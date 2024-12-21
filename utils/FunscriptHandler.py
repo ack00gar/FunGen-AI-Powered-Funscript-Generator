@@ -4,15 +4,39 @@ from simplification.cutil import simplify_coords
 import matplotlib.pyplot as plt
 
 class FunscriptGenerator:
-    def generate(self, frames, distances, output_path, fps, TestMode = False):
-        print(f"Generating funscript based on {len(distances)} distances...")
+    def generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
+        output_path = raw_funscript_path[:-18] + '.funscript'
+        if len(funscript_data) == 0:
+            # Read the funscript data from the JSON file
+            with open(raw_funscript_path, 'r') as f:
+                print(f"Loading funscript from {raw_funscript_path}")
+                try:
+                    data = f.read() #json.load(f)
+                    data = eval(data)
+                except:
+                    print(f"Error loading funscript from {raw_funscript_path}")
+        else:
+            data = funscript_data
 
-        self.points = list(zip(frames, distances))
+        try:
+            print(f"Generating funscript based on {len(data)} points...")
 
-        self.filtered_positions = simplify_coords(self.points, 10.0)  # Use VW algorithm
+            filter_coeff = 12.0
 
-        self.write_funscript(self.filtered_positions, output_path, fps)
+            self.filtered_positions = simplify_coords(data, filter_coeff)  # Use VW algorithm
 
+            print(f"Lenghth of filtered positions: {len(self.filtered_positions)}")
+
+            #output_path = raw_funscript_path[:-18] + '_vw_' + str(filter_coeff) + '.funscript'
+            #output_path = raw_funscript_path[:-18] + '_vw_' + str(filter_coeff) + '.funscript'
+
+            self.write_funscript(self.filtered_positions, output_path, fps)
+
+            print(f"Funscript generated and saved to {output_path}")
+
+        except:
+            print(f"Error loading raw funscript from {raw_funscript_path}")
+        """
         # for alternative version, make every point 0 if distance is under 20
         points_v2 = []
         multiplier = 1.2
@@ -29,10 +53,11 @@ class FunscriptGenerator:
 
         write_path = output_path[:-10] + '_remapped.funscript'
         self.write_funscript(points_v2, write_path, fps)
+        """
 
-        if TestMode:
-            # plot a comparative graph
-            self.plot_comparison(self.points, self.filtered_positions, points_v2)
+        #if TestMode:
+        #    # plot a comparative graph
+        #    self.plot_comparison(self.points, self.filtered_positions, points_v2)
 
 
     def write_funscript(self, distances, output_path, fps):

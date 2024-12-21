@@ -1,16 +1,21 @@
 import subprocess
 import cv2
 import numpy as np
-import ffmpeg
-import time
 
 
 class VideoReaderFFmpeg:
-    def __init__(self, video_path):
+    def __init__(self, video_path, is_VR=False, ffmpeg_path="/usr/local/bin/ffmpeg", ffprobe_path="/usr/local/bin/ffprobe"):
+        """
+        Initialize the VideoReaderFFmpeg class.
+        :param video_path: Path to the video file.
+        :param ffmpeg_path: Path to the FFmpeg binary (default: "ffmpeg").
+        :param ffprobe_path: Path to the FFprobe binary (default: "ffprobe").
+        """
         self.video_path = video_path
-        self._initialize_video_info()
-        self.playback_speed = 1.0  # Default is 1.0 (real-time)
-        self.paused = False
+        self.is_VR = is_VR
+        self.ffmpeg_path = ffmpeg_path
+        self.ffprobe_path = ffprobe_path
+        self._initialize_video_info()  # Initialize video metadata
         self.start_frame = 0
         self.current_frame_number = 0
         self.current_time = 0
@@ -18,113 +23,100 @@ class VideoReaderFFmpeg:
         self.frame_size = None
 
     def _initialize_video_info(self):
-        """ Retrieves video metadata like fps, total frames, resolution, etc. using ffprobe. """
+        """
+        Retrieve video metadata (fps, resolution, codec, etc.) using FFprobe.
+        """
         try:
-            probe = ffmpeg.probe(self.video_path)
-            video_streams = [stream for stream in probe['streams'] if stream['codec_type'] == 'video']
-            video_stream = video_streams[0]  # First video stream
+            # Run FFprobe to get video metadata
+            cmd = [
+                self.ffprobe_path,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=r_frame_rate,width,height,codec_name,nb_frames,duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                self.video_path,
+            ]
+            output = subprocess.check_output(cmd).decode("utf-8").splitlines()
 
-            self.fps = eval(video_stream['r_frame_rate'])
-            self.width = int(video_stream['width'])
-            self.height = int(video_stream['height'])
-            self.codec = video_stream['codec_name']
-            self.total_frames = int(video_stream['nb_frames']) if 'nb_frames' in video_stream else None
-            self.duration = float(video_stream['duration']) * 1000  # Duration in milliseconds
+            # Ensure the output has the correct number of fields
+            if len(output) < 6:
+                raise ValueError("FFprobe output is missing required fields.")
+
+            # Parse metadata
+            codec_name = output[0]  # codec_name
+            width = int(output[1])  # width
+            height = int(output[2])  # height
+            r_frame_rate = output[3]  # r_frame_rate in "num/den" format
+            duration = float(output[4])  # duration in seconds
+            total_frames = int(output[5])  # nb_frames
+
+            # Calculate FPS
+            num, den = map(int, r_frame_rate.split('/'))  # Split numerator and denominator
+            fps = num / den  # Calculate FPS
+
+            # Store metadata
+            self.fps = fps
+            self.width = width
+            if self.is_VR:
+                self.width //= 2
+            self.height = height
+            self.codec = codec_name
+            self.total_frames = total_frames
+            self.duration = duration * 1000  # Convert duration to milliseconds
 
             print(f"FPS: {self.fps}, Resolution: {self.width}x{self.height}, "
                   f"Codec: {self.codec}, Total Frames: {self.total_frames}, Duration: {self.duration:.2f} ms")
         except Exception as e:
             print(f"Error initializing video info: {e}")
-
-    def _start_process(self, start_frame=0):
-        """ Start the FFmpeg process to read frames. """
-        start_time = (start_frame / self.fps) * 1000  # Convert to milliseconds
-        self.current_frame_number = start_frame
-        self.process = (
-            ffmpeg.input(self.video_path, ss=start_time / 1000)  # Convert back to seconds for FFmpeg
-            .output('pipe:', format='rawvideo', pix_fmt='bgr24')
-            .run_async(pipe_stdout=True, pipe_stderr=subprocess.PIPE)
-        )
-        self.frame_size = self.width * self.height * 3  # For 'bgr24', 3 bytes per pixel
-
-    def prev_initialize_video_info(self):
-        """ Retrieves video metadata like fps, total frames, resolution, etc. using ffprobe. """
-        # Retrieve FPS, frame count, codec, width, and height
-        try:
-            probe = ffmpeg.probe(self.video_path)
-            video_streams = [stream for stream in probe['streams'] if stream['codec_type'] == 'video']
-            if not video_streams:
-                raise ValueError("No video streams found in the input file.")
-            video_stream = video_streams[0]  # First video stream
-
-            self.fps = eval(video_stream['r_frame_rate'])
-            self.width = int(video_stream['width'])
-            self.height = int(video_stream['height'])
-            self.codec = video_stream['codec_name']
-            self.total_frames = int(video_stream['nb_frames']) if 'nb_frames' in video_stream else None
-            self.duration = float(video_stream['duration']) * 1000  # Duration in milliseconds
-
-            print(f"FPS: {self.fps}, Resolution: {self.width}x{self.height}, "
-                  f"Codec: {self.codec}, Total Frames: {self.total_frames}, Duration: {self.duration:.2f} ms")
-
-        except ffmpeg.Error as e:
-            print(f"FFmpeg error: {e.stderr.decode('utf8')}")
             raise
 
-    def get_frame(self, frame_number: int, crop = None, vr_roi= None) -> np.ndarray:
-        """ Retrieve a specific frame by number, optionally crop or resize. """
-        return self._get_frame_by_time_or_number(frame_number=frame_number, crop=crop, vr_roi=vr_roi)
+    def _start_process(self, start_frame=0):
+        """
+        Start the FFmpeg process to read frames.
+        :param start_frame: Frame number to start reading from.
+        """
+        start_time = (start_frame / self.fps) * 1000  # Convert to milliseconds
+        self.current_frame_number = start_frame
 
-    def get_frame_at_time(self, time_milliseconds, crop=None, vr_roi=None):
-        """ Retrieve a frame at a specific time in the video (in milliseconds), with crop and resize options. """
-        return self._get_frame_by_time_or_number(time_milliseconds=time_milliseconds, crop=crop, vr_roi=vr_roi)
+        if self.is_VR:
+            # FFmpeg command to read frames with VR reprojection
+            cmd = [
+                self.ffmpeg_path,
+                "-hwaccel", "videotoolbox",  # Use hardware acceleration on macOS
+                "-ss", str(start_time / 1000),  # Seek to start time in seconds
+                "-i", self.video_path,
+                "-an",  # Disable audio processing
+                "-filter_complex",  # Apply the v360 filter for VR reprojection
+                f"[0:v]v360=input=he:in_stereo=sbs:pitch=-25:yaw=-0.75:roll=0:output=flat:d_fov=120:w={self.width}:h={self.height}",
+                "-f", "rawvideo",  # Output raw video data
+                "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
+                "-vsync", "0",  # Disable frame rate synchronization
+                "-preset",  "ultrafast",
+                "-tune", "zerolatency",
+                "-threads", "0",  # Use maximum threads available
+                "-",  # Output to stdout
+            ]
+        else:
+            # FFmpeg command to read frames
+            cmd = [
+                self.ffmpeg_path,
+                "-ss", str(start_time / 1000),  # Seek to start time in seconds
+                "-i", self.video_path,
+                "-f", "rawvideo",  # Output raw video data
+                "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
+                "-vsync", "0",  # Disable frame rate synchronization
+                "-",  # Output to stdout
+            ]
 
-    def _get_frame_by_time_or_number(self, frame_number=None, time_milliseconds=None, crop=None, vr_roi=None):
-        """ Internal function to retrieve a frame either by frame number or time, with optional crop/resize. """
-        try:
-            if frame_number is not None:
-                time_milliseconds = (frame_number / self.fps) * 1000  # Convert frame number to milliseconds
-            elif time_milliseconds is None:
-                raise ValueError("Either frame_number or time_milliseconds must be provided.")
+        # Start FFmpeg process
+        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.frame_size = self.width * self.height * 3  # Size of one frame in bytes
 
-            # FFmpeg cropping command if needed
-            ffmpeg_input = ffmpeg.input(self.video_path, ss=time_milliseconds / 1000)  # Convert back to seconds for FFmpeg
-
-            cmd = (
-                ffmpeg_input
-                .output('pipe:', vframes=1, format='image2', vcodec='rawvideo', pix_fmt='bgr24')
-                .run_async(pipe_stdout=True, pipe_stderr=True)
-            )
-
-            frame_size = self.width * self.height * 3  # For 'bgr24', 3 bytes per pixel
-            raw_frame = cmd.stdout.read(frame_size)
-            frame = np.frombuffer(raw_frame, np.uint8).reshape((self.height, self.width, 3))
-
-            if crop:
-                if crop == "Left":
-                    frame = frame[:, :frame.shape[1] // 2, :]
-                elif crop == "Right":
-                    frame = frame[:, frame.shape[1] // 2:, :]
-                elif crop == "Top":
-                    frame = frame[:frame.shape[0] // 2, :, :]
-                elif crop == "Bottom":
-                    frame = frame[frame.shape[0] // 2:, :, :]
-            if vr_roi:
-                panel_height, panel_width = frame.shape[:2]
-                frame = frame[2 * (panel_height // 5):, (panel_width // 4):(3 * panel_width // 4)]
-
-            # Close FFmpeg process
-            cmd.stdout.close()
-            cmd.wait()
-
-            return frame
-
-        except ffmpeg.Error as e:
-            print(f"FFmpeg error: {e.stderr.decode()}")
-            return None
-
-    def read(self, crop=None, vr_roi=None, resize=None):
-        """ Read the next frame from the video. Returns (ret, frame). """
+    def read(self):
+        """
+        Read the next frame from the video. Mimics OpenCV's cap.read().
+        :return: (True, frame) if successful, (False, None) if end of video.
+        """
         if self.process is None:
             self._start_process(start_frame=self.start_frame)
 
@@ -133,18 +125,6 @@ class VideoReaderFFmpeg:
             if not in_bytes:
                 return False, None  # End of video
             frame = np.frombuffer(in_bytes, np.uint8).reshape([self.height, self.width, 3])
-            if crop:
-                if crop == "Left":
-                    frame = frame[:, :frame.shape[1] // 2, :]
-                elif crop == "Right":
-                    frame = frame[:, frame.shape[1] // 2:, :]
-                elif crop == "Top":
-                    frame = frame[:frame.shape[0] // 2, :, :]
-                elif crop == "Bottom":
-                    frame = frame[frame.shape[0] // 2:, :, :]
-            if vr_roi:
-                panel_height, panel_width = frame.shape[:2]
-                frame = frame[2 * (panel_height // 5):, (panel_width // 4):(3 * panel_width // 4)]
 
             self.current_frame_number += 1
             self.current_time = (self.current_frame_number / self.fps) * 1000
@@ -153,100 +133,64 @@ class VideoReaderFFmpeg:
             print(f"Error reading frame: {e}")
             return False, None
 
-    def read_frames(self, start_frame=0, crop=None, resize=None):
+    def set(self, prop_id, value):
         """
-        Generator function that yields frames starting from a specific frame.
-        You can crop and resize frames on the fly.
+        Mimics OpenCV's cap.set().
+        :param prop_id: Property ID (e.g., cv2.CAP_PROP_POS_FRAMES).
+        :param value: Value to set.
         """
-        # Seek to the starting frame by calculating the time in milliseconds
-        start_time = (start_frame / self.fps) * 1000  # Convert to milliseconds
-        process = (
-            ffmpeg.input(self.video_path, ss=start_time / 1000)  # Convert back to seconds for FFmpeg
-            .output('pipe:', format='rawvideo', pix_fmt='bgr24')
-            .run_async(pipe_stdout=True, pipe_stderr=subprocess.PIPE)
-        )
+        if prop_id == cv2.CAP_PROP_POS_FRAMES:
+            self.start_frame = int(value)
+            self._start_process(start_frame=self.start_frame)
+        elif prop_id == cv2.CAP_PROP_FPS:
+            self.fps = value
+        else:
+            print(f"Property {prop_id} not supported.")
 
-        frame_size = self.width * self.height * 3  # For 'bgr24', 3 bytes per pixel
-        frame_number = start_frame
-
-        try:
-            while True:
-                in_bytes = process.stdout.read(frame_size)
-                if not in_bytes:
-                    break  # End of video
-                frame = np.frombuffer(in_bytes, np.uint8).reshape([self.height, self.width, 3])
-
-                # Apply crop
-                if crop:
-                    x, y, w, h = crop
-                    frame = frame[y:y + h, x:x + w]
-
-                # Apply resize
-                if resize:
-                    new_w, new_h = resize
-                    frame = cv2.resize(frame, (new_w, new_h))
-
-                self.current_frame_number = frame_number
-                yield frame, frame_number, frame_number * 1000 / self.fps  # Return frame, frame number, and timestamp in ms
-
-                # Adjust for playback speed
-                if not self.paused:
-                    time.sleep(1 / (self.fps * self.playback_speed))
-                    frame_number += 1
-        finally:
-            process.stdout.close()
-            process.wait()
-
-
-
-    def pause(self):
-        self.paused = True
-
-    def resume(self):
-        self.paused = False
-
-    def set_playback_speed(self, speed):
-        """ Set playback speed (1.0 = normal speed, 2.0 = 2x, 0.5 = 0.5x, etc.). """
-        self.playback_speed = speed
-
-    def seek_and_read(self, seek_frame, crop=None, resize=None):
-        """ Seeks to a specific time and returns the next frame with crop and resize options. """
-        frame = self.get_frame(seek_frame) #, crop=crop, resize=resize)
-        return frame
-
-    def get_metadata(self):
-        """ Return the video's metadata as a dictionary. """
-        return {
-            'fps': self.fps,
-            'width': self.width,
-            'height': self.height,
-            'codec': self.codec,
-            'total_frames': self.total_frames,
-            'duration': self.duration,
-        }
+    def get(self, prop_id):
+        """
+        Mimics OpenCV's cap.get().
+        :param prop_id: Property ID (e.g., cv2.CAP_PROP_FPS).
+        :return: Property value.
+        """
+        if prop_id == cv2.CAP_PROP_FPS:
+            return self.fps
+        elif prop_id == cv2.CAP_PROP_FRAME_WIDTH:
+            return self.width
+        elif prop_id == cv2.CAP_PROP_FRAME_HEIGHT:
+            return self.height
+        elif prop_id == cv2.CAP_PROP_FRAME_COUNT:
+            return self.total_frames
+        elif prop_id == cv2.CAP_PROP_POS_FRAMES:
+            return self.current_frame_number
+        else:
+            print(f"Property {prop_id} not supported.")
+            return None
 
     def release(self):
-        """ Release the resources and close the FFmpeg process. """
+        """
+        Release the resources and close the FFmpeg process.
+        """
         if self.process:
             self.process.stdout.close()
             self.process.wait()
             self.process = None
 
-"""
+
 # Example Usage
 if __name__ == '__main__':
-    video_path = 'your_video.mp4'
-    reader = VideoReaderFFmpeg(video_path)
+    video_path = '/Users/k00gar/Downloads/VideoFile.mp4'
+    reader = VideoReaderFFmpeg(video_path, is_VR=True)
 
-    # Set playback speed to 2x
-    reader.set_playback_speed(2.0)
+    reader.set(cv2.CAP_PROP_POS_FRAMES, 79000)
 
-    # Read and display frames at 2x speed
-    for frame, frame_num, timestamp in reader.read_frames(start_frame=0, crop=(0, 0, reader.width // 2, reader.height)):
-        print(f"Frame: {frame_num}, Time: {timestamp:.2f} ms")
+    # Read and display frames as fast as possible
+    while True:
+        ret, frame = reader.read()
+        if not ret:
+            break
         cv2.imshow('Frame', frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cv2.destroyAllWindows()
-"""

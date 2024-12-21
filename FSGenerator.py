@@ -2,14 +2,16 @@ import time
 import os
 import cv2
 import json
-from utils.config import class_names, class_priority_order, class_reverse_match, class_colors
-from ultralytics import YOLO
-from utils import ObjectTracker as OT
-from utils import FunscriptHandler as FH
 from tqdm import tqdm
-from utils import Visualizer as VS
-from utils.SceneCutsDetect import detect_scene_changes
+from ultralytics import YOLO
 
+from utils.config import class_names, class_priority_order, class_reverse_match, class_colors
+from utils.ObjectTracker_v2 import ObjectTracker
+from utils.FunscriptHandler import FunscriptGenerator
+from utils.Visualizer import Visualizer
+from utils.Debugger import Debugger
+from utils.SceneCutsDetect import detect_scene_changes
+from utils.VideoReaderFFmpeg import VideoReaderFFmpeg
 
 # Define the BoxRecord class
 class BoxRecord:
@@ -49,7 +51,8 @@ class Result:
     def get_boxes(self, frame_id):
         itemized_boxes = []
         if frame_id not in self.frame_data:
-            raise KeyError(f"No records found for frame ID {frame_id}")
+            return itemized_boxes
+            # raise KeyError(f"No records found for frame ID {frame_id}")
         boxes = self.frame_data[frame_id]
         for box, conf, cls, class_name in boxes:
             target_class_name = self.map_class_type_to_name(class_name, box[0], box[2], self.image_width)
@@ -63,13 +66,6 @@ class Result:
     def get_all_frame_ids(self):
         return list(self.frame_data.keys())
 
-def update_sex_position(position, new_position, frame_id, reason=None):
-    if position is not None and new_position is not None and position != new_position:
-        due_to = " given " + reason if reason else ""
-        print(f"Sex position changed from {position} to {new_position}{due_to}")
-        position_changes.append((frame_id, position, new_position, reason))
-        return new_position
-    return position
 
 def write_dataset(file_path, data):
     print(f"Exporting data...")
@@ -85,7 +81,9 @@ def extract_yolo_data(model_file, video_path, frame_start, frame_end=None, TestM
     records = []
     test_result = Result(320)
 
-    cap = cv2.VideoCapture(video_path)
+    #cap = cv2.VideoCapture(video_path)
+    cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
+    # cap = FFmpegVideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start)
 
     if frame_end:
@@ -104,14 +102,18 @@ def extract_yolo_data(model_file, video_path, frame_start, frame_end=None, TestM
         if success:
             if isVR:
                 # only keep the center third of the left half of the frame
-                frame = frame[:, frame.shape[1] // 6:frame.shape[1] // 3, :]
+                #frame = frame[:, frame.shape[1] // 6:frame.shape[1] // 3, :]
+                frame = frame[:, frame.shape[1] // 3:2*frame.shape[1] // 3, :]
 
             # Run YOLO11 tracking on the frame, persisting tracks between frames
             # yolo_results = model.predict(frame, verbose=False, conf=0.5)  #track(frame, persist=True, verbose=False)
-            yolo_results = model.track(frame, persist=True, conf=0.5, verbose=False)
+            yolo_results = model.track(frame, persist=True, conf=0.3, verbose=False)
 
             #if results[0].boxes.id is None:
             if yolo_results[0].boxes.cls is None:
+                continue
+
+            if len(yolo_results[0].boxes) == 0 and not TestMode:
                 continue
 
             # Get the boxes and track IDs
@@ -136,6 +138,13 @@ def extract_yolo_data(model_file, video_path, frame_start, frame_end=None, TestM
                     test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls), class_reverse_match.get(int(cls), 'unknown')]
                     print(f"Test box: {test_box}")
                     test_result.add_record(frame_pos, test_box)
+                #if DebugMode:
+                #    debugger.log_frame(frame_pos,
+                #                       bounding_boxes={'box': [x1, y1, x2, y2],
+                #                                       'conf': conf,
+                #                                       'class_id': int(cls),
+                #                                       'class_name': class_reverse_match.get(int(cls), 'unknown')})
+
             if TestMode:
                 # display the results from YOLO
                 yolo_results[0].plot()
@@ -151,15 +160,7 @@ def extract_yolo_data(model_file, video_path, frame_start, frame_end=None, TestM
                     #cv2.putText(frame, f"{int(cls)}: {int(conf*100)}%", (record[4], record[5] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 cv2.imshow("YOLO11 test boxes Tracking", frame)
                 cv2.waitKey(1)
-            if frame_pos == last_frame-1:
-                print("Triggered here")
-                write_dataset(video_path[:-4] + f"_rawyolo.json", records)
-                break
-        else:
-            # Break the loop if the end of the video is reached
-            print("Triggered there")
-            write_dataset(video_path[:-4] + f"_rawyolo.json", records)
-            break
+    write_dataset(video_path[:-4] + f"_rawyolo.json", records)
     # Release the video capture object and close the display window
     cap.release()
     cv2.destroyAllWindows()
@@ -184,10 +185,15 @@ def make_data_boxes(records, image_x_size):
 
 def analyze_tracking_results(results, image_y_size, video_path, frame_start = None, frame_end = None, TestMode = False):
     list_of_frames = results.get_all_frame_ids()
-    visualizer = VS.Visualizer()
+    visualizer = Visualizer()
 
-    cap = cv2.VideoCapture(video_path)
+    #cap = cv2.VideoCapture(video_path)
+    cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    # cap = FFmpegVideoCapture(video_path)
     nb_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    offset_x = int(image_x_size / 3)
 
     if not frame_start:
         frame_start = 0
@@ -197,12 +203,16 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
 
     if TestMode:
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start)
+    else:
+        cap.release()
 
     # if a file already exists, directly load the cuts
     if os.path.exists(video_path[:-4] + f"_cuts.json"):
         print(f"Loading cuts from {video_path[:-4] + f'_cuts.json'}")
         with open(video_path[:-4] + f"_cuts.json", 'r') as f:
             cuts = json.load(f)
+        print(f"Loaded {len(cuts)} cuts : {cuts}")
+
     else:
         scene_list = detect_scene_changes(video_path, "Left", 0.9, frame_start, frame_end)
         print(f"Analyzing frames {frame_start} to {frame_end}")
@@ -213,15 +223,17 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
         with open(video_path[:-4] + f"_cuts.json", 'w') as f:
             json.dump(cuts, f)
 
-    tracker = OT.ObjectTracker()
+    funscript_frames = []
+    tracker = ObjectTracker(fps, frame_start)
 
-    for frame_pos in tqdm(range(frame_start, frame_end), ncols=None, desc="Analyzing tracking results"):
+    for frame_pos in tqdm(range(frame_start, frame_end), ncols=80, desc="Analyzing tracking results"):
 
         if frame_pos in cuts:
             print(f"Reaching cut at frame {frame_pos}")
             previous_distances = tracker.previous_distances
-            tqdm.write(f"Reinitializing tracker with previous distances: {previous_distances}")
-            tracker = OT.ObjectTracker()
+            # tqdm.write
+            print(f"Reinitializing tracker with previous distances: {previous_distances}")
+            tracker = ObjectTracker(fps, frame_pos)
             tracker.previous_distances = previous_distances
 
         if frame_pos in list_of_frames:
@@ -231,7 +243,36 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
 
             if tracker.distance:
                 funscript_frames.append(frame_pos)
-                funscript_distances.append(tracker.distance)
+                funscript_distances.append(int(tracker.distance))
+
+            if DebugMode:
+                bounding_boxes = []  # Initialize an empty list for bounding boxes
+                for box in sorted_boxes:
+                    bounding_boxes.append({
+                        'box': box[0],
+                        'conf': box[1],
+                        'class_name': box[3]
+                    })
+                debugger.log_frame(frame_pos,
+                                   bounding_boxes=bounding_boxes,  # Pass the list of bounding boxes
+                                   variables={
+                                       'distance': tracker.distance,
+                                       'Penetration': tracker.penetration,
+                                       'Grinding': tracker.grinding,
+                                       'sex_position': tracker.sex_position,
+                                       #'sex_position': tracker.state_manager.state,
+                                       'sex_position_reason': tracker.sex_position_reason,
+                                       'tracked_body_part': tracker.tracked_body_part,
+                                       'locked_penis_box': tracker.locked_penis_box,
+                                       'glans_detected': tracker.glans_detected,
+                                       'cons._glans_detections': tracker.consecutive_detections['glans'],
+                                       'cons._glans_non_detections': tracker.consecutive_non_detections['glans'],
+                                       'cons._penis_detections': tracker.consecutive_detections['penis'],
+                                       'cons._penis_non_detections': tracker.consecutive_non_detections['penis'],
+                                       'breast_tracking': tracker.breast_tracking,
+                                       'left hand normalized': tracker.normalized_positions['left hand'][-1],
+                                       'right hand normalized': tracker.normalized_positions['right hand'][-1],
+                                   })
 
         if TestMode:
             ret, frame = cap.read()
@@ -241,12 +282,17 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
                                                           tracker.boxes[tracker.tracked_body_part],
                                                           tracker.tracked_body_part,
                                                           class_colors[tracker.tracked_body_part],
-                                                          int(image_x_size / 2))
+                                                          offset_x)
             if tracker.locked_penis_box is not None:
                 frame = visualizer.draw_bounding_box(frame, tracker.locked_penis_box,
                                                               "Locked_Penis",
                                                               class_colors['penis'],
-                                                              int(image_x_size / 2))
+                                                              offset_x)
+            if tracker.glans_detected:
+                frame = visualizer.draw_bounding_box(frame, tracker.boxes['glans'],
+                                                              "Glans",
+                                                              class_colors['glans'],
+                                                              offset_x)
             if funscript_distances:
                 frame = visualizer.draw_gauge(frame, funscript_distances[-1])
                 #frame = visualizer.draw_limited_graph(frame, funscript_distances,
@@ -254,22 +300,55 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
 
             cv2.imshow("Combined Results", frame)
             cv2.waitKey(1)
-    return funscript_frames, funscript_distances
+
+    funscript_data = list(zip(funscript_frames, funscript_distances))
+
+    points = "["
+    for i in range(len(funscript_frames)):
+        if i != 0:
+            points += ","
+        points += f"[{funscript_frames[i]}, {funscript_distances[i]}]"
+        # points += f'{{funscript_frames[i]}, {funscript_distances[i]}}'
+    points += "]"
+    # write the raw data to a json file
+    with open(video_path[:-4] + f"_rawfunscript.json", 'w') as f:
+        #json.dump(points, f)
+        json.dump(funscript_data, f)
+    return funscript_data #funscript_frames, funscript_distances
 
 
 def parse_yolo_data_looking_for_penis(data, start_frame):
+    consecutive_frames = 0
+    frame_detected = 0
+    penis_frame = 0
     for line in data:
-        if line[0] >= start_frame and line[1] == 0:  # class_types.get("penis"):
-            print(f"First instance of Penis found in frame {line[0]}")
-            return line[0]
+        if line[0] >= start_frame and line[1] == 0 and line[2] >= 0.5:
+            penis_frame = line[0]
+        #if line[0] >= start_frame and line[1] == 1 and line[2] >= 0.5:  # actually, Glans --class_types.get("penis"):
+        if line[0] == penis_frame and line[1] == 1 and line[2] >= 0.5:
+            if frame_detected == 0:
+                frame_detected = line[0]
+                consecutive_frames += 1
+            elif line[0] == frame_detected + 1:
+                consecutive_frames += 1
+                frame_detected = line[0]
+            else:
+                consecutive_frames = 0
+                frame_detected = 0
 
-
+            if consecutive_frames >= 10:
+                print(f"First instance of Glans/Penis found in frame {line[0] - 4}")
+                return line[0] - 4
 
 
 # MAIN logic
 
 # YOLO model file
-yolo_model = "models/k00gar-11n-200ep-best.mlpackage"
+#yolo_model = "models/k00gar-11n-200ep-best.mlpackage"
+yolo_model = "models/k00gar-11s-198ep-best.mlpackage"
+#yolo_model = "models/k00gar-11m-134ep-best.mlpackage"
+
+funscript_data = []
 
 video_list = []
 # video_list.append("/Users/k00gar/Downloads/wankzvr-shocum-180_180x180_3dh_LR.mp4")
@@ -283,16 +362,48 @@ video_list = []
 # video_list.append("/Users/k00gar/Downloads/JVR_100199.mp4")
 # video_list.append("/Users/k00gar/Downloads/JVR_100200.mp4")
 # video_list.append("/Users/k00gar/Downloads/JVR_100201.mp4")
-video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Poolside Romance_1920p_39107_FISHEYE190.mp4")
+# video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Poolside Romance_1920p_39107_FISHEYE190.mp4")
+# video_list.append("/Users/k00gar/Downloads/SLR_UpCloseVR_UP Close VR with Connie Perignon_1920p_49954_LR_180.mp4")
+# video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_CJ Miles Sexperience_1920p_33250_MKX200.mp4")
+# video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_She Gives The Best Gifts_1920p_35951_MKX200.mp4")
+
+#video_list.append("/Users/k00gar/Downloads/VRLatina_Innocence_Unveiled_2000p_180_180x180_3dh_LR.mp4")
+#video_list.append("/Users/k00gar/Downloads/Katrina Jade [ADD] Oct 16, 2024R_6kvr265_reenc.mp4")
+#video_list.append("/Users/k00gar/Downloads/milfvr-daisy fuentes-jizzlejuice-jizzlejuice-3600p-180_180x180_3dh_LR_reenc.mp4")
+#video_list.append("/Users/k00gar/Downloads/BaDoinkVR_Peaches_n_Cream_5k_180_180x180_3dh_LR.mp4")
+# video_list.append("/Users/k00gar/Downloads/730-czechvr-3d-7680x3840-60fps-oculusrift_uhq_h265.mp4")
+#video_list.append("/Users/k00gar/Downloads/ARPorn_Sasha Tatcha_Fit and Fired Up_4000p_8K_original_FISHEYE190_alpha.mp4")
+
+#video_list.append("/Users/k00gar/Downloads/WAVR 278 A - Ichika Matsumoto, Aoi Kururugi, Mitsuki Nagisa - 3 Little Sisters.mp4")
+#video_list.append("/Users/k00gar/Downloads/HNVR 097 B.mp4")
+#video_list.append("/Users/k00gar/Downloads/BadoinkVR_Lights_Camera_Satisfaction_4K_HEVC_180_180x180_3dh.mp4")
+#video_list.append("/Users/k00gar/Downloads/2022-09-09 - TonightsGirlfriend - Kenna James.mp4")
+
+video_list.append("/Users/k00gar/Downloads/VideoFile.mp4")
 
 TestMode = False
+DebugMode = True
+isVR = True
+
+# wait 60 minutes before continuing
+# time.sleep(60 * 40)
+
 
 for video_path in video_list:
     print(f"Processing video: {video_path}")
-    cap = cv2.VideoCapture(video_path)
+    #funscript_data = []
+
+    debugger = Debugger(video_path, output_dir=video_path[:-4])
+
+    #cap = cv2.VideoCapture(video_path)
+    cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
     fps = cap.get(cv2.CAP_PROP_FPS)
     image_y_size = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-    image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 3
+    image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+
+    if isVR:
+        image_x_size = image_x_size // 3
+
     print(f"Image size: {image_x_size}x{image_y_size}")
     cap.release()
 
@@ -305,20 +416,30 @@ for video_path in video_list:
     funscript_distances = []
 
     # Process the video
-    extract_yolo_data(yolo_model, video_path, frame_start, frame_end, TestMode)
 
+    # Run the YOLO detection and saves result to _rawyolo.json file
+    #extract_yolo_data(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
+
+    # Load YOLO detection results from file
     yolo_data = load_yolo_data_from_file(video_path[:-4] + f"_rawyolo.json")
 
     results = make_data_boxes(yolo_data, image_x_size)
 
+    # Looking for the first instance of penis within the YOLO results
     first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
 
+    # Deciding whether we start from there or from a user specified later frame
     frame_start = max(max(first_penis_frame - int(fps), frame_start - int(fps)), 0)
 
-    analyze_tracking_results(results, image_y_size, video_path, frame_start, frame_end, TestMode)
+    # Performing the tracking part and generation of the raw funscript data
+    funscript_data = analyze_tracking_results(results, image_y_size, video_path, frame_start, frame_end, TestMode)
 
-    funscript_handler = FH.FunscriptGenerator()
-    funscript_handler.generate(funscript_frames, funscript_distances, video_path[:-4] + "_kAI.funscript", fps, TestMode)
+    debugger.save_logs()
+
+    funscript_handler = FunscriptGenerator()
+
+    # Simplifying the funscript data and generating the file
+    funscript_handler.generate(video_path[:-4] + f"_rawfunscript.json", funscript_data, fps, TestMode)
 
     print(f"Finished processing video: {video_path}")
 
