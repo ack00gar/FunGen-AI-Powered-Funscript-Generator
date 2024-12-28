@@ -21,6 +21,10 @@ class VideoReaderFFmpeg:
         self.current_time = 0
         self.process = None
         self.frame_size = None
+        self.type = ""
+        self.iv_fov = 0
+        self.ih_fov = 0
+        self.d_fov = 0
 
     def _initialize_video_info(self):
         """
@@ -80,22 +84,49 @@ class VideoReaderFFmpeg:
 
         if self.is_VR:
             # FFmpeg command to read frames with VR reprojection
+            # if 'FISHEYE' is present in video_path then type = "fisheye"
+            if 'FISHEYE' in self.video_path:
+                self.type = "fisheye"
+                self.iv_fov = 190  # 120
+                self.ih_fov = 190
+                self.v_fov = 90
+                self.h_fov = 90
+                self.d_fov = 180  # 110
+            else:
+                type = "he"  # [0:v]v360=input=he:in_stereo=sbs:pitch=-35:v_fov=90:h_fov=90:output=sg:w=2048:h=2048
+                self.iv_fov = 90
+                self.ih_fov = 90
+                self.d_fov = 100
+            #"""
             cmd = [
                 self.ffmpeg_path,
-                "-hwaccel", "videotoolbox",  # Use hardware acceleration on macOS
+                #"-hwaccel", "videotoolbox",  # Use hardware acceleration on macOS
                 "-ss", str(start_time / 1000),  # Seek to start time in seconds
                 "-i", self.video_path,
                 "-an",  # Disable audio processing
-                "-filter_complex",  # Apply the v360 filter for VR reprojection
-                f"[0:v]v360=input=he:in_stereo=sbs:pitch=-25:yaw=-0.75:roll=0:output=flat:d_fov=120:w={self.width}:h={self.height}",
+                #"-filter_complex",  # Apply the v360 filter for VR reprojection
+                #f"[0:v]v360=input=he:in_stereo=sbs:pitch=-35:yaw=-0.75:roll=0:output=sg:v_fov=90:h_fov=90:d_fov=180:w={self.width}:h={self.height}",
+                "-map", "0:v:0",
+                "-vf", f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1",
                 "-f", "rawvideo",  # Output raw video data
                 "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
                 "-vsync", "0",  # Disable frame rate synchronization
-                "-preset",  "ultrafast",
-                "-tune", "zerolatency",
                 "-threads", "0",  # Use maximum threads available
                 "-",  # Output to stdout
             ]
+            """
+            cmd = [
+                self.ffmpeg_path,
+                "-ss", str(start_time / 1000),  # Seek to start time in seconds
+                "-i", self.video_path,  # Input video file
+                "-vf", "crop=in_w/2:in_h:0:0",  # Crop to the left half (width/2, full height, starting from top-left)
+                "-an",  # Disable audio processing
+                "-f", "rawvideo",  # Output raw video data
+                "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
+                "-vsync", "0",  # Disable frame rate synchronization
+                "-",  # Output to stdout
+            ]
+            """
         else:
             # FFmpeg command to read frames
             cmd = [
@@ -107,6 +138,11 @@ class VideoReaderFFmpeg:
                 "-vsync", "0",  # Disable frame rate synchronization
                 "-",  # Output to stdout
             ]
+
+        # kill the process if already running
+        if self.process:
+            self.process.terminate()
+            # self.process.wait()
 
         # Start FFmpeg process
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -125,7 +161,6 @@ class VideoReaderFFmpeg:
             if not in_bytes:
                 return False, None  # End of video
             frame = np.frombuffer(in_bytes, np.uint8).reshape([self.height, self.width, 3])
-
             self.current_frame_number += 1
             self.current_time = (self.current_frame_number / self.fps) * 1000
             return True, frame
@@ -173,24 +208,5 @@ class VideoReaderFFmpeg:
         """
         if self.process:
             self.process.stdout.close()
-            self.process.wait()
+            # self.process.wait()
             self.process = None
-
-
-# Example Usage
-if __name__ == '__main__':
-    video_path = '/Users/k00gar/Downloads/VideoFile.mp4'
-    reader = VideoReaderFFmpeg(video_path, is_VR=True)
-
-    reader.set(cv2.CAP_PROP_POS_FRAMES, 79000)
-
-    # Read and display frames as fast as possible
-    while True:
-        ret, frame = reader.read()
-        if not ret:
-            break
-        cv2.imshow('Frame', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cv2.destroyAllWindows()

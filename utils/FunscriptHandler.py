@@ -2,6 +2,7 @@ import os
 import json
 from simplification.cutil import simplify_coords
 import matplotlib.pyplot as plt
+import numpy as np
 
 class FunscriptGenerator:
     def generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
@@ -21,7 +22,7 @@ class FunscriptGenerator:
         try:
             print(f"Generating funscript based on {len(data)} points...")
 
-            filter_coeff = 12.0
+            filter_coeff = 10.0
 
             self.filtered_positions = simplify_coords(data, filter_coeff)  # Use VW algorithm
 
@@ -250,3 +251,40 @@ class FunscriptGenerator:
                 relevant_chapters_export.append([chapter['name'], startTime_ms, endTime_ms])
 
         return times, positions, relevant_chapters_export, irrelevant_chapters_export
+
+    def generate_heatmap(self, funscript_path, output_image_path):
+        # Load funscript data
+        times, positions, _, _ = self.load_funscript(funscript_path)
+        if not times or not positions:
+            print("Failed to load funscript data.")
+            return
+
+        # Calculate average duration, average speed, and total actions
+        total_duration = times[-1] / 1000  # Convert to seconds
+        avg_duration = total_duration
+        avg_speed = np.mean(np.abs(np.diff(positions)) / np.diff(times) * 1000)  # Positions per second
+        total_actions = len(times)
+
+        # Create heatmap data
+        heatmap_data = np.zeros((200, 3000))
+        for i in range(len(times) - 1):
+            start = int(times[i] / total_duration * 2999)
+            end = int(times[i + 1] / total_duration * 2999)
+            pos = positions[i]
+            heatmap_data[pos, start:end] += 1
+
+        # Normalize heatmap data
+        heatmap_data = heatmap_data / np.max(heatmap_data)
+
+        # Create the heatmap image
+        plt.figure(figsize=(30, 2))
+        plt.imshow(heatmap_data, aspect='auto', cmap='hot', interpolation='nearest')
+        plt.colorbar(label='Intensity')
+        plt.title(
+            f'Funscript Heatmap\nAvg Duration: {avg_duration:.2f}s, Avg Speed: {avg_speed:.2f} pos/s, Actions: {total_actions}')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Position')
+        plt.savefig(output_image_path, bbox_inches='tight')
+        plt.close()
+
+        print(f"Heatmap generated and saved to {output_image_path}")
