@@ -4,9 +4,11 @@ import cv2
 import json
 from tqdm import tqdm
 from ultralytics import YOLO
+from concurrent.futures import ProcessPoolExecutor
 
 from utils.config import class_names, class_priority_order, class_reverse_match, class_colors
-from utils.ObjectTracker_v2 import ObjectTracker
+from utils.ObjectTracker_v3 import ObjectTracker
+#from utils.ObjectTracker import ObjectTracker
 from utils.FunscriptHandler import FunscriptGenerator
 from utils.Visualizer import Visualizer
 from utils.Debugger import Debugger
@@ -15,14 +17,15 @@ from utils.VideoReaderFFmpeg import VideoReaderFFmpeg
 
 # Define the BoxRecord class
 class BoxRecord:
-    def __init__(self, box, conf, cls, class_name):
+    def __init__(self, box, conf, cls, class_name, track_id):
         self.box = box
         self.conf = conf
         self.cls = cls
         self.class_name = class_name
+        self.track_id = int(track_id)
 
     def __iter__(self):
-        return iter((self.box, self.conf, self.cls, self.class_name))
+        return iter((self.box, self.conf, self.cls, self.class_name, self.track_id))
 
 
 # Define the Result class
@@ -38,30 +41,28 @@ class Result:
             self.frame_data[frame_id] = [box_record]
 
     def map_class_type_to_name(self, class_type, x1, x2, image_width):
-        if class_type in ['foot', 'hand']:
-            # Call it left if it is mainly on the left of the frame, right otherwise
-            if (x1 + x2) / 2 < image_width / 2:
-                class_name = 'right ' + class_type
-            else:
-                class_name = 'left ' + class_type
-        else:
-            class_name = class_type
+        #if class_type in ['foot', 'hand']:
+        #    # Call it left if it is mainly on the left of the frame, right otherwise
+        #    if (x1 + x2) / 2 < image_width / 2:
+        #        class_name = 'right ' + class_type
+        #    else:
+        #        class_name = 'left ' + class_type
+        #else:
+        class_name = class_type
         return class_name
 
     def get_boxes(self, frame_id):
         itemized_boxes = []
         if frame_id not in self.frame_data:
             return itemized_boxes
-            # raise KeyError(f"No records found for frame ID {frame_id}")
         boxes = self.frame_data[frame_id]
-        for box, conf, cls, class_name in boxes:
-            target_class_name = self.map_class_type_to_name(class_name, box[0], box[2], self.image_width)
-            itemized_boxes.append((box, conf, cls, target_class_name))
+        for box, conf, cls, class_name, track_id in boxes:
+            itemized_boxes.append((box, conf, cls, class_name, track_id))
         sorted_boxes = sorted(
             itemized_boxes,
             key=lambda x: class_priority_order.get(x[3], 7)  # Sort by class name priority
         )
-        return sorted_boxes  # sorted_boxes
+        return sorted_boxes
 
     def get_all_frame_ids(self):
         return list(self.frame_data.keys())
@@ -77,7 +78,18 @@ def write_dataset(file_path, data):
         json.dump(data, f)
     export_end = time.time()
     print(f"Done in {export_end - export_start}.")
+
 def extract_yolo_data(model_file, video_path, frame_start, frame_end=None, TestMode = False, isVR = False):
+    # if file already exists, ask if overwrite
+    if os.path.exists(video_path[:-4] + f"_rawyolo.json"):
+        return
+        #print(f"File {video_path[:-4] + f'_rawyolo.json'} already exists. Overwrite? (y/n)")
+        #if input() != 'y':
+        #    return
+        #else:
+        #    # make a backup before continuing
+        #    os.rename(video_path[:-4] + f"_rawyolo.json", video_path[:-4] + f"_rawyolo.json.bak")
+
     records = []
     test_result = Result(320)
 
@@ -109,33 +121,34 @@ def extract_yolo_data(model_file, video_path, frame_start, frame_end=None, TestM
             # yolo_results = model.predict(frame, verbose=False, conf=0.5)  #track(frame, persist=True, verbose=False)
             yolo_results = model.track(frame, persist=True, conf=0.3, verbose=False)
 
-            #if results[0].boxes.id is None:
-            if yolo_results[0].boxes.cls is None:
+            if yolo_results[0].boxes.id is None:  # in case of tracking
+            # if yolo_results[0].boxes.cls is None:  # in case of detection
                 continue
 
             if len(yolo_results[0].boxes) == 0 and not TestMode:
                 continue
 
             # Get the boxes and track IDs
-            #track_ids = results[0].boxes.id.cpu().tolist()
+            track_ids = yolo_results[0].boxes.id.cpu().tolist()
             boxes = yolo_results[0].boxes.xywh.cpu()
             classes = yolo_results[0].boxes.cls.cpu().tolist()
             confs = yolo_results[0].boxes.conf.cpu().tolist()
 
-            # for track_id, cls, conf, box in zip(track_ids, classes, confs, boxes):
-            for cls, conf, box in zip(classes, confs, boxes):
+            for track_id, cls, conf, box in zip(track_ids, classes, confs, boxes):
+            #for cls, conf, box in zip(classes, confs, boxes):
+                track_id = int(track_id)
                 x, y, w, h = box.int().tolist()
                 x1 = x - w // 2
                 y1 = y - h // 2
                 x2 = x + w // 2
                 y2 = y + h // 2
                 #record = [frame_pos, int(track_id), int(cls), round(conf, 1), x1, y1, x2, y2]
-                record = [frame_pos, int(cls), round(conf, 1), x1, y1, x2, y2]
+                record = [frame_pos, int(cls), round(conf, 1), x1, y1, x2, y2, track_id]
                 records.append(record)
                 if TestMode:
                     print(f"Record : {record}")
                     print(f"For class id: {int(cls)}, getting: {class_reverse_match.get(int(cls), 'unknown')}")
-                    test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls), class_reverse_match.get(int(cls), 'unknown')]
+                    test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls), class_reverse_match.get(int(cls), 'unknown'), track_id]
                     print(f"Test box: {test_box}")
                     test_result.add_record(frame_pos, test_box)
                 #if DebugMode:
@@ -154,12 +167,16 @@ def extract_yolo_data(model_file, video_path, frame_start, frame_end=None, TestM
                 sorted_boxes = test_result.get_boxes(frame_pos)
                 print(f"Sorted boxes : {sorted_boxes}")
 
+                frame_display = frame.copy()
+
                 for box in sorted_boxes:
-                    cv2.rectangle(frame, (box[0][0], box[0][1]), (box[0][2], box[0][3]), (0, 255, 0), 2)
-                    cv2.putText(frame, f"{box[3]}", (box[0][0], box[0][1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    color = class_colors.get(box[3])
+                    cv2.rectangle(frame_display, (box[0][0], box[0][1]), (box[0][2], box[0][3]), color, 2)
+                    cv2.putText(frame_display, f"{box[4]}: {box[3]}", (box[0][0], box[0][1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                     #cv2.putText(frame, f"{int(cls)}: {int(conf*100)}%", (record[4], record[5] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                cv2.imshow("YOLO11 test boxes Tracking", frame)
-                cv2.waitKey(1)
+                cv2.imshow("YOLO11 test boxes Tracking", frame_display)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
     write_dataset(video_path[:-4] + f"_rawyolo.json", records)
     # Release the video capture object and close the display window
     cap.release()
@@ -168,6 +185,7 @@ def extract_yolo_data(model_file, video_path, frame_start, frame_end=None, TestM
 def load_yolo_data_from_file(file_path):
     with open(file_path, 'r') as f:
         data = json.load(f)
+        print(f"Loaded data from {file_path}, length: {len(data)}")
     return data
 
 def make_data_boxes(records, image_x_size):
@@ -176,10 +194,10 @@ def make_data_boxes(records, image_x_size):
 
     # Populate the Result instance with BoxRecord instances
     for record in records:
-        frame_idx, cls, conf, x1, y1, x2, y2 = record
+        frame_idx, cls, conf, x1, y1, x2, y2, track_id = record
         box = [x1, y1, x2, y2]
         class_name = class_reverse_match.get(cls, 'unknown')
-        box_record = BoxRecord(box, conf, cls, class_name)
+        box_record = BoxRecord(box, conf, cls, class_name, track_id)
         result.add_record(frame_idx, box_record)
     return result
 
@@ -193,7 +211,7 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
     # cap = FFmpegVideoCapture(video_path)
     nb_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    offset_x = int(image_x_size / 3)
+    #offset_x = int(image_x_size / 3)
 
     if not frame_start:
         frame_start = 0
@@ -248,10 +266,16 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
             if DebugMode:
                 bounding_boxes = []  # Initialize an empty list for bounding boxes
                 for box in sorted_boxes:
+                    if box[4] in tracker.tracked_positions:
+                        position = tracker.tracked_positions[box[4]][-1]
+                    else:
+                        position = None
                     bounding_boxes.append({
                         'box': box[0],
                         'conf': box[1],
-                        'class_name': box[3]
+                        'class_name': box[3],
+                        'track_id': box[4],
+                        'position': position,
                     })
                 debugger.log_frame(frame_pos,
                                    bounding_boxes=bounding_boxes,  # Pass the list of bounding boxes
@@ -260,7 +284,6 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
                                        'Penetration': tracker.penetration,
                                        'Grinding': tracker.grinding,
                                        'sex_position': tracker.sex_position,
-                                       #'sex_position': tracker.state_manager.state,
                                        'sex_position_reason': tracker.sex_position_reason,
                                        'tracked_body_part': tracker.tracked_body_part,
                                        'locked_penis_box': tracker.locked_penis_box,
@@ -270,35 +293,42 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start = No
                                        'cons._penis_detections': tracker.consecutive_detections['penis'],
                                        'cons._penis_non_detections': tracker.consecutive_non_detections['penis'],
                                        'breast_tracking': tracker.breast_tracking,
-                                       'left hand normalized': tracker.normalized_positions['left hand'][-1],
-                                       'right hand normalized': tracker.normalized_positions['right hand'][-1],
                                    })
 
         if TestMode:
             ret, frame = cap.read()
-            frame = frame[:, :frame.shape[1] // 2, :]
-            if tracker.tracked_body_part in class_names and tracker.boxes[tracker.tracked_body_part] is not None:
-                frame = visualizer.draw_bounding_box(frame,
-                                                          tracker.boxes[tracker.tracked_body_part],
-                                                          tracker.tracked_body_part,
-                                                          class_colors[tracker.tracked_body_part],
-                                                          offset_x)
+            #frame = frame[:, :frame.shape[1] // 2, :]
+            frame_display = frame.copy()
+
+            for box in tracker.tracked_boxes:
+                #print(f"box[0]: {box[0]}, box[1]: {box[1]}, box[2]: {box[2]}")
+                frame_display = visualizer.draw_bounding_box(frame_display,
+                                                             box[0],
+                                                             str(box[2]) + ": " + box[1],
+                                                             class_colors[str(box[1])],
+                                                             offset_x)
+            #if tracker.tracked_body_part in class_names and tracker.boxes[tracker.tracked_body_part] is not None:
+            #    frame_display = visualizer.draw_bounding_box(frame_display,
+            #                                              tracker.boxes[tracker.tracked_body_part],
+            #                                              tracker.tracked_body_part,
+            #                                              class_colors[tracker.tracked_body_part],
+            #                                              offset_x)
             if tracker.locked_penis_box is not None:
-                frame = visualizer.draw_bounding_box(frame, tracker.locked_penis_box,
+                frame_display = visualizer.draw_bounding_box(frame_display, tracker.locked_penis_box,
                                                               "Locked_Penis",
                                                               class_colors['penis'],
                                                               offset_x)
             if tracker.glans_detected:
-                frame = visualizer.draw_bounding_box(frame, tracker.boxes['glans'],
+                frame_display = visualizer.draw_bounding_box(frame_display, tracker.boxes['glans'],
                                                               "Glans",
                                                               class_colors['glans'],
                                                               offset_x)
             if funscript_distances:
-                frame = visualizer.draw_gauge(frame, funscript_distances[-1])
-                #frame = visualizer.draw_limited_graph(frame, funscript_distances,
+                frame_display = visualizer.draw_gauge(frame_display, funscript_distances[-1])
+                #frame_display = visualizer.draw_limited_graph(frame_display, funscript_distances,
                 #                                               funscript_frames, 200)
 
-            cv2.imshow("Combined Results", frame)
+            cv2.imshow("Combined Results", frame_display)
             cv2.waitKey(1)
 
     funscript_data = list(zip(funscript_frames, funscript_distances))
@@ -336,110 +366,173 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
                 consecutive_frames = 0
                 frame_detected = 0
 
-            if consecutive_frames >= 10:
+            if consecutive_frames >= 2:
                 print(f"First instance of Glans/Penis found in frame {line[0] - 4}")
                 return line[0] - 4
 
 
+def process_chunk(model_file, video_path, frame_start, frame_end, isVR=False):
+    records = []
+    cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start)
+
+    model = YOLO(model_file, task="detect")
+
+    for frame_pos in range(frame_start, frame_end):
+        success, frame = cap.read()
+        if success:
+            if isVR:
+                frame = frame[:, frame.shape[1] // 3:2 * frame.shape[1] // 3, :]
+
+            yolo_results = model.track(frame, persist=True, conf=0.3, verbose=False)
+
+            if yolo_results[0].boxes.cls is None:
+                continue
+
+            boxes = yolo_results[0].boxes.xywh.cpu()
+            classes = yolo_results[0].boxes.cls.cpu().tolist()
+            confs = yolo_results[0].boxes.conf.cpu().tolist()
+
+            for cls, conf, box in zip(classes, confs, boxes):
+                x, y, w, h = box.int().tolist()
+                x1 = x - w // 2
+                y1 = y - h // 2
+                x2 = x + w // 2
+                y2 = y + h // 2
+                record = [frame_pos, int(cls), round(conf, 1), x1, y1, x2, y2]
+                records.append(record)
+
+    cap.release()
+    return records
+
+def extract_yolo_data_parallel(model_file, video_path, frame_start, frame_end=None, isVR=False, num_chunks=4):
+    if frame_end is None:
+        cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
+        frame_end = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+
+    chunk_size = (frame_end - frame_start) // num_chunks
+    chunks = [(model_file, video_path, frame_start + i * chunk_size, frame_start + (i + 1) * chunk_size, isVR)
+              for i in range(num_chunks)]
+
+    all_records = []
+    with ProcessPoolExecutor() as executor:
+        futures = [executor.submit(process_chunk, *chunk) for chunk in chunks]
+        for future in tqdm(futures, desc="Processing chunks"):
+            all_records.extend(future.result())
+
+    # Sort records by frame_pos to ensure proper order
+    all_records.sort(key=lambda x: x[0])
+
+    write_dataset(video_path[:-4] + f"_rawyolo.json", all_records)
+
+
 # MAIN logic
 
-# YOLO model file
-#yolo_model = "models/k00gar-11n-200ep-best.mlpackage"
-yolo_model = "models/k00gar-11s-198ep-best.mlpackage"
-#yolo_model = "models/k00gar-11m-134ep-best.mlpackage"
+if __name__ == '__main__':
 
-funscript_data = []
+    # YOLO model file
+    yolo_model = "models/k00gar-11n-200ep-best.mlpackage"
+    #yolo_model = "models/k00gar-11s-198ep-best.mlpackage"
+    #yolo_model = "models/k00gar-11m-134ep-best.mlpackage"
 
-video_list = []
-# video_list.append("/Users/k00gar/Downloads/wankzvr-shocum-180_180x180_3dh_LR.mp4")
-# video_list.append("/Users/k00gar/Downloads/ARPorn_Angel Youngs_Angel Of Nurse_4000p_2K_original_FISHEYE190_alpha.mp4")
-# video_list.append("/Users/k00gar/Downloads/Milfvr - Honeymoon In Vega - Vanessa Vega_1080p.mp4")
-# video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Sugar-baby_ Drooling Kitty_1920p_48559_FISHEYE190.mp4")
-# video_list.append("/Volumes/Crucial/pn/EBVR-018-B_AI_upscaled.mp4")
-# video_list.append("/Volumes/Crucial/pn/NaugthyAmericaVR.My.Wifes.Hot.Friend.23.09.15.Blake.Blossom.Oculus.8k.4096.mp4")
-# video_list.append("/Volumes/WD Elements/VRPn/CzechVR.723.I.m.Here.to.Serve.Agatha.Vega.Oculus.8K..mp4")
-# video_list.append("/Volumes/WD Elements/VRPn/721.czechvr.3d.7680x3840.60fps.oculusrift_uhq_h265.mp4")
-# video_list.append("/Users/k00gar/Downloads/JVR_100199.mp4")
-# video_list.append("/Users/k00gar/Downloads/JVR_100200.mp4")
-# video_list.append("/Users/k00gar/Downloads/JVR_100201.mp4")
-# video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Poolside Romance_1920p_39107_FISHEYE190.mp4")
-# video_list.append("/Users/k00gar/Downloads/SLR_UpCloseVR_UP Close VR with Connie Perignon_1920p_49954_LR_180.mp4")
-# video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_CJ Miles Sexperience_1920p_33250_MKX200.mp4")
-# video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_She Gives The Best Gifts_1920p_35951_MKX200.mp4")
+    funscript_data = []
 
-#video_list.append("/Users/k00gar/Downloads/VRLatina_Innocence_Unveiled_2000p_180_180x180_3dh_LR.mp4")
-#video_list.append("/Users/k00gar/Downloads/Katrina Jade [ADD] Oct 16, 2024R_6kvr265_reenc.mp4")
-#video_list.append("/Users/k00gar/Downloads/milfvr-daisy fuentes-jizzlejuice-jizzlejuice-3600p-180_180x180_3dh_LR_reenc.mp4")
-#video_list.append("/Users/k00gar/Downloads/BaDoinkVR_Peaches_n_Cream_5k_180_180x180_3dh_LR.mp4")
-# video_list.append("/Users/k00gar/Downloads/730-czechvr-3d-7680x3840-60fps-oculusrift_uhq_h265.mp4")
-#video_list.append("/Users/k00gar/Downloads/ARPorn_Sasha Tatcha_Fit and Fired Up_4000p_8K_original_FISHEYE190_alpha.mp4")
+    video_list = []
+    # video_list.append("/Users/k00gar/Downloads/wankzvr-shocum-180_180x180_3dh_LR.mp4")
+    # video_list.append("/Users/k00gar/Downloads/ARPorn_Angel Youngs_Angel Of Nurse_4000p_2K_original_FISHEYE190_alpha.mp4")
+    # video_list.append("/Users/k00gar/Downloads/Milfvr - Honeymoon In Vega - Vanessa Vega_1080p.mp4")
+    # video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Sugar-baby_ Drooling Kitty_1920p_48559_FISHEYE190.mp4")
+    # video_list.append("/Volumes/Crucial/pn/EBVR-018-B_AI_upscaled.mp4")
+    # video_list.append("/Volumes/Crucial/pn/NaugthyAmericaVR.My.Wifes.Hot.Friend.23.09.15.Blake.Blossom.Oculus.8k.4096.mp4")
+    # video_list.append("/Volumes/WD Elements/VRPn/CzechVR.723.I.m.Here.to.Serve.Agatha.Vega.Oculus.8K..mp4")
+    # video_list.append("/Volumes/WD Elements/VRPn/721.czechvr.3d.7680x3840.60fps.oculusrift_uhq_h265.mp4")
+    # video_list.append("/Users/k00gar/Downloads/JVR_100199.mp4")
+    # video_list.append("/Users/k00gar/Downloads/JVR_100200.mp4")
+    # video_list.append("/Users/k00gar/Downloads/JVR_100201.mp4")
+    # video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Poolside Romance_1920p_39107_FISHEYE190.mp4")
+    # video_list.append("/Users/k00gar/Downloads/SLR_UpCloseVR_UP Close VR with Connie Perignon_1920p_49954_LR_180.mp4")
+    # video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_CJ Miles Sexperience_1920p_33250_MKX200.mp4")
+    # video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_She Gives The Best Gifts_1920p_35951_MKX200.mp4")
+    #video_list.append("/Users/k00gar/Downloads/VRLatina_Innocence_Unveiled_2000p_180_180x180_3dh_LR.mp4")
+    #video_list.append("/Users/k00gar/Downloads/Katrina Jade [ADD] Oct 16, 2024R_6kvr265_reenc.mp4")
+    #video_list.append("/Users/k00gar/Downloads/milfvr-daisy fuentes-jizzlejuice-jizzlejuice-3600p-180_180x180_3dh_LR_reenc.mp4")
+    #video_list.append("/Users/k00gar/Downloads/BaDoinkVR_Peaches_n_Cream_5k_180_180x180_3dh_LR.mp4")
+    # video_list.append("/Users/k00gar/Downloads/730-czechvr-3d-7680x3840-60fps-oculusrift_uhq_h265.mp4")
+    #video_list.append("/Users/k00gar/Downloads/ARPorn_Sasha Tatcha_Fit and Fired Up_4000p_8K_original_FISHEYE190_alpha.mp4")
+    #video_list.append("/Users/k00gar/Downloads/WAVR 278 A - Ichika Matsumoto, Aoi Kururugi, Mitsuki Nagisa - 3 Little Sisters.mp4")
+    #video_list.append("/Users/k00gar/Downloads/HNVR 097 B.mp4")
+    #video_list.append("/Users/k00gar/Downloads/BadoinkVR_Lights_Camera_Satisfaction_4K_HEVC_180_180x180_3dh.mp4")
+    #video_list.append("/Users/k00gar/Downloads/2022-09-09 - TonightsGirlfriend - Kenna James.mp4")
+    #video_list.append("/Users/k00gar/Downloads/VideoFile.mp4")
+    video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4")
+    # video_list.append("/Users/k00gar/Downloads/The Ultimate Furry VR Porn Compilation.mp4")
 
-#video_list.append("/Users/k00gar/Downloads/WAVR 278 A - Ichika Matsumoto, Aoi Kururugi, Mitsuki Nagisa - 3 Little Sisters.mp4")
-#video_list.append("/Users/k00gar/Downloads/HNVR 097 B.mp4")
-#video_list.append("/Users/k00gar/Downloads/BadoinkVR_Lights_Camera_Satisfaction_4K_HEVC_180_180x180_3dh.mp4")
-#video_list.append("/Users/k00gar/Downloads/2022-09-09 - TonightsGirlfriend - Kenna James.mp4")
+    TestMode = False
+    DebugMode = True
+    isVR = True
 
-video_list.append("/Users/k00gar/Downloads/VideoFile.mp4")
+    for video_path in video_list:
+        print(f"Processing video: {video_path}")
+        #funscript_data = []
 
-TestMode = False
-DebugMode = True
-isVR = True
+        debugger = Debugger(video_path, output_dir=video_path[:-4])
 
-# wait 60 minutes before continuing
-# time.sleep(60 * 40)
+        #cap = cv2.VideoCapture(video_path)
+        cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        image_y_size = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
 
+        if isVR:
+            offset_x = image_x_size = image_x_size // 3
 
-for video_path in video_list:
-    print(f"Processing video: {video_path}")
-    #funscript_data = []
+        print(f"Image size: {image_x_size}x{image_y_size}")
+        cap.release()
 
-    debugger = Debugger(video_path, output_dir=video_path[:-4])
+        frame_start = 0   # 61000  # 0
+        frame_end = None  #64000  # None
 
-    #cap = cv2.VideoCapture(video_path)
-    cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    image_y_size = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-    image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        position_changes = []
+        sex_position = ""
+        funscript_frames = []
+        funscript_distances = []
 
-    if isVR:
-        image_x_size = image_x_size // 3
+        # Process the video
 
-    print(f"Image size: {image_x_size}x{image_y_size}")
-    cap.release()
+        # Run the YOLO detection and saves result to _rawyolo.json file
+        extract_yolo_data(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
+        #extract_yolo_data_parallel(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
 
-    frame_start = 0   # 61000  # 0
-    frame_end = None  #64000  # None
+        # time.sleep(20)  # time to write the file
 
-    position_changes = []
-    sex_position = ""
-    funscript_frames = []
-    funscript_distances = []
+        # Load YOLO detection results from file
+        yolo_data = load_yolo_data_from_file(video_path[:-4] + f"_rawyolo.json")
 
-    # Process the video
+        results = make_data_boxes(yolo_data, image_x_size)
 
-    # Run the YOLO detection and saves result to _rawyolo.json file
-    #extract_yolo_data(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
+        # Looking for the first instance of penis within the YOLO results
+        first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
 
-    # Load YOLO detection results from file
-    yolo_data = load_yolo_data_from_file(video_path[:-4] + f"_rawyolo.json")
+        if first_penis_frame is None:
+            print(f"No penis found in video: {video_path}")
+            first_penis_frame = 0
 
-    results = make_data_boxes(yolo_data, image_x_size)
+        # Deciding whether we start from there or from a user specified later frame
+        frame_start = max(max(first_penis_frame - int(fps), frame_start - int(fps)), 0)
 
-    # Looking for the first instance of penis within the YOLO results
-    first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
+        # Performing the tracking part and generation of the raw funscript data
+        funscript_data = analyze_tracking_results(results, image_y_size, video_path, frame_start, frame_end, TestMode)
 
-    # Deciding whether we start from there or from a user specified later frame
-    frame_start = max(max(first_penis_frame - int(fps), frame_start - int(fps)), 0)
+        debugger.save_logs()
 
-    # Performing the tracking part and generation of the raw funscript data
-    funscript_data = analyze_tracking_results(results, image_y_size, video_path, frame_start, frame_end, TestMode)
+        funscript_handler = FunscriptGenerator()
 
-    debugger.save_logs()
+        # Simplifying the funscript data and generating the file
+        funscript_handler.generate(video_path[:-4] + f"_rawfunscript.json", funscript_data, fps, TestMode)
 
-    funscript_handler = FunscriptGenerator()
+        # generate heatmap
+        funscript_handler.generate_heatmap(video_path[:-4] + f".funscript", video_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript")
 
-    # Simplifying the funscript data and generating the file
-    funscript_handler.generate(video_path[:-4] + f"_rawfunscript.json", funscript_data, fps, TestMode)
-
-    print(f"Finished processing video: {video_path}")
+        print(f"Finished processing video: {video_path}")
 

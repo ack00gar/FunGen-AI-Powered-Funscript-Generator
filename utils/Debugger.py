@@ -14,6 +14,11 @@ class Debugger:
         self.output_dir = output_dir
         self.logs = {}
 
+        self.cap = None
+        self.current_frame = 0
+        self.total_frames = 0
+        self.fps = 0
+
     def log_frame(self, frame_id, variables=None, bounding_boxes=None):
         """
         Log or update the state of variables and bounding boxes for a specific frame.
@@ -133,7 +138,7 @@ class Debugger:
         self.log_frame(frame_id, variables, bounding_boxes)
         self.display_frame(frame_id)
 
-    def play_video(self, start_frame=0, duration=15, rolling_window_size=100, record=False, downsize_ratio = 1):
+    def play_video(self, start_frame=0, duration=0, rolling_window_size=100, record=False, downsize_ratio=1):
         """
         Play the video from a specified frame or timestamp, displaying variables, bounding boxes,
         and rolling window curves for distance and funscript data.
@@ -143,28 +148,28 @@ class Debugger:
 
         # Load the video
         #cap = cv2.VideoCapture(self.video_path)
-        cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        print(f"Total frames: {total_frames}, FPS: {fps}")
+        self.cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        print(f"Total frames: {self.total_frames}, FPS: {self.fps}")
 
         if record:
-            ret, frame = cap.read()
-            if cap.is_VR:
+            ret, frame = self.cap.read()
+            if self.cap.is_VR:
                 frame_copy = frame.copy()
                 frame_copy = frame_copy[:, frame.shape[1] // 3:2 * frame.shape[1] // 3, :]
             # Define the output video writer
             output_path = self.video_path.replace(".mp4", "_debug.mp4")
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4
-            out = cv2.VideoWriter(output_path, fourcc, fps, (frame_copy.shape[1] // downsize_ratio, frame_copy.shape[0] // downsize_ratio))
+            out = cv2.VideoWriter(output_path, fourcc, self.fps, (frame_copy.shape[1] // downsize_ratio, frame_copy.shape[0] // downsize_ratio))
 
             if not out.isOpened():
                 print(f"Error: Could not open video writer for {output_path}")
-                cap.release()
+                self.cap.release()
                 return
 
         # Set the starting frame
-        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         # Load the funscript file
         funscript_path = self.video_path.replace(".mp4", ".funscript")
@@ -188,22 +193,34 @@ class Debugger:
             funscript_interpolator = interp1d(funscript_times, funscript_positions, kind='linear',
                                               fill_value="extrapolate")
 
-        frame_id = start_frame
-        end_frame = start_frame + int(duration * fps)  # Calculate the end frame based on duration
+        self.current_frame = start_frame
+        if duration > 0:
+            end_frame = start_frame + int(duration * self.fps)  # Calculate the end frame based on duration
+        else:
+            end_frame = self.total_frames
 
-        while frame_id < end_frame:
-            ret, frame = cap.read()
+        width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+
+        if self.cap.is_VR:
+            width = width // 6
+
+        cv2.namedWindow("Debug Video")
+        cv2.setMouseCallback("Debug Video", self._mouse_callback,
+                             param=width)
+
+        while self.current_frame < end_frame:
+            ret, frame = self.cap.read()
             if not ret:
                 break
 
             # Crop the frame (as done in display_frame)
             #frame = frame[:, frame.shape[1] // 6:frame.shape[1] // 3, :]
-            if cap.is_VR:
+            if self.cap.is_VR:
                 frame_copy = frame.copy()
                 frame_copy = frame_copy[:, frame.shape[1] // 3:2 * frame.shape[1] // 3, :]
 
             # Display variables and bounding boxes
-            str_frame_id = str(frame_id)
+            str_frame_id = str(self.current_frame)
             if str_frame_id in self.logs:
                 variables = self.logs[str_frame_id]['variables']
                 bounding_boxes = self.logs[str_frame_id]['bounding_boxes']
@@ -213,10 +230,12 @@ class Debugger:
                     x1, y1, x2, y2 = box['box']
                     class_name = box['class_name']
                     conf = box['conf']
+                    track_id = box['track_id']
+                    position = box['position']
                     color = class_colors.get(class_name, (0, 255, 0))
                     cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame_copy, f"{class_name} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color,
-                                2)
+                    cv2.putText(frame_copy, f"{class_name} {position}", (x1, y1 - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
                 # Display variables
                 y_offset = 30
@@ -235,8 +254,8 @@ class Debugger:
 
             # Update rolling window buffers
             distance = variables.get('distance', 0)
-            funscript_value = self._get_funscript_value(funscript_interpolator, frame_id, fps) if funscript_data else 0
-            print(f"Funscript value: {funscript_value}")
+            funscript_value = self._get_funscript_value(funscript_interpolator, self.current_frame, self.fps) if funscript_data else 0
+            #print(f"Funscript value: {funscript_value}")
             visualizer.draw_gauge(frame_copy, funscript_value)
             distance_buffer = np.roll(distance_buffer, -1)
             distance_buffer[-1] = distance
@@ -249,6 +268,8 @@ class Debugger:
             self._draw_rolling_window_curve(frame_copy, distance_buffer, (0, 255, 0), 0.5, graph_height, graph_y_start)
             self._draw_rolling_window_curve(frame_copy, funscript_buffer, (255, 0, 0), 0.5, graph_height, graph_y_start)
 
+            self._draw_progress_bar(frame_copy, frame.shape[1], frame.shape[0])
+
             # Show the frame
             cv2.imshow(f"Debug Video", frame_copy)
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -257,16 +278,14 @@ class Debugger:
             if cv2.waitKey(1) & 0xFF == 32:
                 time.sleep(10)
 
-
-
             if record:
                 # resize the frame, divide dimensions by 2
-                frame = cv2.resize(frame_copy, (frame_copy.shape[1] // downsize_ratio, frame_copy.shape[0] // downsize_ratio))
+                frame_copy = cv2.resize(frame_copy, (frame_copy.shape[1] // downsize_ratio, frame_copy.shape[0] // downsize_ratio))
                 out.write(frame_copy)
 
-            frame_id += 1
+            self.current_frame += 1
 
-        cap.release()
+        self.cap.release()
         if record:
             out.release()
         cv2.destroyAllWindows()
@@ -296,4 +315,56 @@ class Debugger:
             cv2.line(overlay, (x1, y1), (x2, y2), color, 2)
 
         cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+
+    def _mouse_callback(self, event, x, y, flags, param):
+        """
+        Handle mouse events for video navigation.
+        """
+        if event == cv2.EVENT_LBUTTONDOWN:  # Start dragging
+            if y >= self.bar_y_start:  # Clicked on the progress bar
+                self._update_frame_from_mouse(x, param)
+        """
+        elif event == cv2.EVENT_MOUSEMOVE and self.is_dragging:  # Dragging
+            self._update_frame_from_mouse(x, param)
+
+        elif event == cv2.EVENT_LBUTTONUP:  # End dragging
+            self.is_dragging = False
+            self._update_frame_from_mouse(x, param)
+        """
+
+    def _update_frame_from_mouse(self, x, width):
+        """
+        Update the current frame based on the mouse's X position.
+        """
+        self.current_frame = int((x / width) * self.total_frames)
+        print(f"Target frame: {self.current_frame}")
+        self.cap.release()
+        print("Release cap")
+        #self.current_frame = max(0, min(self.current_frame, self.total_frames - 1))
+        self.cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
+        print("Set up new cap")
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+        print("Done resetting and jumping to target frame")
+
+    def _draw_progress_bar(self, frame, width, height):
+        """
+        Draw a progress bar on the frame indicating the current playback position.
+        """
+        # Ensure the frame is writable
+        # frame = np.ascontiguousarray(frame)
+
+        bar_height = 10
+        bar_x_start = 0
+        bar_x_end = width
+        bar_y_start = height - bar_height
+        self.bar_y_start = bar_y_start
+        bar_y_end = height
+
+        # Background of the progress bar
+        cv2.rectangle(frame, (bar_x_start, bar_y_start), (bar_x_end, bar_y_end), (50, 50, 50), -1)
+
+        # Progress indicator
+        progress_x = int((self.current_frame / self.total_frames) * width)
+        cv2.rectangle(frame, (bar_x_start, bar_y_start), (progress_x, bar_y_end), (0, 255, 0), -1)
+
 

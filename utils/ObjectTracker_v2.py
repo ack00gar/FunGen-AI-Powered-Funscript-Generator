@@ -189,8 +189,8 @@ class ObjectTracker:
         self.boxes = {class_name: None for class_name in class_names}
         all_detections = {class_name: [] for class_name in class_names}
 
-        for box, conf, cls, class_name in sorted_boxes:
-            all_detections[class_name].append([conf, box])
+        for box, conf, cls, class_name, track_id in sorted_boxes:
+            all_detections[class_name].append([conf, box, track_id])
 
         found_box = {class_name: [] for class_name in class_names}
         classes_touching_penis = {class_name: None for class_name in class_names}
@@ -198,9 +198,9 @@ class ObjectTracker:
 
         for check_class_first in ['glans', 'penis', 'navel']:
             prev_conf = 0
-            for conf, box in all_detections[check_class_first]:
+            for conf, box, track_id in all_detections[check_class_first]:
                 if conf > prev_conf:
-                    found_box[check_class_first] = [box, conf]
+                    found_box[check_class_first] = [box, conf, track_id]
                     prev_conf = conf
 
         for check_class_first in ['glans', 'penis', 'navel']:
@@ -223,7 +223,7 @@ class ObjectTracker:
             if check_class_second in ['glans', 'penis', 'navel']:
                 continue
             prev_conf = 0
-            for conf, box in all_detections[check_class_second]:
+            for conf, box, track_id in all_detections[check_class_second]:
                 if self.locked_penis_box and self.boxes_overlap(box, self.locked_penis_box) and conf > prev_conf:
                     classes_touching_penis[check_class_second] = box
                     prev_conf = conf
@@ -259,7 +259,8 @@ class ObjectTracker:
                 self.tracked_body_part = 'face'
                 self.detect_sex_position_change('Blowjob', 'face touching penis')
                 self.sub_sex_position = "Not relevant"
-            elif classes_touching_penis['left hand'] or classes_touching_penis['right hand']:
+            #elif classes_touching_penis['left hand'] or classes_touching_penis['right hand']:
+            elif classes_touching_penis['left hand']:
                 self.detect_sex_position_change('Handjob', 'hand touching penis')
                 self.sub_sex_position = "Handjob"
 

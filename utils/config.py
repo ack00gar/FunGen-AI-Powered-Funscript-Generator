@@ -12,7 +12,7 @@ class_priority_order = {
 # Define class names with their corresponding indices
 class_names = {
     'face': 0,
-    'left hand': 1, 'right hand': 1,
+    'hand':1, 'left hand': 1, 'right hand': 1,
     'penis': 2,
     'glans': 3,
     'pussy': 4,
@@ -20,7 +20,7 @@ class_names = {
     'anus': 6,
     'breast': 7,
     'navel': 8,
-    'left foot': 9, 'right foot': 9
+    'foot':9, 'left foot': 9, 'right foot': 9
 }
 
 # Define colors for each class
@@ -32,9 +32,11 @@ class_colors = {
     "anus": (128, 0, 128),              # purple
     "breast": (255, 165, 0),            # orange
     "navel": (0, 255, 255),             # cyan
+    "hand": (255, 0, 255),              # magenta
     "left hand": (255, 0, 255),         # magenta
     "right hand": (255, 0, 255),        # magenta
     "face": (0, 255, 0),                # lime
+    "foot": (165, 42, 42),              # brown
     "left foot": (165, 42, 42),         # brown
     "right foot": (165, 42, 42)         # brown
 }
