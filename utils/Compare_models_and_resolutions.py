@@ -1,6 +1,4 @@
 import cv2
-import numpy as np
-import json
 from ultralytics import YOLO
 
 # Example usage
@@ -10,7 +8,6 @@ if __name__ == "__main__":
     # Replace with your video paths and YOLO models
     video = []
     video.append("/Users/k00gar/Downloads/ARPorn_Sasha Tatcha_Fit and Fired Up_4000p_8K_original_FISHEYE190_alpha_orig.mp4")
-    #video.append("/Users/k00gar/Downloads/ARPorn_Sasha Tatcha_Fit and Fired Up_4000p_8K_original_FISHEYE190_alpha.mp4")
 
     models = []
     models.append("models/k00gar-11n-200ep-best.mlpackage")
