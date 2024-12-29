@@ -6,7 +6,7 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 from utils.config import class_names, class_priority_order, class_reverse_match, class_colors
-from utils.lib_ObjectTracker_v2 import ObjectTracker
+from utils.lib_ObjectTracker import ObjectTracker
 from utils.lib_FunscriptHandler import FunscriptGenerator
 from utils.lib_Visualizer import Visualizer
 from utils.lib_Debugger import Debugger
