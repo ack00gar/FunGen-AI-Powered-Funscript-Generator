@@ -81,7 +81,7 @@ Before using this project, ensure you have the following installed:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/video-processing-yolo-funscript.git
+   git clone https://github.com/ack00gar/VR-Funscript-AI-Generator.git
    cd video-processing-yolo-funscript
    ```
 
