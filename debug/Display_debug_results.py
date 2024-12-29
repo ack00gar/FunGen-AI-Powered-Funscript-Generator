@@ -1,8 +1,8 @@
 from utils.lib_Debugger import Debugger
 
-video = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
+video = "/Users/k00gar/Downloads/730-czechvr-3d-7680x3840-60fps-oculusrift_uhq_h265.mp4"
 
-frame = 79080
+frame = 8*60*60
 
 debugger = Debugger(video, video[:-4])
 
@@ -12,4 +12,4 @@ debugger.load_logs()
 
 #debugger.play_video(frame)
 
-debugger.play_video(frame, record=True, downsize_ratio=2, duration=10)
+debugger.play_video(frame, record=False, downsize_ratio=1)  # , duration=10)

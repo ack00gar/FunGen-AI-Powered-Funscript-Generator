@@ -6,6 +6,11 @@
 
 This project is a Python-based tool for generating Funscript files from VR videos using Computer Vision (CV) and AI techniques. It leverages YOLO (You Only Look Once) object detection and custom tracking algorithms to automate the process of creating Funscript files for interactive devices.
 
+## DISCLAIMER
+
+This project is at its very early stages of development, still faulty and broken, and is for research and educational purposes only. 
+It is not intended for commercial use.
+
 ## Features
 
 - **YOLO Object Detection**: Uses a pre-trained YOLO model to detect and track objects in video frames.
@@ -109,6 +114,24 @@ The project relies on the following Python libraries:
 
 ## Usage
 
+### Input file
+
+The input video file should be a video file.
+
+For VR, keep it as a SBS video file, the algorithm will process the left (by default) panel only.
+
+Also, even if the algorithm is capable of running on 8k videos, I strongly advise you to process a video limited to 1920p for the sake of performance, and no lower than 1080p.
+
+Feel free to experiment.
+
+### Attention point
+
+Depending on the nature of the video (FISHEYE 190, Equirectangular, etc.) you might want to experiment projection settings.
+
+Those settings can be found in the `utils/lib_VideoReaderFFmpeg.py` file.
+
+To test them, you can use the `utils/test_detect_compare_unwarped.py` file before processing the video, as this will have a huge impact on the quality of the detection and tracking.   
+
 ### Basic Command
 
 To process a video, run the following command:
@@ -127,7 +150,7 @@ python main.py /path/to/video.mp4
 Example:
 
 ```bash
-python main.py /path/to/video.mp4 --yolo_model /path/to/custom_model.mlpackage --test_mode --is_vr
+python FSGenerator.py /path/to/video.mp4 --yolo_model /path/to/custom_model.mlpackage --test_mode --is_vr
 ```
 
 ### Output Files
@@ -166,6 +189,8 @@ python FSGenerator.py /path/to/vr_video.mp4 --yolo_model models/k00gar-11n-200ep
 ```
 This command processes a VR video, detects objects using the specified YOLO model, and generates Funscript data. The `--test_mode` flag enables real-time visualization.
 
+You can also simply run it from your IDE, giving it a video_path to process.
+
 2. **Debugging example**:
 
 Display a Specific Frame with debug information:
@@ -180,6 +205,8 @@ Record the Debugged Video:
 ```bash
 debugger.play_video(frame, record=True, downsize_ratio=2, duration=10)
 ```
+
+Or run Display_debug_results.py from your IDE with the wanted parameters.
 
 ## Contributing
 

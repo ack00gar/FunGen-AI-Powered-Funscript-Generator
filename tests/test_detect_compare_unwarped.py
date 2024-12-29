@@ -6,9 +6,10 @@ import numpy as np
 # Paths to the model and input image
 model_file = "../models/k00gar-11n-200ep-best.mlpackage"
 
-video_path = video = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
+#video_path = video = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
+video_path = video = "/Users/k00gar/Downloads/730-czechvr-3d-7680x3840-60fps-oculusrift_uhq_h265.mp4"
 
-frame_id = 79080
+frame_id = 8*60*60
 
 output_path_1 = video_path[:-4] + "_" + str(frame_id) + "_ffmpeg_unwarped.jpg"  # Save location for the annotated frame
 output_path_2 = video_path[:-4] + "_" + str(frame_id) + "_original.jpg"
