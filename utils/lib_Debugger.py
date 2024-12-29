@@ -3,7 +3,7 @@ import time
 
 import cv2
 import numpy as np
-from utils.config import class_colors
+from params.config import class_colors
 from scipy.interpolate import interp1d
 from utils.lib_Visualizer import Visualizer
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg

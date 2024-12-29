@@ -2,13 +2,13 @@ from ultralytics import YOLO
 import numpy as np
 import cv2
 from collections import defaultdict
-from utils.config import class_names, class_priority_order, class_reverse_match, class_colors
+from params.config import class_reverse_match
 
 #video_path = "/Users/k00gar/Downloads/Katrina Jade [ADD] Oct 16, 2024R_6kvr265_reenc.mp4"
 video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
 
 # Load a model
-pose_model = YOLO("yolo11x-pose.pt")
+pose_model = YOLO("../utils/yolo11x-pose.pt")
 detect_model = YOLO("../models/k00gar-11n-200ep-best.mlpackage")
 
 timestamp_min = 15
