@@ -164,7 +164,9 @@ class ObjectTracker:
 
         # Collect all detections by class name
         for box, conf, cls, class_name, track_id in sorted_boxes:
-            if conf > 0.5:
+            if class_name == "penis":
+                print(f"penis detected @1")
+            if conf > 0.3:
                 all_detections[class_name].append([conf, box, track_id])
 
         # Find the best box for specific classes
@@ -173,6 +175,8 @@ class ObjectTracker:
             prev_conf = 0
             for conf, box, track_id in all_detections[check_class_first]:
                 if conf > prev_conf:
+                    if check_class_first == 'penis':
+                        print("penis detected @2")
                     found_box[check_class_first] = [box, conf, track_id]
                     prev_conf = conf
 
@@ -183,6 +187,8 @@ class ObjectTracker:
                 conf = found_box[check_class_first][1]
                 self.consecutive_detections[check_class_first] += 1
                 self.consecutive_non_detections[check_class_first] = 0
+                if check_class_first == 'penis':
+                    print("sending to handle penis")
                 self.handle_class_first(check_class_first, self.boxes[check_class_first], conf)
             else:
                 self.consecutive_detections[check_class_first] = 0
@@ -401,8 +407,9 @@ class ObjectTracker:
                             px1 = self.penis_box[0] + np.sign(self.penis_box[0] - self.locked_penis_box[0]) * max_move
                         if abs(self.penis_box[2] - self.locked_penis_box[2]) > max_move:
                             px2 = self.penis_box[2] + np.sign(self.penis_box[2] - self.locked_penis_box[2]) * max_move
-                        if abs(self.locked_penis_box[3] - py2) > max_move:
-                            py2 = self.locked_penis_box[3] + np.sign(py2 - self.locked_penis_box[3]) * max_move
+                        if abs(self.penis_box[3] - self.locked_penis_box[3]) > max_move:
+                            print("adjusting now")
+                            py2 = self.locked_penis_box[3] + np.sign(self.penis_box[3] - self.locked_penis_box[3]) * max_move
 
                         self.locked_penis_box = (px1, py2 - self.locked_penis_height, px2, py2)
                     else:

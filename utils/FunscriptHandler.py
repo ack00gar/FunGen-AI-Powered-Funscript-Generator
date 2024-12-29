@@ -3,6 +3,11 @@ import json
 from simplification.cutil import simplify_coords
 import matplotlib.pyplot as plt
 import numpy as np
+import datetime
+from scipy.ndimage import gaussian_filter
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
+from matplotlib.cm import ScalarMappable
 
 class FunscriptGenerator:
     def generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
@@ -26,7 +31,7 @@ class FunscriptGenerator:
 
             self.filtered_positions = simplify_coords(data, filter_coeff)  # Use VW algorithm
 
-            print(f"Lenghth of filtered positions: {len(self.filtered_positions)}")
+            print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
 
             #output_path = raw_funscript_path[:-18] + '_vw_' + str(filter_coeff) + '.funscript'
             #output_path = raw_funscript_path[:-18] + '_vw_' + str(filter_coeff) + '.funscript'
@@ -259,32 +264,84 @@ class FunscriptGenerator:
             print("Failed to load funscript data.")
             return
 
-        # Calculate average duration, average speed, and total actions
-        total_duration = times[-1] / 1000  # Convert to seconds
-        avg_duration = total_duration
-        avg_speed = np.mean(np.abs(np.diff(positions)) / np.diff(times) * 1000)  # Positions per second
-        total_actions = len(times)
+        # Print loaded data for debugging
+        print(f"Times: {times}")
+        print(f"Positions: {positions}")
+        print(f"Total Actions: {len(times)}")
+        print(f"Time Range: {times[0]} to {datetime.timedelta(seconds = times[-1]/1000)}")
 
-        # Create heatmap data
-        heatmap_data = np.zeros((200, 3000))
-        for i in range(len(times) - 1):
-            start = int(times[i] / total_duration * 2999)
-            end = int(times[i + 1] / total_duration * 2999)
-            pos = positions[i]
-            heatmap_data[pos, start:end] += 1
+        # Calculate speed (position change per time interval)
+        speeds = np.abs(np.diff(positions) / np.diff(times)) * 1000  # Positions per second
+        print(f"Speeds: {speeds}")
 
-        # Normalize heatmap data
-        heatmap_data = heatmap_data / np.max(heatmap_data)
+        # Define custom colormap: blue -> green -> yellow -> orange -> red -> purple
+        colors = [
+            (0, 0, 1),    # Blue
+            (0, 1, 0),    # Green
+            (1, 1, 0),    # Yellow
+            (1, 0.5, 0),  # Orange
+            (1, 0, 0),    # Red
+            (0.5, 0, 1)   # Purple
+        ]
+        cmap = mcolors.LinearSegmentedColormap.from_list("custom_gradient", colors)
 
-        # Create the heatmap image
+        # Normalize speeds for colormap
+        norm = mcolors.Normalize(vmin=np.min(speeds), vmax=np.max(speeds))
+
+        # Create figure and plot
         plt.figure(figsize=(30, 2))
-        plt.imshow(heatmap_data, aspect='auto', cmap='hot', interpolation='nearest')
-        plt.colorbar(label='Intensity')
-        plt.title(
-            f'Funscript Heatmap\nAvg Duration: {avg_duration:.2f}s, Avg Speed: {avg_speed:.2f} pos/s, Actions: {total_actions}')
-        plt.xlabel('Time (s)')
-        plt.ylabel('Position')
-        plt.savefig(output_image_path, bbox_inches='tight')
+        ax = plt.gca()
+
+        # Draw lines between points with colors based on speed
+        for i in range(len(times) - 1):
+            x_start = times[i] / 1000  # Convert ms to seconds
+            x_end = times[i + 1] / 1000
+            y_start = positions[i]
+            y_end = positions[i + 1]
+            speed = speeds[i]
+
+            # Get color based on speed
+            line_color = cmap(norm(speed))
+
+            # Plot the line
+            ax.plot([x_start, x_end], [y_start, y_end], color=line_color, linewidth=2)
+
+        # Customize plot
+        ax.set_title(f'Funscript Speed Visualization\nDuration: {datetime.timedelta(seconds = int(times[-1]/1000))} - Avg. Speed {int(np.mean(speeds))} - Actions: {len(times)}')
+        ax.set_xlabel('Time (s)')
+        #ax.set_ylabel('Position')
+        ax.set_yticks(np.arange(0, 101, 10))
+        ax.set_xlim(times[0] / 1000, times[-1] / 1000)
+        ax.set_ylim(0, 100)
+
+        # Remove borders (spines)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        # Add colorbar (optional, currently commented out)
+        # sm = ScalarMappable(cmap=cmap, norm=norm)
+        # sm.set_array([])
+        # cbar = plt.colorbar(sm, ax=ax, orientation='horizontal', pad=0.2)
+        # cbar.set_label('Speed (positions/s)')
+
+        # Add colorbar
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        #cbar = plt.colorbar(sm, ax=ax, orientation='horizontal', pad=0.2)
+        #cbar.set_label('Speed (positions/s)')
+
+        # Save the figure
+        plt.savefig(output_image_path, bbox_inches='tight', dpi=200)  # Increase resolution
         plt.close()
 
-        print(f"Heatmap generated and saved to {output_image_path}")
+        print(f"Colored line visualization saved to {output_image_path}")
+
+# if main
+if __name__ == "__main__":
+    video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
+
+    funscript_handler = FunscriptGenerator()
+
+    # generate heatmap
+    funscript_handler.generate_heatmap(video_path[:-4] + ".funscript", video_path[
+                                                                        :-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
