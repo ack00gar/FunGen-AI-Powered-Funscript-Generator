@@ -1,4 +1,4 @@
-from Debugger import Debugger
+from lib_Debugger import Debugger
 
 #video="/Users/k00gar/Downloads/BadoinkVR_Lights_Camera_Satisfaction_4K_HEVC_180_180x180_3dh.mp4"
 

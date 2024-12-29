@@ -8,13 +8,12 @@ from concurrent.futures import ProcessPoolExecutor
 import datetime
 
 from utils.config import class_names, class_priority_order, class_reverse_match, class_colors
-from utils.ObjectTracker import ObjectTracker
-#from utils.ObjectTracker import ObjectTracker
-from utils.FunscriptHandler import FunscriptGenerator
-from utils.Visualizer import Visualizer
-from utils.Debugger import Debugger
-from utils.SceneCutsDetect import detect_scene_changes
-from utils.VideoReaderFFmpeg import VideoReaderFFmpeg
+from utils.lib_ObjectTracker import ObjectTracker
+from utils.lib_FunscriptHandler import FunscriptGenerator
+from utils.lib_Visualizer import Visualizer
+from utils.lib_Debugger import Debugger
+from utils.lib_SceneCutsDetect import detect_scene_changes
+from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 
 # Define the BoxRecord class
 class BoxRecord:
@@ -371,63 +370,6 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
                 print(f"First instance of Glans/Penis found in frame {line[0] - 4}")
                 return line[0] - 4
 
-
-def process_chunk(model_file, video_path, frame_start, frame_end, isVR=False):
-    records = []
-    cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start)
-
-    model = YOLO(model_file, task="detect")
-
-    for frame_pos in range(frame_start, frame_end):
-        success, frame = cap.read()
-        if success:
-            if isVR:
-                frame = frame[:, frame.shape[1] // 3:2 * frame.shape[1] // 3, :]
-
-            yolo_results = model.track(frame, persist=True, conf=0.3, verbose=False)
-
-            if yolo_results[0].boxes.cls is None:
-                continue
-
-            boxes = yolo_results[0].boxes.xywh.cpu()
-            classes = yolo_results[0].boxes.cls.cpu().tolist()
-            confs = yolo_results[0].boxes.conf.cpu().tolist()
-
-            for cls, conf, box in zip(classes, confs, boxes):
-                x, y, w, h = box.int().tolist()
-                x1 = x - w // 2
-                y1 = y - h // 2
-                x2 = x + w // 2
-                y2 = y + h // 2
-                record = [frame_pos, int(cls), round(conf, 1), x1, y1, x2, y2]
-                records.append(record)
-
-    cap.release()
-    return records
-
-def extract_yolo_data_parallel(model_file, video_path, frame_start, frame_end=None, isVR=False, num_chunks=4):
-    if frame_end is None:
-        cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
-        frame_end = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
-
-    chunk_size = (frame_end - frame_start) // num_chunks
-    chunks = [(model_file, video_path, frame_start + i * chunk_size, frame_start + (i + 1) * chunk_size, isVR)
-              for i in range(num_chunks)]
-
-    all_records = []
-    with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(process_chunk, *chunk) for chunk in chunks]
-        for future in tqdm(futures, desc="Processing chunks"):
-            all_records.extend(future.result())
-
-    # Sort records by frame_pos to ensure proper order
-    all_records.sort(key=lambda x: x[0])
-
-    write_dataset(video_path[:-4] + f"_rawyolo.json", all_records)
-
-
 # MAIN logic
 
 if __name__ == '__main__':
@@ -502,10 +444,7 @@ if __name__ == '__main__':
         # Process the video
 
         # Run the YOLO detection and saves result to _rawyolo.json file
-        #extract_yolo_data(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
-        #extract_yolo_data_parallel(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
-
-        # time.sleep(20)  # time to write the file
+        extract_yolo_data(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
 
         # Load YOLO detection results from file
         yolo_data = load_yolo_data_from_file(video_path[:-4] + f"_rawyolo.json")
