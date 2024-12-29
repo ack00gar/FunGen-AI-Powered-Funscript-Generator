@@ -33,17 +33,16 @@ class FunscriptGenerator:
 
             print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
 
-            #output_path = raw_funscript_path[:-18] + '_vw_' + str(filter_coeff) + '.funscript'
-            #output_path = raw_funscript_path[:-18] + '_vw_' + str(filter_coeff) + '.funscript'
-
             self.write_funscript(self.filtered_positions, output_path, fps)
 
             print(f"Funscript generated and saved to {output_path}")
 
+            self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
+
         except:
             print(f"Error loading raw funscript from {raw_funscript_path}")
-        """
-        # for alternative version, make every point 0 if distance is under 20
+
+        # for alternative version, make every point 0 if distance is under 10
         points_v2 = []
         multiplier = 1.2
         for i in range(len(self.filtered_positions)):
@@ -57,9 +56,9 @@ class FunscriptGenerator:
             # print(f"Point {i}: was {self.filtered_positions[i][1]}, now is {distance}")
             points_v2.append((self.filtered_positions[i][0], distance))
 
-        write_path = output_path[:-10] + '_remapped.funscript'
-        self.write_funscript(points_v2, write_path, fps)
-        """
+        remapped_path = output_path[:-10] + '_remapped.funscript'
+        self.write_funscript(points_v2, remapped_path, fps)
+        self.generate_heatmap(remapped_path, remapped_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
 
         #if TestMode:
         #    # plot a comparative graph
@@ -257,6 +256,7 @@ class FunscriptGenerator:
 
         return times, positions, relevant_chapters_export, irrelevant_chapters_export
 
+
     def generate_heatmap(self, funscript_path, output_image_path):
         # Load funscript data
         times, positions, _, _ = self.load_funscript(funscript_path)
@@ -268,25 +268,37 @@ class FunscriptGenerator:
         print(f"Times: {times}")
         print(f"Positions: {positions}")
         print(f"Total Actions: {len(times)}")
-        print(f"Time Range: {times[0]} to {datetime.timedelta(seconds = times[-1]/1000)}")
+        print(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
         # Calculate speed (position change per time interval)
         speeds = np.abs(np.diff(positions) / np.diff(times)) * 1000  # Positions per second
         print(f"Speeds: {speeds}")
 
-        # Define custom colormap: blue -> green -> yellow -> orange -> red -> purple
-        colors = [
-            (0, 0, 1),    # Blue
-            (0, 1, 0),    # Green
-            (1, 1, 0),    # Yellow
-            (1, 0.5, 0),  # Orange
-            (1, 0, 0),    # Red
-            (0.5, 0, 1)   # Purple
+        # Define custom colormap based on Lucife's heatmapColors
+        heatmap_colors = [
+            [0, 0, 0],  # Black (no action)
+            [30, 144, 255],  # Dodger blue
+            [34, 139, 34],  # Lime green
+            [255, 215, 0],  # Gold
+            [220, 20, 60],  # Crimson
+            [147, 112, 219],  # Medium purple
+            [37, 22, 122]  # Dark blue
         ]
-        cmap = mcolors.LinearSegmentedColormap.from_list("custom_gradient", colors)
+        step_size = 120  # Speed step size for color transitions
 
-        # Normalize speeds for colormap
-        norm = mcolors.Normalize(vmin=np.min(speeds), vmax=np.max(speeds))
+        def get_color(intensity):
+            if intensity <= 0:
+                return heatmap_colors[0]
+            if intensity > 5 * step_size:
+                return heatmap_colors[6]
+            intensity += step_size / 2.0
+            index = int(intensity // step_size)
+            t = (intensity - index * step_size) / step_size
+            return [
+                heatmap_colors[index][0] + (heatmap_colors[index + 1][0] - heatmap_colors[index][0]) * t,
+                heatmap_colors[index][1] + (heatmap_colors[index + 1][1] - heatmap_colors[index][1]) * t,
+                heatmap_colors[index][2] + (heatmap_colors[index + 1][2] - heatmap_colors[index][2]) * t
+            ]
 
         # Create figure and plot
         plt.figure(figsize=(30, 2))
@@ -301,15 +313,16 @@ class FunscriptGenerator:
             speed = speeds[i]
 
             # Get color based on speed
-            line_color = cmap(norm(speed))
+            color = get_color(speed)
+            line_color = (color[0] / 255, color[1] / 255, color[2] / 255)  # Normalize to [0, 1]
 
             # Plot the line
             ax.plot([x_start, x_end], [y_start, y_end], color=line_color, linewidth=2)
 
         # Customize plot
-        ax.set_title(f'Funscript Speed Visualization\nDuration: {datetime.timedelta(seconds = int(times[-1]/1000))} - Avg. Speed {int(np.mean(speeds))} - Actions: {len(times)}')
+        ax.set_title(
+            f'Funscript Heatmap\nDuration: {datetime.timedelta(seconds=int(times[-1] / 1000))} - Avg. Speed {int(np.mean(speeds))} - Actions: {len(times)}')
         ax.set_xlabel('Time (s)')
-        #ax.set_ylabel('Position')
         ax.set_yticks(np.arange(0, 101, 10))
         ax.set_xlim(times[0] / 1000, times[-1] / 1000)
         ax.set_ylim(0, 100)
@@ -318,25 +331,26 @@ class FunscriptGenerator:
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        # Add colorbar (optional, currently commented out)
-        # sm = ScalarMappable(cmap=cmap, norm=norm)
-        # sm.set_array([])
-        # cbar = plt.colorbar(sm, ax=ax, orientation='horizontal', pad=0.2)
-        # cbar.set_label('Speed (positions/s)')
-
         # Add colorbar
+        cmap = mcolors.LinearSegmentedColormap.from_list("custom_heatmap", [
+            (heatmap_colors[i][0] / 255, heatmap_colors[i][1] / 255, heatmap_colors[i][2] / 255) for i in
+            range(len(heatmap_colors))
+        ])
+        norm = mcolors.Normalize(vmin=0, vmax=5 * step_size)
         sm = ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
-        #cbar = plt.colorbar(sm, ax=ax, orientation='horizontal', pad=0.2)
+        #cbar = plt.colorbar(sm, ax=ax, orientation='horizontal', pad=0.2,
+        #                    ticks=np.arange(0, 5 * step_size + 1, step_size))
         #cbar.set_label('Speed (positions/s)')
 
         # Save the figure
         plt.savefig(output_image_path, bbox_inches='tight', dpi=200)  # Increase resolution
         plt.close()
 
-        print(f"Colored line visualization saved to {output_image_path}")
+        print(f"Funscript heatmap saved to {output_image_path}")
 
-# if main
+
+
 if __name__ == "__main__":
     video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
 

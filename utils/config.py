@@ -1,3 +1,7 @@
+# ffmpeg and ffprobe paths
+ffmpeg_path = "/usr/local/bin/ffmpeg"
+ffprobe_path = "/usr/local/bin/ffprobe"
+
 # Class types
 class_types = {'face': 0, 'hand': 1, 'penis': 2, 'glans': 3, 'pussy': 4, 'butt': 5,
                        'anus': 6, 'breast': 7, 'navel': 8, 'foot': 9}
