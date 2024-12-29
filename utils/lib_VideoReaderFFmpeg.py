@@ -93,11 +93,16 @@ class VideoReaderFFmpeg:
                 self.v_fov = 90
                 self.h_fov = 90
                 self.d_fov = 180
+                arg_line = f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1"
             else:
-                self.type = "he"
-                self.iv_fov = 90
-                self.ih_fov = 90
-                self.d_fov = 100
+                # more tweaking and experimentation needed...
+                # self.type = "he"
+                # self.iv_fov = 90
+                # self.ih_fov = 90
+                # self.v_fov = 90
+                # self.h_fov = 90
+                # self.d_fov = 100
+                arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
 
             cmd = [
                 self.ffmpeg_path,
@@ -105,7 +110,8 @@ class VideoReaderFFmpeg:
                 "-i", self.video_path,
                 "-an",  # Disable audio processing
                 "-map", "0:v:0",
-                "-vf", f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1",
+                #"-vf", f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1",
+                "-vf", arg_line,
                 "-f", "rawvideo",  # Output raw video data
                 "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
                 "-vsync", "0",  # Disable frame rate synchronization

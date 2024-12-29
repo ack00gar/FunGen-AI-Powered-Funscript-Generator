@@ -226,7 +226,6 @@ class Debugger:
                 # Draw the locked_penis_box if it exists
                 locked_penis_box = variables.get("locked_penis_box")
                 if locked_penis_box:
-                    print(f"locked_penis_box: {locked_penis_box}")
                     x1, y1, x2, y2 = locked_penis_box['box']
                     color = class_colors.get("penis", (0, 255, 0))
                     cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
