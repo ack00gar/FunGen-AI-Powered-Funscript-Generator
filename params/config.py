@@ -44,3 +44,17 @@ class_colors = {
     "left foot": (165, 42, 42),         # brown
     "right foot": (165, 42, 42)         # brown
 }
+
+# Define custom colormap based on Lucife's heatmapColors
+heatmap_colors = [
+    [0, 0, 0],  # Black (no action)
+    [30, 144, 255],  # Dodger blue
+    [34, 139, 34],  # Lime green
+    [255, 215, 0],  # Gold
+    [220, 20, 60],  # Crimson
+    [147, 112, 219],  # Medium purple
+    [37, 22, 122]  # Dark blue
+]
+step_size = 120  # Speed step size for color transitions
+
+vw_filter_coeff = 10.0

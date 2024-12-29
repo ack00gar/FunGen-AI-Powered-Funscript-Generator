@@ -4,10 +4,9 @@ from simplification.cutil import simplify_coords
 import matplotlib.pyplot as plt
 import numpy as np
 import datetime
-from scipy.ndimage import gaussian_filter
 import matplotlib.colors as mcolors
-import matplotlib.cm as cm
 from matplotlib.cm import ScalarMappable
+from params.config import heatmap_colors, step_size, vw_filter_coeff
 
 class FunscriptGenerator:
     def generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
@@ -26,17 +25,10 @@ class FunscriptGenerator:
 
         try:
             print(f"Generating funscript based on {len(data)} points...")
-
-            filter_coeff = 10.0
-
-            self.filtered_positions = simplify_coords(data, filter_coeff)  # Use VW algorithm
-
+            self.filtered_positions = simplify_coords(data, vw_filter_coeff)  # Use VW algorithm
             print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
-
             self.write_funscript(self.filtered_positions, output_path, fps)
-
             print(f"Funscript generated and saved to {output_path}")
-
             self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
 
         except:
@@ -274,17 +266,7 @@ class FunscriptGenerator:
         speeds = np.abs(np.diff(positions) / np.diff(times)) * 1000  # Positions per second
         print(f"Speeds: {speeds}")
 
-        # Define custom colormap based on Lucife's heatmapColors
-        heatmap_colors = [
-            [0, 0, 0],  # Black (no action)
-            [30, 144, 255],  # Dodger blue
-            [34, 139, 34],  # Lime green
-            [255, 215, 0],  # Gold
-            [220, 20, 60],  # Crimson
-            [147, 112, 219],  # Medium purple
-            [37, 22, 122]  # Dark blue
-        ]
-        step_size = 120  # Speed step size for color transitions
+
 
         def get_color(intensity):
             if intensity <= 0:

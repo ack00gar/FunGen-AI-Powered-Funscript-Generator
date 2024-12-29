@@ -1,88 +1,104 @@
 import cv2
-import numpy as np
-import tqdm
+from tqdm import tqdm
+
 
 def compute_histogram(frame):
-    # Convert the frame to the HSV color space
+    """
+    Compute the normalized histogram of the H channel in the HSV color space.
+    :param frame: Input frame (BGR format).
+    :return: Normalized histogram.
+    """
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    # Compute the histogram for the H channel
     hist = cv2.calcHist([hsv], [0], None, [256], [0, 256])
-    # Normalize the histogram
     cv2.normalize(hist, hist)
     return hist
 
+
 def compare_histograms(hist1, hist2):
-    # Use the correlation method to compare histograms
+    """
+    Compare two histograms using the correlation method.
+    :param hist1: First histogram.
+    :param hist2: Second histogram.
+    :return: Similarity score (higher values indicate greater similarity).
+    """
     return cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
 
-def detect_scene_changes(video_path, crop = None, threshold=0.97, frame_start = 0, frame_end = None):
+
+def detect_scene_changes(video_path, crop=None, threshold=0.97, frame_start=0, frame_end=None):
+    """
+    Detect scene changes in a video using histogram comparison.
+    :param video_path: Path to the video file.
+    :param crop: Crop mode ("Left" or "Right") to process only one side of the frame.
+    :param threshold: Similarity threshold for detecting scene changes.
+    :param frame_start: Starting frame for processing.
+    :param frame_end: Ending frame for processing.
+    :return: List of scene changes as [start_frame, end_frame] pairs.
+    """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("Error: Could not open video.")
-        return
+        return []
 
-    frame_count = 0
-    prev_cut = 0
-    fps_step = 2 * int(cap.get(cv2.CAP_PROP_FPS))
+    # Get video properties
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
     total_frames_base = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if frame_start != 0:
-        if frame_end is None:
-            total_frames = total_frames_base - frame_start
-        else:
-            total_frames = frame_end - frame_start
-    else:
-        total_frames = total_frames_base
+    frame_step = 2 * fps  # Process every 2 seconds of video
 
-    total_frames_to_parse = int(total_frames / fps_step)
+    # Adjust frame range based on input
+    if frame_end is None:
+        frame_end = total_frames_base
+    total_frames = frame_end - frame_start
+    total_frames_to_parse = int(total_frames / frame_step)
+
+    # Initialize variables
     scene_changes = []
     prev_hist = None
+    prev_cut = frame_start
 
-    for frame_pos in tqdm.tqdm(range(total_frames_to_parse)):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos * fps_step)
+    # Process frames
+    for frame_pos in tqdm(range(total_frames_to_parse), desc="Detecting scene changes"):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start + frame_pos * frame_step)
         ret, frame = cap.read()
         if not ret:
             break
 
+        # Crop frame if specified
         if crop == "Left":
-            # only left side of the frame
             frame = frame[:, :frame.shape[1] // 2]
         elif crop == "Right":
-            # only right side of the frame
             frame = frame[:, frame.shape[1] // 2:]
 
+        # Compute histogram and compare with previous
         current_hist = compute_histogram(frame)
-
         if prev_hist is not None:
             similarity = compare_histograms(prev_hist, current_hist)
             if similarity < threshold:
-                # we have a scene cut in between (frame_pos - 1)*fps and frame_pos * fps
-                tqdm.tqdm.write(
-                    f"Raw Scene change detected at frame {frame_pos * fps_step}, time: {int(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 // 60)} min {int(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 % 60)} sec")
-                scene_changes.append([prev_cut, frame_pos * fps_step])
-                prev_cut = frame_pos * fps_step
+                # Scene change detected
+                current_frame = frame_start + frame_pos * frame_step
+                tqdm.write(
+                    f"Scene change detected at frame {current_frame}, "
+                    f"time: {int(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 // 60)} min "
+                    f"{int(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 % 60)} sec"
+                )
+                scene_changes.append([prev_cut, current_frame])
+                prev_cut = current_frame
 
         prev_hist = current_hist
 
-    scenes = []
+    # Add the last scene
+    if not scene_changes:
+        scene_changes.append([frame_start, frame_end])
+    elif scene_changes[-1][1] != frame_end:
+        scene_changes.append([scene_changes[-1][1], frame_end])
+
+    # Merge scenes that are too close
+    merged_scenes = []
     for scene in scene_changes:
-        if len(scenes) == 0:
-            scenes.append(scene)
+        if not merged_scenes or scene[0] - merged_scenes[-1][1] >= 5000:
+            merged_scenes.append(scene)
         else:
-            if scene[1] - scenes[-1][1] < 5000:
-                scenes[-1][1] = scene[1]
-            else:
-                scenes.append(scene)
+            merged_scenes[-1][1] = scene[1]
 
-    # add the last scene
-    if len(scenes) == 0:
-        scenes.append([0, total_frames_base])
-    else:
-        if scenes[-1][1] != total_frames_base:
-            scenes.append([scenes[-1][1], total_frames_base])
-
-    print(f"Found {len(scenes)} relevant scenes: {scenes}.")
-
+    print(f"Found {len(merged_scenes)} relevant scenes: {merged_scenes}.")
     cap.release()
-    return scenes
-
-
+    return merged_scenes
