@@ -1,16 +1,10 @@
 from ultralytics import YOLO
 import cv2
-from utils.VideoReaderFFmpeg import VideoReaderFFmpeg
+from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 import numpy as np
 
 # Paths to the model and input image
 model_file = "../models/k00gar-11n-200ep-best.mlpackage"
-#model_file = "models/k00gar-11s-198ep-best.mlpackage"
-#model_file = "models/k00gar-11m-134ep-best.mlpackage"
-#model_file = "models/best-nsfw-porn-v16-11n-273e.mlpackage"
-#model_file = "models/nsfw-identification-yolo10n-best.mlpackage" # interesting for eye nose mouth
-#model_file = "models/own_trained-11n-130ep.mlpackage"
-
 
 video_path = video = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
 
@@ -31,9 +25,6 @@ ret2, frame2 = cap2.read()
 
 # we will only keep left half of frame2
 frame2 = frame2[:, :frame2.shape[1] // 2, :]
-
-# Create projection maps (only need to do this once)
-map_x, map_y = create_projection_maps(frame2.shape[1], frame2.shape[0])
 
 cap1.release()
 cap2.release()
