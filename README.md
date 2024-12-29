@@ -18,37 +18,30 @@ This project is a Python-based tool for generating Funscript files from VR video
 
 This project started as a dream to automate Funscript generation for VR videos. Here’s a brief history of its development:
 
-### Initial Approach (OpenCV Trackers)
-
-The first version relied on OpenCV trackers to detect and track objects in the video.
+- **Initial Approach (OpenCV Trackers)**: The first version relied on OpenCV trackers to detect and track objects in the video.
 While functional, the approach was slow (8–20 FPS) and struggled with occlusions and complex scenes.
 
-### Transition to YOLO
-
-To improve accuracy and speed, the project shifted to using YOLO object detection.
+- **Transition to YOLO**: To improve accuracy and speed, the project shifted to using YOLO object detection.
 A custom YOLO model was trained on a dataset of VR video frames, significantly improving detection quality.
 The new approach runs at 90 FPS on a Mac mini M4 pro, making it much more efficient.
 
-### Original Post
-
-For more details and discussions, check out the original post on EroScripts:  
+- **Original Post**: For more details and discussions, check out the original post on EroScripts:  
 [VR Funscript Generation Helper (Python + CV/AI)](https://discuss.eroscripts.com/t/vr-funscript-generation-helper-python-now-cv-ai/202554)
 
 ## YOLO Model
 
 The YOLO model used in this project is based on YOLOv11n, which was fine-tuned with 9 new classes and 4,500+ frames randomly extracted from a VR video library. Here’s how the model was developed:
 
-### Initial Training:
-A few hundred frames were manually tagged and boxed to create an initial dataset.
+- **Initial Training**:A few hundred frames were manually tagged and boxed to create an initial dataset.
 The model was trained on this dataset to generate preliminary detection results.
-### Iterative Improvement
+- **Iterative Improvement**:
 The trained model was used to suggest bounding boxes in additional frames.
 The suggested boxes were manually adjusted, and the dataset was expanded.
 This process was repeated iteratively to improve the model’s accuracy.
-### Final Training
+- **Final Training**:
 After gathering 4,500+ images and 30,149 annotations, the model was trained for 200 epochs.
 YOLOv11s and YOLOv11m were also tested, but YOLOv11n was chosen for its balance of accuracy and inference speed.
-### Hardware:
+- **Hardware**:
 The model runs on a Mac using MPS (Metal Performance Shaders) for accelerated inference on ARM chips.
 Other versions of the model (ONNX and PT) are also available for use on other platforms.
 
@@ -91,6 +84,11 @@ Before using this project, ensure you have the following installed:
    ```bash
    pip install numpy opencv-python tqdm ultralytics scipy matplotlib simplification
    ```
+3. **Download the YOLO model**:
+   - Place your YOLO model file (e.g., `k00gar-11n-200ep-best.mlpackage`) in the `models/` directory.
+   - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
+
+
 ### Libraries Used
 
 The project relies on the following Python libraries:
@@ -108,10 +106,6 @@ The project relies on the following Python libraries:
 - **collections**: For specialized container datatypes like deque and defaultdict.
 - **datetime**: For handling timestamps and date-related operations.
 - **json**: For reading and writing JSON files.
-
-3. **Download the YOLO model**:
-   - Place your YOLO model file (e.g., `k00gar-11n-200ep-best.mlpackage`) in the `models/` directory.
-   - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
 
 ## Usage
 
