@@ -5,6 +5,7 @@ import json
 from tqdm import tqdm
 from ultralytics import YOLO
 from concurrent.futures import ProcessPoolExecutor
+import datetime
 
 from utils.config import class_names, class_priority_order, class_reverse_match, class_colors
 from utils.ObjectTracker_v3 import ObjectTracker
@@ -501,7 +502,7 @@ if __name__ == '__main__':
         # Process the video
 
         # Run the YOLO detection and saves result to _rawyolo.json file
-        extract_yolo_data(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
+        #extract_yolo_data(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
         #extract_yolo_data_parallel(yolo_model, video_path, frame_start, frame_end, TestMode, isVR)
 
         # time.sleep(20)  # time to write the file
@@ -532,7 +533,7 @@ if __name__ == '__main__':
         funscript_handler.generate(video_path[:-4] + f"_rawfunscript.json", funscript_data, fps, TestMode)
 
         # generate heatmap
-        funscript_handler.generate_heatmap(video_path[:-4] + f".funscript", video_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript")
+        funscript_handler.generate_heatmap(video_path[:-4] + f".funscript", video_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
 
         print(f"Finished processing video: {video_path}")
 

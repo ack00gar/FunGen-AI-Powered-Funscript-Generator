@@ -10,7 +10,7 @@ video = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHE
 
 #Vote for me
 #frame = 126000
-frame = 61000
+frame = 79080
 
 # Katrina Jade ADD
 #frame = 77000
@@ -43,4 +43,4 @@ debugger.load_logs()
 
 #debugger.play_video(frame)
 
-debugger.play_video(frame, record=False, downsize_ratio=2)  # , duration=10)
+debugger.play_video(frame, record=True, downsize_ratio=2, duration=10)
