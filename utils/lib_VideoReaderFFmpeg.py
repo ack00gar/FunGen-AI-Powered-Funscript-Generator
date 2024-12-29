@@ -1,6 +1,7 @@
 import subprocess
 import cv2
 import numpy as np
+import argparse
 from params.config import ffmpeg_path, ffprobe_path
 
 
@@ -85,28 +86,24 @@ class VideoReaderFFmpeg:
 
         if self.is_VR:
             # FFmpeg command to read frames with VR reprojection
-            # if 'FISHEYE' is present in video_path then type = "fisheye"
             if 'FISHEYE' in self.video_path:
                 self.type = "fisheye"
-                self.iv_fov = 190  # 120
+                self.iv_fov = 190
                 self.ih_fov = 190
                 self.v_fov = 90
                 self.h_fov = 90
-                self.d_fov = 180  # 110
+                self.d_fov = 180
             else:
-                type = "he"  # [0:v]v360=input=he:in_stereo=sbs:pitch=-35:v_fov=90:h_fov=90:output=sg:w=2048:h=2048
+                self.type = "he"
                 self.iv_fov = 90
                 self.ih_fov = 90
                 self.d_fov = 100
-            #"""
+
             cmd = [
                 self.ffmpeg_path,
-                #"-hwaccel", "videotoolbox",  # Use hardware acceleration on macOS
                 "-ss", str(start_time / 1000),  # Seek to start time in seconds
                 "-i", self.video_path,
                 "-an",  # Disable audio processing
-                #"-filter_complex",  # Apply the v360 filter for VR reprojection
-                #f"[0:v]v360=input=he:in_stereo=sbs:pitch=-35:yaw=-0.75:roll=0:output=sg:v_fov=90:h_fov=90:d_fov=180:w={self.width}:h={self.height}",
                 "-map", "0:v:0",
                 "-vf", f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1",
                 "-f", "rawvideo",  # Output raw video data
@@ -115,19 +112,6 @@ class VideoReaderFFmpeg:
                 "-threads", "0",  # Use maximum threads available
                 "-",  # Output to stdout
             ]
-            """
-            cmd = [
-                self.ffmpeg_path,
-                "-ss", str(start_time / 1000),  # Seek to start time in seconds
-                "-i", self.video_path,  # Input video file
-                "-vf", "crop=in_w/2:in_h:0:0",  # Crop to the left half (width/2, full height, starting from top-left)
-                "-an",  # Disable audio processing
-                "-f", "rawvideo",  # Output raw video data
-                "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
-                "-vsync", "0",  # Disable frame rate synchronization
-                "-",  # Output to stdout
-            ]
-            """
         else:
             # FFmpeg command to read frames
             cmd = [
@@ -140,10 +124,9 @@ class VideoReaderFFmpeg:
                 "-",  # Output to stdout
             ]
 
-        # kill the process if already running
+        # Kill the process if already running
         if self.process:
             self.process.terminate()
-            # self.process.wait()
 
         # Start FFmpeg process
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -209,5 +192,38 @@ class VideoReaderFFmpeg:
         """
         if self.process:
             self.process.stdout.close()
-            # self.process.wait()
             self.process = None
+
+
+def main(video_path, is_VR=False):
+    """
+    Display a video using the VideoReaderFFmpeg class.
+    :param video_path: Path to the video file.
+    :param is_VR: Whether the video is a VR video (default: False).
+    """
+    # Initialize the video reader
+    video_reader = VideoReaderFFmpeg(video_path, is_VR=is_VR)
+
+    # Display the video
+    while True:
+        ret, frame = video_reader.read()
+        if not ret:
+            break
+        cv2.imshow("Video", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):  # Press 'q' to exit
+            break
+
+    # Release resources
+    video_reader.release()
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Display a video using FFmpeg.")
+    parser.add_argument("video_path", type=str, help="Path to the video file.")
+    parser.add_argument("--is_vr", action="store_true", help="Enable VR mode for processing VR videos.")
+    args = parser.parse_args()
+
+    # Run the main function
+    main(args.video_path, args.is_vr)
