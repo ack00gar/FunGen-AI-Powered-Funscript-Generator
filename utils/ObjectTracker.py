@@ -1,5 +1,5 @@
 from utils import KalmanFilter as KF
-from collections import deque, defaultdict
+from collections import deque
 import numpy as np
 from utils.config import class_names
 import math

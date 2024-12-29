@@ -8,7 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 import datetime
 
 from utils.config import class_names, class_priority_order, class_reverse_match, class_colors
-from utils.ObjectTracker_v3 import ObjectTracker
+from utils.ObjectTracker import ObjectTracker
 #from utils.ObjectTracker import ObjectTracker
 from utils.FunscriptHandler import FunscriptGenerator
 from utils.Visualizer import Visualizer
