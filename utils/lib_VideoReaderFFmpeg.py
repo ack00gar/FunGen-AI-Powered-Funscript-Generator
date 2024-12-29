@@ -1,10 +1,11 @@
 import subprocess
 import cv2
 import numpy as np
+from utils.config import ffmpeg_path, ffprobe_path
 
 
 class VideoReaderFFmpeg:
-    def __init__(self, video_path, is_VR=False, ffmpeg_path="/usr/local/bin/ffmpeg", ffprobe_path="/usr/local/bin/ffprobe"):
+    def __init__(self, video_path, is_VR=False, ffmpeg_path=ffmpeg_path, ffprobe_path=ffprobe_path):
         """
         Initialize the VideoReaderFFmpeg class.
         :param video_path: Path to the video file.
