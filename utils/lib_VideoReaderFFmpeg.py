@@ -1,7 +1,7 @@
 import subprocess
 import cv2
 import numpy as np
-from utils.config import ffmpeg_path, ffprobe_path
+from params.config import ffmpeg_path, ffprobe_path
 
 
 class VideoReaderFFmpeg:
