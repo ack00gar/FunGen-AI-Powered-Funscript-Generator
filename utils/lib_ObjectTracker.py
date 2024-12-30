@@ -134,14 +134,33 @@ class ObjectTracker:
         Update the tracked distance using a Kalman filter and speed constraints.
         """
         if raw_distance is None:
-            filtered_distance = self._predict_distance()
+            #filtered_distance = self.distance_kf.predict()
+            # simple predict using ema, waiting for kalman filter fix
+            filtered_distance = 0.1 * self.previous_distances[-3] + 0.3 * self.previous_distances[-2] + 0.6 * self.previous_distances[-1]
+            print(f"predicted distance: {filtered_distance}")
         else:
-            if abs(self.distance - raw_distance) > self.max_speed:
-                raw_distance = self.distance + np.sign(raw_distance - self.distance) * self.max_speed
-            filtered_distance = raw_distance
+            print(f"before fix, raw distance is: {raw_distance}")
+            # applying ema
+            ema_distance = 0.1 * self.previous_distances[-2] + 0.3 * self.previous_distances[-1] + 0.6 * raw_distance
+            print(f"self distance: {self.distance}, ema_distance: {ema_distance}, max speed: {self.max_speed}, delta distances: {self.distance-ema_distance}")
+            if abs(self.distance - ema_distance) > self.max_speed:
+                ema_distance = self.distance + np.sign(ema_distance - self.distance) * self.max_speed
+                print(f"adjusted ema distance: {ema_distance}")
+            #raw_distance_2d = (raw_distance, 0)
+            # Update the Kalman filter with the new measurement
+            #self.distance_kf.update(raw_distance_2d)
+
+            # Get the filtered distance from the Kalman filter
+            #filtered_k_distance = self.distance_kf.position[0]
+
+            #print(f"Kalman filtered distance: {filtered_k_distance} vs {raw_distance}")
+            filtered_distance = ema_distance
+            #filtered_distance = raw_distance
 
         filtered_distance = int(max(0, min(100, filtered_distance)))
         self.distance = filtered_distance
+        self.previous_distances.pop()
+        self.previous_distances.append(self.distance)
         return filtered_distance
 
     def _predict_distance(self):
@@ -236,7 +255,7 @@ class ObjectTracker:
         for box, conf, cls, class_name, track_id in sorted_boxes:
             if class_name in ['glans', 'penis', 'navel']:
                 continue
-            if self.boxes_overlap(box, self.locked_penis_box.get_box()):
+            elif self.locked_penis_box.is_active() and (self.boxes_overlap(box, self.locked_penis_box.get_box()) or class_name == 'hips center'):
                 if class_name not in classes_touching_penis:
                     classes_touching_penis.append(class_name)
                 self.tracked_boxes.append([box, class_name, track_id])
@@ -248,6 +267,11 @@ class ObjectTracker:
                 # Update tracked positions
                 if track_id not in self.tracked_positions:
                     self.tracked_positions[track_id] = []
+                # self.tracked_positions[track_id].append(normalized_y)
+
+                # let's apply a moving average to try and filter outliers
+                if len(self.tracked_positions[track_id]) > 2:
+                    normalized_y = 0.2 * self.tracked_positions[track_id][-2] + 0.3 * self.tracked_positions[track_id][-1] + 0.5 * normalized_y
                 self.tracked_positions[track_id].append(normalized_y)
 
                 # Maintain a fixed-size history
@@ -257,7 +281,8 @@ class ObjectTracker:
                 # Update normalized tracked positions
                 if track_id not in self.normalized_tracked_positions:
                     self.normalized_tracked_positions[track_id] = []
-                self.normalized_tracked_positions[track_id].append(normalized_y)
+                #self.normalized_tracked_positions[track_id].append(normalized_y)
+                self.normalized_tracked_positions[track_id].append(self.tracked_positions[track_id][-1])
 
                 # Maintain a fixed-size history
                 if len(self.normalized_tracked_positions[track_id]) > 60:
@@ -275,23 +300,29 @@ class ObjectTracker:
             self.penetration = False
             distance = 100
             self.detect_sex_position_change('Not relevant', "no part touching penis / no penis")
+            self.tracked_body_part = 'Nothing'
         elif 'pussy' in classes_touching_penis and not self.glans_detected:
             self.penetration = True
             self.detect_sex_position_change('Missionnary / Cowgirl', "pussy visible and touching")
+            self.tracked_body_part = 'pussy'
         elif 'ass' in classes_touching_penis and not self.glans_detected:
             self.penetration = True
             self.detect_sex_position_change('Doggy / Rev. Cowgirl', "ass visible and touching")
+            self.tracked_body_part = 'ass'
         elif ('hand' in classes_touching_penis or 'face' in classes_touching_penis) and not self.penetration:
             self.detect_sex_position_change('Handjob / Blowjob', "hand or face visible and touching")
         elif 'foot' in classes_touching_penis and not self.penetration:
             self.detect_sex_position_change('Footjob', "foot visible and touching")
         elif 'breast' in classes_touching_penis and not self.penetration:
             self.detect_sex_position_change('Boobjob', "breast visible and touching")
+            self.tracked_body_part = 'breast'
 
         if weight_pos > 0:
             distance = int(sum_pos / weight_pos)
         else:
             distance = 100
+
+        print(f"computed distance: {distance}, sending for filtering...")
 
         self.update_distance(distance)
 

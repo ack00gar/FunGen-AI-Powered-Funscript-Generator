@@ -151,12 +151,12 @@ class Debugger:
         # Initialize video writer if recording
         if record:
             ret, frame = self.cap.read()
-            if self.cap.is_VR:
-                frame_copy = frame[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
+            #if self.cap.is_VR:
+            #    frame_copy = frame[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
             output_path = self.video_path.replace(".mp4", "_debug.mp4")
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             out = cv2.VideoWriter(
-                output_path, fourcc, self.fps, (frame_copy.shape[1] // downsize_ratio, frame_copy.shape[0] // downsize_ratio)
+                output_path, fourcc, self.fps, (frame.shape[1] // downsize_ratio, frame.shape[0] // downsize_ratio)
             )
             if not out.isOpened():
                 print(f"Error: Could not open video writer for {output_path}")

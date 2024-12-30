@@ -526,7 +526,7 @@ if __name__ == '__main__':
         # Process the video
 
         # Run the YOLO detection and saves result to _rawyolo.json file
-        #extract_yolo_data(yolo_det_model, yolo_pose_model, video_path, frame_start, frame_end, TestMode, isVR)
+        extract_yolo_data(yolo_det_model, yolo_pose_model, video_path, frame_start, frame_end, TestMode, isVR)
 
         # Load YOLO detection results from file
         yolo_data = load_yolo_data_from_file(video_path[:-4] + f"_rawyolo.json")
