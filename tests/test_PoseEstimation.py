@@ -8,10 +8,10 @@ from params.config import class_reverse_match
 video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
 
 # Load a model
-pose_model = YOLO("../utils/yolo11x-pose.pt")
+pose_model = YOLO("../models/yolo11x-pose.mlpackage")
 detect_model = YOLO("../models/k00gar-11n-200ep-best.mlpackage")
 
-timestamp_min = 15
+timestamp_min = 0 #15
 timestamp_sec = 0
 
 cap = cv2.VideoCapture(video_path)
@@ -52,46 +52,48 @@ while cap.isOpened():
         # display the results of detect model on the frame also
         frame_2 = detect_results[0].plot("hand")
 
-        keypoints = pose_results[0].keypoints.cpu()
-        keypoints_list = keypoints.xy.cpu().tolist()
-        left_hip = keypoints_list[0][11]
-        right_hip = keypoints_list[0][12]
-        left_wrist = keypoints_list[0][9]
-        right_wrist = keypoints_list[0][10]
+        if pose_results[0].boxes.id is not None:
 
-        mid_point = [middle_x_frame, (left_hip[1]+ right_hip[1])/2]
+            keypoints = pose_results[0].keypoints.cpu()
+            keypoints_list = keypoints.xy.cpu().tolist()
+            left_hip = keypoints_list[0][11]
+            right_hip = keypoints_list[0][12]
+            left_wrist = keypoints_list[0][9]
+            right_wrist = keypoints_list[0][10]
 
-        track = track_history[1]
+            mid_point = [middle_x_frame, (left_hip[1]+ right_hip[1])/2]
 
-        track.append((int(middle_x_frame), int(mid_point[1])))  # x, y center point
-        if len(track) > 5:  # retain 90 tracks for 90 frames
-            track.pop(0)
+            track = track_history[1]
 
-        cv2.circle(frame, (int(middle_x_frame), int(mid_point[1])), 2, (0, 0, 0), -1)
+            track.append((int(middle_x_frame), int(mid_point[1])))  # x, y center point
+            if len(track) > 5:  # retain 90 tracks for 90 frames
+                track.pop(0)
 
-        # Draw the tracking lines
-        points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
-        cv2.polylines(frame_1, [points], isClosed=False, color=(230, 230, 230), thickness=10)
+            cv2.circle(frame, (int(middle_x_frame), int(mid_point[1])), 2, (0, 0, 0), -1)
 
-        track = track_history[2]
+            # Draw the tracking lines
+            points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
+            cv2.polylines(frame_1, [points], isClosed=False, color=(230, 230, 230), thickness=10)
 
-        track.append((int(left_wrist[0]), int(left_wrist[1])))  # x, y center point
-        if len(track) > 5:  # retain 90 tracks for 90 frames
-            track.pop(0)
+            track = track_history[2]
 
-        # Draw the tracking lines
-        points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
-        cv2.polylines(frame_2 - 1, [points], isClosed=False, color=(230, 230, 230), thickness=10)
+            track.append((int(left_wrist[0]), int(left_wrist[1])))  # x, y center point
+            if len(track) > 5:  # retain 90 tracks for 90 frames
+                track.pop(0)
 
-        track = track_history[3]
+            # Draw the tracking lines
+            points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
+            cv2.polylines(frame_2 - 1, [points], isClosed=False, color=(230, 230, 230), thickness=10)
 
-        track.append((int(right_wrist[0]), int(right_wrist[1])))  # x, y center point
-        if len(track) > 5:  # retain 90 tracks for 90 frames
-            track.pop(0)
+            track = track_history[3]
 
-        # Draw the tracking lines
-        points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
-        cv2.polylines(frame_2 - 1, [points], isClosed=False, color=(230, 230, 230), thickness=10)
+            track.append((int(right_wrist[0]), int(right_wrist[1])))  # x, y center point
+            if len(track) > 5:  # retain 90 tracks for 90 frames
+                track.pop(0)
+
+            # Draw the tracking lines
+            points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
+            cv2.polylines(frame_2 - 1, [points], isClosed=False, color=(230, 230, 230), thickness=10)
 
         hand_counter = 0
 
