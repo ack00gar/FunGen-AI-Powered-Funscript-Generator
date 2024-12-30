@@ -1,8 +1,8 @@
 from utils.lib_Debugger import Debugger
 
-video = "/Users/k00gar/Downloads/730-czechvr-3d-7680x3840-60fps-oculusrift_uhq_h265.mp4"
+video = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
 
-frame = 8*60*60
+frame = 54000
 
 debugger = Debugger(video, video[:-4])
 

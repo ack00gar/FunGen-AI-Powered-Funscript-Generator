@@ -86,7 +86,7 @@ class VideoReaderFFmpeg:
 
         if self.is_VR:
             # FFmpeg command to read frames with VR reprojection
-            if 'FISHEYE' in self.video_path:
+            if 'NFISHEYE' in self.video_path:  # impeded for troubleshooting
                 self.type = "fisheye"
                 self.iv_fov = 190
                 self.ih_fov = 190

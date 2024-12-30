@@ -199,9 +199,9 @@ class Debugger:
                 break
 
             # Crop the frame for VR videos
-            if self.cap.is_VR:
-                frame_copy = frame.copy()[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
-
+            #if self.cap.is_VR:
+            #    frame_copy = frame.copy()[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
+            frame_copy = frame.copy()  # make a copy of the frame to make it writeable
             # Display variables and bounding boxes
             str_frame_id = str(self.current_frame)
             if str_frame_id in self.logs:
@@ -218,14 +218,15 @@ class Debugger:
                     cv2.putText(frame_copy, f"{class_name} {position}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
                 # Display variables
-                y_offset = 30
+                y_offset = frame.shape[0] // 3   # 30
                 for key, value in variables.items():
                     cv2.putText(frame_copy, f"{key}: {value}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                     y_offset += 20
 
                 # Draw the locked_penis_box if it exists
                 locked_penis_box = variables.get("locked_penis_box")
-                if locked_penis_box:
+                print(f"locked_penis_box: {locked_penis_box}")
+                if locked_penis_box['active']:
                     x1, y1, x2, y2 = locked_penis_box['box']
                     color = class_colors.get("penis", (0, 255, 0))
                     cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
