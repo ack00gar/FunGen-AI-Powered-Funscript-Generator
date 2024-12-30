@@ -12,4 +12,4 @@ debugger.load_logs()
 
 #debugger.play_video(frame)
 
-debugger.play_video(frame, record=False, downsize_ratio=1)  # , duration=10)
+debugger.play_video(frame, record=True, downsize_ratio=2, duration=4)
