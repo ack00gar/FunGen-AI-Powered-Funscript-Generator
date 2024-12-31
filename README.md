@@ -143,9 +143,12 @@ python FSGenerator.py /path/to/video.mp4
 ### Optional Arguments
 
 - `--yolo_model`: Path to the YOLO model file (default: `models/k00gar-11n-200ep-best.mlpackage`).
-- `--test_mode`: Enable test mode for real-time visualization of object tracking.
+- `--yolo_model`: Path to the YOLO model file (default: `models/yolo11n-pose.mlpackage`).
+- `--live_display_mode`: Enable test mode for real-time visualization of object tracking.
 - `--debug_mode`: Enable debug mode to save detailed logs.
 - `--is_vr`: Enable VR mode for processing VR videos.
+- `--frame_start`: Frame to start with (default: 0).
+- `--frame_end`: Frame to end with (default: None).
 
 Example:
 
