@@ -235,7 +235,3 @@ See the [LICENSE](LICENSE) file for full details.
 ## Support
 
 If you encounter any issues or have questions, please open an issue on the [GitHub repository](https://github.com/yourusername/video-processing-yolo-funscript/issues).
-
----
-
-This README provides a comprehensive overview of the project, making it easy for users to understand, set up, and use the tool. It also encourages contributions and provides support information.
