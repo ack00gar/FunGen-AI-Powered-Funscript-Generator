@@ -137,7 +137,7 @@ To test them, you can use the `utils/test_detect_compare_unwarped.py` file befor
 To process a video, run the following command:
 
 ```bash
-python main.py /path/to/video.mp4
+python FSGenerator.py /path/to/video.mp4
 ```
 
 ### Optional Arguments
