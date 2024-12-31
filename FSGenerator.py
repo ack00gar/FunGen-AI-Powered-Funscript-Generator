@@ -130,6 +130,7 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
     """
     # Check if the output file already exists
     if os.path.exists(video_path[:-4] + f"_rawyolo.json"):
+        print(f"File {video_path[:-4] + f'_rawyolo.json'} already exists. Skipping detections and loading file content...")
         return
 
     records = []  # List to store detection records
@@ -147,7 +148,16 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
 
     # Load the YOLO model
     det_model = YOLO(det_model_file, task="detect")
-    pose_model = YOLO(pose_model_file, task="pose")
+
+    # make the pose model optional
+    if len(pose_model_file) > 0:
+        run_pose_model = True
+        print("Activating pose model")
+    else:
+        run_pose_model = False
+        print("Discarding pose model part of the code")
+    if run_pose_model:
+        pose_model = YOLO(pose_model_file, task="pose")
 
     # Loop through the video frames
     for frame_pos in tqdm(range(frame_start, last_frame), ncols=None, desc="Performing YOLO detection on frames"):
@@ -160,7 +170,8 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
 
             # Run YOLO tracking on the frame
             yolo_det_results = det_model.track(frame, persist=True, conf=0.3, verbose=False)
-            yolo_pose_results = pose_model.track(frame, persist=True, conf=0.3, verbose=False)
+            if run_pose_model:
+                yolo_pose_results = pose_model.track(frame, persist=True, conf=0.3, verbose=False)
 
             if yolo_det_results[0].boxes.id is None:  # Skip if no tracks are found
                 continue
@@ -194,47 +205,48 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
                     print(f"Test box: {test_box}")
                     test_result.add_record(frame_pos, test_box)
 
-            ### POSE DETECTION - Hips and wrists
-            # Extract track IDs, boxes, classes, and confidence scores
-            if len(yolo_pose_results[0].boxes) > 0 and yolo_pose_results[0].boxes.id is not None:
-                pose_track_ids = yolo_pose_results[0].boxes.id.cpu().tolist()
+            if run_pose_model:
+                ### POSE DETECTION - Hips and wrists
+                # Extract track IDs, boxes, classes, and confidence scores
+                if len(yolo_pose_results[0].boxes) > 0 and yolo_pose_results[0].boxes.id is not None:
+                    pose_track_ids = yolo_pose_results[0].boxes.id.cpu().tolist()
 
-                # Check if keypoints are detected
-                if yolo_pose_results[0].keypoints is not None:
-                    print("We have keypoints")
-                    # pose_keypoints = yolo_pose_results[0].keypoints.cpu()
-                    # pose_track_ids = yolo_pose_results[0].boxes.id.cpu().tolist()
-                    # pose_boxes = yolo_pose_results[0].boxes.xywh.cpu()
-                    # pose_classes = yolo_pose_results[0].boxes.cls.cpu().tolist()
-                    pose_confs = yolo_pose_results[0].boxes.conf.cpu().tolist()
+                    # Check if keypoints are detected
+                    if yolo_pose_results[0].keypoints is not None:
+                        # print("We have keypoints")
+                        # pose_keypoints = yolo_pose_results[0].keypoints.cpu()
+                        # pose_track_ids = yolo_pose_results[0].boxes.id.cpu().tolist()
+                        # pose_boxes = yolo_pose_results[0].boxes.xywh.cpu()
+                        # pose_classes = yolo_pose_results[0].boxes.cls.cpu().tolist()
+                        pose_confs = yolo_pose_results[0].boxes.conf.cpu().tolist()
 
-                    pose_keypoints = yolo_pose_results[0].keypoints.cpu()
-                    pose_keypoints_list = pose_keypoints.xy.cpu().tolist()
-                    left_hip = pose_keypoints_list[0][11]
-                    right_hip = pose_keypoints_list[0][12]
-                    left_wrist = pose_keypoints_list[0][9]
-                    right_wrist = pose_keypoints_list[0][10]
+                        pose_keypoints = yolo_pose_results[0].keypoints.cpu()
+                        pose_keypoints_list = pose_keypoints.xy.cpu().tolist()
+                        left_hip = pose_keypoints_list[0][11]
+                        right_hip = pose_keypoints_list[0][12]
+                        left_wrist = pose_keypoints_list[0][9]
+                        right_wrist = pose_keypoints_list[0][10]
 
-                    middle_x_frame = frame.shape[1] // 2
-                    mid_hips = [middle_x_frame, (int(left_hip[1])+ int(right_hip[1]))//2]
-                    x1 = mid_hips[0]-5
-                    y1 = mid_hips[1]-5
-                    x2 = mid_hips[0]+5
-                    y2 = mid_hips[1]+5
-                    cls = 10  # hips center
-                    print(f"pose_confs: {pose_confs}")
-                    conf = pose_confs[0]
+                        middle_x_frame = frame.shape[1] // 2
+                        mid_hips = [middle_x_frame, (int(left_hip[1])+ int(right_hip[1]))//2]
+                        x1 = mid_hips[0]-5
+                        y1 = mid_hips[1]-5
+                        x2 = mid_hips[0]+5
+                        y2 = mid_hips[1]+5
+                        cls = 10  # hips center
+                        # print(f"pose_confs: {pose_confs}")
+                        conf = pose_confs[0]
 
-                    record = [frame_pos, 10, round(conf, 1), x1, y1, x2, y2, 0]
-                    records.append(record)
-                    if TestMode:
-                        # Print and test the record
-                        print(f"Record : {record}")
-                        print(f"For class id: {int(cls)}, getting: {class_reverse_match.get(int(cls), 'unknown')}")
-                        test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls),
-                                    class_reverse_match.get(int(cls), 'unknown'), 0]
-                        print(f"Test box: {test_box}")
-                        test_result.add_record(frame_pos, test_box)
+                        record = [frame_pos, 10, round(conf, 1), x1, y1, x2, y2, 0]
+                        records.append(record)
+                        if TestMode:
+                            # Print and test the record
+                            print(f"Record : {record}")
+                            print(f"For class id: {int(cls)}, getting: {class_reverse_match.get(int(cls), 'unknown')}")
+                            test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls),
+                                        class_reverse_match.get(int(cls), 'unknown'), 0]
+                            print(f"Test box: {test_box}")
+                            test_result.add_record(frame_pos, test_box)
 
 
             if TestMode:
@@ -465,14 +477,17 @@ if __name__ == '__main__':
     video_list = []  # List of videos to process
 
     # Default values for IDE usage
-    video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4")
+    #video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4")
+    video_list.append("/Users/k00gar/Downloads/VRCONK_Kiara Cole_game_of_thrones_daenerys_targaryen_a_porn_parody_8K_180x180_3dh.mp4")
     yolo_det_model = "models/k00gar-11n-200ep-best.mlpackage"
-    yolo_pose_model = "models/yolo11x-pose.mlpackage"
+    yolo_pose_model = "models/yolo11n-pose.mlpackage"  # "models/yolo11x-pose.mlpackage"
     DebugMode = True
-    TestMode = True
+    LiveDisplayMode = False
     isVR = True
-    frame_start = 54000  # 0 for analysis from the beginning
-    frame_end = 55000  # None for analysis until the end
+    frame_start = 0  # 0 for analysis from the beginning
+    frame_end = None  # None for analysis until the end
+
+    reference_funscript = "/Users/k00gar/Downloads/VRCONK_game_of_thrones_daenerys_targaryen_a_porn_parody_8K_180x180_3dh.funscript"  # "/Users/k00gar/Downloads/SLR Originals - Vote for me - Blake Blossom.realcumber.v1.51071.funscript"
 
     # Check if the script is run from the command line
     if len(sys.argv) > 1:  # Command-line arguments are present
@@ -481,7 +496,7 @@ if __name__ == '__main__':
         parser.add_argument("video_path", type=str, help="Path to the input video file.")
         parser.add_argument("--yolo_det_model", type=str, default=yolo_det_model, help="Path to the YOLO detection model file.")
         parser.add_argument("--yolo_pose_model", type=str, default=yolo_pose_model, help="Path to the YOLO pose model file.")
-        parser.add_argument("--test_mode", action="store_true", help="Enable test mode for displaying.")
+        parser.add_argument("--live_display_mode", action="store_true", help="Enable live display mode while processing.")
         parser.add_argument("--debug_mode", action="store_true", help="Enable debug mode for logging.")
         parser.add_argument("--is_vr", action="store_true", help="Enable VR mode for video processing.")
         parser.add_argument("--frame_start", type=int, default=0, help="Frame to start with.")
@@ -491,7 +506,8 @@ if __name__ == '__main__':
         # Override default values with command-line arguments
         video_list.append(args.video_path)
         yolo_det_model = args.yolo_model
-        TestMode = args.test_mode
+        yolo_pose_model = args.yolo_pose_model
+        LiveDisplayMode = args.live_display_mode
         DebugMode = args.debug_mode
         isVR = args.is_vr
         frame_start = args.frame_start
@@ -526,7 +542,7 @@ if __name__ == '__main__':
         # Process the video
 
         # Run the YOLO detection and saves result to _rawyolo.json file
-        extract_yolo_data(yolo_det_model, yolo_pose_model, video_path, frame_start, frame_end, TestMode, isVR)
+        extract_yolo_data(yolo_det_model, yolo_pose_model, video_path, frame_start, frame_end, LiveDisplayMode, isVR)
 
         # Load YOLO detection results from file
         yolo_data = load_yolo_data_from_file(video_path[:-4] + f"_rawyolo.json")
@@ -544,13 +560,25 @@ if __name__ == '__main__':
         frame_start = max(max(first_penis_frame - int(fps), frame_start - int(fps)), 0)
 
         # Performing the tracking part and generation of the raw funscript data
-        funscript_data = analyze_tracking_results(results, image_y_size, video_path, frame_start, frame_end, TestMode)
+        funscript_data = analyze_tracking_results(results, image_y_size, video_path, frame_start, frame_end, LiveDisplayMode)
 
         debugger.save_logs()
 
         funscript_handler = FunscriptGenerator()
 
         # Simplifying the funscript data and generating the file
-        funscript_handler.generate(video_path[:-4] + f"_rawfunscript.json", funscript_data, fps, TestMode)
+        funscript_handler.generate(video_path[:-4] + f"_rawfunscript.json", funscript_data, fps, LiveDisplayMode)
+
+        # Optional, compare generated funscript with reference funscript
+        if reference_funscript:
+            funscript_handler.compare_funscripts(reference_funscript, video_path[:-3] + "funscript", video_path, isVR, video_path[:-4] + "_comparefunscripts.png", video_path[:-4] + "_adjusted.funscript",)
+
+        #funscripts = []
+        #if reference_funscript:
+        #    funscripts.append(reference_funscript)
+        #funscripts.append(video_path[:-3] + "funscript")
+        #funscripts.append(video_path[:-4] + "_adjusted.funscript")
+        #funscript_handler.analyze_funscripts(script_paths=funscripts, video_path=video_path,
+        #                            isVR=isVR, output_image_path=video_path[:-4] + "_comparefunscripts.png")
 
         print(f"Finished processing video: {video_path}")

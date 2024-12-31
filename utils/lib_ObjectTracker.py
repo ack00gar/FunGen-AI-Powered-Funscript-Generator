@@ -99,8 +99,6 @@ class ObjectTracker:
         self.sex_position_history = deque(maxlen=120)  # History of sex positions
 
         # Position and distance tracking
-        self.positions = {class_name: deque(maxlen=200) for class_name in class_names}  # Positions for each class
-        self.distances = {class_name: deque(maxlen=200) for class_name in class_names}  # Distances for each class
         self.areas = {class_name: deque(maxlen=200) for class_name in class_names}  # Areas for each class
 
         # Normalized positions and distances
@@ -109,7 +107,8 @@ class ObjectTracker:
 
         # Tracked positions and normalized tracked positions
         self.tracked_positions = {}
-        self.normalized_tracked_positions = {}
+        self.normalized_absolute_tracked_positions = {}
+        self.normalized_distance_to_penis = {}
 
         # Initialize normalized distances and positions
         for class_name in class_names:
@@ -124,10 +123,6 @@ class ObjectTracker:
         # Penetration state
         self.penetration = False  # Whether penetration is detected
 
-        # Prediction and tracking thresholds
-        self.max_predictions = int(self.fps)  # Maximum number of predictions
-        self.max_inactive_frames = int(fps * 2)  # Maximum inactive frames before a track is lost
-        self.distance_threshold = 50  # Distance threshold for tracking
 
     def update_distance(self, raw_distance):
         """
@@ -137,15 +132,15 @@ class ObjectTracker:
             #filtered_distance = self.distance_kf.predict()
             # simple predict using ema, waiting for kalman filter fix
             filtered_distance = 0.1 * self.previous_distances[-3] + 0.3 * self.previous_distances[-2] + 0.6 * self.previous_distances[-1]
-            print(f"predicted distance: {filtered_distance}")
+            #print(f"predicted distance: {filtered_distance}")
         else:
-            print(f"before fix, raw distance is: {raw_distance}")
+            #print(f"before fix, raw distance is: {raw_distance}")
             # applying ema
             ema_distance = 0.1 * self.previous_distances[-2] + 0.3 * self.previous_distances[-1] + 0.6 * raw_distance
-            print(f"self distance: {self.distance}, ema_distance: {ema_distance}, max speed: {self.max_speed}, delta distances: {self.distance-ema_distance}")
+            #print(f"self distance: {self.distance}, ema_distance: {ema_distance}, max speed: {self.max_speed}, delta distances: {self.distance-ema_distance}")
             if abs(self.distance - ema_distance) > self.max_speed:
                 ema_distance = self.distance + np.sign(ema_distance - self.distance) * self.max_speed
-                print(f"adjusted ema distance: {ema_distance}")
+                #print(f"adjusted ema distance: {ema_distance}")
             #raw_distance_2d = (raw_distance, 0)
             # Update the Kalman filter with the new measurement
             #self.distance_kf.update(raw_distance_2d)
@@ -207,7 +202,7 @@ class ObjectTracker:
         self.image_y_size = image_y_size
 
         # Collect all detections
-        detections = [(box, conf, class_name, track_id) for box, conf, cls, class_name, track_id in sorted_boxes]
+        # detections = [(box, conf, class_name, track_id) for box, conf, cls, class_name, track_id in sorted_boxes]
 
         # Initialize tracking state
         self.glans_detected = False
@@ -250,51 +245,91 @@ class ObjectTracker:
                 logging.info(f"@{self.current_frame_id} - Deactivated locked_penis_box")
 
         sum_pos = 0
-        weight_pos = 0
+        sum_weight_pos = 0
 
         for box, conf, cls, class_name, track_id in sorted_boxes:
             if class_name in ['glans', 'penis', 'navel']:
                 continue
             elif self.locked_penis_box.is_active() and (self.boxes_overlap(box, self.locked_penis_box.get_box()) or class_name == 'hips center'):
-                if class_name not in classes_touching_penis:
+                if class_name != 'hips center' and class_name not in classes_touching_penis:
                     classes_touching_penis.append(class_name)
                 self.tracked_boxes.append([box, class_name, track_id])
                 x1, y1, x2, y2 = box
-                mid_y = (y1 + 4 * y2) // 5
-                dist_to_penis_base = int(((self.locked_penis_box.get_box()[3] - mid_y) / (self.locked_penis_box.get_height() * .8)) * 100)
-                normalized_y = min(max(0, dist_to_penis_base), 100)
+                #mid_y = (y1 + 4 * y2) // 5
+                mid_y = (y1 + y2) // 2
 
-                # Update tracked positions
+                # Update tracked positions within the frame
                 if track_id not in self.tracked_positions:
                     self.tracked_positions[track_id] = []
-                # self.tracked_positions[track_id].append(normalized_y)
-
                 # let's apply a moving average to try and filter outliers
                 if len(self.tracked_positions[track_id]) > 2:
-                    normalized_y = 0.2 * self.tracked_positions[track_id][-2] + 0.3 * self.tracked_positions[track_id][-1] + 0.5 * normalized_y
-                self.tracked_positions[track_id].append(normalized_y)
-
+                    mid_y = 0.2 * self.tracked_positions[track_id][-2] + 0.3 * \
+                                                    self.tracked_positions[track_id][
+                                                        -1] + 0.5 * mid_y
+                self.tracked_positions[track_id].append(mid_y)
                 # Maintain a fixed-size history
                 if len(self.tracked_positions[track_id]) > 600:
                     self.tracked_positions[track_id].pop(0)
 
-                # Update normalized tracked positions
-                if track_id not in self.normalized_tracked_positions:
-                    self.normalized_tracked_positions[track_id] = []
-                #self.normalized_tracked_positions[track_id].append(normalized_y)
-                self.normalized_tracked_positions[track_id].append(self.tracked_positions[track_id][-1])
-
+                # Normalize absolute position 0-100 based on historic min and max
+                if track_id not in self.normalized_absolute_tracked_positions:
+                    self.normalized_absolute_tracked_positions[track_id] = []
+                # let's retrieve min and max from self.tracked_positions
+                min_y, max_y = min(self.tracked_positions[track_id]), max(self.tracked_positions[track_id])
+                # now, normalize
+                if max_y - min_y == 0:
+                    normalized_y = 100
+                else:
+                    normalized_y = min(max(0, 100 - (((mid_y - min_y) / (max_y - min_y)) * 100)), 100)
+                self.normalized_absolute_tracked_positions[track_id].append(normalized_y)
                 # Maintain a fixed-size history
-                if len(self.normalized_tracked_positions[track_id]) > 60:
-                    self.normalized_tracked_positions[track_id].pop(0)
+                if len(self.normalized_absolute_tracked_positions[track_id]) > 60:
+                    self.normalized_absolute_tracked_positions[track_id].pop(0)
 
-                # Sum delta positions of all touching items, weighted by the length of their history
-                weight_pos_track_id = sum(
-                    abs(self.normalized_tracked_positions[track_id][i] - self.normalized_tracked_positions[track_id][
-                        i - 1]) for i in
-                    range(1, len(self.normalized_tracked_positions[track_id])))
-                sum_pos += max(0, (normalized_y - (100 - self.max_allowed))) * weight_pos_track_id
-                weight_pos += weight_pos_track_id
+                # Now, we compute the distance to penis base
+                if track_id not in self.normalized_distance_to_penis:
+                    self.normalized_distance_to_penis[track_id] = []
+                if class_name == 'butt':  # 80% of (y2 - y1) + y1
+                    low_y = (.8 * (y2 - y1)) + y1
+                elif class_name != 'hips center':
+                    low_y = y2
+
+                # Now, we compute the distance to penis base for classes that are not 'hips center'
+                # And computing the weighted position based on recent moves
+                if class_name != 'hips center':
+                    dist_to_penis_base = int(((self.locked_penis_box.get_box()[3] - low_y) / self.locked_penis_box.get_height()) * 100)
+                    normalized_dist_to_penis_base = min(max(0, dist_to_penis_base), 100)
+                    # let's apply a moving average to try and filter outliers
+                    if len(self.normalized_distance_to_penis[track_id]) > 2:
+                        low_y = 0.2 * self.normalized_distance_to_penis[track_id][-2] + 0.3 * \
+                                self.normalized_distance_to_penis[track_id][
+                                    -1] + 0.5 * low_y
+                    # Update normalized tracked positions
+                    if track_id not in self.normalized_distance_to_penis:
+                        self.normalized_distance_to_penis[track_id] = []
+                    self.normalized_distance_to_penis[track_id].append(normalized_dist_to_penis_base)
+                    # Maintain a fixed-size history
+                    if len(self.normalized_distance_to_penis[track_id]) > 60:
+                        self.normalized_distance_to_penis[track_id].pop(0)
+
+                    # Sum delta positions of all touching items, weighted by the length of their history
+                    weight_pos_track_id = sum(
+                        abs(self.normalized_distance_to_penis[track_id][i] - self.normalized_distance_to_penis[track_id][
+                            i - 1]) for i in
+                        range(1, len(self.normalized_distance_to_penis[track_id])))
+                    #sum_pos += max(0, (normalized_dist_to_penis_base - (100 - self.max_allowed))) * weight_pos_track_id
+                    sum_pos += ((self.normalized_distance_to_penis[track_id][-1] +
+                                self.normalized_absolute_tracked_positions[track_id][-1]) // 2) * weight_pos_track_id
+                    sum_weight_pos += weight_pos_track_id
+                else:  # hips center
+                    if self.penetration:  # only consider them during penetration
+                        weight_pos_track_id = sum(
+                            abs(self.normalized_absolute_tracked_positions[track_id][i] -
+                                self.normalized_absolute_tracked_positions[track_id][
+                                    i - 1]) for i in
+                            range(1, len(self.normalized_absolute_tracked_positions[track_id])))
+                        sum_pos += self.normalized_absolute_tracked_positions[track_id][-1] * weight_pos_track_id
+                        sum_weight_pos += weight_pos_track_id
 
         if len(classes_touching_penis) == 0 or not self.locked_penis_box.is_active():
             self.penetration = False
@@ -317,12 +352,12 @@ class ObjectTracker:
             self.detect_sex_position_change('Boobjob', "breast visible and touching")
             self.tracked_body_part = 'breast'
 
-        if weight_pos > 0:
-            distance = int(sum_pos / weight_pos)
+        if sum_weight_pos > 0:
+            distance = int(sum_pos / sum_weight_pos)
         else:
             distance = 100
 
-        print(f"computed distance: {distance}, sending for filtering...")
+        #print(f"computed distance: {distance}, sending for filtering...")
 
         self.update_distance(distance)
 
@@ -383,3 +418,23 @@ class ObjectTracker:
         max_area = frame_width * frame_height
         normalized_area = 100 * (box_area / max_area)
         return max(0, min(100, normalized_area))
+
+    """def log_and_normalize_pos(self, box, track_id):
+        self.boxes[class_name] = box
+        _, y1, _, y2 = box
+        mid_y = (y1 + y2) / 2
+        self.positions[class_name].append(mid_y)
+
+        min_y, max_y = min(self.positions[class_name]), max(self.positions[class_name])
+        normalized_y = (100 - int(100 * ((mid_y - min_y) / (max_y - min_y)))) if min_y != max_y else 100
+
+        # In case of breast, which is a fallback class to pussy, we compute not only the normalized position
+        # but also the normalized breast area which shows back and forth in case of grinding
+        if class_name == "breast" and self.frame:
+            normalized_breast_area = self.normalize_box_area(box, self.frame.shape[1], self.frame.shape[0])
+            normalized_y = ((0.75 * normalized_breast_area) + normalized_y) / 1.75
+
+        # self.normalized_positions[class_name][current_frame_id] = normalized_y
+        self.normalized_positions[class_name].append(normalized_y)
+        return normalized_y
+    """

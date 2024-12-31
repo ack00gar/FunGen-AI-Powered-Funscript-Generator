@@ -84,23 +84,33 @@ class Debugger:
         Display the logged frame with bounding boxes and variable states.
         :param frame_id: The frame ID to display.
         """
+        self.play_video(frame_id, duration=-1)
+
+    def old_display_frame(self, frame_id):
+        """
+        Display the logged frame with bounding boxes and variable states.
+        :param frame_id: The frame ID to display.
+        """
         str_frame_id = str(frame_id)
         if str_frame_id not in self.logs:
             print(f"No logs found for frame {frame_id}")
             return
 
         # Load the frame from the video
-        cap = cv2.VideoCapture(self.video_path)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
-        ret, frame = cap.read()
-        cap.release()
+        #cap = cv2.VideoCapture(self.video_path)
+        self.cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
+        ret, frame = self.cap.read()
+        self.cap.release()
 
         if not ret:
             print(f"Failed to read frame {frame_id}")
             return
 
         # Crop the frame (for VR videos)
-        frame = frame[:, frame.shape[1] // 6 : frame.shape[1] // 3, :]
+        # frame = frame[:, frame.shape[1] // 6 : frame.shape[1] // 3, :]
+
+        frame_copy = frame.copy()
 
         # Draw bounding boxes
         for box in self.logs[str_frame_id]["bounding_boxes"]:
@@ -108,26 +118,26 @@ class Debugger:
             class_name = box["class_name"]
             conf = box["conf"]
             color = class_colors.get(class_name, (0, 255, 0))  # Default to green if class not found
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, f"{class_name} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame_copy, f"{class_name} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         # Display variables
         variables = self.logs[str_frame_id]["variables"]
         y_offset = 30
         for key, value in variables.items():
-            cv2.putText(frame, f"{key}: {value}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            cv2.putText(frame_copy, f"{key}: {value}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
             y_offset += 20
 
         # Draw the locked_penis_box if it exists
         locked_penis_box = variables.get("locked_penis_box")
         if locked_penis_box:
-            x1, y1, x2, y2 = locked_penis_box
+            x1, y1, x2, y2 = locked_penis_box['box']
             color = class_colors.get("penis", (0, 255, 0))
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, "Locked Penis", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame_copy, "Locked Penis", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         # Show the frame
-        cv2.imshow(f"Debug Frame {frame_id}", frame)
+        cv2.imshow(f"Debug Frame {frame_id}", frame_copy)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
@@ -225,7 +235,7 @@ class Debugger:
 
                 # Draw the locked_penis_box if it exists
                 locked_penis_box = variables.get("locked_penis_box")
-                print(f"locked_penis_box: {locked_penis_box}")
+                #print(f"locked_penis_box: {locked_penis_box}")
                 if locked_penis_box['active']:
                     x1, y1, x2, y2 = locked_penis_box['box']
                     color = class_colors.get("penis", (0, 255, 0))
@@ -256,6 +266,9 @@ class Debugger:
                 break
             if cv2.waitKey(1) & 0xFF == 32:  # Pause on spacebar
                 time.sleep(10)
+            if duration == -1:
+                cv2.imwrite(f"{self.video_path[:-4]}_frame_{self.current_frame}.png", frame_copy)
+                break
 
             # Record the frame if enabled
             if record:
