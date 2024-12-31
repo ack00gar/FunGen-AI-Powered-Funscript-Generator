@@ -6,15 +6,19 @@ from params.config import ffmpeg_path, ffprobe_path
 
 
 class VideoReaderFFmpeg:
-    def __init__(self, video_path, is_VR=False, ffmpeg_path=ffmpeg_path, ffprobe_path=ffprobe_path):
+    def __init__(self, video_path, is_VR=False, unwarp=True, projection=None, ffmpeg_path=ffmpeg_path, ffprobe_path=ffprobe_path):
         """
         Initialize the VideoReaderFFmpeg class.
         :param video_path: Path to the video file.
+        :param unwarp: Will try and unwarp VR videos.
+        :param projection: FISHEYE, EQUIRECTANGULAR. Will also look for 'FISHEYE' in the video path.
         :param ffmpeg_path: Path to the FFmpeg binary (default: "ffmpeg").
         :param ffprobe_path: Path to the FFprobe binary (default: "ffprobe").
         """
         self.video_path = video_path
         self.is_VR = is_VR
+        self.unwarp = unwarp
+        self.projection = projection
         self.ffmpeg_path = ffmpeg_path
         self.ffprobe_path = ffprobe_path
         self._initialize_video_info()  # Initialize video metadata
@@ -85,24 +89,37 @@ class VideoReaderFFmpeg:
         self.current_frame_number = start_frame
 
         if self.is_VR:
-            # FFmpeg command to read frames with VR reprojection
-            if 'NFISHEYE' in self.video_path:  # impeded for troubleshooting
-                self.type = "fisheye"
-                self.iv_fov = 190
-                self.ih_fov = 190
-                self.v_fov = 90
-                self.h_fov = 90
-                self.d_fov = 180
-                arg_line = f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1"
+            arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
+            if self.unwarp:
+                if self.projection == "FISHEYE" or "FISHEYE" in self.video_path:
+                    print("Proceeding with fisheye projection correction")
+                    self.type = "fisheye"
+                    self.iv_fov = 190
+                    self.ih_fov = 190
+                    self.v_fov = 90
+                    self.h_fov = 90
+                    self.d_fov = 180
+                else:  # Assuming Equirectangular
+                    print("Assuming Equirectangular projection")
+                    self.type = "he"
+                    self.iv_fov = 250
+                    self.ih_fov = 120
+                    self.v_fov = 90
+                    self.h_fov = 90
+                    self.d_fov = 180
+                    #arg_line = f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1"
+                arg_line = arg_line + f",v360={self.type}:output=sg"
+                arg_line = arg_line + f":iv_fov={self.iv_fov}:ih_fov={self.ih_fov}"
+                arg_line = arg_line + f":d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}"
+                arg_line = arg_line + f":pitch=-25:yaw=0:roll=0"
+                arg_line = arg_line + f":w={self.width}:h={self.height}"
+                arg_line = arg_line + f":interp=lanczos:reset_rot=1"
+                arg_line = arg_line + f",lutyuv=y=gammaval(0.7)"
+                #arg_line = arg_line + f",eq=brightness=0.1:contrast=1.5"
+                #arg_line = arg_line + f",format=gray"
+                #arg_line = arg_line + f",histeq"
             else:
-                # more tweaking and experimentation needed...
-                # self.type = "he"
-                # self.iv_fov = 90
-                # self.ih_fov = 90
-                # self.v_fov = 90
-                # self.h_fov = 90
-                # self.d_fov = 100
-                arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
+                arg_line = arg_line  # "crop=w=iw/2:h=ih:x=0:y=0"
 
             cmd = [
                 self.ffmpeg_path,

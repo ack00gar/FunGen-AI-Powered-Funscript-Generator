@@ -5,13 +5,15 @@ from collections import defaultdict
 from params.config import class_reverse_match
 
 #video_path = "/Users/k00gar/Downloads/Katrina Jade [ADD] Oct 16, 2024R_6kvr265_reenc.mp4"
-video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
+#video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
+video_path = "/Users/k00gar/Downloads/730-czechvr-3d-7680x3840-60fps-oculusrift_uhq_h265.mp4"
 
 # Load a model
-pose_model = YOLO("../models/yolo11x-pose.mlpackage")
+#pose_model = YOLO("../models/yolo11x-pose.mlpackage")
+pose_model = YOLO("../models/yolo11n-pose.mlpackage")
 detect_model = YOLO("../models/k00gar-11n-200ep-best.mlpackage")
 
-timestamp_min = 0 #15
+timestamp_min = 25 #15
 timestamp_sec = 0
 
 cap = cv2.VideoCapture(video_path)
