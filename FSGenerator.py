@@ -5,17 +5,41 @@ import cv2  # OpenCV for image and video processing
 import json  # For handling JSON data
 from tqdm import tqdm  # For progress bars
 from ultralytics import YOLO  # YOLO model for object detection
-import argparse  # For command-line argument parsing
-import sys  # For accessing command-line arguments
+import platform  # For identifying the operating system
+import torch  # PyTorch for use of .pt model if not on Apple device
+import tkinter as tk  # GUI library for macOS for basic use in our case
+from tkinter import filedialog, messagebox  # here, what was I saying...
+import subprocess  # For running shell commands
 
 # Import custom modules and configurations
-from params.config import class_priority_order, class_reverse_match, class_colors  # Configuration for class priorities, reverse matching, and colors
+from params.config import class_priority_order, class_reverse_match, class_colors, yolo_models  # Configuration for class priorities, reverse matching, and colors
 from utils.lib_ObjectTracker import ObjectTracker  # Custom object tracking logic
 from utils.lib_FunscriptHandler import FunscriptGenerator  # For generating Funscript files
 from utils.lib_Visualizer import Visualizer  # For visualizing results
 from utils.lib_Debugger import Debugger  # For debugging and logging
 from utils.lib_SceneCutsDetect import detect_scene_changes  # For detecting scene changes in videos
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg  # Custom video reader using FFmpeg
+
+# Define a GlobalState class to manage global variables
+class GlobalState:
+    def __init__(self):
+        self.yolo_det_model = ""
+        self.yolo_pose_model = ""
+        self.video_file = ""
+        self.DebugMode = False
+        self.LiveDisplayMode = False
+        self.isVR = True
+        self.frame_start = 0
+        self.frame_end = None
+        self.reference_script = ""
+        self.offset_x = 0
+        self.funscript_data = []  # List to store Funscript data
+        self.funscript_frames = []
+        self.funscript_distances = []
+        self.debugger = None
+
+# Initialize global state
+global_state = GlobalState()
 
 # Define the BoxRecord class to store bounding box information
 class BoxRecord:
@@ -62,18 +86,6 @@ class Result:
         else:
             self.frame_data[frame_id] = [box_record]
 
-    def map_class_type_to_name(self, class_type, x1, x2, image_width):
-        """
-        Map class type to a class name (currently unused).
-        :param class_type: The class type to map.
-        :param x1: The x-coordinate of the bounding box's top-left corner.
-        :param x2: The x-coordinate of the bounding box's bottom-right corner.
-        :param image_width: The width of the image/frame.
-        :return: The mapped class name.
-        """
-        class_name = class_type
-        return class_name
-
     def get_boxes(self, frame_id):
         """
         Retrieve and sort bounding boxes for a specific frame.
@@ -117,56 +129,71 @@ def write_dataset(file_path, data):
     export_end = time.time()
     print(f"Done in {export_end - export_start}.")
 
-def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, frame_end=None, TestMode=False, isVR=False):
+def get_yolo_model_path():
+    # Check if the device is an Apple device
+    if platform.system() == 'Darwin':
+        print(f"Apple device detected, loading {yolo_models[0]} for MPS inference.")
+        return yolo_models[0]
+
+    # Check if CUDA is available (for GPU support)
+    elif torch.cuda.is_available():
+        print(f"CUDA is available, loading {yolo_models[1]} for GPU inference.")
+        return yolo_models[1]
+
+    # Fallback to ONNX model for other platforms without CUDA
+    else:
+        print(f"Falling back to CPU inference, loading {yolo_models[2]}.")
+        return yolo_models[2]
+
+def extract_yolo_data():
     """
     Extract YOLO detection data from a video.
-    :param det_model_file: Path to the YOLO model file.
-    :param pose_model_file: Path to the YOLO pose model file.
-    :param video_path: Path to the input video file.
-    :param frame_start: The starting frame for processing.
-    :param frame_end: The ending frame for processing (optional).
-    :param TestMode: Enable/disable test mode for debugging.
-    :param isVR: Enable/disable VR mode for video processing.
     """
     # Check if the output file already exists
-    if os.path.exists(video_path[:-4] + f"_rawyolo.json"):
-        print(f"File {video_path[:-4] + f'_rawyolo.json'} already exists. Skipping detections and loading file content...")
-        return
+    if os.path.exists(global_state.video_file[:-4] + f"_rawyolo.json"):
+        # messagebox to ask if user wants to overwrite or reuse
+        # file name without path
+        file_name = os.path.basename(global_state.video_file[:-4] + f"_rawyolo.json")
+        skip_detection = messagebox.askyesno("Detection file already exists",
+                f"File {file_name} already exists.\n\nClick Yes to reuse the existing detections file.\nClick No to perform detections again.")
+        if skip_detection:
+            print(
+                f"File {global_state.video_file[:-4] + f'_rawyolo.json'} already exists. Skipping detections and loading file content...")
+            return
+        else:
+            os.remove(global_state.video_file[:-4] + f"_rawyolo.json")
 
     records = []  # List to store detection records
     test_result = Result(320)  # Test result object for debugging
 
     # Initialize the video reader
-    cap = VideoReaderFFmpeg(video_path, is_VR=isVR)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start)
+    cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, global_state.frame_start)
 
     # Determine the last frame to process
-    if frame_end:
-        last_frame = frame_end
+    if global_state.frame_end:
+        last_frame = global_state.frame_end
     else:
         last_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # Load the YOLO model
-    det_model = YOLO(det_model_file, task="detect")
+    det_model = YOLO(global_state.yolo_det_model, task="detect")
 
     # make the pose model optional
-    if len(pose_model_file) > 0:
+    if len(global_state.yolo_pose_model) > 0:
         run_pose_model = True
         print("Activating pose model")
     else:
         run_pose_model = False
         print("Discarding pose model part of the code")
     if run_pose_model:
-        pose_model = YOLO(pose_model_file, task="pose")
+        pose_model = YOLO(global_state.yolo_pose_model, task="pose")
 
     # Loop through the video frames
-    for frame_pos in tqdm(range(frame_start, last_frame), ncols=None, desc="Performing YOLO detection on frames"):
+    for frame_pos in tqdm(range(global_state.frame_start, last_frame), ncols=None, desc="Performing YOLO detection on frames"):
         success, frame = cap.read()  # Read a frame from the video
 
         if success:
-            #if isVR:
-            #    # For VR videos, crop the frame to the middle third
-            #    frame = frame[:, frame.shape[1] // 3:2 * frame.shape[1] // 3, :]
 
             # Run YOLO tracking on the frame
             yolo_det_results = det_model.track(frame, persist=True, conf=0.3, verbose=False)
@@ -176,7 +203,7 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
             if yolo_det_results[0].boxes.id is None:  # Skip if no tracks are found
                 continue
 
-            if len(yolo_det_results[0].boxes) == 0 and not TestMode:  # Skip if no boxes are detected
+            if len(yolo_det_results[0].boxes) == 0 and not global_state.LiveDisplayMode:  # Skip if no boxes are detected
                 continue
 
             ### DETECTION of BODY PARTS
@@ -197,7 +224,7 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
                 # Create a detection record
                 record = [frame_pos, int(cls), round(conf, 1), x1, y1, x2, y2, track_id]
                 records.append(record)
-                if TestMode:
+                if global_state.LiveDisplayMode:
                     # Print and test the record
                     print(f"Record : {record}")
                     print(f"For class id: {int(cls)}, getting: {class_reverse_match.get(int(cls), 'unknown')}")
@@ -224,8 +251,6 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
                         pose_keypoints_list = pose_keypoints.xy.cpu().tolist()
                         left_hip = pose_keypoints_list[0][11]
                         right_hip = pose_keypoints_list[0][12]
-                        left_wrist = pose_keypoints_list[0][9]
-                        right_wrist = pose_keypoints_list[0][10]
 
                         middle_x_frame = frame.shape[1] // 2
                         mid_hips = [middle_x_frame, (int(left_hip[1])+ int(right_hip[1]))//2]
@@ -239,7 +264,7 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
 
                         record = [frame_pos, 10, round(conf, 1), x1, y1, x2, y2, 0]
                         records.append(record)
-                        if TestMode:
+                        if global_state.LiveDisplayMode:
                             # Print and test the record
                             print(f"Record : {record}")
                             print(f"For class id: {int(cls)}, getting: {class_reverse_match.get(int(cls), 'unknown')}")
@@ -248,8 +273,7 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
                             print(f"Test box: {test_box}")
                             test_result.add_record(frame_pos, test_box)
 
-
-            if TestMode:
+            if global_state.LiveDisplayMode:
                 # Display the YOLO results for testing
                 yolo_det_results[0].plot()
                 cv2.imshow("YOLO11", yolo_det_results[0].plot())
@@ -269,7 +293,7 @@ def extract_yolo_data(det_model_file, pose_model_file,video_path, frame_start, f
                     break
 
     # Write the detection records to a JSON file
-    write_dataset(video_path[:-4] + f"_rawyolo.json", records)
+    write_dataset(global_state.video_file[:-4] + f"_rawyolo.json", records)
     # Release the video capture object and close the display window
     cap.release()
     cv2.destroyAllWindows()
@@ -301,61 +325,61 @@ def make_data_boxes(records, image_x_size):
         result.add_record(frame_idx, box_record)
     return result
 
-def analyze_tracking_results(results, image_y_size, video_path, frame_start=None, frame_end=None, TestMode=False):
+def analyze_tracking_results(results, image_y_size):
     """
     Analyze tracking results and generate Funscript data.
     :param results: The Result object containing detection data.
     :param image_y_size: Height of the image/frame.
-    :param video_path: Path to the input video file.
-    :param frame_start: The starting frame for processing (optional).
-    :param frame_end: The ending frame for processing (optional).
-    :param TestMode: Enable/disable test mode for debugging.
     :return: A list of Funscript data.
     """
     list_of_frames = results.get_all_frame_ids()  # Get all frame IDs with detections
     visualizer = Visualizer()  # Initialize the visualizer
 
-    cap = VideoReaderFFmpeg(video_path, is_VR=isVR)  # Initialize the video reader
+    cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)  # Initialize the video reader
     fps = cap.get(cv2.CAP_PROP_FPS)  # Get the video's FPS
     nb_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # Get the total number of frames
 
-    if not frame_start:
-        frame_start = 0
+    cuts = []
 
-    if not frame_end:
-        frame_end = nb_frames
+    image_area = cap.get(cv2.CAP_PROP_FRAME_WIDTH) * cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
-    if TestMode:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start)
+    if not global_state.frame_start:
+        global_state.frame_start = 0
+
+    if not global_state.frame_end:
+        global_state.frame_end = nb_frames
+
+    if global_state.LiveDisplayMode:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, global_state.frame_start)
     else:
         cap.release()
 
     # Load scene cuts if the file exists
-    if os.path.exists(video_path[:-4] + f"_cuts.json"):
-        print(f"Loading cuts from {video_path[:-4] + f'_cuts.json'}")
-        with open(video_path[:-4] + f"_cuts.json", 'r') as f:
+    if os.path.exists(global_state.video_file[:-4] + f"_cuts.json"):
+        print(f"Loading cuts from {global_state.video_file[:-4] + f'_cuts.json'}")
+        with open(global_state.video_file[:-4] + f"_cuts.json", 'r') as f:
             cuts = json.load(f)
         print(f"Loaded {len(cuts)} cuts : {cuts}")
     else:
         # Detect scene changes if the cuts file does not exist
-        scene_list = detect_scene_changes(video_path, "Left", 0.9, frame_start, frame_end)
-        print(f"Analyzing frames {frame_start} to {frame_end}")
+        scene_list = detect_scene_changes(global_state.video_file, global_state.isVR, 0.9, global_state.frame_start, global_state.frame_end)
+        print(f"Analyzing frames {global_state.frame_start} to {global_state.frame_end}")
         cuts = [scene[1] for scene in scene_list]
         cuts = cuts[:-1]  # Remove the last entry
         # Save the cuts to a file
-        with open(video_path[:-4] + f"_cuts.json", 'w') as f:
+        with open(global_state.video_file[:-4] + f"_cuts.json", 'w') as f:
             json.dump(cuts, f)
 
-    funscript_frames = []  # List to store Funscript frames
-    tracker = ObjectTracker(fps, frame_start)  # Initialize the object tracker
+    global_state.funscript_frames = []  # List to store Funscript frames
+    tracker = ObjectTracker(fps, global_state.frame_start, image_area)  # Initialize the object tracker
 
-    for frame_pos in tqdm(range(frame_start, frame_end), ncols=80, desc="Analyzing tracking results"):
+    for frame_pos in tqdm(range(global_state.frame_start, global_state.frame_end), unit="f"):
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
             print(f"Reaching cut at frame {frame_pos}")
             previous_distances = tracker.previous_distances
             print(f"Reinitializing tracker with previous distances: {previous_distances}")
-            tracker = ObjectTracker(fps, frame_pos)
+            tracker = ObjectTracker(fps, frame_pos, image_area)
             tracker.previous_distances = previous_distances
 
         if frame_pos in list_of_frames:
@@ -365,15 +389,26 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start=None
 
             if tracker.distance:
                 # Append Funscript data if distance is available
-                funscript_frames.append(frame_pos)
-                funscript_distances.append(int(tracker.distance))
+                global_state.funscript_frames.append(frame_pos)
+                global_state.funscript_distances.append(int(tracker.distance))
 
-            if DebugMode:
+            if global_state.DebugMode:
                 # Log debugging information
                 bounding_boxes = []
                 for box in sorted_boxes:
-                    if box[4] in tracker.tracked_positions:
-                        position = tracker.tracked_positions[box[4]][-1]
+                    #if box[4] in tracker.tracked_positions:
+                    if box[4] in tracker.normalized_absolute_tracked_positions:
+                        #position = tracker.tracked_positions[box[4]][-1]
+                        if box[4] == 0:  # generic track_id for 'hips center'
+                            str_dist_penis = 'None'
+                        else:
+                            if box[4] in tracker.normalized_distance_to_penis:
+                                # print(f"box[4]: {box[4]}")
+                                str_dist_penis = str(int(tracker.normalized_distance_to_penis[box[4]][-1]))
+                            else:
+                                str_dist_penis = 'None'
+                        str_abs_pos = str(int(tracker.normalized_absolute_tracked_positions[box[4]][-1]))
+                        position = 'p: ' + str_dist_penis + ' | ' + 'a: ' + str_abs_pos
                     else:
                         position = None
                     bounding_boxes.append({
@@ -383,7 +418,7 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start=None
                         'track_id': box[4],
                         'position': position,
                     })
-                debugger.log_frame(frame_pos,
+                global_state.debugger.log_frame(frame_pos,
                                    bounding_boxes=bounding_boxes,
                                    variables={
                                        'distance': tracker.distance,
@@ -400,7 +435,7 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start=None
                                        'breast_tracking': tracker.breast_tracking,
                                    })
 
-        if TestMode:
+        if global_state.LiveDisplayMode:
             # Display the tracking results for testing
             ret, frame = cap.read()
             frame_display = frame.copy()
@@ -410,12 +445,12 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start=None
                                                              box[0],
                                                              str(box[2]) + ": " + box[1],
                                                              class_colors[str(box[1])],
-                                                             offset_x)
+                                                             global_state.offset_x)
             if tracker.locked_penis_box is not None and tracker.locked_penis_box.is_active():
                 frame_display = visualizer.draw_bounding_box(frame_display, tracker.locked_penis_box.box,
                                                              "Locked_Penis",
                                                              class_colors['penis'],
-                                                             offset_x)
+                                                             global_state.offset_x)
             else:
                 print("No active locked penis box to draw.")
 
@@ -423,26 +458,26 @@ def analyze_tracking_results(results, image_y_size, video_path, frame_start=None
                 frame_display = visualizer.draw_bounding_box(frame_display, tracker.boxes['glans'],
                                                               "Glans",
                                                               class_colors['glans'],
-                                                              offset_x)
-            if funscript_distances:
-                frame_display = visualizer.draw_gauge(frame_display, funscript_distances[-1])
+                                                              global_state.offset_x)
+            if global_state.funscript_distances:
+                frame_display = visualizer.draw_gauge(frame_display, global_state.funscript_distances[-1])
 
             cv2.imshow("Combined Results", frame_display)
             cv2.waitKey(1)
 
     # Prepare Funscript data
-    funscript_data = list(zip(funscript_frames, funscript_distances))
+    global_state.funscript_data = list(zip(global_state.funscript_frames, global_state.funscript_distances))
 
     points = "["
-    for i in range(len(funscript_frames)):
+    for i in range(len(global_state.funscript_frames)):
         if i != 0:
             points += ","
-        points += f"[{funscript_frames[i]}, {funscript_distances[i]}]"
+        points += f"[{global_state.funscript_frames[i]}, {global_state.funscript_distances[i]}]"
     points += "]"
     # Write the raw Funscript data to a JSON file
-    with open(video_path[:-4] + f"_rawfunscript.json", 'w') as f:
-        json.dump(funscript_data, f)
-    return funscript_data
+    with open(global_state.video_file[:-4] + f"_rawfunscript.json", 'w') as f:
+        json.dump(global_state.funscript_data, f)
+    return global_state.funscript_data
 
 def parse_yolo_data_looking_for_penis(data, start_frame):
     """
@@ -472,113 +507,236 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
                 print(f"First instance of Glans/Penis found in frame {line[0] - 4}")
                 return line[0] - 4
 
-# MAIN logic
-if __name__ == '__main__':
-    video_list = []  # List of videos to process
+def select_video_file():
+    file_path = filedialog.askopenfilename(
+        title="Select a video file",
+        filetypes=[("Video Files", "*.mp4 *.avi *.mov *.mkv")]
+    )
+    if file_path:
+        video_path.set(file_path)
+        check_video_resolution(file_path)
 
-    # Default values for IDE usage
-    #video_list.append("/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4")
-    video_list.append("/Users/k00gar/Downloads/VRCONK_Kiara Cole_game_of_thrones_daenerys_targaryen_a_porn_parody_8K_180x180_3dh.mp4")
-    yolo_det_model = "models/k00gar-11n-200ep-best.mlpackage"
-    yolo_pose_model = "models/yolo11n-pose.mlpackage"  # "models/yolo11x-pose.mlpackage"
-    DebugMode = True
-    LiveDisplayMode = False
-    isVR = True
-    frame_start = 0  # 0 for analysis from the beginning
-    frame_end = None  # None for analysis until the end
+def select_reference_script():
+    file_path = filedialog.askopenfilename(
+        title="Select a reference funscript file",
+        filetypes=[("Funscript Files", "*.funscript")]
+    )
+    if file_path:
+        reference_script_path.set(file_path)
 
-    reference_funscript = "/Users/k00gar/Downloads/VRCONK_game_of_thrones_daenerys_targaryen_a_porn_parody_8K_180x180_3dh.funscript"  # "/Users/k00gar/Downloads/SLR Originals - Vote for me - Blake Blossom.realcumber.v1.51071.funscript"
+def check_video_resolution(video_path):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        messagebox.showerror("Error", "Could not open the video file.")
+        return
 
-    # Check if the script is run from the command line
-    if len(sys.argv) > 1:  # Command-line arguments are present
-        # Set up argument parsing for command-line usage
-        parser = argparse.ArgumentParser(description="Generate Funscript data from a video using YOLO object detection.")
-        parser.add_argument("video_path", type=str, help="Path to the input video file.")
-        parser.add_argument("--yolo_det_model", type=str, default=yolo_det_model, help="Path to the YOLO detection model file.")
-        parser.add_argument("--yolo_pose_model", type=str, default=yolo_pose_model, help="Path to the YOLO pose model file.")
-        parser.add_argument("--live_display_mode", action="store_true", help="Enable live display mode while processing.")
-        parser.add_argument("--debug_mode", action="store_true", help="Enable debug mode for logging.")
-        parser.add_argument("--is_vr", action="store_true", help="Enable VR mode for video processing.")
-        parser.add_argument("--frame_start", type=int, default=0, help="Frame to start with.")
-        parser.add_argument("--frame_end", type=int, default=0, help="Frame to end with.")
-        args = parser.parse_args()
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
 
-        # Override default values with command-line arguments
-        video_list.append(args.video_path)
-        yolo_det_model = args.yolo_model
-        yolo_pose_model = args.yolo_pose_model
-        LiveDisplayMode = args.live_display_mode
-        DebugMode = args.debug_mode
-        isVR = args.is_vr
-        frame_start = args.frame_start
-        frame_end = args.frame_end
+    if height > 1920:
+        resize_options = ["1920", "1440", "1080"]
+        choice = messagebox.askquestion(
+            "Resize Video",
+            f"The video height is {height}p. Do you want to resize it to a lower resolution?",
+            detail="Options: " + ", ".join(resize_options)
+        )
+        if choice == "yes":
+            resize_video(video_path, resize_options)
 
-        if frame_end == 0 or frame_end < frame_start:
-            frame_end = None
+def resize_video(video_path, options):
 
-    funscript_data = []  # List to store Funscript data
+    def on_resize_select(option):
+        output_path = video_path.replace(".mp4", f"_{option}p.mp4")
+        command = [
+            "ffmpeg", "-i", video_path,
+            "-vf", f"scale=-1:{option}",
+            # "-c:a", "copy",  # if you need the audio, uncomment this line and comment the next one
+            "-an",  # skipping the audio
+            output_path
+        ]
+        subprocess.run(command, check=True)
+        messagebox.showinfo("Success", f"Video resized to {option}p and saved as {output_path}")
+        resize_window.destroy()
 
-    for video_path in video_list:
-        print(f"Processing video: {video_path}")
+    resize_window = tk.Toplevel()
+    resize_window.title("Select Resize Option")
+    for option in options:
+        btn = tk.Button(resize_window, text=f"{option}p", command=lambda o=option: on_resize_select(o))
+        btn.pack(pady=5)
 
-        debugger = Debugger(video_path, output_dir=video_path[:-4])  # Initialize the debugger
+def start_processing():
+    global_state.video_file = video_path.get()
+    if not global_state.video_file:
+        messagebox.showerror("Error", "Please select a video file.")
+        return
 
-        cap = VideoReaderFFmpeg(video_path, is_VR=isVR)  # Initialize the video reader
-        fps = cap.get(cv2.CAP_PROP_FPS)  # Get the video's FPS
-        image_y_size = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # Get the video's height
-        image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # Get the video's width
+    global_state.yolo_det_model = get_yolo_model_path()
+    global_state.yolo_pose_model = ""  # "models/yolo11n-pose.mlpackage"
+    global_state.DebugMode = debug_mode_var.get()
+    global_state.LiveDisplayMode = live_display_mode_var.get()
+    global_state.isVR = is_vr_var.get()
+    global_state.frame_start = 0 if frame_start_entry.get() == "" else int(frame_start_entry.get())
+    global_state.frame_end = None if frame_end_entry.get() == "" else int(frame_end_entry.get())
+    global_state.reference_script = reference_script_path.get()
 
-        offset_x = 0
+    print(f"Processing video: {global_state.video_file}")
+    print(f"YOLO Detection Model: {global_state.yolo_det_model}")
+    print(f"YOLO Pose Model: {global_state.yolo_pose_model}")
+    print(f"Debug Mode: {global_state.DebugMode}")
+    print(f"Live Display Mode: {global_state.LiveDisplayMode}")
+    print(f"VR Mode: {global_state.isVR}")
+    print(f"Frame Start: {global_state.frame_start}")
+    print(f"Frame End: {global_state.frame_end}")
+    print(f"Reference Script: {global_state.reference_script}")
 
-        #if isVR:
-        #    offset_x = image_x_size = image_x_size // 3  # Adjust for VR videos
+    # Processing logic
 
-        print(f"Image size: {image_x_size}x{image_y_size}")
-        cap.release()
+    global_state.debugger = Debugger(global_state.video_file, output_dir=global_state.video_file[:-4])  # Initialize the debugger
 
-        funscript_frames = []
-        funscript_distances = []
+    cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)  # Initialize the video reader
+    fps = cap.get(cv2.CAP_PROP_FPS)  # Get the video's FPS
+    image_y_size = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # Get the video's height
+    image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # Get the video's width
 
-        # Process the video
+    print(f"Image size: {image_x_size}x{image_y_size}")
+    cap.release()
 
-        # Run the YOLO detection and saves result to _rawyolo.json file
-        extract_yolo_data(yolo_det_model, yolo_pose_model, video_path, frame_start, frame_end, LiveDisplayMode, isVR)
+    # Process the video
 
-        # Load YOLO detection results from file
-        yolo_data = load_yolo_data_from_file(video_path[:-4] + f"_rawyolo.json")
+    # Run the YOLO detection and saves result to _rawyolo.json file
+    extract_yolo_data()
+    #
+    # Load YOLO detection results from file
+    yolo_data = load_yolo_data_from_file(global_state.video_file[:-4] + f"_rawyolo.json")
 
-        results = make_data_boxes(yolo_data, image_x_size)
+    results = make_data_boxes(yolo_data, image_x_size)
 
-        # Looking for the first instance of penis within the YOLO results
-        first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
+    # Looking for the first instance of penis within the YOLO results
+    first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
 
-        if first_penis_frame is None:
-            print(f"No penis found in video: {video_path}")
-            first_penis_frame = 0
+    if first_penis_frame is None:
+        print(f"No penis found in video: {global_state.video_file}")
+        first_penis_frame = 0
 
-        # Deciding whether we start from there or from a user specified later frame
-        frame_start = max(max(first_penis_frame - int(fps), frame_start - int(fps)), 0)
+    # Deciding whether we start from there or from a user specified later frame
+    global_state.frame_start = max(max(first_penis_frame - int(fps), global_state.frame_start - int(fps)), 0)
 
-        # Performing the tracking part and generation of the raw funscript data
-        funscript_data = analyze_tracking_results(results, image_y_size, video_path, frame_start, frame_end, LiveDisplayMode)
+    print(f"Frame Start adjusted to: {global_state.frame_start}")
 
-        debugger.save_logs()
+    # Performing the tracking part and generation of the raw funscript data
+    global_state.funscript_data = analyze_tracking_results(results, image_y_size)
 
-        funscript_handler = FunscriptGenerator()
+    global_state.debugger.save_logs()
 
-        # Simplifying the funscript data and generating the file
-        funscript_handler.generate(video_path[:-4] + f"_rawfunscript.json", funscript_data, fps, LiveDisplayMode)
+    funscript_handler = FunscriptGenerator()
 
-        # Optional, compare generated funscript with reference funscript
-        if reference_funscript:
-            funscript_handler.compare_funscripts(reference_funscript, video_path[:-3] + "funscript", video_path, isVR, video_path[:-4] + "_comparefunscripts.png", video_path[:-4] + "_adjusted.funscript",)
+    # Simplifying the funscript data and generating the file
+    funscript_handler.generate(global_state.video_file[:-4] + f"_rawfunscript.json", global_state.funscript_data, fps, global_state.LiveDisplayMode)
 
-        #funscripts = []
-        #if reference_funscript:
-        #    funscripts.append(reference_funscript)
-        #funscripts.append(video_path[:-3] + "funscript")
-        #funscripts.append(video_path[:-4] + "_adjusted.funscript")
-        #funscript_handler.analyze_funscripts(script_paths=funscripts, video_path=video_path,
-        #                            isVR=isVR, output_image_path=video_path[:-4] + "_comparefunscripts.png")
+    # Optional, compare generated funscript with reference funscript if specified, or a simple generic report
+    funscript_handler.compare_funscripts(global_state.reference_script, global_state.video_file[:-3] + "funscript", global_state.video_file, global_state.isVR,
+                                             global_state.video_file[:-4] + "_comparefunscripts.png",
+                                             global_state.video_file[:-4] + "_adjusted.funscript", )
 
-        print(f"Finished processing video: {video_path}")
+    print(f"Finished processing video: {global_state.video_file}")
+
+def debug_function():
+    """
+    Debugging function to perform specific debugging tasks.
+    """
+    global_state.video_file = video_path.get()
+    if not global_state.video_file:
+        messagebox.showerror("Error", "Please select a video file.")
+        return
+
+    global_state.yolo_det_model = get_yolo_model_path()
+    global_state.yolo_pose_model = ""  # "models/yolo11n-pose.mlpackage"
+    global_state.DebugMode = debug_mode_var.get()
+    global_state.LiveDisplayMode = live_display_mode_var.get()
+    global_state.isVR = is_vr_var.get()
+    global_state.frame_start = 0 if frame_start_entry.get() == "" else int(frame_start_entry.get())
+    global_state.frame_end = None if frame_end_entry.get() == "" else int(frame_end_entry.get())
+    global_state.reference_script = reference_script_path.get()
+
+    print(f"Processing video: {global_state.video_file}")
+    print(f"YOLO Detection Model: {global_state.yolo_det_model}")
+    print(f"YOLO Pose Model: {global_state.yolo_pose_model}")
+    print(f"Debug Mode: {global_state.DebugMode}")
+    print(f"Live Display Mode: {global_state.LiveDisplayMode}")
+    print(f"VR Mode: {global_state.isVR}")
+    print(f"Frame Start: {global_state.frame_start}")
+    print(f"Frame End: {global_state.frame_end}")
+    print(f"Reference Script: {global_state.reference_script}")
+
+    # Processing logic
+
+    global_state.debugger = Debugger(global_state.video_file, output_dir=global_state.video_file[:-4])  # Initialize the debugger
+
+    # if the debug_logs.json file exists, load it
+    if os.path.exists(global_state.video_file[:-4] + f"_debug_logs.json"):
+        global_state.debugger.load_logs()
+        global_state.debugger.play_video(global_state.frame_start)
+    else:
+        messagebox.showinfo("Info", f"Debug logs file not found: {global_state.video_file[:-4] + f'_debug_logs.json'}")
+
+def quit_application():
+    """
+    Quit the application.
+    """
+    print("Quitting the application...")
+    root.quit()  # Close the Tkinter main loop
+    root.destroy()  # Destroy the root window
+
+# GUI Setup
+root = tk.Tk()
+root.title("VR funscript generation helper")
+
+# Variables
+video_path = tk.StringVar()
+reference_script_path = tk.StringVar()
+debug_mode_var = tk.BooleanVar()
+live_display_mode_var = tk.BooleanVar()
+is_vr_var = tk.BooleanVar()
+
+# Video File Selection
+tk.Label(root, text="Video File:").grid(row=0, column=0, padx=5, pady=5)
+tk.Entry(root, textvariable=video_path, width=50).grid(row=0, column=1, padx=5, pady=5)
+tk.Button(root, text="Browse", command=select_video_file).grid(row=0, column=2, padx=5, pady=5)
+
+# Reference Script Selection
+tk.Label(root, text="Reference Script:").grid(row=1, column=0, padx=5, pady=5)
+tk.Entry(root, textvariable=reference_script_path, width=50).grid(row=1, column=1, padx=5, pady=5)
+tk.Button(root, text="Browse", command=select_reference_script).grid(row=1, column=2, padx=5, pady=5)
+
+# Debug Mode
+tk.Checkbutton(root, text="Debug Mode (save logs)", variable=debug_mode_var).grid(row=2, column=0, padx=5, pady=5)
+
+# Live Display Mode
+tk.Checkbutton(root, text="Live Display Mode (plays video during detection, costs time)", variable=live_display_mode_var).grid(row=2, column=1, padx=5, pady=5)
+
+# VR Mode, activated by default
+is_vr_var.set(True)
+tk.Checkbutton(root, text="VR Mode", variable=is_vr_var).grid(row=2, column=2, padx=5, pady=5)
+
+# Frame Start
+tk.Label(root, text="Frame Start (or blank):").grid(row=3, column=0, padx=5, pady=5)
+frame_start_entry = tk.Entry(root, width=10)
+frame_start_entry.grid(row=3, column=1, padx=5, pady=5)
+
+# Frame End
+tk.Label(root, text="Frame End (or blank):").grid(row=4, column=0, padx=5, pady=5)
+frame_end_entry = tk.Entry(root, width=10)
+frame_end_entry.grid(row=4, column=1, padx=5, pady=5)
+
+# Start Button
+tk.Button(root, text="Start Processing", command=start_processing).grid(row=5, column=1, padx=5, pady=20)
+
+# Debug Button
+tk.Button(root, text="Debug (q to quit)", command=debug_function).grid(row=5, column=2, padx=5, pady=20)
+
+# Quit Button
+tk.Button(root, text="Quit", command=quit_application).grid(row=5, column=0, padx=5, pady=20)
+
+tk.Label(root, text="Not for commercial use. Individual and personal use only.\nk00gar © 2024 - https://github.com/ack00gar", font=("Arial", 10, "italic")).grid(row=6, column=0, columnspan=3, padx=5, pady=5)
+
+root.mainloop()

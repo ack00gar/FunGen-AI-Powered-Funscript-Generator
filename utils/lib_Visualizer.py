@@ -21,6 +21,10 @@ class Visualizer:
         cv2.rectangle(image, (gauge_x, gauge_y), (gauge_x + gauge_width, gauge_y + gauge_height), (0, 0, 0), -1)
         fill_height = int((distance / 100) * gauge_height)
         cv2.rectangle(image, (gauge_x, gauge_y + gauge_height - fill_height), (gauge_x + gauge_width, gauge_y + gauge_height), (0, 255, 0), -1)
+        # Draw the distance text on top of the filled part of the gauge
+        #cv2.putText(image, str(int(distance)), (gauge_x + gauge_width // 2, gauge_y + gauge_height // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        cv2.putText(image, str(int(distance)), (gauge_x, gauge_y + gauge_height - fill_height - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         return image
 
     def draw_limited_graph(self, image, distances, frames, nb_frames):

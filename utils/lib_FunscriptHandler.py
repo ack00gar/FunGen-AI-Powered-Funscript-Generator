@@ -10,6 +10,10 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize
 from params.config import heatmap_colors, step_size, vw_filter_coeff
 import cv2
 
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import datetime
+
 class FunscriptGenerator:
     def generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
         output_path = raw_funscript_path[:-18] + '.funscript'
@@ -37,12 +41,22 @@ class FunscriptGenerator:
             # Adjust peaks and lows
             ats = [p[0] for p in self.filtered_positions]
             positions = [p[1] for p in self.filtered_positions]
-            adjusted_positions = self.adjust_peaks_and_lows(positions, peak_boost=15, low_reduction=25,
-                                                            max_flat_length=3)
+
+            # let's remap the highest to 100, and the lowest to 0, and rescale to 0-100
+            adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
+            # drag all values below 10 to 0 and above 90 to 100
+            readjusted_positions = [0 if p < 10 else 100 if p > 90 else p for p in adjusted_positions]
+
+            # let's boost the peaks by 20%, and reduce the lows by 20% and stay within 0-100
+            adjusted_positions = self.adjust_peaks_and_lows(readjusted_positions, peak_boost=20, low_reduction=20,)
+
+
+            #adjusted_positions = self.adjust_peaks_and_lows(positions, peak_boost=15, low_reduction=20,
+            #                                                max_flat_length=3)
             # recombine ats and positions
-            adjusted_positions = list(zip(ats, adjusted_positions))
+            zip_adjusted_positions = list(zip(ats, adjusted_positions))
             remapped_path = output_path[:-10] + '_adjusted.funscript'
-            self.write_funscript(adjusted_positions, remapped_path, fps)
+            self.write_funscript(zip_adjusted_positions, remapped_path, fps)
             self.generate_heatmap(remapped_path,
                                   remapped_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
 
@@ -73,9 +87,14 @@ class FunscriptGenerator:
             print("Failed to load funscript data.")
             return
 
+        # add a timing: 0, position: 100 at the beginning if no value for 0
+        if times[0] != 0:
+            times.insert(0, 0)
+            positions.insert(0, 100)
+
         # Print loaded data for debugging
-        print(f"Times: {times}")
-        print(f"Positions: {positions}")
+        #print(f"Times: {times}")
+        #print(f"Positions: {positions}")
         print(f"Total Actions: {len(times)}")
         print(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
@@ -226,6 +245,10 @@ class FunscriptGenerator:
         irrelevant_chapters_export = []
         # Print the chapters
         for chapter in chapters:
+            if len(chapter['startTime']) > 8:
+                chapter['startTime'] = chapter['startTime'][:8]
+            if len(chapter['endTime']) > 8:
+                chapter['endTime'] = chapter['endTime'][:8]
             print(f"Chapter: {chapter['name']}, Start: {chapter['startTime']}, End: {chapter['endTime']}")
             # convert 00:00:00 to milliseconds
             startTime_ms = int(chapter['startTime'].split(':')[0]) * 60 * 60 * 1000 + int(
@@ -245,11 +268,21 @@ class FunscriptGenerator:
         if script2 is not None:
             generated_paths.append(script2)
 
-        # Load reference funscript
-        ref_times, ref_positions, _, _ = self.load_funscript(reference_path)
+        if reference_path:
+            # Load reference funscript
+            ref_times, ref_positions, _, _ = self.load_funscript(reference_path)
 
-        # Determine total duration in seconds
-        total_duration = ref_times[-1] / 1000 if ref_times else 0
+            # if no 0 at the beginning, add it
+            if ref_times and ref_times[0] != 0:
+                ref_times.insert(0, 0)
+                ref_positions.insert(0, 100)
+
+            # Determine total duration in seconds
+            total_duration = ref_times[-1] / 1000 if ref_times else 0
+        else:
+            ref_times, ref_positions = [], []
+            gen_times, gen_positions, _, _ = self.load_funscript(generated_paths[0])
+            total_duration = gen_times[-1] / 1000 if gen_times else 0
 
         # Select 6 random non-overlapping 20-second sections
         sections = self.select_random_sections(total_duration, section_duration=10, num_sections=6)
@@ -263,9 +296,10 @@ class FunscriptGenerator:
             ref_sections = []
             gen_sections = []
             for start, end in sections:
-                ref_sec = self.extract_section(ref_times, ref_positions, start, end)
+                if reference_path:
+                    ref_sec = self.extract_section(ref_times, ref_positions, start, end)
+                    ref_sections.append(ref_sec)
                 gen_sec = self.extract_section(gen_times, gen_positions, start, end)
-                ref_sections.append(ref_sec)
                 gen_sections.append(gen_sec)
 
             if not screenshots_done:
@@ -274,155 +308,11 @@ class FunscriptGenerator:
                 screenshots_done = True
 
             # Plot and combine
-            #self.create_combined_plot(ref_sections, gen_sections, screenshots, sections, output_image_path)
-            # Create the combined plot
             self.create_combined_plot(
                 ref_sections, gen_sections, screenshots, sections, output_image_path,
                 ref_times, ref_positions, gen_times, gen_positions
             )
 
-    def analyze_funscripts(self, script_paths, video_path, isVR, output_image_path):
-        """
-        Analyzes one, two, or three funscripts and generates a report.
-
-        Args:
-            script_paths (list): List of paths to the funscripts (1, 2, or 3).
-            video_path (str): Path to the video file.
-            isVR (bool): Whether the video is VR (to crop the frame).
-            output_image_path (str): Path to save the output image.
-        """
-        if not script_paths or len(script_paths) > 3:
-            raise ValueError("Please provide 1, 2, or 3 funscript paths.")
-
-        # Load funscripts
-        funscripts = []
-        for path in script_paths:
-            times, positions, _, _ = self.load_funscript(path)
-            funscripts.append((times, positions))
-
-        # Determine total duration in seconds
-        total_duration = funscripts[0][0][-1] / 1000 if funscripts[0][0] else 0
-
-        # Select 6 random non-overlapping 20-second sections
-        sections = self.select_random_sections(total_duration, section_duration=10, num_sections=6)
-
-        # Capture screenshots
-        screenshots = self.capture_screenshots(video_path, isVR, sections)
-
-        # Extract data for each section
-        section_data = []
-        for times, positions in funscripts:
-            sections_data = []
-            for start, end in sections:
-                sec = self.extract_section(times, positions, start, end)
-                sections_data.append(sec)
-            section_data.append(sections_data)
-
-        # Create the combined plot
-        self.create_flexible_plot(section_data, screenshots, sections, output_image_path, funscripts)
-
-    def create_flexible_plot(self, section_data, screenshots, sections, output_image_path, funscripts):
-        """
-        Creates a flexible plot for 1, 2, or 3 funscripts.
-
-        Args:
-            section_data (list): List of section data for each funscript.
-            screenshots (list): List of screenshots for each section.
-            sections (list): List of tuples (start, end) for each section.
-            output_image_path (str): Path to save the plot.
-            funscripts (list): List of tuples (times, positions) for each funscript.
-        """
-        num_funscripts = len(funscripts)
-        rows_per_funscript = 2  # Heatmap + stats
-        total_rows = rows_per_funscript + 6  # 6 sections
-
-        # Create a grid: total_rows rows, num_funscripts columns
-        #   fig, axes = plt.subplots(nrows=total_rows, ncols=2, figsize=(10 * num_funscripts, 28))
-        fig, axes = plt.subplots(nrows=total_rows, ncols=2, figsize=(10, 28))
-        if num_funscripts == 1:
-            axes = axes.reshape(-1, 1)  # Ensure axes is 2D even for a single funscript
-
-        # Plot heatmaps and stats for each funscript
-        for i, (times, positions) in enumerate(funscripts):
-            # Heatmap
-            ax_heatmap = axes[0, i]
-            self.generate_heatmap_inline(ax_heatmap, times, positions)
-            ax_heatmap.set_title(f'Funscript {i + 1} Heatmap')
-
-            # Stats
-            ax_stats = axes[1, i]
-            ax_stats.axis('off')
-            metrics = self._calculate_metrics(times, positions)
-            stats_text = (
-                f"Stats:\n"
-                f"Number of Strokes: {metrics['num_strokes']}\n"
-                f"Avg Stroke Duration: {metrics['avg_stroke_duration']:.2f}s\n"
-                f"Avg Speed: {int(metrics['avg_speed'])} positions/s\n"
-                f"Avg Depth of Stroke: {int(metrics['avg_depth'])}\n"
-                f"Avg Max: {int(metrics['avg_max'])}\n"
-                f"Avg Min: {int(metrics['avg_min'])}"
-            )
-            ax_stats.text(0.1, 0.5, stats_text, fontsize=10, va='center')
-
-        # original version - Plot sections in the remaining rows
-        """for i in range(6):  # 6 sections
-            # Plot screenshot in the first column
-            ax_screenshot = axes[(i + 2) * 2]  # First column of each row
-            ax_screenshot.imshow(screenshots[i])
-            ax_screenshot.axis('off')  # Hide axes for the screenshot
-
-            # Plot funscript data in the second column
-            ax_plot = axes[(i + 2) * 2 + 1]  # Second column of each row
-            gen_times_sec = [t / 1000 for t in gen_sections[i][0]]
-            ax_plot.plot(gen_times_sec, gen_sections[i][1], label='Generated', color='blue')
-
-            ref_times_sec = [t / 1000 for t in ref_sections[i][0]]
-            ax_plot.plot(ref_times_sec, ref_sections[i][1], label='Reference', color='red')
-
-            # Set labels and title
-            start_time = datetime.datetime.fromtimestamp(sections[i][0]).strftime('%H:%M:%S')
-            end_time = datetime.datetime.fromtimestamp(sections[i][1]).strftime('%H:%M:%S')
-            ax_plot.set_title(f'Section {i + 1}: {start_time} - {end_time}')
-            ax_plot.set_xlabel('Time (s)')
-            ax_plot.set_ylabel('Position')
-            ax_plot.legend()
-            ax_plot.set_xlim(sections[i][0], sections[i][1])
-        """
-
-        # Adjust layout
-        plt.tight_layout()
-
-        # Plot sections
-        for i in range(6):  # 6 sections
-            #ax_screenshot = axes[rows_per_funscript + i]  # axes[rows_per_funscript + i, j]
-            ax_screenshot = axes[(i + 2) * 2]  # First column of each row
-            ax_screenshot.imshow(screenshots[i])
-            ax_screenshot.axis('off')
-
-            # Plot funscript data in the second column
-            ax_plot = axes[(i + 2) * 2 + 1]  # Second column of each row
-            for j in range(num_funscripts):
-
-                #ax_plot = axes[rows_per_funscript + i, j]
-                times_sec = [t / 1000 for t in section_data[j][i][0]]
-                ax_plot.plot(times_sec, section_data[j][i][1], label=f'Funscript {j + 1}',
-                             color=['blue', 'red', 'green'][j])
-
-            # Set labels and title
-            start_time = datetime.datetime.fromtimestamp(sections[i][0]).strftime('%H:%M:%S')
-            end_time = datetime.datetime.fromtimestamp(sections[i][1]).strftime('%H:%M:%S')
-            ax_plot.set_title(f'Section {i + 1}: {start_time} - {end_time}')
-            ax_plot.set_xlabel('Time (s)')
-            ax_plot.set_ylabel('Position')
-            ax_plot.legend()
-            ax_plot.set_xlim(sections[i][0], sections[i][1])
-
-        # Adjust layout
-        plt.tight_layout()
-
-        # Save the figure
-        plt.savefig(output_image_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png", dpi=200)
-        plt.close()
 
     def select_random_sections(self, total_duration, section_duration=10, num_sections=6):
         sections = []
@@ -468,9 +358,8 @@ class FunscriptGenerator:
         cap.release()
         return screenshots
 
-
     def create_combined_plot(self, ref_sections, gen_sections, screenshots, sections, output_image_path, ref_times,
-                             ref_positions, gen_times, gen_positions):
+                                 ref_positions, gen_times, gen_positions):
         """
         Creates a combined plot with heatmaps as a header, comparative information, and section comparisons below.
 
@@ -485,42 +374,38 @@ class FunscriptGenerator:
             gen_times (list): Times from the generated funscript.
             gen_positions (list): Positions from the generated funscript.
         """
-        # Create a 8x2 grid: 8 rows, 2 columns (1st row for heatmaps, 2nd row for comparative info, 3rd-8th for sections)
-        fig, axes = plt.subplots(nrows=8, ncols=2, figsize=(10, 28))
+        # Create a flexible grid layout
+        fig = plt.figure(figsize=(28, 24))
+        gs = gridspec.GridSpec(5, 4, height_ratios=[1, .5, 2, 2, 2], width_ratios=[1, 2, 1, 2])
 
-        # Flatten the axes array for easy iteration
-        axes = axes.flatten()
+        # Heatmaps (First row: 2 columns spanning the entire width)
+        if ref_sections:
+            ax_ref_heatmap = fig.add_subplot(gs[0, :2])
+            self.generate_heatmap_inline(ax_ref_heatmap, ref_times, ref_positions)
+            ax_ref_heatmap.set_title('Reference Funscript Heatmap', fontsize=14)
 
-        # Generate and add reference heatmap to the first row, first column
-        ax_ref_heatmap = axes[0]
-        self.generate_heatmap_inline(ax_ref_heatmap, ref_times, ref_positions)
-        ax_ref_heatmap.set_title('Reference Funscript Heatmap')
-
-        # Generate and add generated heatmap to the first row, second column
-        ax_gen_heatmap = axes[1]
+        ax_gen_heatmap = fig.add_subplot(gs[0, 2:])
         self.generate_heatmap_inline(ax_gen_heatmap, gen_times, gen_positions)
-        ax_gen_heatmap.set_title('Generated Funscript Heatmap')
+        ax_gen_heatmap.set_title('Generated Funscript Heatmap', fontsize=14)
 
-        # Calculate comparative information
-        ref_metrics = self._calculate_metrics(ref_times, ref_positions)
+        if ref_sections:
+            # Comparative information (Second row: 2 columns)
+            ax_comparative_left = fig.add_subplot(gs[1, :2])
+            ref_metrics = self._calculate_metrics(ref_times, ref_positions)
+            ref_comparative_text = (
+                f"Reference:\n"
+                f"Number of Strokes: {ref_metrics['num_strokes']}\n"
+                f"Avg Stroke Duration: {ref_metrics['avg_stroke_duration']:.2f}s\n"
+                f"Avg Speed: {int(ref_metrics['avg_speed'])} positions/s\n"
+                f"Avg Depth of Stroke: {int(ref_metrics['avg_depth'])}\n"
+                f"Avg Max: {int(ref_metrics['avg_max'])}\n"
+                f"Avg Min: {int(ref_metrics['avg_min'])}"
+            )
+            ax_comparative_left.text(0.5, 0.5, ref_comparative_text, fontsize=12, va='center', ha='center')
+            ax_comparative_left.axis('off')
+
+        ax_comparative_right = fig.add_subplot(gs[1, 2:])
         gen_metrics = self._calculate_metrics(gen_times, gen_positions)
-
-        # Add comparative information to the second row
-        ax_comparative_left = axes[2]  # First column of the second row
-        ax_comparative_left.axis('off')  # Hide axes for the comparative info
-        ref_comparative_text = (
-            f"Reference:\n"
-            f"Number of Strokes: {ref_metrics['num_strokes']}\n"
-            f"Avg Stroke Duration: {ref_metrics['avg_stroke_duration']:.2f}s\n"
-            f"Avg Speed: {int(ref_metrics['avg_speed'])} positions/s\n"
-            f"Avg Depth of Stroke: {int(ref_metrics['avg_depth'])}\n"
-            f"Avg Max: {int(ref_metrics['avg_max'])}\n"
-            f"Avg Min: {int(ref_metrics['avg_min'])}"
-        )
-        ax_comparative_left.text(0.1, 0.5, ref_comparative_text, fontsize=10, va='center')
-
-        ax_comparative_right = axes[3]  # Second column of the second row
-        ax_comparative_right.axis('off')  # Hide axes for the comparative info
         gen_comparative_text = (
             f"Generated:\n"
             f"Number of Strokes: {gen_metrics['num_strokes']}\n"
@@ -530,38 +415,43 @@ class FunscriptGenerator:
             f"Avg Max: {int(gen_metrics['avg_max'])}\n"
             f"Avg Min: {int(gen_metrics['avg_min'])}"
         )
-        ax_comparative_right.text(0.1, 0.5, gen_comparative_text, fontsize=10, va='center')
+        ax_comparative_right.text(0.5, 0.5, gen_comparative_text, fontsize=12, va='center', ha='center')
+        ax_comparative_right.axis('off')
 
-        # Plot sections in the remaining rows
-        for i in range(6):  # 6 sections
-            # Plot screenshot in the first column
-            ax_screenshot = axes[(i + 2) * 2]  # First column of each row
-            ax_screenshot.imshow(screenshots[i])
-            ax_screenshot.axis('off')  # Hide axes for the screenshot
+        # Sections (Rows 3-8: Each row has 2 subplots for screenshot and data plot)
+        for i in range(3, 6):  # Section rows
+            for j in range(2):  # Two columns per row
+                idx = (i - 3) * 2 + j  # Section index
+                if idx >= len(sections):
+                    break
 
-            # Plot funscript data in the second column
-            ax_plot = axes[(i + 2) * 2 + 1]  # Second column of each row
-            gen_times_sec = [t / 1000 for t in gen_sections[i][0]]
-            ax_plot.plot(gen_times_sec, gen_sections[i][1], label='Generated', color='blue')
+                # Screenshot (first column)
+                ax_screenshot = fig.add_subplot(gs[i-1, j * 2])
+                ax_screenshot.imshow(screenshots[idx])
+                ax_screenshot.axis('off')
 
-            ref_times_sec = [t / 1000 for t in ref_sections[i][0]]
-            ax_plot.plot(ref_times_sec, ref_sections[i][1], label='Reference', color='red')
+                # Funscript comparison (second column)
+                ax_plot = fig.add_subplot(gs[i-1, j * 2 + 1])
+                gen_times_sec = [t / 1000 for t in gen_sections[idx][0]]
+                ax_plot.plot(gen_times_sec, gen_sections[idx][1], label='Generated', color='blue')
 
-            # Set labels and title
-            start_time = datetime.datetime.fromtimestamp(sections[i][0]).strftime('%H:%M:%S')
-            end_time = datetime.datetime.fromtimestamp(sections[i][1]).strftime('%H:%M:%S')
-            ax_plot.set_title(f'Section {i + 1}: {start_time} - {end_time}')
-            ax_plot.set_xlabel('Time (s)')
-            ax_plot.set_ylabel('Position')
-            ax_plot.legend()
-            ax_plot.set_xlim(sections[i][0], sections[i][1])
+                if ref_sections:
+                    ref_times_sec = [t / 1000 for t in ref_sections[idx][0]]
+                    ax_plot.plot(ref_times_sec, ref_sections[idx][1], label='Reference', color='red')
+
+                start_time = datetime.timedelta(seconds=int(sections[idx][0]))  # datetime.datetime.fromtimestamp(sections[idx][0]).strftime('%H:%M:%S')
+                end_time = datetime.timedelta(seconds=int(sections[idx][1]))  # datetime.datetime.fromtimestamp(sections[idx][1]).strftime('%H:%M:%S')
+                ax_plot.set_title(f'Section {idx + 1}: {start_time} - {end_time}', fontsize=10)
+                ax_plot.set_xlabel('Time (s)')
+                ax_plot.set_ylabel('Position')
+                ax_plot.legend()
 
         # Adjust layout
         plt.tight_layout()
 
-        # Save the combined figure
-        plt.savefig(output_image_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png", dpi=200)
-        #plt.show()
+        # Save the figure
+        plt.savefig(output_image_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png", dpi=100)
+        # plt.show()
 
     def generate_heatmap_inline(self, ax, times, positions):
         """

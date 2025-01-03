@@ -28,7 +28,7 @@ def detect_scene_changes(video_path, crop=None, threshold=0.97, frame_start=0, f
     """
     Detect scene changes in a video using histogram comparison.
     :param video_path: Path to the video file.
-    :param crop: Crop mode ("Left" or "Right") to process only one side of the frame.
+    :param crop: Will crop the video and keep left/right side.
     :param threshold: Similarity threshold for detecting scene changes.
     :param frame_start: Starting frame for processing.
     :param frame_end: Ending frame for processing.
@@ -42,7 +42,7 @@ def detect_scene_changes(video_path, crop=None, threshold=0.97, frame_start=0, f
     # Get video properties
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     total_frames_base = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    frame_step = 2 * fps  # Process every 2 seconds of video
+    frame_step = fps  # Process every second of video
 
     # Adjust frame range based on input
     if frame_end is None:
@@ -91,13 +91,24 @@ def detect_scene_changes(video_path, crop=None, threshold=0.97, frame_start=0, f
     elif scene_changes[-1][1] != frame_end:
         scene_changes.append([scene_changes[-1][1], frame_end])
 
-    # Merge scenes that are too close
+    print(f"Found {len(scene_changes)} raw scenes: {scene_changes}.")
+    print(f"Scene changes: {scene_changes}")
+    print(f"Merging short scenes...")
+
+    # Merge only short scenes
     merged_scenes = []
+    min_scene_length = 1000  # Minimum scene length in frames (adjust as needed)
     for scene in scene_changes:
-        if not merged_scenes or scene[0] - merged_scenes[-1][1] >= 5000:
-            merged_scenes.append(scene)
+        scene_length = scene[1] - scene[0]
+        if scene_length < min_scene_length:
+            # Merge short scenes with the previous or next scene
+            if merged_scenes:
+                merged_scenes[-1][1] = scene[1]  # Merge with the previous scene
+            else:
+                merged_scenes.append(scene)  # Add the first scene
         else:
-            merged_scenes[-1][1] = scene[1]
+            # Keep scenes longer than the minimum length
+            merged_scenes.append(scene)
 
     print(f"Found {len(merged_scenes)} relevant scenes: {merged_scenes}.")
     cap.release()
