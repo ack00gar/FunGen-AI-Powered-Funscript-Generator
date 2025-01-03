@@ -704,7 +704,7 @@ tk.Entry(root, textvariable=video_path, width=50).grid(row=0, column=1, padx=5, 
 tk.Button(root, text="Browse", command=select_video_file).grid(row=0, column=2, padx=5, pady=5)
 
 # Reference Script Selection
-tk.Label(root, text="Reference Script:").grid(row=1, column=0, padx=5, pady=5)
+tk.Label(root, text="Reference Script (or blank):").grid(row=1, column=0, padx=5, pady=5)
 tk.Entry(root, textvariable=reference_script_path, width=50).grid(row=1, column=1, padx=5, pady=5)
 tk.Button(root, text="Browse", command=select_reference_script).grid(row=1, column=2, padx=5, pady=5)
 
