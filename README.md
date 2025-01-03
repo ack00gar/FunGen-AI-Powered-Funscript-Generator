@@ -1,5 +1,3 @@
-Here’s the updated `README.md` with the **Discord community link** added under the **Support** section:
-
 ---
 
 # VR-Funscript-AI-Generator
