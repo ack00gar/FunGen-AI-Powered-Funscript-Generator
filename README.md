@@ -48,7 +48,7 @@ This project started as a dream to automate Funscript generation for VR videos. 
 
 ## YOLO Model
 
-The YOLO model used in this project is based on YOLOv11n, which was fine-tuned with 9 new classes and 4,500+ frames randomly extracted from a VR video library. Here’s how the model was developed:
+The YOLO model used in this project is based on YOLOv11n, which was fine-tuned with 10 new classes and 4,500+ frames randomly extracted from a VR video library. Here’s how the model was developed:
 
 - **Initial Training**: A few hundred frames were manually tagged and boxed to create an initial dataset. The model was trained on this dataset to generate preliminary detection results.
 - **Iterative Improvement**: The trained model was used to suggest bounding boxes in additional frames. The suggested boxes were manually adjusted, and the dataset was expanded. This process was repeated iteratively to improve the model’s accuracy.
