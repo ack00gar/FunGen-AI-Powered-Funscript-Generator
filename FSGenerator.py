@@ -275,9 +275,9 @@ def extract_yolo_data():
 
             if global_state.LiveDisplayMode:
                 # Display the YOLO results for testing
-                yolo_det_results[0].plot()
-                cv2.imshow("YOLO11", yolo_det_results[0].plot())
-                cv2.waitKey(1)
+                #yolo_det_results[0].plot()
+                #cv2.imshow("YOLO11", yolo_det_results[0].plot())
+                #cv2.waitKey(1)
                 # Verify the sorted boxes
                 sorted_boxes = test_result.get_boxes(frame_pos)
                 print(f"Sorted boxes : {sorted_boxes}")
