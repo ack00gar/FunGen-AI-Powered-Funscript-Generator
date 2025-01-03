@@ -242,21 +242,24 @@ class Debugger:
                     cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
                     cv2.putText(frame_copy, "Locked Penis", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-            # Update rolling window buffers
-            distance = variables.get("distance", 0)
-            funscript_value = self._get_funscript_value(funscript_interpolator, self.current_frame, self.fps) if funscript_interpolator else 0
-            visualizer.draw_gauge(frame_copy, funscript_value)
-            distance_buffer = np.roll(distance_buffer, -1)
-            distance_buffer[-1] = distance
-            funscript_buffer = np.roll(funscript_buffer, -1)
-            funscript_buffer[-1] = funscript_value
+            try:
+                # Update rolling window buffers
+                distance = variables.get("distance", 0)
+                funscript_value = self._get_funscript_value(funscript_interpolator, self.current_frame, self.fps) if funscript_interpolator else 0
+                visualizer.draw_gauge(frame_copy, funscript_value)
+                distance_buffer = np.roll(distance_buffer, -1)
+                distance_buffer[-1] = distance
+                funscript_buffer = np.roll(funscript_buffer, -1)
+                funscript_buffer[-1] = funscript_value
 
-            # Draw rolling window curves
-            graph_height = int(frame_copy.shape[0] * 0.2)
-            graph_y_start = y_offset + 10
-            self._draw_rolling_window_curve(frame_copy, distance_buffer, (0, 255, 0), 0.5, graph_height, graph_y_start)
-            self._draw_rolling_window_curve(frame_copy, funscript_buffer, (255, 0, 0), 0.5, graph_height, graph_y_start)
-
+                # Draw rolling window curves
+                graph_height = int(frame_copy.shape[0] * 0.2)
+                graph_y_start = y_offset + 10
+                self._draw_rolling_window_curve(frame_copy, distance_buffer, (0, 255, 0), 0.5, graph_height, graph_y_start)
+                self._draw_rolling_window_curve(frame_copy, funscript_buffer, (255, 0, 0), 0.5, graph_height, graph_y_start)
+            except:
+                # no variables logged at this frame
+                pass
             # Draw progress bar
             self._draw_progress_bar(frame_copy, frame.shape[1], frame.shape[0])
 

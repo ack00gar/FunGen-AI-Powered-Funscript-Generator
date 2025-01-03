@@ -1,3 +1,11 @@
+#models path
+yolo_models = ["models/k00gar-11n-200ep-best.mlpackage",
+                "models/k00gar-11n-200ep-best.pt",
+                "models/k00gar-11n-200ep-best.onnx",
+                "models/yolo11n-pose.mlpackage",
+                "models/yolo11n-pose.pt",
+                "models/yolo11n-pose.onnx"]
+
 # ffmpeg and ffprobe paths
 ffmpeg_path = "/usr/local/bin/ffmpeg"
 ffprobe_path = "/usr/local/bin/ffprobe"
