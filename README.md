@@ -1,5 +1,3 @@
----
-
 # VR-Funscript-AI-Generator
 
 This project is a Python-based tool for generating Funscript files from VR videos using Computer Vision (CV) and AI techniques. It leverages YOLO (You Only Look Once) object detection and custom tracking algorithms to automate the process of creating Funscript files for interactive devices.
