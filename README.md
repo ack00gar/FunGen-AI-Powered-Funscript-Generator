@@ -9,8 +9,7 @@ If you find this project useful, consider supporting me on:
 
 Your support helps me continue developing and improving this project!
 
-Join the **Discord community** for discussions and support:  
-[Discord Community](https://discord.gg/WYkjMbtCZA)
+Join the **Discord community** for discussions and support: [Discord Community](https://discord.gg/WYkjMbtCZA)
 
 The necessary YOLO models will also be available via the Discord.
 
