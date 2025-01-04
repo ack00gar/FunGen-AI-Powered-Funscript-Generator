@@ -74,7 +74,7 @@ The pipeline for generating Funscript files is as follows:
 Before using this project, ensure you have the following installed:
 
 - **Python 3.8 or higher**
-- **FFmpeg** (for video processing)
+- **FFmpeg** added to your path (for video processing)
 - **CUDA** (optional, for GPU acceleration)
 
 ---
@@ -95,6 +95,21 @@ Before using this project, ensure you have the following installed:
 3. **Download the YOLO model**:
    - Place your YOLO model file (e.g., `k00gar-11n-200ep-best.mlpackage`) in the `models/` sub-directory.
    - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
+
+4. **Update the params/config.py**:
+   - If ffmpeg and ffprobe paths are not in your system path, the program will default to the following values.
+   - You can update the params/config.py file, which contains:
+
+   ```bash
+   # ffmpeg and ffprobe paths - replace with your own if not in your system path   
+    win_ffmpeg_path = "C:/ffmpeg/bin/ffmpeg.exe"
+    mac_ffmpeg_path = "/usr/local/bin/ffmpeg"
+    lin_ffmpeg_path = "/usr/bin/ffmpeg"
+
+    win_ffprobe_path = "C:/ffmpeg/bin/ffprobe.exe"
+    mac_ffprobe_path = "/usr/local/bin/ffprobe"
+    lin_ffprobe_path = "/usr/bin/ffprobe"
+   ```
 
 ---
 
@@ -211,13 +226,17 @@ The script generates the following files in the same directory as the input vide
 
 1. **Generate Funscript**:
    ```bash
-   python FSGenerator.py /path/to/vr_video.mp4 --yolo_model models/k00gar-11n-200ep-best.mlpackage --test_mode --is_vr
+   python FSGenerator.py /path/to/vr_video.mp4
    ```
-   This command processes a VR video, detects objects using the specified YOLO model, and generates Funscript data. The `--test_mode` flag enables real-time visualization.
+   This command starts the UI.
 
    You can also simply run it from your IDE, giving it a `video_path` to process.
 
 2. **Debugging Example**:
+
+   The debugger is accessible from the GUI.
+
+   If you want to call it from the code, you can do the following: 
 
    - Display a Specific Frame with debug information:
      ```bash

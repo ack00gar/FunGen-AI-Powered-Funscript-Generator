@@ -13,7 +13,7 @@ class Debugger:
     A class for debugging video frames by logging variables, bounding boxes, and visualizing them.
     """
 
-    def __init__(self, video_path, output_dir):
+    def __init__(self, video_path, isVR=False, video_reader=None, output_dir=None):
         """
         Initialize the Debugger.
         :param video_path: Path to the video file.
@@ -27,6 +27,8 @@ class Debugger:
         self.total_frames = 0  # Total number of frames in the video
         self.fps = 0  # Frames per second of the video
         self.bar_y_start = 0  # Y-coordinate of the progress bar
+        self.isVR = isVR
+        self.video_reader = video_reader
 
     def log_frame(self, frame_id, variables=None, bounding_boxes=None):
         """
@@ -86,61 +88,6 @@ class Debugger:
         """
         self.play_video(frame_id, duration=-1)
 
-    def old_display_frame(self, frame_id):
-        """
-        Display the logged frame with bounding boxes and variable states.
-        :param frame_id: The frame ID to display.
-        """
-        str_frame_id = str(frame_id)
-        if str_frame_id not in self.logs:
-            print(f"No logs found for frame {frame_id}")
-            return
-
-        # Load the frame from the video
-        #cap = cv2.VideoCapture(self.video_path)
-        self.cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
-        ret, frame = self.cap.read()
-        self.cap.release()
-
-        if not ret:
-            print(f"Failed to read frame {frame_id}")
-            return
-
-        # Crop the frame (for VR videos)
-        # frame = frame[:, frame.shape[1] // 6 : frame.shape[1] // 3, :]
-
-        frame_copy = frame.copy()
-
-        # Draw bounding boxes
-        for box in self.logs[str_frame_id]["bounding_boxes"]:
-            x1, y1, x2, y2 = box["box"]
-            class_name = box["class_name"]
-            conf = box["conf"]
-            color = class_colors.get(class_name, (0, 255, 0))  # Default to green if class not found
-            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame_copy, f"{class_name} {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-        # Display variables
-        variables = self.logs[str_frame_id]["variables"]
-        y_offset = 30
-        for key, value in variables.items():
-            cv2.putText(frame_copy, f"{key}: {value}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-            y_offset += 20
-
-        # Draw the locked_penis_box if it exists
-        locked_penis_box = variables.get("locked_penis_box")
-        if locked_penis_box:
-            x1, y1, x2, y2 = locked_penis_box['box']
-            color = class_colors.get("penis", (0, 255, 0))
-            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame_copy, "Locked Penis", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-        # Show the frame
-        cv2.imshow(f"Debug Frame {frame_id}", frame_copy)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
     def play_video(self, start_frame=0, duration=0, rolling_window_size=100, record=False, downsize_ratio=1):
         """
         Play the video from a specified frame, displaying variables, bounding boxes, and rolling window curves.
@@ -153,7 +100,11 @@ class Debugger:
         visualizer = Visualizer()
 
         # Load the video
-        self.cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
+        if self.video_reader == "FFmpeg":
+            self.cap = VideoReaderFFmpeg(self.video_path, is_VR=self.isVR)
+        else:
+            self.cap = cv2.VideoCapture(self.video_path)
+
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         print(f"Total frames: {self.total_frames}, FPS: {self.fps}")
@@ -161,6 +112,8 @@ class Debugger:
         # Initialize video writer if recording
         if record:
             ret, frame = self.cap.read()
+            if self.video_reader == "OpenCV" and self.isVR:
+                frame = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
             #if self.cap.is_VR:
             #    frame_copy = frame[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
             output_path = self.video_path.replace(".mp4", "_debug.mp4")
@@ -208,10 +161,9 @@ class Debugger:
             if not ret:
                 break
 
-            # Crop the frame for VR videos
-            #if self.cap.is_VR:
-            #    frame_copy = frame.copy()[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
-            frame_copy = frame.copy()  # make a copy of the frame to make it writeable
+            if self.video_reader == "OpenCV" and self.isVR:
+                frame = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
+            frame_copy = frame.copy()  # make a copy of the frame to make it writeable, useful for ffmpeg library here
             # Display variables and bounding boxes
             str_frame_id = str(self.current_frame)
             if str_frame_id in self.logs:
@@ -340,8 +292,9 @@ class Debugger:
         """
         self.current_frame = int((x / width) * self.total_frames)
         print(f"Target frame: {self.current_frame}")
-        self.cap.release()
-        self.cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
+        if self.video_reader == "FFmpeg":
+            self.cap.release()
+            self.cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         print("Done resetting and jumping to target frame")
 

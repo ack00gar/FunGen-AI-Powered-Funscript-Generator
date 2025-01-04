@@ -37,6 +37,7 @@ class GlobalState:
         self.funscript_frames = []
         self.funscript_distances = []
         self.debugger = None
+        self.video_reader = None
 
 # Initialize global state
 global_state = GlobalState()
@@ -142,7 +143,12 @@ def get_yolo_model_path():
 
     # Fallback to ONNX model for other platforms without CUDA
     else:
+        print("CUDA not available, if this is unexpected, please install CUDA and check your version of torch.")
+        print("You might need to install a dependency with the following command (example):")
+        print("pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118")
         print(f"Falling back to CPU inference, loading {yolo_models[2]}.")
+        print("WARNING: CPU inference may be slow on some devices.")
+
         return yolo_models[2]
 
 def extract_yolo_data():
@@ -167,7 +173,11 @@ def extract_yolo_data():
     test_result = Result(320)  # Test result object for debugging
 
     # Initialize the video reader
-    cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)
+    if global_state.video_reader == "FFmpeg":
+        cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)  # Initialize the video reader
+    else:
+        cap = cv2.VideoCapture(global_state.video_file)
+
     cap.set(cv2.CAP_PROP_POS_FRAMES, global_state.frame_start)
 
     # Determine the last frame to process
@@ -194,6 +204,8 @@ def extract_yolo_data():
         success, frame = cap.read()  # Read a frame from the video
 
         if success:
+            if global_state.video_reader == "OpenCV" and global_state.isVR:
+                frame = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
 
             # Run YOLO tracking on the frame
             yolo_det_results = det_model.track(frame, persist=True, conf=0.3, verbose=False)
@@ -335,13 +347,21 @@ def analyze_tracking_results(results, image_y_size):
     list_of_frames = results.get_all_frame_ids()  # Get all frame IDs with detections
     visualizer = Visualizer()  # Initialize the visualizer
 
-    cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)  # Initialize the video reader
+    if global_state.video_reader == "FFmpeg":
+        cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)  # Initialize the video reader
+    else:
+        cap = cv2.VideoCapture(global_state.video_file)
+
     fps = cap.get(cv2.CAP_PROP_FPS)  # Get the video's FPS
     nb_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # Get the total number of frames
 
-    cuts = []
+    if global_state.video_reader == "OpenCV" and global_state.isVR:
+        divide_size_by = 2
+    else:
+        divide_size_by = 1
+    image_area = (cap.get(cv2.CAP_PROP_FRAME_WIDTH) // divide_size_by )* cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
-    image_area = cap.get(cv2.CAP_PROP_FRAME_WIDTH) * cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    cuts = []
 
     if not global_state.frame_start:
         global_state.frame_start = 0
@@ -438,7 +458,11 @@ def analyze_tracking_results(results, image_y_size):
         if global_state.LiveDisplayMode:
             # Display the tracking results for testing
             ret, frame = cap.read()
-            frame_display = frame.copy()
+
+            if global_state.video_reader == "OpenCV" and global_state.isVR:
+                frame_display = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
+            else:
+                frame_display = frame.copy()
 
             for box in tracker.tracked_boxes:
                 frame_display = visualizer.draw_bounding_box(frame_display,
@@ -578,8 +602,10 @@ def start_processing():
     global_state.frame_start = 0 if frame_start_entry.get() == "" else int(frame_start_entry.get())
     global_state.frame_end = None if frame_end_entry.get() == "" else int(frame_end_entry.get())
     global_state.reference_script = reference_script_path.get()
+    global_state.video_reader = video_reader_var.get()
 
     print(f"Processing video: {global_state.video_file}")
+    print(f"Video Reader: {global_state.video_reader}")
     print(f"YOLO Detection Model: {global_state.yolo_det_model}")
     print(f"YOLO Pose Model: {global_state.yolo_pose_model}")
     print(f"Debug Mode: {global_state.DebugMode}")
@@ -593,10 +619,18 @@ def start_processing():
 
     global_state.debugger = Debugger(global_state.video_file, output_dir=global_state.video_file[:-4])  # Initialize the debugger
 
-    cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)  # Initialize the video reader
+    if global_state.video_reader == "FFmpeg":
+        cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)  # Initialize the video reader
+        image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # Get the video's width
+    else:
+        cap = cv2.VideoCapture(global_state.video_file)
+        if global_state.isVR:
+            image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 2  # Get the video's width
+        else:
+            image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
     fps = cap.get(cv2.CAP_PROP_FPS)  # Get the video's FPS
     image_y_size = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # Get the video's height
-    image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # Get the video's width
+
 
     print(f"Image size: {image_x_size}x{image_y_size}")
     cap.release()
@@ -657,8 +691,10 @@ def debug_function():
     global_state.frame_start = 0 if frame_start_entry.get() == "" else int(frame_start_entry.get())
     global_state.frame_end = None if frame_end_entry.get() == "" else int(frame_end_entry.get())
     global_state.reference_script = reference_script_path.get()
+    global_state.video_reader = video_reader_var.get()
 
     print(f"Processing video: {global_state.video_file}")
+    print(f"Video Reader: {global_state.video_reader}")
     print(f"YOLO Detection Model: {global_state.yolo_det_model}")
     print(f"YOLO Pose Model: {global_state.yolo_pose_model}")
     print(f"Debug Mode: {global_state.DebugMode}")
@@ -670,7 +706,7 @@ def debug_function():
 
     # Processing logic
 
-    global_state.debugger = Debugger(global_state.video_file, output_dir=global_state.video_file[:-4])  # Initialize the debugger
+    global_state.debugger = Debugger(global_state.video_file, global_state.isVR, global_state.video_reader, output_dir=global_state.video_file[:-4])  # Initialize the debugger
 
     # if the debug_logs.json file exists, load it
     if os.path.exists(global_state.video_file[:-4] + f"_debug_logs.json"):
@@ -697,6 +733,7 @@ reference_script_path = tk.StringVar()
 debug_mode_var = tk.BooleanVar()
 live_display_mode_var = tk.BooleanVar()
 is_vr_var = tk.BooleanVar()
+video_reader_var = tk.StringVar(value="FFmpeg")  # Default to ffmpeg
 
 # Video File Selection
 tk.Label(root, text="Video File:").grid(row=0, column=0, padx=5, pady=5)
@@ -728,15 +765,24 @@ tk.Label(root, text="Frame End (or blank):").grid(row=4, column=0, padx=5, pady=
 frame_end_entry = tk.Entry(root, width=10)
 frame_end_entry.grid(row=4, column=1, padx=5, pady=5)
 
+# Video Reader Selection
+tk.Label(root, text="Video Reader:").grid(row=5, column=0, padx=5, pady=5)
+video_reader_menu = tk.OptionMenu(root, video_reader_var, "OpenCV", "FFmpeg")
+video_reader_menu.grid(row=5, column=1, padx=5, pady=5)
+
+# Add text on the right side
+text_label = tk.Label(root, text="Pick FFmpeg for VR undistortion.\n<= Pick OpenCV for normal processing\nor performance issues.")
+text_label.grid(row=5, column=2, padx=5, pady=5)
+
 # Start Button
-tk.Button(root, text="Start Processing", command=start_processing).grid(row=5, column=1, padx=5, pady=20)
+tk.Button(root, text="Start Processing", command=start_processing).grid(row=6, column=1, padx=5, pady=20)
 
 # Debug Button
-tk.Button(root, text="Debug (q to quit)", command=debug_function).grid(row=5, column=2, padx=5, pady=20)
+tk.Button(root, text="Debug (q to quit)", command=debug_function).grid(row=6, column=2, padx=5, pady=20)
 
 # Quit Button
-tk.Button(root, text="Quit", command=quit_application).grid(row=5, column=0, padx=5, pady=20)
+tk.Button(root, text="Quit", command=quit_application).grid(row=6, column=0, padx=5, pady=20)
 
-tk.Label(root, text="Not for commercial use. Individual and personal use only.\nk00gar © 2024 - https://github.com/ack00gar", font=("Arial", 10, "italic")).grid(row=6, column=0, columnspan=3, padx=5, pady=5)
+tk.Label(root, text="Not for commercial use. Individual and personal use only.\nk00gar © 2024 - https://github.com/ack00gar", font=("Arial", 10, "italic")).grid(row=7, column=0, columnspan=3, padx=5, pady=5)
 
 root.mainloop()
