@@ -151,7 +151,11 @@ class Debugger:
         end_frame = start_frame + int(duration * self.fps) if duration > 0 else self.total_frames
 
         # Set up mouse callback for progress bar
-        width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 6 if self.cap.is_VR else self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        if self.video_reader == "OpenCV" and self.isVR:
+            width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 2
+        else:
+            width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+
         cv2.namedWindow("Debug Video")
         cv2.setMouseCallback("Debug Video", self._mouse_callback, param=width)
 
