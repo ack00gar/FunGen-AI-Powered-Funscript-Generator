@@ -8,7 +8,7 @@ from ultralytics import YOLO  # YOLO model for object detection
 import platform  # For identifying the operating system
 import torch  # PyTorch for use of .pt model if not on Apple device
 import tkinter as tk  # GUI library for macOS for basic use in our case
-from tkinter import filedialog, messagebox  # here, what was I saying...
+from tkinter import filedialog, messagebox, ttk  # here, what was I saying...
 import subprocess  # For running shell commands
 
 # Import custom modules and configurations
@@ -38,6 +38,8 @@ class GlobalState:
         self.funscript_distances = []
         self.debugger = None
         self.video_reader = None
+        self.debug_record_mode = False
+        self.record_duration = 0
 
 # Initialize global state
 global_state = GlobalState()
@@ -692,6 +694,8 @@ def debug_function():
     global_state.frame_end = None if frame_end_entry.get() == "" else int(frame_end_entry.get())
     global_state.reference_script = reference_script_path.get()
     global_state.video_reader = video_reader_var.get()
+    global_state.debug_record_mode = debug_record_mode_var.get()
+    global_state.debug_record_duration = int(debug_record_duration_var.get())
 
     print(f"Processing video: {global_state.video_file}")
     print(f"Video Reader: {global_state.video_reader}")
@@ -711,7 +715,10 @@ def debug_function():
     # if the debug_logs.json file exists, load it
     if os.path.exists(global_state.video_file[:-4] + f"_debug_logs.json"):
         global_state.debugger.load_logs()
-        global_state.debugger.play_video(global_state.frame_start)
+        global_state.debugger.play_video(start_frame=global_state.frame_start,
+                                         duration=global_state.debug_record_duration if global_state.debug_record_mode else 0,
+                                         record=global_state.debug_record_mode,
+                                         downsize_ratio=2)
     else:
         messagebox.showinfo("Info", f"Debug logs file not found: {global_state.video_file[:-4] + f'_debug_logs.json'}")
 
@@ -731,58 +738,92 @@ root.title("VR funscript generation helper")
 video_path = tk.StringVar()
 reference_script_path = tk.StringVar()
 debug_mode_var = tk.BooleanVar()
+debug_record_mode_var = tk.BooleanVar()  # debug record mode
 live_display_mode_var = tk.BooleanVar()
 is_vr_var = tk.BooleanVar()
-video_reader_var = tk.StringVar(value="FFmpeg")  # Default to ffmpeg
+video_reader_var = tk.StringVar()
+debug_record_duration_var = tk.StringVar(value="5")  # Default duration
 
 # Video File Selection
-tk.Label(root, text="Video File:").grid(row=0, column=0, padx=5, pady=5)
-tk.Entry(root, textvariable=video_path, width=50).grid(row=0, column=1, padx=5, pady=5)
-tk.Button(root, text="Browse", command=select_video_file).grid(row=0, column=2, padx=5, pady=5)
+video_frame = ttk.LabelFrame(root, text="Video File", padding=(10, 5))
+video_frame.grid(row=0, column=0, columnspan=4, padx=5, pady=5, sticky="ew")
 
-# Reference Script Selection
-tk.Label(root, text="Reference Script (or blank):").grid(row=1, column=0, padx=5, pady=5)
-tk.Entry(root, textvariable=reference_script_path, width=50).grid(row=1, column=1, padx=5, pady=5)
-tk.Button(root, text="Browse", command=select_reference_script).grid(row=1, column=2, padx=5, pady=5)
-
-# Debug Mode
-tk.Checkbutton(root, text="Debug Mode (save logs)", variable=debug_mode_var).grid(row=2, column=0, padx=5, pady=5)
-
-# Live Display Mode
-tk.Checkbutton(root, text="Live Display Mode (plays video during detection, costs time)", variable=live_display_mode_var).grid(row=2, column=1, padx=5, pady=5)
-
+ttk.Label(video_frame, text="Video File:").grid(row=0, column=0, padx=5, pady=5)
+ttk.Entry(video_frame, textvariable=video_path, width=50).grid(row=0, column=1, padx=5, pady=5)
+ttk.Button(video_frame, text="Browse", command=select_video_file).grid(row=0, column=2, padx=5, pady=5)
 # VR Mode, activated by default
 is_vr_var.set(True)
-tk.Checkbutton(root, text="VR Mode", variable=is_vr_var).grid(row=2, column=2, padx=5, pady=5)
+ttk.Checkbutton(video_frame, text="VR Mode", variable=is_vr_var).grid(row=0, column=3, padx=5, pady=5)
+# Reference Script Selection
+script_frame = ttk.LabelFrame(root, text="Reference Script for comparison (optional)", padding=(10, 5))
+script_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
-# Frame Start
-tk.Label(root, text="Frame Start (or blank):").grid(row=3, column=0, padx=5, pady=5)
-frame_start_entry = tk.Entry(root, width=10)
-frame_start_entry.grid(row=3, column=1, padx=5, pady=5)
+ttk.Label(script_frame, text="Reference Script (optional):").grid(row=0, column=0, padx=5, pady=5)
+ttk.Entry(script_frame, textvariable=reference_script_path, width=50).grid(row=0, column=1, padx=5, pady=5)
+ttk.Button(script_frame, text="Browse", command=select_reference_script).grid(row=0, column=2, padx=5, pady=5)
 
-# Frame End
-tk.Label(root, text="Frame End (or blank):").grid(row=4, column=0, padx=5, pady=5)
-frame_end_entry = tk.Entry(root, width=10)
-frame_end_entry.grid(row=4, column=1, padx=5, pady=5)
+# Mode Selection
+mode_frame = ttk.LabelFrame(root, text="Processing Mode Selection", padding=(10, 5))
+mode_frame.grid(row=2, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+ttk.Checkbutton(mode_frame, text="Debug Mode (save logs for Replay)", variable=debug_mode_var).grid(row=0, column=0, padx=5, pady=5)
+ttk.Checkbutton(mode_frame, text="Live Display Mode (plays video during inference)", variable=live_display_mode_var).grid(row=0, column=1, padx=5, pady=5)
+
+# Frame Range
+frame_frame = ttk.LabelFrame(root, text="Frame Range (optional)", padding=(10, 5))
+frame_frame.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+ttk.Label(frame_frame, text="Frame Start (optional):").grid(row=0, column=0, padx=5, pady=5)
+frame_start_entry = ttk.Entry(frame_frame, width=10)
+frame_start_entry.grid(row=0, column=1, padx=5, pady=5)
+
+ttk.Label(frame_frame, text="Frame End (optional):").grid(row=0, column=2, padx=5, pady=5)
+frame_end_entry = ttk.Entry(frame_frame, width=10)
+frame_end_entry.grid(row=0, column=3, padx=5, pady=5)
 
 # Video Reader Selection
-tk.Label(root, text="Video Reader:").grid(row=5, column=0, padx=5, pady=5)
-video_reader_menu = tk.OptionMenu(root, video_reader_var, "OpenCV", "FFmpeg")
-video_reader_menu.grid(row=5, column=1, padx=5, pady=5)
+reader_frame = ttk.LabelFrame(root, text="Video Reader", padding=(10, 5))
+reader_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+ttk.Label(reader_frame, text="Video Reader:").grid(row=0, column=0, padx=5, pady=5)
+video_reader_menu = ttk.OptionMenu(reader_frame, video_reader_var, "FFmpeg", "FFmpeg", "OpenCV")
+video_reader_menu.grid(row=0, column=1, padx=5, pady=5)
 
 # Add text on the right side
-text_label = tk.Label(root, text="Pick FFmpeg for VR undistortion.\n<= Pick OpenCV for normal processing\nor performance issues.")
-text_label.grid(row=5, column=2, padx=5, pady=5)
+text_label = ttk.Label(reader_frame, text="<= Pick FFmpeg for VR undistortion.\n<= Pick OpenCV for normal processing or performance issues.")
+text_label.grid(row=0, column=2, padx=5, pady=5)
 
-# Start Button
-tk.Button(root, text="Start Processing", command=start_processing).grid(row=6, column=1, padx=5, pady=20)
+# Debug Record Mode
+debug_frame = ttk.LabelFrame(root, text="Debugging", padding=(10, 5))
+debug_frame.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
-# Debug Button
-tk.Button(root, text="Debug (q to quit)", command=debug_function).grid(row=6, column=2, padx=5, pady=20)
+ttk.Checkbutton(debug_frame, text="Save debugging as video", variable=debug_record_mode_var).grid(row=0, column=0, padx=5, pady=5)
 
-# Quit Button
-tk.Button(root, text="Quit", command=quit_application).grid(row=6, column=0, padx=5, pady=20)
+# Duration Selector
+ttk.Label(debug_frame, text="Duration (seconds):").grid(row=0, column=1, padx=5, pady=5)
+duration_combobox = ttk.Combobox(debug_frame, textvariable=debug_record_duration_var, values=["5", "10", "20"], width=5)
+duration_combobox.grid(row=0, column=2, padx=5, pady=5)
 
-tk.Label(root, text="Not for commercial use. Individual and personal use only.\nk00gar © 2024 - https://github.com/ack00gar", font=("Arial", 10, "italic")).grid(row=7, column=0, columnspan=3, padx=5, pady=5)
+ttk.Button(debug_frame, text="Debug (q to quit)", command=debug_function).grid(row=0, column=3, padx=5, pady=5)
+
+# Progress Bar
+# progress_frame = ttk.LabelFrame(root, text="Progress", padding=(10, 5))
+# progress_frame.grid(row=6, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+# progress_bar = ttk.Progressbar(progress_frame, variable=progress_var, maximum=100)
+# progress_bar.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+# Startand Quit Buttons
+button_frame = ttk.Frame(root)
+button_frame.grid(row=7, column=0, columnspan=3, padx=5, pady=10)
+
+start_button = ttk.Button(button_frame, text="Start Processing", command=start_processing)
+start_button.grid(row=0, column=0, padx=5, pady=5)
+
+ttk.Button(button_frame, text="Quit", command=quit_application).grid(row=0, column=2, padx=5, pady=5)
+
+# Footer
+footer_label = ttk.Label(root, text="Not for commercial use. Individual and personal use only.\n© k00gar 2024 - https://github.com/ack00gar", font=("Arial", 10, "italic"))
+footer_label.grid(row=8, column=0, columnspan=3, padx=5, pady=5)
 
 root.mainloop()
