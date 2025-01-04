@@ -5,9 +5,7 @@ This project is a Python-based tool for generating Funscript files from VR video
 If you find this project useful, consider supporting me on:
 
 - **Ko-fi**: [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/H2H818EIJV) 
-- **Patreon**: 
-
-   [https://www.patreon.com/c/k00gar](https://www.patreon.com/c/k00gar)
+- **Patreon**: [https://www.patreon.com/c/k00gar](https://www.patreon.com/c/k00gar)
 
 Your support helps me continue developing and improving this project!
 
