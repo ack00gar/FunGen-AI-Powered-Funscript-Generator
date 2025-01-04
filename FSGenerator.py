@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox  # here, what was I saying...
 import subprocess  # For running shell commands
 
 # Import custom modules and configurations
-from params.config import class_priority_order, class_reverse_match, class_colors, yolo_models  # Configuration for class priorities, reverse matching, and colors
+from params.config import class_priority_order, class_reverse_match, class_colors, yolo_models, ffmpeg_path  # Configuration for class priorities, reverse matching, and colors
 from utils.lib_ObjectTracker import ObjectTracker  # Custom object tracking logic
 from utils.lib_FunscriptHandler import FunscriptGenerator  # For generating Funscript files
 from utils.lib_Visualizer import Visualizer  # For visualizing results
@@ -572,7 +572,7 @@ def resize_video(video_path, options):
     def on_resize_select(option):
         output_path = video_path.replace(".mp4", f"_{option}p.mp4")
         command = [
-            "ffmpeg", "-i", video_path,
+            ffmpeg_path, "-i", video_path,
             "-vf", f"scale=-1:{option}",
             # "-c:a", "copy",  # if you need the audio, uncomment this line and comment the next one
             "-an",  # skipping the audio
