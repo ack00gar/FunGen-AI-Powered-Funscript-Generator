@@ -91,7 +91,7 @@ Before using this project, ensure you have the following installed:
    pip install numpy opencv-python tqdm ultralytics scipy matplotlib simplification
    ```
 
-3. ** Use a venv as suggested by Zalunda**
+3. **Use a venv as suggested by Zalunda**
    * Install miniconda 
    * Start a miniconda command prompt 
    * Execute (assuming you already cloned VR-Funscript-AI-Generator and copied the model into models folder)
