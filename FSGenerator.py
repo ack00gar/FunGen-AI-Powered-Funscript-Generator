@@ -802,7 +802,7 @@ ttk.Checkbutton(processing_frame, text="Live Display Mode (perf. down)", variabl
 debug_frame = ttk.LabelFrame(root, text="Debugging", padding=(10, 5))
 debug_frame.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
-ttk.Button(debug_frame, text="Debug (q to quit)", command=debug_function).grid(row=0, column=0, padx=5, pady=5)
+ttk.Button(debug_frame, text="Video (q to quit)", command=debug_function).grid(row=0, column=0, padx=5, pady=5)
 
 ttk.Checkbutton(debug_frame, text="Save debugging session as video", variable=debug_record_mode_var).grid(row=0, column=1, padx=5, pady=5)
 
@@ -810,7 +810,6 @@ ttk.Checkbutton(debug_frame, text="Save debugging session as video", variable=de
 duration_combobox = ttk.Combobox(debug_frame, textvariable=debug_record_duration_var, values=["5", "10", "20"], width=5)
 duration_combobox.grid(row=0, column=2, padx=5, pady=5)
 ttk.Label(debug_frame, text="seconds").grid(row=0, column=3, padx=5, pady=5)
-
 
 # Progress Bar
 # progress_frame = ttk.LabelFrame(root, text="Progress", padding=(10, 5))
