@@ -443,6 +443,7 @@ def analyze_tracking_results(results, image_y_size):
                 global_state.debugger.log_frame(frame_pos,
                                    bounding_boxes=bounding_boxes,
                                    variables={
+                                       'frame': frame_pos,
                                        'distance': tracker.distance,
                                        'Penetration': tracker.penetration,
                                        'sex_position': tracker.sex_position,
@@ -745,66 +746,70 @@ video_reader_var = tk.StringVar()
 debug_record_duration_var = tk.StringVar(value="5")  # Default duration
 
 # Video File Selection
-video_frame = ttk.LabelFrame(root, text="Video File", padding=(10, 5))
-video_frame.grid(row=0, column=0, columnspan=4, padx=5, pady=5, sticky="ew")
+video_frame = ttk.LabelFrame(root, text="Video Selection", padding=(10, 5))
+video_frame.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
-ttk.Label(video_frame, text="Video File:").grid(row=0, column=0, padx=5, pady=5)
+ttk.Label(video_frame, text="Video File:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
 ttk.Entry(video_frame, textvariable=video_path, width=50).grid(row=0, column=1, padx=5, pady=5)
-ttk.Button(video_frame, text="Browse", command=select_video_file).grid(row=0, column=2, padx=5, pady=5)
-# VR Mode, activated by default
-is_vr_var.set(True)
-ttk.Checkbutton(video_frame, text="VR Mode", variable=is_vr_var).grid(row=0, column=3, padx=5, pady=5)
-# Reference Script Selection
-script_frame = ttk.LabelFrame(root, text="Reference Script for comparison (optional)", padding=(10, 5))
-script_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+ttk.Button(video_frame, text="Browse", command=select_video_file).grid(row=0, column=2, padx=5, pady=5, sticky="e")
 
-ttk.Label(script_frame, text="Reference Script (optional):").grid(row=0, column=0, padx=5, pady=5)
-ttk.Entry(script_frame, textvariable=reference_script_path, width=50).grid(row=0, column=1, padx=5, pady=5)
-ttk.Button(script_frame, text="Browse", command=select_reference_script).grid(row=0, column=2, padx=5, pady=5)
-
-# Mode Selection
-mode_frame = ttk.LabelFrame(root, text="Processing Mode Selection", padding=(10, 5))
-mode_frame.grid(row=2, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
-
-ttk.Checkbutton(mode_frame, text="Debug Mode (save logs for Replay)", variable=debug_mode_var).grid(row=0, column=0, padx=5, pady=5)
-ttk.Checkbutton(mode_frame, text="Live Display Mode (plays video during inference)", variable=live_display_mode_var).grid(row=0, column=1, padx=5, pady=5)
-
-# Frame Range
-frame_frame = ttk.LabelFrame(root, text="Frame Range (optional)", padding=(10, 5))
-frame_frame.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
-
-ttk.Label(frame_frame, text="Frame Start (optional):").grid(row=0, column=0, padx=5, pady=5)
-frame_start_entry = ttk.Entry(frame_frame, width=10)
-frame_start_entry.grid(row=0, column=1, padx=5, pady=5)
-
-ttk.Label(frame_frame, text="Frame End (optional):").grid(row=0, column=2, padx=5, pady=5)
-frame_end_entry = ttk.Entry(frame_frame, width=10)
-frame_end_entry.grid(row=0, column=3, padx=5, pady=5)
 
 # Video Reader Selection
 reader_frame = ttk.LabelFrame(root, text="Video Reader", padding=(10, 5))
-reader_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+reader_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
-ttk.Label(reader_frame, text="Video Reader:").grid(row=0, column=0, padx=5, pady=5)
-video_reader_menu = ttk.OptionMenu(reader_frame, video_reader_var, "FFmpeg", "FFmpeg", "OpenCV")
-video_reader_menu.grid(row=0, column=1, padx=5, pady=5)
+ttk.Label(video_frame, text="Reader:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+video_reader_menu = ttk.OptionMenu(video_frame, video_reader_var, "FFmpeg", "FFmpeg", "OpenCV")
+video_reader_menu.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+#text_label = ttk.Label(video_frame, text="<= Pick FFmpeg for VR undistortion.\n<= Pick OpenCV if perf. issues.")
+#text_label.grid(row=1, column=2, padx=5, pady=5)
+# VR Mode, activated by default
+is_vr_var.set(True)
+ttk.Checkbutton(video_frame, text="VR SBS video", variable=is_vr_var).grid(row=2, column=0, padx=5, pady=5)
 
-# Add text on the right side
-text_label = ttk.Label(reader_frame, text="<= Pick FFmpeg for VR undistortion.\n<= Pick OpenCV for normal processing or performance issues.")
-text_label.grid(row=0, column=2, padx=5, pady=5)
+# Frame Range
+frame_frame = ttk.LabelFrame(root, text="Optional settings", padding=(10, 5))
+frame_frame.grid(row=2, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+ttk.Label(frame_frame, text="Frame Start:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+frame_start_entry = ttk.Entry(frame_frame, width=10)
+frame_start_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
+ttk.Label(frame_frame, text="Frame End:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+frame_end_entry = ttk.Entry(frame_frame, width=10)
+frame_end_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+# Reference Script Selection
+#script_frame = ttk.LabelFrame(root)  #,  # text="Reference Script for comparison (optional)",
+                             # padding=(10, 5))
+#script_frame.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+ttk.Label(frame_frame, text="Reference Script:").grid(row=2, column=0, padx=5, pady=5)
+ttk.Entry(frame_frame, textvariable=reference_script_path, width=50).grid(row=2, column=1, padx=5, pady=5)
+ttk.Button(frame_frame, text="Browse", command=select_reference_script).grid(row=2, column=2, padx=5, pady=5)
+
+# Processing Mode Selection
+processing_frame = ttk.LabelFrame(root, text="Processing", padding=(10, 5))
+processing_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+start_button = ttk.Button(processing_frame, text="Start Processing", command=start_processing)
+start_button.grid(row=0, column=0, padx=5, pady=5)
+
+ttk.Checkbutton(processing_frame, text="Logging for debug", variable=debug_mode_var).grid(row=0, column=1, padx=5, pady=5)
+ttk.Checkbutton(processing_frame, text="Live Display Mode (perf. down)", variable=live_display_mode_var).grid(row=0, column=2, padx=5, pady=5)
 
 # Debug Record Mode
 debug_frame = ttk.LabelFrame(root, text="Debugging", padding=(10, 5))
 debug_frame.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
-ttk.Checkbutton(debug_frame, text="Save debugging as video", variable=debug_record_mode_var).grid(row=0, column=0, padx=5, pady=5)
+ttk.Button(debug_frame, text="Video (q to quit)", command=debug_function).grid(row=0, column=0, padx=5, pady=5)
+
+ttk.Checkbutton(debug_frame, text="Save debugging session as video", variable=debug_record_mode_var).grid(row=0, column=1, padx=5, pady=5)
 
 # Duration Selector
-ttk.Label(debug_frame, text="Duration (seconds):").grid(row=0, column=1, padx=5, pady=5)
 duration_combobox = ttk.Combobox(debug_frame, textvariable=debug_record_duration_var, values=["5", "10", "20"], width=5)
 duration_combobox.grid(row=0, column=2, padx=5, pady=5)
-
-ttk.Button(debug_frame, text="Debug (q to quit)", command=debug_function).grid(row=0, column=3, padx=5, pady=5)
+ttk.Label(debug_frame, text="seconds").grid(row=0, column=3, padx=5, pady=5)
 
 # Progress Bar
 # progress_frame = ttk.LabelFrame(root, text="Progress", padding=(10, 5))
@@ -817,13 +822,10 @@ ttk.Button(debug_frame, text="Debug (q to quit)", command=debug_function).grid(r
 button_frame = ttk.Frame(root)
 button_frame.grid(row=7, column=0, columnspan=3, padx=5, pady=10)
 
-start_button = ttk.Button(button_frame, text="Start Processing", command=start_processing)
-start_button.grid(row=0, column=0, padx=5, pady=5)
-
 ttk.Button(button_frame, text="Quit", command=quit_application).grid(row=0, column=2, padx=5, pady=5)
 
 # Footer
-footer_label = ttk.Label(root, text="Not for commercial use. Individual and personal use only.\n© k00gar 2024 - https://github.com/ack00gar", font=("Arial", 10, "italic"))
+footer_label = ttk.Label(root, text="Individual and personal use only.\nNot for commercial use, nor use by a company.\nk00gar 2025 - https://github.com/ack00gar", font=("Arial", 10, "italic", "bold"), justify="center")
 footer_label.grid(row=8, column=0, columnspan=3, padx=5, pady=5)
 
 root.mainloop()
