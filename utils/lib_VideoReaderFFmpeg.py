@@ -156,8 +156,7 @@ class VideoReaderFFmpeg:
 
         # Start FFmpeg process
         #self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                        bufsize=self.width * self.height * 3)
+        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.frame_size = self.width * self.height * 3  # Size of one frame in bytes
 
     def read(self):
