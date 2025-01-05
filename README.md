@@ -91,11 +91,28 @@ Before using this project, ensure you have the following installed:
    pip install numpy opencv-python tqdm ultralytics scipy matplotlib simplification
    ```
 
-3. **Download the YOLO model**:
+3. ** Use a venv as suggested by Zalunda**
+   * Install miniconda 
+   * Start a miniconda command prompt 
+   * Execute (assuming you already cloned VR-Funscript-AI-Generator and copied the model into models folder)
+   ```bash
+   conda create -n VRFunAIGen python=3.11
+   conda activate VRFunAIGen
+   pip install numpy opencv-python tqdm ultralytics scipy matplotlib simplification
+   pip uninstall torch torchvision torchaudio
+   pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+   cd <VR-Funscript-AI-Generator folder>
+   python FSGenerator.py
+   ```
+   
+While executing, you’ll need to say “yes” a few times. The lines “pip uninstall / pip3 install” is to replace the “CPU” version of torch with a “cuda enabled / GPU” version (you might need to install nvidia CUDA stuff for it to works, I’m not sure).
+
+
+4. **Download the YOLO model**:
    - Place your YOLO model file (e.g., `k00gar-11n-200ep-best.mlpackage`) in the `models/` sub-directory.
    - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
 
-4. **Update the params/config.py**:
+5. **Update the params/config.py**:
    - If ffmpeg and ffprobe paths are not in your system path, the program will default to the following values.
    - You can update the params/config.py file, which contains:
 
