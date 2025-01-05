@@ -31,6 +31,68 @@ class FunscriptGenerator:
 
         try:
             print(f"Generating funscript based on {len(data)} points...")
+            #self.filtered_positions = simplify_coords(data, vw_filter_coeff)  # Use VW algorithm
+            # use my own simplification function instead of vw here
+            positions = self.filter_positions(data, fps)
+            print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
+            # enhance the funscript
+            # let's remap the highest to 100, and the lowest to 0, and rescale to 0-100
+            adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
+            # drag all values below 10 to 0 and above 90 to 100
+            readjusted_positions = [0 if p < 10 else 100 if p > 90 else p for p in adjusted_positions]
+
+            # let's boost the peaks by 20%, and reduce the lows by 20% and stay within 0-100
+            adjusted_positions = self.adjust_peaks_and_lows(readjusted_positions, peak_boost=20, low_reduction=20, )
+            # now, perform the vw simplification again
+            self.filtered_positions = simplify_coords(adjusted_positions, vw_filter_coeff)
+
+            self.write_funscript(self.filtered_positions, output_path, fps)
+            print(f"Funscript generated and saved to {output_path}")
+            self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
+            """
+            # Now proceeding with remapping / adjusting
+            # Adjust peaks and lows
+            ats = [p[0] for p in self.filtered_positions]
+            positions = [p[1] for p in self.filtered_positions]
+
+            # let's remap the highest to 100, and the lowest to 0, and rescale to 0-100
+            adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
+            # drag all values below 10 to 0 and above 90 to 100
+            readjusted_positions = [0 if p < 10 else 100 if p > 90 else p for p in adjusted_positions]
+
+            # let's boost the peaks by 20%, and reduce the lows by 20% and stay within 0-100
+            adjusted_positions = self.adjust_peaks_and_lows(readjusted_positions, peak_boost=20, low_reduction=20,)
+
+
+            #adjusted_positions = self.adjust_peaks_and_lows(positions, peak_boost=15, low_reduction=20,
+            #                                                max_flat_length=3)
+            # recombine ats and positions
+            zip_adjusted_positions = list(zip(ats, adjusted_positions))
+            remapped_path = output_path[:-10] + '_adjusted.funscript'
+            self.write_funscript(zip_adjusted_positions, remapped_path, fps)
+            self.generate_heatmap(remapped_path,
+                                  remapped_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
+            """
+        except:
+            print(f"Error loading raw funscript from {raw_funscript_path}")
+
+
+    def prev_generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
+        output_path = raw_funscript_path[:-18] + '.funscript'
+        if len(funscript_data) == 0:
+            # Read the funscript data from the JSON file
+            with open(raw_funscript_path, 'r') as f:
+                print(f"Loading funscript from {raw_funscript_path}")
+                try:
+                    data = f.read() #json.load(f)
+                    data = eval(data)
+                except:
+                    print(f"Error loading funscript from {raw_funscript_path}")
+        else:
+            data = funscript_data
+
+        try:
+            print(f"Generating funscript based on {len(data)} points...")
             self.filtered_positions = simplify_coords(data, vw_filter_coeff)  # Use VW algorithm
             print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
             self.write_funscript(self.filtered_positions, output_path, fps)

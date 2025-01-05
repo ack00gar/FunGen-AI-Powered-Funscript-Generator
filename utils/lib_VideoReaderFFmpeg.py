@@ -89,7 +89,8 @@ class VideoReaderFFmpeg:
         self.current_frame_number = start_frame
 
         if self.is_VR:
-            arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
+            #arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
+            arg_line = ""
             if self.unwarp:
                 if self.projection == "FISHEYE" or (self.projection == None and "FISHEYE" in self.video_path.upper()):
                     print("Proceeding with fisheye projection correction")
@@ -107,8 +108,7 @@ class VideoReaderFFmpeg:
                     self.v_fov = 90
                     self.h_fov = 90
                     self.d_fov = 180
-                    #arg_line = f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1"
-                arg_line = arg_line + f",v360={self.type}:output=sg"
+                arg_line = arg_line + f"v360={self.type}:in_stereo=sbs:output=sg"
                 arg_line = arg_line + f":iv_fov={self.iv_fov}:ih_fov={self.ih_fov}"
                 arg_line = arg_line + f":d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}"
                 arg_line = arg_line + f":pitch=-25:yaw=0:roll=0"
@@ -119,15 +119,16 @@ class VideoReaderFFmpeg:
                 #arg_line = arg_line + f",format=gray"
                 #arg_line = arg_line + f",histeq"
             else:
-                arg_line = arg_line  # "crop=w=iw/2:h=ih:x=0:y=0"
+                arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
 
             cmd = [
                 self.ffmpeg_path,
+                '-nostats',  # Disable progress statistics
+                '-loglevel', 'warning',
                 "-ss", str(start_time / 1000),  # Seek to start time in seconds
                 "-i", self.video_path,
                 "-an",  # Disable audio processing
                 "-map", "0:v:0",
-                #"-vf", f"crop=w=iw/2:h=ih:x=0:y=0,v360={self.type}:sg:iv_fov={self.iv_fov}:ih_fov={self.ih_fov}:d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}:pitch=-20:yaw=0:roll=0:w={self.width}:h={self.height}:interp=lanczos:reset_rot=1",
                 "-vf", arg_line,
                 "-f", "rawvideo",  # Output raw video data
                 "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
@@ -139,6 +140,8 @@ class VideoReaderFFmpeg:
             # FFmpeg command to read frames
             cmd = [
                 self.ffmpeg_path,
+                '-nostats',  # Disable progress statistics
+                '-loglevel', 'warning',
                 "-ss", str(start_time / 1000),  # Seek to start time in seconds
                 "-i", self.video_path,
                 "-f", "rawvideo",  # Output raw video data
@@ -152,7 +155,8 @@ class VideoReaderFFmpeg:
             self.process.terminate()
 
         # Start FFmpeg process
-        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        #self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.frame_size = self.width * self.height * 3  # Size of one frame in bytes
 
     def read(self):
