@@ -91,7 +91,7 @@ class VideoReaderFFmpeg:
         if self.is_VR:
             arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
             if self.unwarp:
-                if self.projection == "FISHEYE" or "FISHEYE" in self.video_path:
+                if self.projection == "FISHEYE" or self.projection == "" and "FISHEYE" in self.video_path.upper():
                     print("Proceeding with fisheye projection correction")
                     self.type = "fisheye"
                     self.iv_fov = 190
