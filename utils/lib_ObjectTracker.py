@@ -353,7 +353,8 @@ class ObjectTracker:
 
                 self.tracked_boxes.append([box, class_name, track_id])
                 x1, y1, x2, y2 = box
-                mid_y = (y1 + y2) // 2
+                # mid_y = (y1 + y2) // 2  # not happy with this, trying alternative
+                mid_y = y2
 
                 # Update tracked positions within the frame
                 if track_id not in self.tracked_positions:
