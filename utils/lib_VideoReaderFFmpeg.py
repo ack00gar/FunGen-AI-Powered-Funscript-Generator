@@ -17,7 +17,10 @@ class VideoReaderFFmpeg:
         """
         self.video_path = video_path
         self.is_VR = is_VR
-        self.unwarp = unwarp
+        if not self.is_VR:
+            self.unwarp = False
+        else:
+            self.unwarp = unwarp
         self.projection = projection
         self.ffmpeg_path = ffmpeg_path
         self.ffprobe_path = ffprobe_path
@@ -120,6 +123,10 @@ class VideoReaderFFmpeg:
                 #arg_line = arg_line + f",histeq"
             else:
                 arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
+            # Add scale filter with height and auto-width (-1)
+            #arg_line += f",scale=-1:{target_height}"
+            #arg_line += f",scale=-1:{1080}"
+            # perf for on the fly downscale to 1080p were terrible
 
             cmd = [
                 self.ffmpeg_path,
@@ -144,6 +151,7 @@ class VideoReaderFFmpeg:
                 '-loglevel', 'warning',
                 "-ss", str(start_time / 1000),  # Seek to start time in seconds
                 "-i", self.video_path,
+                "-an",  # Disable audio processing
                 "-f", "rawvideo",  # Output raw video data
                 "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
                 "-vsync", "0",  # Disable frame rate synchronization

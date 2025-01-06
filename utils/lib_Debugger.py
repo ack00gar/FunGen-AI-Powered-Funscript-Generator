@@ -298,7 +298,7 @@ class Debugger:
         print(f"Target frame: {self.current_frame}")
         if self.video_reader == "FFmpeg":
             self.cap.release()
-            self.cap = VideoReaderFFmpeg(self.video_path, is_VR=True)
+            self.cap = VideoReaderFFmpeg(self.video_path, self.isVR)
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         print("Done resetting and jumping to target frame")
 

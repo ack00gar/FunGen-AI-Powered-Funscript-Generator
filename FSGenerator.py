@@ -10,6 +10,7 @@ import torch  # PyTorch for use of .pt model if not on Apple device
 import tkinter as tk  # GUI library for macOS for basic use in our case
 from tkinter import filedialog, messagebox, ttk  # here, what was I saying...
 import subprocess  # For running shell commands
+import threading
 
 # Import custom modules and configurations
 from params.config import class_priority_order, class_reverse_match, class_colors, yolo_models, ffmpeg_path  # Configuration for class priorities, reverse matching, and colors
@@ -153,17 +154,16 @@ def get_yolo_model_path():
 
         return yolo_models[2]
 
-def extract_yolo_data():
+def extract_yolo_data(progress_callback=None):
     """
     Extract YOLO detection data from a video.
     """
-    # Check if the output file already exists
     if os.path.exists(global_state.video_file[:-4] + f"_rawyolo.json"):
         # messagebox to ask if user wants to overwrite or reuse
         # file name without path
         file_name = os.path.basename(global_state.video_file[:-4] + f"_rawyolo.json")
         skip_detection = messagebox.askyesno("Detection file already exists",
-                f"File {file_name} already exists.\n\nClick Yes to reuse the existing detections file.\nClick No to perform detections again.")
+                                             f"File {file_name} already exists.\n\nClick Yes to reuse the existing detections file.\nClick No to perform detections again.")
         if skip_detection:
             print(
                 f"File {global_state.video_file[:-4] + f'_rawyolo.json'} already exists. Skipping detections and loading file content...")
@@ -200,6 +200,9 @@ def extract_yolo_data():
         print("Discarding pose model part of the code")
     if run_pose_model:
         pose_model = YOLO(global_state.yolo_pose_model, task="pose")
+
+    # Start time for ETA calculation
+    start_time = time.time()
 
     # Loop through the video frames
     for frame_pos in tqdm(range(global_state.frame_start, last_frame), ncols=None, desc="Performing YOLO detection on frames"):
@@ -306,6 +309,14 @@ def extract_yolo_data():
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
 
+        # Update progress
+        if progress_callback:
+            elapsed_time = time.time() - start_time
+            frames_processed = frame_pos - global_state.frame_start + 1
+            frames_remaining = last_frame - frame_pos - 1
+            eta = (elapsed_time / frames_processed) * frames_remaining if frames_processed > 0 else 0
+            progress_callback(frame_pos, last_frame, time.strftime("%H:%M:%S", time.gmtime(eta)))
+
     # Write the detection records to a JSON file
     write_dataset(global_state.video_file[:-4] + f"_rawyolo.json", records)
     # Release the video capture object and close the display window
@@ -339,7 +350,7 @@ def make_data_boxes(records, image_x_size):
         result.add_record(frame_idx, box_record)
     return result
 
-def analyze_tracking_results(results, image_y_size):
+def analyze_tracking_results(results, image_y_size, progress_callback=None):
     """
     Analyze tracking results and generate Funscript data.
     :param results: The Result object containing detection data.
@@ -361,7 +372,7 @@ def analyze_tracking_results(results, image_y_size):
         divide_size_by = 2
     else:
         divide_size_by = 1
-    image_area = (cap.get(cv2.CAP_PROP_FRAME_WIDTH) // divide_size_by )* cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    image_area = (cap.get(cv2.CAP_PROP_FRAME_WIDTH) // divide_size_by) * cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
     cuts = []
 
@@ -395,6 +406,9 @@ def analyze_tracking_results(results, image_y_size):
     global_state.funscript_frames = []  # List to store Funscript frames
     tracker = ObjectTracker(fps, global_state.frame_start, image_area)  # Initialize the object tracker
 
+    # Start time for ETA calculation
+    start_time = time.time()
+
     for frame_pos in tqdm(range(global_state.frame_start, global_state.frame_end), unit="f"):
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
@@ -418,14 +432,11 @@ def analyze_tracking_results(results, image_y_size):
                 # Log debugging information
                 bounding_boxes = []
                 for box in sorted_boxes:
-                    #if box[4] in tracker.tracked_positions:
                     if box[4] in tracker.normalized_absolute_tracked_positions:
-                        #position = tracker.tracked_positions[box[4]][-1]
                         if box[4] == 0:  # generic track_id for 'hips center'
                             str_dist_penis = 'None'
                         else:
                             if box[4] in tracker.normalized_distance_to_penis:
-                                # print(f"box[4]: {box[4]}")
                                 str_dist_penis = str(int(tracker.normalized_distance_to_penis[box[4]][-1]))
                             else:
                                 str_dist_penis = 'None'
@@ -491,6 +502,14 @@ def analyze_tracking_results(results, image_y_size):
 
             cv2.imshow("Combined Results", frame_display)
             cv2.waitKey(1)
+
+        # Update progress
+        if progress_callback:
+            elapsed_time = time.time() - start_time
+            frames_processed = frame_pos - global_state.frame_start + 1
+            frames_remaining = global_state.frame_end - frame_pos - 1
+            eta = (elapsed_time / frames_processed) * frames_remaining if frames_processed > 0 else 0
+            progress_callback(frame_pos, global_state.frame_end, time.strftime("%H:%M:%S", time.gmtime(eta)))
 
     # Prepare Funscript data
     global_state.funscript_data = list(zip(global_state.funscript_frames, global_state.funscript_distances))
@@ -618,64 +637,84 @@ def start_processing():
     print(f"Frame End: {global_state.frame_end}")
     print(f"Reference Script: {global_state.reference_script}")
 
-    # Processing logic
-
-    global_state.debugger = Debugger(global_state.video_file, output_dir=global_state.video_file[:-4])  # Initialize the debugger
+    # Initialize the debugger
+    global_state.debugger = Debugger(global_state.video_file, output_dir=global_state.video_file[:-4])
 
     if global_state.video_reader == "FFmpeg":
-        cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)  # Initialize the video reader
-        image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # Get the video's width
+        cap = VideoReaderFFmpeg(global_state.video_file, is_VR=global_state.isVR)
+        image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
     else:
         cap = cv2.VideoCapture(global_state.video_file)
         if global_state.isVR:
-            image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 2  # Get the video's width
+            image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 2
         else:
             image_x_size = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-    fps = cap.get(cv2.CAP_PROP_FPS)  # Get the video's FPS
-    image_y_size = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # Get the video's height
-
-
-    print(f"Image size: {image_x_size}x{image_y_size}")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    image_y_size = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
     cap.release()
 
-    # Process the video
+    print(f"Image size: {image_x_size}x{image_y_size}")
 
-    # Run the YOLO detection and saves result to _rawyolo.json file
-    extract_yolo_data()
-    #
-    # Load YOLO detection results from file
-    yolo_data = load_yolo_data_from_file(global_state.video_file[:-4] + f"_rawyolo.json")
+    # YOLO Detection Progress
+    def update_yolo_progress(current_frame, total_frames, eta):
+        progress = (current_frame / total_frames) * 100
+        yolo_progress_bar["value"] = progress
+        yolo_progress_percent.config(text=f"{progress:.0f}% - ETA: {eta}")
+        #yolo_progress_eta.config(text=f"ETA: {eta}")
+        root.update_idletasks()
 
-    results = make_data_boxes(yolo_data, image_x_size)
+    # Tracking Analysis Progress
+    def update_tracking_progress(current_frame, total_frames, eta):
+        progress = (current_frame / total_frames) * 100
+        tracking_progress_bar["value"] = progress
+        tracking_progress_percent.config(text=f"{progress:.0f}% - ETA: {eta}")
+        #tracking_progress_eta.config(text=f"ETA: {eta}")
+        root.update_idletasks()
 
-    # Looking for the first instance of penis within the YOLO results
-    first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
+    # Function to run the processing tasks
+    def run_processing():
+        # Run the YOLO detection and save result to _rawyolo.json file
+        extract_yolo_data(update_yolo_progress)
 
-    if first_penis_frame is None:
-        print(f"No penis found in video: {global_state.video_file}")
-        first_penis_frame = 0
+        # Load YOLO detection results from file
+        yolo_data = load_yolo_data_from_file(global_state.video_file[:-4] + f"_rawyolo.json")
 
-    # Deciding whether we start from there or from a user specified later frame
-    global_state.frame_start = max(max(first_penis_frame - int(fps), global_state.frame_start - int(fps)), 0)
+        results = make_data_boxes(yolo_data, image_x_size)
 
-    print(f"Frame Start adjusted to: {global_state.frame_start}")
+        # Looking for the first instance of penis within the YOLO results
+        first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
 
-    # Performing the tracking part and generation of the raw funscript data
-    global_state.funscript_data = analyze_tracking_results(results, image_y_size)
+        if first_penis_frame is None:
+            print(f"No penis found in video: {global_state.video_file}")
+            first_penis_frame = 0
 
-    global_state.debugger.save_logs()
+        # Deciding whether we start from there or from a user-specified later frame
+        global_state.frame_start = max(max(first_penis_frame - int(fps), global_state.frame_start - int(fps)), 0)
 
-    funscript_handler = FunscriptGenerator()
+        print(f"Frame Start adjusted to: {global_state.frame_start}")
 
-    # Simplifying the funscript data and generating the file
-    funscript_handler.generate(global_state.video_file[:-4] + f"_rawfunscript.json", global_state.funscript_data, fps, global_state.LiveDisplayMode)
+        # Performing the tracking part and generation of the raw funscript data
+        global_state.funscript_data = analyze_tracking_results(results, image_y_size, update_tracking_progress)
 
-    # Optional, compare generated funscript with reference funscript if specified, or a simple generic report
-    funscript_handler.compare_funscripts(global_state.reference_script, global_state.video_file[:-3] + "funscript", global_state.video_file, global_state.isVR,
-                                             global_state.video_file[:-4] + "_comparefunscripts.png",
-                                             global_state.video_file[:-4] + "_adjusted.funscript", )
+        global_state.debugger.save_logs()
 
-    print(f"Finished processing video: {global_state.video_file}")
+        funscript_handler = FunscriptGenerator()
+
+        # Simplifying the funscript data and generating the file
+        funscript_handler.generate(global_state.video_file[:-4] + f"_rawfunscript.json",
+                                   global_state.funscript_data,
+                                   fps, global_state.LiveDisplayMode)
+
+        # Optional, compare generated funscript with reference funscript if specified, or a simple generic report
+        funscript_handler.compare_funscripts(global_state.reference_script, global_state.video_file[:-3] + "funscript", global_state.video_file, global_state.isVR,
+                                             global_state.video_file[:-4] + "_comparefunscripts.png") #,
+        #                                     global_state.video_file[:-4] + "_adjusted.funscript")
+
+        print(f"Finished processing video: {global_state.video_file}")
+
+    # Run the processing in a separate thread
+    processing_thread = threading.Thread(target=run_processing)
+    processing_thread.start()
 
 def debug_function():
     """
@@ -731,6 +770,7 @@ def quit_application():
     root.quit()  # Close the Tkinter main loop
     root.destroy()  # Destroy the root window
 
+
 # GUI Setup
 root = tk.Tk()
 root.title("VR funscript generation helper")
@@ -758,11 +798,11 @@ ttk.Button(video_frame, text="Browse", command=select_video_file).grid(row=0, co
 reader_frame = ttk.LabelFrame(root, text="Video Reader", padding=(10, 5))
 reader_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
-ttk.Label(video_frame, text="Reader:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+ttk.Label(video_frame, text="Video Reader:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
 video_reader_menu = ttk.OptionMenu(video_frame, video_reader_var, "FFmpeg", "FFmpeg", "OpenCV")
 video_reader_menu.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 #text_label = ttk.Label(video_frame, text="<= Pick FFmpeg for VR undistortion.\n<= Pick OpenCV if perf. issues.")
-#text_label.grid(row=1, column=2, padx=5, pady=5)
+#text_label.grid(row=1, column=2, padx=5, pady=5, sticky="w")
 # VR Mode, activated by default
 is_vr_var.set(True)
 ttk.Checkbutton(video_frame, text="VR SBS video", variable=is_vr_var).grid(row=2, column=0, padx=5, pady=5)
@@ -779,11 +819,6 @@ ttk.Label(frame_frame, text="Frame End:").grid(row=1, column=0, padx=5, pady=5, 
 frame_end_entry = ttk.Entry(frame_frame, width=10)
 frame_end_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
-# Reference Script Selection
-#script_frame = ttk.LabelFrame(root)  #,  # text="Reference Script for comparison (optional)",
-                             # padding=(10, 5))
-#script_frame.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
-
 ttk.Label(frame_frame, text="Reference Script:").grid(row=2, column=0, padx=5, pady=5)
 ttk.Entry(frame_frame, textvariable=reference_script_path, width=50).grid(row=2, column=1, padx=5, pady=5)
 ttk.Button(frame_frame, text="Browse", command=select_reference_script).grid(row=2, column=2, padx=5, pady=5)
@@ -793,16 +828,34 @@ processing_frame = ttk.LabelFrame(root, text="Processing", padding=(10, 5))
 processing_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
 start_button = ttk.Button(processing_frame, text="Start Processing", command=start_processing)
-start_button.grid(row=0, column=0, padx=5, pady=5)
+start_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
 
 ttk.Checkbutton(processing_frame, text="Logging for debug", variable=debug_mode_var).grid(row=0, column=1, padx=5, pady=5)
-ttk.Checkbutton(processing_frame, text="Live Display Mode (perf. down)", variable=live_display_mode_var).grid(row=0, column=2, padx=5, pady=5)
+debug_mode_var.set(True)
+ttk.Checkbutton(processing_frame, text="Live inference => slow & heavy!", variable=live_display_mode_var).grid(row=0, column=2, padx=5, pady=5)
+
+# Progress Bar for YOLO Detection
+yolo_progress_label = ttk.Label(processing_frame, text="YOLO Detection Progress:")
+yolo_progress_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+yolo_progress_bar = ttk.Progressbar(processing_frame, orient="horizontal", length=300, mode="determinate")
+yolo_progress_bar.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+yolo_progress_percent = ttk.Label(processing_frame, text="0%")
+yolo_progress_percent.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+
+# Progress Bar for Tracking Analysis
+tracking_progress_label = ttk.Label(processing_frame, text="Tracking Analysis Progress:")
+tracking_progress_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+tracking_progress_bar = ttk.Progressbar(processing_frame, orient="horizontal", length=300, mode="determinate")
+tracking_progress_bar.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+tracking_progress_percent = ttk.Label(processing_frame, text="0%")
+tracking_progress_percent.grid(row=2, column=2, padx=5, pady=5, sticky="w")
 
 # Debug Record Mode
-debug_frame = ttk.LabelFrame(root, text="Debugging", padding=(10, 5))
-debug_frame.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+debug_frame = ttk.LabelFrame(root, text="Debugging (Replay and navigate a processed video)", padding=(10, 5))
+debug_frame.grid(row=6, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
 
-ttk.Button(debug_frame, text="Video (q to quit)", command=debug_function).grid(row=0, column=0, padx=5, pady=5)
+quit_button = ttk.Button(debug_frame, text="Video (q to quit)", command=debug_function)
+quit_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
 
 ttk.Checkbutton(debug_frame, text="Save debugging session as video", variable=debug_record_mode_var).grid(row=0, column=1, padx=5, pady=5)
 
@@ -811,14 +864,7 @@ duration_combobox = ttk.Combobox(debug_frame, textvariable=debug_record_duration
 duration_combobox.grid(row=0, column=2, padx=5, pady=5)
 ttk.Label(debug_frame, text="seconds").grid(row=0, column=3, padx=5, pady=5)
 
-# Progress Bar
-# progress_frame = ttk.LabelFrame(root, text="Progress", padding=(10, 5))
-# progress_frame.grid(row=6, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
-
-# progress_bar = ttk.Progressbar(progress_frame, variable=progress_var, maximum=100)
-# progress_bar.grid(row=0, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
-
-# Startand Quit Buttons
+# Quit Button
 button_frame = ttk.Frame(root)
 button_frame.grid(row=7, column=0, columnspan=3, padx=5, pady=10)
 
