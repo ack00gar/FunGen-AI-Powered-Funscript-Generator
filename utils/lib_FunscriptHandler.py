@@ -1,80 +1,71 @@
+import logging
 import os
 import json
 from simplification.cutil import simplify_coords
-import matplotlib.pyplot as plt
 import numpy as np
+import cv2
 import datetime
+
+from params.config import heatmap_colors, step_size, vw_filter_coeff
+
+import matplotlib
+matplotlib.use('Agg')  # Use a non-interactive backend
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import matplotlib.colors as mcolors
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import LinearSegmentedColormap, Normalize
-from params.config import heatmap_colors, step_size, vw_filter_coeff
-import cv2
-
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import datetime
 
 class FunscriptGenerator:
     def generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
         output_path = raw_funscript_path[:-18] + '.funscript'
         if len(funscript_data) == 0:
+            print("len funscript data is 0, trying to load file")
             # Read the funscript data from the JSON file
             with open(raw_funscript_path, 'r') as f:
                 print(f"Loading funscript from {raw_funscript_path}")
                 try:
-                    data = f.read() #json.load(f)
-                    data = eval(data)
+                    data = json.load(f)  #f.read() #json.load(f)
+                    #data = eval(data)
+                    print(f"data loaded: {data}")
                 except:
-                    print(f"Error loading funscript from {raw_funscript_path}")
+                    print(f"line 31 - Error loading funscript from {raw_funscript_path}")
         else:
             data = funscript_data
 
         try:
             print(f"Generating funscript based on {len(data)} points...")
-            #self.filtered_positions = simplify_coords(data, vw_filter_coeff)  # Use VW algorithm
+            # self.filtered_positions = simplify_coords(data, vw_filter_coeff)  # Use VW algorithm
             # use my own simplification function instead of vw here
+            print("Positions adjustment - step 0 (simplification)")
             positions = self.filter_positions(data, fps)
-            print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
+            # print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
+            print(f"Lenghth of filtered positions: {len(positions) + 1}")
             # enhance the funscript
             # let's remap the highest to 100, and the lowest to 0, and rescale to 0-100
+            print("Positions adjustment - step 1 (remapping)")
+            # Adjust peaks and lows
+            ats = [p[0] for p in positions]
+            positions = [p[1] for p in positions]
             adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
             # drag all values below 10 to 0 and above 90 to 100
+            print("Positions adjustment - step 2 (thresholding)")
             readjusted_positions = [0 if p < 10 else 100 if p > 90 else p for p in adjusted_positions]
-
+            print("Positions adjustment - step 3 (amplitude boosting)")
             # let's boost the peaks by 20%, and reduce the lows by 20% and stay within 0-100
             adjusted_positions = self.adjust_peaks_and_lows(readjusted_positions, peak_boost=20, low_reduction=20, )
-            # now, perform the vw simplification again
-            self.filtered_positions = simplify_coords(adjusted_positions, vw_filter_coeff)
-
-            self.write_funscript(self.filtered_positions, output_path, fps)
-            print(f"Funscript generated and saved to {output_path}")
-            self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
-            """
-            # Now proceeding with remapping / adjusting
-            # Adjust peaks and lows
-            ats = [p[0] for p in self.filtered_positions]
-            positions = [p[1] for p in self.filtered_positions]
-
-            # let's remap the highest to 100, and the lowest to 0, and rescale to 0-100
-            adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
-            # drag all values below 10 to 0 and above 90 to 100
-            readjusted_positions = [0 if p < 10 else 100 if p > 90 else p for p in adjusted_positions]
-
-            # let's boost the peaks by 20%, and reduce the lows by 20% and stay within 0-100
-            adjusted_positions = self.adjust_peaks_and_lows(readjusted_positions, peak_boost=20, low_reduction=20,)
-
-
-            #adjusted_positions = self.adjust_peaks_and_lows(positions, peak_boost=15, low_reduction=20,
-            #                                                max_flat_length=3)
             # recombine ats and positions
             zip_adjusted_positions = list(zip(ats, adjusted_positions))
-            remapped_path = output_path[:-10] + '_adjusted.funscript'
-            self.write_funscript(zip_adjusted_positions, remapped_path, fps)
-            self.generate_heatmap(remapped_path,
-                                  remapped_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
-            """
-        except:
-            print(f"Error loading raw funscript from {raw_funscript_path}")
+            # now, perform the vw simplification again
+            print("Positions adjustment - step 4 (VW algorithm simplification)")
+            filtered_positions = simplify_coords(zip_adjusted_positions, vw_filter_coeff)
+            # filtered_positions = zip_adjusted_positions
+            self.write_funscript(filtered_positions, output_path, fps)
+            print(f"Funscript generated and saved to {output_path}")
+            self.generate_heatmap(output_path,
+                                  output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
+        except Exception as e:
+            print(f"Error generating funscript: {e}")
 
 
     def prev_generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
@@ -226,8 +217,49 @@ class FunscriptGenerator:
         plt.close()
         print(f"Funscript heatmap saved to {output_image_path}")
 
-
     def filter_positions(self, positions, fps):
+        if not positions:
+            return []
+
+        positions = np.array(positions)
+        filtered_positions = [positions[0]]  # Start with the first position
+
+        min_interval_ms = 50  # Minimum interval between points in milliseconds
+        slope_threshold = 0.2  # Adjusted slope threshold for gradual changes
+
+        for i in range(1, len(positions) - 1):
+            current_pos = positions[i]
+            prev_pos = positions[i - 1]
+            next_pos = positions[i + 1]
+
+            # Skip consecutive duplicate positions
+            if current_pos[1] == filtered_positions[-1][1] and current_pos[1] == next_pos[1]:
+                continue
+
+            # Calculate slopes
+            slope_prev = (current_pos[1] - prev_pos[1]) / (current_pos[0] - prev_pos[0]) if (current_pos[0] - prev_pos[
+                0]) != 0 else 0
+            slope_next = (next_pos[1] - current_pos[1]) / (next_pos[0] - current_pos[0]) if (next_pos[0] - current_pos[
+                0]) != 0 else 0
+            slope_diff = abs(slope_next - slope_prev)
+
+            is_local_extreme = ((current_pos[1] >= prev_pos[1] and current_pos[1] > next_pos[1])
+                                or (current_pos[1] > prev_pos[1] and current_pos[1] >= next_pos[1])
+                                or (current_pos[1] <= prev_pos[1] and current_pos[1] < next_pos[1])
+                                or (current_pos[1] < prev_pos[1] and current_pos[1] <= next_pos[1]))
+
+            # Add to filtered lists based on conditions
+            if (is_local_extreme or slope_diff > slope_threshold) and (abs(
+                    current_pos[0] - filtered_positions[-1][0]) * 1000 / fps) > min_interval_ms:
+                filtered_positions.append(current_pos)
+
+        # Ensure the last point meets the interval requirement
+        if len(filtered_positions) > 1 and positions[-1][0] - filtered_positions[-1][0] >= min_interval_ms:
+            filtered_positions.append(positions[-1])
+
+        return filtered_positions
+
+    def prev_filter_positions(self, positions, fps):
         if not positions:
             return []
 
@@ -400,6 +432,9 @@ class FunscriptGenerator:
         return sections
 
     def extract_section(self, times, positions, start, end):
+        if times is None or not isinstance(times, (list, tuple)):
+            logging.warning(f"No times for current section {start} - {end}")
+            return [], []
         start_ms = start * 1000
         end_ms = end * 1000
         indices = [i for i, t in enumerate(times) if start_ms <= t <= end_ms]

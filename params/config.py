@@ -131,4 +131,4 @@ heatmap_colors = [
 ]
 step_size = 120  # Speed step size for color transitions
 
-vw_filter_coeff = 6.0
+vw_filter_coeff = 2.0

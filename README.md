@@ -106,7 +106,16 @@ Before using this project, ensure you have the following installed:
    ```
    
    While executing, you’ll need to say “yes” a few times. The lines “pip uninstall / pip3 install” is to replace the “CPU” version of torch with a “cuda enabled / GPU” version (you might need to install nvidia CUDA stuff for it to works, I’m not sure).
+   
+   Zalunda also suggests the creation of a batch file, after the setup, to start the application in the right conda environment:
 
+   ```bash
+   @echo off
+   call <PATH_TO_MINICONDA>\miniconda3\condabin\conda activate VRFunAIGen
+   cd /d "<PATH_TO_SOURCES>\VR-Funscript-AI-Generator"
+   python FSGenerator.py
+   pause
+   ```
 
 4. **Download the YOLO model**:
    - Place your YOLO model file (e.g., `k00gar-11n-200ep-best.mlpackage`) in the `models/` sub-directory.
