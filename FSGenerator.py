@@ -657,8 +657,6 @@ def start_processing():
     print(f"Video Reader: {global_state.video_reader}")
     print(f"Enhance lighting: {global_state.enhance_lighting}")
 
-    return
-
     # Initialize the debugger
     global_state.debugger = Debugger(global_state.video_file, output_dir=global_state.video_file[:-4])
 
