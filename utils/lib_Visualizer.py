@@ -26,9 +26,9 @@ class Visualizer:
         cv2.putText(image, str(int(distance)), (gauge_x, gauge_y + gauge_height - fill_height - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         return image
-
+"""
     def draw_limited_graph(self, image, distances, frames, nb_frames):
-        """Plot the frame indices vs positions for the last nb frames."""
+        # Plot the frame indices vs positions for the last nb frames.
         # Determine the number of frames to plot
         num_frames_to_plot = min(nb_frames, len(distances))
 
@@ -98,3 +98,5 @@ class Visualizer:
         )
         plt.close(fig)
         return image
+
+"""

@@ -27,9 +27,11 @@ class GlobalState:
         self.yolo_det_model = ""
         self.yolo_pose_model = ""
         self.video_file = ""
+        self.video_fps = 1
         self.DebugMode = False
         self.LiveDisplayMode = False
         self.isVR = True
+        self.enhance_lighting = False
         self.frame_start = 0
         self.frame_end = None
         self.reference_script = ""
@@ -41,6 +43,16 @@ class GlobalState:
         self.video_reader = None
         self.debug_record_mode = False
         self.record_duration = 0
+        # Funscript Tweaking Variables
+        self.boost_enabled = True
+        self.boost_up_percent = 10
+        self.boost_down_percent = 15
+        self.threshold_enabled = True
+        self.threshold_low = 10
+        self.threshold_high = 90
+        self.vw_simplification_enabled = True
+        self.vw_factor = 8.0
+        self.rounding = 5
 
 # Initialize global state
 global_state = GlobalState()
@@ -572,6 +584,8 @@ def select_reference_script():
 
 def check_video_resolution(video_path):
     cap = cv2.VideoCapture(video_path)
+    global_state.fps = float(cap.get(cv2.CAP_PROP_FPS))
+    print(f"Video FPS: {global_state.fps}")
     if not cap.isOpened():
         messagebox.showerror("Error", "Could not open the video file.")
         return
@@ -579,8 +593,8 @@ def check_video_resolution(video_path):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     cap.release()
 
-    if height > 1920:
-        resize_options = ["1920", "1440", "1080"]
+    if height > 1440:
+        resize_options = ["1440", "1080"]
         choice = messagebox.askquestion(
             "Resize Video",
             f"The video height is {height}p. Do you want to resize it to a lower resolution?",
@@ -603,6 +617,7 @@ def resize_video(video_path, options):
         subprocess.run(command, check=True)
         messagebox.showinfo("Success", f"Video resized to {option}p and saved as {output_path}")
         resize_window.destroy()
+        video_path.set(output_path)
 
     resize_window = tk.Toplevel()
     resize_window.title("Select Resize Option")
@@ -621,10 +636,12 @@ def start_processing():
     global_state.DebugMode = debug_mode_var.get()
     global_state.LiveDisplayMode = live_display_mode_var.get()
     global_state.isVR = is_vr_var.get()
+    global_state.enhance_lighting = enhance_lighting_var.get()
     global_state.frame_start = 0 if frame_start_entry.get() == "" else int(frame_start_entry.get())
     global_state.frame_end = None if frame_end_entry.get() == "" else int(frame_end_entry.get())
     global_state.reference_script = reference_script_path.get()
     global_state.video_reader = video_reader_var.get()
+    global_state.enhance_lighting = enhance_lighting_var.get()
 
     print(f"Processing video: {global_state.video_file}")
     print(f"Video Reader: {global_state.video_reader}")
@@ -633,9 +650,14 @@ def start_processing():
     print(f"Debug Mode: {global_state.DebugMode}")
     print(f"Live Display Mode: {global_state.LiveDisplayMode}")
     print(f"VR Mode: {global_state.isVR}")
+    print(f"Enhance lighting: {global_state.enhance_lighting}")
     print(f"Frame Start: {global_state.frame_start}")
     print(f"Frame End: {global_state.frame_end}")
     print(f"Reference Script: {global_state.reference_script}")
+    print(f"Video Reader: {global_state.video_reader}")
+    print(f"Enhance lighting: {global_state.enhance_lighting}")
+
+    return
 
     # Initialize the debugger
     global_state.debugger = Debugger(global_state.video_file, output_dir=global_state.video_file[:-4])
@@ -701,14 +723,10 @@ def start_processing():
         funscript_handler = FunscriptGenerator()
 
         # Simplifying the funscript data and generating the file
-        funscript_handler.generate(global_state.video_file[:-4] + f"_rawfunscript.json",
-                                   global_state.funscript_data,
-                                   fps, global_state.LiveDisplayMode)
+        funscript_handler.generate(global_state)
 
-        # Optional, compare generated funscript with reference funscript if specified, or a simple generic report
-        funscript_handler.compare_funscripts(global_state.reference_script, global_state.video_file[:-3] + "funscript", global_state.video_file, global_state.isVR,
-                                             global_state.video_file[:-4] + "_comparefunscripts.png") #,
-        #                                     global_state.video_file[:-4] + "_adjusted.funscript")
+        # Optionally, compare generated funscript with reference funscript if specified, or a simple generic report
+        funscript_handler.create_report_funscripts(global_state)
 
         print(f"Finished processing video: {global_state.video_file}")
 
@@ -762,6 +780,38 @@ def debug_function():
     else:
         messagebox.showinfo("Info", f"Debug logs file not found: {global_state.video_file[:-4] + f'_debug_logs.json'}")
 
+def regenerate_funscript(global_state):
+    global_state.video_file = video_path.get()
+    if not global_state.video_file:
+        messagebox.showerror("Error", "Please select a video file.")
+        return
+    global_state.reference_script = reference_script_path.get()
+
+    print("Regenerating Funscript with tweaked settings...")
+    # Apply tweaks to funscript_data
+    if global_state.boost_enabled:
+        print(f"Applying Boost: Up {global_state.boost_up_percent}%, Down {global_state.boost_down_percent}%")
+        # Add boost logic here
+
+    if global_state.threshold_enabled:
+        print(f"Applying Threshold: Low {global_state.threshold_low}, High {global_state.threshold_high}")
+        # Add threshold logic here
+
+    if global_state.vw_simplification_enabled:
+        print(f"Applying VW Simplification with Factor: {global_state.vw_factor} then rounding to {global_state.rounding}")
+        # Add VW simplification logic here
+
+    # Save and regenerate funscript
+    funscript_handler = FunscriptGenerator()
+    # Simplifying the funscript data and generating the file
+    funscript_handler.generate(global_state)
+    print("Funscript re-generation complete.")
+    # Optional, compare generated funscript with reference funscript if specified, or a simple generic report
+    funscript_handler.create_report_funscripts(global_state)
+
+    print("Report generation complete.")
+
+
 def quit_application():
     """
     Quit the application.
@@ -782,8 +832,17 @@ debug_mode_var = tk.BooleanVar()
 debug_record_mode_var = tk.BooleanVar()  # debug record mode
 live_display_mode_var = tk.BooleanVar()
 is_vr_var = tk.BooleanVar()
+enhance_lighting_var = tk.BooleanVar()
 video_reader_var = tk.StringVar()
 debug_record_duration_var = tk.StringVar(value="5")  # Default duration
+boost_enabled_var = tk.BooleanVar()
+boost_up_percent_var = tk.IntVar()
+boost_down_percent_var = tk.IntVar()
+threshold_enabled_var = tk.BooleanVar()
+threshold_low_var = tk.IntVar()
+threshold_high_var = tk.IntVar()
+vw_simplification_enabled_var = tk.BooleanVar()
+vw_factor_var = tk.DoubleVar()
 
 # Video File Selection
 video_frame = ttk.LabelFrame(root, text="Video Selection", padding=(10, 5))
@@ -806,6 +865,10 @@ video_reader_menu.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 # VR Mode, activated by default
 is_vr_var.set(True)
 ttk.Checkbutton(video_frame, text="VR SBS video", variable=is_vr_var).grid(row=2, column=0, padx=5, pady=5)
+# enhance_lighting_var.set(False)
+# ttk.Checkbutton(video_frame, text="Enhance lighting",
+#                 variable=enhance_lighting_var,
+#                 command=lambda: setattr(global_state, 'vw_simplification_enabled', not global_state.enhance_lighting)).grid(row=2, column=1, padx=5, pady=5)
 
 # Frame Range
 frame_frame = ttk.LabelFrame(root, text="Optional settings", padding=(10, 5))
@@ -832,7 +895,8 @@ start_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
 
 ttk.Checkbutton(processing_frame, text="Logging for debug", variable=debug_mode_var).grid(row=0, column=1, padx=5, pady=5)
 debug_mode_var.set(True)
-ttk.Checkbutton(processing_frame, text="Live inference => slow & heavy!", variable=live_display_mode_var).grid(row=0, column=2, padx=5, pady=5)
+# this one needs a fix
+# ttk.Checkbutton(processing_frame, text="Live inference => slow & heavy!", variable=live_display_mode_var).grid(row=0, column=2, padx=5, pady=5)
 
 # Progress Bar for YOLO Detection
 yolo_progress_label = ttk.Label(processing_frame, text="YOLO Detection Progress:")
@@ -849,6 +913,94 @@ tracking_progress_bar = ttk.Progressbar(processing_frame, orient="horizontal", l
 tracking_progress_bar.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
 tracking_progress_percent = ttk.Label(processing_frame, text="0%")
 tracking_progress_percent.grid(row=2, column=2, padx=5, pady=5, sticky="w")
+
+
+
+# Funscript Tweaking Section (Collapsible)
+funscript_tweaking_frame = ttk.LabelFrame(root, text="Funscript Tweaking", padding=(10, 5))
+funscript_tweaking_frame.grid(row=5, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+# Collapse/Expand Button
+def toggle_funscript_tweaking():
+    if funscript_tweaking_collapsible.winfo_ismapped():
+        funscript_tweaking_collapsible.grid_remove()
+    else:
+        funscript_tweaking_collapsible.grid()
+
+toggle_button = ttk.Button(funscript_tweaking_frame, text="Toggle Funscript Tweaking", command=toggle_funscript_tweaking)
+toggle_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+
+# Collapsible Section
+funscript_tweaking_collapsible = ttk.Frame(funscript_tweaking_frame)
+funscript_tweaking_collapsible.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+# Boost Settings
+boost_frame = ttk.LabelFrame(funscript_tweaking_collapsible, text="Boost Settings", padding=(10, 5))
+boost_frame.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+
+boost_checkbox = ttk.Checkbutton(boost_frame, text="Enable Boost", variable=boost_enabled_var, command=lambda: setattr(global_state, 'boost_enabled', not global_state.boost_enabled))
+boost_checkbox.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+boost_enabled_var.set(global_state.boost_enabled)
+
+ttk.Label(boost_frame, text="Boost Up %:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+boost_up_selector = ttk.Combobox(boost_frame, values=[str(i) for i in range(0, 21)], width=5)
+boost_up_selector.set(str(global_state.boost_up_percent))
+boost_up_selector.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+boost_up_selector.bind("<<ComboboxSelected>>", lambda e: setattr(global_state, 'boost_up_percent', int(boost_up_selector.get())))
+
+ttk.Label(boost_frame, text="Reduce Down %:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+boost_down_selector = ttk.Combobox(boost_frame, values=[str(i) for i in range(0, 21)], width=5)
+boost_down_selector.set(str(global_state.boost_down_percent))
+boost_down_selector.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+boost_down_selector.bind("<<ComboboxSelected>>", lambda e: setattr(global_state, 'boost_down_percent', int(boost_down_selector.get())))
+
+# Threshold Settings
+threshold_frame = ttk.LabelFrame(funscript_tweaking_collapsible, text="Threshold Settings", padding=(10, 5))
+threshold_frame.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+threshold_checkbox = ttk.Checkbutton(threshold_frame, text="Enable Threshold", variable=threshold_enabled_var, command=lambda: setattr(global_state, 'threshold_enabled', not global_state.threshold_enabled))
+threshold_checkbox.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+threshold_enabled_var.set(global_state.threshold_enabled)
+
+ttk.Label(threshold_frame, text="0 Threshold:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+threshold_low_selector = ttk.Combobox(threshold_frame, values=[str(i) for i in range(0, 16)], width=5)
+threshold_low_selector.set(str(global_state.threshold_low))
+threshold_low_selector.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+threshold_low_selector.bind("<<ComboboxSelected>>", lambda e: setattr(global_state, 'threshold_low', int(threshold_low_selector.get())))
+
+ttk.Label(threshold_frame, text="100 Threshold:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+threshold_high_selector = ttk.Combobox(threshold_frame, values=[str(i) for i in range(80, 101)], width=5)
+threshold_high_selector.set(str(global_state.threshold_high))
+threshold_high_selector.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+threshold_high_selector.bind("<<ComboboxSelected>>", lambda e: setattr(global_state, 'threshold_high', int(threshold_high_selector.get())))
+
+# Simplification Settings
+vw_frame = ttk.LabelFrame(funscript_tweaking_collapsible, text="Simplification", padding=(10, 5))
+vw_frame.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
+
+vw_checkbox = ttk.Checkbutton(vw_frame, text="Enable Simplification", variable=vw_simplification_enabled_var, command=lambda: setattr(global_state, 'vw_simplification_enabled', not global_state.vw_simplification_enabled))
+vw_checkbox.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+vw_simplification_enabled_var.set(global_state.vw_simplification_enabled)
+
+ttk.Label(vw_frame, text="VW Factor:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+vw_factor_selector = ttk.Combobox(vw_frame, values=[str(i / 5) for i in range(10, 51)], width=5)
+vw_factor_selector.set(str(global_state.vw_factor))
+vw_factor_selector.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+vw_factor_selector.bind("<<ComboboxSelected>>", lambda e: setattr(global_state, 'vw_factor', float(vw_factor_selector.get())))
+
+ttk.Label(vw_frame, text="Rounding:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+rounding = ttk.Combobox(vw_frame, values=['5', '10'], width=5)
+rounding.set(str(global_state.rounding))
+rounding.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+rounding.bind("<<ComboboxSelected>>", lambda e: setattr(global_state, 'rounding', float(rounding.get())))
+
+# Regenerate Funscript Button
+regenerate_funscript_button = ttk.Button(funscript_tweaking_collapsible, text="Regenerate Funscript", command=lambda: regenerate_funscript(global_state))
+regenerate_funscript_button.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+
+
+
+funscript_tweaking_collapsible.grid_remove()
 
 # Debug Record Mode
 debug_frame = ttk.LabelFrame(root, text="Debugging (Replay and navigate a processed video)", padding=(10, 5))

@@ -336,11 +336,18 @@ class ObjectTracker:
                     normalized_dist_to_penis_base = min(max(0, dist_to_penis_base), 100)
                     self.update_normalized_distance_to_penis(track_id, normalized_dist_to_penis_base)
 
+                    # attempt : as a weight, we use the absolute position
+                    # weight_pos_track_id = sum(
+                    #    abs(self.tracked_positions[track_id][i] - self.tracked_positions[track_id][i - 1])
+                    #    for i in range(1, len(self.tracked_positions[track_id])))
+
                     weight_pos_track_id = sum(
                         abs(self.normalized_distance_to_penis[track_id][i] - self.normalized_distance_to_penis[track_id][i - 1])
-                        for i in range(1, len(self.normalized_distance_to_penis[track_id]))
-                    )
+                        for i in range(1, len(self.normalized_distance_to_penis[track_id])))
                     sum_pos += ((self.normalized_distance_to_penis[track_id][-1] + normalized_y) // 2) * weight_pos_track_id
+
+                    # attempt : use only the distance to penis value, discarding the absolute position
+                    # sum_pos += self.normalized_distance_to_penis[track_id][-1] * weight_pos_track_id
                     sum_weight_pos += weight_pos_track_id
 
         if len(classes_touching_penis) == 0 or not self.locked_penis_box.is_active():

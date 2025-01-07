@@ -17,109 +17,88 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 
 class FunscriptGenerator:
-    def generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
-        output_path = raw_funscript_path[:-18] + '.funscript'
-        if len(funscript_data) == 0:
+    def generate(self, global_state):
+        output_path = global_state.video_file[:-3] + f"funscript"
+
+        # Backup output file if it exists
+        if os.path.exists(output_path):
+            print(f"Output path {output_path} already exists, backing up as {output_path}.bak...")
+            os.rename(output_path, output_path + ".bak")
+
+        raw_funscript_path = global_state.video_file[:-4] + f"_rawfunscript.json"
+
+        if len(global_state.funscript_data) == 0:
             print("len funscript data is 0, trying to load file")
             # Read the funscript data from the JSON file
             with open(raw_funscript_path, 'r') as f:
                 print(f"Loading funscript from {raw_funscript_path}")
                 try:
-                    data = json.load(f)  #f.read() #json.load(f)
-                    #data = eval(data)
-                    print(f"data loaded: {data}")
-                except:
-                    print(f"line 31 - Error loading funscript from {raw_funscript_path}")
+                    data = json.load(f)
+                except Exception as e:
+                    print(f"Error loading funscript from {raw_funscript_path}: {e}")
+                    return
         else:
-            data = funscript_data
+            data = global_state.funscript_data
 
         try:
             print(f"Generating funscript based on {len(data)} points...")
-            # self.filtered_positions = simplify_coords(data, vw_filter_coeff)  # Use VW algorithm
-            # use my own simplification function instead of vw here
-            print("Positions adjustment - step 0 (simplification)")
-            positions = self.filter_positions(data, fps)
-            # print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
-            print(f"Lenghth of filtered positions: {len(positions) + 1}")
-            # enhance the funscript
-            # let's remap the highest to 100, and the lowest to 0, and rescale to 0-100
-            print("Positions adjustment - step 1 (remapping)")
-            # Adjust peaks and lows
+            # positions = data
+            positions = self.filter_positions(data, global_state.fps)
+            print(f"Length of filtered positions: {len(positions)}")
+
+            # Extract timestamps and positions
             ats = [p[0] for p in positions]
             positions = [p[1] for p in positions]
+
+            # Remap positions to 0-100 range
+            print("Positions adjustment - step 1 (remapping)")
             adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
-            # drag all values below 10 to 0 and above 90 to 100
-            print("Positions adjustment - step 2 (thresholding)")
-            readjusted_positions = [0 if p < 10 else 100 if p > 90 else p for p in adjusted_positions]
-            print("Positions adjustment - step 3 (amplitude boosting)")
-            # let's boost the peaks by 20%, and reduce the lows by 20% and stay within 0-100
-            adjusted_positions = self.adjust_peaks_and_lows(readjusted_positions, peak_boost=20, low_reduction=20, )
-            # recombine ats and positions
+
+            # Apply thresholding
+            if global_state.threshold_enabled:
+                print(f"Positions adjustment - step 2 (thresholding)")
+                adjusted_positions = adjusted_positions.tolist()  # Convert to list
+                adjusted_positions = [
+                    0 if p < global_state.threshold_low else 100 if p > global_state.threshold_high else p for p in
+                    adjusted_positions]
+            else:
+                print("Skipping positions adjustment - step 2 (thresholding)")
+
+            # Apply amplitude boosting
+            if global_state.boost_enabled:
+                print("Positions adjustment - step 3 (amplitude boosting)")
+                #self.boost_amplitude(adjusted_positions, boost_factor=1.2, min_value=0, max_value=100)
+                adjusted_positions = self.adjust_peaks_and_lows(adjusted_positions,
+                                                                peak_boost=global_state.boost_up_percent,
+                                                                low_reduction=global_state.boost_down_percent)
+            else:
+                print("Skipping positions adjustment - step 3 (amplitude boosting)")
+
+            # Round position values to the closest multiple of 5, still between 0 and 100
+            print("Positions adjustment - step 4 (rounding to the closest multiple of 5)")
+            #adjusted_positions = [round(p, -1) for p in adjusted_positions] # multiple of 10
+            adjusted_positions = [round(p / global_state.rounding) * global_state.rounding for p in adjusted_positions]
+
+            # Recombine timestamps and adjusted positions
+            print("Re-assembling ats and positions")
             zip_adjusted_positions = list(zip(ats, adjusted_positions))
-            # now, perform the vw simplification again
-            print("Positions adjustment - step 4 (VW algorithm simplification)")
-            filtered_positions = simplify_coords(zip_adjusted_positions, vw_filter_coeff)
-            # filtered_positions = zip_adjusted_positions
-            self.write_funscript(filtered_positions, output_path, fps)
+
+            # Apply VW simplification if enabled
+            if global_state.vw_simplification_enabled:
+                print("Positions adjustment - step 5 (VW algorithm simplification)")
+                zip_adjusted_positions = simplify_coords(zip_adjusted_positions, global_state.vw_factor)
+            else:
+                print("Skipping positions adjustment - step 5 (VW algorithm simplification)")
+
+            # Write the final funscript
+            self.write_funscript(zip_adjusted_positions, output_path, global_state.fps)
             print(f"Funscript generated and saved to {output_path}")
+
+            # Generate a heatmap
             self.generate_heatmap(output_path,
                                   output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
         except Exception as e:
             print(f"Error generating funscript: {e}")
-
-
-    def prev_generate(self, raw_funscript_path, funscript_data, fps, TestMode = False):
-        output_path = raw_funscript_path[:-18] + '.funscript'
-        if len(funscript_data) == 0:
-            # Read the funscript data from the JSON file
-            with open(raw_funscript_path, 'r') as f:
-                print(f"Loading funscript from {raw_funscript_path}")
-                try:
-                    data = f.read() #json.load(f)
-                    data = eval(data)
-                except:
-                    print(f"Error loading funscript from {raw_funscript_path}")
-        else:
-            data = funscript_data
-
-        try:
-            print(f"Generating funscript based on {len(data)} points...")
-            self.filtered_positions = simplify_coords(data, vw_filter_coeff)  # Use VW algorithm
-            print(f"Lenghth of filtered positions: {len(self.filtered_positions) + 1}")
-            self.write_funscript(self.filtered_positions, output_path, fps)
-            print(f"Funscript generated and saved to {output_path}")
-            self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
-
-            # Now proceeding with remapping / adjusting
-            # Adjust peaks and lows
-            ats = [p[0] for p in self.filtered_positions]
-            positions = [p[1] for p in self.filtered_positions]
-
-            # let's remap the highest to 100, and the lowest to 0, and rescale to 0-100
-            adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
-            # drag all values below 10 to 0 and above 90 to 100
-            readjusted_positions = [0 if p < 10 else 100 if p > 90 else p for p in adjusted_positions]
-
-            # let's boost the peaks by 20%, and reduce the lows by 20% and stay within 0-100
-            adjusted_positions = self.adjust_peaks_and_lows(readjusted_positions, peak_boost=20, low_reduction=20,)
-
-
-            #adjusted_positions = self.adjust_peaks_and_lows(positions, peak_boost=15, low_reduction=20,
-            #                                                max_flat_length=3)
-            # recombine ats and positions
-            zip_adjusted_positions = list(zip(ats, adjusted_positions))
-            remapped_path = output_path[:-10] + '_adjusted.funscript'
-            self.write_funscript(zip_adjusted_positions, remapped_path, fps)
-            self.generate_heatmap(remapped_path,
-                                  remapped_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
-
-        except:
-            print(f"Error loading raw funscript from {raw_funscript_path}")
-
-        #if LiveDisplayMode:
-        #    # plot a comparative graph
-        #    self.plot_comparison(self.points, self.filtered_positions, points_v2)
-
 
     def write_funscript(self, distances, output_path, fps):
         with open(output_path, 'w') as f:
@@ -217,11 +196,52 @@ class FunscriptGenerator:
         plt.close()
         print(f"Funscript heatmap saved to {output_image_path}")
 
+    def boost_amplitude(self, signal, boost_factor, min_value=0, max_value=100):
+        """
+        Boosts the amplitude of a signal and ensures it stays within a specified range.
+
+        Parameters:
+            signal (list or np.ndarray): The input signal to boost.
+            boost_factor (float): The factor by which to boost the signal's amplitude.
+            min_value (int, optional): Minimum value of the range. Default is 0.
+            max_value (int, optional): Maximum value of the range. Default is 100.
+
+        Returns:
+            np.ndarray: The boosted signal clamped to the specified range.
+        """
+        # Convert to numpy array for easier manipulation
+        signal = np.array(signal)
+
+        # Calculate the midpoint for rescaling
+        midpoint = (min_value + max_value) / 2
+
+        # Boost the signal
+        boosted_signal = midpoint + (signal - midpoint) * boost_factor
+
+        # Clamp the signal to the specified range
+        boosted_signal = np.clip(boosted_signal, min_value, max_value)
+
+        return boosted_signal
+
     def filter_positions(self, positions, fps):
+        """
+        Filters positions to remove unnecessary points while preserving key features.
+
+        Args:
+            positions (list or np.array): List of [timestamp, value] pairs.
+            fps (int): Frames per second of the video.
+
+        Returns:
+            list: Filtered list of [timestamp, value] pairs.
+        """
         if not positions:
             return []
 
-        positions = np.array(positions)
+        # Ensure positions is a list of [timestamp, value] pairs
+        positions = np.array(positions, dtype=float)
+        if positions.ndim != 2 or positions.shape[1] != 2:
+            raise ValueError("positions must be a list of [timestamp, value] pairs")
+
         filtered_positions = [positions[0]]  # Start with the first position
 
         min_interval_ms = 50  # Minimum interval between points in milliseconds
@@ -237,71 +257,31 @@ class FunscriptGenerator:
                 continue
 
             # Calculate slopes
-            slope_prev = (current_pos[1] - prev_pos[1]) / (current_pos[0] - prev_pos[0]) if (current_pos[0] - prev_pos[
-                0]) != 0 else 0
-            slope_next = (next_pos[1] - current_pos[1]) / (next_pos[0] - current_pos[0]) if (next_pos[0] - current_pos[
-                0]) != 0 else 0
+            time_diff_prev = current_pos[0] - prev_pos[0]
+            time_diff_next = next_pos[0] - current_pos[0]
+
+            slope_prev = (current_pos[1] - prev_pos[1]) / time_diff_prev if time_diff_prev != 0 else 0
+            slope_next = (next_pos[1] - current_pos[1]) / time_diff_next if time_diff_next != 0 else 0
             slope_diff = abs(slope_next - slope_prev)
 
-            is_local_extreme = ((current_pos[1] >= prev_pos[1] and current_pos[1] > next_pos[1])
-                                or (current_pos[1] > prev_pos[1] and current_pos[1] >= next_pos[1])
-                                or (current_pos[1] <= prev_pos[1] and current_pos[1] < next_pos[1])
-                                or (current_pos[1] < prev_pos[1] and current_pos[1] <= next_pos[1]))
+            # Check if the current position is a local extreme
+            is_local_extreme = (
+                    (current_pos[1] >= prev_pos[1] and current_pos[1] > next_pos[1]) or
+                    (current_pos[1] > prev_pos[1] and current_pos[1] >= next_pos[1]) or
+                    (current_pos[1] <= prev_pos[1] and current_pos[1] < next_pos[1]) or
+                    (current_pos[1] < prev_pos[1] and current_pos[1] <= next_pos[1])
+            )
 
-            # Add to filtered lists based on conditions
-            if (is_local_extreme or slope_diff > slope_threshold) and (abs(
-                    current_pos[0] - filtered_positions[-1][0]) * 1000 / fps) > min_interval_ms:
+            # Calculate time difference in milliseconds
+            time_diff_ms = (current_pos[0] - filtered_positions[-1][0]) * 1000 / fps
+
+            # Add to filtered list based on conditions
+            if (is_local_extreme or slope_diff > slope_threshold) and time_diff_ms > min_interval_ms:
                 filtered_positions.append(current_pos)
 
         # Ensure the last point meets the interval requirement
-        if len(filtered_positions) > 1 and positions[-1][0] - filtered_positions[-1][0] >= min_interval_ms:
-            filtered_positions.append(positions[-1])
-
-        return filtered_positions
-
-    def prev_filter_positions(self, positions, fps):
-        if not positions:
-            return []
-
-        filtered_positions = [positions[0]]  # Start with the first position
-
-        min_interval_ms = 50  # Minimum interval between points in milliseconds
-        slope_threshold = 0.2  # Adjusted slope threshold for gradual changes
-
-        def calculate_slope(pos1, time1, pos2, time2):
-            return (pos2 - pos1) / (time2 - time1) if (time2 - time1) != 0 else 0
-
-        for i in range(1, len(positions) - 1):
-            current_pos = positions[i]
-
-            # Skip None values
-            if current_pos is None:
-                continue
-
-            prev_pos = positions[i - 1]
-            next_pos = positions[i + 1]
-
-            # Skip consecutive duplicate positions
-            if current_pos[1] == filtered_positions[-1][1] and current_pos[1] == next_pos[1]:
-                continue
-
-            # Calculate slopes
-            slope_prev = calculate_slope(prev_pos[1], prev_pos[0], current_pos[1], current_pos[0])
-            slope_next = calculate_slope(current_pos[1], current_pos[0], next_pos[1], next_pos[0])
-            slope_diff = abs(slope_next - slope_prev)
-
-            is_local_extreme = ((current_pos[1] >= prev_pos[1] and current_pos[1] > next_pos[1])
-                                or (current_pos[1] > prev_pos[1] and current_pos[1] >= next_pos[1])
-                                or (current_pos[1] <= prev_pos[1] and current_pos[1] < next_pos[1])
-                                or (current_pos[1] < prev_pos[1] and current_pos[1] <= next_pos[1]))
-
-            # Add to filtered lists based on conditions
-            if (is_local_extreme or slope_diff > slope_threshold) and (abs(
-                    current_pos[0] - filtered_positions[-1][0]) * 1000 / fps) > min_interval_ms:
-                filtered_positions.append(current_pos)
-
-        # Ensure the last point meets the interval requirement
-        if len(filtered_positions) > 1 and positions[-1][0] - filtered_positions[-1][0] >= min_interval_ms:
+        if len(filtered_positions) > 1 and (
+                positions[-1][0] - filtered_positions[-1][0]) * 1000 / fps >= min_interval_ms:
             filtered_positions.append(positions[-1])
 
         return filtered_positions
@@ -356,15 +336,13 @@ class FunscriptGenerator:
 
         return times, positions, relevant_chapters_export, irrelevant_chapters_export
 
-    def compare_funscripts(self, reference_path, script1, video_path, isVR, output_image_path, script2=None):
+    def create_report_funscripts(self, global_state):
         generated_paths = []
-        generated_paths.append(script1)
-        if script2 is not None:
-            generated_paths.append(script2)
+        generated_paths.append(global_state.video_file[:-4] + ".funscript")
 
-        if reference_path:
+        if global_state.reference_script:
             # Load reference funscript
-            ref_times, ref_positions, _, _ = self.load_funscript(reference_path)
+            ref_times, ref_positions, _, _ = self.load_funscript(global_state.reference_script)
 
             # if no 0 at the beginning, add it
             if ref_times and ref_times[0] != 0:
@@ -382,6 +360,7 @@ class FunscriptGenerator:
         sections = self.select_random_sections(total_duration, section_duration=10, num_sections=6)
 
         screenshots_done = False
+        screenshots = []
 
         # Load generated funscripts
         for generated_path in generated_paths:
@@ -390,7 +369,7 @@ class FunscriptGenerator:
             ref_sections = []
             gen_sections = []
             for start, end in sections:
-                if reference_path:
+                if global_state.reference_script:
                     ref_sec = self.extract_section(ref_times, ref_positions, start, end)
                     ref_sections.append(ref_sec)
                 gen_sec = self.extract_section(gen_times, gen_positions, start, end)
@@ -398,12 +377,12 @@ class FunscriptGenerator:
 
             if not screenshots_done:
                 # Capture screenshots, but only once
-                screenshots = self.capture_screenshots(video_path, isVR, sections)
+                screenshots = self.capture_screenshots(global_state.video_file, global_state.isVR, sections)
                 screenshots_done = True
 
             # Plot and combine
             self.create_combined_plot(
-                ref_sections, gen_sections, screenshots, sections, output_image_path,
+                ref_sections, gen_sections, screenshots, sections, global_state.video_file[:-4] + "_report.png",
                 ref_times, ref_positions, gen_times, gen_positions
             )
 
@@ -658,13 +637,12 @@ class FunscriptGenerator:
             'avg_min': avg_min
             }
 
-
     def adjust_peaks_and_lows(self, positions, peak_boost=10, low_reduction=10, max_flat_length=5):
         """
         Adjusts the peaks and lows of a funscript while avoiding long flat sections at 0 or 100.
 
         Args:
-            positions (list): List of positions (0-100) from the funscript.
+            positions (list or np.array): List or array of positions (0-100) from the funscript.
             peak_boost (int): Amount to increase peaks by.
             low_reduction (int): Amount to decrease lows by.
             max_flat_length (int): Maximum allowed length of flat sections at 0 or 100.
@@ -672,29 +650,31 @@ class FunscriptGenerator:
         Returns:
             list: Adjusted positions.
         """
+
+        # Ensure positions is a list of [timestamp, value] pairs
+        if isinstance(positions, np.ndarray):
+            positions = positions.tolist()
+        elif not isinstance(positions, list):
+            raise ValueError("positions must be a list or numpy array of [timestamp, value] pairs")
+
         if not positions or len(positions) < 3:
             return positions
 
         # Convert positions to a numpy array for easier manipulation
-        positions = np.array(positions)
+        positions = np.array(positions, dtype=float)
 
         # Identify plateaus before boosting
         original_plateaus = self._find_plateaus(positions)
-
         # Identify peaks and lows
         peaks = self._find_local_maxima(positions)
         lows = self._find_local_minima(positions)
-
         # Adjust peaks and lows
         positions[peaks] = np.clip(positions[peaks] + peak_boost, 0, 100)
         positions[lows] = np.clip(positions[lows] - low_reduction, 0, 100)
-
         # Identify plateaus after boosting
         adjusted_plateaus = self._find_plateaus(positions)
-
         # Compare plateaus and adjust artificially created flats
         positions = self._compare_and_adjust_plateaus(positions, original_plateaus, adjusted_plateaus, max_flat_length)
-
         return positions.tolist()
 
     def _find_local_maxima(self, positions):
@@ -763,6 +743,7 @@ class FunscriptGenerator:
         Returns:
             np.array: Adjusted positions.
         """
+        positions = positions.copy()  # Work on a copy to avoid modifying the original array
         for plateau in adjusted_plateaus:
             start, end = plateau
             value = positions[start]
