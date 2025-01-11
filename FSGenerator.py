@@ -1021,7 +1021,7 @@ button_frame.grid(row=7, column=0, columnspan=3, padx=5, pady=10)
 ttk.Button(button_frame, text="Quit", command=quit_application).grid(row=0, column=2, padx=5, pady=5)
 
 # Footer
-footer_label = ttk.Label(root, text="Individual and personal use only.\nNot for commercial use, nor use by a company.\nk00gar 2025 - https://github.com/ack00gar", font=("Arial", 10, "italic", "bold"), justify="center")
+footer_label = ttk.Label(root, text="Individual and personal use only.\nNot for commercial use.\nk00gar 2025 - https://github.com/ack00gar", font=("Arial", 10, "italic", "bold"), justify="center")
 footer_label.grid(row=8, column=0, columnspan=3, padx=5, pady=5)
 
 root.mainloop()
