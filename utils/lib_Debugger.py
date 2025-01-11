@@ -143,6 +143,7 @@ class Debugger:
             funscript_interpolator = None
 
         # Initialize rolling window buffers
+        half_window = rolling_window_size // 2
         distance_buffer = np.zeros(rolling_window_size)
         funscript_buffer = np.zeros(rolling_window_size)
 
@@ -200,9 +201,12 @@ class Debugger:
 
             try:
                 # Update rolling window buffers
+                # Update rolling window buffers
                 distance = variables.get("distance", 0)
-                funscript_value = self._get_funscript_value(funscript_interpolator, self.current_frame, self.fps) if funscript_interpolator else 0
+                funscript_value = self._get_funscript_value(funscript_interpolator, self.current_frame,
+                                                            self.fps) if funscript_interpolator else 0
                 visualizer.draw_gauge(frame_copy, funscript_value)
+                # Shift buffers to the left and add new values at the center
                 distance_buffer = np.roll(distance_buffer, -1)
                 distance_buffer[-1] = distance
                 funscript_buffer = np.roll(funscript_buffer, -1)
@@ -309,7 +313,7 @@ class Debugger:
         :param width: Width of the frame.
         :param height: Height of the frame.
         """
-        bar_height = 10
+        bar_height = 20
         bar_x_start = 0
         bar_x_end = width
         bar_y_start = height - bar_height

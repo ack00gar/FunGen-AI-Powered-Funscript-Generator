@@ -5,6 +5,7 @@ from simplification.cutil import simplify_coords
 import numpy as np
 import cv2
 import datetime
+from scipy.signal import savgol_filter
 
 from params.config import heatmap_colors, step_size, vw_filter_coeff
 
@@ -42,53 +43,62 @@ class FunscriptGenerator:
 
         try:
             print(f"Generating funscript based on {len(data)} points...")
-            # positions = data
-            positions = self.filter_positions(data, global_state.fps)
-            print(f"Length of filtered positions: {len(positions)}")
 
             # Extract timestamps and positions
-            ats = [p[0] for p in positions]
-            positions = [p[1] for p in positions]
+            ats = [p[0] for p in data]
+            positions = [p[1] for p in data]
+
+            print(f"Positions adjustment - step 1 (noise removal)")
+            # Run the Savitzky-Golay filter
+            positions = savgol_filter(positions, int(global_state.fps) // 4, 3)
+
+            # zip adjusted positions
+            zip_positions = list(zip(ats, positions))
+
+            # Apply VW simplification if enabled
+            if global_state.vw_simplification_enabled:
+                print("Positions adjustment - step 2 (VW algorithm simplification)")
+                zip_vw_positions = simplify_coords(zip_positions, global_state.vw_factor)
+                print(f"Length of VW filtered positions: {len(zip_vw_positions)}")
+            else:
+                print("Skipping positions adjustment - step 2 (VW algorithm simplification)")
+
+            # Extract timestamps and positions
+            ats = [p[0] for p in zip_vw_positions]
+            positions = [p[1] for p in zip_vw_positions]
 
             # Remap positions to 0-100 range
-            print("Positions adjustment - step 1 (remapping)")
+            print("Positions adjustment - step 3 (remapping)")
             adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
 
             # Apply thresholding
             if global_state.threshold_enabled:
-                print(f"Positions adjustment - step 2 (thresholding)")
+                print(f"Positions adjustment - step 4 (thresholding)")
                 adjusted_positions = adjusted_positions.tolist()  # Convert to list
                 adjusted_positions = [
                     0 if p < global_state.threshold_low else 100 if p > global_state.threshold_high else p for p in
                     adjusted_positions]
             else:
-                print("Skipping positions adjustment - step 2 (thresholding)")
+                print("Skipping positions adjustment - step 4 (thresholding)")
 
             # Apply amplitude boosting
             if global_state.boost_enabled:
-                print("Positions adjustment - step 3 (amplitude boosting)")
+                print("Positions adjustment - step 5 (amplitude boosting)")
                 #self.boost_amplitude(adjusted_positions, boost_factor=1.2, min_value=0, max_value=100)
                 adjusted_positions = self.adjust_peaks_and_lows(adjusted_positions,
                                                                 peak_boost=global_state.boost_up_percent,
                                                                 low_reduction=global_state.boost_down_percent)
             else:
-                print("Skipping positions adjustment - step 3 (amplitude boosting)")
+                print("Skipping positions adjustment - step 5 (amplitude boosting)")
 
             # Round position values to the closest multiple of 5, still between 0 and 100
-            print("Positions adjustment - step 4 (rounding to the closest multiple of 5)")
+            print("Positions adjustment - step 6 (rounding to the closest multiple of 5)")
             #adjusted_positions = [round(p, -1) for p in adjusted_positions] # multiple of 10
             adjusted_positions = [round(p / global_state.rounding) * global_state.rounding for p in adjusted_positions]
 
             # Recombine timestamps and adjusted positions
             print("Re-assembling ats and positions")
             zip_adjusted_positions = list(zip(ats, adjusted_positions))
-
-            # Apply VW simplification if enabled
-            if global_state.vw_simplification_enabled:
-                print("Positions adjustment - step 5 (VW algorithm simplification)")
-                zip_adjusted_positions = simplify_coords(zip_adjusted_positions, global_state.vw_factor)
-            else:
-                print("Skipping positions adjustment - step 5 (VW algorithm simplification)")
 
             # Write the final funscript
             self.write_funscript(zip_adjusted_positions, output_path, global_state.fps)
@@ -508,6 +518,8 @@ class FunscriptGenerator:
 
                 # Funscript comparison (second column)
                 ax_plot = fig.add_subplot(gs[i-1, j * 2 + 1])
+                # Scale the y axis 0 to 100
+                ax_plot.set_ylim(0, 100)
                 gen_times_sec = [t / 1000 for t in gen_sections[idx][0]]
                 ax_plot.plot(gen_times_sec, gen_sections[idx][1], label='Generated', color='blue')
 

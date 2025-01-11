@@ -306,11 +306,13 @@ class ObjectTracker:
                             self.update_distance(distance)
                             return
 
+        # Section where we compute the funscript positions
         sum_pos = 0
         sum_weight_pos = 0
 
         for box, conf, cls, class_name, track_id in sorted_boxes:
-            if class_name in ['glans', 'penis', 'navel', 'hips center']:
+            # discarding those classes for distance computation
+            if class_name in ['glans', 'penis', 'navel', 'hips center', 'anus']:
                 continue
             elif self.locked_penis_box.is_active() and class_name == 'breast' and not self.boxes_overlap(box, self.locked_penis_box.get_box()):
                 x1, y1, x2, y2 = box
@@ -488,23 +490,3 @@ class ObjectTracker:
         self.normalized_distance_to_penis[track_id].append(normalized_dist_to_penis_base)
         if len(self.normalized_distance_to_penis[track_id]) > 60:
             self.normalized_distance_to_penis[track_id].pop(0)
-
-    def normalize_box_area(self, box, frame_width, frame_height):
-        """
-        Normalize the area of a bounding box relative to the frame size.
-
-        Args:
-            box (tuple): Coordinates of the box.
-            frame_width (int): Width of the frame.
-            frame_height (int): Height of the frame.
-
-        Returns:
-            int: Normalized area (0-100).
-        """
-        x1, y1, x2, y2 = box
-        if x2 <= x1 or y2 <= y1:
-            return 0
-        box_area = (x2 - x1) * (y2 - y1)
-        max_area = frame_width * frame_height
-        normalized_area = 100 * (box_area / max_area)
-        return max(0, min(100, normalized_area))
