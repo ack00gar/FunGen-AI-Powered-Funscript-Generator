@@ -99,6 +99,7 @@ class ObjectTracker:
         self.tracked_boxes = []  # List of tracked boxes
         self.penis_box = None  # Detected penis box
         self.locked_penis_box = LockedPenisBox()  # Locked penis box
+        self.visible_part_of_penis = -1
         self.glans_detected = False  # Whether the glans is detected
         self.breast_tracking = False  # Whether breast tracking is active
         self.distance = 100  # Current distance
@@ -115,6 +116,8 @@ class ObjectTracker:
         self.tracked_positions = {}  # Tracked positions for each track_id
         self.normalized_absolute_tracked_positions = {}  # Normalized absolute positions for each track_id
         self.normalized_distance_to_penis = {}  # Normalized distance to penis for each track_id
+        self.weights = {}  # Weights for each track_id
+        self.pct_weights = {}  # Percentage weights for each track_id
 
         # Initialize normalized positions and distances
         self.normalized_positions = {class_name: deque(maxlen=200) for class_name in class_names}
@@ -123,7 +126,7 @@ class ObjectTracker:
         # Detection thresholds
         self.consecutive_detections = {class_name: 0 for class_name in class_names}
         self.consecutive_non_detections = {class_name: 0 for class_name in class_names}
-        self.detections_threshold = 3  # Threshold for considering a detection valid
+        self.detections_threshold = round(self.fps) / 10  # Threshold for considering a detection valid
 
         # Penetration state
         self.penetration = False  # Whether penetration is detected
@@ -244,6 +247,8 @@ class ObjectTracker:
         self.boxes = {class_name: None for class_name in self.class_names}
         self.tracked_boxes = []
         all_detections = {class_name: [] for class_name in self.class_names}
+        self.weights = {}  # Weights for each track_id
+        self.pct_weights = {}  # Percentage weights for each track_id
 
         classes_touching_penis = []
         breast_tracked = None
@@ -312,7 +317,8 @@ class ObjectTracker:
 
         for box, conf, cls, class_name, track_id in sorted_boxes:
             # discarding those classes for distance computation
-            if class_name in ['glans', 'penis', 'navel', 'hips center', 'anus']:
+            #if class_name in ['glans', 'penis', 'navel', 'hips center', 'anus']:
+            if class_name in ['glans', 'navel', 'hips center', 'anus']:
                 continue
             elif self.locked_penis_box.is_active() and class_name == 'breast' and not self.boxes_overlap(box, self.locked_penis_box.get_box()):
                 x1, y1, x2, y2 = box
@@ -326,15 +332,23 @@ class ObjectTracker:
 
                 self.tracked_boxes.append([box, class_name, track_id])
                 x1, y1, x2, y2 = box
-                mid_y = y2
+                if class_name != 'penis':
+                    mid_y = y2
+                else:
+                    mid_y = (y1 + y2) // 2
 
                 normalized_y = self.update_tracked_positions(track_id, mid_y)
 
                 if class_name != 'hips center':
+
                     low_y = y2 if class_name != 'butt' else (0.8 * (y2 - y1)) + y1
-                    dist_to_penis_base = int(
-                        ((self.locked_penis_box.get_box()[3] - low_y) / self.locked_penis_box.get_height()) * 100
-                    )
+
+                    if class_name == 'penis':
+                        dist_to_penis_base = self.visible_part_of_penis
+                    else:
+                        dist_to_penis_base = int(
+                            ((self.locked_penis_box.get_box()[3] - low_y) / self.locked_penis_box.get_height()) * 100
+                        )
                     normalized_dist_to_penis_base = min(max(0, dist_to_penis_base), 100)
                     self.update_normalized_distance_to_penis(track_id, normalized_dist_to_penis_base)
 
@@ -346,11 +360,28 @@ class ObjectTracker:
                     weight_pos_track_id = sum(
                         abs(self.normalized_distance_to_penis[track_id][i] - self.normalized_distance_to_penis[track_id][i - 1])
                         for i in range(1, len(self.normalized_distance_to_penis[track_id])))
+                    if track_id not in self.weights:
+                        self.weights[track_id] = []
+                    self.weights[track_id].append(weight_pos_track_id)
+
                     sum_pos += ((self.normalized_distance_to_penis[track_id][-1] + normalized_y) // 2) * weight_pos_track_id
 
                     # attempt : use only the distance to penis value, discarding the absolute position
                     # sum_pos += self.normalized_distance_to_penis[track_id][-1] * weight_pos_track_id
                     sum_weight_pos += weight_pos_track_id
+
+        for _, class_name, track_id in self.tracked_boxes:
+            # disregard penis class if hand or foot in classes_touching_penis, because of obstruction issue
+            if class_name == 'penis' and ('hand' in classes_touching_penis or 'foot' in classes_touching_penis):
+                continue
+            # saves the weight for the current track_id
+            if track_id not in self.pct_weights:
+                self.pct_weights[track_id] = []
+            if track_id not in self.weights:
+                continue
+            if sum_weight_pos > 0:
+                weight = int((self.weights[track_id][-1] / sum_weight_pos) * 100)
+                self.pct_weights[track_id].append(weight)
 
         if len(classes_touching_penis) == 0 or not self.locked_penis_box.is_active():
             self.penetration = False
@@ -411,7 +442,8 @@ class ObjectTracker:
                             self.locked_penis_box.update(self.penis_box, current_height)
 
                         # Move locked penis box towards current penis box
-                        max_move = max(1, int(self.image_y_size / 960))
+                        #max_move = max(1, int(self.image_y_size / 960))
+                        max_move = 120 // int(self.fps)
 
                         if abs(self.penis_box[0] - self.locked_penis_box.get_box()[0]) > max_move:
                             px1 = self.penis_box[0] + np.sign(self.penis_box[0] - self.locked_penis_box.get_box()[0]) * max_move
@@ -421,8 +453,14 @@ class ObjectTracker:
                             py2 = self.locked_penis_box.get_box()[3] + np.sign(self.penis_box[3] - self.locked_penis_box.get_box()[3]) * max_move
 
                         self.locked_penis_box.update((px1, py2 - self.locked_penis_box.get_height(), px2, py2), self.locked_penis_box.get_height())
+
+                        self.visible_part_of_penis = min(100, int((current_height / (self.locked_penis_box.get_height() * .7)) * 100))
+                        # values most likely to be 25 to 100 give a residual box at full penetration, need to remap 0-100
+                        self.visible_part_of_penis = int((self.visible_part_of_penis - 25) / 75 * 100)
                     else:
                         self.locked_penis_box.update(self.penis_box, current_height)
+            else:
+                self.visible_part_of_penis = -1
         elif class_name == 'glans' and box:
             if self.consecutive_detections['glans'] >= self.detections_threshold:
                 self.boxes['glans'] = box

@@ -11,6 +11,7 @@ import tkinter as tk  # GUI library for macOS for basic use in our case
 from tkinter import filedialog, messagebox, ttk  # here, what was I saying...
 import subprocess  # For running shell commands
 import threading
+from datetime import datetime
 
 # Import custom modules and configurations
 from params.config import class_priority_order, class_reverse_match, class_colors, yolo_models, ffmpeg_path  # Configuration for class priorities, reverse matching, and colors
@@ -454,6 +455,10 @@ def analyze_tracking_results(results, image_y_size, progress_callback=None):
                                 str_dist_penis = 'None'
                         str_abs_pos = str(int(tracker.normalized_absolute_tracked_positions[box[4]][-1]))
                         position = 'p: ' + str_dist_penis + ' | ' + 'a: ' + str_abs_pos
+                        if box[4] in tracker.pct_weights:
+                            if len(tracker.pct_weights[box[4]]) > 0:
+                                weight = tracker.pct_weights[box[4]][-1]
+                                position += ' | w: ' + str(weight)
                     else:
                         position = None
                     bounding_boxes.append({
@@ -467,6 +472,8 @@ def analyze_tracking_results(results, image_y_size, progress_callback=None):
                                    bounding_boxes=bounding_boxes,
                                    variables={
                                        'frame': frame_pos,
+                                       # time of the frame hh:mm:ss
+                                       'time': datetime.fromtimestamp(frame_pos / fps).strftime('%H:%M:%S'),
                                        'distance': tracker.distance,
                                        'Penetration': tracker.penetration,
                                        'sex_position': tracker.sex_position,

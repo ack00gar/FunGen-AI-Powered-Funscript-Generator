@@ -228,7 +228,8 @@ class Debugger:
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
             if cv2.waitKey(1) & 0xFF == 32:  # Pause on spacebar
-                time.sleep(10)
+                # press a key to resume
+                cv2.waitKey(0)
             if duration == -1:
                 cv2.imwrite(f"{self.video_path[:-4]}_frame_{self.current_frame}.png", frame_copy)
                 break
