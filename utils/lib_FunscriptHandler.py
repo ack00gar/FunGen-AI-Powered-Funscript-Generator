@@ -409,7 +409,8 @@ class FunscriptGenerator:
             # Ensure the 10-second section stays within the segment
             max_start = segment_end - section_duration
             if max_start < segment_start:
-                raise ValueError(f"Segment {i} is too short to fit a {section_duration}-second section.")
+                # raise ValueError(f"Segment {i} is too short to fit a {section_duration}-second section.")
+                continue
 
             # Randomly select a start time within the segment
             start = np.random.uniform(segment_start, max_start)
