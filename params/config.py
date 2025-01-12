@@ -56,6 +56,9 @@ ffprobe_path = find_ffprobe_path()
 print(f"ffmpeg_path: {ffmpeg_path}")
 print(f"ffprobe_path: {ffprobe_path}")
 
+# Yolo detection settings
+max_frame_height = 1440
+
 # models path
 
 # Define the base models directory
