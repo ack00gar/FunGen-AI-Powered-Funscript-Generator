@@ -22,6 +22,9 @@ from utils.lib_Debugger import Debugger  # For debugging and logging
 from utils.lib_SceneCutsDetect import detect_scene_changes  # For detecting scene changes in videos
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg  # Custom video reader using FFmpeg
 
+# TODO this is a workaround and needs to be fixed properly
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 # Define a GlobalState class to manage global variables
 class GlobalState:
     def __init__(self):
@@ -685,10 +688,13 @@ def start_processing():
     # YOLO Detection Progress
     def update_yolo_progress(current_frame, total_frames, eta):
         progress = (current_frame / total_frames) * 100
-        yolo_progress_bar["value"] = progress
-        yolo_progress_percent.config(text=f"{progress:.0f}% - ETA: {eta}")
-        #yolo_progress_eta.config(text=f"ETA: {eta}")
-        root.update_idletasks()
+
+        def update_gui():
+            yolo_progress_bar["value"] = progress
+            yolo_progress_percent.config(text=f"{progress:.0f}% - ETA: {eta}")
+
+        # Schedule the update in the main thread
+        root.after(0, update_gui)
 
     # Tracking Analysis Progress
     def update_tracking_progress(current_frame, total_frames, eta):

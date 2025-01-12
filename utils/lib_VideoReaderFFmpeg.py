@@ -2,7 +2,7 @@ import subprocess
 import cv2
 import numpy as np
 import argparse
-from params.config import ffmpeg_path, ffprobe_path
+from params.config import ffmpeg_path, ffprobe_path, max_frame_height
 
 
 class VideoReaderFFmpeg:
@@ -76,6 +76,11 @@ class VideoReaderFFmpeg:
             self.codec = codec_name
             self.total_frames = total_frames
             self.duration = duration * 1000  # Convert duration to milliseconds
+
+            # limiting the frame height here has no additional performance cost and significantly improves speed for 1440p+ video
+            scaling_factor = min(max_frame_height / self.width, max_frame_height / self.height)
+            self.width = int(self.width * scaling_factor)
+            self.height = int(self.height * scaling_factor)
 
             print(f"FPS: {self.fps}, Resolution: {self.width}x{self.height}, "
                   f"Codec: {self.codec}, Total Frames: {self.total_frames}, Duration: {self.duration:.2f} ms")
