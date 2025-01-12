@@ -21,6 +21,9 @@ from utils.lib_Debugger import Debugger  # For debugging and logging
 from utils.lib_SceneCutsDetect import detect_scene_changes  # For detecting scene changes in videos
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg  # Custom video reader using FFmpeg
 
+# TODO this is a workaround and needs to be fixed properly
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 # Define a GlobalState class to manage global variables
 class GlobalState:
     def __init__(self):
