@@ -7,7 +7,7 @@ import cv2
 import datetime
 from scipy.signal import savgol_filter
 
-from params.config import heatmap_colors, step_size, vw_filter_coeff
+from params.config import heatmap_colors, step_size
 
 import matplotlib
 matplotlib.use('Agg')  # Use a non-interactive backend
@@ -23,92 +23,92 @@ class FunscriptGenerator:
 
         # Backup output file if it exists
         if os.path.exists(output_path):
-            print(f"Output path {output_path} already exists, backing up as {output_path}.bak...")
+            global_state.logger.warning(f"Output path {output_path} already exists, backing up as {output_path}.bak...")
             os.rename(output_path, output_path + ".bak")
 
         raw_funscript_path = global_state.video_file[:-4] + f"_rawfunscript.json"
 
         if len(global_state.funscript_data) == 0:
-            print("len funscript data is 0, trying to load file")
+            global_state.logger.info("len funscript data is 0, trying to load file")
             # Read the funscript data from the JSON file
             with open(raw_funscript_path, 'r') as f:
-                print(f"Loading funscript from {raw_funscript_path}")
+                global_state.logger.info(f"Loading funscript from {raw_funscript_path}")
                 try:
                     data = json.load(f)
                 except Exception as e:
-                    print(f"Error loading funscript from {raw_funscript_path}: {e}")
+                    global_state.logger.error(f"Error loading funscript from {raw_funscript_path}: {e}")
                     return
         else:
             data = global_state.funscript_data
 
         try:
-            print(f"Generating funscript based on {len(data)} points...")
+            global_state.logger.info(f"Generating funscript based on {len(data)} points...")
 
             # Extract timestamps and positions
             ats = [p[0] for p in data]
             positions = [p[1] for p in data]
 
-            print(f"Positions adjustment - step 1 (noise removal)")
+            global_state.logger.info(f"Positions adjustment - step 1 (noise removal)")
             # Run the Savitzky-Golay filter
-            positions = savgol_filter(positions, int(global_state.fps) // 4, 3)
+            positions = savgol_filter(positions, int(global_state.video_fps) // 4, 3)
 
             # zip adjusted positions
             zip_positions = list(zip(ats, positions))
 
             # Apply VW simplification if enabled
             if global_state.vw_simplification_enabled:
-                print("Positions adjustment - step 2 (VW algorithm simplification)")
+                global_state.logger.info("Positions adjustment - step 2 (VW algorithm simplification)")
                 zip_vw_positions = simplify_coords(zip_positions, global_state.vw_factor)
-                print(f"Length of VW filtered positions: {len(zip_vw_positions)}")
+                global_state.logger.info(f"Length of VW filtered positions: {len(zip_vw_positions)}")
             else:
-                print("Skipping positions adjustment - step 2 (VW algorithm simplification)")
+                global_state.logger.info("Skipping positions adjustment - step 2 (VW algorithm simplification)")
 
             # Extract timestamps and positions
             ats = [p[0] for p in zip_vw_positions]
             positions = [p[1] for p in zip_vw_positions]
 
             # Remap positions to 0-100 range
-            print("Positions adjustment - step 3 (remapping)")
+            global_state.logger.info("Positions adjustment - step 3 (remapping)")
             adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
 
             # Apply thresholding
             if global_state.threshold_enabled:
-                print(f"Positions adjustment - step 4 (thresholding)")
+                global_state.logger.info(f"Positions adjustment - step 4 (thresholding)")
                 adjusted_positions = adjusted_positions.tolist()  # Convert to list
                 adjusted_positions = [
                     0 if p < global_state.threshold_low else 100 if p > global_state.threshold_high else p for p in
                     adjusted_positions]
             else:
-                print("Skipping positions adjustment - step 4 (thresholding)")
+                global_state.logger.info("Skipping positions adjustment - step 4 (thresholding)")
 
             # Apply amplitude boosting
             if global_state.boost_enabled:
-                print("Positions adjustment - step 5 (amplitude boosting)")
+                global_state.logger.info("Positions adjustment - step 5 (amplitude boosting)")
                 #self.boost_amplitude(adjusted_positions, boost_factor=1.2, min_value=0, max_value=100)
                 adjusted_positions = self.adjust_peaks_and_lows(adjusted_positions,
                                                                 peak_boost=global_state.boost_up_percent,
                                                                 low_reduction=global_state.boost_down_percent)
             else:
-                print("Skipping positions adjustment - step 5 (amplitude boosting)")
+                global_state.logger.info("Skipping positions adjustment - step 5 (amplitude boosting)")
 
             # Round position values to the closest multiple of 5, still between 0 and 100
-            print("Positions adjustment - step 6 (rounding to the closest multiple of 5)")
+            global_state.logger.info("Positions adjustment - step 6 (rounding to the closest multiple of 5)")
             #adjusted_positions = [round(p, -1) for p in adjusted_positions] # multiple of 10
             adjusted_positions = [round(p / global_state.rounding) * global_state.rounding for p in adjusted_positions]
 
             # Recombine timestamps and adjusted positions
-            print("Re-assembling ats and positions")
+            global_state.logger.info("Re-assembling ats and positions")
             zip_adjusted_positions = list(zip(ats, adjusted_positions))
 
             # Write the final funscript
-            self.write_funscript(zip_adjusted_positions, output_path, global_state.fps)
-            print(f"Funscript generated and saved to {output_path}")
+            self.write_funscript(zip_adjusted_positions, output_path, global_state.video_fps)
+            global_state.logger.info(f"Funscript generated and saved to {output_path}")
 
             # Generate a heatmap
             self.generate_heatmap(output_path,
                                   output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
         except Exception as e:
-            print(f"Error generating funscript: {e}")
+            global_state.logger.error(f"Error generating funscript: {e}")
 
     def write_funscript(self, distances, output_path, fps):
         with open(output_path, 'w') as f:
@@ -134,9 +134,6 @@ class FunscriptGenerator:
             times.insert(0, 0)
             positions.insert(0, 100)
 
-        # Print loaded data for debugging
-        #print(f"Times: {times}")
-        #print(f"Positions: {positions}")
         print(f"Total Actions: {len(times)}")
         print(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
@@ -528,8 +525,8 @@ class FunscriptGenerator:
                     ref_times_sec = [t / 1000 for t in ref_sections[idx][0]]
                     ax_plot.plot(ref_times_sec, ref_sections[idx][1], label='Reference', color='red')
 
-                start_time = datetime.timedelta(seconds=int(sections[idx][0]))  # datetime.datetime.fromtimestamp(sections[idx][0]).strftime('%H:%M:%S')
-                end_time = datetime.timedelta(seconds=int(sections[idx][1]))  # datetime.datetime.fromtimestamp(sections[idx][1]).strftime('%H:%M:%S')
+                start_time = datetime.timedelta(seconds=int(sections[idx][0]))
+                end_time = datetime.timedelta(seconds=int(sections[idx][1]))
                 ax_plot.set_title(f'Section {idx + 1}: {start_time} - {end_time}', fontsize=10)
                 ax_plot.set_xlabel('Time (s)')
                 ax_plot.set_ylabel('Position')
@@ -539,8 +536,11 @@ class FunscriptGenerator:
         plt.tight_layout()
 
         # Save the figure
+        # Add "SPOILER_" to the filename
+        directory, filename = os.path.split(output_image_path)
+        new_filename = f"SPOILER_{filename}"
+        output_image_path = os.path.join(directory, new_filename)
         plt.savefig(output_image_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png", dpi=100)
-        # plt.show()
 
     def generate_heatmap_inline(self, ax, times, positions):
         """

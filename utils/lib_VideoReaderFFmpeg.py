@@ -78,9 +78,12 @@ class VideoReaderFFmpeg:
             self.duration = duration * 1000  # Convert duration to milliseconds
 
             # limiting the frame height here has no additional performance cost and significantly improves speed for 1440p+ video
-            scaling_factor = min(max_frame_height / self.width, max_frame_height / self.height)
-            self.width = int(self.width * scaling_factor)
-            self.height = int(self.height * scaling_factor)
+            if self.is_VR:
+                scaling_factor = min(max_frame_height / self.width, max_frame_height / self.height)
+                self.width = int(self.width * scaling_factor)
+                self.height = int(self.height * scaling_factor)
+            else:  # in case of 2D video
+                pass
 
             print(f"FPS: {self.fps}, Resolution: {self.width}x{self.height}, "
                   f"Codec: {self.codec}, Total Frames: {self.total_frames}, Duration: {self.duration:.2f} ms")
@@ -148,7 +151,7 @@ class VideoReaderFFmpeg:
                 "-threads", "0",  # Use maximum threads available
                 "-",  # Output to stdout
             ]
-        else:
+        else:  # 2D, no unwarping, limiting the size to 1080p
             # FFmpeg command to read frames
             cmd = [
                 self.ffmpeg_path,
@@ -160,6 +163,7 @@ class VideoReaderFFmpeg:
                 "-f", "rawvideo",  # Output raw video data
                 "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
                 "-vsync", "0",  # Disable frame rate synchronization
+                "-vf", "scale=-1:'min(1080,ih)'",  # Resize height to max 1080p, width is auto-calculated
                 "-",  # Output to stdout
             ]
 
