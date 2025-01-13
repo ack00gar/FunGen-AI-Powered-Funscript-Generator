@@ -1,7 +1,9 @@
 import json
-import time
 import cv2
 import numpy as np
+import os
+import subprocess
+
 from params.config import class_colors
 from scipy.interpolate import interp1d
 from utils.lib_Visualizer import Visualizer
@@ -114,12 +116,10 @@ class Debugger:
             ret, frame = self.cap.read()
             if self.video_reader == "OpenCV" and self.isVR:
                 frame = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
-            #if self.cap.is_VR:
-            #    frame_copy = frame[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
-            output_path = self.video_path.replace(".mp4", "_debug.mp4")
+            output_path = self.video_path.replace(".mp4", f"_debug_{start_frame}.mp4")
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             out = cv2.VideoWriter(
-                output_path, fourcc, self.fps, (frame.shape[1] // downsize_ratio, frame.shape[0] // downsize_ratio)
+                output_path, fourcc, self.fps // 2, (frame.shape[1], frame.shape[0])
             )
             if not out.isOpened():
                 print(f"Error: Could not open video writer for {output_path}")
@@ -236,7 +236,6 @@ class Debugger:
 
             # Record the frame if enabled
             if record:
-                frame_copy = cv2.resize(frame_copy, (frame_copy.shape[1] // downsize_ratio, frame_copy.shape[0] // downsize_ratio))
                 out.write(frame_copy)
 
             self.current_frame += 1
@@ -245,6 +244,35 @@ class Debugger:
         self.cap.release()
         if record:
             out.release()
+
+            # Input and output paths
+            input_path = output_path
+            # Add "SPOILER_" to the filename
+            directory, filename = os.path.split(input_path)
+            new_filename = f"SPOILER_{filename}"
+            output_path_ffmpeg = os.path.join(directory, new_filename)
+
+            # FFmpeg command to convert to H.265
+            ffmpeg_command = [
+                "ffmpeg",
+                "-y",  # Overwrite output file if it exists
+                "-i", input_path,  # Input file
+                "-c:v", "libx265",  # Use H.265 codec
+                "-crf", "26",  # Constant Rate Factor (quality)
+                "-preset", "fast",  # Encoding speed
+                "-b:v", "5000k",  # Bitrate
+                "-movflags", "+faststart",  # Enable fast streaming
+                output_path_ffmpeg
+            ]
+
+            # Run FFmpeg command
+            subprocess.run(ffmpeg_command)
+
+            # Delete the intermediate file
+            if os.path.exists(input_path):
+                os.remove(input_path)
+                print(f"Deleted intermediate file: {input_path}")
+
         cv2.destroyAllWindows()
 
     def _get_funscript_value(self, interpolator, frame_id, fps):

@@ -57,7 +57,8 @@ print(f"ffmpeg_path: {ffmpeg_path}")
 print(f"ffprobe_path: {ffprobe_path}")
 
 # Yolo detection settings
-max_frame_height = 1440
+# max_frame_height = 1440
+max_frame_height = 1080
 
 # models path
 
@@ -91,7 +92,7 @@ class_priority_order = {
 # Define class names with their corresponding indices
 class_names = {
     'face': 0,
-    'hand':1, 'left hand': 1, 'right hand': 1,
+    'hand': 1, 'left hand': 1, 'right hand': 1,
     'penis': 2,
     'glans': 3,
     'pussy': 4,
@@ -99,7 +100,7 @@ class_names = {
     'anus': 6,
     'breast': 7,
     'navel': 8,
-    'foot':9, 'left foot': 9, 'right foot': 9,
+    'foot': 9, 'left foot': 9, 'right foot': 9,
     'hips center': 10
 }
 
@@ -134,4 +135,3 @@ heatmap_colors = [
 ]
 step_size = 120  # Speed step size for color transitions
 
-vw_filter_coeff = 2.0
