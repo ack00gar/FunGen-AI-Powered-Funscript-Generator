@@ -355,7 +355,12 @@ class ObjectTracker:
                         butt_box_area = (b_x2 - b_x1) * (b_y2 - b_y1)
 
                         # Check if the butt box is unusually large (close-up)
-                        if butt_box_area > 0.15 * self.image_area:
+                        if self.isVR:
+                            size_threshold = 0.15
+                        else:  #2D POV
+                            size_threshold = 0.4
+
+                        if butt_box_area > size_threshold * self.image_area:
                             close_up_detected = True
                             self.detect_sex_position_change('Close up', 'Butt box size beyond threshold')
                             if not self.close_up:
@@ -409,8 +414,10 @@ class ObjectTracker:
 
                     if class_name == 'penis':
                         dist_to_penis_base = self.locked_penis_box.visible
-                        # skipping the rest for now as a test as it was introducing noise
-                        continue
+                        if self.isVR:  # skipping the rest for now as a test as it was introducing noise
+                            continue
+                        else:  # 2D POV, trying to reinject this here
+                            pass
                     elif class_name in ['hand', 'foot']:
                         real_pen_height *= 0.6
                         real_pen_y3 -= real_pen_height * 0.1
@@ -499,8 +506,8 @@ class ObjectTracker:
             pass
         else:
             # meaning distance was not actuated
-            distance = self.previous_distances[-1]
-            # distance = 100
+            # distance = self.previous_distances[-1]
+            distance = 100
 
         self.update_distance(distance)
 
@@ -529,10 +536,10 @@ class ObjectTracker:
                         # Move locked penis box towards current penis box
                         #max_move = max(1, int(self.image_y_size / 960))
                         if self.isVR:
-                            max_move = 120 // int(self.fps)
+                            max_move = 180 // int(self.fps)
                         else:
                             # in 2D POV, camera is not still, actuation needs to be faster
-                            max_move = 240 // int(self.fps)
+                            max_move = 360 // int(self.fps)
 
                         if abs(self.penis_box[0] - self.locked_penis_box.get_box()[0]) > max_move:
                             px1 = self.penis_box[0] + np.sign(self.penis_box[0] - self.locked_penis_box.get_box()[0]) * max_move
