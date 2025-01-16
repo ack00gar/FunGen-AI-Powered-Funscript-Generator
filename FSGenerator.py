@@ -10,18 +10,18 @@ import torch  # PyTorch for use of .pt model if not on Apple device
 import tkinter as tk  # GUI library for macOS for basic use in our case
 from tkinter import filedialog, messagebox, ttk  # here, what was I saying...
 import threading
-from datetime import datetime
+from datetime import timedelta
 import logging
 import sys
 
 # Import custom modules and configurations
 from params.config import (class_priority_order, class_reverse_match, class_colors,
-                           yolo_models, max_frame_height)  # Configuration for class priorities, reverse matching, and colors
+                           yolo_models, max_frame_height, version, ffmpeg_path, ffprobe_path)  # Configuration for class priorities, reverse matching, and colors
 from utils.lib_ObjectTracker import ObjectTracker  # Custom object tracking logic
 from utils.lib_FunscriptHandler import FunscriptGenerator  # For generating Funscript files
 from utils.lib_Visualizer import Visualizer  # For visualizing results
 from utils.lib_Debugger import Debugger  # For debugging and logging
-from utils.lib_SceneCutsDetect import detect_scene_changes  # For detecting scene changes in videos
+# from utils.lib_SceneCutsDetect import detect_scene_changes  # For detecting scene changes in videos
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg  # Custom video reader using FFmpeg
 
 # TODO this is a workaround and needs to be fixed properly
@@ -69,22 +69,32 @@ class GlobalState:
         self.vw_simplification_enabled = True
         self.vw_factor = 8.0
         self.rounding = 5
-        # Configure logging (simple setup)
-        # Initialize logger
-        logging.basicConfig(
-            level=logging.INFO,
-            format=f"@{self.current_frame_id} - %(levelname)s - %(message)s",  # Log format
-            filename="FSGenerator.log",
-            filemode="w",
-            handlers=[
-                logging.FileHandler("FSGenerator.log"),  # Save logs to a file
-                logging.StreamHandler(sys.stdout)  # Print logs to the console
-            ]
-        )
-        self.logger = logging.getLogger("GlobalStateLogger")
-        self.logger.setLevel(logging.INFO)
-        self.logger.info(f"@{self.current_frame_id} - Initiated logger in global_state instance")
 
+        # Create a logger
+        self.logger = logging.getLogger("GlobalStateLogger")
+
+        # Disable propagation to the root logger
+        self.logger.propagate = False
+
+        # Check if the logger already has handlers
+        if not self.logger.handlers:
+            self.logger.setLevel(logging.INFO)
+
+            # Create a file handler
+            file_handler = logging.FileHandler("FSGenerator.log", mode="w")
+            file_handler.setLevel(logging.INFO)
+            file_formatter = logging.Formatter(f"%(levelname)s - %(message)s")
+            file_handler.setFormatter(file_formatter)
+
+            # Create a console handler
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(logging.INFO)
+            console_formatter = logging.Formatter(f"%(levelname)s - %(message)s")
+            console_handler.setFormatter(console_formatter)
+
+            # Add handlers to the logger
+            self.logger.addHandler(file_handler)
+            self.logger.addHandler(console_handler)
 
 # Initialize global state
 global_state = GlobalState()
@@ -206,14 +216,9 @@ def extract_yolo_data(progress_callback=None):
         # messagebox to ask if user wants to overwrite or reuse
         # file name without path
         file_name = os.path.basename(global_state.video_file[:-4] + f"_rawyolo.json")
-        skip_detection = messagebox.askyesno("Detection file already exists",
-                                             f"File {file_name} already exists.\n\nClick Yes to reuse the existing detections file.\nClick No to perform detections again.")
-        if skip_detection:
-            global_state.logger.info(
-                f"File {global_state.video_file[:-4] + f'_rawyolo.json'} already exists. Skipping detections and loading file content...")
-            return
-        else:
-            os.remove(global_state.video_file[:-4] + f"_rawyolo.json")
+        global_state.logger.warning(
+            f"File {file_name} already exists. Skipping detections and loading file content...")
+        return
 
     records = []  # List to store detection records
     test_result = Result(320)  # Test result object for debugging
@@ -294,11 +299,6 @@ def extract_yolo_data(progress_callback=None):
 
                     # Check if keypoints are detected
                     if yolo_pose_results[0].keypoints is not None:
-                        # print("We have keypoints")
-                        # pose_keypoints = yolo_pose_results[0].keypoints.cpu()
-                        # pose_track_ids = yolo_pose_results[0].boxes.id.cpu().tolist()
-                        # pose_boxes = yolo_pose_results[0].boxes.xywh.cpu()
-                        # pose_classes = yolo_pose_results[0].boxes.cls.cpu().tolist()
                         pose_confs = yolo_pose_results[0].boxes.conf.cpu().tolist()
 
                         pose_keypoints = yolo_pose_results[0].keypoints.cpu()
@@ -488,9 +488,10 @@ def analyze_tracking_results(results, image_y_size, progress_callback=None):
                                    bounding_boxes=bounding_boxes,
                                    variables={
                                        'frame': frame_pos,
-                                       # time of the frame hh:mm:ss
-                                       'time': datetime.fromtimestamp(frame_pos / fps).strftime('%H:%M:%S'),
+                                       'time': str(timedelta(seconds=int(frame_pos / fps))),
                                        'distance': tracker.distance,
+                                       #'lead class': tracker.lead_class + ' | ' + str(tracker.lead_trackid) + ' | '
+                                       #              + str(tracker.lead_trackid_count),
                                        'Penetration': tracker.penetration,
                                        'sex_position': tracker.sex_position,
                                        'sex_position_reason': tracker.sex_position_reason,
@@ -607,19 +608,22 @@ def check_video_resolution(video_path):
     global_state.video_fps = float(cap.get(cv2.CAP_PROP_FPS))
     global_state.logger.info(f"Video FPS: {global_state.video_fps}")
     if not cap.isOpened():
-        messagebox.showerror("Error", "Could not open the video file.")
+        global_state.logger.error(f"Could not open the video file: {video_path}")
+        # messagebox.showerror("Error", "Could not open the video file.")
         return
 
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     cap.release()
 
     if height > max_frame_height:
-        messagebox.showinfo("Info", f"The video height is {height}p > {max_frame_height}p.\nIt will be automatically resized on the fly, no conversion required.")
+        global_state.logger.info(f"The video height is {height}p > {max_frame_height}p.\nIt will be automatically resized on the fly, no conversion required.")
+        #messagebox.showinfo("Info", f"The video height is {height}p > {max_frame_height}p.\nIt will be automatically resized on the fly, no conversion required.")
 
 def common_initialization():
     global_state.video_file = video_path.get()
     if not global_state.video_file:
         messagebox.showerror("Error", "Please select a video file.")
+        global_state.logger.error("Please select a video file.")
         return
 
     global_state.yolo_det_model = get_yolo_model_path()
@@ -648,12 +652,15 @@ def common_initialization():
     global_state.video_fps = cap.get(cv2.CAP_PROP_FPS)
     cap.release()
 
+    global_state.logger.info(f"Running script version: {version}")
     global_state.logger.info(f"Processing video: {global_state.video_file}")
+    global_state.logger.info(f"ffmpeg path: {ffmpeg_path}")
+    global_state.logger.info(f"ffprobe path: {ffprobe_path}")
     global_state.logger.info(f"Image size: {global_state.image_x_size}x{global_state.image_y_size}")
     global_state.logger.info(f"FPS: {global_state.video_fps}")
     global_state.logger.info(f"Video Reader: {global_state.video_reader}")
     global_state.logger.info(f"YOLO Detection Model: {global_state.yolo_det_model}")
-    global_state.logger.info(f"YOLO Pose Model: {global_state.yolo_pose_model}")
+    # global_state.logger.info(f"YOLO Pose Model: {global_state.yolo_pose_model}")
     global_state.logger.info(f"Debug Mode: {global_state.DebugMode}")
     global_state.logger.info(f"Live Display Mode: {global_state.LiveDisplayMode}")
     global_state.logger.info(f"VR Mode: {global_state.isVR}")
@@ -747,11 +754,13 @@ def debug_function():
                                          record=global_state.debug_record_mode,
                                          downsize_ratio=2)
     else:
+        global_state.logger.error(f"Debug logs file not found: {global_state.video_file[:-4] + f'_debug_logs.json'}")
         messagebox.showinfo("Info", f"Debug logs file not found: {global_state.video_file[:-4] + f'_debug_logs.json'}")
 
 def regenerate_funscript(global_state):
     global_state.video_file = video_path.get()
     if not global_state.video_file:
+        global_state.logger.error("Please select a video file.")
         messagebox.showerror("Error", "Please select a video file.")
         return
     global_state.reference_script = reference_script_path.get()
@@ -792,7 +801,7 @@ def quit_application():
 
 # GUI Setup
 root = tk.Tk()
-root.title("VR funscript AI Generator")
+root.title("VR & 2D POV Funscript AI Generator")
 
 # Variables
 video_path = tk.StringVar()
@@ -833,7 +842,7 @@ processing_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="ew"
 start_button = ttk.Button(processing_frame, text="Start Processing", command=start_processing)
 start_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
 
-ttk.Checkbutton(processing_frame, text="Logging for debug", variable=debug_mode_var).grid(row=0, column=2, padx=5, pady=5)
+#ttk.Checkbutton(processing_frame, text="Logging for debug", variable=debug_mode_var).grid(row=0, column=2, padx=5, pady=5)
 debug_mode_var.set(True)
 # this one needs a fix
 # ttk.Checkbutton(processing_frame, text="Live inference => slow & heavy!", variable=live_display_mode_var).grid(row=0, column=2, padx=5, pady=5)

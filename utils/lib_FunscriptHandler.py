@@ -7,7 +7,7 @@ import cv2
 import datetime
 from scipy.signal import savgol_filter
 
-from params.config import heatmap_colors, step_size
+from params.config import heatmap_colors, step_size, version
 
 import matplotlib
 matplotlib.use('Agg')  # Use a non-interactive backend
@@ -106,13 +106,16 @@ class FunscriptGenerator:
 
             # Generate a heatmap
             self.generate_heatmap(output_path,
-                                  output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
+                                  output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png",
+                                  global_state)
         except Exception as e:
             global_state.logger.error(f"Error generating funscript: {e}")
 
     def write_funscript(self, distances, output_path, fps):
         with open(output_path, 'w') as f:
-            f.write('{"version":"1.0","inverted":false,"range":95,"author":"kAI","actions":[{"at": 0, "pos": 100},')
+            #f.write('f{"version":"{version}","inverted":false,"range":95,"author":"FunGen_k00gar_AI","actions":[{"at": 0, "pos": 100},')
+            f.write(
+                f'{{"version":"{version}","inverted":false,"range":95,"author":"FunGen_k00gar_AI","actions":[{{"at": 0, "pos": 100}},')
             i = 0
             for frame, position in distances:
                 time_ms = int(frame * 1000 / fps)
@@ -122,11 +125,11 @@ class FunscriptGenerator:
                 i += 1
             f.write("]}\n")
 
-    def generate_heatmap(self, funscript_path, output_image_path):
+    def generate_heatmap(self, funscript_path, output_image_path, global_state):
         # Load funscript data
-        times, positions, _, _ = self.load_funscript(funscript_path)
+        times, positions, _, _ = self.load_funscript(funscript_path, global_state)
         if not times or not positions:
-            print("Failed to load funscript data.")
+            global_state.logger.error("Failed to load funscript data.")
             return
 
         # add a timing: 0, position: 100 at the beginning if no value for 0
@@ -134,12 +137,11 @@ class FunscriptGenerator:
             times.insert(0, 0)
             positions.insert(0, 100)
 
-        print(f"Total Actions: {len(times)}")
-        print(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
+        global_state.logger.info(f"Total Actions: {len(times)}")
+        global_state.logger.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
         # Calculate speed (position change per time interval)
         speeds = np.abs(np.diff(positions) / np.diff(times)) * 1000  # Positions per second
-        print(f"Speeds: {speeds}")
 
         def get_color(intensity):
             if intensity <= 0:
@@ -201,7 +203,7 @@ class FunscriptGenerator:
         # Save the figure
         plt.savefig(output_image_path, bbox_inches='tight', dpi=200)  # Increase resolution
         plt.close()
-        print(f"Funscript heatmap saved to {output_image_path}")
+        global_state.logger.info(f"Funscript heatmap saved to {output_image_path}")
 
     def boost_amplitude(self, signal, boost_factor, min_value=0, max_value=100):
         """
@@ -293,20 +295,20 @@ class FunscriptGenerator:
 
         return filtered_positions
 
-    def load_funscript(self, funscript_path):
+    def load_funscript(self, funscript_path, global_state):
         # if the funscript path exists
         if not os.path.exists(funscript_path):
-            print(f"Funscript not found at {funscript_path}")
+            global_state.logger.error(f"Funscript not found at {funscript_path}")
             return None, None, None, None
 
         with open(funscript_path, 'r') as f:
             try:
-                print(f"Loading funscript from {funscript_path}")
+                global_state.logger.info(f"Loading funscript from {funscript_path}")
                 data = json.load(f)
             except json.JSONDecodeError as e:
-                print(f"JSONDecodeError: {e}")
-                print(f"Error occurred at line {e.lineno}, column {e.colno}")
-                print("Dumping the problematic JSON data:")
+                global_state.logger.error(f"JSONDecodeError: {e}")
+                global_state.logger.error(f"Error occurred at line {e.lineno}, column {e.colno}")
+                global_state.logger.error("Dumping the problematic JSON data:")
                 f.seek(0)  # Reset file pointer to the beginning
                 print(f.read())
                 return None, None, None, None
@@ -317,7 +319,7 @@ class FunscriptGenerator:
         for action in data['actions']:
             times.append(action['at'])
             positions.append(action['pos'])
-        print(f"Loaded funscript with {len(times)} actions")
+        global_state.logger.info(f"Loaded funscript with {len(times)} actions")
 
         # Access the chapters
         chapters = data.get("metadata", {}).get("chapters", [])
@@ -349,7 +351,7 @@ class FunscriptGenerator:
 
         if global_state.reference_script:
             # Load reference funscript
-            ref_times, ref_positions, _, _ = self.load_funscript(global_state.reference_script)
+            ref_times, ref_positions, _, _ = self.load_funscript(global_state.reference_script, global_state)
 
             # if no 0 at the beginning, add it
             if ref_times and ref_times[0] != 0:
@@ -360,7 +362,7 @@ class FunscriptGenerator:
             total_duration = ref_times[-1] / 1000 if ref_times else 0
         else:
             ref_times, ref_positions = [], []
-            gen_times, gen_positions, _, _ = self.load_funscript(generated_paths[0])
+            gen_times, gen_positions, _, _ = self.load_funscript(generated_paths[0], global_state)
             total_duration = gen_times[-1] / 1000 if gen_times else 0
 
         # Select 6 random non-overlapping 20-second sections
@@ -371,7 +373,7 @@ class FunscriptGenerator:
 
         # Load generated funscripts
         for generated_path in generated_paths:
-            gen_times, gen_positions, _, _ = self.load_funscript(generated_path)
+            gen_times, gen_positions, _, _ = self.load_funscript(generated_path, global_state)
             # Extract data for each section
             ref_sections = []
             gen_sections = []
@@ -390,7 +392,7 @@ class FunscriptGenerator:
             # Plot and combine
             self.create_combined_plot(
                 ref_sections, gen_sections, screenshots, sections, global_state.video_file[:-4] + "_report.png",
-                ref_times, ref_positions, gen_times, gen_positions
+                ref_times, ref_positions, gen_times, gen_positions, global_state
             )
 
 
@@ -443,7 +445,7 @@ class FunscriptGenerator:
         return screenshots
 
     def create_combined_plot(self, ref_sections, gen_sections, screenshots, sections, output_image_path, ref_times,
-                                 ref_positions, gen_times, gen_positions):
+                                 ref_positions, gen_times, gen_positions, global_state):
         """
         Creates a combined plot with heatmaps as a header, comparative information, and section comparisons below.
 
@@ -787,12 +789,3 @@ class FunscriptGenerator:
             if start >= original_start and end <= original_end:
                 return True
         return False
-
-if __name__ == "__main__":
-    video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
-
-    funscript_handler = FunscriptGenerator()
-
-    # generate heatmap
-    funscript_handler.generate_heatmap(video_path[:-4] + ".funscript", video_path[
-                                                                        :-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")

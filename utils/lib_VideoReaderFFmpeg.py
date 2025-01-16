@@ -1,7 +1,6 @@
 import subprocess
 import cv2
 import numpy as np
-import argparse
 from params.config import ffmpeg_path, ffprobe_path, max_frame_height
 
 
@@ -260,14 +259,3 @@ def main(video_path, is_VR=False):
     # Release resources
     video_reader.release()
     cv2.destroyAllWindows()
-
-
-if __name__ == "__main__":
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Display a video using FFmpeg.")
-    parser.add_argument("video_path", type=str, help="Path to the video file.")
-    parser.add_argument("--is_vr", action="store_true", help="Enable VR mode for processing VR videos.")
-    args = parser.parse_args()
-
-    # Run the main function
-    main(args.video_path, args.is_vr)
