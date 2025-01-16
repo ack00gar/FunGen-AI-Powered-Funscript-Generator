@@ -2,6 +2,8 @@ import shutil
 import platform
 import os
 
+version = "0.0.1_25-01-16"
+
 # ffmpeg and ffprobe paths - replace with your own if not in your system path
 win_ffmpeg_path = "C:/ffmpeg/bin/ffmpeg.exe"
 mac_ffmpeg_path = "/usr/local/bin/ffmpeg"
