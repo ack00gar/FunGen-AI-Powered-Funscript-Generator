@@ -620,6 +620,12 @@ def check_video_resolution(video_path):
         #messagebox.showinfo("Info", f"The video height is {height}p > {max_frame_height}p.\nIt will be automatically resized on the fly, no conversion required.")
 
 def common_initialization():
+    # Reinitialize global state in case the user wants to run another video
+    global_state.funscript_data = []
+    global_state.funscript_frames = []
+    global_state.funscript_distances = []
+
+    # Now, proceed
     global_state.video_file = video_path.get()
     if not global_state.video_file:
         messagebox.showerror("Error", "Please select a video file.")
