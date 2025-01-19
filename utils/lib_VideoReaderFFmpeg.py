@@ -2,7 +2,7 @@ import subprocess
 import cv2
 import numpy as np
 import argparse
-from config import FFMPEG_PATH, FFPROBE_PATH, MAX_FRAME_HEIGHT
+from config import FFMPEG_PATH, FFPROBE_PATH, RENDER_RESOLUTION
 
 
 class VideoReaderFFmpeg:
@@ -78,7 +78,7 @@ class VideoReaderFFmpeg:
             self.duration = duration * 1000  # Convert duration to milliseconds
 
             # limiting the frame height here has no additional performance cost and significantly improves speed for 1440p+ video
-            scaling_factor = min(MAX_FRAME_HEIGHT / self.width, MAX_FRAME_HEIGHT / self.height)
+            scaling_factor = min(RENDER_RESOLUTION / self.width, RENDER_RESOLUTION / self.height)
             self.width = int(self.width * scaling_factor)
             self.height = int(self.height * scaling_factor)
 

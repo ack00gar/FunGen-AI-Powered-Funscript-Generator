@@ -2,7 +2,7 @@ import json
 import os
 import time
 
-from config import OUTPUT_PATH
+from script_generator.constants import OUTPUT_PATH
 
 
 def write_dataset(file_path, data):

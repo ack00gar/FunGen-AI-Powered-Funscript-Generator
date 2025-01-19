@@ -2,7 +2,7 @@ import ctypes
 import os
 import tkinter as tk
 
-from config import LOGO, ICON
+from script_generator.constants import LOGO, ICON
 from script_generator.gui.views.funscript_generator import FunscriptGeneratorPage
 from script_generator.state.app_state import AppState
 

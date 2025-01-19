@@ -1,10 +1,9 @@
 import os
 import platform
-from tkinter import messagebox
 
 import torch
 
-from config import YOLO_MODELS, CLASS_REVERSE_MATCH, OUTPUT_PATH
+from script_generator.constants import CLASS_REVERSE_MATCH, YOLO_MODELS
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.object_detection.box_record import BoxRecord
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
@@ -27,28 +26,6 @@ def check_skip_object_detection(state):
             os.remove(raw_yolo_path)
 
     return False
-
-def get_yolo_model_path():
-    # Check if the device is an Apple device
-    if platform.system() == 'Darwin':
-        print(f"Apple device detected, loading {YOLO_MODELS[0]} for MPS inference.")
-        return YOLO_MODELS[0]
-
-    # Check if CUDA is available (for GPU support)
-    elif torch.cuda.is_available():
-        print(f"CUDA is available, loading {YOLO_MODELS[1]} for GPU inference.")
-        return YOLO_MODELS[1]
-
-    # Fallback to ONNX model for other platforms without CUDA
-    else:
-        print("CUDA not available, if this is unexpected, please install CUDA and check your version of torch.")
-        print("You might need to install a dependency with the following command (example):")
-        print("pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118")
-        print(f"Falling back to CPU inference, loading {YOLO_MODELS[2]}.")
-        print("WARNING: CPU inference may be slow on some devices.")
-
-        return YOLO_MODELS[2]
-
 
 def make_data_boxes(records):
     """

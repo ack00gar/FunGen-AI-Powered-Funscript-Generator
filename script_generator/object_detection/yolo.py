@@ -1,6 +1,7 @@
 import time
 
-from script_generator.config import YOLO_CONF, YOLO_BATCH_SIZE, YOLO_MODEL
+from config import YOLO_CONF, YOLO_BATCH_SIZE, YOLO_MODEL
+
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 
 

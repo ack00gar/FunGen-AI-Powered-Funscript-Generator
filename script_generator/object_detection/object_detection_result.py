@@ -1,4 +1,4 @@
-from config import CLASS_PRIORITY_ORDER
+from script_generator.constants import CLASS_PRIORITY_ORDER
 
 
 class ObjectDetectionResult:

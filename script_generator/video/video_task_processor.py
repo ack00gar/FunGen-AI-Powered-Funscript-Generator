@@ -3,8 +3,7 @@ from multiprocessing import cpu_count
 
 import numpy as np
 
-from config import MAX_FRAME_HEIGHT, FFMPEG_PATH
-from script_generator.config import SUBTRACT_THREADS_FROM_FFMPEG, PITCH
+from config import SUBTRACT_THREADS_FROM_FFMPEG, PITCH, RENDER_RESOLUTION, FFMPEG_PATH
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyseFrameTask
 from script_generator.video.video_info import get_cropped_dimensions
@@ -47,23 +46,23 @@ class VideoTaskProcessor(AbstractTaskProcessor):
 
             if self.state.video_reader == "FFmpeg":
                 filters = [
-                    f"scale={MAX_FRAME_HEIGHT * 2}:{MAX_FRAME_HEIGHT}",
-                    f"crop={MAX_FRAME_HEIGHT}:{MAX_FRAME_HEIGHT}:0:0",
+                    f"scale={RENDER_RESOLUTION * 2}:{RENDER_RESOLUTION}",
+                    f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0",
                     f"v360={projection}:in_stereo=2d:output=sg:iv_fov={iv_fov}:ih_fov={ih_fov}:"
                     f"d_fov={d_fov}:v_fov={v_fov}:h_fov={h_fov}:pitch={PITCH}:yaw=0:roll=0:"
-                    f"w={MAX_FRAME_HEIGHT}:h={MAX_FRAME_HEIGHT}:interp=lanczos:reset_rot=1",
+                    f"w={RENDER_RESOLUTION}:h={RENDER_RESOLUTION}:interp=lanczos:reset_rot=1",
                     "lutyuv=y=gammaval(0.7)"
                 ]
             else:
                 filters = [
-                    f"scale={MAX_FRAME_HEIGHT * 2}:{MAX_FRAME_HEIGHT}",
-                    f"crop={MAX_FRAME_HEIGHT}:{MAX_FRAME_HEIGHT}:0:0"
+                    f"scale={RENDER_RESOLUTION * 2}:{RENDER_RESOLUTION}",
+                    f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0"
                 ]
 
             return ",".join(filters)
 
         def standard_video_filters():
-            return f"scale={width}:{height}" if video.height > MAX_FRAME_HEIGHT else None
+            return f"scale={width}:{height}" if video.height > RENDER_RESOLUTION else None
 
         width, height = get_cropped_dimensions(video)
 
@@ -75,7 +74,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
 
         # Start FFmpeg process
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        frame_size = width * height * 3   # Size of one frame in bytes
+        frame_size = width * height * 3  # Size of one frame in bytes
 
         # progress_bar = tqdm(total=203856, unit="frame", desc="Processing frames")
         while True:
@@ -109,7 +108,6 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 return False, None
 
         self.stop_process()
-
 
     # TODO ffmpeg interrupt
     # def release(self):
