@@ -55,7 +55,7 @@ def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start
     last_ui_update_time = time.time()
 
     # Process frames
-    for frame_pos in range(total_frames_to_parse): # tqdm(range(total_frames_to_parse), desc="Detecting scene changes"):
+    for frame_pos in tqdm(range(total_frames_to_parse), desc="Detecting scene changes"):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start + frame_pos * frame_step)
         ret, frame = cap.read()
         if not ret:
