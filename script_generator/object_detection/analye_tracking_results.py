@@ -179,6 +179,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
         if state.update_ui:
             current_time = time.time()
             if current_time - last_ui_update_time >= UPDATE_PROGRESS_INTERVAL:
+                last_ui_update_time = current_time
                 elapsed_time = current_time - start_time
                 frames_processed = frame_pos - state.frame_start + 1
                 frames_remaining = state.frame_end - frame_pos - 1
@@ -190,7 +191,6 @@ def analyze_tracking_results(state, results, progress_callback=None):
                     total_frames=state.frame_end,
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
-                last_ui_update_time = current_time
 
         # TODO improve this
         # if progress_callback:

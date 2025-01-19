@@ -3,6 +3,7 @@ import time
 import cv2
 from tqdm import tqdm
 
+from config import UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.state.app_state import AppState
 
@@ -51,6 +52,7 @@ def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start
     prev_hist = None
     prev_cut = frame_start
     start_time = time.time()
+    last_ui_update_time = time.time()
 
     # Process frames
     for frame_pos in range(total_frames_to_parse): # tqdm(range(total_frames_to_parse), desc="Detecting scene changes"):
@@ -84,17 +86,22 @@ def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start
 
         # Update progress
         if state.update_ui:
-            elapsed_time = time.time() - start_time
-            frames_processed = frame_pos - state.frame_start + 1
-            frames_remaining = state.frame_end - frame_pos - 1
-            eta = (elapsed_time / frames_processed) * frames_remaining if frames_processed > 0 else 0
 
-            state.update_ui(ProgressMessage(
-                process="SCENE_DETECTION",
-                frames_processed=frames_processed,
-                total_frames=state.frame_end,
-                eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
-            ))
+            current_time = time.time()
+            if current_time - last_ui_update_time >= UPDATE_PROGRESS_INTERVAL:
+                last_ui_update_time = time.time()
+                elapsed_time = time.time() - start_time
+                frames_processed = frame_pos - state.frame_start + 1
+                frames_remaining = state.frame_end - frame_pos - 1
+                eta = (elapsed_time / frames_processed) * frames_remaining if frames_processed > 0 else 0
+
+                state.update_ui(ProgressMessage(
+                    process="SCENE_DETECTION",
+                    frames_processed=frames_processed,
+                    total_frames=state.frame_end,
+                    eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
+                ))
+
 
     # Add the last scene
     if not scene_changes:

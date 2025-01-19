@@ -60,7 +60,11 @@ class FunscriptGeneratorPage(tk.Frame):
         yolo_p_container, yolo_p, yolo_p_label, yolo_p_perc = Widgets.labeled_progress(processing, "YOLO Detection", row=0)
         scene_p_container, scene_p, scene_p_label, scene_p_perc = Widgets.labeled_progress(processing, "Scene detection", row=1)
         track_p_container, track_p, track_p_label, track_p_perc = Widgets.labeled_progress(processing, "Tracking Analysis", row=2)
-        Widgets.button(processing, "Start processing", lambda: video_analysis(state), row=3)
+
+        def start_processing():
+            # TODO reset the progress bars
+            video_analysis(state)
+        Widgets.button(processing, "Start processing", start_processing, row=3)
         #endregion
 
         #region FUNSCRIPT TWEAKING
