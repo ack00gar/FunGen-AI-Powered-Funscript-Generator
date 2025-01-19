@@ -20,28 +20,28 @@ mac_ffprobe_path = "/usr/local/bin/ffprobe"
 lin_ffprobe_path = "/usr/bin/ffprobe"
 
 ##################################################################################################
-# OBJECT DETECTION
+# PERFORMANCE
 ##################################################################################################
 
-RENDER_RESOLUTION = 1080
+RENDER_RESOLUTION = 1080 # Above 1080x1080 doesn't seem to improve detections
 TEXTURE_RESOLUTION = 1440 # Size that is used to texture the opengl sphere
+YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30 # Mac doesn't support batching due to onnx
+
+##################################################################################################
+# ADVANCED / DEVELOPMENT
+##################################################################################################
+
+
 PITCH=-25
 YAW=0
 YOLO_CONF = 0.3
-YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30 # Mac doesn't support batching due to onnx
+
 RUN_POSE_MODEL = False
 YOLO_MODEL = YOLO(MODEL_PATH, task="detect")
 YOLO_POSE_MODEL = None # YOLO("models/yolo11n-pose.mlpackage", task="pose")
 
 # Set the paths in your config
-FFMPEG_PATH = find_ffmpeg_path(win_ffmpeg_path, mac_ffmpeg_path, lin_ffmpeg_path)
-FFPROBE_PATH = find_ffprobe_path(win_ffprobe_path, mac_ffprobe_path, lin_ffprobe_path)
-print(f"ffmpeg_path: {FFMPEG_PATH}")
-print(f"ffprobe_path: {FFPROBE_PATH}")
 
-##################################################################################################
-# ADVANCED / DEVELOPMENT
-##################################################################################################
 
 SUBTRACT_THREADS_FROM_FFMPEG = 0
 UPDATE_PROGRESS_INTERVAL = 0.25 # Updates progress in the console and in gui
@@ -55,5 +55,11 @@ PROGRESS_BAR = True # disable when you want to print messages while debugging
 # Define custom colormap based on Lucife's heatmapColors
 STEP_SIZE = 120  # Speed step size for color transitions
 VW_FILTER_COEFF = 2.0
+
+
+FFMPEG_PATH = find_ffmpeg_path(win_ffmpeg_path, mac_ffmpeg_path, lin_ffmpeg_path)
+FFPROBE_PATH = find_ffprobe_path(win_ffprobe_path, mac_ffprobe_path, lin_ffprobe_path)
+print(f"ffmpeg_path: {FFMPEG_PATH}")
+print(f"ffprobe_path: {FFPROBE_PATH}")
 
 
