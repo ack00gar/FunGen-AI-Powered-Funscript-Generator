@@ -139,3 +139,5 @@ HEATMAP_COLORS = [
 STEP_SIZE = 120  # Speed step size for color transitions
 
 VW_FILTER_COEFF = 2.0
+LOGO = os.path.join(PROJECT_PATH, "resources", "logo.png")
+ICON = os.path.join(PROJECT_PATH, "resources", "icon.ico")

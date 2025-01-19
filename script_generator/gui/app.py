@@ -2,6 +2,7 @@ import ctypes
 import os
 import tkinter as tk
 
+from config import LOGO, ICON
 from script_generator.gui.views.funscript_generator import FunscriptGeneratorPage
 from script_generator.state.app_state import AppState
 
@@ -17,6 +18,10 @@ class App(tk.Tk):
         self.title("VR funscript generation")
         self.geometry("700x920")
         self.resizable(False, False)
+
+        self.iconphoto(False, tk.PhotoImage(file=LOGO))
+        self.iconbitmap(ICON)
+
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
         self.container = tk.Frame(self)
