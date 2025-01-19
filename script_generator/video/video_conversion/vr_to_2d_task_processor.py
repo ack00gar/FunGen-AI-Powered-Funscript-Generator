@@ -1,14 +1,11 @@
-import os
-
-import imageio
-import numpy as np
 import glfw
+import numpy as np
 from OpenGL.GL import *
 from OpenGL.GLU import *
 
-from config import RENDER_RESOLUTION, YAW, PITCH, DEBUG_PATH
-from script_generator.video.video_conversion.opengl.helpers import create_180_dome, render_dome
+from config import RENDER_RESOLUTION, YAW, PITCH
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
+from script_generator.video.video_conversion.opengl.helpers import create_180_dome, render_dome
 
 
 class VrTo2DTaskProcessor(AbstractTaskProcessor):

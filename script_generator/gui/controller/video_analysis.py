@@ -1,7 +1,9 @@
 import threading
+from datetime import time
 from tkinter import messagebox
 
 from script_generator.gui.controller.tracking_analysis import tracking_analysis
+from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.object_detection.utils import check_skip_object_detection
 from script_generator.scripts.analyse_video import analyse_video
 from script_generator.utils.file import get_output_file_path
@@ -28,8 +30,18 @@ def video_analysis(state):
 
         skip_detection = check_skip_object_detection(state)
 
-        if not skip_detection:
+        if skip_detection:
+            state.set_video_info()
+            if state.update_ui:
+                state.update_ui(ProgressMessage(
+                    process="OBJECT_DETECTION",
+                    frames_processed=state.video_info.total_frames,
+                    total_frames=state.frame_end,
+                    eta="Done"
+                ))
+        else:
             analyse_video(state)
+
 
         tracking_analysis(state)
 
