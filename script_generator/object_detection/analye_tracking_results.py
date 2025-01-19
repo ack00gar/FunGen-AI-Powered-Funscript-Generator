@@ -40,9 +40,10 @@ def analyze_tracking_results(state, results, progress_callback=None):
         reader.release()
 
     # Load scene cuts if the file exists
-    if os.path.exists(state.video_path[:-4] + f"_cuts.json"):
-        print(f"Loading cuts from {state.video_path[:-4] + f'_cuts.json'}")
-        with open(state.video_path[:-4] + f"_cuts.json", 'r') as f:
+    cuts_path, _ = get_output_file_path(state.video_path, "_cuts.json")
+    if os.path.exists(cuts_path):
+        print(f"Loading cuts from {cuts_path}")
+        with open(cuts_path, 'r') as f:
             cuts = json.load(f)
         print(f"Loaded {len(cuts)} cuts : {cuts}")
     else:
@@ -52,7 +53,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
         cuts = [scene[1] for scene in scene_list]
         cuts = cuts[:-1]  # Remove the last entry
         # Save the cuts to a file
-        with open(state.video_path[:-4] + f"_cuts.json", 'w') as f:
+        with open(cuts_path, 'w') as f:
             json.dump(cuts, f)
 
     state.funscript_frames = []  # List to store Funscript frames
