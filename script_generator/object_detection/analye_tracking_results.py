@@ -24,15 +24,9 @@ def analyze_tracking_results(state, results, progress_callback=None):
 
     video_info = state.video_info
     fps = video_info.fps
-    nb_frames = video_info.total_frames
-    if state.frame_start and state.frame_end:
-        nb_frames = state.frame_end - state.frame_start
-    frame_width, frame_height = get_cropped_dimensions(video_info)
     reader = VideoReaderFFmpeg(state.video_path, is_vr=video_info.is_vr)
 
     image_area = video_info.width * video_info.height
-
-    cuts = []
 
     if state.life_display_mode:
         reader.set(cv2.CAP_PROP_POS_FRAMES, state.frame_start)
@@ -46,9 +40,17 @@ def analyze_tracking_results(state, results, progress_callback=None):
         with open(cuts_path, 'r') as f:
             cuts = json.load(f)
         print(f"Loaded {len(cuts)} cuts : {cuts}")
+
+        if state.update_ui:
+            state.update_ui(ProgressMessage(
+                process="SCENE_DETECTION",
+                frames_processed=state.video_info.total_frames,
+                total_frames=state.frame_end,
+                eta="Done"
+            ))
     else:
         # Detect scene changes if the cuts file does not exist
-        scene_list = detect_scene_changes(state.video_path, video_info.is_vr, 0.9, state.frame_start, state.frame_end)
+        scene_list = detect_scene_changes(state, video_info.is_vr, 0.9, state.frame_start, state.frame_end)
         print(f"Analyzing frames {state.frame_start} to {state.frame_end}")
         cuts = [scene[1] for scene in scene_list]
         cuts = cuts[:-1]  # Remove the last entry
@@ -62,7 +64,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
     # Start time for ETA calculation
     start_time = time.time()
 
-    for frame_pos in tqdm(range(state.frame_start, state.frame_end), unit="f"):
+    for frame_pos in range(state.frame_start, state.frame_end): # tqdm(range(state.frame_start, state.frame_end), unit="f"):
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
             print(f"Reaching cut at frame {frame_pos}")
@@ -171,7 +173,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
             cv2.waitKey(1)
 
         # Update progress
-        if progress_callback:
+        if state.update_ui:
             elapsed_time = time.time() - start_time
             frames_processed = frame_pos - state.frame_start + 1
             frames_remaining = state.frame_end - frame_pos - 1
@@ -184,7 +186,10 @@ def analyze_tracking_results(state, results, progress_callback=None):
                 eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
             ))
 
-            # progress_callback(frame_pos, frame_end, time.strftime("%H:%M:%S", time.gmtime(eta)))
+        # TODO improve this
+        # if progress_callback:
+        #     progress_callback()
+
 
     # Prepare Funscript data
     state.funscript_data = list(zip(state.funscript_frames, state.funscript_distances))

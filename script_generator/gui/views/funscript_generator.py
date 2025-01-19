@@ -58,8 +58,9 @@ class FunscriptGeneratorPage(tk.Frame):
         #region PROCESSING
         processing = Widgets.frame(wrapper, title="Processing", main_section=True, row=3)
         yolo_p_container, yolo_p, yolo_p_label, yolo_p_perc = Widgets.labeled_progress(processing, "YOLO Detection", row=0)
-        track_p_container, track_p, track_p_label, track_p_perc = Widgets.labeled_progress(processing, "Tracking Analysis", row=1)
-        Widgets.button(processing, "Start processing", lambda: video_analysis(state), row=2)
+        scene_p_container, scene_p, scene_p_label, scene_p_perc = Widgets.labeled_progress(processing, "Scene detection", row=1)
+        track_p_container, track_p, track_p_label, track_p_perc = Widgets.labeled_progress(processing, "Tracking Analysis", row=2)
+        Widgets.button(processing, "Start processing", lambda: video_analysis(state), row=3)
         #endregion
 
         #region FUNSCRIPT TWEAKING
@@ -193,12 +194,18 @@ class FunscriptGeneratorPage(tk.Frame):
                     print(f"Unhandled message type: {type(msg)}")
 
             def handle_progress_message(progress_msg: ProgressMessage):
-                if progress_msg.process == "OBJECT_DETECTION":
-                    yolo_p["value"] = progress_msg.frames_processed
-                    yolo_p["maximum"] = progress_msg.total_frames
-                    percentage = (progress_msg.frames_processed / progress_msg.total_frames) * 100 if progress_msg.total_frames > 0 else 0
-                    yolo_p_perc.config(text=f"{percentage:.0f}% - ETA: {progress_msg.eta}")
+                progress_mapping = {
+                    "OBJECT_DETECTION": (yolo_p, yolo_p_perc),
+                    "SCENE_DETECTION": (scene_p, scene_p_perc),
+                    "TRACKING_ANALYSIS": (track_p, track_p_perc),
+                }
 
+                if progress_msg.process in progress_mapping:
+                    progress_bar, progress_label = progress_mapping[progress_msg.process]
+                    progress_bar["value"] = progress_msg.frames_processed
+                    progress_bar["maximum"] = progress_msg.total_frames
+                    percentage = (progress_msg.frames_processed / progress_msg.total_frames) * 100 if progress_msg.total_frames > 0 else 0
+                    progress_label.config(text=f"{percentage:.0f}% - ETA: {progress_msg.eta}")
 
             # Schedule the update on the main thread
             self.controller.after(0, process_update)

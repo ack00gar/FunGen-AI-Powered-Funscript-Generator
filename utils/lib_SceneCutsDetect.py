@@ -1,5 +1,10 @@
+import time
+
 import cv2
 from tqdm import tqdm
+
+from script_generator.gui.messages.messages import ProgressMessage
+from script_generator.state.app_state import AppState
 
 
 def compute_histogram(frame):
@@ -24,17 +29,8 @@ def compare_histograms(hist1, hist2):
     return cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
 
 
-def detect_scene_changes(video_path, crop=None, threshold=0.97, frame_start=0, frame_end=None):
-    """
-    Detect scene changes in a video using histogram comparison.
-    :param video_path: Path to the video file.
-    :param crop: Will crop the video and keep left/right side.
-    :param threshold: Similarity threshold for detecting scene changes.
-    :param frame_start: Starting frame for processing.
-    :param frame_end: Ending frame for processing.
-    :return: List of scene changes as [start_frame, end_frame] pairs.
-    """
-    cap = cv2.VideoCapture(video_path)
+def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start=0, frame_end=None):
+    cap = cv2.VideoCapture(state.video_path)
     if not cap.isOpened():
         print("Error: Could not open video.")
         return []
@@ -54,9 +50,10 @@ def detect_scene_changes(video_path, crop=None, threshold=0.97, frame_start=0, f
     scene_changes = []
     prev_hist = None
     prev_cut = frame_start
+    start_time = time.time()
 
     # Process frames
-    for frame_pos in tqdm(range(total_frames_to_parse), desc="Detecting scene changes"):
+    for frame_pos in range(total_frames_to_parse): # tqdm(range(total_frames_to_parse), desc="Detecting scene changes"):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start + frame_pos * frame_step)
         ret, frame = cap.read()
         if not ret:
@@ -85,6 +82,20 @@ def detect_scene_changes(video_path, crop=None, threshold=0.97, frame_start=0, f
 
         prev_hist = current_hist
 
+        # Update progress
+        if state.update_ui:
+            elapsed_time = time.time() - start_time
+            frames_processed = frame_pos - state.frame_start + 1
+            frames_remaining = state.frame_end - frame_pos - 1
+            eta = (elapsed_time / frames_processed) * frames_remaining if frames_processed > 0 else 0
+
+            state.update_ui(ProgressMessage(
+                process="SCENE_DETECTION",
+                frames_processed=frames_processed,
+                total_frames=state.frame_end,
+                eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
+            ))
+
     # Add the last scene
     if not scene_changes:
         scene_changes.append([frame_start, frame_end])
@@ -112,4 +123,5 @@ def detect_scene_changes(video_path, crop=None, threshold=0.97, frame_start=0, f
 
     print(f"Found {len(merged_scenes)} relevant scenes: {merged_scenes}.")
     cap.release()
+
     return merged_scenes

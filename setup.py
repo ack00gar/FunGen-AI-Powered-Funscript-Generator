@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="VR funscript creator",
     version="0.0.1",  # Replace with your project version
-    author="Koogar",
+    author="k00gar",
     description="Create funscripts for VR files",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

@@ -34,8 +34,7 @@ class FunscriptGenerator:
             os.rename(output_path, output_path + f"_{time.time()}.bak")
 
         raw_funscript_path, _ = get_output_file_path(state.video_path, "_rawfunscript.json")
-
-        if len(state.funscript_data) == 0:
+        if os.path.exists(raw_funscript_path) and (state.funscript_data is None or len(state.funscript_data) == 0):
             print("len funscript data is 0, trying to load file")
             # Read the funscript data from the JSON file
             with open(raw_funscript_path, 'r') as f:
@@ -92,9 +91,11 @@ class FunscriptGenerator:
             if state.boost_enabled:
                 print("Positions adjustment - step 5 (amplitude boosting)")
                 # self.boost_amplitude(adjusted_positions, boost_factor=1.2, min_value=0, max_value=100)
-                adjusted_positions = self.adjust_peaks_and_lows(adjusted_positions,
-                                                                peak_boost=state.boost_up_percent,
-                                                                low_reduction=state.boost_down_percent)
+                adjusted_positions = self.adjust_peaks_and_lows(
+                    adjusted_positions,
+                    peak_boost=state.boost_up_percent,
+                    low_reduction=state.boost_down_percent
+                )
             else:
                 print("Skipping positions adjustment - step 5 (amplitude boosting)")
 
@@ -592,6 +593,7 @@ class FunscriptGenerator:
             speeds = np.nan_to_num(speeds, nan=0.0)  # Replace NaN values in speeds with 0
         else:
             speeds = np.array([])  # Empty array if not enough valid data points
+
         # TODO filter nan at one logical moment END
 
         def get_color(intensity):
