@@ -1,11 +1,10 @@
 import json
 import cv2
 import numpy as np
-import os
-import subprocess
-
-from params.config import class_colors
+from config import CLASS_COLORS
 from scipy.interpolate import interp1d
+
+from script_generator.utils.file import get_output_file_path
 from utils.lib_Visualizer import Visualizer
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 
@@ -15,21 +14,21 @@ class Debugger:
     A class for debugging video frames by logging variables, bounding boxes, and visualizing them.
     """
 
-    def __init__(self, video_path, isVR=False, video_reader=None, output_dir=None):
+    def __init__(self, video_path, is_vr=False, video_reader=None, log_file=None):
         """
         Initialize the Debugger.
         :param video_path: Path to the video file.
-        :param output_dir: Directory to save debug logs.
+        :param log_file: Directory to save debug logs.
         """
         self.video_path = video_path
-        self.output_dir = output_dir
+        self.log_file = log_file
         self.logs = {}  # Dictionary to store logs for each frame
         self.cap = None  # Video capture object
         self.current_frame = 0  # Current frame being processed
         self.total_frames = 0  # Total number of frames in the video
         self.fps = 0  # Frames per second of the video
         self.bar_y_start = 0  # Y-coordinate of the progress bar
-        self.isVR = isVR
+        self.is_vr = is_vr
         self.video_reader = video_reader
 
     def log_frame(self, frame_id, variables=None, bounding_boxes=None):
@@ -52,7 +51,6 @@ class Debugger:
         """
         Save the logs to a JSON file.
         """
-        log_file = f"{self.output_dir}_debug_logs.json"
 
         def default(obj):
             """Convert NumPy types to native Python types for JSON serialization."""
@@ -65,23 +63,22 @@ class Debugger:
             else:
                 raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
-        with open(log_file, "w") as f:
+        with open(self.log_file, "w") as f:
             json.dump(self.logs, f, indent=4, default=default)
-        print(f"Logs saved to {log_file}")
+        print(f"Logs saved to {self.log_file}")
 
     def load_logs(self):
         """
         Load existing logs from a JSON file.
         """
-        log_file = f"{self.output_dir}_debug_logs.json"
         try:
-            with open(log_file, "r") as f:
+            with open(self.log_file, "r") as f:
                 self.logs = json.load(f)
-            print(f"Logs loaded from {log_file}")
+            print(f"Logs loaded from {self.log_file}")
         except FileNotFoundError:
-            print(f"Log file {log_file} not found. Starting with empty logs.")
+            print(f"Log file {self.log_file} not found. Starting with empty logs.")
         except json.JSONDecodeError:
-            print(f"Error decoding JSON from {log_file}. Starting with empty logs.")
+            print(f"Error decoding JSON from {self.log_file}. Starting with empty logs.")
 
     def display_frame(self, frame_id):
         """
@@ -103,7 +100,7 @@ class Debugger:
 
         # Load the video
         if self.video_reader == "FFmpeg":
-            self.cap = VideoReaderFFmpeg(self.video_path, is_VR=self.isVR)
+            self.cap = VideoReaderFFmpeg(self.video_path, is_vr=self.is_vr)
         else:
             self.cap = cv2.VideoCapture(self.video_path)
 
@@ -114,12 +111,14 @@ class Debugger:
         # Initialize video writer if recording
         if record:
             ret, frame = self.cap.read()
-            if self.video_reader == "OpenCV" and self.isVR:
+            if self.video_reader == "OpenCV" and self.is_vr:
                 frame = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
-            output_path = self.video_path.replace(".mp4", f"_debug_{start_frame}.mp4")
+            #if self.cap.is_vr:
+            #    frame_copy = frame[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
+            output_path = self.video_path.replace(".mp4", "_debug.mp4")
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             out = cv2.VideoWriter(
-                output_path, fourcc, self.fps // 2, (frame.shape[1], frame.shape[0])
+                output_path, fourcc, self.fps, (frame.shape[1] // downsize_ratio, frame.shape[0] // downsize_ratio)
             )
             if not out.isOpened():
                 print(f"Error: Could not open video writer for {output_path}")
@@ -130,7 +129,8 @@ class Debugger:
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         # Load the funscript file
-        funscript_path = self.video_path.replace(".mp4", ".funscript")
+        funscript_path, _ = get_output_file_path(self.video_path, ".funscript")
+
         try:
             with open(funscript_path, "r") as f:
                 funscript_data = json.load(f)
@@ -152,7 +152,7 @@ class Debugger:
         end_frame = start_frame + int(duration * self.fps) if duration > 0 else self.total_frames
 
         # Set up mouse callback for progress bar
-        if self.video_reader == "OpenCV" and self.isVR:
+        if self.video_reader == "OpenCV" and self.is_vr:
             width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 2
         else:
             width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
@@ -166,7 +166,7 @@ class Debugger:
             if not ret:
                 break
 
-            if self.video_reader == "OpenCV" and self.isVR:
+            if self.video_reader == "OpenCV" and self.is_vr:
                 frame = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
             frame_copy = frame.copy()  # make a copy of the frame to make it writeable, useful for ffmpeg library here
             # Display variables and bounding boxes
@@ -180,7 +180,7 @@ class Debugger:
                     x1, y1, x2, y2 = box["box"]
                     class_name = box["class_name"]
                     position = box["position"]
-                    color = class_colors.get(class_name, (0, 255, 0))
+                    color = CLASS_COLORS.get(class_name, (0, 255, 0))
                     cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
                     cv2.putText(frame_copy, f"{class_name} {position}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
@@ -195,7 +195,7 @@ class Debugger:
                 #print(f"locked_penis_box: {locked_penis_box}")
                 if locked_penis_box['active']:
                     x1, y1, x2, y2 = locked_penis_box['box']
-                    color = class_colors.get("penis", (0, 255, 0))
+                    color = CLASS_COLORS.get("penis", (0, 255, 0))
                     cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, 2)
                     cv2.putText(frame_copy, "Locked Penis", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
@@ -236,6 +236,7 @@ class Debugger:
 
             # Record the frame if enabled
             if record:
+                frame_copy = cv2.resize(frame_copy, (frame_copy.shape[1] // downsize_ratio, frame_copy.shape[0] // downsize_ratio))
                 out.write(frame_copy)
 
             self.current_frame += 1
@@ -244,35 +245,6 @@ class Debugger:
         self.cap.release()
         if record:
             out.release()
-
-            # Input and output paths
-            input_path = output_path
-            # Add "SPOILER_" to the filename
-            directory, filename = os.path.split(input_path)
-            new_filename = f"SPOILER_{filename}"
-            output_path_ffmpeg = os.path.join(directory, new_filename)
-
-            # FFmpeg command to convert to H.265
-            ffmpeg_command = [
-                "ffmpeg",
-                "-y",  # Overwrite output file if it exists
-                "-i", input_path,  # Input file
-                "-c:v", "libx265",  # Use H.265 codec
-                "-crf", "26",  # Constant Rate Factor (quality)
-                "-preset", "fast",  # Encoding speed
-                "-b:v", "5000k",  # Bitrate
-                "-movflags", "+faststart",  # Enable fast streaming
-                output_path_ffmpeg
-            ]
-
-            # Run FFmpeg command
-            subprocess.run(ffmpeg_command)
-
-            # Delete the intermediate file
-            if os.path.exists(input_path):
-                os.remove(input_path)
-                print(f"Deleted intermediate file: {input_path}")
-
         cv2.destroyAllWindows()
 
     def _get_funscript_value(self, interpolator, frame_id, fps):
@@ -331,7 +303,7 @@ class Debugger:
         print(f"Target frame: {self.current_frame}")
         if self.video_reader == "FFmpeg":
             self.cap.release()
-            self.cap = VideoReaderFFmpeg(self.video_path, self.isVR)
+            self.cap = VideoReaderFFmpeg(self.video_path, self.is_vr)
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         print("Done resetting and jumping to target frame")
 

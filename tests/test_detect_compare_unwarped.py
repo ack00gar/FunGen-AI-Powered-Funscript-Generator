@@ -16,8 +16,8 @@ output_path_1 = video_path[:-4] + "_" + str(frame_id) + "_ffmpeg_unwarped.jpg"  
 output_path_2 = video_path[:-4] + "_" + str(frame_id) + "_original.jpg"
 output_path_3 = video_path[:-4] + "_" + str(frame_id) + "_results.jpg"
 
-cap1 = VideoReaderFFmpeg(video_path, is_VR=True)
-cap2 = VideoReaderFFmpeg(video_path, is_VR=True, unwarp=False)
+cap1 = VideoReaderFFmpeg(video_path, is_vr=True)
+cap2 = VideoReaderFFmpeg(video_path, is_vr=True, unwarp=False)
 
 cap1.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
 cap2.set(cv2.CAP_PROP_POS_FRAMES, frame_id)

@@ -1,3 +1,4 @@
+from script_generator.utils.file import get_output_file_path
 from utils.lib_Debugger import Debugger
 
 video = "/Users/k00gar/Downloads/703-czechvr-3d-2160x1080-60fps-smartphone_hq.mp4"
@@ -6,7 +7,8 @@ video = "/Users/k00gar/Downloads/703-czechvr-3d-2160x1080-60fps-smartphone_hq.mp
 
 frame = (44 * 60 + 26) * 60
 
-debugger = Debugger(video, isVR=True, video_reader="FFmpeg", output_dir=video[:-4])
+log_file, _ = get_output_file_path(video, "_debug_logs.json")
+debugger = Debugger(video, is_vr=True, video_reader="FFmpeg", log_file=log_file)
 
 debugger.load_logs()
 
