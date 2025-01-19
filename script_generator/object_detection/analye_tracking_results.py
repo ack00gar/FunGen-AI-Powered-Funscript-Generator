@@ -7,6 +7,7 @@ import cv2
 from tqdm import tqdm
 from datetime import timedelta
 
+from config import UPDATE_PROGRESS_INTERVAL
 from script_generator.constants import CLASS_COLORS
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.utils.file import get_output_file_path
@@ -63,6 +64,8 @@ def analyze_tracking_results(state, results, progress_callback=None):
 
     # Start time for ETA calculation
     start_time = time.time()
+
+    last_ui_update_time = time.time()
 
     for frame_pos in tqdm(range(state.frame_start, state.frame_end), unit="f"):
         if frame_pos in cuts:
@@ -174,17 +177,20 @@ def analyze_tracking_results(state, results, progress_callback=None):
 
         # Update progress
         if state.update_ui:
-            elapsed_time = time.time() - start_time
-            frames_processed = frame_pos - state.frame_start + 1
-            frames_remaining = state.frame_end - frame_pos - 1
-            eta = (elapsed_time / frames_processed) * frames_remaining if frames_processed > 0 else 0
+            current_time = time.time()
+            if current_time - last_ui_update_time >= UPDATE_PROGRESS_INTERVAL:
+                elapsed_time = current_time - start_time
+                frames_processed = frame_pos - state.frame_start + 1
+                frames_remaining = state.frame_end - frame_pos - 1
+                eta = (elapsed_time / frames_processed) * frames_remaining if frames_processed > 0 else 0
 
-            state.update_ui(ProgressMessage(
-                process="TRACKING_ANALYSIS",
-                frames_processed=frames_processed,
-                total_frames=state.frame_end,
-                eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
-            ))
+                state.update_ui(ProgressMessage(
+                    process="TRACKING_ANALYSIS",
+                    frames_processed=frames_processed,
+                    total_frames=state.frame_end,
+                    eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
+                ))
+                last_ui_update_time = current_time
 
         # TODO improve this
         # if progress_callback:
