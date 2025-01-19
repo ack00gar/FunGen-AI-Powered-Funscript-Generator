@@ -7,7 +7,7 @@ import cv2
 from tqdm import tqdm
 from datetime import timedelta
 
-from config import CLASS_COLORS
+from script_generator.constants import CLASS_COLORS
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.utils.file import get_output_file_path
 from script_generator.video.video_info import get_cropped_dimensions

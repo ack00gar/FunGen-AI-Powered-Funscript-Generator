@@ -6,7 +6,7 @@ import glfw
 from OpenGL.GL import *
 from OpenGL.GLU import *
 
-from script_generator.config import RENDER_RESOLUTION, YAW, PITCH, DEBUG_PATH
+from config import RENDER_RESOLUTION, YAW, PITCH, DEBUG_PATH
 from script_generator.video.video_conversion.opengl.helpers import create_180_dome, render_dome
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 

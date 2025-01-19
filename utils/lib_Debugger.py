@@ -1,7 +1,7 @@
 import json
 import cv2
 import numpy as np
-from config import CLASS_COLORS
+from script_generator.constants import CLASS_COLORS
 from scipy.interpolate import interp1d
 
 from script_generator.utils.file import get_output_file_path

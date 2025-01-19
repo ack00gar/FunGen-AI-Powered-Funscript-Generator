@@ -9,7 +9,8 @@ import cv2
 import datetime
 from scipy.signal import savgol_filter
 
-from config import HEATMAP_COLORS, STEP_SIZE, VERSION
+from config import STEP_SIZE, VERSION
+from script_generator.constants import HEATMAP_COLORS
 
 import matplotlib
 

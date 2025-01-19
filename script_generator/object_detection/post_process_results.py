@@ -3,8 +3,8 @@ import time
 
 import cv2
 
-from config import CLASS_REVERSE_MATCH, CLASS_COLORS, OUTPUT_PATH
-from script_generator.config import RUN_POSE_MODEL
+from script_generator.constants import CLASS_REVERSE_MATCH, CLASS_COLORS, OUTPUT_PATH
+from config import RUN_POSE_MODEL
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.utils.file import write_dataset, get_output_file_path

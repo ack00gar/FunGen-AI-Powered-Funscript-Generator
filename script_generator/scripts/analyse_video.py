@@ -6,7 +6,7 @@ from typing import List
 from colorama import Fore, Style
 from tqdm import tqdm
 
-from script_generator.config import QUEUE_MAXSIZE, SEQUENTIAL_MODE, PROGRESS_BAR, UPDATE_PROGRESS_INTERVAL
+from config import QUEUE_MAXSIZE, SEQUENTIAL_MODE, PROGRESS_BAR, UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.object_detection.post_process_results import YoloAnalysisTaskProcessor
 from script_generator.object_detection.yolo import YoloTaskProcessor

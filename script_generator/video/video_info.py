@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 
-from config import MAX_FRAME_HEIGHT
+from config import RENDER_RESOLUTION
 
 
 @dataclass
@@ -61,7 +61,7 @@ def get_projection_and_fov_from_filename(filename):
 
 def get_cropped_dimensions(video: VideoInfo):
     if video.is_vr:
-        return MAX_FRAME_HEIGHT, MAX_FRAME_HEIGHT
+        return RENDER_RESOLUTION, RENDER_RESOLUTION
     else:
-        scaling_factor = min(1, MAX_FRAME_HEIGHT / video.height)
+        scaling_factor = min(1, RENDER_RESOLUTION / video.height)
         return int(video.width * scaling_factor), int(video.height * scaling_factor)
