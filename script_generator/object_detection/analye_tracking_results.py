@@ -64,7 +64,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
     # Start time for ETA calculation
     start_time = time.time()
 
-    for frame_pos in range(state.frame_start, state.frame_end): # tqdm(range(state.frame_start, state.frame_end), unit="f"):
+    for frame_pos in tqdm(range(state.frame_start, state.frame_end), unit="f"):
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
             print(f"Reaching cut at frame {frame_pos}")

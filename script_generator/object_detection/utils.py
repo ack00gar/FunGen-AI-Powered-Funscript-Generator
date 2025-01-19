@@ -62,9 +62,6 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
         if frame_idx >= start_frame and cls == penis_cls and conf >= 0.5:
             penis_frame = frame_idx
 
-            # TODO re-enable logic
-            return penis_frame
-
         if frame_idx == penis_frame and cls == glans_cls and conf >= 0.5:
             if frame_detected == 0:
                 frame_detected = frame_idx
