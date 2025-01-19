@@ -29,11 +29,14 @@ def analyze_tracking_results(state, results, progress_callback=None):
 
     image_area = video_info.width * video_info.height
 
+    cuts = []
+
     if state.life_display_mode:
         reader.set(cv2.CAP_PROP_POS_FRAMES, state.frame_start)
     else:
         reader.release()
 
+    """ discarding the scene detection for now
     # Load scene cuts if the file exists
     cuts_path, _ = get_output_file_path(state.video_path, "_cuts.json")
     if os.path.exists(cuts_path):
@@ -58,6 +61,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
         # Save the cuts to a file
         with open(cuts_path, 'w') as f:
             json.dump(cuts, f)
+    """
 
     state.funscript_frames = []  # List to store Funscript frames
     tracker = ObjectTracker(fps, state.frame_start, image_area, video_info.is_vr)  # Initialize the object tracker
