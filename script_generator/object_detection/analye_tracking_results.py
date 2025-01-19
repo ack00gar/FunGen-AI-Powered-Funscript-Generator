@@ -190,6 +190,12 @@ def analyze_tracking_results(state, results, progress_callback=None):
         # if progress_callback:
         #     progress_callback()
 
+    state.update_ui(ProgressMessage(
+        process="TRACKING_ANALYSIS",
+        frames_processed=state.video_info.total_frames,
+        total_frames=state.video_info.total_frames,
+        eta="Done"
+    ))
 
     # Prepare Funscript data
     state.funscript_data = list(zip(state.funscript_frames, state.funscript_distances))

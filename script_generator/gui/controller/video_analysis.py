@@ -36,7 +36,7 @@ def video_analysis(state):
                 state.update_ui(ProgressMessage(
                     process="OBJECT_DETECTION",
                     frames_processed=state.video_info.total_frames,
-                    total_frames=state.frame_end,
+                    total_frames=state.video_info.total_frames,
                     eta="Done"
                 ))
         else:

@@ -205,7 +205,7 @@ class FunscriptGeneratorPage(tk.Frame):
                     progress_bar["value"] = progress_msg.frames_processed
                     progress_bar["maximum"] = progress_msg.total_frames
                     percentage = (progress_msg.frames_processed / progress_msg.total_frames) * 100 if progress_msg.total_frames > 0 else 0
-                    progress_label.config(text=f"{percentage:.0f}% - ETA: {progress_msg.eta}")
+                    progress_label.config(text=f"{percentage:.0f}% - ETA: {progress_msg.eta}" if progress_msg.frames_processed < progress_msg.total_frames else "Done")
 
             # Schedule the update on the main thread
             self.controller.after(0, process_update)
