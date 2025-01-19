@@ -1,9 +1,12 @@
 import ctypes
+import os
 import tkinter as tk
 
 from script_generator.gui.views.funscript_generator import FunscriptGeneratorPage
 from script_generator.state.app_state import AppState
 
+# TODO this is a workaround and needs to be fixed properly
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 class App(tk.Tk):
     def __init__(self):
