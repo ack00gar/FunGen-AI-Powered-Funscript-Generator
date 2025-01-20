@@ -6,7 +6,7 @@ from script_generator.constants import MODEL_PATH
 from script_generator.utils.config import find_ffmpeg_path, find_ffprobe_path
 from script_generator.utils.logger import logger
 
-VERSION = "0.0.1_25-01-16"
+VERSION = "0.0.3"
 
 ##################################################################################################
 # FFMPEG
