@@ -1,8 +1,5 @@
 import json
-import os
 import time
-from datetime import datetime
-
 import cv2
 from tqdm import tqdm
 from datetime import timedelta
@@ -129,7 +126,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
                     variables={
                         'frame': frame_pos,
                         # time of the frame hh:mm:ss
-                        'time': datetime.fromtimestamp(frame_pos / fps).strftime('%H:%M:%S'),
+                        'time': str(timedelta(seconds=int(frame_pos / fps))),
                         'distance': tracker.distance,
                         'Penetration': tracker.penetration,
                         'sex_position': tracker.sex_position,
