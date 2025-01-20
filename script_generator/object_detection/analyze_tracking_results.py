@@ -29,7 +29,7 @@ def analyze_tracking_results(state, results, debug_video_callback=None):
 
     cuts = []
 
-    if state.life_display_mode:
+    if state.live_preview_mode:
         reader.set(cv2.CAP_PROP_POS_FRAMES, state.frame_start)
     else:
         reader.release()
@@ -150,7 +150,7 @@ def analyze_tracking_results(state, results, debug_video_callback=None):
                     }
                 )
 
-        if state.life_display_mode:
+        if state.live_preview_mode:
             # Display the tracking results for testing
             ret, frame = reader.read()
 
@@ -208,7 +208,7 @@ def analyze_tracking_results(state, results, debug_video_callback=None):
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
 
-        if debug_video_callback and state.life_display_mode:
+        if debug_video_callback and state.live_preview_mode:
             debug_video_callback()
 
     state.update_ui(ProgressMessage(

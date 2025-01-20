@@ -21,6 +21,7 @@ def debug_video(state: AppState):
         state.debugger.load_logs()
 
         state.debugger.play_video(
+            state=state,
             start_frame=state.frame_start,
             duration=state.debug_video_duration if state.save_debug_video else 0,
             save_debug_video=state.save_debug_video,
