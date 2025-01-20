@@ -1,4 +1,4 @@
-from script_generator.scripts.analyse_video import analyse_video
+from script_generator.scripts.analyze_video import analyse_video
 from script_generator.state.app_state import AppState
 
 
