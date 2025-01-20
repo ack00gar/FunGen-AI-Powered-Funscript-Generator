@@ -2,7 +2,6 @@ import os
 
 from script_generator.gui.controller.debug_video import debug_video
 from script_generator.object_detection.analyze_tracking_results import analyze_tracking_results
-from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.object_detection.utils import make_data_boxes, parse_yolo_data_looking_for_penis
 from script_generator.utils.file import load_json_from_file, get_output_file_path
 from script_generator.utils.logger import logger

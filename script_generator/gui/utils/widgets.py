@@ -62,9 +62,9 @@ class Widgets:
         return entry
 
     @staticmethod
-    def input(parent, label_text, state, attr, row=0, col=0, label_width_px=LABEL_WIDTH, entry_width_px=200, callback=None, tooltip_text=None):
+    def input(parent, label_text, state, attr, row=0, column=0, label_width_px=LABEL_WIDTH, entry_width_px=200, callback=None, tooltip_text=None):
         container = ttk.Frame(parent)
-        container.grid(row=row, column=col, sticky="ew", padx=5, pady=5)
+        container.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
         container.columnconfigure(1, weight=1)
 
         value = tk.StringVar(value=getattr(state, attr))
@@ -87,12 +87,12 @@ class Widgets:
         return container, entry, value
 
     @staticmethod
-    def button(parent, button_text, on_click, row=0, col=0, tooltip_text=None, style_name="Custom.TButton"):
+    def button(parent, button_text, on_click, row=0, column=0, tooltip_text=None, style_name="Custom.TButton"):
         style = ttk.Style()
         style.configure(style_name, padding=(10, 3))
 
         button = ttk.Button(parent, text=button_text, command=on_click, style=style_name)
-        button.grid(row=row, column=col, sticky="w", padx=PADDING_X, pady=PADDING_Y)
+        button.grid(row=row, column=column, sticky="w", padx=PADDING_X, pady=PADDING_Y)
 
         if tooltip_text:
             Tooltip(button, tooltip_text)
@@ -142,9 +142,9 @@ class Widgets:
         return container, entry, file_path
 
     @staticmethod
-    def labeled_progress(parent, label_text, row=0, col=0, progress_length=300, label_width_px=LABEL_WIDTH, label_percentage_width_px=LABEL_WIDTH, tooltip_text=None):
+    def labeled_progress(parent, label_text, row=0, column=0, progress_length=300, label_width_px=LABEL_WIDTH, label_percentage_width_px=LABEL_WIDTH, tooltip_text=None):
         container = ttk.Frame(parent)
-        container.grid(row=row, column=col, sticky="ew", padx=5, pady=5)
+        container.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
         container.columnconfigure(1, weight=1)  # Allow the progress bar to expand
 
         # Label for progress description with fixed pixel width
@@ -165,12 +165,13 @@ class Widgets:
         return container, progress_bar, progress_label, percentage_label
 
     @staticmethod
-    def dropdown(parent, label_text, options, default_value, state, attr, row=0, col=0, label_width_px=LABEL_WIDTH, tooltip_text=None):
+    def dropdown(parent, label_text, options, default_value, state, attr, row=0, column=0, label_width_px=LABEL_WIDTH, tooltip_text=None, **grid_kwargs):
         selected_value = tk.StringVar(value=default_value)
 
         # Create a container for the dropdown
         container = ttk.Frame(parent)
-        container.grid(row=row, column=col, sticky="ew", padx=5, pady=5)
+        grid_kwargs.setdefault("sticky", "ew")
+        container.grid(row=row, column=column, padx=5, pady=5, **grid_kwargs)
         container.columnconfigure(1, weight=1)  # Allow the dropdown to expand
 
         # Label with fixed pixel width
@@ -190,13 +191,13 @@ class Widgets:
         return container, label, dropdown, selected_value
 
     @staticmethod
-    def range_selector(parent, label_text, row, state, attr, values, col=0, tooltip_text=None):
-        Widgets.label(parent, label_text, row=row, column=col, sticky="w", padx=PADDING_X, pady=PADDING_Y)
+    def range_selector(parent, label_text, row, state, attr, values, column=0, tooltip_text=None):
+        Widgets.label(parent, label_text, row=row, column=column, sticky="w", padx=PADDING_X, pady=PADDING_Y)
 
         selected_value = tk.StringVar(value=str(getattr(state, attr)))
 
         dropdown = ttk.Combobox(parent, textvariable=selected_value, values=values, width=5, state="readonly")
-        dropdown.grid(row=row, column=col + 1, sticky="w", padx=PADDING_X, pady=PADDING_Y)
+        dropdown.grid(row=row, column=column + 1, sticky="w", padx=PADDING_X, pady=PADDING_Y)
 
         dropdown.bind("<<ComboboxSelected>>", lambda _: setattr(state, attr, int(selected_value.get())))
 
@@ -206,7 +207,7 @@ class Widgets:
         return dropdown
 
     @staticmethod
-    def checkbox(parent, label_text, state, attr, label_left=True, row=0, col=0, label_width_px=150, tooltip_text=None, **grid_kwargs):
+    def checkbox(parent, label_text, state, attr, label_left=True, row=0, column=0, label_width_px=150, tooltip_text=None, **grid_kwargs):
         # Ensure the parent has a _checkbox_vars attribute to track BooleanVars
         if not hasattr(parent, "_checkbox_vars"):
             parent._checkbox_vars = {}
@@ -219,7 +220,7 @@ class Widgets:
 
         # Create a container for the checkbox and label
         container = ttk.Frame(parent)
-        container.grid(row=row, column=col, sticky="ew", padx=5, pady=5)
+        container.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
         container.columnconfigure(1, weight=1)  # Allow checkbox to adjust dynamically
 
         if label_left:
@@ -272,14 +273,14 @@ class Widgets:
             user_choice.set(True)
             window.destroy()
 
-        Widgets.button(button_frame, yes_text, on_yes, row=0, col=0)
+        Widgets.button(button_frame, yes_text, on_yes, row=0, column=0)
 
         # No button
         def on_no():
             user_choice.set(False)
             window.destroy()
 
-        Widgets.button(button_frame, no_text, on_no, row=0, col=1)
+        Widgets.button(button_frame, no_text, on_no, row=0, column=1)
 
         # Wait for the user to close the dialog
         window.grab_set()
