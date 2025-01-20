@@ -253,11 +253,39 @@ class Widgets:
         return container, checkbox, is_checked
 
     @staticmethod
-    def messagebox(title, message, yes_text="Yes", no_text="No"):
+    def messagebox(title, message, yes_text="Yes", no_text="No", master=None):
         # Create a Toplevel window
-        window = tk.Toplevel()
+        window = tk.Toplevel(master)
         window.title(title)
         window.geometry("350x140")
+
+        # Center the popup in the master window
+        if master is not None:
+            master.update_idletasks()  # Ensure master's dimensions are up-to-date
+            master_width = master.winfo_width()
+            master_height = master.winfo_height()
+            master_x = master.winfo_x()
+            master_y = master.winfo_y()
+
+            window_width = 350
+            window_height = 140
+
+            position_right = master_x + (master_width // 2) - (window_width // 2)
+            position_down = master_y + (master_height // 2) - (window_height // 2)
+
+            window.geometry(f"{window_width}x{window_height}+{position_right}+{position_down}")
+        else:
+            # Center in the screen if no master is provided
+            window_width = 350
+            window_height = 140
+
+            screen_width = window.winfo_screenwidth()
+            screen_height = window.winfo_screenheight()
+
+            position_right = (screen_width // 2) - (window_width // 2)
+            position_down = (screen_height // 2) - (window_height // 2)
+
+            window.geometry(f"{window_width}x{window_height}+{position_right}+{position_down}")
 
         # Add message label
         tk.Label(window, text=message, wraplength=350, justify="left").pack(pady=20)

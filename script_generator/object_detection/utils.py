@@ -11,14 +11,15 @@ from script_generator.utils.file import get_output_file_path
 from script_generator.utils.logger import logger
 
 
-def check_skip_object_detection(state):
+def check_skip_object_detection(state, root):
     raw_yolo_path, raw_yolo_filename = get_output_file_path(state.video_path, "_rawyolo.json")
     if os.path.exists(raw_yolo_path):
         skip_detection = Widgets.messagebox(
             "Detection File Conflict",
             f"The file already exists. What would you like to do?\n{raw_yolo_filename}",
             "Use Existing",
-            "Generate New"
+            "Generate New",
+            root
         )
         if skip_detection:
             logger.info(f"File {raw_yolo_path} already exists. Skipping detections and loading file content...")
