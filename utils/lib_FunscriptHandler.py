@@ -58,14 +58,14 @@ class FunscriptGenerator:
             # Apply VW simplification if enabled
             if global_state.vw_simplification_enabled:
                 global_state.logger.info("Positions adjustment - step 2 (VW algorithm simplification)")
-                zip_vw_positions = simplify_coords(zip_positions, global_state.vw_factor)
-                global_state.logger.info(f"Length of VW filtered positions: {len(zip_vw_positions)}")
+                zip_positions = simplify_coords(zip_positions, global_state.vw_factor)
+                global_state.logger.info(f"Length of VW filtered positions: {len(zip_positions)}")
             else:
                 global_state.logger.info("Skipping positions adjustment - step 2 (VW algorithm simplification)")
 
             # Extract timestamps and positions
-            ats = [p[0] for p in zip_vw_positions]
-            positions = [p[1] for p in zip_vw_positions]
+            ats = [p[0] for p in zip_positions]
+            positions = [p[1] for p in zip_positions]
 
             # Remap positions to 0-100 range
             global_state.logger.info("Positions adjustment - step 3 (remapping)")
@@ -92,9 +92,13 @@ class FunscriptGenerator:
                 global_state.logger.info("Skipping positions adjustment - step 5 (amplitude boosting)")
 
             # Round position values to the closest multiple of 5, still between 0 and 100
-            global_state.logger.info("Positions adjustment - step 6 (rounding to the closest multiple of 5)")
-            #adjusted_positions = [round(p, -1) for p in adjusted_positions] # multiple of 10
-            adjusted_positions = [round(p / global_state.rounding) * global_state.rounding for p in adjusted_positions]
+            if global_state.vw_simplification_enabled:
+                global_state.logger.info(f"Positions adjustment - step 6 (rounding to the closest multiple of {global_state.rounding})")
+                adjusted_positions = [round(p / global_state.rounding) * global_state.rounding for p in
+                                      adjusted_positions]
+
+            else:
+                global_state.logger.info(f"Skipping positions adjustment - step 6 (rounding to the closest multiple of {global_state.rounding})")
 
             # Recombine timestamps and adjusted positions
             global_state.logger.info("Re-assembling ats and positions")
@@ -467,11 +471,11 @@ class FunscriptGenerator:
         # Heatmaps (First row: 2 columns spanning the entire width)
         if ref_sections:
             ax_ref_heatmap = fig.add_subplot(gs[0, :2])
-            self.generate_heatmap_inline(ax_ref_heatmap, ref_times, ref_positions)
+            self.generate_heatmap_inline(ax_ref_heatmap, ref_times, ref_positions, global_state)
             ax_ref_heatmap.set_title('Reference Funscript Heatmap', fontsize=14)
 
         ax_gen_heatmap = fig.add_subplot(gs[0, 2:])
-        self.generate_heatmap_inline(ax_gen_heatmap, gen_times, gen_positions)
+        self.generate_heatmap_inline(ax_gen_heatmap, gen_times, gen_positions, global_state)
         ax_gen_heatmap.set_title('Generated Funscript Heatmap', fontsize=14)
 
         if ref_sections:
@@ -544,7 +548,7 @@ class FunscriptGenerator:
         output_image_path = os.path.join(directory, new_filename)
         plt.savefig(output_image_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png", dpi=100)
 
-    def generate_heatmap_inline(self, ax, times, positions):
+    def generate_heatmap_inline(self, ax, times, positions, global_state):
         """
         Generates a heatmap on the given axes using the existing `generate_heatmap` logic.
 
@@ -555,6 +559,14 @@ class FunscriptGenerator:
         """
         if not times or not positions:
             return
+
+        # Bug fix, happened on some reference scripts with 2 identical times values : keep only the first one
+        for i in range(1, len(times)):
+            if times[i] == times[i-1]:
+                times.pop(i)
+                positions.pop(i)
+                global_state.logger.info(f"Removed duplicate time value {times[i]}")
+                break
 
         # Calculate speed (position change per time interval)
         speeds = np.abs(np.diff(positions) / np.diff(times)) * 1000  # Positions per second
