@@ -89,7 +89,8 @@ class FunscriptGeneratorPage(tk.Frame):
             state=self.state,
             attr='boost_up_percent',
             values=[str(i) for i in range(0, 21)],
-            row=1
+            row=1,
+            tooltip_text="Boost up peaks by x%"
         )
         Widgets.range_selector(
             parent=boost_frame,
@@ -97,7 +98,8 @@ class FunscriptGeneratorPage(tk.Frame):
             state=self.state,
             attr='boost_down_percent',
             values=[str(i) for i in range(0, 21)],
-            row=2
+            row=2,
+            tooltip_text="Reduce down peaks by x%"
         )
 
         # Threshold Settings
@@ -111,7 +113,8 @@ class FunscriptGeneratorPage(tk.Frame):
             state=self.state,
             attr='threshold_low',
             values=[str(i) for i in range(0, 16)],
-            row=1
+            row=1,
+            tooltip_text="Threshold under which values are mapped to 0"
         )
         Widgets.range_selector(
             parent=threshold_frame,
@@ -119,7 +122,8 @@ class FunscriptGeneratorPage(tk.Frame):
             state=self.state,
             attr='threshold_high',
             values=[str(i) for i in range(80, 101)],
-            row=2
+            row=2,
+            tooltip_text="Threshold above which values are mapped to 100"
         )
 
         # Simplification Settings
@@ -133,7 +137,8 @@ class FunscriptGeneratorPage(tk.Frame):
             state=self.state,
             attr='vw_factor',
             values=[i / 5 for i in range(10, 51)],
-            row=1
+            row=1,
+            tooltip_text="Rationalize the number of points\nMakes the script end-user friendly\nDeactivating this will make the script unusable as is\nExpert mode, for post-editing"
         )
         Widgets.range_selector(
             parent=vw_frame,
@@ -141,7 +146,8 @@ class FunscriptGeneratorPage(tk.Frame):
             state=self.state,
             attr='rounding',
             values=[5, 10],
-            row=2
+            row=2,
+            tooltip_text="Rounding factor for values"
         )
 
         # Regenerate Funscript Button
