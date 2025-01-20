@@ -151,6 +151,20 @@ class FunscriptGeneratorPage(tk.Frame):
         debugging = Widgets.frame(wrapper, title="Debugging", main_section=True, row=5)
         general = Widgets.frame(debugging, title="General", row=0)
         Widgets.checkbox(general, "Logging for debug", state, "debug_mode")
+        Widgets.checkbox(general, "Save debugging video", state=state, attr="save_debug_video", row=2)
+        Widgets.dropdown(
+            attr="debug_record_duration_var",
+            parent=general,
+            label_text="duration (s)",
+            options=[5, 10, 20],
+            default_value=5,
+            state=state,
+            column=2,
+            row=2,
+            label_width_px=73,
+            sticky="w"
+        )
+        Widgets.button(general, "Play debug video (q to quit)", None, row=2, column=3)
 
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
         Widgets.file_selection(
@@ -167,20 +181,6 @@ class FunscriptGeneratorPage(tk.Frame):
         object_detection = Widgets.frame(debugging, title="Object detection", row=2)
 
         Widgets.checkbox(object_detection, "Live display mode", state, "life_display_mode",tooltip_text="Will show a live preview of the object detection.", row=3)
-        Widgets.checkbox(object_detection, "Save debugging video", state=state, attr="save_debug_as_video", row=5)
-        Widgets.dropdown(
-            attr="debug_record_duration_var",
-            parent=object_detection,
-            label_text="duration (s)",
-            options=[5, 10, 20],
-            default_value=5,
-            state=state,
-            column=2,
-            row=5,
-            label_width_px=73,
-            sticky="w"
-        )
-        Widgets.button(object_detection, "Play debug video (q to quit)", None, row=5, column=3)
         #endregion
 
         #region FOOTER

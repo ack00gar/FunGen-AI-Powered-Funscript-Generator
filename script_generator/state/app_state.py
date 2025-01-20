@@ -27,11 +27,10 @@ class AppState:
         self.debug_mode: bool = False
         self.life_display_mode: bool = False
         self.reference_script: string = None
-        self.save_debug_as_video: bool = False
-        self.debug_record_mode: bool = False
+        self.save_debug_video: bool = False
         self.debug_record_duration: int = 0
 
-        # TODO what's this
+        # TODO move this to a batch task class (so parallel inference is possible)
         self.funscript_data = []
         self.funscript_frames = []
         self.funscript_distances = []

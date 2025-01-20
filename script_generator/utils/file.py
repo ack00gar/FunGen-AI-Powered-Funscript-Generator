@@ -35,6 +35,7 @@ def get_output_file_path(video_path, suffix):
     """"
     Get the OUTPUT_PATH filename for a specific suffix (e.g. _raw_yolo.json)
     """
-    filename = f"{os.path.basename(video_path)[:-4]}{suffix}"
-    path = os.path.join(OUTPUT_PATH, filename)
+    filename_base = os.path.basename(video_path)[:-4]
+    filename = f"{filename_base}{suffix}"
+    path = os.path.join(OUTPUT_PATH, filename_base, filename)
     return path, filename

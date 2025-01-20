@@ -91,41 +91,35 @@ class Debugger:
         """
         self.play_video(frame_id, duration=-1)
 
-    def play_video(self, start_frame=0, duration=0, rolling_window_size=100, record=False, downsize_ratio=1):
+    def play_video(self, start_frame=0, duration=0, rolling_window_size=100, save_debug_video=False, downsize_ratio=1):
         """
         Play the video from a specified frame, displaying variables, bounding boxes, and rolling window curves.
         :param start_frame: Frame to start playback from.
         :param duration: Duration of playback in seconds.
         :param rolling_window_size: Size of the rolling window for distance and funscript data.
-        :param record: Whether to record the debug video.
+        :param save_debug_video: Whether to record the debug video.
         :param downsize_ratio: Ratio to downsize the recorded video.
         """
         visualizer = Visualizer()
+        debug_video_path = self.video_path.replace(".mp4", "_debug.mp4")
 
         # Load the video
-        if self.video_reader == "FFmpeg":
-            self.cap = VideoReaderFFmpeg(self.video_path, is_vr=self.is_vr)
-        else:
-            self.cap = cv2.VideoCapture(self.video_path)
+        self.cap = VideoReaderFFmpeg(self.video_path, is_vr=self.is_vr)
 
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         logger.info(f"Total frames: {self.total_frames}, FPS: {self.fps}")
 
         # Initialize video writer if recording
-        if record:
+        if save_debug_video:
             ret, frame = self.cap.read()
-            if self.video_reader == "OpenCV" and self.is_vr:
-                frame = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
-            #if self.cap.is_vr:
-            #    frame_copy = frame[:, frame.shape[1] // 3 : 2 * frame.shape[1] // 3, :]
-            output_path = self.video_path.replace(".mp4", "_debug.mp4")
+
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             out = cv2.VideoWriter(
-                output_path, fourcc, self.fps, (frame.shape[1] // downsize_ratio, frame.shape[0] // downsize_ratio)
+                debug_video_path, fourcc, self.fps, (frame.shape[1] // downsize_ratio, frame.shape[0] // downsize_ratio)
             )
             if not out.isOpened():
-                logger.error(f"Error: Could not open video writer for {output_path}")
+                logger.error(f"Error: Could not open video writer for {debug_video_path}")
                 self.cap.release()
                 return
 
@@ -239,44 +233,43 @@ class Debugger:
                 break
 
             # Record the frame if enabled
-            if record:
+            if save_debug_video:
                 out.write(frame_copy)
 
             self.current_frame += 1
 
         # Release resources
         self.cap.release()
-        if record:
+        if save_debug_video:
             out.release()
 
-            # TODO re-enable? (didn't have time to debug yet)
-            # # Input and output paths
-            # input_path = output_path
-            # # Add "SPOILER_" to the filename
-            # directory, filename = os.path.split(input_path)
-            # new_filename = f"SPOILER_{filename}"
-            # output_path_ffmpeg = os.path.join(directory, new_filename)
-            #
-            # # FFmpeg command to convert to H.265
-            # ffmpeg_command = [
-            #     "ffmpeg",
-            #     "-y",  # Overwrite output file if it exists
-            #     "-i", input_path,  # Input file
-            #     "-c:v", "libx265",  # Use H.265 codec
-            #     "-crf", "26",  # Constant Rate Factor (quality)
-            #     "-preset", "fast",  # Encoding speed
-            #     "-b:v", "5000k",  # Bitrate
-            #     "-movflags", "+faststart",  # Enable fast streaming
-            #     output_path_ffmpeg
-            # ]
-            #
-            # # Run FFmpeg command
-            # subprocess.run(ffmpeg_command)
-            #
-            # # Delete the intermediate file
-            # if os.path.exists(input_path):
-            #     os.remove(input_path)
-            #     logger.info(f"Deleted intermediate file: {input_path}")
+            # Input and output paths
+            input_path = debug_video_path
+            # Add "SPOILER_" to the filename
+            directory, filename = os.path.split(input_path)
+            new_filename = f"SPOILER_{filename}"
+            output_path_ffmpeg = os.path.join(directory, new_filename)
+
+            # FFmpeg command to convert to H.265
+            ffmpeg_command = [
+                "ffmpeg",
+                "-y",  # Overwrite output file if it exists
+                "-i", input_path,  # Input file
+                "-c:v", "libx265",  # Use H.265 codec
+                "-crf", "26",  # Constant Rate Factor (quality)
+                "-preset", "fast",  # Encoding speed
+                "-b:v", "5000k",  # Bitrate
+                "-movflags", "+faststart",  # Enable fast streaming
+                output_path_ffmpeg
+            ]
+
+            # Run FFmpeg command
+            subprocess.run(ffmpeg_command)
+
+            # Delete the intermediate file
+            if os.path.exists(input_path):
+                os.remove(input_path)
+                logger.info(f"Deleted intermediate file: {input_path}")
 
         cv2.destroyAllWindows()
 

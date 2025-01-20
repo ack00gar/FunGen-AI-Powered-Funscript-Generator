@@ -205,9 +205,8 @@ def analyze_tracking_results(state, results, progress_callback=None):
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
 
-        # TODO improve this
-        # if progress_callback:
-        #     progress_callback()
+        if progress_callback and state.save_debug_video:
+            progress_callback()
 
     state.update_ui(ProgressMessage(
         process="TRACKING_ANALYSIS",
