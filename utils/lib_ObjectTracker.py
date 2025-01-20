@@ -1,19 +1,9 @@
-import logging
 import math
 from collections import deque
-
-
-from utils import lib_KalmanFilter as KF
-from collections import deque
-import math
 import numpy as np
 
 from script_generator.constants import CLASS_NAMES
 from script_generator.utils.logger import logger
-from utils import lib_KalmanFilter as KF
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 class LockedPenisBox:
@@ -21,7 +11,6 @@ class LockedPenisBox:
     A class to manage the locked penis box, which represents the detected penis area.
     It stores the box coordinates, height, and active status.
     """
-
     def __init__(self):
         self.box = None  # Coordinates of the locked penis box
         self.height = 0  # Height of the locked penis box
@@ -78,32 +67,30 @@ class LockedPenisBox:
             locked_box.update(data["box"], data["height"])
         return locked_box
 
-
 class ObjectTracker:
     """
     A class to track objects (e.g., penis, glans, etc.) in a video frame and determine their positions and interactions.
     """
 
-    def __init__(self, fps, frame_pos, image_area, is_vr):
+    def __init__(self, state):
         """
         Initialize the ObjectTracker.
 
         Args:
-            fps (int): Frames per second of the video.
-            frame_pos (int): Current frame position.
-            image_area (int): Area of the video frame.
+            global_state
         """
-        self.is_vr = is_vr
+        self.state = state
         self.class_names = CLASS_NAMES  # List of class names to track
         self.active_tracks = {}  # Active tracks: {track_id: Track object}
         self.inactive_tracks = []  # Inactive tracks (lost tracks)
-        self.distance_kf = KF.KalmanFilter()  # Kalman filter for distance smoothing
+        # self.distance_kf = KF.KalmanFilter()  # Kalman filter for distance smoothing
 
         self.frame = None  # Current video frame
-        self.current_frame_id = frame_pos  # Current frame ID
-        self.image_y_size = 0  # Height of the video frame
-        self.image_area = image_area  # Area of the video frame
-        self.fps = fps  # Frames per second of the video
+        self.current_frame_id = state.current_frame_id  # frame_pos  # Current frame ID
+        self.width = 0  # Height of the video frame
+        self.image_area = state.frame_area # image_area  # Area of the video frame
+        self.fps = state.video_info.fps  # fps  # Frames per second of the video
+        self.isVR = state.video_info.is_vr  # isVR
 
         # Speed and distance thresholds
         self.max_speed = 100 / (0.18 * self.fps)  # Maximum allowed speed for distance changes
@@ -134,12 +121,12 @@ class ObjectTracker:
         self.pct_weights = {}  # Percentage weights for each track_id
 
         # Initialize normalized positions and distances
-        self.normalized_positions = {class_name: deque(maxlen=200) for class_name in CLASS_NAMES}
-        self.normalized_distances = {class_name: deque(maxlen=200) for class_name in CLASS_NAMES}
+        self.normalized_positions = {class_name: deque(maxlen=200) for class_name in self.class_names}
+        self.normalized_distances = {class_name: deque(maxlen=200) for class_name in self.class_names}
 
         # Detection thresholds
-        self.consecutive_detections = {class_name: 0 for class_name in CLASS_NAMES}
-        self.consecutive_non_detections = {class_name: 0 for class_name in CLASS_NAMES}
+        self.consecutive_detections = {class_name: 0 for class_name in self.class_names}
+        self.consecutive_non_detections = {class_name: 0 for class_name in self.class_names}
         self.detections_threshold = round(self.fps) / 10  # Threshold for considering a detection valid
 
         # Penetration state
@@ -292,23 +279,22 @@ class ObjectTracker:
         self.sex_position_history.append(sex_position)
         position_counts = {position: self.sex_position_history.count(position) for position in self.sex_position_history}
         most_frequent_position = max(position_counts, key=position_counts.get, default="Not relevant")
-
         if most_frequent_position != self.sex_position:
             logger.info(f"@{self.current_frame_id} - Sex position switched to: {most_frequent_position}")
             self.sex_position = most_frequent_position
             self.sex_position_reason = reason
 
-    def tracking_logic(self, sorted_boxes, current_frame_id, image_y_size):
+    def tracking_logic(self, state, sorted_boxes):
         """
         Main tracking logic to process detected boxes and update tracking state.
 
         Args:
             sorted_boxes (list): List of detected boxes with confidence, class, and track ID.
-            current_frame_id (int): Current frame ID.
-            image_y_size (int): Height of the video frame.
+            width (int): Height of the video frame.
         """
-        self.current_frame_id = current_frame_id
-        self.image_y_size = image_y_size
+        self.state = state
+        self.current_frame_id = state.current_frame_id
+        self.width = state.video_info.width
 
         close_up_detected = False
 
@@ -354,7 +340,7 @@ class ObjectTracker:
                 and not self.penetration:  # equivalent to 3 seconds
             if self.locked_penis_box.active:  # is_active():
                 self.locked_penis_box.deactivate()
-                logger.debug(f"@{self.current_frame_id} - Deactivated locked_penis_box")
+                logger.info(f"@{self.current_frame_id} - Deactivated locked_penis_box")
 
         if self.locked_penis_box.is_active() and self.locked_penis_box.visible < 100 and not self.glans_detected:
             self.penetration = True
@@ -373,7 +359,7 @@ class ObjectTracker:
                         butt_box_area = (b_x2 - b_x1) * (b_y2 - b_y1)
 
                         # Check if the butt box is unusually large (close-up)
-                        if self.is_vr:
+                        if self.isVR:
                             size_threshold = 0.15
                         else:  #2D POV
                             size_threshold = 0.4
@@ -382,7 +368,7 @@ class ObjectTracker:
                             close_up_detected = True
                             self.detect_sex_position_change('Close up', 'Butt box size beyond threshold')
                             if not self.close_up:
-                                logging.info(
+                                logger.info(
                                     f"@{self.current_frame_id} - Close up detected - butt size beyond threshold: {int((butt_box_area / self.image_area) * 100)}%"
                                 )
                                 self.close_up = True
@@ -413,7 +399,7 @@ class ObjectTracker:
 
         for box, conf, cls, class_name, track_id in sorted_boxes:
             # discarding those classes for distance computation
-            # if class_name in ['glans', 'penis', 'navel', 'hips center', 'anus']:
+            #if class_name in ['glans', 'penis', 'navel', 'hips center', 'anus']:
             if class_name in ['glans', 'navel', 'hips center', 'anus']:
                 continue
             elif self.locked_penis_box.is_active() and class_name == 'breast' and not self.boxes_overlap(box, self.locked_penis_box.get_box()):
@@ -576,8 +562,8 @@ class ObjectTracker:
                             self.locked_penis_box.update(self.penis_box, current_height)
 
                         # Move locked penis box towards current penis box
-                        #max_move = max(1, int(self.image_y_size / 960))
-                        if self.is_vr:
+                        #max_move = max(1, int(self.width / 960))
+                        if self.isVR:
                             max_move = 180 // int(self.fps)
                         else:
                             # in 2D POV, camera is not still, actuation needs to be faster
@@ -606,9 +592,9 @@ class ObjectTracker:
                     self.locked_penis_box.update(self.penis_box, self.penis_box[3] - self.penis_box[1])
                 if self.penetration:
                     self.penetration = False
-                    # logging.info(
+                    #logging.info(
                     #    f"@{self.current_frame_id} - Penetration ended after {self.consecutive_detections['glans']} detections of glans"
-                    # )
+                    #)
                     if self.tracked_body_part != 'Nothing':
                         self.normalized_distances[self.tracked_body_part].clear()
                         self.normalized_distances[self.tracked_body_part].append(100)
