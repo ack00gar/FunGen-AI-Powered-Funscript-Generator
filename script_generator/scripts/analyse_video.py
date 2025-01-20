@@ -3,7 +3,6 @@ import threading
 import time
 from typing import List
 
-from colorama import Fore, Style
 from tqdm import tqdm
 
 from config import QUEUE_MAXSIZE, SEQUENTIAL_MODE, PROGRESS_BAR, UPDATE_PROGRESS_INTERVAL
@@ -202,6 +201,3 @@ def log_performance(state, results_queue):
 
     for line in log_message.splitlines():
         logger.info(line)
-
-    print(Fore.LIGHTBLUE_EX + log_message)
-    print(Style.RESET_ALL, end="")

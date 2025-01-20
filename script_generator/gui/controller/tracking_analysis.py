@@ -28,8 +28,8 @@ def tracking_analysis(state):
     first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
 
     if first_penis_frame is None:
-        logger.warning(f"No penis found in video: {state.video_path}")
-        first_penis_frame = 0
+        logger.error(f"No penis and penis tip in the same frame found in video. Since these two are needed for estimating stroke length atm further tracking is not possible.")
+        return
 
     # Deciding whether we start from there or from a user-specified later frame
     state.frame_start = max(max(first_penis_frame - int(video_info.fps), state.frame_start - int(video_info.fps)), 0)
