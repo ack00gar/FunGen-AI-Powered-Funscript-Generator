@@ -89,89 +89,89 @@ class VideoReaderFFmpeg:
             logger.error(f"Error initializing video info: {e}")
             raise
 
-    # def _start_process(self, start_frame=0):
-    #     """
-    #     Start the FFmpeg process to read frames.
-    #     :param start_frame: Frame number to start reading from.
-    #     """
-    #     start_time = (start_frame / self.fps) * 1000  # Convert to milliseconds
-    #     self.current_frame_number = start_frame
-    #
-    #     if self.is_vr:
-    #         #arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
-    #         arg_line = ""
-    #         if self.unwarp:
-    #             if self.projection == "FISHEYE" or (self.projection == None and "FISHEYE" in self.video_path.upper()):
-    #                 print("Proceeding with fisheye projection correction")
-    #                 self.type = "fisheye"
-    #                 self.iv_fov = 190
-    #                 self.ih_fov = 190
-    #                 self.v_fov = 90
-    #                 self.h_fov = 90
-    #                 self.d_fov = 180
-    #             else:  # Assuming Equirectangular
-    #                 print("Assuming Equirectangular projection")
-    #                 self.type = "he"
-    #                 self.iv_fov = 250
-    #                 self.ih_fov = 120
-    #                 self.v_fov = 90
-    #                 self.h_fov = 90
-    #                 self.d_fov = 180
-    #             arg_line = arg_line + f"v360={self.type}:in_stereo=sbs:output=sg"
-    #             arg_line = arg_line + f":iv_fov={self.iv_fov}:ih_fov={self.ih_fov}"
-    #             arg_line = arg_line + f":d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}"
-    #             arg_line = arg_line + f":pitch=-25:yaw=0:roll=0"
-    #             arg_line = arg_line + f":w={self.width}:h={self.height}"
-    #             arg_line = arg_line + f":interp=lanczos:reset_rot=1"
-    #             arg_line = arg_line + f",lutyuv=y=gammaval(0.7)"
-    #             #arg_line = arg_line + f",eq=brightness=0.1:contrast=1.5"
-    #             #arg_line = arg_line + f",format=gray"
-    #             #arg_line = arg_line + f",histeq"
-    #         else:
-    #             arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
-    #         # Add scale filter with height and auto-width (-1)
-    #         #arg_line += f",scale=-1:{target_height}"
-    #         #arg_line += f",scale=-1:{1080}"
-    #         # perf for on the fly downscale to 1080p were terrible
-    #
-    #         cmd = [
-    #             self.ffmpeg_path,
-    #             '-nostats',  # Disable progress statistics
-    #             '-loglevel', 'warning',
-    #             "-ss", str(start_time / 1000),  # Seek to start time in seconds
-    #             "-i", self.video_path,
-    #             "-an",  # Disable audio processing
-    #             "-map", "0:v:0",
-    #             "-vf", arg_line,
-    #             "-f", "rawvideo",  # Output raw video data
-    #             "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
-    #             "-vsync", "0",  # Disable frame rate synchronization
-    #             "-threads", "0",  # Use maximum threads available
-    #             "-",  # Output to stdout
-    #         ]
-    #     else:
-    #         # FFmpeg command to read frames
-    #         cmd = [
-    #             self.ffmpeg_path,
-    #             '-nostats',  # Disable progress statistics
-    #             '-loglevel', 'warning',
-    #             "-ss", str(start_time / 1000),  # Seek to start time in seconds
-    #             "-i", self.video_path,
-    #             "-an",  # Disable audio processing
-    #             "-f", "rawvideo",  # Output raw video data
-    #             "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
-    #             "-vsync", "0",  # Disable frame rate synchronization
-    #             "-",  # Output to stdout
-    #         ]
-    #
-    #     # Kill the process if already running
-    #     if self.process:
-    #         self.process.terminate()
-    #
-    #     # Start FFmpeg process
-    #     #self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #     self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    #     self.frame_size = self.width * self.height * 3  # Size of one frame in bytes
+    def _start_process(self, start_frame=0):
+        """
+        Start the FFmpeg process to read frames.
+        :param start_frame: Frame number to start reading from.
+        """
+        start_time = (start_frame / self.fps) * 1000  # Convert to milliseconds
+        self.current_frame_number = start_frame
+
+        if self.is_vr:
+            #arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
+            arg_line = ""
+            if self.unwarp:
+                if self.projection == "FISHEYE" or (self.projection == None and "FISHEYE" in self.video_path.upper()):
+                    print("Proceeding with fisheye projection correction")
+                    self.type = "fisheye"
+                    self.iv_fov = 190
+                    self.ih_fov = 190
+                    self.v_fov = 90
+                    self.h_fov = 90
+                    self.d_fov = 180
+                else:  # Assuming Equirectangular
+                    print("Assuming Equirectangular projection")
+                    self.type = "he"
+                    self.iv_fov = 250
+                    self.ih_fov = 120
+                    self.v_fov = 90
+                    self.h_fov = 90
+                    self.d_fov = 180
+                arg_line = arg_line + f"v360={self.type}:in_stereo=sbs:output=sg"
+                arg_line = arg_line + f":iv_fov={self.iv_fov}:ih_fov={self.ih_fov}"
+                arg_line = arg_line + f":d_fov={self.d_fov}:v_fov={self.v_fov}:h_fov={self.h_fov}"
+                arg_line = arg_line + f":pitch=-25:yaw=0:roll=0"
+                arg_line = arg_line + f":w={self.width}:h={self.height}"
+                arg_line = arg_line + f":interp=lanczos:reset_rot=1"
+                arg_line = arg_line + f",lutyuv=y=gammaval(0.7)"
+                #arg_line = arg_line + f",eq=brightness=0.1:contrast=1.5"
+                #arg_line = arg_line + f",format=gray"
+                #arg_line = arg_line + f",histeq"
+            else:
+                arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
+            # Add scale filter with height and auto-width (-1)
+            #arg_line += f",scale=-1:{target_height}"
+            #arg_line += f",scale=-1:{1080}"
+            # perf for on the fly downscale to 1080p were terrible
+
+            cmd = [
+                self.ffmpeg_path,
+                '-nostats',  # Disable progress statistics
+                '-loglevel', 'warning',
+                "-ss", str(start_time / 1000),  # Seek to start time in seconds
+                "-i", self.video_path,
+                "-an",  # Disable audio processing
+                "-map", "0:v:0",
+                "-vf", arg_line,
+                "-f", "rawvideo",  # Output raw video data
+                "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
+                "-vsync", "0",  # Disable frame rate synchronization
+                "-threads", "0",  # Use maximum threads available
+                "-",  # Output to stdout
+            ]
+        else:
+            # FFmpeg command to read frames
+            cmd = [
+                self.ffmpeg_path,
+                '-nostats',  # Disable progress statistics
+                '-loglevel', 'warning',
+                "-ss", str(start_time / 1000),  # Seek to start time in seconds
+                "-i", self.video_path,
+                "-an",  # Disable audio processing
+                "-f", "rawvideo",  # Output raw video data
+                "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
+                "-vsync", "0",  # Disable frame rate synchronization
+                "-",  # Output to stdout
+            ]
+
+        # Kill the process if already running
+        if self.process:
+            self.process.terminate()
+
+        # Start FFmpeg process
+        #self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.frame_size = self.width * self.height * 3  # Size of one frame in bytes
 
     def read(self):
         """
