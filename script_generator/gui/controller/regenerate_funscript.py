@@ -11,6 +11,8 @@ def regenerate_funscript(state):
 
     logger.info("Regenerating Funscript with tweaked settings...")
 
+    state.set_video_info()
+
     # Apply tweaks to funscript_data
     if state.boost_enabled:
         logger.info(f"Applying Boost: Up {state.boost_up_percent}%, Down {state.boost_down_percent}%")
