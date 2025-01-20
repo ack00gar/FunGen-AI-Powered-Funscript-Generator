@@ -42,7 +42,11 @@ def get_video_info(video_path):
         logger.error(f"Error initializing video info: {e}")
         raise
 
-def is_cuda_supported():
+def is_hwaccel_supported():
+    """
+    Check which hardware acceleration backends are supported by FFmpeg.
+    Returns a dictionary with supported backends.
+    """
     try:
         result = subprocess.run(
             [FFMPEG_PATH, "-hwaccels"],
@@ -51,7 +55,27 @@ def is_cuda_supported():
             text=True,
             check=True
         )
-        return "cuda" in result.stdout.lower()
+        hwaccels = result.stdout.lower()
+        logger.info(f"Hardware acceleration backends: {hwaccels}")
+        # Check for supported hardware acceleration backends
+        return {
+            "cuda": "cuda" in hwaccels,
+            "vaapi": "vaapi" in hwaccels,
+            "amf": "amf" in hwaccels,
+            "videotoolbox": "videotoolbox" in hwaccels,
+            "qsv": "qsv" in hwaccels,  # Intel Quick Sync Video
+            "d3d11va": "d3d11va" in hwaccels,  # Direct3D 11 (Windows)
+            "opencl": "opencl" in hwaccels,  # OpenCL (cross-platform)
+        }
     except Exception as e:
-        logger.error(f"Error checking CUDA support: {e}")
-        return False
+        logger.error(f"Error checking hardware acceleration support: {e}")
+        return {
+            "cuda": False,
+            "vaapi": False,
+            "amf": False,
+            "videotoolbox": False,
+            "qsv": False,
+            "d3d11va": False,
+            "opencl": False,
+        }
+

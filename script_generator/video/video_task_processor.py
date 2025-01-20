@@ -21,9 +21,31 @@ class VideoTaskProcessor(AbstractTaskProcessor):
         def get_cmd(vf):
             start_time = (state.frame_start / video.fps) * 1000
             ffmpeg_threads = max(cpu_count() - SUBTRACT_THREADS_FROM_FFMPEG, 1)
-            cuda_supported = state.ffmpeg_cuda_supported
-            hwaccel = ["-hwaccel", "cuda"] if cuda_supported else []
+
+            # Get supported hardware acceleration backends
+            hwaccel_support = state.ffmpeg_hwaccel_supported
+
+            # Determine the best hardware acceleration backend to use
+            hwaccel = []
+            if hwaccel_support["cuda"]:
+                hwaccel = ["-hwaccel", "cuda"]
+            elif hwaccel_support["vaapi"]:
+                hwaccel = ["-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128"]
+            elif hwaccel_support["amf"]:
+                hwaccel = ["-hwaccel", "amf"]
+            elif hwaccel_support["videotoolbox"]:
+                hwaccel = ["-hwaccel", "videotoolbox"]
+            elif hwaccel_support["qsv"]:
+                hwaccel = ["-hwaccel", "qsv"]
+            elif hwaccel_support["d3d11va"]:
+                hwaccel = ["-hwaccel", "d3d11va"]
+            # Add more backends as needed
+
+            # Add platform-specific video filters if required
             video_filter = ["-vf", vf] if vf else []
+            if hwaccel_support["vaapi"]:
+                # VAAPI requires specific pixel formats and filters
+                video_filter = ["-vf", f"{vf},format=nv12,hwupload"] if vf else ["-vf", "format=nv12,hwupload"]
 
             return [
                 FFMPEG_PATH,
