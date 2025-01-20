@@ -126,7 +126,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
             
 
     def on_last_item(self):
-        self.state.analyse_task.end_time = time.time()
+        self.state.analyze_task.end_time = time.time()
 
         # Write the detection records to a JSON file
         raw_yolo_path, _ = get_output_file_path(self.state.video_path, "_rawyolo.json")

@@ -11,20 +11,20 @@ from script_generator.object_detection.post_process_results import YoloAnalysisT
 from script_generator.object_detection.yolo import YoloTaskProcessor
 from script_generator.state.app_state import AppState
 from script_generator.tasks.abstract_task_processor import TaskProcessorTypes
-from script_generator.tasks.tasks import AnalyseVideoTask, AnalyseFrameTask
+from script_generator.tasks.tasks import AnalyzeVideoTask, AnalyzeFrameTask
 from script_generator.utils.logger import logger
 from script_generator.video.video_conversion.vr_to_2d_task_processor import VrTo2DTaskProcessor
 from script_generator.video.video_task_processor import VideoTaskProcessor
 
 
-def analyse_video(state: AppState) -> List[AnalyseFrameTask]:
+def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
     logger.info(f"[OBJECT DETECTION] Starting up pipeline with profiling in {'sequential mode' if SEQUENTIAL_MODE else 'parallel mode'}...")
 
     use_open_gl = state.video_reader == "FFmpeg + OpenGL (Windows)"
 
     # Initialize batch task
     state.set_video_info()
-    state.analyse_task = AnalyseVideoTask()
+    state.analyze_task = AnalyzeVideoTask()
 
     # Create queues
     opengl_q = queue.Queue(maxsize=QUEUE_MAXSIZE)
@@ -68,7 +68,7 @@ def analyse_video(state: AppState) -> List[AnalyseFrameTask]:
         for thread in threads:
             thread.join()
 
-    state.analyse_task.end_time = time.time()
+    state.analyze_task.end_time = time.time()
 
     log_thread_stop_event.set()
 
@@ -110,7 +110,7 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
                     stop_event.set()
 
                 if state.update_ui:
-                    elapsed_time = time.time() - state.analyse_task.start_time
+                    elapsed_time = time.time() - state.analyze_task.start_time
                     processing_rate = frames_processed / elapsed_time if elapsed_time > 0 else 0
                     remaining_frames = total_frames - frames_processed
                     eta = remaining_frames / processing_rate if processing_rate > 0 else float('inf')
@@ -140,12 +140,12 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
             time.sleep(0.5)
 
 def log_performance(state, results_queue):
-    analyse_task = state.analyse_task
+    analyze_task = state.analyze_task
     # TODO filter out sentinals in task processor
     tasks = [task for task in results_queue.queue if task is not None and hasattr(task, 'profile')]
     total_frames = len(tasks)
 
-    total_pipeline_time = analyse_task.end_time - analyse_task.start_time
+    total_pipeline_time = analyze_task.end_time - analyze_task.start_time
     video_duration = total_frames / state.video_info.fps
     avg_processing_fps = total_frames / total_pipeline_time
     realtime_percentage = (avg_processing_fps / 60.0) * 100.0
@@ -162,7 +162,7 @@ def log_performance(state, results_queue):
 
     if SEQUENTIAL_MODE:
         log_message += f"\n Sequential Queue statistics\n"
-        for key, total_time in analyse_task.profile.items():
+        for key, total_time in analyze_task.profile.items():
             if key.endswith("_duration"):  # Only include duration metrics
                 avg_time = total_time / total_frames if total_frames > 0 else 0.0
                 stage_name = key.replace("_duration", "").capitalize()

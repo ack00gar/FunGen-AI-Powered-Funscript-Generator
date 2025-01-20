@@ -3,7 +3,7 @@ import threading
 from typing import Generator, Optional
 
 from script_generator.state.app_state import AppState
-from script_generator.tasks.tasks import AnalyseFrameTask
+from script_generator.tasks.tasks import AnalyzeFrameTask
 from script_generator.utils.logger import logger
 
 
@@ -31,7 +31,7 @@ class AbstractTaskProcessor(threading.Thread):
         thread_name = threading.current_thread().name
         logger.info(f"[{self.__class__.__name__}-{thread_name}] {message}")
 
-    def get_task(self) -> Generator[AnalyseFrameTask, None, None]:
+    def get_task(self) -> Generator[AnalyzeFrameTask, None, None]:
         """
         Generator for retrieving tasks from the input queue.
         Yields tasks until a sentinel (None) is encountered or the thread is stopped.
@@ -45,7 +45,7 @@ class AbstractTaskProcessor(threading.Thread):
                 task = self.input_queue.get(timeout=1)
 
                 if task is None:  # Sentinel for termination
-                    self.state.analyse_task.end(self.process_type)
+                    self.state.analyze_task.end(self.process_type)
                     self.on_last_item()
                     self.finish_task(None)
                     break
@@ -72,7 +72,7 @@ class AbstractTaskProcessor(threading.Thread):
         Main thread entry point. Executes the `task_logic` method.
         """
         try:
-            self.state.analyse_task.start(self.process_type)
+            self.state.analyze_task.start(self.process_type)
             self.task_logic()
         except Exception as e:
             logger.error(f"An error occurred during task execution on thread {self.process_type}: {e}")
@@ -89,7 +89,7 @@ class AbstractTaskProcessor(threading.Thread):
         raise NotImplementedError("Subclasses must implement task_logic")
 
     def stop_process(self):
-        self.state.analyse_task.end(self.process_type)
+        self.state.analyze_task.end(self.process_type)
         self.on_last_item()
         # Propagate sentinel to the output queue
         self.output_queue.put(None)

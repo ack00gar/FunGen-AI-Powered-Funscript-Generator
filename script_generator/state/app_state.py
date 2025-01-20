@@ -1,7 +1,7 @@
 import string
 from typing import Literal
 
-from script_generator.tasks.tasks import AnalyseVideoTask
+from script_generator.tasks.tasks import AnalyzeVideoTask
 from script_generator.utils.helpers import is_mac
 from script_generator.video.ffmpeg import is_hwaccel_supported, get_video_info
 from script_generator.video.video_info import VideoInfo
@@ -13,7 +13,7 @@ class AppState:
 
         # Job
         self.video_info: VideoInfo | None = None
-        self.analyse_task: AnalyseVideoTask | None = None
+        self.analyze_task: AnalyzeVideoTask | None = None
         self.video_path: string = None
         self.frame_start: int = 0
         self.frame_end: int | None = None
