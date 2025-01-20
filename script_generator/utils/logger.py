@@ -8,6 +8,8 @@ class ColorizedStreamHandler(logging.StreamHandler):
     def emit(self, record):
         if record.levelno >= logging.ERROR:
             record.msg = f"{Fore.RED}{record.msg}{Style.RESET_ALL}"
+        elif record.levelno == logging.WARNING or record.levelno == logging.WARN:
+            record.msg = f"{Fore.YELLOW}{record.msg}{Style.RESET_ALL}"
         super().emit(record)
 
 logging.basicConfig(
@@ -20,4 +22,3 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("General")
-logger.info("Logger initialized with file and console handlers.")
