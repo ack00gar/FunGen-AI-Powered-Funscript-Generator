@@ -24,11 +24,11 @@ class AppState:
         self.video_reader: Literal["FFmpeg", "FFmpeg + OpenGL (Windows)"] = "FFmpeg" if is_mac() else "FFmpeg + OpenGL (Windows)"
 
         # Debug
-        self.debug_mode: bool = False
+        self.save_debug_file: bool = False
+        self.save_debug_video: bool = False
+        self.debug_video_duration: int = 0
         self.life_display_mode: bool = False
         self.reference_script: string = None
-        self.save_debug_video: bool = False
-        self.debug_record_duration: int = 0
 
         # TODO move this to a batch task class (so parallel inference is possible)
         self.funscript_data = []

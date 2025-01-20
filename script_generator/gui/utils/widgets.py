@@ -137,6 +137,7 @@ class Widgets:
         file_path.trace("w", lambda *args: on_change(file_path.get()))
 
         if tooltip_text:
+            Tooltip(entry, tooltip_text)
             Tooltip(button, tooltip_text)
 
         return container, entry, file_path

@@ -14,7 +14,13 @@ def write_dataset(file_path, data):
     """
     logger.info(f"Exporting data...")
     export_start = time.time()
-    # Write the data to the file (overwrites if it exists)
+
+    # Ensure the directory exists
+    directory = os.path.dirname(file_path)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+        # Write the data to the file (overwrites if it exists)
     with open(file_path, 'w') as f:
         json.dump(data, f)
     export_end = time.time()
@@ -31,11 +37,17 @@ def load_json_from_file(file_path):
         logger.info(f"Loaded data from {file_path}, length: {len(data)}")
     return data
 
-def get_output_file_path(video_path, suffix):
+def get_output_file_path(video_path, suffix, add_spoiler_prefix=False):
     """"
     Get the OUTPUT_PATH filename for a specific suffix (e.g. _raw_yolo.json)
     """
     filename_base = os.path.basename(video_path)[:-4]
-    filename = f"{filename_base}{suffix}"
+    filename = f"{'SPOILER_' if add_spoiler_prefix else ''}{filename_base}{suffix}"
     path = os.path.join(OUTPUT_PATH, filename_base, filename)
     return path, filename
+
+def check_create_output_folder(video_path):
+    output_dir, _ = get_output_file_path(video_path, "")
+    directory = os.path.dirname(output_dir)
+    if not os.path.exists(directory):
+        os.makedirs(directory)

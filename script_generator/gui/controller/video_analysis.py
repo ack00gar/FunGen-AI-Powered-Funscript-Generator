@@ -17,7 +17,7 @@ def video_analysis(state):
 
     logger.info(f"Processing video: {state.video_path}")
     logger.info(f"Video Reader: {state.video_reader}")
-    logger.info(f"Debug Mode: {state.debug_mode}")
+    logger.info(f"Debug Mode: {state.save_debug_file}")
     logger.info(f"Live Display Mode: {state.life_display_mode}")
     logger.info(f"Frame Start: {state.frame_start}")
     logger.info(f"Frame End: {state.frame_end}")

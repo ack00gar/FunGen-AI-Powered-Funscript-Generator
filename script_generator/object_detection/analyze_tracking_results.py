@@ -16,7 +16,7 @@ from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 from utils.lib_Visualizer import Visualizer
 
 
-def analyze_tracking_results(state, results, progress_callback=None):
+def analyze_tracking_results(state, results, debug_video_callback=None):
     width, height = get_cropped_dimensions(state.video_info)
     list_of_frames = results.get_all_frame_ids()  # Get all frame IDs with detections
     visualizer = Visualizer()  # Initialize the visualizer
@@ -99,7 +99,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
                 state.funscript_frames.append(frame_pos)
                 state.funscript_distances.append(int(tracker.distance))
 
-            if state.debug_mode:
+            if state.save_debug_file:
                 # Log debugging information
                 bounding_boxes = []
                 for box in sorted_boxes:
@@ -126,6 +126,8 @@ def analyze_tracking_results(state, results, progress_callback=None):
                         'track_id': box[4],
                         'position': position,
                     })
+
+                # Add debug information to the debugger class so it can be saved later
                 state.debugger.log_frame(
                     frame_pos,
                     bounding_boxes=bounding_boxes,
@@ -185,7 +187,8 @@ def analyze_tracking_results(state, results, progress_callback=None):
             if state.funscript_distances:
                 frame_display = visualizer.draw_gauge(frame_display, state.funscript_distances[-1])
 
-            cv2.imshow("Combined Results", frame_display)
+            # TODO this probably needs to be disabled but I need to check yolo inference
+            # cv2.imshow("Combined Results", frame_display)
             cv2.waitKey(1)
 
         # Update progress
@@ -205,8 +208,8 @@ def analyze_tracking_results(state, results, progress_callback=None):
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
 
-        if progress_callback and state.save_debug_video:
-            progress_callback()
+        if debug_video_callback and state.life_display_mode:
+            debug_video_callback()
 
     state.update_ui(ProgressMessage(
         process="TRACKING_ANALYSIS",

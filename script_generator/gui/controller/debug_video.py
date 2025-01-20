@@ -22,7 +22,7 @@ def debug_video(state: AppState):
 
         state.debugger.play_video(
             start_frame=state.frame_start,
-            duration=state.debug_record_duration if state.save_debug_video else 0,
+            duration=state.debug_video_duration if state.save_debug_video else 0,
             save_debug_video=state.save_debug_video,
             downsize_ratio=2
         )
