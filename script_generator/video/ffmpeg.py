@@ -44,6 +44,7 @@ def get_video_info(video_path):
         logger.error(f"Error initializing video info: {e}")
         raise
 
+
 def is_hwaccel_supported():
     """
     Check which hardware acceleration backends are supported by FFmpeg.
@@ -57,8 +58,10 @@ def is_hwaccel_supported():
             text=True,
             check=True
         )
-        hwaccels = result.stdout.lower()
-        logger.info(f"Hardware acceleration backends: {', '.join([line for line in hwaccels.splitlines() if line.strip()])}")
+        hwaccels = result.stdout.lower().replace("hardware acceleration methods:", "")
+        hwaccel_lines = [line.strip() for line in str(hwaccels).splitlines() if line.strip()]
+        logger.info(f"hardware acceleration methods: {', '.join(hwaccel_lines)}")
+
         # Check for supported hardware acceleration backends
         return {
             "cuda": "cuda" in hwaccels,
@@ -80,4 +83,3 @@ def is_hwaccel_supported():
             "d3d11va": False,
             "opencl": False,
         }
-
