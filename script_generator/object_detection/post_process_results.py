@@ -20,6 +20,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
         state = self.state
 
         for task in self.get_task():
+
             frame_pos = task.frame_pos
             det_results = task.yolo_results
             frame = task.rendered_frame

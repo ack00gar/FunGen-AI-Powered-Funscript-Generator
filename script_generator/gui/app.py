@@ -18,7 +18,7 @@ class App(tk.Tk):
             ctypes.windll.shcore.SetProcessDpiAwareness(2)  # For Windows DPI scaling
         # self.tk.call('tk', 'scaling', 1.0)
         self.title("VR funscript generation")
-        self.geometry(f"{('800' if is_mac() else '720')}x920")
+        self.geometry(f"{('800' if is_mac() else '700')}x890")
         self.resizable(False, False)
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))

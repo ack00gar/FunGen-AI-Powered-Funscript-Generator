@@ -171,15 +171,16 @@ class FunscriptGeneratorPage(tk.Frame):
         Widgets.dropdown(
             attr="debug_record_duration_var",
             parent=object_detection,
-            label_text="save a frame every",
+            label_text="duration (s)",
             options=[5, 10, 20],
             default_value=5,
             state=state,
-            col=2,
-            row=5
+            column=2,
+            row=5,
+            label_width_px=73,
+            sticky="w"
         )
-        Widgets.label(object_detection, text="seconds", row=5, column=3)
-        Widgets.button(object_detection, "Play debug video (q to quit)", None, row=6)
+        Widgets.button(object_detection, "Play debug video (q to quit)", None, row=5, column=3)
         #endregion
 
         #region FOOTER
