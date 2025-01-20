@@ -8,6 +8,7 @@ from config import RUN_POSE_MODEL
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.utils.file import write_dataset, get_output_file_path
+from script_generator.utils.logger import logger
 
 
 class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
@@ -53,10 +54,10 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                     test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls), CLASS_REVERSE_MATCH.get(int(cls), 'unknown'), track_id]
                     self.test_result.add_record(frame_pos, test_box)
 
-                    # Print and test the record
-                    # print(f"Record : {record}")
-                    # print(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
-                    # print(f"Test box: {test_box}")
+                    # print and test the record
+                    logger.trace(f"Record : {record}")
+                    logger.trace(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
+                    logger.trace(f"Test box: {test_box}")
 
             if RUN_POSE_MODEL:
                 ### POSE DETECTION - Hips and wrists
@@ -66,7 +67,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
 
                     # Check if keypoints are detected
                     if pose_results[0].keypoints is not None:
-                        # print("We have keypoints")
+                        # logger.trace("We have keypoints")
                         # pose_keypoints = pose_results[0].keypoints.cpu()
                         # pose_track_ids = pose_results[0].boxes.id.cpu().tolist()
                         # pose_boxes = pose_results[0].boxes.xywh.cpu()
@@ -85,18 +86,18 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                         x2 = mid_hips[0] + 5
                         y2 = mid_hips[1] + 5
                         cls = 10  # hips center
-                        # print(f"pose_confs: {pose_confs}")
+                        # logger.trace(f"pose_confs: {pose_confs}")
                         conf = pose_confs[0]
 
                         record = [frame_pos, 10, round(conf, 1), x1, y1, x2, y2, 0]
                         self.records.append(record)
                         if state.life_display_mode:
                             # Print and test the record
-                            print(f"Record : {record}")
-                            print(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
+                            logger.debug(f"Record : {record}")
+                            logger.debug(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
                             test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls),
                                         CLASS_REVERSE_MATCH.get(int(cls), 'unknown'), 0]
-                            print(f"Test box: {test_box}")
+                            logger.debug(f"Test box: {test_box}")
                             self.test_result.add_record(frame_pos, test_box)
 
             if state.life_display_mode:
@@ -106,7 +107,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                 # cv2.waitKey(1)
                 # Verify the sorted boxes
                 sorted_boxes = self.test_result.get_boxes(frame_pos)
-                # print(f"Sorted boxes : {sorted_boxes}")
+                # logger.debug(f"Sorted boxes : {sorted_boxes}")
 
                 # frame_display = frame.copy()
                 frame_display = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)

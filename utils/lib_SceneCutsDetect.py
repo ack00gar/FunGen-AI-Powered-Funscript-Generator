@@ -6,6 +6,7 @@ from tqdm import tqdm
 from config import UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.state.app_state import AppState
+from script_generator.utils.logger import logger
 
 
 def compute_histogram(frame):
@@ -33,7 +34,7 @@ def compare_histograms(hist1, hist2):
 def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start=0, frame_end=None):
     cap = cv2.VideoCapture(state.video_path)
     if not cap.isOpened():
-        print("Error: Could not open video.")
+        logger.error("Error: Could not open video.")
         return []
 
     # Get video properties
@@ -109,9 +110,9 @@ def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start
     elif scene_changes[-1][1] != frame_end:
         scene_changes.append([scene_changes[-1][1], frame_end])
 
-    print(f"Found {len(scene_changes)} raw scenes: {scene_changes}.")
-    print(f"Scene changes: {scene_changes}")
-    print(f"Merging short scenes...")
+    logger.info(f"Found {len(scene_changes)} raw scenes: {scene_changes}.")
+    logger.info(f"Scene changes: {scene_changes}")
+    logger.info(f"Merging short scenes...")
 
     # Merge only short scenes
     merged_scenes = []
@@ -128,7 +129,7 @@ def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start
             # Keep scenes longer than the minimum length
             merged_scenes.append(scene)
 
-    print(f"Found {len(merged_scenes)} relevant scenes: {merged_scenes}.")
+    logger.info(f"Found {len(merged_scenes)} relevant scenes: {merged_scenes}.")
     cap.release()
 
     return merged_scenes

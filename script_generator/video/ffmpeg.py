@@ -1,5 +1,6 @@
 import subprocess
 
+from script_generator.utils.logger import logger
 from script_generator.video.video_info import VideoInfo
 from config import FFPROBE_PATH, FFMPEG_PATH
 
@@ -38,7 +39,7 @@ def get_video_info(video_path):
 
         return VideoInfo(video_path, codec_name, width, height, duration, total_frames, fps, is_vr)
     except Exception as e:
-        print(f"Error initializing video info: {e}")
+        logger.error(f"Error initializing video info: {e}")
         raise
 
 def is_cuda_supported():
@@ -52,5 +53,5 @@ def is_cuda_supported():
         )
         return "cuda" in result.stdout.lower()
     except Exception as e:
-        print(f"Error checking CUDA support: {e}")
+        logger.error(f"Error checking CUDA support: {e}")
         return False

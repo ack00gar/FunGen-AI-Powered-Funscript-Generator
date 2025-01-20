@@ -1,16 +1,23 @@
 import logging
 import sys
+from colorama import Fore, Style, init
 
-# Configure the logger
+init(autoreset=True)
+
+class ColorizedStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        if record.levelno >= logging.ERROR:
+            record.msg = f"{Fore.RED}{record.msg}{Style.RESET_ALL}"
+        super().emit(record)
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s|%(levelname)s|%(name)s|%(message)s",
     handlers=[
-        logging.FileHandler("FSGenerator.log", mode="w"),  # Save logs to a file
-        logging.StreamHandler(sys.stdout)  # Print logs to the console
+        logging.FileHandler("FSGenerator.log", mode="w"),
+        ColorizedStreamHandler(sys.stdout)
     ]
 )
 
-# Create and configure the global logger
-logger = logging.getLogger("MainLogger")
+logger = logging.getLogger("General")
 logger.info("Logger initialized with file and console handlers.")

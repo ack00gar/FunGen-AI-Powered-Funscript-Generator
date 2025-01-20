@@ -3,6 +3,7 @@ import os
 import time
 
 from script_generator.constants import OUTPUT_PATH
+from script_generator.utils.logger import logger
 
 
 def write_dataset(file_path, data):
@@ -11,13 +12,13 @@ def write_dataset(file_path, data):
     :param file_path: The path to the output file.
     :param data: The data to write.
     """
-    print(f"Exporting data...")
+    logger.info(f"Exporting data...")
     export_start = time.time()
     # Write the data to the file (overwrites if it exists)
     with open(file_path, 'w') as f:
         json.dump(data, f)
     export_end = time.time()
-    print(f"Done in {export_end - export_start} seconds.")
+    logger.info(f"Done in {export_end - export_start} seconds.")
 
 def load_json_from_file(file_path):
     """
@@ -27,7 +28,7 @@ def load_json_from_file(file_path):
     """
     with open(file_path, 'r') as f:
         data = json.load(f)
-        print(f"Loaded data from {file_path}, length: {len(data)}")
+        logger.info(f"Loaded data from {file_path}, length: {len(data)}")
     return data
 
 def get_output_file_path(video_path, suffix):

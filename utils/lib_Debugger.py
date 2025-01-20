@@ -8,6 +8,7 @@ from script_generator.constants import CLASS_COLORS
 from scipy.interpolate import interp1d
 
 from script_generator.utils.file import get_output_file_path
+from script_generator.utils.logger import logger
 from utils.lib_Visualizer import Visualizer
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 
@@ -68,7 +69,7 @@ class Debugger:
 
         with open(self.log_file, "w") as f:
             json.dump(self.logs, f, indent=4, default=default)
-        print(f"Logs saved to {self.log_file}")
+        logger.info(f"Logs saved to {self.log_file}")
 
     def load_logs(self):
         """
@@ -77,11 +78,11 @@ class Debugger:
         try:
             with open(self.log_file, "r") as f:
                 self.logs = json.load(f)
-            print(f"Logs loaded from {self.log_file}")
+            logger.info(f"Logs loaded from {self.log_file}")
         except FileNotFoundError:
-            print(f"Log file {self.log_file} not found. Starting with empty logs.")
+            logger.error(f"Log file {self.log_file} not found. Starting with empty logs.")
         except json.JSONDecodeError:
-            print(f"Error decoding JSON from {self.log_file}. Starting with empty logs.")
+            logger.error(f"Error decoding JSON from {self.log_file}. Starting with empty logs.")
 
     def display_frame(self, frame_id):
         """
@@ -109,7 +110,7 @@ class Debugger:
 
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        print(f"Total frames: {self.total_frames}, FPS: {self.fps}")
+        logger.info(f"Total frames: {self.total_frames}, FPS: {self.fps}")
 
         # Initialize video writer if recording
         if record:
@@ -124,7 +125,7 @@ class Debugger:
                 output_path, fourcc, self.fps, (frame.shape[1] // downsize_ratio, frame.shape[0] // downsize_ratio)
             )
             if not out.isOpened():
-                print(f"Error: Could not open video writer for {output_path}")
+                logger.error(f"Error: Could not open video writer for {output_path}")
                 self.cap.release()
                 return
 
@@ -142,7 +143,7 @@ class Debugger:
             funscript_positions = [action["pos"] for action in actions]
             funscript_interpolator = interp1d(funscript_times, funscript_positions, kind="linear", fill_value="extrapolate")
         except FileNotFoundError:
-            print(f"Funscript file not found at {funscript_path}")
+            logger.error(f"Funscript file not found at {funscript_path}")
             funscript_interpolator = None
 
         # Initialize rolling window buffers
@@ -195,7 +196,7 @@ class Debugger:
 
                 # Draw the locked_penis_box if it exists
                 locked_penis_box = variables.get("locked_penis_box")
-                #print(f"locked_penis_box: {locked_penis_box}")
+                #logger.info(f"locked_penis_box: {locked_penis_box}")
                 if locked_penis_box['active']:
                     x1, y1, x2, y2 = locked_penis_box['box']
                     color = CLASS_COLORS.get("penis", (0, 255, 0))
@@ -275,7 +276,7 @@ class Debugger:
             # # Delete the intermediate file
             # if os.path.exists(input_path):
             #     os.remove(input_path)
-            #     print(f"Deleted intermediate file: {input_path}")
+            #     logger.info(f"Deleted intermediate file: {input_path}")
 
         cv2.destroyAllWindows()
 
@@ -332,12 +333,12 @@ class Debugger:
         :param width: Width of the frame.
         """
         self.current_frame = int((x / width) * self.total_frames)
-        print(f"Target frame: {self.current_frame}")
+        logger.info(f"Target frame: {self.current_frame}")
         if self.video_reader == "FFmpeg":
             self.cap.release()
             self.cap = VideoReaderFFmpeg(self.video_path, self.is_vr)
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-        print("Done resetting and jumping to target frame")
+        logger.info("Done resetting and jumping to target frame")
 
     def _draw_progress_bar(self, frame, width, height):
         """

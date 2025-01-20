@@ -11,6 +11,7 @@ from config import UPDATE_PROGRESS_INTERVAL
 from script_generator.constants import CLASS_COLORS
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.utils.file import get_output_file_path
+from script_generator.utils.logger import logger
 from script_generator.video.video_info import get_cropped_dimensions
 from utils.lib_ObjectTracker import ObjectTracker
 from utils.lib_SceneCutsDetect import detect_scene_changes
@@ -40,10 +41,10 @@ def analyze_tracking_results(state, results, progress_callback=None):
     # Load scene cuts if the file exists
     cuts_path, _ = get_output_file_path(state.video_path, "_cuts.json")
     if os.path.exists(cuts_path):
-        print(f"Loading cuts from {cuts_path}")
+        logger.info(f"Loading cuts from {cuts_path}")
         with open(cuts_path, 'r') as f:
             cuts = json.load(f)
-        print(f"Loaded {len(cuts)} cuts : {cuts}")
+        logger.info(f"Loaded {len(cuts)} cuts : {cuts}")
 
         if state.update_ui:
             state.update_ui(ProgressMessage(
@@ -55,7 +56,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
     else:
         # Detect scene changes if the cuts file does not exist
         scene_list = detect_scene_changes(state, video_info.is_vr, 0.9, state.frame_start, state.frame_end)
-        print(f"Analyzing frames {state.frame_start} to {state.frame_end}")
+        logger.info(f"Analyzing frames {state.frame_start} to {state.frame_end}")
         cuts = [scene[1] for scene in scene_list]
         cuts = cuts[:-1]  # Remove the last entry
         # Save the cuts to a file
@@ -74,9 +75,9 @@ def analyze_tracking_results(state, results, progress_callback=None):
     for frame_pos in tqdm(range(state.frame_start, state.frame_end), unit="f"):
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
-            print(f"Reaching cut at frame {frame_pos}")
+            logger.info(f"Reaching cut at frame {frame_pos}")
             previous_distances = tracker.previous_distances
-            print(f"Reinitializing tracker with previous distances: {previous_distances}")
+            logger.info(f"Reinitializing tracker with previous distances: {previous_distances}")
             tracker = ObjectTracker(fps, frame_pos, image_area, video_info.is_vr)
             tracker.previous_distances = previous_distances
 
@@ -164,7 +165,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
                     state.offset_x
                 )
             else:
-                print("No active locked penis box to draw.")
+                logger.info("No active locked penis box to draw.")
 
             if tracker.glans_detected:
                 frame_display = visualizer.draw_bounding_box(

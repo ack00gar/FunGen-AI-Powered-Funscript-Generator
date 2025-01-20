@@ -6,6 +6,7 @@ import numpy as np
 from config import SUBTRACT_THREADS_FROM_FFMPEG, PITCH, RENDER_RESOLUTION, FFMPEG_PATH
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyseFrameTask
+from script_generator.utils.logger import logger
 from script_generator.video.video_info import get_cropped_dimensions
 
 
@@ -104,7 +105,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 # progress_bar.update(1)
 
             except Exception as e:
-                print(f"Error reading frame: {e}")
+                logger.error(f"Error reading frame: {e}")
                 return False, None
 
         self.stop_process()

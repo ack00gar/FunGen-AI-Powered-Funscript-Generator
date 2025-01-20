@@ -13,12 +13,13 @@ from script_generator.object_detection.yolo import YoloTaskProcessor
 from script_generator.state.app_state import AppState
 from script_generator.tasks.abstract_task_processor import TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyseVideoTask, AnalyseFrameTask
+from script_generator.utils.logger import logger
 from script_generator.video.video_conversion.vr_to_2d_task_processor import VrTo2DTaskProcessor
 from script_generator.video.video_task_processor import VideoTaskProcessor
 
 
 def analyse_video(state: AppState) -> List[AnalyseFrameTask]:
-    print(f"[OBJECT DETECTION] Starting up pipeline with profiling in {'sequential mode' if SEQUENTIAL_MODE else 'parallel mode'}...")
+    logger.info(f"[OBJECT DETECTION] Starting up pipeline with profiling in {'sequential mode' if SEQUENTIAL_MODE else 'parallel mode'}...")
 
     use_open_gl = state.video_reader == "FFmpeg + OpenGL (Windows)"
 
@@ -54,7 +55,7 @@ def analyse_video(state: AppState) -> List[AnalyseFrameTask]:
             thread.start()
             thread.join()
             out_queue.put(None)
-            print(f"[OBJECT DETECTION] {thread_name} thread done in {time.time() - start_time} s")
+            logger.info(f"[OBJECT DETECTION] {thread_name} thread done in {time.time() - start_time} s")
 
         run_thread(decode_thread, TaskProcessorTypes.VIDEO, opengl_q)
         if use_open_gl:
@@ -122,7 +123,7 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
                             eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                         ))
                     except Exception as e:
-                        print(f"Error in state.update_ui: {e}")
+                        logger.error(f"Error in state.update_ui: {e}")
 
                 time.sleep(UPDATE_PROGRESS_INTERVAL)
     else:
@@ -132,7 +133,7 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
             analysis_size = analysis_q.size()
             frames_processed = results_q.qsize()
             open_gl = f"OpenGL: {opengl_size:>3}, " if state.video_reader == "FFmpeg + OpenGL (Windows)" else ""
-            print(f"Queues: {open_gl}YOLO: {yolo_size:>3}, Analysis: {analysis_size:>3}, DONE: {frames_processed:>3}")
+            logger.info(f"Queues: {open_gl}YOLO: {yolo_size:>3}, Analysis: {analysis_size:>3}, DONE: {frames_processed:>3}")
 
             if frames_processed >= total_frames:
                 stop_event.set()
@@ -198,6 +199,9 @@ def log_performance(state, results_queue):
             )
 
     log_message += f"{'-' * 60}\n"
+
+    for line in log_message.splitlines():
+        logger.info(line)
 
     print(Fore.LIGHTBLUE_EX + log_message)
     print(Style.RESET_ALL, end="")

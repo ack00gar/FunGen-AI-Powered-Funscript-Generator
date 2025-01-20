@@ -8,6 +8,7 @@ from script_generator.gui.utils.widgets import Widgets
 from script_generator.object_detection.box_record import BoxRecord
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.utils.file import get_output_file_path
+from script_generator.utils.logger import logger
 
 
 def check_skip_object_detection(state):
@@ -20,7 +21,7 @@ def check_skip_object_detection(state):
             "Generate New"
         )
         if skip_detection:
-            print(f"File {raw_yolo_path} already exists. Skipping detections and loading file content...")
+            logger.info(f"File {raw_yolo_path} already exists. Skipping detections and loading file content...")
             return True
         else:
             os.remove(raw_yolo_path)
@@ -74,5 +75,5 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
                 frame_detected = 0
 
             if consecutive_frames >= 2:
-                print(f"First instance of Glans/Penis found in frame {frame_idx - 4}")
+                logger.info(f"First instance of Glans/Penis found in frame {frame_idx - 4}")
                 return frame_idx - 4

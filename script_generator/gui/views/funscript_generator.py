@@ -7,6 +7,7 @@ from script_generator.gui.messages.messages import UIMessage, ProgressMessage
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
+from script_generator.utils.logger import logger
 
 
 class FunscriptGeneratorPage(tk.Frame):
@@ -58,7 +59,7 @@ class FunscriptGeneratorPage(tk.Frame):
         #region PROCESSING
         processing = Widgets.frame(wrapper, title="Processing", main_section=True, row=3)
         yolo_p_container, yolo_p, yolo_p_label, yolo_p_perc = Widgets.labeled_progress(processing, "YOLO Detection", row=0)
-        scene_p_container, scene_p, scene_p_label, scene_p_perc = Widgets.labeled_progress(processing, "Scene detection", row=1)
+        # scene_p_container, scene_p, scene_p_label, scene_p_perc = Widgets.labeled_progress(processing, "Scene detection", row=1)
         track_p_container, track_p, track_p_label, track_p_perc = Widgets.labeled_progress(processing, "Tracking Analysis", row=2)
 
         def start_processing():
@@ -195,12 +196,12 @@ class FunscriptGeneratorPage(tk.Frame):
                 if handler:
                     handler(msg)
                 else:
-                    print(f"Unhandled message type: {type(msg)}")
+                    logger.info(f"Unhandled message type: {type(msg)}")
 
             def handle_progress_message(progress_msg: ProgressMessage):
                 progress_mapping = {
                     "OBJECT_DETECTION": (yolo_p, yolo_p_perc),
-                    "SCENE_DETECTION": (scene_p, scene_p_perc),
+                    # "SCENE_DETECTION": (scene_p, scene_p_perc),
                     "TRACKING_ANALYSIS": (track_p, track_p_perc),
                 }
 
