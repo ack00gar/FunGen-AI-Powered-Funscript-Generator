@@ -86,7 +86,7 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
     if PROGRESS_BAR:
         with tqdm(
                 total=total_frames,
-                desc="Analysing video",
+                desc="Analyzing video",
                 unit="frames",
                 position=0,
                 unit_scale=False,
