@@ -72,7 +72,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
 
     last_ui_update_time = time.time()
 
-    for frame_pos in tqdm(range(state.frame_start, state.frame_end), unit="f"):
+    for frame_pos in tqdm(range(state.frame_start, state.frame_end), unit="f", desc="Analyzing tracking data"):
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
             logger.info(f"Reaching cut at frame {frame_pos}")
