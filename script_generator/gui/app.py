@@ -6,6 +6,7 @@ from script_generator.constants import LOGO, ICON
 from script_generator.gui.views.funscript_generator import FunscriptGeneratorPage
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
+from script_generator.utils.logger import logger
 
 # TODO this is a workaround and needs to be fixed properly
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -44,7 +45,7 @@ class App(tk.Tk):
                 self.frames[page_name] = frame
                 frame.grid(row=0, column=0, sticky="nsew")
             else:
-                print(f"Page '{page_name}' not found!")
+                logger.info(f"Page '{page_name}' not found!")
                 return
 
         # Show the requested page

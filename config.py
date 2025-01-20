@@ -4,6 +4,7 @@ from ultralytics import YOLO
 
 from script_generator.constants import MODEL_PATH
 from script_generator.utils.config import find_ffmpeg_path, find_ffprobe_path
+from script_generator.utils.logger import logger
 
 VERSION = "0.0.1_25-01-16"
 
@@ -59,7 +60,7 @@ VW_FILTER_COEFF = 2.0
 
 FFMPEG_PATH = find_ffmpeg_path(win_ffmpeg_path, mac_ffmpeg_path, lin_ffmpeg_path)
 FFPROBE_PATH = find_ffprobe_path(win_ffprobe_path, mac_ffprobe_path, lin_ffprobe_path)
-print(f"ffmpeg_path: {FFMPEG_PATH}")
-print(f"ffprobe_path: {FFPROBE_PATH}")
+logger.info(f"ffmpeg_path: {FFMPEG_PATH}")
+logger.info(f"ffprobe_path: {FFPROBE_PATH}")
 
 

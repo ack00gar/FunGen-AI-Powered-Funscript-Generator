@@ -86,7 +86,7 @@ class FunscriptGenerator:
                     0 if p < state.threshold_low else 100 if p > state.threshold_high else p for p in
                     adjusted_positions]
             else:
-                print("Skipping positions adjustment - step 4 (thresholding)")
+                logger.info("Skipping positions adjustment - step 4 (thresholding)")
 
             # Apply amplitude boosting
             if state.boost_enabled:
@@ -143,8 +143,8 @@ class FunscriptGenerator:
             positions.insert(0, 100)
 
         # Print loaded data for debugging
-        # print(f"Times: {times}")
-        # print(f"Positions: {positions}")
+        # logger.trace(f"Times: {times}")
+        # logger.trace(f"Positions: {positions}")
         logger.info(f"Total Actions: {len(times)}")
         logger.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
@@ -156,7 +156,7 @@ class FunscriptGenerator:
         # Calculate speed (position change per time interval)
         speeds = np.abs(np.diff(filtered_positions) / np.diff(filtered_times)) * 1000  # Positions per second
 
-        print(f"Speeds: {speeds}")
+        logger.debug(f"Speeds: {speeds}")
 
         def get_color(intensity):
             if intensity <= 0:
@@ -347,7 +347,7 @@ class FunscriptGenerator:
                 chapter['startTime'] = chapter['startTime'][:8]
             if len(chapter['endTime']) > 8:
                 chapter['endTime'] = chapter['endTime'][:8]
-            print(f"Chapter: {chapter['name']}, Start: {chapter['startTime']}, End: {chapter['endTime']}")
+            logger.info(f"Chapter: {chapter['name']}, Start: {chapter['startTime']}, End: {chapter['endTime']}")
             # convert 00:00:00 to milliseconds
             startTime_ms = int(chapter['startTime'].split(':')[0]) * 60 * 60 * 1000 + int(
                 chapter['startTime'].split(':')[1]) * 60 * 1000 + int(chapter['startTime'].split(':')[2]) * 1000

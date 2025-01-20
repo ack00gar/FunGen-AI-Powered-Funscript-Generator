@@ -1,5 +1,6 @@
 import argparse
 from script_generator.scripts.generate_funscript import generate_funscript
+from script_generator.utils.logger import logger
 
 
 def main():
@@ -14,11 +15,11 @@ def main():
     args = parser.parse_args()
 
     try:
-        print(f"Processing video: {args.video_path}")
+        logger.info(f"Processing video: {args.video_path}")
         generate_funscript(args.video_path)
-        print("Funscript generation complete.")
+        logger.info("Funscript generation complete.")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
 
 
 if __name__ == "__main__":

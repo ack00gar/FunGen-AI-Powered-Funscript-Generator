@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import argparse
 from config import FFMPEG_PATH, FFPROBE_PATH, RENDER_RESOLUTION
+from script_generator.utils.logger import logger
 
 
 class VideoReaderFFmpeg:
@@ -82,10 +83,10 @@ class VideoReaderFFmpeg:
             self.width = int(self.width * scaling_factor)
             self.height = int(self.height * scaling_factor)
 
-            print(f"FPS: {self.fps}, Resolution: {self.width}x{self.height}, "
+            logger.info(f"FPS: {self.fps}, Resolution: {self.width}x{self.height}, "
                   f"Codec: {self.codec}, Total Frames: {self.total_frames}, Duration: {self.duration:.2f} ms")
         except Exception as e:
-            print(f"Error initializing video info: {e}")
+            logger.error(f"Error initializing video info: {e}")
             raise
 
     # def _start_process(self, start_frame=0):
@@ -189,7 +190,7 @@ class VideoReaderFFmpeg:
             self.current_time = (self.current_frame_number / self.fps) * 1000
             return True, frame
         except Exception as e:
-            print(f"Error reading frame: {e}")
+            logger.error(f"Error reading frame: {e}")
             return False, None
 
     def set(self, prop_id, value):
@@ -204,7 +205,7 @@ class VideoReaderFFmpeg:
         elif prop_id == cv2.CAP_PROP_FPS:
             self.fps = value
         else:
-            print(f"Property {prop_id} not supported.")
+            logger.error(f"Property {prop_id} not supported.")
 
     def get(self, prop_id):
         """
@@ -223,7 +224,7 @@ class VideoReaderFFmpeg:
         elif prop_id == cv2.CAP_PROP_POS_FRAMES:
             return self.current_frame_number
         else:
-            print(f"Property {prop_id} not supported.")
+            logger.error(f"Property {prop_id} not supported.")
             return None
 
     def release(self):
