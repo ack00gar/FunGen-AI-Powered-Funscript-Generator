@@ -863,12 +863,3 @@ class FunscriptGenerator:
             if start >= original_start and end <= original_end:
                 return True
         return False
-
-# if __name__ == "__main__":
-#     video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
-#
-#     funscript_handler = FunscriptGenerator()
-#
-#     # generate heatmap
-#     funscript_handler.generate_heatmap(video_path[:-4] + ".funscript", video_path[
-#                                                                         :-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
