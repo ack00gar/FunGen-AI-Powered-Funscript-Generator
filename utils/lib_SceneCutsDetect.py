@@ -56,7 +56,12 @@ def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start
     last_ui_update_time = time.time()
 
     # Process frames
-    for frame_pos in tqdm(range(total_frames_to_parse), desc="Detecting scene changes"):
+    for frame_pos in tqdm(
+            range(total_frames_to_parse), desc="Detecting scene changes", position=0,
+            unit_scale=False,
+            unit_divisor=1,
+            ncols=130
+    ):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start + frame_pos * frame_step)
         ret, frame = cap.read()
         if not ret:
@@ -75,7 +80,7 @@ def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start
             if similarity < threshold:
                 # Scene change detected
                 current_frame = frame_start + frame_pos * frame_step
-                tqdm.write(
+                logger.info(
                     f"Scene change detected at frame {current_frame}, "
                     f"time: {int(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 // 60)} min "
                     f"{int(cap.get(cv2.CAP_PROP_POS_MSEC) / 1000 % 60)} sec"
@@ -102,7 +107,6 @@ def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start
                     total_frames=state.frame_end,
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
-
 
     # Add the last scene
     if not scene_changes:

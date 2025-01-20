@@ -34,7 +34,10 @@ class FunscriptGeneratorPage(tk.Frame):
             button_text="Browse",
             file_selector_title="Choose a File",
             file_types=[("Text Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")],
-            state=state
+            state=state,
+            # if the file changes we need to make sure the video info is reset
+            # TODO add os.path.exists and update video_info immediately if found
+            command=lambda val: setattr(state, 'video_info', None)
         )
 
         Widgets.dropdown(

@@ -292,6 +292,7 @@ class ObjectTracker:
         self.sex_position_history.append(sex_position)
         position_counts = {position: self.sex_position_history.count(position) for position in self.sex_position_history}
         most_frequent_position = max(position_counts, key=position_counts.get, default="Not relevant")
+
         if most_frequent_position != self.sex_position:
             logger.info(f"@{self.current_frame_id} - Sex position switched to: {most_frequent_position}")
             self.sex_position = most_frequent_position
@@ -353,7 +354,7 @@ class ObjectTracker:
                 and not self.penetration:  # equivalent to 3 seconds
             if self.locked_penis_box.active:  # is_active():
                 self.locked_penis_box.deactivate()
-                logger.info(f"@{self.current_frame_id} - Deactivated locked_penis_box")
+                logger.debug(f"@{self.current_frame_id} - Deactivated locked_penis_box")
 
         if self.locked_penis_box.is_active() and self.locked_penis_box.visible < 100 and not self.glans_detected:
             self.penetration = True

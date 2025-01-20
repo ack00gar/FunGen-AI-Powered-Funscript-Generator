@@ -100,9 +100,14 @@ class Widgets:
         return button
 
     @staticmethod
-    def file_selection(parent, label_text, button_text, file_selector_title, file_types, state, attr, row=0, label_width_px=150, button_width_px=100, tooltip_text=None):
+    def file_selection(parent, label_text, button_text, file_selector_title, file_types, state, attr, command=None, row=0, label_width_px=150, button_width_px=100, tooltip_text=None):
         container = tk.Frame(parent)
         container.grid(row=row, column=0, sticky="nsew", padx=5, pady=5)
+
+        def on_change(val):
+            setattr(state, attr, val)
+            if command:
+                command(val)
 
         # Ensure the container scales properly
         parent.grid_rowconfigure(row, weight=1)
@@ -129,7 +134,7 @@ class Widgets:
         button.pack(fill="both", expand=True)
 
         # Update state whenever the file path changes
-        file_path.trace("w", lambda *args: setattr(state, attr, file_path.get()))
+        file_path.trace("w", lambda *args: on_change(file_path.get()))
 
         if tooltip_text:
             Tooltip(button, tooltip_text)
