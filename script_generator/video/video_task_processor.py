@@ -39,7 +39,6 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 hwaccel = ["-hwaccel", "qsv"]
             elif hwaccel_support["d3d11va"]:
                 hwaccel = ["-hwaccel", "d3d11va"]
-            # Add more backends as needed
 
             # Add platform-specific video filters if required
             video_filter = ["-vf", vf] if vf else []
