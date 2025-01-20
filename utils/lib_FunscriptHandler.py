@@ -15,6 +15,7 @@ from script_generator.constants import HEATMAP_COLORS
 import matplotlib
 
 from script_generator.utils.file import get_output_file_path
+from script_generator.utils.logger import logger
 
 matplotlib.use('Agg')  # Use a non-interactive backend
 import matplotlib.pyplot as plt
@@ -30,31 +31,31 @@ class FunscriptGenerator:
 
         # Backup output file if it exists
         if os.path.exists(output_path):
-            print(f"Funscript {output_path} already exists, backing up as {output_path}_{time.time()}.bak...")
+            logger.info(f"Funscript {output_path} already exists, backing up as {output_path}_{time.time()}.bak...")
             os.rename(output_path, output_path + f"_{time.time()}.bak")
 
         raw_funscript_path, _ = get_output_file_path(state.video_path, "_rawfunscript.json")
         if os.path.exists(raw_funscript_path) and (state.funscript_data is None or len(state.funscript_data) == 0):
-            print("len funscript data is 0, trying to load file")
+            logger.info("len funscript data is 0, trying to load file")
             # Read the funscript data from the JSON file
             with open(raw_funscript_path, 'r') as f:
-                print(f"Loading funscript from {raw_funscript_path}")
+                logger.info(f"Loading funscript from {raw_funscript_path}")
                 try:
                     data = json.load(f)
                 except Exception as e:
-                    print(f"Error loading funscript from {raw_funscript_path}: {e}")
+                    logger.error(f"Error loading funscript from {raw_funscript_path}: {e}")
                     return
         else:
             data = state.funscript_data
 
         try:
-            print(f"Generating funscript based on {len(data)} points...")
+            logger.info(f"Generating funscript based on {len(data)} points...")
 
             # Extract timestamps and positions
             ats = [p[0] for p in data]
             positions = [p[1] for p in data]
 
-            print(f"Positions adjustment - step 1 (noise removal)")
+            logger.info(f"Positions adjustment - step 1 (noise removal)")
             # Run the Savitzky-Golay filter
             positions = savgol_filter(positions, int(state.video_info.fps) // 4, 3)
 
@@ -63,23 +64,23 @@ class FunscriptGenerator:
 
             # Apply VW simplification if enabled
             if state.vw_simplification_enabled:
-                print("Positions adjustment - step 2 (VW algorithm simplification)")
+                logger.info("Positions adjustment - step 2 (VW algorithm simplification)")
                 zip_vw_positions = simplify_coords(zip_positions, state.vw_factor)
-                print(f"Length of VW filtered positions: {len(zip_vw_positions)}")
+                logger.info(f"Length of VW filtered positions: {len(zip_vw_positions)}")
             else:
-                print("Skipping positions adjustment - step 2 (VW algorithm simplification)")
+                logger.info("Skipping positions adjustment - step 2 (VW algorithm simplification)")
 
             # Extract timestamps and positions
             ats = [p[0] for p in zip_vw_positions]
             positions = [p[1] for p in zip_vw_positions]
 
             # Remap positions to 0-100 range
-            print("Positions adjustment - step 3 (remapping)")
+            logger.info("Positions adjustment - step 3 (remapping)")
             adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
 
             # Apply thresholding
             if state.threshold_enabled:
-                print(f"Positions adjustment - step 4 (thresholding)")
+                logger.info(f"Positions adjustment - step 4 (thresholding)")
                 adjusted_positions = adjusted_positions.tolist()  # Convert to list
                 adjusted_positions = [
                     0 if p < state.threshold_low else 100 if p > state.threshold_high else p for p in
@@ -89,7 +90,7 @@ class FunscriptGenerator:
 
             # Apply amplitude boosting
             if state.boost_enabled:
-                print("Positions adjustment - step 5 (amplitude boosting)")
+                logger.info("Positions adjustment - step 5 (amplitude boosting)")
                 # self.boost_amplitude(adjusted_positions, boost_factor=1.2, min_value=0, max_value=100)
                 adjusted_positions = self.adjust_peaks_and_lows(
                     adjusted_positions,
@@ -97,25 +98,25 @@ class FunscriptGenerator:
                     low_reduction=state.boost_down_percent
                 )
             else:
-                print("Skipping positions adjustment - step 5 (amplitude boosting)")
+                logger.info("Skipping positions adjustment - step 5 (amplitude boosting)")
 
             # Round position values to the closest multiple of 5, still between 0 and 100
-            print("Positions adjustment - step 6 (rounding to the closest multiple of 5)")
+            logger.info("Positions adjustment - step 6 (rounding to the closest multiple of 5)")
             # adjusted_positions = [round(p, -1) for p in adjusted_positions] # multiple of 10
             adjusted_positions = [round(p / state.rounding) * state.rounding for p in adjusted_positions]
 
             # Recombine timestamps and adjusted positions
-            print("Re-assembling ats and positions")
+            logger.info("Re-assembling ats and positions")
             zip_adjusted_positions = list(zip(ats, adjusted_positions))
 
             # Write the final funscript
             self.write_funscript(zip_adjusted_positions, output_path, state.video_info.fps)
-            print(f"Funscript generated and saved to {output_path}")
+            logger.info(f"Funscript generated and saved to {output_path}")
 
             # Generate a heatmap
             self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
         except Exception as e:
-            print(f"Error generating funscript: {e}")
+            logger.error(f"Error generating funscript: {e}")
 
     def write_funscript(self, distances, output_path, fps):
         with open(output_path, 'w') as f:
@@ -133,7 +134,7 @@ class FunscriptGenerator:
         # Load funscript data
         times, positions, _, _ = self.load_funscript(funscript_path)
         if not times or not positions:
-            print("Failed to load funscript data.")
+            logger.info("Failed to load funscript data.")
             return
 
         # add a timing: 0, position: 100 at the beginning if no value for 0
@@ -144,8 +145,8 @@ class FunscriptGenerator:
         # Print loaded data for debugging
         # print(f"Times: {times}")
         # print(f"Positions: {positions}")
-        print(f"Total Actions: {len(times)}")
-        print(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
+        logger.info(f"Total Actions: {len(times)}")
+        logger.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
         # Calculate speed (position change per time interval)
         valid_indices = ~np.isnan(times) & ~np.isnan(positions)
@@ -217,7 +218,7 @@ class FunscriptGenerator:
         # Save the figure
         plt.savefig(output_image_path, bbox_inches='tight', dpi=200)  # Increase resolution
         plt.close()
-        print(f"Funscript heatmap saved to {output_image_path}")
+        logger.info(f"Funscript heatmap saved to {output_image_path}")
 
     def boost_amplitude(self, signal, boost_factor, min_value=0, max_value=100):
         """
@@ -312,19 +313,19 @@ class FunscriptGenerator:
     def load_funscript(self, funscript_path):
         # if the funscript path exists
         if not os.path.exists(funscript_path):
-            print(f"Funscript not found at {funscript_path}")
+            logger.error(f"Funscript not found at {funscript_path}")
             return None, None, None, None
 
         with open(funscript_path, 'r') as f:
             try:
-                print(f"Loading funscript from {funscript_path}")
+                logger.info(f"Loading funscript from {funscript_path}")
                 data = json.load(f)
             except json.JSONDecodeError as e:
-                print(f"JSONDecodeError: {e}")
-                print(f"Error occurred at line {e.lineno}, column {e.colno}")
-                print("Dumping the problematic JSON data:")
+                logger.error(f"JSONDecodeError: {e}")
+                logger.error(f"Error occurred at line {e.lineno}, column {e.colno}")
+                logger.error("Dumping the problematic JSON data:")
                 f.seek(0)  # Reset file pointer to the beginning
-                print(f.read())
+                logger.error(f.read())
                 return None, None, None, None
 
         times = []
@@ -333,7 +334,7 @@ class FunscriptGenerator:
         for action in data['actions']:
             times.append(action['at'])
             positions.append(action['pos'])
-        print(f"Loaded funscript with {len(times)} actions")
+        logger.info(f"Loaded funscript with {len(times)} actions")
 
         # Access the chapters
         chapters = data.get("metadata", {}).get("chapters", [])
@@ -511,8 +512,7 @@ class FunscriptGenerator:
             f"Generated:\n"
             f"Number of Strokes: {gen_metrics['num_strokes']}\n"
             f"Avg Stroke Duration: {gen_metrics['avg_stroke_duration']:.2f}s\n"
-            # TODO re-enable
-            # f"Avg Speed: {int(gen_metrics['avg_speed'])} positions/s\n"
+            f"Avg Speed: {int(gen_metrics['avg_speed'])} positions/s\n"
             f"Avg Depth of Stroke: {int(gen_metrics['avg_depth'])}\n"
             f"Avg Max: {int(gen_metrics['avg_max'])}\n"
             f"Avg Min: {int(gen_metrics['avg_min'])}"
@@ -554,8 +554,11 @@ class FunscriptGenerator:
         plt.tight_layout()
 
         # Save the figure
+        # Add "SPOILER_" to the filename
+        directory, filename = os.path.split(output_image_path)
+        new_filename = f"SPOILER_{filename}"
+        output_image_path = os.path.join(directory, new_filename)
         plt.savefig(output_image_path[:-4] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png", dpi=100)
-        # plt.show()
 
     def generate_heatmap_inline(self, ax, times, positions):
         """
@@ -634,7 +637,7 @@ class FunscriptGenerator:
             avg_speed = 0  # Default to 0 if speeds are empty or contain NaN
         else:
             avg_speed = int(np.nanmean(speeds))  # Use nanmean to ignore NaN values
-
+        # TODO fix nan at source END
         # Set title with safe average speed
         ax.set_title(
             f'Funscript Heatmap\nDuration: {datetime.timedelta(seconds=int(times[-1] / 1000))} - Avg. Speed {avg_speed} - Actions: {len(times)}'

@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+
 import cv2
 import numpy as np
 from script_generator.constants import CLASS_COLORS
@@ -236,7 +239,6 @@ class Debugger:
 
             # Record the frame if enabled
             if record:
-                frame_copy = cv2.resize(frame_copy, (frame_copy.shape[1] // downsize_ratio, frame_copy.shape[0] // downsize_ratio))
                 out.write(frame_copy)
 
             self.current_frame += 1
@@ -245,6 +247,36 @@ class Debugger:
         self.cap.release()
         if record:
             out.release()
+
+            # TODO re-enable? (didn't have time to debug yet)
+            # # Input and output paths
+            # input_path = output_path
+            # # Add "SPOILER_" to the filename
+            # directory, filename = os.path.split(input_path)
+            # new_filename = f"SPOILER_{filename}"
+            # output_path_ffmpeg = os.path.join(directory, new_filename)
+            #
+            # # FFmpeg command to convert to H.265
+            # ffmpeg_command = [
+            #     "ffmpeg",
+            #     "-y",  # Overwrite output file if it exists
+            #     "-i", input_path,  # Input file
+            #     "-c:v", "libx265",  # Use H.265 codec
+            #     "-crf", "26",  # Constant Rate Factor (quality)
+            #     "-preset", "fast",  # Encoding speed
+            #     "-b:v", "5000k",  # Bitrate
+            #     "-movflags", "+faststart",  # Enable fast streaming
+            #     output_path_ffmpeg
+            # ]
+            #
+            # # Run FFmpeg command
+            # subprocess.run(ffmpeg_command)
+            #
+            # # Delete the intermediate file
+            # if os.path.exists(input_path):
+            #     os.remove(input_path)
+            #     print(f"Deleted intermediate file: {input_path}")
+
         cv2.destroyAllWindows()
 
     def _get_funscript_value(self, interpolator, frame_id, fps):
