@@ -3,7 +3,7 @@ from typing import Literal
 
 from script_generator.tasks.tasks import AnalyseVideoTask
 from script_generator.utils.helpers import is_mac
-from script_generator.video.ffmpeg import is_cuda_supported, get_video_info
+from script_generator.video.ffmpeg import is_hwaccel_supported, get_video_info
 from script_generator.video.video_info import VideoInfo
 
 
@@ -49,7 +49,7 @@ class AppState:
         # App logic
         self.debugger = None
         self.update_ui = None
-        self.ffmpeg_cuda_supported = is_cuda_supported()
+        self.ffmpeg_hwaccel_supported = is_hwaccel_supported()
 
     def set_video_info(self):
         if self.video_info is None:
