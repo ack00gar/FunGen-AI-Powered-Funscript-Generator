@@ -84,14 +84,14 @@ class Debugger:
         except json.JSONDecodeError:
             logger.error(f"Error decoding JSON from {self.log_file}. Starting with empty logs.")
 
-    def display_frame(self, frame_id):
+    def display_frame(self, state, frame_id):
         """
         Display the logged frame with bounding boxes and variable states.
         :param frame_id: The frame ID to display.
         """
-        self.play_video(frame_id, duration=-1)
+        self.play_video(state, frame_id, duration=-1)
 
-    def play_video(self, start_frame=0, duration=0, rolling_window_size=100, save_debug_video=False, downsize_ratio=1):
+    def play_video(self, state, start_frame=0, duration=0, rolling_window_size=100, save_debug_video=False, downsize_ratio=1):
         """
         Play the video from a specified frame, displaying variables, bounding boxes, and rolling window curves.
         :param start_frame: Frame to start playback from.
@@ -161,8 +161,12 @@ class Debugger:
         # Play the video
         while self.current_frame < end_frame:
             ret, frame = self.cap.read()
+
             if not ret:
                 break
+
+            if not state.live_preview_mode:
+                continue
 
             frame_copy = frame.copy()  # make a copy of the frame to make it writeable, useful for ffmpeg library here
             # Display variables and bounding boxes

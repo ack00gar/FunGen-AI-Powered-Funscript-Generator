@@ -27,7 +27,7 @@ class AppState:
         self.save_debug_file: bool = False
         self.save_debug_video: bool = False
         self.debug_video_duration: int = 0
-        self.life_display_mode: bool = False
+        self.live_preview_mode: bool = False
         self.reference_script: string = None
 
         # TODO move this to a batch task class (so parallel inference is possible)

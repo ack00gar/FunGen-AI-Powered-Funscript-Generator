@@ -161,7 +161,7 @@ class FunscriptGeneratorPage(tk.Frame):
         Widgets.checkbox(
             general, "Live preview",
             state,
-            "life_display_mode",
+            "live_preview_mode",
             tooltip_text="Use q to quite.\n\nWill show a live preview of what is being generated.\n\nFor debugging only this will greatly reduce your performance.\nStage 1: Show bounding boxes during object detection.\nStage 2: Show funscript and metric overlay while the funscript is being processed.",
             row=0
         )

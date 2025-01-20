@@ -102,7 +102,7 @@ class VideoReaderFFmpeg:
             arg_line = ""
             if self.unwarp:
                 if self.projection == "FISHEYE" or (self.projection == None and "FISHEYE" in self.video_path.upper()):
-                    print("Proceeding with fisheye projection correction")
+                    logger.info("Proceeding with fisheye projection correction")
                     self.type = "fisheye"
                     self.iv_fov = 190
                     self.ih_fov = 190
@@ -110,7 +110,7 @@ class VideoReaderFFmpeg:
                     self.h_fov = 90
                     self.d_fov = 180
                 else:  # Assuming Equirectangular
-                    print("Assuming Equirectangular projection")
+                    logger.info("Assuming Equirectangular projection")
                     self.type = "he"
                     self.iv_fov = 250
                     self.ih_fov = 120

@@ -27,7 +27,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
             pose_results = None # TODO pose support
 
             # Skip if no boxes are detected or no tracks are found
-            if  det_results.boxes.id is None or (len(det_results.boxes) == 0 and not state.life_display_mode):
+            if  det_results.boxes.id is None or (len(det_results.boxes) == 0 and not state.live_preview_mode):
                 task.rendered_frame = None # Clear memory
                 task.yolo_results = None  # Clear memory
                 self.finish_task(task)
@@ -51,7 +51,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                 # Create a detection record
                 record = [frame_pos, int(cls), round(conf, 1), x1, y1, x2, y2, track_id]
                 self.records.append(record)
-                if state.life_display_mode:
+                if state.live_preview_mode:
                     test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls), CLASS_REVERSE_MATCH.get(int(cls), 'unknown'), track_id]
                     self.test_result.add_record(frame_pos, test_box)
 
@@ -92,7 +92,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
 
                         record = [frame_pos, 10, round(conf, 1), x1, y1, x2, y2, 0]
                         self.records.append(record)
-                        if state.life_display_mode:
+                        if state.live_preview_mode:
                             # Print and test the record
                             logger.debug(f"Record : {record}")
                             logger.debug(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
@@ -101,7 +101,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                             logger.debug(f"Test box: {test_box}")
                             self.test_result.add_record(frame_pos, test_box)
 
-            if state.life_display_mode:
+            if state.live_preview_mode:
                 # Display the YOLO results for testing
                 # det_results.plot()
                 # cv2.imshow("YOLO11", det_results.plot())
