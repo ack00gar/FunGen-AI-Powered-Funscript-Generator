@@ -25,7 +25,7 @@ def analyze_tracking_results(state, results, progress_callback=None):
     fps = video_info.fps
     reader = VideoReaderFFmpeg(state.video_path, is_vr=video_info.is_vr)
 
-    image_area = video_info.width * video_info.height
+    state.frame_area = video_info.width * video_info.height
 
     cuts = []
 
@@ -62,7 +62,11 @@ def analyze_tracking_results(state, results, progress_callback=None):
     """
 
     state.funscript_frames = []  # List to store Funscript frames
-    tracker = ObjectTracker(fps, state.frame_start, image_area, video_info.is_vr)  # Initialize the object tracker
+    state.funscript_distances = []
+    state.funscript_data = []
+
+    #tracker = ObjectTracker(fps, state.frame_start, image_area, video_info.is_vr)  # Initialize the object tracker
+    tracker = ObjectTracker(state)
 
     # Start time for ETA calculation
     start_time = time.time()
@@ -75,18 +79,20 @@ def analyze_tracking_results(state, results, progress_callback=None):
             unit_divisor=1,
             ncols=130
     ):
+        state.current_frame_id = frame_pos
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
             logger.info(f"Reaching cut at frame {frame_pos}")
             previous_distances = tracker.previous_distances
             logger.info(f"Reinitializing tracker with previous distances: {previous_distances}")
-            tracker = ObjectTracker(fps, frame_pos, image_area, video_info.is_vr)
+            #tracker = ObjectTracker(fps, frame_pos, image_area, video_info.is_vr)
+            tracker = ObjectTracker(state)
             tracker.previous_distances = previous_distances
 
         if frame_pos in list_of_frames:
             # Get sorted boxes for the current frame
             sorted_boxes = results.get_boxes(frame_pos)
-            tracker.tracking_logic(sorted_boxes, frame_pos, height)  # Apply tracking logic
+            tracker.tracking_logic(state, sorted_boxes)  # Apply tracking logic
 
             if tracker.distance:
                 # Append Funscript data if distance is available

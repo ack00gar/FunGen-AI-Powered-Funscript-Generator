@@ -17,6 +17,8 @@ class AppState:
         self.video_path: string = None
         self.frame_start: int = 0
         self.frame_end: int | None = None
+        self.current_frame_id = 0
+        self.frame_area = 0
 
         # Detection & decoding
         self.video_reader: Literal["FFmpeg", "FFmpeg + OpenGL (Windows)"] = "FFmpeg" if is_mac() else "FFmpeg + OpenGL (Windows)"
