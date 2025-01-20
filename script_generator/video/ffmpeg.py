@@ -34,6 +34,8 @@ def get_video_info(video_path):
         num, den = map(int, r_frame_rate.split('/'))  # Split numerator and denominator
         fps = num / den  # Calculate FPS
 
+        logger.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {total_frames} frames, {duration} seconds")
+
         # If the width is 2x the height we are dealing with a VR video
         is_vr = height == width // 2
 
