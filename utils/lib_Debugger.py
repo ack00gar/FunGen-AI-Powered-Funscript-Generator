@@ -164,8 +164,6 @@ class Debugger:
             if not ret:
                 break
 
-            if self.video_reader == "OpenCV" and self.is_vr:
-                frame = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
             frame_copy = frame.copy()  # make a copy of the frame to make it writeable, useful for ffmpeg library here
             # Display variables and bounding boxes
             str_frame_id = str(self.current_frame)
@@ -242,19 +240,13 @@ class Debugger:
         self.cap.release()
         if save_debug_video:
             out.release()
-
-            # Input and output paths
-            input_path = debug_video_path
-            # Add "SPOILER_" to the filename
-            directory, filename = os.path.split(input_path)
-            new_filename = f"SPOILER_{filename}"
-            output_path_ffmpeg = os.path.join(directory, new_filename)
+            output_path_ffmpeg, _ = get_output_file_path(debug_video_path, "_rawyolo.json", True)
 
             # FFmpeg command to convert to H.265
             ffmpeg_command = [
                 "ffmpeg",
                 "-y",  # Overwrite output file if it exists
-                "-i", input_path,  # Input file
+                "-i", debug_video_path,  # Input file
                 "-c:v", "libx265",  # Use H.265 codec
                 "-crf", "26",  # Constant Rate Factor (quality)
                 "-preset", "fast",  # Encoding speed
@@ -267,9 +259,9 @@ class Debugger:
             subprocess.run(ffmpeg_command)
 
             # Delete the intermediate file
-            if os.path.exists(input_path):
-                os.remove(input_path)
-                logger.info(f"Deleted intermediate file: {input_path}")
+            if os.path.exists(debug_video_path):
+                os.remove(debug_video_path)
+                logger.info(f"Deleted intermediate file: {debug_video_path}")
 
         cv2.destroyAllWindows()
 

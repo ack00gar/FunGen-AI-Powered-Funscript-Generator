@@ -1,3 +1,4 @@
+import os
 import queue
 import threading
 import time
@@ -12,6 +13,7 @@ from script_generator.object_detection.yolo import YoloTaskProcessor
 from script_generator.state.app_state import AppState
 from script_generator.tasks.abstract_task_processor import TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyzeVideoTask, AnalyzeFrameTask
+from script_generator.utils.file import get_output_file_path, check_create_output_folder
 from script_generator.utils.logger import logger
 from script_generator.video.video_conversion.vr_to_2d_task_processor import VrTo2DTaskProcessor
 from script_generator.video.video_task_processor import VideoTaskProcessor
@@ -19,6 +21,9 @@ from script_generator.video.video_task_processor import VideoTaskProcessor
 
 def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
     logger.info(f"[OBJECT DETECTION] Starting up pipeline with profiling in {'sequential mode' if SEQUENTIAL_MODE else 'parallel mode'}...")
+
+    # make sure the output folder exists for this video
+    check_create_output_folder(state.video_path)
 
     use_open_gl = state.video_reader == "FFmpeg + OpenGL (Windows)"
 

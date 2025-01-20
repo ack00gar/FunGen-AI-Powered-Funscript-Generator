@@ -12,7 +12,7 @@ from script_generator.utils.logger import logger
 
 class FunscriptGeneratorPage(tk.Frame):
     def __init__(self, parent, controller):
-        #region SETUP
+        # region SETUP
         super().__init__(parent)
         self.controller = controller
         self.state: AppState = controller.state
@@ -22,9 +22,9 @@ class FunscriptGeneratorPage(tk.Frame):
         self.grid_columnconfigure(0, weight=1)
 
         wrapper = Widgets.frame(self, title=None, sticky="nsew")
-        #endregion
+        # endregion
 
-        #region VIDEO SELECTION
+        # region VIDEO SELECTION
         video_selection = Widgets.frame(wrapper, title="Video Selection", main_section=True)
 
         Widgets.file_selection(
@@ -35,6 +35,7 @@ class FunscriptGeneratorPage(tk.Frame):
             file_selector_title="Choose a File",
             file_types=[("Text Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")],
             state=state,
+            tooltip_text="The video to generate a funscript for",
             # if the file changes we need to make sure the video info is reset
             # TODO add os.path.exists and update video_info immediately if found
             command=lambda val: setattr(state, 'video_info', None)
@@ -50,16 +51,16 @@ class FunscriptGeneratorPage(tk.Frame):
             state=state,
             row=1
         )
-        #endregion
+        # endregion
 
-        #region OPTIONAL SETTINGS
+        # region OPTIONAL SETTINGS
         optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
 
-        Widgets.input(optional_settings, "Frame Start", state=state, attr="frame_start")
-        Widgets.input(optional_settings, "Frame End", state=state, attr="frame_start", row=1)
-        #endregion
+        Widgets.input(optional_settings, "Frame Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
+        Widgets.input(optional_settings, "Frame End", state=state, attr="frame_start", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
+        # endregion
 
-        #region PROCESSING
+        # region PROCESSING
         processing = Widgets.frame(wrapper, title="Processing", main_section=True, row=3)
         yolo_p_container, yolo_p, yolo_p_label, yolo_p_perc = Widgets.labeled_progress(processing, "YOLO Detection", row=0)
         # scene_p_container, scene_p, scene_p_label, scene_p_perc = Widgets.labeled_progress(processing, "Scene detection", row=1)
@@ -68,10 +69,11 @@ class FunscriptGeneratorPage(tk.Frame):
         def start_processing():
             # TODO reset the progress bars
             video_analysis(state)
-        Widgets.button(processing, "Start processing", start_processing, row=3)
-        #endregion
 
-        #region FUNSCRIPT TWEAKING
+        Widgets.button(processing, "Start processing", start_processing, row=3)
+        # endregion
+
+        # region FUNSCRIPT TWEAKING
         tweaking = Widgets.frame(wrapper, title="Funscript", main_section=True, row=4)
         # tweaking.grid_rowconfigure(1, weight=10)
         tweaking_container = ttk.Frame(tweaking)
@@ -145,17 +147,32 @@ class FunscriptGeneratorPage(tk.Frame):
         # Regenerate Funscript Button
         Widgets.button(tweaking_container, "Regenerate Funscript", lambda: regenerate_funscript(self.state), row=2)
 
-        #endregion
+        # endregion
 
-        #region DEBUGGING
+        # region DEBUGGING
         debugging = Widgets.frame(wrapper, title="Debugging", main_section=True, row=5)
         general = Widgets.frame(debugging, title="General", row=0)
-        Widgets.checkbox(general, "Logging for debug", state, "debug_mode")
-        Widgets.checkbox(general, "Save debugging video", state=state, attr="save_debug_video", row=2)
+        Widgets.checkbox(
+            general, "Live display mode",
+            state,
+            "life_display_mode",
+            tooltip_text="Use q to quite.\n\nWill show a live preview of what is being generated.\n\nFor debugging only this will greatly reduce your performance.\nStage 1: Show bounding boxes during object detection.\nStage 2: Show funscript and metric overlay while the funscript is being processed.",
+            row=0
+        )
+        Widgets.checkbox(general, "Save debug file", state, "save_debug_file", tooltip_text="Saves  a debug file to disk with all collected metrics. This file can be very large.", row=1)
+        Widgets.checkbox(
+            general,
+            "Save debugging video",
+            tooltip_text="Will save a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement.",
+            state=state,
+            attr="save_debug_video",
+            row=2
+        )
         Widgets.dropdown(
             attr="debug_record_duration_var",
             parent=general,
             label_text="duration (s)",
+            tooltip_text="Duration of the debug video",
             options=[5, 10, 20],
             default_value=5,
             state=state,
@@ -164,7 +181,7 @@ class FunscriptGeneratorPage(tk.Frame):
             label_width_px=73,
             sticky="w"
         )
-        Widgets.button(general, "Play debug video (q to quit)", None, row=2, column=3)
+        Widgets.button(general, "Open debug video", None, row=2, column=5, tooltip_text="Open the debug video after the funscript generation process has completed.")
 
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
         Widgets.file_selection(
@@ -174,20 +191,18 @@ class FunscriptGeneratorPage(tk.Frame):
             button_text="Browse",
             file_selector_title="Choose a File",
             file_types=[("Funscript Files", "*.funscript"), ("All Files", "*.*")],
+            tooltip_text="If provided the reference script will be compared in the\nfunscript report that is generated on completion and be shown\nin the live display funscript overlay when enabled.",
             state=state,
             row=0
         )
+        # endregion
 
-        object_detection = Widgets.frame(debugging, title="Object detection", row=2)
-
-        Widgets.checkbox(object_detection, "Live display mode", state, "life_display_mode",tooltip_text="Will show a live preview of the object detection.", row=3)
-        #endregion
-
-        #region FOOTER
+        # region FOOTER
         Widgets.disclaimer(wrapper)
-        #endregion
 
-        #region UI UPDATE CALLBACK
+        # endregion
+
+        # region UI UPDATE CALLBACK
         def update_ui(msg: UIMessage):
             """Handle UI updates using a switch-like statement."""
 
@@ -220,4 +235,4 @@ class FunscriptGeneratorPage(tk.Frame):
             self.controller.after(0, process_update)
 
         self.state.update_ui = update_ui
-        #endregion
+        # endregion
