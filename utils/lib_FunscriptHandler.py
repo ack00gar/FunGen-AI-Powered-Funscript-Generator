@@ -103,13 +103,13 @@ class FunscriptGenerator:
 
             # Round position values to the closest multiple of 5, still between 0 and 100
             if state.vw_simplification_enabled:
-                state.logger.info(
+                logger.info(
                     f"Positions adjustment - step 6 (rounding to the closest multiple of {state.rounding})")
                 adjusted_positions = [round(p / state.rounding) * state.rounding for p in
                                       adjusted_positions]
 
             else:
-                state.logger.info(
+                logger.info(
                     f"Skipping positions adjustment - step 6 (rounding to the closest multiple of {state.rounding})")
 
             # Recombine timestamps and adjusted positions
@@ -123,6 +123,8 @@ class FunscriptGenerator:
             # Generate a heatmap
             self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
         except Exception as e:
+            # TODO this error doesn't reach the console
+            print(e)
             logger.error(f"Error generating funscript: {e}")
 
     def write_funscript(self, distances, output_path, fps):
@@ -484,6 +486,11 @@ class FunscriptGenerator:
             gen_positions (list): Positions from the generated funscript.
         """
 
+        # TODO why is this empty sometimes? and result in errors
+        if not gen_times or not gen_positions:
+            logger.error("Could not created combined plot")
+            return
+
         # Create a flexible grid layout
         fig = plt.figure(figsize=(28, 24))
         gs = gridspec.GridSpec(5, 4, height_ratios=[1, .5, 2, 2, 2], width_ratios=[1, 2, 1, 2])
@@ -516,6 +523,7 @@ class FunscriptGenerator:
 
         ax_comparative_right = fig.add_subplot(gs[1, 2:])
         gen_metrics = self._calculate_metrics(gen_times, gen_positions)
+
         gen_comparative_text = (
             f"Generated:\n"
             f"Number of Strokes: {gen_metrics['num_strokes']}\n"
@@ -585,7 +593,7 @@ class FunscriptGenerator:
             if times[i] == times[i - 1]:
                 times.pop(i)
                 positions.pop(i)
-                state.logger.info(f"Removed duplicate time value {times[i]}")
+                logger.info(f"Removed duplicate time value {times[i]}")
                 break
 
         # Calculate speed (position change per time interval)
