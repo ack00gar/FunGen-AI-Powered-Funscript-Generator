@@ -68,7 +68,7 @@ class FunscriptGeneratorPage(tk.Frame):
 
         def start_processing():
             # TODO reset the progress bars
-            video_analysis(state)
+            video_analysis(state, controller)
 
         Widgets.button(processing, "Start processing", start_processing, row=3)
         # endregion

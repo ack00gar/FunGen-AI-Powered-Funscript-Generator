@@ -10,7 +10,7 @@ from script_generator.utils.logger import logger
 from utils.lib_Debugger import Debugger
 
 
-def video_analysis(state):
+def video_analysis(state, root):
     if not state.video_path:
         messagebox.showerror("Error", "Please select a video file.")
         return
@@ -28,7 +28,7 @@ def video_analysis(state):
         log_file, _ = get_output_file_path(state.video_path, "_debug_logs.json")
         state.debugger = Debugger(state.video_path, log_file=log_file)
 
-        skip_detection = check_skip_object_detection(state)
+        skip_detection = check_skip_object_detection(state, root)
 
         if skip_detection:
             state.set_video_info()
