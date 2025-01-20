@@ -143,8 +143,8 @@ class FunscriptGenerator:
             positions.insert(0, 100)
 
         # Print loaded data for debugging
-        # logger.trace(f"Times: {times}")
-        # logger.trace(f"Positions: {positions}")
+        # logger.debug(f"Times: {times}")
+        # logger.debug(f"Positions: {positions}")
         logger.info(f"Total Actions: {len(times)}")
         logger.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
