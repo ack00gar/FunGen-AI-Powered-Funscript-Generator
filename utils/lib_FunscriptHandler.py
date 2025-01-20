@@ -14,6 +14,7 @@ from script_generator.constants import HEATMAP_COLORS
 
 import matplotlib
 
+from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
 from script_generator.utils.logger import logger
 
@@ -414,7 +415,7 @@ class FunscriptGenerator:
             # Plot and combine
             report_path, _ = get_output_file_path(state.video_path, "_report.png")
             self.create_combined_plot(
-                ref_sections, gen_sections, screenshots, sections, report_path,
+                state, ref_sections, gen_sections, screenshots, sections, report_path,
                 ref_times, ref_positions, gen_times, gen_positions
             )
 
@@ -466,11 +467,12 @@ class FunscriptGenerator:
         cap.release()
         return screenshots
 
-    def create_combined_plot(self, ref_sections, gen_sections, screenshots, sections, output_image_path, ref_times, ref_positions, gen_times, gen_positions):
+    def create_combined_plot(self, state: AppState, ref_sections, gen_sections, screenshots, sections, output_image_path, ref_times, ref_positions, gen_times, gen_positions):
         """
         Creates a combined plot with heatmaps as a header, comparative information, and section comparisons below.
 
         Args:
+            state: AppState
             ref_sections (list): List of reference sections (times, positions).
             gen_sections (list): List of generated sections (times, positions).
             screenshots (list): List of screenshots for each section.
