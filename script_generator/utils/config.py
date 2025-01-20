@@ -11,7 +11,7 @@ def find_ffmpeg_path(win_ffmpeg_path, mac_ffmpeg_path, lin_ffmpeg_path):
     if ffmpeg_path:
         return ffmpeg_path
     else:
-        logger.trace("ffmpeg not found in PATH, defaulting to platform values in params/config.py")
+        logger.debug("ffmpeg not found in PATH, defaulting to platform values in params/config.py")
 
         if platform.system() == "Windows":
             return win_ffmpeg_path

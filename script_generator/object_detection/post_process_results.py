@@ -55,9 +55,9 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                     self.test_result.add_record(frame_pos, test_box)
 
                     # print and test the record
-                    logger.trace(f"Record : {record}")
-                    logger.trace(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
-                    logger.trace(f"Test box: {test_box}")
+                    logger.debug(f"Record : {record}")
+                    logger.debug(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
+                    logger.debug(f"Test box: {test_box}")
 
             if RUN_POSE_MODEL:
                 ### POSE DETECTION - Hips and wrists
@@ -67,7 +67,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
 
                     # Check if keypoints are detected
                     if pose_results[0].keypoints is not None:
-                        # logger.trace("We have keypoints")
+                        # logger.debug("We have keypoints")
                         # pose_keypoints = pose_results[0].keypoints.cpu()
                         # pose_track_ids = pose_results[0].boxes.id.cpu().tolist()
                         # pose_boxes = pose_results[0].boxes.xywh.cpu()
@@ -86,7 +86,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                         x2 = mid_hips[0] + 5
                         y2 = mid_hips[1] + 5
                         cls = 10  # hips center
-                        # logger.trace(f"pose_confs: {pose_confs}")
+                        # logger.debug(f"pose_confs: {pose_confs}")
                         conf = pose_confs[0]
 
                         record = [frame_pos, 10, round(conf, 1), x1, y1, x2, y2, 0]
