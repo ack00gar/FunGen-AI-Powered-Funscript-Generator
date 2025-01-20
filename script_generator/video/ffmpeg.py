@@ -58,7 +58,7 @@ def is_hwaccel_supported():
             check=True
         )
         hwaccels = result.stdout.lower()
-        logger.info(f"Hardware acceleration backends: {hwaccels}")
+        logger.info(f"Hardware acceleration backends: {', '.join(hwaccels)}")
         # Check for supported hardware acceleration backends
         return {
             "cuda": "cuda" in hwaccels,
