@@ -1,9 +1,11 @@
+import os
 import subprocess
 from multiprocessing import cpu_count
 
+import imageio
 import numpy as np
 
-from config import SUBTRACT_THREADS_FROM_FFMPEG, PITCH, RENDER_RESOLUTION, FFMPEG_PATH
+from config import SUBTRACT_THREADS_FROM_FFMPEG, PITCH, RENDER_RESOLUTION, FFMPEG_PATH, DEBUG_PATH
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyzeFrameTask
 from script_generator.utils.logger import logger

@@ -117,7 +117,12 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                     color = CLASS_COLORS.get(box[3])
                     cv2.rectangle(frame_display, (box[0][0], box[0][1]), (box[0][2], box[0][3]), color, 2)
                     cv2.putText(frame_display, f"{box[4]}: {box[3]}", (box[0][0], box[0][1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                # Draw the frame ID at the top-left corner
+                cv2.putText(frame_display, f"Frame: {task.frame_pos}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 3)
+
                 cv2.imshow("Object detection tacking preview", frame_display)
+
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
 
