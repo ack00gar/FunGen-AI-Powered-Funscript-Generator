@@ -24,7 +24,7 @@ class AppState:
         self.video_reader: Literal["FFmpeg", "FFmpeg + OpenGL (Windows)"] = "FFmpeg" if is_mac() else "FFmpeg + OpenGL (Windows)"
 
         # Debug
-        self.save_debug_file: bool = False
+        self.save_debug_file: bool = True
         self.save_debug_video: bool = False
         self.debug_video_duration: int = 0
         self.live_preview_mode: bool = False
