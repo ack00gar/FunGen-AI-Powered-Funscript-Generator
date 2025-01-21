@@ -79,7 +79,10 @@ class VideoReaderFFmpeg:
             self.duration = duration * 1000  # Convert duration to milliseconds
 
             # limiting the frame height here has no additional performance cost and significantly improves speed for 1440p+ video
-            scaling_factor = min(RENDER_RESOLUTION / self.width, RENDER_RESOLUTION / self.height)
+            #scaling_factor = min(RENDER_RESOLUTION / self.width, RENDER_RESOLUTION / self.height)
+            scaling_factor = min(1, RENDER_RESOLUTION / self.height)
+            #if scaling_factor > 1:
+            #    scaling_factor = 1
             self.width = int(self.width * scaling_factor)
             self.height = int(self.height * scaling_factor)
 
@@ -170,6 +173,7 @@ class VideoReaderFFmpeg:
 
         # Start FFmpeg process
         #self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print(f"cmd: {cmd}")
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.frame_size = self.width * self.height * 3  # Size of one frame in bytes
 

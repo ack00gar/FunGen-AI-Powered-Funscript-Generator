@@ -165,8 +165,8 @@ class Debugger:
             if not ret:
                 break
 
-            if not state.live_preview_mode:
-                continue
+            #if not state.live_preview_mode:
+            #    continue
 
             frame_copy = frame.copy()  # make a copy of the frame to make it writeable, useful for ffmpeg library here
             # Display variables and bounding boxes
@@ -242,6 +242,7 @@ class Debugger:
 
         # Release resources
         self.cap.release()
+
         if save_debug_video:
             out.release()
             output_path_ffmpeg, _ = get_output_file_path(debug_video_path, "_rawyolo.json", True)
