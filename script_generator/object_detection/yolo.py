@@ -1,5 +1,7 @@
 import time
 
+import cv2
+
 from config import YOLO_CONF, YOLO_BATCH_SIZE, YOLO_MODEL
 
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
@@ -18,6 +20,8 @@ class YoloTaskProcessor(AbstractTaskProcessor):
 
         for task in self.get_task():
             if task.rendered_frame is not None:
+                task.rendered_frame = cv2.cvtColor(task.rendered_frame, cv2.COLOR_RGB2BGR)
+
                 batch.append(task.rendered_frame)
                 tasks.append(task)
 
