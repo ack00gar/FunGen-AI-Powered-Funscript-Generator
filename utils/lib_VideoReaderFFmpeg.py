@@ -80,6 +80,7 @@ class VideoReaderFFmpeg:
 
             # limiting the frame height here has no additional performance cost and significantly improves speed for 1440p+ video
             #scaling_factor = min(RENDER_RESOLUTION / self.width, RENDER_RESOLUTION / self.height)
+            # was having issues with the rendering of a 720p 2D video... < 1080p
             scaling_factor = min(1, RENDER_RESOLUTION / self.height)
             #if scaling_factor > 1:
             #    scaling_factor = 1
