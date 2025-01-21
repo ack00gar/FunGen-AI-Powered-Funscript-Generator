@@ -3,6 +3,7 @@ from tkinter import ttk
 
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
 from script_generator.gui.controller.video_analysis import video_analysis
+from script_generator.gui.controller.debug_video import debug_video
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.state.app_state import AppState
@@ -69,6 +70,9 @@ class FunscriptGeneratorPage(tk.Frame):
         def start_processing():
             # TODO reset the progress bars
             video_analysis(state, controller)
+
+        def start_debugging():
+            debug_video(state)
 
         Widgets.button(processing, "Start processing", start_processing, row=3)
         # endregion
@@ -187,7 +191,12 @@ class FunscriptGeneratorPage(tk.Frame):
             label_width_px=73,
             sticky="w"
         )
-        Widgets.button(general, "Open debug video", None, row=2, column=5, tooltip_text="Open the debug video after the funscript generation process has completed.")
+        Widgets.button(general,
+                       "Open debug video",
+                       lambda: start_debugging(),
+                       row=2,
+                       column=5,
+                       tooltip_text="Open the debug video after the funscript generation process has completed.")
 
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
         Widgets.file_selection(
