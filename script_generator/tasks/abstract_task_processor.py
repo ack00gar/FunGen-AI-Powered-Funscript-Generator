@@ -101,7 +101,8 @@ from enum import Enum
 
 class TaskProcessorTypes(Enum):
     VIDEO = "Video processing"
-    OPENGL = "3d to 2D"
+    OPENGL = "3D to 2D"
+    METAL = "3D to 2D (MPS)"
     YOLO = "YOLO inference"
     YOLO_ANALYSIS = "YOLO analysis"
 
