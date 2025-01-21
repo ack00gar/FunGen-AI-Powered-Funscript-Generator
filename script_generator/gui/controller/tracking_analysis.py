@@ -27,7 +27,7 @@ def tracking_analysis(state):
     first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
 
     if first_penis_frame is None:
-        logger.error(f"No frames found with a penis and penis tip in the same frame. Since these two are needed for estimating stroke length atm further tracking is not possible.")
+        logger.error(f"No penis instance found in video. Further tracking is not possible.")
         return
 
     # Deciding whether we start from there or from a user-specified later frame
