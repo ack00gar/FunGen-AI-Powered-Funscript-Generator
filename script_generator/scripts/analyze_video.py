@@ -88,11 +88,14 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
 def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
     total_frames = state.video_info.total_frames
 
+    label = 'Analyzing ' + ('VR' if state.video_info.is_vr else '2D') + ' video'
+
     if PROGRESS_BAR:
         with tqdm(
                 total=total_frames,
-                desc="Analyzing video",
-                unit="frames",
+                #desc="Analyzing video",
+                desc=label,
+                unit="f",
                 position=0,
                 unit_scale=False,
                 unit_divisor=1,
