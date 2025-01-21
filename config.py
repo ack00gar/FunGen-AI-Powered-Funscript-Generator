@@ -55,7 +55,6 @@ PROGRESS_BAR = True # disable when you want to print messages while debugging
 
 # Define custom colormap based on Lucife's heatmapColors
 STEP_SIZE = 120  # Speed step size for color transitions
-VW_FILTER_COEFF = 2.0
 
 
 FFMPEG_PATH = find_ffmpeg_path(win_ffmpeg_path, mac_ffmpeg_path, lin_ffmpeg_path)
