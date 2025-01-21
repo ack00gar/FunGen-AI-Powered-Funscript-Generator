@@ -39,6 +39,13 @@ def get_video_info(video_path):
         # If the width is 2x the height we are dealing with a VR video
         is_vr = height == width // 2
 
+        # TODO: make it possible to override this auto-detection
+
+        if is_vr:
+            logger.info("Video format: VR - Based on its 2:1 ratio, processing this video as a VR SBS video")
+        else:
+            logger.info("Video format: 2D - Based on its ratio, processing this video as a 2D video")
+
         return VideoInfo(video_path, codec_name, width, height, duration, total_frames, fps, is_vr)
     except Exception as e:
         logger.error(f"Error initializing video info: {e}")
