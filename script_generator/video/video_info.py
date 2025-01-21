@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass, field
 
 from config import RENDER_RESOLUTION
+from script_generator.utils.logger import logger
 
 
 @dataclass
@@ -56,6 +57,7 @@ def get_projection_and_fov_from_filename(filename):
             projection = pattern["projection"]
             fov = pattern["fov"]
             break
+    logger.info(f"Video Format: Projection={projection}, FOV={fov}, is_fisheye={is_fisheye}")
 
     return {"projection": projection, "fov": fov, "is_fisheye": is_fisheye}
 

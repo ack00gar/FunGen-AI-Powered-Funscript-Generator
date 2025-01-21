@@ -42,9 +42,9 @@ def get_video_info(video_path):
         # TODO: make it possible to override this auto-detection
 
         if is_vr:
-            logger.info("Video format: VR - Based on its 2:1 ratio, processing this video as a VR SBS video")
+            logger.info("Video Format: VR SBS - Based on its 2:1 ratio")
         else:
-            logger.info("Video format: 2D - Based on its ratio, processing this video as a 2D video")
+            logger.info("Video Format: 2D - Based on its ratio")
 
         return VideoInfo(video_path, codec_name, width, height, duration, total_frames, fps, is_vr)
     except Exception as e:
