@@ -200,7 +200,7 @@ class FunscriptGeneratorPage(tk.Frame):
             lambda: debug_video(state),
             row=2,
             column=5,
-            tooltip_text="Open the debug video after the funscript generation process has completed.\nNeeds the 'Save debug file' activated during processing"
+            tooltip_text="Open the debug video after the funscript generation process has completed.\nNeeds the 'Save debug file' activated during processing."
         )
 
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
