@@ -168,10 +168,18 @@ class FunscriptGeneratorPage(tk.Frame):
         )
         Widgets.checkbox(
             general,
-            "Save debug file",
+            "Save debug information",
             state, "save_debug_file",
-            tooltip_text="Saves  a debug file to disk with all collected metrics. This file can be very large.",
+            tooltip_text="Saves a debug file to disk with all collected metrics.\nThis is a prerequisite for playing back the debug video with the debug statistics overlay.\nThis also contains all generated metrics.",
             row=1
+        )
+        Widgets.button(
+            general,
+            "Open debug video",
+            lambda: debug_video(state),
+            row=1,
+            column=5,
+            tooltip_text="Opens a debug video player overlaid with debugging information.\n\nPress q to quit.\nThis overlay shows object detection boxes and a live funscript overlay,\namong other useful debugging information.\nCan only be triggered after the funscript generation process has completed.\nNeeds the 'Save debug information' option activated during processing."
         )
         Widgets.checkbox(
             general,
@@ -194,15 +202,6 @@ class FunscriptGeneratorPage(tk.Frame):
             label_width_px=73,
             sticky="w"
         )
-        Widgets.button(
-            general,
-            "Open debug video",
-            lambda: debug_video(state),
-            row=2,
-            column=5,
-            tooltip_text="Open the debug video after the funscript generation process has completed.\nNeeds the 'Save debug file' activated during processing."
-        )
-
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
         Widgets.file_selection(
             attr="reference_script",
