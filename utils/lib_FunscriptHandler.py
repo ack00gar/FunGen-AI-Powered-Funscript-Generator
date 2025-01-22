@@ -145,7 +145,8 @@ class FunscriptGenerator:
         global_state.logger.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
         # Calculate speed (position change per time interval)
-        speeds = np.abs(np.diff(positions) / np.diff(times)) * 1000  # Positions per second
+        # We add 1e-10 to prevent dividing by zero
+        speeds = np.abs(np.diff(positions) / (np.diff(times) + 1e-10)) * 1000  # Positions per second
 
         def get_color(intensity):
             if intensity <= 0:
@@ -569,7 +570,8 @@ class FunscriptGenerator:
                 break
 
         # Calculate speed (position change per time interval)
-        speeds = np.abs(np.diff(positions) / np.diff(times)) * 1000  # Positions per second
+        # We add 1e-10 to prevent dividing by zero
+        speeds = np.abs(np.diff(positions) / (np.diff(times) + 1e-10)) * 1000  # Positions per second
 
         def get_color(intensity):
             if intensity <= 0:
@@ -643,7 +645,8 @@ class FunscriptGenerator:
         avg_stroke_duration = np.mean(stroke_durations)
 
         # Calculate average speed
-        speeds = np.abs(np.diff(positions) / np.diff(times)) * 1000  # Positions per second
+        # We add 1e-10 to prevent dividing by zero
+        speeds = np.abs(np.diff(positions) / (np.diff(times) + 1e-10)) * 1000  # Positions per second
         #speeds = np.abs(np.diff(positions) / stroke_durations)
         avg_speed = np.mean(speeds)
 
