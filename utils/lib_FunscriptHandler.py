@@ -123,8 +123,6 @@ class FunscriptGenerator:
             # Generate a heatmap
             self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
         except Exception as e:
-            # TODO this error doesn't reach the console
-            print(e)
             logger.error(f"Error generating funscript: {e}")
 
     def write_funscript(self, distances, output_path, fps):
@@ -140,94 +138,99 @@ class FunscriptGenerator:
             f.write("]}\n")
 
     def generate_heatmap(self, funscript_path, output_image_path):
-        # Load funscript data
-        times, positions, _, _ = self.load_funscript(funscript_path)
-        if not times or not positions:
-            logger.info("Failed to load funscript data.")
-            return
+        try:
+            # Load funscript data
+            times, positions, _, _ = self.load_funscript(funscript_path)
+            if not times or not positions:
+                logger.info("Failed to load funscript data.")
+                return
 
-        # add a timing: 0, position: 100 at the beginning if no value for 0
-        if times[0] != 0:
-            times.insert(0, 0)
-            positions.insert(0, 100)
+            # add a timing: 0, position: 100 at the beginning if no value for 0
+            if times[0] != 0:
+                times.insert(0, 0)
+                positions.insert(0, 100)
 
-        # Print loaded data for debugging
-        # logger.debug(f"Times: {times}")
-        # logger.debug(f"Positions: {positions}")
-        logger.info(f"Total Actions: {len(times)}")
-        logger.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
+            # Print loaded data for debugging
+            # logger.debug(f"Times: {times}")
+            # logger.debug(f"Positions: {positions}")
+            logger.info(f"Total Actions: {len(times)}")
+            logger.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
-        # Calculate speed (position change per time interval)
-        valid_indices = ~np.isnan(times) & ~np.isnan(positions)
-        filtered_positions = positions[valid_indices]
-        filtered_times = times[valid_indices]
+            # Calculate speed (position change per time interval)
+            times = np.array(times)
+            positions = np.array(positions)
+            valid_indices = ~np.isnan(times) & ~np.isnan(positions)
+            filtered_positions = positions[valid_indices]
+            filtered_times = times[valid_indices]
 
-        # Calculate speed (position change per time interval)
-        speeds = np.abs(np.diff(filtered_positions) / np.diff(filtered_times)) * 1000  # Positions per second
+            # Calculate speed (position change per time interval)
+            speeds = np.abs(np.diff(filtered_positions) / np.diff(filtered_times)) * 1000  # Positions per second
 
-        logger.debug(f"Speeds: {speeds}")
+            logger.debug(f"Speeds: {speeds}")
 
-        def get_color(intensity):
-            if intensity <= 0:
-                return HEATMAP_COLORS[0]
-            if intensity > 5 * STEP_SIZE:
-                return HEATMAP_COLORS[6]
-            intensity += STEP_SIZE / 2.0
-            index = int(intensity // STEP_SIZE)
-            t = (intensity - index * STEP_SIZE) / STEP_SIZE
-            return [
-                HEATMAP_COLORS[index][0] + (HEATMAP_COLORS[index + 1][0] - HEATMAP_COLORS[index][0]) * t,
-                HEATMAP_COLORS[index][1] + (HEATMAP_COLORS[index + 1][1] - HEATMAP_COLORS[index][1]) * t,
-                HEATMAP_COLORS[index][2] + (HEATMAP_COLORS[index + 1][2] - HEATMAP_COLORS[index][2]) * t
-            ]
+            def get_color(intensity):
+                if intensity <= 0:
+                    return HEATMAP_COLORS[0]
+                if intensity > 5 * STEP_SIZE:
+                    return HEATMAP_COLORS[6]
+                intensity += STEP_SIZE / 2.0
+                index = int(intensity // STEP_SIZE)
+                t = (intensity - index * STEP_SIZE) / STEP_SIZE
+                return [
+                    HEATMAP_COLORS[index][0] + (HEATMAP_COLORS[index + 1][0] - HEATMAP_COLORS[index][0]) * t,
+                    HEATMAP_COLORS[index][1] + (HEATMAP_COLORS[index + 1][1] - HEATMAP_COLORS[index][1]) * t,
+                    HEATMAP_COLORS[index][2] + (HEATMAP_COLORS[index + 1][2] - HEATMAP_COLORS[index][2]) * t
+                ]
 
-        # Create figure and plot
-        plt.figure(figsize=(30, 2))
-        ax = plt.gca()
+            # Create figure and plot
+            plt.figure(figsize=(30, 2))
+            ax = plt.gca()
 
-        # Draw lines between points with colors based on speed
-        for i in range(len(times) - 1):
-            x_start = times[i] / 1000  # Convert ms to seconds
-            x_end = times[i + 1] / 1000
-            y_start = positions[i]
-            y_end = positions[i + 1]
-            speed = speeds[i]
+            # Draw lines between points with colors based on speed
+            for i in range(len(times) - 1):
+                x_start = times[i] / 1000  # Convert ms to seconds
+                x_end = times[i + 1] / 1000
+                y_start = positions[i]
+                y_end = positions[i + 1]
+                speed = speeds[i]
 
-            # Get color based on speed
-            color = get_color(speed)
-            line_color = (color[0] / 255, color[1] / 255, color[2] / 255)  # Normalize to [0, 1]
+                # Get color based on speed
+                color = get_color(speed)
+                line_color = (color[0] / 255, color[1] / 255, color[2] / 255)  # Normalize to [0, 1]
 
-            # Plot the line
-            ax.plot([x_start, x_end], [y_start, y_end], color=line_color, linewidth=2)
+                # Plot the line
+                ax.plot([x_start, x_end], [y_start, y_end], color=line_color, linewidth=2)
 
-        # Customize plot
-        ax.set_title(
-            f'Funscript Heatmap\nDuration: {datetime.timedelta(seconds=int(times[-1] / 1000))} - Avg. Speed {int(np.mean(speeds))} - Actions: {len(times)}')
-        ax.set_xlabel('Time (s)')
-        ax.set_yticks(np.arange(0, 101, 10))
-        ax.set_xlim(times[0] / 1000, times[-1] / 1000)
-        ax.set_ylim(0, 100)
+            # Customize plot
+            ax.set_title(
+                f'Funscript Heatmap\nDuration: {datetime.timedelta(seconds=int(times[-1] / 1000))} - Avg. Speed {int(np.mean(speeds))} - Actions: {len(times)}')
+            ax.set_xlabel('Time (s)')
+            ax.set_yticks(np.arange(0, 101, 10))
+            ax.set_xlim(times[0] / 1000, times[-1] / 1000)
+            ax.set_ylim(0, 100)
 
-        # Remove borders (spines)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
+            # Remove borders (spines)
+            for spine in ax.spines.values():
+                spine.set_visible(False)
 
-        # Add colorbar
-        cmap = mcolors.LinearSegmentedColormap.from_list("custom_heatmap", [
-            (HEATMAP_COLORS[i][0] / 255, HEATMAP_COLORS[i][1] / 255, HEATMAP_COLORS[i][2] / 255) for i in
-            range(len(HEATMAP_COLORS))
-        ])
-        norm = mcolors.Normalize(vmin=0, vmax=5 * STEP_SIZE)
-        sm = ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        # cbar = plt.colorbar(sm, ax=ax, orientation='horizontal', pad=0.2,
-        #                    ticks=np.arange(0, 5 * step_size + 1, step_size))
-        # cbar.set_label('Speed (positions/s)')
+            # Add colorbar
+            cmap = mcolors.LinearSegmentedColormap.from_list("custom_heatmap", [
+                (HEATMAP_COLORS[i][0] / 255, HEATMAP_COLORS[i][1] / 255, HEATMAP_COLORS[i][2] / 255) for i in
+                range(len(HEATMAP_COLORS))
+            ])
+            norm = mcolors.Normalize(vmin=0, vmax=5 * STEP_SIZE)
+            sm = ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            # cbar = plt.colorbar(sm, ax=ax, orientation='horizontal', pad=0.2,
+            #                    ticks=np.arange(0, 5 * step_size + 1, step_size))
+            # cbar.set_label('Speed (positions/s)')
 
-        # Save the figure
-        plt.savefig(output_image_path, bbox_inches='tight', dpi=200)  # Increase resolution
-        plt.close()
-        logger.info(f"Funscript heatmap saved to {output_image_path}")
+            # Save the figure
+            plt.savefig(output_image_path, bbox_inches='tight', dpi=200)  # Increase resolution
+            plt.close()
+            logger.info(f"Funscript heatmap saved to {output_image_path}")
+        except Exception as e:
+            logger.error(f"Error generating heatmap for funscript: {e}")
 
     def boost_amplitude(self, signal, boost_factor, min_value=0, max_value=100):
         """
