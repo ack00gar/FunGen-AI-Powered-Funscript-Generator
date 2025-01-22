@@ -571,6 +571,8 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
     for line in data:
         if line[0] >= start_frame and line[1] == 0 and line[2] >= 0.5:
             penis_frame = line[0]
+            return penis_frame
+        """
         if line[0] == penis_frame and line[1] == 1 and line[2] >= 0.5:
             if frame_detected == 0:
                 frame_detected = line[0]
@@ -582,9 +584,10 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
                 consecutive_frames = 0
                 frame_detected = 0
 
-            if consecutive_frames >= 2:
-                global_state.logger.info(f"First instance of Glans/Penis found in frame {line[0] - 4}")
-                return line[0] - 4
+        if consecutive_frames >= 2:
+            global_state.logger.info(f"First instance of Glans/Penis found in frame {line[0] - 4}")
+            return line[0] - 4
+        """
 
 def select_video_file():
     file_path = filedialog.askopenfilename(
