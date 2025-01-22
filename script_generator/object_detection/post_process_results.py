@@ -110,8 +110,7 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
                 sorted_boxes = self.test_result.get_boxes(frame_pos)
                 # logger.debug(f"Sorted boxes : {sorted_boxes}")
 
-                # frame_display = frame.copy()
-                frame_display = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                frame_display = frame.copy()
 
                 for box in sorted_boxes:
                     color = CLASS_COLORS.get(box[3])

@@ -57,7 +57,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 "-an",  # Disable audio processing
                 "-map", "0:v:0",
                 *video_filter,
-                "-f", "rawvideo", "-pix_fmt", "rgb24",
+                "-f", "rawvideo", "-pix_fmt", "bgr24",
                 "-threads", str(ffmpeg_threads),
                 "-",  # Output to stdout
             ]

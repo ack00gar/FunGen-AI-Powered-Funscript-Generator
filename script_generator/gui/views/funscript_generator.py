@@ -71,9 +71,6 @@ class FunscriptGeneratorPage(tk.Frame):
             # TODO reset the progress bars
             video_analysis(state, controller)
 
-        def start_debugging():
-            debug_video(state)
-
         Widgets.button(processing, "Start processing", start_processing, row=3)
         # endregion
 
@@ -169,11 +166,13 @@ class FunscriptGeneratorPage(tk.Frame):
             tooltip_text="Press 'q' to quit.\n\nWill show a live preview of what is being generated.\n\nFor debugging only this will greatly reduce your performance.\nStage 1: Show bounding boxes during object detection.\nStage 2: Show funscript and metric overlay while the funscript is being processed.",
             row=0
         )
-        Widgets.checkbox(general,
-                         "Save debug file",
-                         state, "save_debug_file",
-                         tooltip_text="Saves  a debug file to disk with all collected metrics. This file can be very large.",
-                         row=1)
+        Widgets.checkbox(
+            general,
+            "Save debug file",
+            state, "save_debug_file",
+            tooltip_text="Saves  a debug file to disk with all collected metrics. This file can be very large.",
+            row=1
+        )
         Widgets.checkbox(
             general,
             "Save debugging video",
@@ -195,12 +194,14 @@ class FunscriptGeneratorPage(tk.Frame):
             label_width_px=73,
             sticky="w"
         )
-        Widgets.button(general,
-                       "Open debug video",
-                       lambda: start_debugging(),
-                       row=2,
-                       column=5,
-                       tooltip_text="Open the debug video after the funscript generation process has completed.\nNeeds the 'Save debug file' activated during processing")
+        Widgets.button(
+            general,
+            "Open debug video",
+            lambda: debug_video(state),
+            row=2,
+            column=5,
+            tooltip_text="Open the debug video after the funscript generation process has completed.\nNeeds the 'Save debug file' activated during processing"
+        )
 
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
         Widgets.file_selection(
