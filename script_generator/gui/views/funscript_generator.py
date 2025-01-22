@@ -179,7 +179,7 @@ class FunscriptGeneratorPage(tk.Frame):
             lambda: debug_video(state),
             row=1,
             column=5,
-            tooltip_text="Press q to quit.\n\nOpens a debug video player overlaid with debugging information.\nThis overlay shows object detection boxes and a live funscript overlay,\namong other useful debugging information.\nCan only be triggered after the funscript generation process has completed.\nNeeds the 'Save debug information' option activated during processing."
+            tooltip_text="Press q to quit.\n\nOpens a debug video player overlaid with debugging information.\n\nThis overlay shows object detection boxes and a live funscript overlay,\namong other useful debugging information.\nCan only be triggered after the funscript generation process has completed.\nNeeds the 'Save debug information' option activated during processing."
         )
         Widgets.checkbox(
             general,
