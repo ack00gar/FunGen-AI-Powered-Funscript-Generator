@@ -81,7 +81,7 @@ class GlobalState:
             self.logger.setLevel(logging.INFO)
 
             # Create a file handler
-            file_handler = logging.FileHandler("FSGenerator.log", mode="w")
+            file_handler = logging.FileHandler("FSGenerator.log", mode="w", encoding='utf-8')
             file_handler.setLevel(logging.INFO)
             file_formatter = logging.Formatter(f"%(levelname)s - %(message)s")
             file_handler.setFormatter(file_formatter)
