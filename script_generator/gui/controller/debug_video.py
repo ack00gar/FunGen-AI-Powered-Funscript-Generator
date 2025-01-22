@@ -7,6 +7,7 @@ from script_generator.utils.logger import logger
 from utils.lib_Debugger import Debugger
 
 
+# TODO this callback is called on every frame. This doesn't seem correct or can be optized (instantiating Debugger, checks etc.)
 def debug_video(state: AppState):
     if not state.video_path:
         messagebox.showerror("Error", "Please select a video file.")

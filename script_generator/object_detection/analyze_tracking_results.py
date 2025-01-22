@@ -16,7 +16,7 @@ from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 from utils.lib_Visualizer import Visualizer
 
 
-def analyze_tracking_results(state, results, debug_video_callback=None):
+def analyze_tracking_results(state, results):
     width, height = get_cropped_dimensions(state.video_info)
     list_of_frames = results.get_all_frame_ids()  # Get all frame IDs with detections
     visualizer = Visualizer()  # Initialize the visualizer
@@ -207,9 +207,6 @@ def analyze_tracking_results(state, results, debug_video_callback=None):
                     total_frames=state.frame_end,
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
-
-        if debug_video_callback and state.live_preview_mode:
-            debug_video_callback()
 
     state.update_ui(ProgressMessage(
         process="TRACKING_ANALYSIS",

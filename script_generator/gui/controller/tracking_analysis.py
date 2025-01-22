@@ -38,7 +38,7 @@ def tracking_analysis(state):
     logger.info(f"Frame Start adjusted to: {state.frame_start}")
 
     # Performing the tracking part and generation of the raw funscript data
-    state.funscript_data = analyze_tracking_results(state, results, debug_video_callback=lambda: debug_video(state))
+    state.funscript_data = analyze_tracking_results(state, results)
 
     state.debugger.save_logs()
 
