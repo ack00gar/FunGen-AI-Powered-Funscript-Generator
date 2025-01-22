@@ -24,7 +24,10 @@ class FunscriptGenerator:
         # Backup output file if it exists
         if os.path.exists(output_path):
             global_state.logger.warning(f"Output path {output_path} already exists, backing up as {output_path}.bak...")
-            os.rename(output_path, output_path + ".bak")
+            backup = output_path + ".bak"
+            if os.path.exists(backup):
+                os.remove(backup)
+            os.rename(output_path, backup)
 
         raw_funscript_path = global_state.video_file[:-4] + f"_rawfunscript.json"
 
