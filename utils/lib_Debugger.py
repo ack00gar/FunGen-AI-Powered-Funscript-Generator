@@ -155,6 +155,7 @@ class Debugger:
         else:
             width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
 
+        # debug video with statistics like a funscript overlay, object detection, frame number, funscript mode etc.
         cv2.namedWindow("Debug Video")
         cv2.setMouseCallback("Debug Video", self._mouse_callback, param=width)
 
