@@ -184,7 +184,7 @@ class FunscriptGeneratorPage(tk.Frame):
         Widgets.checkbox(
             general,
             "Save debugging video",
-            tooltip_text="Will take a while to generate after completion! Please see the logs for when it's completed.\n\nWill save a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement.",
+            tooltip_text="Will take a while to generate after completion!\nPlease see the log for when it's completed.\n\nWill save a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement.",
             state=state,
             attr="save_debug_video",
             row=2
