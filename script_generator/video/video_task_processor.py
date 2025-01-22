@@ -57,7 +57,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 "-an",  # Disable audio processing
                 "-map", "0:v:0",
                 *video_filter,
-                "-f", "rawvideo", "-pix_fmt", "bgr24",
+                "-f", "rawvideo", "-pix_fmt", "bgr24", # cv2 requires bgr (over rgb) and Yolo expects bgr images when using numpy frames (converts them internally)
                 "-threads", str(ffmpeg_threads),
                 "-",  # Output to stdout
             ]

@@ -188,7 +188,7 @@ def analyze_tracking_results(state, results):
                 frame_display = visualizer.draw_gauge(frame_display, state.funscript_distances[-1])
 
             # TODO this probably needs to be disabled but I need to check yolo inference
-            # cv2.imshow("Combined Results", frame_display)
+            cv2.imshow("Combined Results", frame_display)
             cv2.waitKey(1)
 
         # Update progress

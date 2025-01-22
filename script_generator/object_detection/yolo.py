@@ -35,7 +35,7 @@ class YoloTaskProcessor(AbstractTaskProcessor):
 
     def process_batch(self, frames, tasks):
         start_time = time.time()
-        # yolo_results = YOLO_MODEL(frames, conf=YOLO_CONF, verbose=False)
+        # Yolo expects bgr images when using numpy frames
         yolo_results = YOLO_MODEL.track(frames, persist=True, conf=YOLO_CONF, verbose=False)
         avg_time = (time.time() - start_time) / len(tasks)
 
