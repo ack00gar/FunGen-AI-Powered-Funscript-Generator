@@ -164,7 +164,8 @@ class FunscriptGenerator:
             filtered_times = times[valid_indices]
 
             # Calculate speed (position change per time interval)
-            speeds = np.abs(np.diff(filtered_positions) / np.diff(filtered_times)) * 1000  # Positions per second
+            # We add 1e-10 to prevent dividing by zero
+            speeds = np.abs(np.diff(filtered_positions) / (np.diff(filtered_times) + 1e-10)) * 1000 # Positions per second
 
             logger.debug(f"Speeds: {speeds}")
 
