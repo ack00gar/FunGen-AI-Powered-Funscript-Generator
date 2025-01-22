@@ -249,6 +249,7 @@ class Debugger:
             output_path_ffmpeg, _ = get_output_file_path(debug_video_path, "_rawyolo.json", True)
 
             # FFmpeg command to convert to H.265
+            # TODO move to generic shared ffmpeg command and add hardware acceleration
             ffmpeg_command = [
                 "ffmpeg",
                 "-y",  # Overwrite output file if it exists
