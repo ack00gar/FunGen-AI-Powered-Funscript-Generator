@@ -601,31 +601,8 @@ class FunscriptGenerator:
                 break
 
         # Calculate speed (position change per time interval)
-        # Filter out NaN values from times and positions
-        # TODO filter nan at one logical moment
-        times = np.array(times, dtype=float)  # Ensure times is a float array
-        positions = np.array(positions, dtype=float)  # Ensure positions is a float array
-
-        # Filter out NaN values
-        valid_indices = ~np.isnan(times) & ~np.isnan(positions)
-        filtered_positions = positions[valid_indices]
-        filtered_times = times[valid_indices]
-
-        # Ensure at least two valid points for speed calculation
-        if len(filtered_times) > 1:
-            time_diffs = np.diff(filtered_times)
-            pos_diffs = np.diff(filtered_positions)
-
-            # Replace zero or negative time differences with NaN to prevent invalid division
-            time_diffs[time_diffs <= 0] = np.nan
-
-            # Calculate speeds, ignoring invalid divisions
-            speeds = np.abs(pos_diffs / time_diffs) * 1000  # Positions per second
-            speeds = np.nan_to_num(speeds, nan=0.0)  # Replace NaN values in speeds with 0
-        else:
-            speeds = np.array([])  # Empty array if not enough valid data points
-
-        # TODO filter nan at one logical moment END
+        # prevent division by zero by adding 1e-10
+        speeds = np.abs(np.diff(positions) / (np.diff(times) + 1e-10)) * 1000  # Positions per second
 
         def get_color(intensity):
             if np.isnan(intensity):
@@ -702,6 +679,9 @@ class FunscriptGenerator:
         if not times or not positions:
             return {}
 
+        times = np.array(times)
+        positions = np.array(positions)
+
         # Calculate number of strokes
         num_strokes = len(times) - 1
 
@@ -710,32 +690,9 @@ class FunscriptGenerator:
         avg_stroke_duration = np.mean(stroke_durations)
 
         # Calculate average speed
-        # Filter out NaN values from times and positions
-        # TODO filter in one place find out why we have nan's
-        times = np.array(times, dtype=float)  # Ensure times is a float array
-        positions = np.array(positions, dtype=float)  # Ensure positions is a float array
-
-        valid_indices = ~np.isnan(times) & ~np.isnan(positions)
-        filtered_positions = positions[valid_indices]
-        filtered_times = times[valid_indices]
-
-        # Ensure at least two valid points for speed calculation
-        if len(filtered_times) > 1:
-            time_diffs = np.diff(filtered_times).astype(float)  # Convert to float explicitly
-            pos_diffs = np.diff(filtered_positions)
-
-            # Prevent division by zero
-            time_diffs[time_diffs == 0] = np.nan  # Replace zero time differences with NaN
-
-            # Calculate speeds, ignoring invalid divisions
-            speeds = np.abs(pos_diffs / time_diffs) * 1000  # Positions per second
-            speeds = np.nan_to_num(speeds, nan=0.0)  # Replace NaN values with 0
-        else:
-            speeds = np.array([])  # Empty array if not enough valid data points
-
-        # Calculate average speed
+        # prevent division by zero by adding 1e-10
+        speeds = np.abs(np.diff(positions) / (np.diff(times) + 1e-10)) * 1000  # Positions per second
         avg_speed = np.mean(speeds)
-        # TODO filter in one place find out why we have nan's END
 
         # Calculate average depth of stroke
         depths = np.abs(np.diff(positions))
