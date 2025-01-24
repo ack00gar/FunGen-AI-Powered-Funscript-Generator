@@ -65,9 +65,12 @@ PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_PATH = os.path.join(PROJECT_PATH, "output")
 MODELS_DIR = "models"
 MODEL_FILENAMES = [
-    "k00gar-11n-200ep-best.mlpackage",
-    "k00gar-11n-200ep-best.pt",
-    "k00gar-11n-200ep-best.onnx",
+#    "k00gar-11n-200ep-best.mlpackage",
+#    "k00gar-11n-200ep-best.pt",
+#    "k00gar-11n-200ep-best.onnx",
+    "k00gar-11n-RGB-200ep-best.mlpackage",
+    "k00gar-11n-RGB-200ep-best.pt",
+    "k00gar-11n-RGB-200ep-best.onnx",
     "yolo11n-pose.mlpackage",
     "yolo11n-pose.pt",
     "yolo11n-pose.onnx"
