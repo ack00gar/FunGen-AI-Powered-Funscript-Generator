@@ -154,10 +154,11 @@ def analyze_tracking_results(state, results):
             # Display the tracking results for testing
             ret, frame = reader.read()
 
-            if state.video_reader == "OpenCV" and video_info.is_vr:
-                frame_display = frame[:, :frame.shape[1] // 2, :]  # only half left of the frame, for VR half
-            else:
-                frame_display = frame.copy()
+            if not frame:
+                logger.warn("Frame could not be read in live preview")
+                continue
+
+            frame_display = frame.copy()
 
             for box in tracker.tracked_boxes:
                 frame_display = visualizer.draw_bounding_box(
