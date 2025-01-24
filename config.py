@@ -24,6 +24,7 @@ lin_ffprobe_path = "/usr/bin/ffprobe"
 # PERFORMANCE
 ##################################################################################################
 
+NUM_PARALLEL_PIPES = 1
 RENDER_RESOLUTION = 1080 # Above 1080x1080 doesn't seem to improve detections
 TEXTURE_RESOLUTION = 1440 # Size that is used to texture the opengl sphere
 YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30 # Mac doesn't support batching due to onnx
