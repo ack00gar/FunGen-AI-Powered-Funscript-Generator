@@ -7,6 +7,7 @@ from script_generator.gui.views.funscript_generator import FunscriptGeneratorPag
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
 from script_generator.utils.logger import logger
+from config import VERSION
 
 # TODO this is a workaround and needs to be fixed properly
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -17,7 +18,7 @@ class App(tk.Tk):
         if hasattr(ctypes, "windll"):
             ctypes.windll.shcore.SetProcessDpiAwareness(2)  # For Windows DPI scaling
         # self.tk.call('tk', 'scaling', 1.0)
-        self.title("VR funscript generation")
+        self.title(f"VR & 2D POV Funscript AI Generator - v" + VERSION)
         self.geometry(f"{('800' if is_mac() else '700')}x910")
         self.resizable(False, False)
 
