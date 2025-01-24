@@ -16,7 +16,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s|%(levelname)s|%(name)s|%(message)s",
     handlers=[
-        logging.FileHandler("FSGenerator.log", mode="w"),
+        logging.FileHandler("FSGenerator.log", mode="w", encoding='utf-8'),
         ColorizedStreamHandler(sys.stdout)
     ]
 )
