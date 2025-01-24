@@ -30,7 +30,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
             # Determine the best hardware acceleration backend to use
             hwaccel = []
             if hwaccel_support["cuda"]:
-                hwaccel = ["-hwaccel", "cuda"]
+                hwaccel = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
             elif hwaccel_support["vaapi"]:
                 hwaccel = ["-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128"]
             elif hwaccel_support["amf"]:
@@ -48,6 +48,9 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 # VAAPI requires specific pixel formats and filters
                 video_filter = ["-vf", f"{vf},format=nv12,hwupload"] if vf else ["-vf", "format=nv12,hwupload"]
 
+            if hwaccel_support["cuda"]:
+                video_filter = ["-noautoscale"] + video_filter # explicitly tell ffmpeg that scaling is done by cuda
+
             return [
                 FFMPEG_PATH,
                 *hwaccel,
@@ -55,7 +58,6 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 "-ss", str(start_time / 1000),  # Seek to start time in seconds
                 "-i", video.path,
                 "-an",  # Disable audio processing
-                "-map", "0:v:0",
                 *video_filter,
                 "-f", "rawvideo", "-pix_fmt", "bgr24",  # cv2 requires bgr (over rgb) and Yolo expects bgr images when using numpy frames (converts them internally)
                 "-threads", str(ffmpeg_threads),
@@ -68,20 +70,26 @@ class VideoTaskProcessor(AbstractTaskProcessor):
             else:
                 projection, iv_fov, ih_fov, v_fov, h_fov, d_fov = "he", 180, 180, 90, 90, 180
 
+            cuda = state.ffmpeg_hwaccel_supported["cuda"]
+
+            scale = f"[0:0]scale_cuda=2160:-2,hwdownload" if cuda else f"[0:0]scale={RENDER_RESOLUTION * 2}:-2"
+            crop = f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0"
+            out_format = f"format=nv12," if cuda else ""
+
             if self.state.video_reader == "FFmpeg":
                 filters = [
-                    f"scale={RENDER_RESOLUTION * 2}:{RENDER_RESOLUTION}",
-                    f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0",
-                    f"v360={projection}:in_stereo=2d:output=sg:iv_fov={iv_fov}:ih_fov={ih_fov}:"
+                    scale,
+                    crop,
+                    f"{out_format}v360={projection}:in_stereo=2d:output=sg:iv_fov={iv_fov}:ih_fov={ih_fov}:"
                     f"d_fov={d_fov}:v_fov={v_fov}:h_fov={h_fov}:pitch={PITCH}:yaw=0:roll=0:"
                     f"w={RENDER_RESOLUTION}:h={RENDER_RESOLUTION}:interp=lanczos:reset_rot=1",
                     "lutyuv=y=gammaval(0.7)"
                 ]
             else:
                 filters = [
-                    f"scale={RENDER_RESOLUTION * 2}:{RENDER_RESOLUTION}",
-                    f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0",
-                    "lutyuv=y=gammaval(0.7)"  # TODO Process in open gl and move scale and crop to the gpu
+                    scale,
+                    crop,
+                    f"{out_format}lutyuv=y=gammaval(0.7)"  # TODO Process in open gl and move scale and crop to the gpu
                 ]
 
             return ",".join(filters)
@@ -93,6 +101,8 @@ class VideoTaskProcessor(AbstractTaskProcessor):
 
         vf = vr_video_filters() if video.is_vr else standard_video_filters()
         cmd = get_cmd(vf)
+
+        logger.info(f"FFMPEG executing command: {' '.join(cmd)}")
 
         # Start FFmpeg process
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
