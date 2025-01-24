@@ -56,7 +56,7 @@ def get_video_info(video_path):
         else:
             logger.info("Video Format: 2D - Based on its ratio")
 
-        return VideoInfo(video_path, codec_name, width, height, duration, nb_frames, fps, is_vr)
+        return VideoInfo(video_path, codec_name, width, height, duration, int(nb_frames), fps, is_vr)
 
     except subprocess.CalledProcessError as e:
         logger.error(f"FFProbe command failed: {e.output.decode('utf-8')}")
