@@ -9,7 +9,8 @@ app_state = AppState(is_cli=True)
 # app_state.video_path = "C:/cvr/funscript-generator/test_short.mp4"
 # app_state.video_path = "C:/cvr/funscript-generator/test_extra_short.mp4"
 # app_state.video_path = "C:/cvr/funscript-generator/test_medium.mp4"
-app_state.video_path = "C:/cvr/funscript-generator/test.mp4"
+app_state.video_path = "C:/cvr/funscript-generator/test_medium.mp4"
+app_state.video_reader = "FFmpeg + OpenGL (Windows)"
 
 # Warmup run
 generate_funscript(app_state)

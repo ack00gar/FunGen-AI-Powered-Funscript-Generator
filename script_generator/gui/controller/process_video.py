@@ -1,7 +1,7 @@
 import threading
 from tkinter import messagebox
 
-from script_generator.gui.controller.tracking_analysis import tracking_analysis
+from script_generator.scripts.tracking_analysis import tracking_analysis
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.object_detection.utils import check_skip_object_detection
 from script_generator.scripts.analyze_video import analyze_video
