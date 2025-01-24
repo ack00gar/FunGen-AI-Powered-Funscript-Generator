@@ -124,7 +124,7 @@ class VideoReaderFFmpeg:
                 "-vf", arg_line,
                 "-f", "rawvideo",  # Output raw video data
                 #"-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
-                "-pix_fmt", "rgb24",
+                "-pix_fmt", "bgr24",
                 "-vsync", "0",  # Disable frame rate synchronization
                 "-threads", "0",  # Use maximum threads available
                 "-",  # Output to stdout
@@ -140,7 +140,7 @@ class VideoReaderFFmpeg:
                 "-an",  # Disable audio processing
                 "-f", "rawvideo",  # Output raw video data
                 #"-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
-                "-pix_fmt", "rgb24",
+                "-pix_fmt", "bgr24",
                 "-vsync", "0",  # Disable frame rate synchronization
                 "-",  # Output to stdout
             ]
