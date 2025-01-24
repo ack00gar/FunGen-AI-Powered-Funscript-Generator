@@ -1,8 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+from script_generator.gui.controller.process_video import video_analysis
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
-from script_generator.gui.controller.video_analysis import video_analysis
 from script_generator.gui.controller.debug_video import debug_video
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage
 from script_generator.gui.utils.widgets import Widgets

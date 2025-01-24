@@ -1,5 +1,5 @@
 import string
-from typing import Literal
+from typing import Literal, List
 
 from script_generator.tasks.tasks import AnalyzeVideoTask
 from script_generator.utils.helpers import is_mac
@@ -13,7 +13,7 @@ class AppState:
 
         # Job
         self.video_info: VideoInfo | None = None
-        self.analyze_task: AnalyzeVideoTask | None = None
+        self.analyze_tasks: List[AnalyzeVideoTask]  = []
         self.video_path: string = None
         self.frame_start: int = 0
         self.frame_end: int | None = None

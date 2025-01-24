@@ -1,3 +1,4 @@
+import queue
 import time
 from dataclasses import dataclass, field
 from threading import Lock
@@ -5,6 +6,7 @@ from typing import List, Dict, Optional
 
 import numpy as np
 
+from config import QUEUE_MAXSIZE
 from script_generator.video.video_info import VideoInfo
 
 
@@ -54,13 +56,20 @@ class Task:
 @dataclass
 class AnalyzeVideoTask(Task):
     tasks: List[Task] = field(default_factory=list)
+    pipe_id = -1
 
-    def __init__(self):
+    def __init__(self, pipe_id):
         super().__init__()
         self.tasks = []
         self._lock = Lock()
         self.profile = {}
         self.start_time = time.time()
+        self.pipe_id = pipe_id
+
+        self.opengl_q = queue.Queue(maxsize=QUEUE_MAXSIZE)
+        self.yolo_q = queue.Queue(maxsize=QUEUE_MAXSIZE)
+        self.analysis_q = queue.Queue(maxsize=QUEUE_MAXSIZE)
+        self.result_q = queue.Queue(maxsize=0)
 
     def add_task(self, task: Task) -> Task:
         with self._lock:
