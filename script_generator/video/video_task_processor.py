@@ -6,6 +6,7 @@ import imageio
 import numpy as np
 
 from config import SUBTRACT_THREADS_FROM_FFMPEG, PITCH, RENDER_RESOLUTION, FFMPEG_PATH, DEBUG_PATH
+from debug.errors import FFMpegError
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyzeFrameTask
 from script_generator.utils.logger import logger
@@ -18,7 +19,6 @@ class VideoTaskProcessor(AbstractTaskProcessor):
     def task_logic(self):
         state = self.state
         video = self.state.video_info
-        current_frame = state.frame_start
 
         def get_cmd(vf):
             start_time = (state.frame_start / video.fps) * 1000
@@ -57,7 +57,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 "-an",  # Disable audio processing
                 "-map", "0:v:0",
                 *video_filter,
-                "-f", "rawvideo", "-pix_fmt", "bgr24", # cv2 requires bgr (over rgb) and Yolo expects bgr images when using numpy frames (converts them internally)
+                "-f", "rawvideo", "-pix_fmt", "bgr24",  # cv2 requires bgr (over rgb) and Yolo expects bgr images when using numpy frames (converts them internally)
                 "-threads", str(ffmpeg_threads),
                 "-",  # Output to stdout
             ]
@@ -81,6 +81,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 filters = [
                     f"scale={RENDER_RESOLUTION * 2}:{RENDER_RESOLUTION}",
                     f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0"
+                    "lutyuv=y=gammaval(0.7)"  # TODO Process in open gl and move scale and crop to the gpu
                 ]
 
             return ",".join(filters)
@@ -99,12 +100,17 @@ class VideoTaskProcessor(AbstractTaskProcessor):
         # Start FFmpeg process
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         frame_size = width * height * 3  # Size of one frame in bytes
+        current_frame = state.frame_start
 
         # progress_bar = tqdm(total=203856, unit="frame", desc="Processing frames")
         while True:
             try:
                 in_bytes = self.process.stdout.read(frame_size)
                 if not in_bytes:
+                    if current_frame == state.frame_start:
+                        raise FFMpegError("FFMPEG could not read any frames from stdout")
+                    else:
+                        logger.info("FFMPEG received last frame")
                     break
 
                 task = AnalyzeFrameTask(frame_pos=current_frame)
@@ -129,7 +135,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
 
             except Exception as e:
                 logger.error(f"Error reading frame: {e}")
-                return False, None
+                raise
 
         self.stop_process()
 

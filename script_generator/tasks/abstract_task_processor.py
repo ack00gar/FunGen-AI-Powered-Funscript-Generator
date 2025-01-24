@@ -22,6 +22,7 @@ class AbstractTaskProcessor(threading.Thread):
         self.input_queue = input_queue
         self.output_queue = output_queue
         self._stop_event = threading.Event()
+        self.exception = None  # Store the exception that occurs in the thread
 
     def log(self, message):
         """
@@ -70,16 +71,20 @@ class AbstractTaskProcessor(threading.Thread):
     def run(self):
         """
         Main thread entry point. Executes the `task_logic` method.
+        Catches any exceptions and stores them for the caller.
         """
         try:
             self.state.analyze_task.start(self.process_type)
             self.task_logic()
         except Exception as e:
+            self.exception = e  # Capture the exception
+            # Propagate sentinel to the output queue
+            self.output_queue.put(None)
             logger.error(f"An error occurred during task execution on thread {self.process_type}: {e}")
-            import traceback
-            traceback.print_exc()
+            # import traceback
+            # traceback.print_exc()
         finally:
-            return
+            self._stop_event.set()
 
     def task_logic(self):
         """
@@ -96,6 +101,13 @@ class AbstractTaskProcessor(threading.Thread):
 
     def on_last_item(self):
         return
+
+    def check_exception(self):
+        """
+        Checks if an exception occurred in the thread and raises it in the calling context.
+        """
+        if self.exception:
+            raise self.exception
 
 from enum import Enum
 

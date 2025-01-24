@@ -150,11 +150,11 @@ def analyze_tracking_results(state, results):
                     }
                 )
 
+        # Display object detection tracking results in a live preview window
         if state.live_preview_mode:
-            # Display the tracking results for testing
             ret, frame = reader.read()
 
-            if not frame:
+            if not frame.any():
                 logger.warn("Frame could not be read in live preview")
                 continue
 

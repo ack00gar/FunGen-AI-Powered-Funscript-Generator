@@ -4,8 +4,9 @@ import numpy as np
 import argparse
 from config import FFMPEG_PATH, FFPROBE_PATH, RENDER_RESOLUTION
 from script_generator.utils.logger import logger
+from script_generator.video.ffmpeg import get_video_info
 
-
+# TODO rework this class in the new logic and make the existing logic more flexible and generic
 class VideoReaderFFmpeg:
     def __init__(self, video_path, is_vr=False, unwarp=True, projection=None, ffmpeg_path=FFMPEG_PATH, ffprobe_path=FFPROBE_PATH):
         """
@@ -41,42 +42,16 @@ class VideoReaderFFmpeg:
         Retrieve video metadata (fps, resolution, codec, etc.) using FFprobe.
         """
         try:
-            # Run FFprobe to get video metadata
-            cmd = [
-                self.ffprobe_path,
-                "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=r_frame_rate,width,height,codec_name,nb_frames,duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                self.video_path,
-            ]
-            output = subprocess.check_output(cmd).decode("utf-8").splitlines()
-
-            # Ensure the output has the correct number of fields
-            if len(output) < 6:
-                raise ValueError("FFprobe output is missing required fields.")
-
-            # Parse metadata
-            codec_name = output[0]  # codec_name
-            width = int(output[1])  # width
-            height = int(output[2])  # height
-            r_frame_rate = output[3]  # r_frame_rate in "num/den" format
-            duration = float(output[4])  # duration in seconds
-            total_frames = int(output[5])  # nb_frames
-
-            # Calculate FPS
-            num, den = map(int, r_frame_rate.split('/'))  # Split numerator and denominator
-            fps = num / den  # Calculate FPS
-
+            video_info = get_video_info(self.video_path)
             # Store metadata
-            self.fps = fps
-            self.width = width
+            self.fps = video_info.fps
+            self.width = video_info.width
             if self.is_vr:
                 self.width //= 2
-            self.height = height
-            self.codec = codec_name
-            self.total_frames = total_frames
-            self.duration = duration * 1000  # Convert duration to milliseconds
+            self.height = video_info.height
+            self.codec = video_info.codec_name
+            self.total_frames = video_info.total_frames
+            self.duration = video_info.duration
 
             # limiting the frame height here has no additional performance cost and significantly improves speed for 1440p+ video
             #scaling_factor = min(RENDER_RESOLUTION / self.width, RENDER_RESOLUTION / self.height)
