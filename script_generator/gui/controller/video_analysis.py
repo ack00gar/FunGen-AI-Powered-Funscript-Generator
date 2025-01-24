@@ -24,26 +24,32 @@ def video_analysis(state, root):
     logger.info(f"Reference Script: {state.reference_script}")
 
     def run():
-        # Initialize the debugger
-        log_file, _ = get_output_file_path(state.video_path, "_debug_logs.json")
-        state.debugger = Debugger(state.video_path, log_file=log_file)
+        try:
+            # Initialize the debugger
+            log_file, _ = get_output_file_path(state.video_path, "_debug_logs.json")
+            state.debugger = Debugger(state.video_path, log_file=log_file)
 
-        skip_detection = check_skip_object_detection(state, root)
+            skip_detection = check_skip_object_detection(state, root)
 
-        if skip_detection:
-            state.set_video_info()
-            if state.update_ui:
-                state.update_ui(ProgressMessage(
-                    process="OBJECT_DETECTION",
-                    frames_processed=state.video_info.total_frames,
-                    total_frames=state.video_info.total_frames,
-                    eta="Done"
-                ))
-        else:
-            analyze_video(state)
+            if skip_detection:
+                state.set_video_info()
+                if state.update_ui:
+                    state.update_ui(ProgressMessage(
+                        process="OBJECT_DETECTION",
+                        frames_processed=state.video_info.total_frames,
+                        total_frames=state.video_info.total_frames,
+                        eta="Done"
+                    ))
+            else:
+                analyze_video(state)
 
+            tracking_analysis(state)
 
-        tracking_analysis(state)
+        except Exception as e:
+            logger.error(f"Error during video analysis: {e}")
+            messagebox.showerror("Error", f"Could not process video:\n{e}")
+            import traceback
+            traceback.print_exc()
 
     processing_thread = threading.Thread(target=run)
     processing_thread.start()

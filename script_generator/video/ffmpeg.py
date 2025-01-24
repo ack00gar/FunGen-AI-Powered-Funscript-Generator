@@ -1,9 +1,12 @@
 import subprocess
 
+from debug.errors import FFProbeError
 from script_generator.utils.logger import logger
 from script_generator.video.video_info import VideoInfo
 from config import FFPROBE_PATH, FFMPEG_PATH
 
+
+import json
 
 def get_video_info(video_path):
     try:
@@ -11,45 +14,56 @@ def get_video_info(video_path):
             FFPROBE_PATH,
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=r_frame_rate,width,height,codec_name,nb_frames,duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-show_entries", "stream=r_frame_rate,width,height,codec_name,nb_frames",
+            "-show_entries", "format=duration",
+            "-of", "json",
             video_path,
         ]
 
-        output = subprocess.check_output(cmd).decode("utf-8").splitlines()
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode("utf-8")
+        info = json.loads(output)
 
-        # Ensure the output has the correct number of fields
-        if len(output) < 6:
-            raise ValueError("FFProbe output is missing required fields.")
+        # Parse the first video stream
+        stream = info.get("streams", [{}])[0]
+        if not stream:
+            raise FFProbeError("No video stream found in the file.")
 
-        # Parse metadata
-        codec_name = output[0]
-        width = int(output[1])
-        height = int(output[2])
-        r_frame_rate = output[3]
-        duration = float(output[4])
-        total_frames = int(output[5])
+        # Extract stream metadata
+        codec_name = stream.get("codec_name", "unknown")
+        width = int(stream.get("width", 0))
+        height = int(stream.get("height", 0))
+        r_frame_rate = stream.get("r_frame_rate", "0/1")
+        nb_frames = stream.get("nb_frames", None)
+
+        # Extract format-level metadata
+        duration = float(info.get("format", {}).get("duration", 0))
 
         # Calculate FPS
-        num, den = map(int, r_frame_rate.split('/'))  # Split numerator and denominator
-        fps = num / den  # Calculate FPS
+        num, den = map(int, r_frame_rate.split('/'))
+        fps = num / den if den > 0 else 0
 
-        logger.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {total_frames} frames, {duration} seconds")
+        # Estimate frames if not available
+        if nb_frames is None and duration > 0 and fps > 0:
+            nb_frames = int(duration * fps)
 
-        # If the width is 2x the height we are dealing with a VR video
+        # Check if the video is VR (2:1 aspect ratio)
         is_vr = height == width // 2
 
-        # TODO: make it possible to override this auto-detection
+        logger.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {nb_frames} frames, {duration:.2f} seconds, is vr: {is_vr}")
 
         if is_vr:
             logger.info("Video Format: VR SBS - Based on its 2:1 ratio")
         else:
             logger.info("Video Format: 2D - Based on its ratio")
 
-        return VideoInfo(video_path, codec_name, width, height, duration, total_frames, fps, is_vr)
-    except Exception as e:
-        logger.error(f"Error initializing video info: {e}")
-        raise
+        return VideoInfo(video_path, codec_name, width, height, duration, nb_frames, fps, is_vr)
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFProbe command failed: {e.output.decode('utf-8')}")
+        raise FFProbeError("FFProbe command execution failed.")
+    except (ValueError, KeyError, IndexError) as e:
+        logger.error(f"Error parsing FFProbe output: {e}")
+        raise FFProbeError("Failed to parse FFProbe output.")
 
 
 def is_hwaccel_supported():

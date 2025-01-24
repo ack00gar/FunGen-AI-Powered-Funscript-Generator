@@ -36,7 +36,7 @@ class FunscriptGeneratorPage(tk.Frame):
             file_selector_title="Choose a File",
             file_types=[("Text Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")],
             state=state,
-            tooltip_text="The video to generate a funscript for",
+            tooltip_text="The video to generate a funscript for. For proper detection of fisheye keep the suffix like _FISHEYE190, _MKX200, etc. in the filename\n\nIn the future we'll add the option to override this in the UI.",
             # if the file changes we need to make sure the video info is reset
             # TODO add os.path.exists and update video_info immediately if found
             command=lambda val: setattr(state, 'video_info', None)
