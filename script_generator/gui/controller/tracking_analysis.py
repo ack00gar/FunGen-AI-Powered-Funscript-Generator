@@ -17,6 +17,7 @@ def tracking_analysis(state):
         return
 
     yolo_data = load_json_from_file(raw_yolo_path)
+
     state.set_video_info()
     video_info = state.video_info
     width, height = get_cropped_dimensions(state.video_info)

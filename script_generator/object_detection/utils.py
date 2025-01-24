@@ -7,13 +7,24 @@ from script_generator.constants import CLASS_REVERSE_MATCH, YOLO_MODELS
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.object_detection.box_record import BoxRecord
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
-from script_generator.utils.file import get_output_file_path
+from script_generator.utils.file import get_output_file_path, load_json_from_file
 from script_generator.utils.logger import logger
 
 
 def check_skip_object_detection(state, root):
     raw_yolo_path, raw_yolo_filename = get_output_file_path(state.video_path, "_rawyolo.json")
     if os.path.exists(raw_yolo_path):
+        # TODO only load the json once (not in this check and later in the process)
+        yolo_data = load_json_from_file(raw_yolo_path)
+        if len(yolo_data) == 0:
+            logger.warn(f"Raw yolo data file doesn't contain any data: {raw_yolo_path}")
+            try:
+                os.remove(raw_yolo_path)
+                logger.info(f"Deleted empty raw yolo data file: {raw_yolo_path}")
+            except OSError as e:
+                logger.error(f"Error deleting raw yolo file {raw_yolo_path}: {e}")
+            return False
+
         skip_detection = Widgets.messagebox(
             "Detection File Conflict",
             f"The file already exists. What would you like to do?\n{raw_yolo_filename}",

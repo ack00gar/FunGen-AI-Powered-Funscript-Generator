@@ -80,7 +80,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
             else:
                 filters = [
                     f"scale={RENDER_RESOLUTION * 2}:{RENDER_RESOLUTION}",
-                    f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0"
+                    f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0",
                     "lutyuv=y=gammaval(0.7)"  # TODO Process in open gl and move scale and crop to the gpu
                 ]
 
@@ -94,9 +94,6 @@ class VideoTaskProcessor(AbstractTaskProcessor):
         vf = vr_video_filters() if video.is_vr else standard_video_filters()
         cmd = get_cmd(vf)
 
-        # Debug
-        # command = ' '.join(vf)
-
         # Start FFmpeg process
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         frame_size = width * height * 3  # Size of one frame in bytes
@@ -108,7 +105,7 @@ class VideoTaskProcessor(AbstractTaskProcessor):
                 in_bytes = self.process.stdout.read(frame_size)
                 if not in_bytes:
                     if current_frame == state.frame_start:
-                        raise FFMpegError("FFMPEG could not read any frames from stdout")
+                        raise FFMpegError(f"FFMPEG could not read any frames from stdout command: {' '.join(cmd)}")
                     else:
                         logger.info("FFMPEG received last frame")
                     break
