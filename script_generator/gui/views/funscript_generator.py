@@ -58,7 +58,7 @@ class FunscriptGeneratorPage(tk.Frame):
         optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
 
         Widgets.input(optional_settings, "Frame Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
-        Widgets.input(optional_settings, "Frame End", state=state, attr="frame_start", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
+        Widgets.input(optional_settings, "Frame End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
         # endregion
 
         # region PROCESSING

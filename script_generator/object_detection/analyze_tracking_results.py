@@ -188,7 +188,7 @@ def analyze_tracking_results(state, results):
             if state.funscript_distances:
                 frame_display = visualizer.draw_gauge(frame_display, state.funscript_distances[-1])
 
-            cv2.imshow("Funscript generation preview", frame_display)
+            cv2.imshow("Combined Results", frame_display)
             cv2.waitKey(1)
 
         # Update progress
