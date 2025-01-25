@@ -81,14 +81,11 @@ class ObjectTracker:
         """
         self.state = state
         self.class_names = CLASS_NAMES  # List of class names to track
-        self.active_tracks = {}  # Active tracks: {track_id: Track object}
-        self.inactive_tracks = []  # Inactive tracks (lost tracks)
         # self.distance_kf = KF.KalmanFilter()  # Kalman filter for distance smoothing
 
         self.frame = None  # Current video frame
         self.current_frame_id = state.current_frame_id  # frame_pos  # Current frame ID
-        self.width = 0  # Height of the video frame
-        self.image_area = state.frame_area # image_area  # Area of the video frame
+        self.image_area = state.frame_area  # image_area  # Area of the video frame
         self.fps = state.video_info.fps  # fps  # Frames per second of the video
         self.isVR = state.video_info.is_vr  # isVR
 
@@ -294,7 +291,6 @@ class ObjectTracker:
         """
         self.state = state
         self.current_frame_id = state.current_frame_id
-        self.width = state.video_info.width
 
         close_up_detected = False
 
@@ -345,10 +341,13 @@ class ObjectTracker:
         if self.locked_penis_box.is_active() and self.locked_penis_box.visible < 100 and not self.glans_detected:
             self.penetration = True
 
+
+
         # Check if pussy boxes are inside butt boxes
         if 'pussy' in all_detections and 'butt' in all_detections:
             for pussy_detection in all_detections['pussy']:
                 p_conf, p_box, p_track_id = pussy_detection
+                pussy_area = self.box_area(p_box)
 
                 for butt_detection in all_detections['butt']:
                     b_conf, b_box, b_track_id = butt_detection
@@ -388,6 +387,16 @@ class ObjectTracker:
                             distance = 100
                             self.update_distance(distance)
                             return
+                if pussy_area > 0.1 * self.image_area and 'penis' not in all_detections:
+                    close_up_detected = True
+                    self.detect_sex_position_change('Close up', 'No penis detected')
+                    if not self.close_up:
+                        logger.info(f"@{self.current_frame_id} - Close up detected - no penis detected")
+                        self.close_up = True
+                    self.penetration = False
+                    distance = 100
+                    self.update_distance(distance)
+                    return
 
         # if we reach here, this means we are not in close_up mode (theoretically)
         self.close_up = False
@@ -562,7 +571,6 @@ class ObjectTracker:
                             self.locked_penis_box.update(self.penis_box, current_height)
 
                         # Move locked penis box towards current penis box
-                        #max_move = max(1, int(self.width / 960))
                         if self.isVR:
                             max_move = 180 // int(self.fps)
                         else:
