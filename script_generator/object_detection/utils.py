@@ -1,9 +1,6 @@
 import os
-import platform
 
-import torch
-
-from script_generator.constants import CLASS_REVERSE_MATCH, YOLO_MODELS
+from script_generator.constants import CLASS_REVERSE_MATCH
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.object_detection.box_record import BoxRecord
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
@@ -64,10 +61,20 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
     """
 
     penis_cls = 0
+    prev_frame = 0
+    cons_frames = 0
+    threshold = 5
 
     for line in data:
         frame_idx, cls, conf, x1, y1, x2, y2, track_id = line
         if frame_idx >= start_frame and cls == penis_cls and conf >= 0.7:
             penis_frame = frame_idx
-            logger.info(f"First instance of Glans/Penis found in frame {frame_idx}")
-            return penis_frame
+            if prev_frame == frame_idx - 1:
+                cons_frames += 1
+            else:
+                cons_frames = 0
+            prev_frame = frame_idx
+
+            if cons_frames > threshold:
+                logger.info(f"First instance of Glans/Penis found in frame {frame_idx - threshold}")
+                return penis_frame - threshold
