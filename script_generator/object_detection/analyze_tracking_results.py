@@ -1,22 +1,23 @@
 import json
 import time
+from datetime import timedelta
+
 import cv2
 from tqdm import tqdm
-from datetime import timedelta
 
 from config import UPDATE_PROGRESS_INTERVAL
 from script_generator.constants import CLASS_COLORS
 from script_generator.gui.messages.messages import ProgressMessage
+from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
 from script_generator.utils.logger import logger
-from script_generator.video.video_info import get_cropped_dimensions
+from script_generator.video.info.video_info import get_cropped_dimensions
 from utils.lib_ObjectTracker import ObjectTracker
-from utils.lib_SceneCutsDetect import detect_scene_changes
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 from utils.lib_Visualizer import Visualizer
 
 
-def analyze_tracking_results(state, results):
+def analyze_tracking_results(state: AppState, results):
     width, height = get_cropped_dimensions(state.video_info)
     list_of_frames = results.get_all_frame_ids()  # Get all frame IDs with detections
     visualizer = Visualizer()  # Initialize the visualizer
@@ -129,7 +130,7 @@ def analyze_tracking_results(state, results):
                     })
 
                 # Add debug information to the debugger class so it can be saved later
-                state.debugger.log_frame(
+                state.debug_data.add_frame(
                     frame_pos,
                     bounding_boxes=bounding_boxes,
                     variables={

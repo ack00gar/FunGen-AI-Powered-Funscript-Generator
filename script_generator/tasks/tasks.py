@@ -5,8 +5,6 @@ from typing import List, Dict, Optional
 
 import numpy as np
 
-from script_generator.video.video_info import VideoInfo
-
 
 @dataclass
 class Task:

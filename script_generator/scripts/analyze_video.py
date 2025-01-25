@@ -7,15 +7,15 @@ from tqdm import tqdm
 
 from config import QUEUE_MAXSIZE, SEQUENTIAL_MODE, PROGRESS_BAR, UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
-from script_generator.object_detection.post_process_results import YoloAnalysisTaskProcessor
-from script_generator.object_detection.yolo import YoloTaskProcessor
+from script_generator.object_detection.post_process_worker import PostProcessWorker
+from script_generator.object_detection.yolo_worker import YoloWorker
 from script_generator.state.app_state import AppState
 from script_generator.tasks.abstract_task_processor import TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyzeVideoTask, AnalyzeFrameTask
 from script_generator.utils.file import check_create_output_folder
 from script_generator.utils.logger import logger
-from script_generator.video.video_conversion.vr_to_2d_task_processor import VrTo2DTaskProcessor
-from script_generator.video.video_task_processor import VideoTaskProcessor
+from script_generator.video.workers.ffmpeg_worker import VideoWorker
+from script_generator.video.workers.vr_to_2d_worker import VrTo2DWorker
 
 
 def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
@@ -50,10 +50,10 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
         result_q = queue.Queue(maxsize=0)
 
         # Create threads
-        decode_thread = VideoTaskProcessor(state=state, output_queue=opengl_q if use_open_gl else yolo_q)
-        opengl_thread = VrTo2DTaskProcessor(state=state, input_queue=opengl_q, output_queue=yolo_q) if use_open_gl else None
-        yolo_thread = YoloTaskProcessor(state=state, input_queue=yolo_q, output_queue=analysis_q)
-        yolo_analysis_thread = YoloAnalysisTaskProcessor(state=state, input_queue=analysis_q, output_queue=result_q)
+        decode_thread = VideoWorker(state=state, output_queue=opengl_q if use_open_gl else yolo_q)
+        opengl_thread = VrTo2DWorker(state=state, input_queue=opengl_q, output_queue=yolo_q) if use_open_gl else None
+        yolo_thread = YoloWorker(state=state, input_queue=yolo_q, output_queue=analysis_q)
+        yolo_analysis_thread = PostProcessWorker(state=state, input_queue=analysis_q, output_queue=result_q)
 
         # Start logging thread
         queue_logging_thread = threading.Thread(
@@ -93,10 +93,14 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
 
         log_thread_stop_event.set()
 
-        # wait for update progress thread to close
-        time.sleep(UPDATE_PROGRESS_INTERVAL * 1.1)
-
         log_performance(state=state, results_queue=result_q)
+
+        state.update_ui(ProgressMessage(
+            process="OBJECT_DETECTION",
+            frames_processed=state.video_info.total_frames,
+            total_frames=state.video_info.total_frames,
+            eta="Done"
+        ))
 
         return result_q.queue
 

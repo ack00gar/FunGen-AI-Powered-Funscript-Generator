@@ -5,10 +5,10 @@ from OpenGL.GLU import *
 
 from config import RENDER_RESOLUTION, YAW, PITCH
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
-from script_generator.video.video_conversion.opengl.helpers import create_180_dome, render_dome
+from script_generator.video.opengl.helpers import create_180_dome, render_dome
 
 
-class VrTo2DTaskProcessor(AbstractTaskProcessor):
+class VrTo2DWorker(AbstractTaskProcessor):
     process_type = TaskProcessorTypes.OPENGL
 
     def task_logic(self):

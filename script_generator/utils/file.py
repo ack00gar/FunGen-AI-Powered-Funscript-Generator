@@ -6,7 +6,7 @@ from script_generator.constants import OUTPUT_PATH
 from script_generator.utils.logger import logger
 
 
-def write_dataset(file_path, data):
+def write_json_to_file(file_path, data):
     """
     Write data to a JSON file, always overwriting if it exists.
     :param file_path: The path to the output file.
@@ -32,6 +32,9 @@ def load_json_from_file(file_path):
     :param file_path: Path to the JSON file.
     :return: The loaded data.
     """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Could not load json from file as it does not exist: {file_path}")
+
     with open(file_path, 'r') as f:
         data = json.load(f)
         logger.info(f"Loaded data from {file_path}, length: {len(data)}")

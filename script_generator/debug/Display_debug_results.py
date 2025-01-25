@@ -12,8 +12,7 @@ debugger = Debugger(video, is_vr=True, video_reader="FFmpeg", log_file=log_file)
 
 debugger.load_logs()
 
-#debugger.display_frame(frame)
 
 #debugger.play_video(frame)
 
-debugger.play_video(frame, save_debug_video=False, downsize_ratio=1) #), duration=4)
+debugger.play_debug_video(frame, downsize_ratio=1) #), duration=4)

@@ -6,6 +6,7 @@ from script_generator.gui.controller.regenerate_funscript import regenerate_funs
 from script_generator.gui.controller.debug_video import debug_video
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage
 from script_generator.gui.utils.widgets import Widgets
+from script_generator.gui.views.popups.create_debug_video import render_debug_video_popup
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
 from script_generator.utils.logger import logger
@@ -178,29 +179,8 @@ class FunscriptGeneratorPage(tk.Frame):
             "Play debug video",
             lambda: debug_video(state),
             row=1,
-            column=5,
-            tooltip_text="Press q to quit.\n\nOpens a debug video player overlaid with debugging information.\n\nThis overlay shows object detection boxes and a live funscript overlay,\namong other useful debugging information.\nCan only be triggered after the funscript generation process has completed.\nNeeds the 'Save debug information' option activated during processing."
-        )
-        Widgets.checkbox(
-            general,
-            "Save debugging video",
-            tooltip_text="Will take a while to generate after completion!\nPlease see the log for when it's completed.\n\nWill save a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement.",
-            state=state,
-            attr="save_debug_video",
-            row=2
-        )
-        Widgets.dropdown(
-            attr="debug_record_duration_var",
-            parent=general,
-            label_text="duration (s)",
-            tooltip_text="Duration of the debug video",
-            options=[5, 10, 20],
-            default_value=5,
-            state=state,
-            column=2,
-            row=2,
-            label_width_px=73,
-            sticky="w"
+            column=30,
+            tooltip_text="Opens a debug video player overlaid with debugging information (Press space to pause).\n\nThis overlay shows object detection boxes and a live funscript overlay,\namong other useful debugging information.\nCan only be triggered after the funscript generation process has completed.\nNeeds the 'Save debug information' option activated during processing."
         )
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
         Widgets.file_selection(
@@ -213,6 +193,15 @@ class FunscriptGeneratorPage(tk.Frame):
             tooltip_text="If provided the reference script will be compared in the\nfunscript report that is generated on completion and be shown\nin the live display funscript overlay when enabled.",
             state=state,
             row=0
+        )
+        debug_video_section = Widgets.frame(debugging, title="Share debug video", row=1)
+        Widgets.button(
+            debug_video_section,
+            "Generate sharable debug video",
+            lambda: Widgets.create_popup(title="Generate debug video", master=controller, width=650, height=205, content_builder=lambda window, user_action: render_debug_video_popup(window, state)),
+            row=1,
+            column=0,
+            tooltip_text="Render a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement."
         )
         # endregion
 

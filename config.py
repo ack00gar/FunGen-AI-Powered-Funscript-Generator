@@ -27,6 +27,7 @@ lin_ffprobe_path = "/usr/bin/ffprobe"
 RENDER_RESOLUTION = 1080 # Above 1080x1080 doesn't seem to improve detections
 TEXTURE_RESOLUTION = 1440 # Size that is used to texture the opengl sphere
 YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30 # Mac doesn't support batching due to onnx
+YOLO_PERSIST = True # Big impact on performance but also improves tracking
 
 ##################################################################################################
 # ADVANCED / DEVELOPMENT
@@ -43,8 +44,6 @@ YOLO_POSE_MODEL = None # YOLO("models/yolo11n-pose.mlpackage", task="pose")
 
 # Set the paths in your config
 
-
-SUBTRACT_THREADS_FROM_FFMPEG = 0
 UPDATE_PROGRESS_INTERVAL = 0.25 # Updates progress in the console and in gui
 # when enabled the queue will be processed one by one (use it on (QUEUE_MAXSIZE / frame rate) seconds longer videos or less)
 # raw frames take a lot of memory (RAM) so don't set the queue to high

@@ -7,11 +7,11 @@ from script_generator.constants import CLASS_REVERSE_MATCH, CLASS_COLORS, OUTPUT
 from config import RUN_POSE_MODEL
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
-from script_generator.utils.file import write_dataset, get_output_file_path
+from script_generator.utils.file import write_json_to_file, get_output_file_path
 from script_generator.utils.logger import logger
 
 
-class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
+class PostProcessWorker(AbstractTaskProcessor):
     process_type = TaskProcessorTypes.YOLO_ANALYSIS
     records = []
     test_result = ObjectDetectionResult()  # Test result object for debugging
@@ -135,5 +135,5 @@ class YoloAnalysisTaskProcessor(AbstractTaskProcessor):
 
         # Write the detection records to a JSON file
         raw_yolo_path, _ = get_output_file_path(self.state.video_path, "_rawyolo.json")
-        write_dataset(raw_yolo_path, self.records)
+        write_json_to_file(raw_yolo_path, self.records)
         

@@ -20,22 +20,26 @@ def check_skip_object_detection(state, root):
                 logger.info(f"Deleted empty raw yolo data file: {raw_yolo_path}")
             except OSError as e:
                 logger.error(f"Error deleting raw yolo file {raw_yolo_path}: {e}")
-            return False
+            return "generate"
 
-        skip_detection = Widgets.messagebox(
+        choice = Widgets.messagebox(
             "Detection File Conflict",
             f"The file already exists. What would you like to do?\n{raw_yolo_filename}",
-            "Use Existing",
             "Generate New",
-            root
+            "Use Existing",
+            root,
+            height=150
         )
-        if skip_detection:
+        if choice == "no":
             logger.info(f"File {raw_yolo_path} already exists. Skipping detections and loading file content...")
-            return True
-        else:
+            return "use_existing"
+        elif choice == "yes":
             os.remove(raw_yolo_path)
+            return "generate"
 
-    return False
+        return "cancel"
+
+    return "generate"
 
 def make_data_boxes(records):
     """
