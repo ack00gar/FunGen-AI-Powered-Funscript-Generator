@@ -3,14 +3,14 @@ import threading
 from typing import Generator, Optional
 
 from script_generator.state.app_state import AppState
-from script_generator.tasks.tasks import AnalyzeFrameTask, Task
+from script_generator.tasks.tasks import AnalyzeFrameTask
 from script_generator.utils.logger import logger
 
 
 class AbstractTaskProcessor(threading.Thread):
     process_type = ""
 
-    def __init__(self, state: AppState, task: Task, output_queue: queue.Queue, input_queue: Optional[queue.Queue] = None):
+    def __init__(self, state: AppState, output_queue: queue.Queue, input_queue: Optional[queue.Queue] = None):
         """
         Abstract thread class to handle lifecycle management and task handling boilerplate.
 
@@ -22,7 +22,6 @@ class AbstractTaskProcessor(threading.Thread):
         self.input_queue = input_queue
         self.output_queue = output_queue
         self._stop_event = threading.Event()
-        self.task = task
         self.exception = None  # Store the exception that occurs in the thread
 
     def log(self, message):
@@ -47,7 +46,7 @@ class AbstractTaskProcessor(threading.Thread):
                 task = self.input_queue.get(timeout=1)
 
                 if task is None:  # Sentinel for termination
-                    self.task.end(self.process_type)
+                    self.state.analyze_task.end(self.process_type)
                     self.on_last_item()
                     self.finish_task(None)
                     break
@@ -75,7 +74,7 @@ class AbstractTaskProcessor(threading.Thread):
         Catches any exceptions and stores them for the caller.
         """
         try:
-            self.task.start(self.process_type)
+            self.state.analyze_task.start(self.process_type)
             self.task_logic()
         except Exception as e:
             self.exception = e  # Capture the exception
@@ -95,7 +94,7 @@ class AbstractTaskProcessor(threading.Thread):
         raise NotImplementedError("Subclasses must implement task_logic")
 
     def stop_process(self):
-        self.task.end(self.process_type)
+        self.state.analyze_task.end(self.process_type)
         self.on_last_item()
         # Propagate sentinel to the output queue
         self.output_queue.put(None)
