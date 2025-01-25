@@ -17,6 +17,7 @@ class AppState:
         self.video_path: string = None
         self.frame_start: int = 0
         self.frame_end: int | None = None
+        self.frame_start_track = 0
         self.current_frame_id = 0
         self.frame_area = 0
 

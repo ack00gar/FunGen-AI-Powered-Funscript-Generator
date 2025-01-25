@@ -31,11 +31,13 @@ def tracking_analysis(state):
         return
 
     # Deciding whether we start from there or from a user-specified later frame
-    state.frame_start = max(max(first_penis_frame - int(video_info.fps), state.frame_start - int(video_info.fps)), 0)
+    #state.frame_start = max(max(first_penis_frame - int(video_info.fps), state.frame_start - int(video_info.fps)), 0)
+    state.frame_start_track = max(max(first_penis_frame - int(video_info.fps), state.frame_start - int(video_info.fps)), 0)
 
     state.frame_end = state.video_info.total_frames if not state.frame_end else state.frame_end
 
-    logger.info(f"Frame Start adjusted to: {state.frame_start}")
+    #logger.info(f"Frame Start adjusted to: {state.frame_start}")
+    logger.info(f"Frame Start adjusted to: {state.frame_start_track}")
 
     # Performing the tracking part and generation of the raw funscript data
     state.funscript_data = analyze_tracking_results(state, results)

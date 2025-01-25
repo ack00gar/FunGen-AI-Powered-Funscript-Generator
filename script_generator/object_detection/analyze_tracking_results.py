@@ -74,7 +74,8 @@ def analyze_tracking_results(state, results):
     last_ui_update_time = time.time()
 
     for frame_pos in tqdm(
-            range(state.frame_start, state.frame_end), unit="f", desc="Analyzing tracking data", position=0,
+            #range(state.frame_start, state.frame_end), unit="f", desc="Analyzing tracking data", position=0,
+            range(state.frame_start_track, state.frame_end), unit="f", desc="Analyzing tracking data", position=0,
             unit_scale=False,
             unit_divisor=1,
             ncols=130
