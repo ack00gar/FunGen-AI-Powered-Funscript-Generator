@@ -565,12 +565,24 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
     :param start_frame: The starting frame for the search.
     :return: The frame ID where the penis is first detected.
     """
-    consecutive_frames = 0
-    frame_detected = 0
-    penis_frame = 0
+    penis_cls = 0
+    prev_frame = 0
+    cons_frames = 0
+    threshold = 5
+
     for line in data:
-        if line[0] >= start_frame and line[1] == 0 and line[2] >= 0.5:
+        if line[0] >= start_frame and line[1] == penis_cls and line[2] >= 0.6:
             penis_frame = line[0]
+            if prev_frame == line[0] - 1:
+                cons_frames += 1
+            else:
+                cons_frames = 0
+            prev_frame = line[0]
+
+            if cons_frames > threshold:
+                global_state.logger.info(f"First instance of Glans/Penis found in frame {prev_frame - threshold}")
+                return penis_frame
+
             return penis_frame
         """
         if line[0] == penis_frame and line[1] == 1 and line[2] >= 0.5:
