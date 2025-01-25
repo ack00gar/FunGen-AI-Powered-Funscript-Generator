@@ -170,7 +170,7 @@ class Debugger:
             #    continue
 
             # frame_copy = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # make a copy of the frame to make it writeable, useful for ffmpeg library here
-            frame_copy = frame.copy()  # no need to convert anymore
+            frame_copy = frame.copy()  # no need to convert
             # Display variables and bounding boxes
             str_frame_id = str(self.current_frame)
             if str_frame_id in self.logs:
