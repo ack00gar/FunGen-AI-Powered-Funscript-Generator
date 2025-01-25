@@ -4,7 +4,8 @@ import numpy as np
 import argparse
 from config import FFMPEG_PATH, FFPROBE_PATH, RENDER_RESOLUTION
 from script_generator.utils.logger import logger
-from script_generator.video.ffmpeg import get_video_info
+from script_generator.video.info.video_info import get_video_info
+
 
 # TODO rework this class in the new logic and make the existing logic more flexible and generic
 class VideoReaderFFmpeg:

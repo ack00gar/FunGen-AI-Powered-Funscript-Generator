@@ -5,7 +5,7 @@ import torch
 
 from script_generator.utils.logger import logger
 
-
+# TODO replace with yaml
 def find_ffmpeg_path(win_ffmpeg_path, mac_ffmpeg_path, lin_ffmpeg_path):
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path:

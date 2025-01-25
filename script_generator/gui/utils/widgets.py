@@ -261,69 +261,81 @@ class Widgets:
         return container, checkbox, is_checked
 
     @staticmethod
-    def messagebox(title, message, yes_text="Yes", no_text="No", master=None):
+    def create_popup(title, master, content_builder, width=400, height=300):
+        # Variable to store user choice
+        user_action = tk.StringVar(value=None)  # Stores user action ('cancel', 'yes', 'no', etc.)
+
         # Create a Toplevel window
         window = tk.Toplevel(master)
         window.title(title)
-        window.geometry("350x140")
+        window.geometry(f"{width}x{height}")
 
-        # Center the popup in the master window
-        if master is not None:
+        # Center the popup
+        if master:
             master.update_idletasks()  # Ensure master's dimensions are up-to-date
             master_width = master.winfo_width()
             master_height = master.winfo_height()
             master_x = master.winfo_x()
             master_y = master.winfo_y()
 
-            window_width = 350
-            window_height = 140
-
-            position_right = master_x + (master_width // 2) - (window_width // 2)
-            position_down = master_y + (master_height // 2) - (window_height // 2)
-
-            window.geometry(f"{window_width}x{window_height}+{position_right}+{position_down}")
+            position_right = master_x + (master_width // 2) - (width // 2)
+            position_down = master_y + (master_height // 2) - (height // 2)
         else:
-            # Center in the screen if no master is provided
-            window_width = 350
-            window_height = 140
-
+            # Center on the screen if no master provided
             screen_width = window.winfo_screenwidth()
             screen_height = window.winfo_screenheight()
 
-            position_right = (screen_width // 2) - (window_width // 2)
-            position_down = (screen_height // 2) - (window_height // 2)
+            position_right = (screen_width // 2) - (width // 2)
+            position_down = (screen_height // 2) - (height // 2)
 
-            window.geometry(f"{window_width}x{window_height}+{position_right}+{position_down}")
+        window.geometry(f"{width}x{height}+{position_right}+{position_down}")
 
-        # Add message label
-        tk.Label(window, text=message, wraplength=350, justify="left").pack(pady=20)
-
-        # Container for buttons
-        button_frame = tk.Frame(window)
-        button_frame.pack(pady=10)
-
-        # Variable to store user choice
-        user_choice = tk.BooleanVar(value=None)
-
-        # Yes button
-        def on_yes():
-            user_choice.set(True)
+        # Handle the close button (X) action
+        def on_close():
+            user_action.set("cancel")  # Set action to 'cancel'
             window.destroy()
 
-        Widgets.button(button_frame, yes_text, on_yes, row=0, column=0)
+        # Bind the on_close callback to the default close button
+        window.protocol("WM_DELETE_WINDOW", on_close)
 
-        # No button
-        def on_no():
-            user_choice.set(False)
-            window.destroy()
+        # Call the content builder if provided
+        if content_builder:
+            content_builder(window, user_action)
 
-        Widgets.button(button_frame, no_text, on_no, row=0, column=1)
-
-        # Wait for the user to close the dialog
+        # Ensure the popup is modal
         window.grab_set()
         window.wait_window()
 
-        return user_choice.get()
+        return user_action.get()
+
+    @staticmethod
+    def messagebox(title, message, yes_text="Yes", no_text="No", master=None, width=400, height=200):
+        # Call `create_popup` and get the action result
+        def build_content(window, user_action):
+            # Add message label
+            tk.Label(window, text=message, wraplength=300, justify="left").pack(pady=20)
+
+            # Add buttons
+            button_frame = tk.Frame(window)
+            button_frame.pack(pady=10)
+
+            def on_yes():
+                user_action.set("yes")
+                window.destroy()
+
+            def on_no():
+                user_action.set("no")
+                window.destroy()
+
+            Widgets.button(button_frame, yes_text, on_yes, row=0, column=0)
+            Widgets.button(button_frame, no_text, on_no, row=0, column=1)
+
+        action_result = Widgets.create_popup(title, master, content_builder=build_content, width=width, height=height)
+        return action_result  # Returns 'yes', 'no', or 'cancel'
+
+    @staticmethod
+    def custom_popup(title, content_builder, master=None, width=400, height=300):
+        Widgets.create_popup(title, master, width, height, content_builder)
 
     @staticmethod
     def disclaimer(parent, tooltip_text=None):

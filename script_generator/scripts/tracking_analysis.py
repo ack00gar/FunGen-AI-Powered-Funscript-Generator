@@ -4,7 +4,7 @@ from script_generator.object_detection.analyze_tracking_results import analyze_t
 from script_generator.object_detection.utils import make_data_boxes, parse_yolo_data_looking_for_penis
 from script_generator.utils.file import load_json_from_file, get_output_file_path
 from script_generator.utils.logger import logger
-from script_generator.video.video_info import get_cropped_dimensions
+from script_generator.video.info.video_info import get_cropped_dimensions
 from utils.lib_FunscriptHandler import FunscriptGenerator
 
 
@@ -42,7 +42,7 @@ def tracking_analysis(state):
     # Performing the tracking part and generation of the raw funscript data
     state.funscript_data = analyze_tracking_results(state, results)
 
-    state.debugger.save_logs()
+    state.debug_data.save_debug_file()
 
     funscript_handler = FunscriptGenerator()
 

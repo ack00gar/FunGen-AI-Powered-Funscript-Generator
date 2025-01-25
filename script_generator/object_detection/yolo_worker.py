@@ -1,13 +1,10 @@
 import time
 
-import cv2
-
-from config import YOLO_CONF, YOLO_BATCH_SIZE, YOLO_MODEL
-
+from config import YOLO_CONF, YOLO_BATCH_SIZE, YOLO_MODEL, YOLO_PERSIST
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 
 
-class YoloTaskProcessor(AbstractTaskProcessor):
+class YoloWorker(AbstractTaskProcessor):
     process_type = TaskProcessorTypes.YOLO
 
     # TODO add pose model support
@@ -36,7 +33,7 @@ class YoloTaskProcessor(AbstractTaskProcessor):
     def process_batch(self, frames, tasks):
         start_time = time.time()
         # Yolo expects bgr images when using numpy frames
-        yolo_results = YOLO_MODEL.track(frames, persist=True, conf=YOLO_CONF, verbose=False)
+        yolo_results = YOLO_MODEL.track(frames, persist=YOLO_PERSIST, conf=YOLO_CONF, verbose=False)
         avg_time = (time.time() - start_time) / len(tasks)
 
         for t, result in zip(tasks, yolo_results):

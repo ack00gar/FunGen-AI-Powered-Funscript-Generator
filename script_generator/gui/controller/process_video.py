@@ -8,7 +8,6 @@ from script_generator.scripts.analyze_video import analyze_video
 from script_generator.utils.file import get_output_file_path
 from script_generator.utils.helpers import to_int_or_none
 from script_generator.utils.logger import logger
-from utils.lib_Debugger import Debugger
 
 
 def video_analysis(state, root):
@@ -29,13 +28,11 @@ def video_analysis(state, root):
 
     def run():
         try:
-            # Initialize the debugger
-            log_file, _ = get_output_file_path(state.video_path, "_debug_logs.json")
-            state.debugger = Debugger(state.video_path, log_file=log_file)
+            choice = check_skip_object_detection(state, root)
 
-            skip_detection = check_skip_object_detection(state, root)
-
-            if skip_detection:
+            if choice == "cancel":
+                return
+            elif choice == "use_existing":
                 state.set_video_info()
                 if state.update_ui:
                     state.update_ui(ProgressMessage(
@@ -44,7 +41,7 @@ def video_analysis(state, root):
                         total_frames=state.video_info.total_frames,
                         eta="Done"
                     ))
-            else:
+            elif choice == "generate":
                 analyze_video(state)
 
             tracking_analysis(state)
@@ -57,4 +54,3 @@ def video_analysis(state, root):
 
     processing_thread = threading.Thread(target=run)
     processing_thread.start()
-    # processing_thread.join()
