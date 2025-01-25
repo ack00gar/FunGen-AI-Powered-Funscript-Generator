@@ -25,7 +25,7 @@ def analyze_tracking_results(state, results):
     fps = video_info.fps
     reader = VideoReaderFFmpeg(state.video_path, is_vr=video_info.is_vr)
 
-    state.frame_area = video_info.width * video_info.height
+    state.frame_area = width * height
 
     cuts = []
 
