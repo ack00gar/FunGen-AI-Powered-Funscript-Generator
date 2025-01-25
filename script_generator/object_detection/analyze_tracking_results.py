@@ -158,7 +158,7 @@ def analyze_tracking_results(state, results):
                 logger.warn("Frame could not be read in live preview")
                 continue
 
-            frame_display = frame.copy()
+            frame_display = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
             for box in tracker.tracked_boxes:
                 frame_display = visualizer.draw_bounding_box(

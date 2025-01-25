@@ -1,8 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+from script_generator.gui.controller.process_video import video_analysis
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
-from script_generator.gui.controller.video_analysis import video_analysis
 from script_generator.gui.controller.debug_video import debug_video
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage
 from script_generator.gui.utils.widgets import Widgets
@@ -58,7 +58,7 @@ class FunscriptGeneratorPage(tk.Frame):
         optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
 
         Widgets.input(optional_settings, "Frame Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
-        Widgets.input(optional_settings, "Frame End", state=state, attr="frame_start", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
+        Widgets.input(optional_settings, "Frame End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
         # endregion
 
         # region PROCESSING
