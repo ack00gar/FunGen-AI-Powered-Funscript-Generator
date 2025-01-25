@@ -6,6 +6,7 @@ from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.object_detection.utils import check_skip_object_detection
 from script_generator.scripts.analyze_video import analyze_video
 from script_generator.utils.file import get_output_file_path
+from script_generator.utils.helpers import to_int_or_none
 from script_generator.utils.logger import logger
 from utils.lib_Debugger import Debugger
 
@@ -22,6 +23,9 @@ def video_analysis(state, root):
     logger.info(f"Frame Start: {state.frame_start}")
     logger.info(f"Frame End: {state.frame_end}")
     logger.info(f"Reference Script: {state.reference_script}")
+
+    state.frame_start = to_int_or_none(state.frame_start)
+    state.frame_end = to_int_or_none(state.frame_end)
 
     def run():
         try:

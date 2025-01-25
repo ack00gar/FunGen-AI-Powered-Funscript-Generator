@@ -67,10 +67,18 @@ class Widgets:
         container.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
         container.columnconfigure(1, weight=1)
 
-        value = tk.StringVar(value=getattr(state, attr))
+        initial_value = getattr(state, attr)
+        if initial_value is None:
+            initial_value = ""
 
-        if callback:
-            value.trace_add("write", lambda *args: setattr(state, attr, value.get()))
+        value = tk.StringVar(value=initial_value)
+
+        def on_value_change(*args):
+            setattr(state, attr, value.get())
+            if callback:
+                callback(value.get())
+
+        value.trace_add("write", on_value_change)
 
         label = tk.Label(container, text=label_text, anchor="w", width=label_width_px // 7)
         label.grid(row=0, column=0, sticky="w", padx=(5, 2))
