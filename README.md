@@ -165,7 +165,7 @@ You can use Start windows.bat to launch the gui on windows if you installed with
 To generate a script with cmd or terminal, run the following command
 
 ```bash
-python script_generator.cli.generate_funscript.py /path/to/video.mp4
+python -m script_generator.cli.generate_funscript.py /path/to/video.mp4
 ```
 ---
 
@@ -194,9 +194,6 @@ The script generates the following files in the output directory of you project 
 6. `_comparefunscripts.png`: Comparison visualization between the generated Funscript and the reference Funscript (if provided).
 7. `_adjusted.funscript`: Funscript file with adjusted amplitude.
 8. `_debug_logs.json`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
-
-In config.py you can set COPY_FUNSCRIPT_TO_MOVIE_LOCATION to True to copy the generated script to the same directory as your video.
-If a funscript already exists it will be renamed to {funscriptName}_{date}.funscript.bak
 
 ---
 

@@ -21,12 +21,6 @@ mac_ffprobe_path = "/usr/local/bin/ffprobe"
 lin_ffprobe_path = "/usr/bin/ffprobe"
 
 ##################################################################################################
-# USER PREFERENCES
-##################################################################################################
-
-COPY_FUNSCRIPT_TO_MOVIE_LOCATION = False
-
-##################################################################################################
 # PERFORMANCE
 ##################################################################################################
 
@@ -60,11 +54,9 @@ if SEQUENTIAL_MODE:
 # PROG
 ##################################################################################################
 
-# Preload the YOLO modal on launch
-YOLO_MODEL = YOLO(MODEL_PATH, task="detect")
 RUN_POSE_MODEL = False
 YOLO_POSE_MODEL = None # YOLO("models/yolo11n-pose.mlpackage", task="pose") #TODO pose model?
-
+VALID_VIDEO_READERS = ["FFmpeg", "FFmpeg + OpenGL (Windows)"]
 FFMPEG_PATH = find_ffmpeg_path(win_ffmpeg_path, mac_ffmpeg_path, lin_ffmpeg_path)
 FFPROBE_PATH = find_ffprobe_path(win_ffprobe_path, mac_ffprobe_path, lin_ffprobe_path)
 logger.info(f"ffmpeg_path: {FFMPEG_PATH}")

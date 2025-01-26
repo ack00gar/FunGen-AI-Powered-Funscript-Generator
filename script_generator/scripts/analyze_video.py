@@ -95,12 +95,13 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
 
         log_performance(state=state, results_queue=result_q)
 
-        state.update_ui(ProgressMessage(
-            process="OBJECT_DETECTION",
-            frames_processed=state.video_info.total_frames,
-            total_frames=state.video_info.total_frames,
-            eta="Done"
-        ))
+        if state.update_ui:
+            state.update_ui(ProgressMessage(
+                process="OBJECT_DETECTION",
+                frames_processed=state.video_info.total_frames,
+                total_frames=state.video_info.total_frames,
+                eta="Done"
+            ))
 
         return result_q.queue
 
@@ -165,7 +166,7 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
 def log_performance(state, results_queue):
     analyze_task = state.analyze_task
     # TODO filter out sentinals in task processor
-    tasks = [task for task in results_queue.queue if task is not None and hasattr(task, 'profile')]
+    tasks = [task for task in results_queue.queue if hasattr(task, 'profile')]
     total_frames = len(tasks)
 
     total_pipeline_time = analyze_task.end_time - analyze_task.start_time

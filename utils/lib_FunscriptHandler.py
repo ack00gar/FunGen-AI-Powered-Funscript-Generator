@@ -10,7 +10,7 @@ import numpy as np
 from scipy.signal import savgol_filter
 from simplification.cutil import simplify_coords
 
-from config import STEP_SIZE, VERSION, COPY_FUNSCRIPT_TO_MOVIE_LOCATION
+from config import STEP_SIZE, VERSION
 from script_generator.constants import HEATMAP_COLORS, FUNSCRIPT_AUTHOR
 from script_generator.debug.logger import logger
 from script_generator.state.app_state import AppState
@@ -113,17 +113,17 @@ class FunscriptGenerator:
             self.write_funscript(zip_adjusted_positions, output_path, state.video_info.fps)
 
             # copy funscript if specified
-            if COPY_FUNSCRIPT_TO_MOVIE_LOCATION:
+            if state.copy_funscript_to_movie_dir:
                 copy = True
                 video_folder = os.path.dirname(state.video_path)
                 filename_base = os.path.basename(state.video_path)[:-4]
-                funscript_path = os.path.join(video_folder, filename_base, ".funscript")
+                funscript_path = os.path.join(video_folder, f"{filename_base}.funscript")
 
                 # Backup output file if it exists
                 if os.path.exists(funscript_path):
                     json_data = load_json_from_file(funscript_path)
                     if json_data["author"] == FUNSCRIPT_AUTHOR:
-                        backup_path = os.path.join(video_folder, filename_base, f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript.bak")
+                        backup_path = os.path.join(video_folder, f"{filename_base}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript.bak")
                         logger.info(f"Funscript {funscript_path} already exists, backing up as {backup_path}...")
                         os.rename(funscript_path, backup_path)
                     else:
@@ -139,6 +139,7 @@ class FunscriptGenerator:
             self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
         except Exception as e:
             logger.error(f"Error generating funscript: {e}")
+            raise
 
     def write_funscript(self, distances, output_path, fps):
         with open(output_path, 'w') as f:

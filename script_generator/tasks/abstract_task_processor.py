@@ -45,7 +45,8 @@ class AbstractTaskProcessor(threading.Thread):
             try:
                 task = self.input_queue.get(timeout=1)
 
-                if task is None:  # Sentinel for termination
+                if task is None:
+                    self.input_queue.task_done() # Remove sentinel
                     self.state.analyze_task.end(self.process_type)
                     self.on_last_item()
                     self.finish_task(None)
