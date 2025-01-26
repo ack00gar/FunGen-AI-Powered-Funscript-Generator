@@ -261,8 +261,11 @@ class FunscriptGeneratorPage(tk.Frame):
                     logger.info(f"Unhandled message type: {type(msg)}")
 
             def handle_state_update(state_msg: UpdateGUIState):
+                setattr(state, state_msg.attr, state_msg.value)
                 if state_msg.attr == "live_preview_mode":
                     live_preview_checked.set(state_msg.value)
+
+                update_ui_for_state()
 
             def handle_progress_message(progress_msg: ProgressMessage):
                 progress_mapping = {
