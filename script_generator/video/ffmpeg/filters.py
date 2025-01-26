@@ -14,7 +14,7 @@ def get_vr_video_filters(video, video_reader, hwaccel, disable_opengl=False):
 
     cuda = hwaccel == "cuda"
 
-    scale = f"[0:0]scale_cuda=2160:-2,hwdownload" if cuda else f"[0:0]scale={RENDER_RESOLUTION * 2}:-2"
+    scale = f"[0:0]scale_cuda={RENDER_RESOLUTION * 2}:-2,hwdownload" if cuda else f"[0:0]scale={RENDER_RESOLUTION * 2}:-2"
     crop = f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0"
     out_format = f"format=nv12," if cuda else ""
 
