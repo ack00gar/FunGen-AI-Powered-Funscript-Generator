@@ -122,7 +122,7 @@ class FunscriptGenerator:
                 # Backup output file if it exists
                 if os.path.exists(funscript_path):
                     json_data = load_json_from_file(funscript_path)
-                    if json_data["author"] == FUNSCRIPT_AUTHOR:
+                    if json_data["author"] and json_data["author"] == FUNSCRIPT_AUTHOR:
                         backup_path = os.path.join(video_folder, f"{filename_base}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript.bak")
                         logger.info(f"Funscript {funscript_path} already exists, backing up as {backup_path}...")
                         os.rename(funscript_path, backup_path)
