@@ -19,7 +19,7 @@ class App(tk.Tk):
             ctypes.windll.shcore.SetProcessDpiAwareness(2)  # For Windows DPI scaling
         # self.tk.call('tk', 'scaling', 1.0)
         self.title(f"VR & 2D POV Funscript AI Generator - v" + VERSION)
-        self.geometry(f"{('800' if is_mac() else '700')}x840")
+        self.geometry(f"{('800' if is_mac() else '700')}x900")
         self.resizable(False, False)
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))
@@ -36,6 +36,13 @@ class App(tk.Tk):
         # Dictionary to store pages
         self.frames = {}
 
+        # Ensure the window is always on top
+        self.attributes("-topmost", True)
+        self.after(200, self.reset_topmost)
+
+    def reset_topmost(self):
+        self.focus_force()
+        self.attributes("-topmost", False)
 
     def show_frame(self, page_name):
         """Show a frame, creating it if necessary."""

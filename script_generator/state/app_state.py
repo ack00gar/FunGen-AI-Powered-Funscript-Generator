@@ -1,3 +1,4 @@
+import os.path
 import string
 from typing import Literal
 
@@ -6,7 +7,10 @@ from ultralytics import YOLO
 from script_generator.constants import MODEL_PATH
 from script_generator.debug.debug_data import DebugData
 from script_generator.debug.logger import logger
+from script_generator.object_detection.util.utils import get_metrics_file_info
+from script_generator.object_detection.utils import get_raw_yolo_file_info
 from script_generator.tasks.tasks import AnalyzeVideoTask
+from script_generator.utils.file import get_output_file_path
 from script_generator.utils.helpers import is_mac
 from script_generator.video.ffmpeg.hwaccel import get_preferred_hwaccel
 from script_generator.video.info.video_info import VideoInfo, get_video_info
@@ -54,6 +58,9 @@ class AppState:
         # State
         self.video_info: VideoInfo | None = None
         self.analyze_task: AnalyzeVideoTask | None = None
+        self.has_raw_yolo = False
+        self.has_tracking_data = False
+        self.is_processing = False
 
         # App logic
         self.debug_data = DebugData(self)
@@ -62,8 +69,11 @@ class AppState:
         self.yolo_model = YOLO(MODEL_PATH, task="detect")
 
     def set_video_info(self):
-        if self.video_info is None:
+        # If movie changed
+        if self.video_info is None or self.video_info.path != self.video_path:
             self.video_info = get_video_info(self.video_path)
+            self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self.video_path)
+            self.has_tracking_data, _, _ = get_metrics_file_info(self.video_path)
 
 
 def log_state_settings(state: AppState):

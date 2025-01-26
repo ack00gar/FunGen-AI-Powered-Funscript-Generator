@@ -151,7 +151,7 @@ class Widgets:
             Tooltip(entry, tooltip_text)
             Tooltip(button, tooltip_text)
 
-        return container, entry, file_path
+        return container, entry, button, file_path
 
     @staticmethod
     def labeled_progress(parent, label_text, row=0, column=0, progress_length=300, label_width_px=LABEL_WIDTH, label_percentage_width_px=LABEL_WIDTH, tooltip_text=None):
