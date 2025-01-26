@@ -165,6 +165,59 @@ To generate a script with cmd or terminal, run the following command
 ```bash
 python -m script_generator.cli.generate_funscript.py /path/to/video.mp4
 ```
+
+### Command-Line Arguments
+#### Required Arguments
+- **`video_path`** *(str)*  
+  Path to the input video file.  
+
+#### Optional Arguments
+- **`--reuse-yolo`** *(bool, default=False)*  
+  Use an existing raw YOLO output file instead of generating a new one.
+
+- **`--copy-funscript`** *(bool, default=True)*  
+  Copies the final funscript to the movie directory.
+
+- **`--frame-start`** *(int, default=0)*  
+  The starting frame number for processing.
+
+- **`--frame-end`** *(int or None, default=None)*  
+  The ending frame number for processing. Set to `None` to process till the end.
+
+- **`--video-reader`** *(str, default=None)*  
+  Video reader to use. Valid options: `<VALID_VIDEO_READERS>`. Defaults are platform-specific.
+
+- **`--save-debug-file`** *(bool, default=True)*  
+  Saves a debug file to disk with all collected metrics. Also allows you to re-use tracking data.
+
+#### Funscript Tweaking Settings
+- **`--boost-enabled`** *(bool, default=True)*  
+  Enable boosting to adjust the motion range dynamically.
+
+- **`--boost-up-percent`** *(int, default=10)*  
+  Increase the peaks by a specified percentage to enhance upper motion limits.
+
+- **`--boost-down-percent`** *(int, default=15)*  
+  Reduce the lower peaks by a specified percentage to limit downward motion.
+
+- **`--threshold-enabled`** *(bool, default=True)*  
+  Enable thresholding to control motion mapping within specified bounds.
+
+- **`--threshold-low`** *(int, default=10)*  
+  Values below this threshold are mapped to 0, limiting lower boundary motion.
+
+- **`--threshold-high`** *(int, default=90)*  
+  Values above this threshold are mapped to 100, limiting upper boundary motion.
+
+- **`--vw-simplification-enabled`** *(bool, default=True)*  
+  Simplify the generated script to reduce the number of points, making it user-friendly.
+
+- **`--vw-factor`** *(float, default=8.0)*  
+  Determines the degree of simplification. Higher values lead to fewer points.
+
+- **`--rounding`** *(int, default=5)*  
+  Set the rounding factor for script values to adjust precision.
+
 ---
 
 ## Performance & Parallel Processing
