@@ -40,6 +40,24 @@ def load_json_from_file(file_path):
         logger.info(f"Loaded data from {file_path}, length: {len(data)}")
     return data
 
+def get_data_file_info(video_path, suffix):
+    """
+    Checks if a data file exists, returns a true / false and the path and filename
+    """
+    raw_yolo_path, raw_yolo_filename = get_output_file_path(video_path, suffix)
+    if os.path.exists(raw_yolo_path):
+        yolo_data = load_json_from_file(raw_yolo_path)
+        if len(yolo_data) == 0:
+            logger.warn(f"Raw YOLO data file doesn't contain any data: {raw_yolo_path}")
+            try:
+                os.remove(raw_yolo_path)
+                logger.info(f"Deleted empty raw YOLO data file: {raw_yolo_path}")
+            except OSError as e:
+                logger.error(f"Error deleting raw YOLO file {raw_yolo_path}: {e}")
+        else:
+            return True, raw_yolo_path, raw_yolo_filename
+    return False, None, None
+
 def get_output_file_path(video_path, suffix, add_spoiler_prefix=False):
     """"
     Get the OUTPUT_PATH filename for a specific suffix (e.g. _raw_yolo.json)

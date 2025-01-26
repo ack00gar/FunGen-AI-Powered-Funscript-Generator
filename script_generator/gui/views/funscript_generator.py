@@ -1,15 +1,16 @@
 import tkinter as tk
 from tkinter import ttk
 
+from script_generator.debug.logger import logger
+from script_generator.gui.controller.debug_video import debug_video
 from script_generator.gui.controller.process_video import video_analysis
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
-from script_generator.gui.controller.debug_video import debug_video
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage, UpdateGUIState
+from script_generator.gui.utils.utils import enable_widgets, disable_widgets, set_progressbars_done, reset_progressbars
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.gui.views.popups.create_debug_video import render_debug_video_popup
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
-from script_generator.debug.logger import logger
 
 
 class FunscriptGeneratorPage(tk.Frame):
@@ -29,7 +30,11 @@ class FunscriptGeneratorPage(tk.Frame):
         # region VIDEO SELECTION
         video_selection = Widgets.frame(wrapper, title="Video Selection", main_section=True)
 
-        Widgets.file_selection(
+        def update_video_path():
+            state.set_video_info()
+            update_ui_for_state()
+
+        _, fs_entry, fs_button, _ = Widgets.file_selection(
             attr="video_path",
             parent=video_selection,
             label_text="Video",
@@ -38,7 +43,7 @@ class FunscriptGeneratorPage(tk.Frame):
             file_types=[("Text Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")],
             state=state,
             tooltip_text="The video to generate a funscript for. For proper detection of fisheye keep the suffix like _FISHEYE190, _MKX200, etc. in the filename\n\nIn the future we'll add the option to override this in the UI.",
-            command=lambda val: state.set_video_info()
+            command=lambda val: update_video_path()
         )
 
         Widgets.dropdown(
@@ -70,7 +75,7 @@ class FunscriptGeneratorPage(tk.Frame):
             # TODO reset the progress bars
             video_analysis(state, controller)
 
-        Widgets.button(processing, "Start processing", start_processing, row=3)
+        processing_btn = Widgets.button(processing, "Start processing", start_processing, row=3)
         # endregion
 
         # region FUNSCRIPT TWEAKING
@@ -151,7 +156,7 @@ class FunscriptGeneratorPage(tk.Frame):
         )
 
         # Regenerate Funscript Button
-        Widgets.button(tweaking_container, "Regenerate Funscript", lambda: regenerate_funscript(self.state), row=2)
+        regenerate_btn = Widgets.button(tweaking_container, "Regenerate Funscript", lambda: regenerate_funscript(self.state), row=2)
 
         # endregion
 
@@ -172,7 +177,7 @@ class FunscriptGeneratorPage(tk.Frame):
             tooltip_text="Saves a debug file to disk with all collected metrics.\nThis is a prerequisite for playing back the debug video with the debug statistics overlay.\nThis also contains all generated metrics.",
             row=1
         )
-        Widgets.button(
+        play_btn = Widgets.button(
             general,
             "Play debug video",
             lambda: debug_video(state),
@@ -192,8 +197,8 @@ class FunscriptGeneratorPage(tk.Frame):
             state=state,
             row=0
         )
-        debug_video_section = Widgets.frame(debugging, title="Share debug video", row=1)
-        Widgets.button(
+        debug_video_section = Widgets.frame(debugging, title="Share debug video", row=2)
+        gen_video_btn = Widgets.button(
             debug_video_section,
             "Generate sharable debug video",
             lambda: Widgets.create_popup(title="Generate debug video", master=controller, width=650, height=205, content_builder=lambda window, user_action: render_debug_video_popup(window, state)),
@@ -206,6 +211,23 @@ class FunscriptGeneratorPage(tk.Frame):
         # region FOOTER
         Widgets.disclaimer(wrapper)
         # endregion
+
+        def update_ui_for_state():
+            if state.has_raw_yolo and state.has_tracking_data:
+                enable_widgets([play_btn, regenerate_btn, gen_video_btn])
+                set_progressbars_done([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
+            elif state.has_raw_yolo and not state.has_tracking_data:
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn])
+                set_progressbars_done([(yolo_p, yolo_p_perc)])
+                reset_progressbars([(track_p, track_p_perc)])
+            else:
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn])
+                reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
+
+            if state.is_processing:
+                disable_widgets([fs_entry, fs_button])
+            else:
+                enable_widgets([fs_entry, fs_button])
 
         # region UI UPDATE CALLBACK
         def update_ui(msg: UIMessage):
@@ -229,20 +251,26 @@ class FunscriptGeneratorPage(tk.Frame):
 
             def handle_progress_message(progress_msg: ProgressMessage):
                 progress_mapping = {
-                    "OBJECT_DETECTION": (yolo_p, yolo_p_perc),
+                    "OBJECT_DETECTION": (yolo_p, yolo_p_perc, "has_raw_yolo"),
                     # "SCENE_DETECTION": (scene_p, scene_p_perc),
-                    "TRACKING_ANALYSIS": (track_p, track_p_perc),
+                    "TRACKING_ANALYSIS": (track_p, track_p_perc, "has_tracking_data"),
                 }
 
                 if progress_msg.process in progress_mapping:
-                    progress_bar, progress_label = progress_mapping[progress_msg.process]
+                    progress_bar, progress_label, state_attr = progress_mapping[progress_msg.process]
                     progress_bar["value"] = progress_msg.frames_processed
                     progress_bar["maximum"] = progress_msg.total_frames
                     percentage = (progress_msg.frames_processed / progress_msg.total_frames) * 100 if progress_msg.total_frames > 0 else 0
-                    progress_label.config(text=f"{percentage:.0f}% - ETA: {progress_msg.eta}" if progress_msg.frames_processed < progress_msg.total_frames else "Done")
+                    is_done = progress_msg.frames_processed >= progress_msg.total_frames
+                    progress_label.config(text="Done" if is_done else f"{percentage:.0f}% - ETA: {progress_msg.eta}")
+
+                    if is_done or progress_msg.frames_processed == 0:
+                        setattr(state, state_attr, is_done)
+                        update_ui_for_state()
 
             # Schedule the update on the main thread
             self.controller.after(0, process_update)
 
         self.state.update_ui = update_ui
+        update_ui_for_state()
         # endregion
