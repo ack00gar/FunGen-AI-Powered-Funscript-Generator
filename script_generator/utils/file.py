@@ -72,3 +72,7 @@ def check_create_output_folder(video_path):
     directory = os.path.dirname(output_dir)
     if not os.path.exists(directory):
         os.makedirs(directory)
+
+def ensure_path_exists(path):
+    if not os.path.exists(path):
+        os.makedirs(path)

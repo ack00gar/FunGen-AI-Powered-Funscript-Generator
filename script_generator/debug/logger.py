@@ -4,6 +4,8 @@ import os
 import sys
 from colorama import Fore, Style, init
 
+from script_generator.utils.file import ensure_path_exists
+
 init(autoreset=True)
 
 class ColorizedStreamHandler(logging.StreamHandler):
@@ -16,12 +18,15 @@ class ColorizedStreamHandler(logging.StreamHandler):
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+log_path = os.path.join(project_root, "logs")
+ensure_path_exists(log_path)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s|%(levelname)s|%(name)s|%(message)s",
     handlers=[
         logging.FileHandler(
-            os.path.join(project_root, "logs", f"log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"), mode="w", encoding='utf-8'),
+            os.path.join(log_path, f"log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"), mode="w", encoding='utf-8'),
         ColorizedStreamHandler(sys.stdout)
     ]
 )
