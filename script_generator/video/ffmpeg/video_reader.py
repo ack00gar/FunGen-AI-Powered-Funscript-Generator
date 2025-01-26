@@ -6,10 +6,10 @@ from script_generator.state.app_state import AppState
 from script_generator.video.ffmpeg.commands import get_ffmpeg_read_cmd
 
 class VideoReaderFFmpeg:
-    def __init__(self, state):
+    def __init__(self, state, start_frame=0):
         self.state: AppState = state
         self.video_path = state.video_path
-        self.start_frame = 0
+        self.start_frame = start_frame
         self.current_frame_number = 0
         self.current_time = 0
         self.process = None
@@ -28,7 +28,7 @@ class VideoReaderFFmpeg:
             self.state.video_info,
             self.state.video_reader,
             self.state.ffmpeg_hwaccel,
-            self.state.frame_start,
+            start_frame,
             disable_opengl=True
         )
         logger.info(f"Starting FFmpeg reader with command: {' '.join(cmd)}")

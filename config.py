@@ -25,10 +25,9 @@ lin_ffprobe_path = "/usr/bin/ffprobe"
 ##################################################################################################
 
 RENDER_RESOLUTION = 1080 # Above 1080x1080 doesn't seem to improve detections minimum of 640x640, has a huge impact on performance but at a quality cost (after changing you need to regenerate your data)
-TEXTURE_RESOLUTION = RENDER_RESOLUTION * 1.3 # Size that is used to texture the opengl sphere
+TEXTURE_RESOLUTION = RENDER_RESOLUTION * 1.3 # Texture size that is used to texture the opengl sphere
 YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30 # Mac doesn't support batching
 YOLO_PERSIST = True # Big impact on performance but also improves tracking
-QUEUE_MAXSIZE = 200 # Bounded queue size to avoid memory blow-up as raw frames consume a lot of memory, does not increase performance
 
 ##################################################################################################
 # ADVANCED
@@ -36,9 +35,10 @@ QUEUE_MAXSIZE = 200 # Bounded queue size to avoid memory blow-up as raw frames c
 
 YOLO_CONF = 0.3
 VR_TO_2D_PITCH=-25 # The dataset is trained on -25
-UPDATE_PROGRESS_INTERVAL = 0.1 # Updates progress in the console and in gui
+UPDATE_PROGRESS_INTERVAL = 0.2 # Updates progress in the console and in gui
 # Define custom colormap based on Lucife's heatmapColors
 STEP_SIZE = 120  # Speed step size for color transitions
+QUEUE_MAXSIZE = 100 # Bounded queue size to avoid memory blow-up as raw frames consume a lot of memory, does not increase performance
 
 ##################################################################################################
 # DEV

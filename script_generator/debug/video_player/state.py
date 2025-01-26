@@ -13,7 +13,7 @@ class VideoPlayer:
         self.end_frame = state.video_info.total_frames if not end_frame else end_frame
         self.current_frame = 0
 
-        self.cap = VideoReaderFFmpeg(state)
+        self.cap = VideoReaderFFmpeg(state, start_frame)
         self.paused = False
 
     def release(self):

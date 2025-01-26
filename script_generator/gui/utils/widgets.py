@@ -471,6 +471,7 @@ class Widgets:
                 minutes_var.set(str(m_))
                 seconds_var.set(str(s_))
                 value.set(str(f_))
+                setattr(state, attr, f_)
 
                 if callback:
                     callback(f_)
