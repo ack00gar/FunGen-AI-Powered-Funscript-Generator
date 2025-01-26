@@ -67,13 +67,14 @@ class FunscriptGeneratorPage(tk.Frame):
 
         # region PROCESSING
         processing = Widgets.frame(wrapper, title="Processing", main_section=True, row=3)
-        yolo_p_container, yolo_p, yolo_p_label, yolo_p_perc = Widgets.labeled_progress(processing, "YOLO Detection", row=0)
+        yolo_p_container, yolo_p, yolo_p_label, yolo_p_perc = Widgets.labeled_progress(processing, "Object Detection", row=0)
         # scene_p_container, scene_p, scene_p_label, scene_p_perc = Widgets.labeled_progress(processing, "Scene detection", row=1)
         track_p_container, track_p, track_p_label, track_p_perc = Widgets.labeled_progress(processing, "Tracking Analysis", row=2)
 
         def start_processing():
-            # TODO reset the progress bars
+            reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
             video_analysis(state, controller)
+            update_ui_for_state()
 
         processing_btn = Widgets.button(processing, "Start processing", start_processing, row=3)
         # endregion
@@ -216,13 +217,21 @@ class FunscriptGeneratorPage(tk.Frame):
             if state.has_raw_yolo and state.has_tracking_data:
                 enable_widgets([play_btn, regenerate_btn, gen_video_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
+                processing_btn.config(text="Re-run object detection and or tracking")
             elif state.has_raw_yolo and not state.has_tracking_data:
                 disable_widgets([play_btn, regenerate_btn, gen_video_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc)])
                 reset_progressbars([(track_p, track_p_perc)])
+                processing_btn.config(text="Re-run object detection and or start tracking")
             else:
                 disable_widgets([play_btn, regenerate_btn, gen_video_btn])
                 reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
+                processing_btn.config(text="Start processing")
+
+            if state.video_path:
+                enable_widgets([processing_btn])
+            else:
+                disable_widgets([processing_btn])
 
             if state.is_processing:
                 disable_widgets([fs_entry, fs_button])
