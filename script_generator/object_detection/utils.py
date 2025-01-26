@@ -9,37 +9,45 @@ from script_generator.debug.logger import logger
 
 
 def check_skip_object_detection(state, root):
-    raw_yolo_path, raw_yolo_filename = get_output_file_path(state.video_path, "_rawyolo.json")
-    if os.path.exists(raw_yolo_path):
-        # TODO only load the json once (not in this check and later in the process)
-        yolo_data = load_json_from_file(raw_yolo_path)
-        if len(yolo_data) == 0:
-            logger.warn(f"Raw yolo data file doesn't contain any data: {raw_yolo_path}")
-            try:
-                os.remove(raw_yolo_path)
-                logger.info(f"Deleted empty raw yolo data file: {raw_yolo_path}")
-            except OSError as e:
-                logger.error(f"Error deleting raw yolo file {raw_yolo_path}: {e}")
-            return "generate"
-
+    exists, path, filename = raw_yolo_file_exists(state)
+    if exists:
         choice = Widgets.messagebox(
             "Detection File Conflict",
-            f"The file already exists. What would you like to do?\n{raw_yolo_filename}",
+            f"The file already exists. What would you like to do?\n{filename}",
             "Generate New",
             "Use Existing",
             root,
             height=150
         )
         if choice == "no":
-            logger.info(f"File {raw_yolo_path} already exists. Skipping detections and loading file content...")
+            logger.info(f"File {path} already exists. Skipping detections and loading file content...")
             return "use_existing"
         elif choice == "yes":
-            os.remove(raw_yolo_path)
+            os.remove(path)
             return "generate"
 
         return "cancel"
 
     return "generate"
+
+
+def raw_yolo_file_exists(state):
+    """
+    Checks if the YOLO file exists
+    """
+    raw_yolo_path, raw_yolo_filename = get_output_file_path(state.video_path, "_rawyolo.json")
+    if os.path.exists(raw_yolo_path):
+        yolo_data = load_json_from_file(raw_yolo_path)
+        if len(yolo_data) == 0:
+            logger.warn(f"Raw YOLO data file doesn't contain any data: {raw_yolo_path}")
+            try:
+                os.remove(raw_yolo_path)
+                logger.info(f"Deleted empty raw YOLO data file: {raw_yolo_path}")
+            except OSError as e:
+                logger.error(f"Error deleting raw YOLO file {raw_yolo_path}: {e}")
+        else:
+            return True, raw_yolo_path, raw_yolo_filename
+    return False, None, None
 
 def make_data_boxes(records):
     """

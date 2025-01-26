@@ -411,7 +411,7 @@ class Widgets:
         def on_fps_change(*_):
             """ Recalculate HH:MM:SS whenever FPS or 'value' changes (externally). """
             fps = getattr(state.video_info, "fps", 0) or 0
-            fps_label.config(text=" {state.video_info.fps} fps" if state.video_info else ' ? fps')
+            # fps_label.config(text=" {state.video_info.fps} fps" if state.video_info else ' ? fps')
 
             try:
                 f_ = int(value.get())
@@ -503,8 +503,8 @@ class Widgets:
         seconds_entry = make_entry(entry_container, seconds_var, width=6)
         tk.Label(entry_container, text=" frame ").pack(side="left")
         frames_entry = make_entry(entry_container, frames_var, width=23)
-        fps_label = tk.Label(entry_container, text=" ? fps")
-        fps_label.pack(side="left")
+        # fps_label = tk.Label(entry_container, text=" ? fps")
+        # fps_label.pack(side="left")
 
         # Optional tooltip
         if tooltip_text:
