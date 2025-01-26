@@ -89,8 +89,8 @@ class FunscriptGeneratorPage(tk.Frame):
         boost_frame = ttk.LabelFrame(tweaking_container, text="Boost Settings", padding=(10, 5))
         boost_frame.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
 
-        Widgets.checkbox(boost_frame, "Boost Settings", state, "boost_enabled", False)
-        Widgets.range_selector(
+        _, boost_check, _ = Widgets.checkbox(boost_frame, "Boost Settings", state, "boost_enabled", False)
+        b_d_1 = Widgets.range_selector(
             parent=boost_frame,
             label_text="Boost Up %",
             state=self.state,
@@ -99,7 +99,7 @@ class FunscriptGeneratorPage(tk.Frame):
             row=1,
             tooltip_text="Boost up peaks by x%"
         )
-        Widgets.range_selector(
+        b_d_2 = Widgets.range_selector(
             parent=boost_frame,
             label_text="Reduce Down %",
             state=self.state,
@@ -113,8 +113,8 @@ class FunscriptGeneratorPage(tk.Frame):
         threshold_frame = ttk.LabelFrame(tweaking_container, text="Threshold Settings", padding=(10, 5))
         threshold_frame.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
 
-        Widgets.checkbox(threshold_frame, "Enable Threshold", state, "threshold_enabled", False)
-        Widgets.range_selector(
+        _, tres_check, _ = Widgets.checkbox(threshold_frame, "Enable Threshold", state, "threshold_enabled", False)
+        t_d_1 = Widgets.range_selector(
             parent=threshold_frame,
             label_text="0 Threshold",
             state=self.state,
@@ -123,7 +123,7 @@ class FunscriptGeneratorPage(tk.Frame):
             row=1,
             tooltip_text="Threshold under which values are mapped to 0"
         )
-        Widgets.range_selector(
+        t_d_2 = Widgets.range_selector(
             parent=threshold_frame,
             label_text="100 Threshold",
             state=self.state,
@@ -137,8 +137,8 @@ class FunscriptGeneratorPage(tk.Frame):
         vw_frame = ttk.LabelFrame(tweaking_container, text="Simplification", padding=(10, 5))
         vw_frame.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
 
-        Widgets.checkbox(vw_frame, "Enable Simplification", state, "vw_simplification_enabled", False)
-        Widgets.range_selector(
+        _, simp_check, _ = Widgets.checkbox(vw_frame, "Enable Simplification", state, "vw_simplification_enabled", False)
+        s_d_1 = Widgets.range_selector(
             parent=vw_frame,
             label_text="VW Factor",
             state=self.state,
@@ -147,7 +147,7 @@ class FunscriptGeneratorPage(tk.Frame):
             row=1,
             tooltip_text="Rationalize the number of points\nMakes the script end-user friendly\nDeactivating this will make the script unusable as is\nExpert mode, for post-editing"
         )
-        Widgets.range_selector(
+        s_d_2 = Widgets.range_selector(
             parent=vw_frame,
             label_text="Rounding",
             state=self.state,
@@ -237,7 +237,8 @@ class FunscriptGeneratorPage(tk.Frame):
             else:
                 disable_widgets([processing_btn])
 
-            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, reader_dropdown, metrics_check, *start_f_widgets, *end_f_widgets]
+            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, reader_dropdown, metrics_check, *start_f_widgets, *end_f_widgets,
+                            boost_check, simp_check, tres_check, t_d_1, t_d_2, s_d_1, s_d_2, b_d_1, b_d_2]
             if state.is_processing:
                 disable_widgets(proc_widgets)
                 processing_btn.config(text="Stop processing")
