@@ -2,13 +2,13 @@ import time
 
 import cv2
 
-from script_generator.constants import CLASS_REVERSE_MATCH, CLASS_COLORS
 from config import RUN_POSE_MODEL
+from script_generator.constants import CLASS_REVERSE_MATCH, CLASS_COLORS
+from script_generator.debug.logger import logger
 from script_generator.gui.messages.messages import UpdateGUIState
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.utils.file import write_json_to_file, get_output_file_path
-from script_generator.debug.logger import logger
 
 
 class PostProcessWorker(AbstractTaskProcessor):
