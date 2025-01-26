@@ -12,9 +12,9 @@ from script_generator.gui.messages.messages import ProgressMessage, UpdateGUISta
 from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
 from script_generator.debug.logger import logger
+from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
 from script_generator.video.info.video_info import get_cropped_dimensions
 from utils.lib_ObjectTracker import ObjectTracker
-from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 
 
 def analyze_tracking_results(state: AppState, results):
@@ -23,7 +23,7 @@ def analyze_tracking_results(state: AppState, results):
 
     video_info = state.video_info
     fps = video_info.fps
-    reader = VideoReaderFFmpeg(state.video_path, is_vr=video_info.is_vr)
+    reader = VideoReaderFFmpeg(state)
 
     state.frame_area = width * height
 

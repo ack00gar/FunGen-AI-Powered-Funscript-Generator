@@ -15,7 +15,8 @@ def render_debug_video_popup(window, state: AppState):
     state.set_video_info()
     debug_state = RenderDebugVideoState(state.video_info)
     Widgets.label(window, "First stream/play your results locally (see Play debug video). Note the frame when the issue occurs. \nSubtract about 120 frames so we have some context. Then add a few seconds of recording (2 to 20 seconds\nshould do it)", column=0, sticky="w", padx=10, pady=10)
-    p_container, p, p_label, p_perc = Widgets.labeled_progress(window, "Progress", row=1)
+    # TODO add progress in the UI
+    # p_container, p, p_label, p_perc = Widgets.labeled_progress(window, "Progress", row=1)
     Widgets.frames_input(window, "Start", state=debug_state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600", row=2)
     Widgets.frames_input(window, "End", state=debug_state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=3)
     Widgets.button(

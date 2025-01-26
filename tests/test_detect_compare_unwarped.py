@@ -1,7 +1,8 @@
 from ultralytics import YOLO
 import cv2
-from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 import numpy as np
+
+from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
 
 # Paths to the model and input image
 model_file = "../models/k00gar-11n-200ep-best.mlpackage"

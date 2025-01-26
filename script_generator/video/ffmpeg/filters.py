@@ -1,7 +1,12 @@
 from config import RENDER_RESOLUTION, VR_TO_2D_PITCH
 
+def get_video_filters(video, video_reader, hwaccel, width, height, disable_opengl=False):
+    if video.is_vr:
+        return get_vr_video_filters(video, video_reader, hwaccel, disable_opengl)
+    else:
+        return get_2d_video_filters(video, width, height)
 
-def get_vr_video_filters(video, video_reader, hwaccel):
+def get_vr_video_filters(video, video_reader, hwaccel, disable_opengl=False):
     if video.is_fisheye:
         projection, iv_fov, ih_fov, v_fov, h_fov, d_fov = "fisheye", 190, 190, 90, 90, 180
     else:
@@ -13,7 +18,7 @@ def get_vr_video_filters(video, video_reader, hwaccel):
     crop = f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0"
     out_format = f"format=nv12," if cuda else ""
 
-    if video_reader == "FFmpeg":
+    if video_reader == "FFmpeg" or disable_opengl:
         filters = [
             scale,
             crop,
@@ -33,9 +38,3 @@ def get_vr_video_filters(video, video_reader, hwaccel):
 
 def get_2d_video_filters(video, width, height):
     return f"scale={width}:{height}" if video.height > RENDER_RESOLUTION else None
-
-def get_video_filters(video, video_reader, hwaccel, width, height):
-    if video.is_vr:
-        return get_vr_video_filters(video, video_reader, hwaccel)
-    else:
-        return get_2d_video_filters(video, width, height)

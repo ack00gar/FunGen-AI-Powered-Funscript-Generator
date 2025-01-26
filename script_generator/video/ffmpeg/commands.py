@@ -4,9 +4,9 @@ from script_generator.video.ffmpeg.hwaccel import get_hwaccel_read_args
 from script_generator.video.info.video_info import get_cropped_dimensions, VideoInfo
 
 
-def get_ffmpeg_read_cmd(video: VideoInfo, video_reader: str, hwaccel: str, frame_start: int | None, output="-"):
+def get_ffmpeg_read_cmd(video: VideoInfo, video_reader: str, hwaccel: str, frame_start: int | None, output="-", disable_opengl=False):
     width, height = get_cropped_dimensions(video)
-    vf = get_video_filters(video, video_reader, hwaccel, width, height)
+    vf = get_video_filters(video, video_reader, hwaccel, width, height, disable_opengl)
     start_time = (frame_start / video.fps) * 1000
 
     # Get supported hardware acceleration backends
