@@ -2,7 +2,7 @@ import threading
 from tkinter import messagebox
 
 from script_generator.scripts.tracking_analysis import tracking_analysis
-from script_generator.gui.messages.messages import ProgressMessage
+from script_generator.gui.messages.messages import ProgressMessage, UpdateGUIState
 from script_generator.object_detection.utils import check_skip_object_detection
 from script_generator.scripts.analyze_video import analyze_video
 from script_generator.state.app_state import AppState, log_state_settings
@@ -39,6 +39,8 @@ def video_analysis(state: AppState, root):
                 analyze_video(state)
 
             tracking_analysis(state)
+
+            state.update_ui(UpdateGUIState(attr="is_processing", value=False))
 
         except Exception as e:
             logger.error(f"Error during video analysis: {e}")
