@@ -79,7 +79,7 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
 
     for line in data:
         frame_idx, cls, conf, x1, y1, x2, y2, track_id = line
-        if frame_idx >= start_frame and cls == penis_cls and conf >= 0.7:
+        if frame_idx >= start_frame and cls == penis_cls and conf >= 0.5:
             penis_frame = frame_idx
             if prev_frame == frame_idx - 1:
                 cons_frames += 1
