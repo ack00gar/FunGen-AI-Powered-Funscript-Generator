@@ -51,8 +51,8 @@ def main():
     parser.add_argument(
         "--save-debug-file",
         type=bool,
-        default=False,
-        help="Saves a debug file to disk with all collected metrics. This file is required for playing back the debug video with the debug statistics overlay."
+        default=True,
+        help="Saves a debug file to disk with all collected metrics. Also allows you to re-use tracking data. Default is True."
     )
     parser.add_argument(
         "--boost-enabled",

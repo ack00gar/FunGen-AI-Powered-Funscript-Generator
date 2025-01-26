@@ -68,7 +68,7 @@ def get_cropped_dimensions(video: VideoInfo):
     if video.is_vr:
         return RENDER_RESOLUTION, RENDER_RESOLUTION
     else:
-        scaling_factor = min(1, RENDER_RESOLUTION / video.height)
+        scaling_factor = min(1, RENDER_RESOLUTION / max(video.width, video.height))
         return int(video.width * scaling_factor), int(video.height * scaling_factor)
 
 def get_video_info(video_path):
