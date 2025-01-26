@@ -4,7 +4,7 @@ def get_video_filters(video, video_reader, hwaccel, width, height, disable_openg
     if video.is_vr:
         return get_vr_video_filters(video, video_reader, hwaccel, disable_opengl)
     else:
-        return get_2d_video_filters(video, width, height)
+        return get_2d_video_filters(video, width, height, hwaccel)
 
 def get_vr_video_filters(video, video_reader, hwaccel, disable_opengl=False):
     if video.is_fisheye:
@@ -36,5 +36,12 @@ def get_vr_video_filters(video, video_reader, hwaccel, disable_opengl=False):
 
     return ",".join(filters)
 
-def get_2d_video_filters(video, width, height):
-    return f"scale={width}:{height}" if video.height > RENDER_RESOLUTION else None
+def get_2d_video_filters(video, width, height, hwaccel):
+    cuda = hwaccel == "cuda"
+
+    if video.height > RENDER_RESOLUTION:
+        scale_filter = f"scale_cuda={width}:{height},hwdownload,format=nv12" if cuda else f"scale={width}:{height}"
+    else:
+        scale_filter = "hwdownload,format=nv12" if cuda else ""
+
+    return scale_filter
