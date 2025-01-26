@@ -4,6 +4,7 @@ from tkinter import ttk, filedialog, Button
 
 from script_generator.constants import LOGO
 from script_generator.gui.utils.tooltip import Tooltip
+from script_generator.gui.utils.utils import disable_widgets
 
 PADDING_X = 5
 PADDING_Y = 5
@@ -506,6 +507,9 @@ class Widgets:
         # fps_label = tk.Label(entry_container, text=" ? fps")
         # fps_label.pack(side="left")
 
+        # TODO remove disabled and fix logic
+        disable_widgets([hours_entry, minutes_entry, seconds_entry])
+
         # Optional tooltip
         if tooltip_text:
             Tooltip(hours_entry, tooltip_text)
@@ -515,6 +519,6 @@ class Widgets:
 
         # Initialize the fields so they match initial_frames (and current FPS if set)
         on_fps_change()
-
-        return container, (hours_entry, minutes_entry, seconds_entry, frames_entry), value
+        # TODO readd hours_entry, minutes_entry, seconds_entry,
+        return container, (frames_entry,), value
 

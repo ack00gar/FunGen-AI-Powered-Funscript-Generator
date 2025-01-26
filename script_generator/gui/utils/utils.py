@@ -1,10 +1,10 @@
-def disable_widgets(buttons):
-    for btn in buttons:
-        btn.config(state='disabled')
+def disable_widgets(widgets):
+    for widget in widgets:
+        widget.config(state='disabled')
 
-def enable_widgets(buttons):
-    for btn in buttons:
-        btn.config(state='normal')
+def enable_widgets(widgets):
+    for widget in widgets:
+        widget.config(state='normal')
 
 def set_progressbars_done(progress_bars):
     for progress, label in progress_bars:
