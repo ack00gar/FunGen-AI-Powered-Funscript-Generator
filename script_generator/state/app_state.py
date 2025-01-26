@@ -71,9 +71,14 @@ class AppState:
     def set_video_info(self):
         # If movie changed
         if self.video_info is None or self.video_info.path != self.video_path:
-            self.video_info = get_video_info(self.video_path)
-            self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self.video_path)
-            self.has_tracking_data, _, _ = get_metrics_file_info(self.video_path)
+            if not self.video_path:
+                self.video_info = None
+                self.has_raw_yolo = False
+                self.has_tracking_data = False
+            else:
+                self.video_info = get_video_info(self.video_path)
+                self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self.video_path)
+                self.has_tracking_data, _, _ = get_metrics_file_info(self.video_path)
 
 
 def log_state_settings(state: AppState):
