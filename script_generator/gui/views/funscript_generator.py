@@ -46,7 +46,7 @@ class FunscriptGeneratorPage(tk.Frame):
             command=lambda val: update_video_path()
         )
 
-        Widgets.dropdown(
+        _, _, reader_dropdown, _ = Widgets.dropdown(
             attr="video_reader",
             parent=video_selection,
             label_text="Video Reader",
@@ -61,8 +61,8 @@ class FunscriptGeneratorPage(tk.Frame):
         # region OPTIONAL SETTINGS
         optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
 
-        Widgets.frames_input(optional_settings, "Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
-        Widgets.frames_input(optional_settings, "End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
+        _, start_f_widgets, _ = Widgets.frames_input(optional_settings, "Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
+        _, end_f_widgets, _ = Widgets.frames_input(optional_settings, "End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
         # endregion
 
         # region PROCESSING
@@ -72,6 +72,7 @@ class FunscriptGeneratorPage(tk.Frame):
         track_p_container, track_p, track_p_label, track_p_perc = Widgets.labeled_progress(processing, "Tracking Analysis", row=2)
 
         def start_processing():
+            state.is_processing = True
             reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
             video_analysis(state, controller)
             update_ui_for_state()
@@ -171,7 +172,7 @@ class FunscriptGeneratorPage(tk.Frame):
             tooltip_text="Will show a live preview of what is being generated.\n\nFor debugging only this will reduce your performance.\nStage 1: Show bounding boxes during object detection.\nStage 2: Show funscript and metric overlay while the funscript is being processed.",
             row=0
         )
-        Widgets.checkbox(
+        _, metrics_check, _ = Widgets.checkbox(
             general,
             "Save debug metrics",
             state, "save_debug_file",
@@ -187,7 +188,7 @@ class FunscriptGeneratorPage(tk.Frame):
             tooltip_text="Opens a debug video player overlaid with debugging information (Press space to pause).\n\nThis overlay shows object detection boxes and a live funscript overlay,\namong other useful debugging information.\nCan only be triggered after the funscript generation process has completed.\nNeeds the 'Save debug information' option activated during processing."
         )
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
-        Widgets.file_selection(
+        _, ref_entry, ref_button, _ = Widgets.file_selection(
             attr="reference_script",
             parent=script_compare,
             label_text="Reference Script",
@@ -214,6 +215,9 @@ class FunscriptGeneratorPage(tk.Frame):
         # endregion
 
         def update_ui_for_state():
+            if not state.is_processing:
+                processing_btn.config(text="Start processing")
+
             if state.has_raw_yolo and state.has_tracking_data:
                 enable_widgets([play_btn, regenerate_btn, gen_video_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
@@ -233,10 +237,12 @@ class FunscriptGeneratorPage(tk.Frame):
             else:
                 disable_widgets([processing_btn])
 
+            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, reader_dropdown, metrics_check, *start_f_widgets, *end_f_widgets]
             if state.is_processing:
-                disable_widgets([fs_entry, fs_button])
+                disable_widgets(proc_widgets)
+                processing_btn.config(text="Stop processing")
             else:
-                enable_widgets([fs_entry, fs_button])
+                enable_widgets(proc_widgets)
 
         # region UI UPDATE CALLBACK
         def update_ui(msg: UIMessage):

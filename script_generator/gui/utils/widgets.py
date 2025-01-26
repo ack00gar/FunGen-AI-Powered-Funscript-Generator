@@ -261,7 +261,7 @@ class Widgets:
         if tooltip_text:
             Tooltip(checkbox, tooltip_text)
 
-        return container, checkbox, is_checked
+            return container, checkbox, is_checked
 
     @staticmethod
     def create_popup(title, master, content_builder, width=400, height=300):
