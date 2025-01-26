@@ -1,22 +1,20 @@
+import datetime
+import json
 import logging
 import os
-import json
-import time
+import shutil
 
-from simplification.cutil import simplify_coords
-import numpy as np
 import cv2
-import datetime
-from scipy.signal import savgol_filter
-
-from config import STEP_SIZE, VERSION
-from script_generator.constants import HEATMAP_COLORS
-
 import matplotlib
+import numpy as np
+from scipy.signal import savgol_filter
+from simplification.cutil import simplify_coords
 
+from config import STEP_SIZE, VERSION, COPY_FUNSCRIPT_TO_MOVIE_LOCATION
+from script_generator.constants import HEATMAP_COLORS, FUNSCRIPT_AUTHOR
+from script_generator.debug.logger import logger
 from script_generator.state.app_state import AppState
-from script_generator.utils.file import get_output_file_path
-from script_generator.utils.logger import logger
+from script_generator.utils.file import get_output_file_path, load_json_from_file
 
 matplotlib.use('Agg')  # Use a non-interactive backend
 import matplotlib.pyplot as plt
@@ -29,11 +27,6 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize
 class FunscriptGenerator:
     def generate(self, state):
         output_path, _ = get_output_file_path(state.video_path, ".funscript")
-
-        # Backup output file if it exists
-        if os.path.exists(output_path):
-            logger.info(f"Funscript {output_path} already exists, backing up as {output_path}_{time.time()}.bak...")
-            os.rename(output_path, output_path + f"_{time.time()}.bak")
 
         raw_funscript_path, _ = get_output_file_path(state.video_path, "_rawfunscript.json")
         if os.path.exists(raw_funscript_path) and (state.funscript_data is None or len(state.funscript_data) == 0):
@@ -118,6 +111,28 @@ class FunscriptGenerator:
 
             # Write the final funscript
             self.write_funscript(zip_adjusted_positions, output_path, state.video_info.fps)
+
+            # copy funscript if specified
+            if COPY_FUNSCRIPT_TO_MOVIE_LOCATION:
+                copy = True
+                video_folder = os.path.dirname(state.video_path)
+                filename_base = os.path.basename(state.video_path)[:-4]
+                funscript_path = os.path.join(video_folder, filename_base, ".funscript")
+
+                # Backup output file if it exists
+                if os.path.exists(funscript_path):
+                    json_data = load_json_from_file(funscript_path)
+                    if json_data["author"] == FUNSCRIPT_AUTHOR:
+                        backup_path = os.path.join(video_folder, filename_base, f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript.bak")
+                        logger.info(f"Funscript {funscript_path} already exists, backing up as {backup_path}...")
+                        os.rename(funscript_path, backup_path)
+                    else:
+                        copy = False
+                        logger.warn(f"Skipping copying funscript to movie directory as the script in the destination directory is not made by this app.")
+
+                if copy:
+                    shutil.copy(output_path, funscript_path)
+
             logger.info(f"Funscript generated and saved to {output_path}")
 
             # Generate a heatmap
@@ -127,7 +142,7 @@ class FunscriptGenerator:
 
     def write_funscript(self, distances, output_path, fps):
         with open(output_path, 'w') as f:
-            f.write(f'{{"version":"{VERSION}","inverted":false,"range":95,"author":"FunGen_k00gar_AI","actions":[{{"at": 0, "pos": 100}},')
+            f.write(f'{{"version":"{VERSION}","inverted":false,"range":95,"author":"{FUNSCRIPT_AUTHOR}","actions":[{{"at": 0, "pos": 100}},')
             i = 0
             for frame, position in distances:
                 time_ms = int(frame * 1000 / fps)
@@ -165,7 +180,7 @@ class FunscriptGenerator:
 
             # Calculate speed (position change per time interval)
             # We add 1e-10 to prevent dividing by zero
-            speeds = np.abs(np.diff(filtered_positions) / (np.diff(filtered_times) + 1e-10)) * 1000 # Positions per second
+            speeds = np.abs(np.diff(filtered_positions) / (np.diff(filtered_times) + 1e-10)) * 1000  # Positions per second
 
             logger.debug(f"Speeds: {speeds}")
 
@@ -636,13 +651,8 @@ class FunscriptGenerator:
             ax.plot([x_start, x_end], [y_start, y_end], color=line_color, linewidth=2)
 
         # Customize plot
-        # Safely calculate the mean speed
-        # TODO fix nan at source
-        if len(speeds) == 0 or np.isnan(np.mean(speeds)):
-            avg_speed = 0  # Default to 0 if speeds are empty or contain NaN
-        else:
-            avg_speed = int(np.nanmean(speeds))  # Use nanmean to ignore NaN values
-        # TODO fix nan at source END
+        avg_speed = int(np.nanmean(speeds))
+
         # Set title with safe average speed
         ax.set_title(
             f'Funscript Heatmap\nDuration: {datetime.timedelta(seconds=int(times[-1] / 1000))} - Avg. Speed {avg_speed} - Actions: {len(times)}'

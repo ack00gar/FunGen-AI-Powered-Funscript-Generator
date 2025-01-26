@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 
 from script_generator.constants import CLASS_COLORS
+from script_generator.debug.video_player.overlay_widgets import OverlayWidgets
 
 
 def get_funscript_value(interpolator, frame_id, fps):
@@ -18,7 +19,6 @@ def draw_overlay(
     funscript_interpolator,
     distance_buffer,
     funscript_buffer,
-    visualizer,
     fps,
     y_offset_start=0,
 ):
@@ -31,7 +31,6 @@ def draw_overlay(
     :param funscript_interpolator:  If present, used to compute funscript values.
     :param distance_buffer:         Rolling buffer for 'distance' data.
     :param funscript_buffer:        Rolling buffer for funscript values.
-    :param visualizer:              An instance of Visualizer (to draw gauges, etc.).
     :param fps:                     The video frames per second.
     :param y_offset_start:          The initial Y offset for drawing text.
     """
@@ -60,18 +59,18 @@ def draw_overlay(
         )
 
     # Display variables
-    y_offset = y_offset_start
+    y_offset_stats = 20
     for key, value in variables.items():
         cv2.putText(
             frame,
             f"{key}: {value}",
-            (10, y_offset),
+            (10, y_offset_stats),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (0, 0, 255),
             2
         )
-        y_offset += 20
+        y_offset_stats += 20
 
     # Draw locked penis box if present
     locked_penis_box = variables.get("locked_penis_box")
@@ -96,7 +95,7 @@ def draw_overlay(
         funscript_value = get_funscript_value(funscript_interpolator, frame_id, fps)
 
     # Draw gauge (example usage)
-    visualizer.draw_gauge(frame, funscript_value)
+    OverlayWidgets.draw_gauge(frame, funscript_value)
 
     # Shift rolling window buffers left and insert new values
     distance_buffer = np.roll(distance_buffer, -1)
@@ -106,13 +105,12 @@ def draw_overlay(
 
     # Draw rolling window curves
     graph_height = int(frame.shape[0] * 0.2)
-    graph_y_start = y_offset + 10
+    graph_y_start = y_offset_start
     draw_rolling_window_curve(frame, distance_buffer, (0, 255, 0), 0.5, graph_height, graph_y_start)
     draw_rolling_window_curve(frame, funscript_buffer, (255, 0, 0), 0.5, graph_height, graph_y_start)
 
     # Return updated buffers in case they need to be maintained externally
     return distance_buffer, funscript_buffer
-
 
 
 def draw_rolling_window_curve(frame, buffer, color, alpha, graph_height, graph_y_start):

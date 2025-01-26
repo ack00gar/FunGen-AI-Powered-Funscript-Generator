@@ -11,13 +11,11 @@ from script_generator.debug.video_player.debug_overlay import draw_overlay
 from script_generator.debug.video_player.interaction import mouse_callback
 from script_generator.debug.video_player.state import VideoPlayer
 from script_generator.utils.file import get_output_file_path
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 from script_generator.video.info.video_info import get_cropped_dimensions
-from utils.lib_Visualizer import Visualizer
 
 
 def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=100, save_video_mode=False):
-    visualizer = Visualizer()
     video_info = state.video_info
     width, height = get_cropped_dimensions(video_info)
 
@@ -103,9 +101,8 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
             funscript_interpolator=funscript_interpolator,
             distance_buffer=distance_buffer,
             funscript_buffer=funscript_buffer,
-            visualizer=visualizer,
             fps=video_info.fps,
-            y_offset_start=frame.shape[0] // 3
+            y_offset_start=frame.shape[0] - 250 # 250 is height of funscript preview
         )
 
         if save_video_mode:

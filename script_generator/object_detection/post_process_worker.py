@@ -1,14 +1,14 @@
-import os
 import time
 
 import cv2
 
-from script_generator.constants import CLASS_REVERSE_MATCH, CLASS_COLORS, OUTPUT_PATH
+from script_generator.constants import CLASS_REVERSE_MATCH, CLASS_COLORS
 from config import RUN_POSE_MODEL
+from script_generator.gui.messages.messages import UpdateGUIState
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.utils.file import write_json_to_file, get_output_file_path
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 class PostProcessWorker(AbstractTaskProcessor):
@@ -19,6 +19,7 @@ class PostProcessWorker(AbstractTaskProcessor):
     def task_logic(self):
         state = self.state
 
+        live_preview_mode_prev = state.live_preview_mode
         for task in self.get_task():
 
             frame_pos = task.frame_pos
@@ -101,6 +102,7 @@ class PostProcessWorker(AbstractTaskProcessor):
                             logger.debug(f"Test box: {test_box}")
                             self.test_result.add_record(frame_pos, test_box)
 
+            window_name = "Object detection tracking preview"
             if state.live_preview_mode:
                 # Display the YOLO results for testing
                 # det_results.plot()
@@ -110,20 +112,37 @@ class PostProcessWorker(AbstractTaskProcessor):
                 sorted_boxes = self.test_result.get_boxes(frame_pos)
                 # logger.debug(f"Sorted boxes : {sorted_boxes}")
 
-                frame_display = frame.copy()
+                frame = frame.copy()
 
                 for box in sorted_boxes:
                     color = CLASS_COLORS.get(box[3])
-                    cv2.rectangle(frame_display, (box[0][0], box[0][1]), (box[0][2], box[0][3]), color, 2)
-                    cv2.putText(frame_display, f"{box[4]}: {box[3]}", (box[0][0], box[0][1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    cv2.rectangle(frame, (box[0][0], box[0][1]), (box[0][2], box[0][3]), color, 2)
+                    cv2.putText(frame, f"{box[4]}: {box[3]}", (box[0][0], box[0][1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
                 # Draw the frame ID at the top-left corner
-                cv2.putText(frame_display, f"Frame: {task.frame_pos}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 3)
+                cv2.putText(frame, f"Frame: {task.frame_pos}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 3)
 
-                cv2.imshow("Object detection tacking preview", frame_display)
 
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
+                # Reinitialize the window if needed
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1 and state.live_preview_mode:
+                    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                cv2.imshow(window_name, frame)
+
+                if not state.live_preview_mode or not handle_user_input(window_name):
+                    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+                        cv2.destroyWindow(window_name)
+
+                    if state.update_ui and state.live_preview_mode:
+                        state.update_ui(UpdateGUIState(attr="live_preview_mode", value=False))
+
+                    state.live_preview_mode = False
+
+            # we don't want to call cv2.getWindowProperty every iteration
+            elif live_preview_mode_prev and not state.live_preview_mode:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+                    cv2.destroyWindow(window_name)
+
+            live_preview_mode_prev = state.live_preview_mode
 
             task.rendered_frame = None # Clear memory
             task.yolo_results = None # Clear memory (yolo results contains a copy of the image)
@@ -136,4 +155,14 @@ class PostProcessWorker(AbstractTaskProcessor):
         # Write the detection records to a JSON file
         raw_yolo_path, _ = get_output_file_path(self.state.video_path, "_rawyolo.json")
         write_json_to_file(raw_yolo_path, self.records)
-        
+
+def handle_user_input(window_name):
+    key = cv2.waitKey(1) & 0xFF
+
+    # Check if the window has been closed
+    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+        return False
+
+    if key == ord("q"):
+        return False
+    return True

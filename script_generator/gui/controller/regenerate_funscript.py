@@ -1,6 +1,6 @@
 from tkinter import messagebox
 
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 from utils.lib_FunscriptHandler import FunscriptGenerator
 
 

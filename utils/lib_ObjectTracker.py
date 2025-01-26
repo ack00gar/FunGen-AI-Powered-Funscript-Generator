@@ -3,7 +3,7 @@ from collections import deque
 import numpy as np
 
 from script_generator.constants import CLASS_NAMES
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 class LockedPenisBox:

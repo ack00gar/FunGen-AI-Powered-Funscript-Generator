@@ -7,20 +7,19 @@ from tqdm import tqdm
 
 from config import UPDATE_PROGRESS_INTERVAL
 from script_generator.constants import CLASS_COLORS
-from script_generator.gui.messages.messages import ProgressMessage
+from script_generator.debug.video_player.overlay_widgets import OverlayWidgets
+from script_generator.gui.messages.messages import ProgressMessage, UpdateGUIState
 from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 from script_generator.video.info.video_info import get_cropped_dimensions
 from utils.lib_ObjectTracker import ObjectTracker
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
-from utils.lib_Visualizer import Visualizer
 
 
 def analyze_tracking_results(state: AppState, results):
     width, height = get_cropped_dimensions(state.video_info)
     list_of_frames = results.get_all_frame_ids()  # Get all frame IDs with detections
-    visualizer = Visualizer()  # Initialize the visualizer
 
     video_info = state.video_info
     fps = video_info.fps
@@ -66,17 +65,20 @@ def analyze_tracking_results(state: AppState, results):
     state.funscript_distances = []
     state.funscript_data = []
 
-    #tracker = ObjectTracker(fps, state.frame_start, image_area, video_info.is_vr)  # Initialize the object tracker
+    # tracker = ObjectTracker(fps, state.frame_start, image_area, video_info.is_vr)  # Initialize the object tracker
     tracker = ObjectTracker(state)
 
     # Start time for ETA calculation
     start_time = time.time()
 
     last_ui_update_time = time.time()
+    live_preview_mode_prev = state.live_preview_mode
 
     for frame_pos in tqdm(
-            #range(state.frame_start, state.frame_end), unit="f", desc="Analyzing tracking data", position=0,
-            range(state.frame_start_track, state.frame_end), unit="f", desc="Analyzing tracking data", position=0,
+            # range(state.frame_start, state.frame_end), unit="f", desc="Analyzing tracking data", position=0,
+            range(state.frame_start_track, state.frame_end),
+            unit="f",
+            desc="Analyzing tracking data", position=0,
             unit_scale=False,
             unit_divisor=1,
             ncols=130
@@ -87,7 +89,7 @@ def analyze_tracking_results(state: AppState, results):
             logger.info(f"Reaching cut at frame {frame_pos}")
             previous_distances = tracker.previous_distances
             logger.info(f"Reinitializing tracker with previous distances: {previous_distances}")
-            #tracker = ObjectTracker(fps, frame_pos, image_area, video_info.is_vr)
+            # tracker = ObjectTracker(fps, frame_pos, image_area, video_info.is_vr)
             tracker = ObjectTracker(state)
             tracker.previous_distances = previous_distances
 
@@ -115,10 +117,9 @@ def analyze_tracking_results(state: AppState, results):
                                 str_dist_penis = 'None'
                         str_abs_pos = str(int(tracker.normalized_absolute_tracked_positions[box[4]][-1]))
                         position = 'p: ' + str_dist_penis + ' | ' + 'a: ' + str_abs_pos
-                        if box[4] in tracker.pct_weights:
-                            if len(tracker.pct_weights[box[4]]) > 0:
-                                weight = tracker.pct_weights[box[4]][-1]
-                                position += ' | w: ' + str(weight)
+                        if box[4] in tracker.pct_weights and len(tracker.pct_weights[box[4]]) > 0:
+                            weight = tracker.pct_weights[box[4]][-1]
+                            position += ' | w: ' + str(weight)
                     else:
                         position = None
                     bounding_boxes.append({
@@ -153,6 +154,7 @@ def analyze_tracking_results(state: AppState, results):
                 )
 
         # Display object detection tracking results in a live preview window
+        window_name = "Combined results"
         if state.live_preview_mode:
             ret, frame = reader.read()
 
@@ -160,19 +162,21 @@ def analyze_tracking_results(state: AppState, results):
                 logger.warn("Frame could not be read in live preview")
                 continue
 
-            frame_display = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = frame.copy()
 
             for box in tracker.tracked_boxes:
-                frame_display = visualizer.draw_bounding_box(
-                    frame_display,
+                frame = OverlayWidgets.draw_bounding_box(
+                    frame,
                     box[0],
                     str(box[2]) + ": " + box[1],
                     CLASS_COLORS[str(box[1])],
                     state.offset_x
                 )
+
             if tracker.locked_penis_box is not None and tracker.locked_penis_box.is_active():
-                frame_display = visualizer.draw_bounding_box(
-                    frame_display, tracker.locked_penis_box.box,
+                frame = OverlayWidgets.draw_bounding_box(
+                    frame,
+                    tracker.locked_penis_box.box,
                     "Locked_Penis",
                     CLASS_COLORS['penis'],
                     state.offset_x
@@ -181,19 +185,37 @@ def analyze_tracking_results(state: AppState, results):
                 logger.info("No active locked penis box to draw.")
 
             if tracker.glans_detected:
-                frame_display = visualizer.draw_bounding_box(
-                    frame_display, tracker.boxes['glans'],
+                frame = OverlayWidgets.draw_bounding_box(
+                    frame,
+                    tracker.boxes['glans'],
                     "Glans",
                     CLASS_COLORS['glans'],
                     state.offset_x
                 )
             if state.funscript_distances:
-                frame_display = visualizer.draw_gauge(frame_display, state.funscript_distances[-1])
+                frame = OverlayWidgets.draw_gauge(frame, state.funscript_distances[-1])
 
-            cv2.imshow("Combined Results", frame_display)
-            cv2.waitKey(1)
+            # Reinitialize the window if needed
+            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1 and state.live_preview_mode:
+                cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.imshow(window_name, frame)
 
-        # Update progress
+            if not handle_user_input(window_name) or not state.live_preview_mode:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+                    cv2.destroyWindow(window_name)
+
+                if state.update_ui and state.live_preview_mode:
+                    state.update_ui(UpdateGUIState(attr="live_preview_mode", value=False))
+
+                state.live_preview_mode = False
+        # we don't want to call cv2.getWindowProperty every iteration
+        elif live_preview_mode_prev and not state.live_preview_mode:
+            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+                cv2.destroyWindow(window_name)
+
+        live_preview_mode_prev = state.live_preview_mode
+
+        # Update progress periodically
         if state.update_ui:
             current_time = time.time()
             if current_time - last_ui_update_time >= UPDATE_PROGRESS_INTERVAL:
@@ -210,24 +232,32 @@ def analyze_tracking_results(state: AppState, results):
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
 
-    state.update_ui(ProgressMessage(
-        process="TRACKING_ANALYSIS",
-        frames_processed=state.video_info.total_frames,
-        total_frames=state.video_info.total_frames,
-        eta="Done"
-    ))
+    # Final UI update: we're done
+    if state.update_ui:
+        state.update_ui(ProgressMessage(
+            process="TRACKING_ANALYSIS",
+            frames_processed=state.video_info.total_frames,
+            total_frames=state.video_info.total_frames,
+            eta="Done"
+        ))
 
     # Prepare Funscript data
     state.funscript_data = list(zip(state.funscript_frames, state.funscript_distances))
 
-    points = "["
-    for i in range(len(state.funscript_frames)):
-        if i != 0:
-            points += ","
-        points += f"[{state.funscript_frames[i]}, {state.funscript_distances[i]}]"
-    points += "]"
-    # Write the raw Funscript data to a JSON file
+    # Save the raw funscript data to JSON
     raw_funscript_path, _ = get_output_file_path(state.video_path, "_rawfunscript.json")
     with open(raw_funscript_path, 'w') as f:
         json.dump(state.funscript_data, f)
+
     return state.funscript_data
+
+def handle_user_input(window_name):
+    key = cv2.waitKey(1) & 0xFF
+
+    # Check if the window has been closed
+    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+        return False
+
+    if key == ord("q"):
+        return False
+    return True

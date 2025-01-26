@@ -1,7 +1,7 @@
 import cv2
 from PIL import Image
 
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 from ultralytics import YOLO
 

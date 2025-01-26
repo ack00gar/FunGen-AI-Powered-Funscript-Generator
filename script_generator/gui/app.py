@@ -6,7 +6,7 @@ from script_generator.constants import LOGO, ICON
 from script_generator.gui.views.funscript_generator import FunscriptGeneratorPage
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 from config import VERSION
 
 # TODO this is a workaround and needs to be fixed properly
@@ -19,7 +19,7 @@ class App(tk.Tk):
             ctypes.windll.shcore.SetProcessDpiAwareness(2)  # For Windows DPI scaling
         # self.tk.call('tk', 'scaling', 1.0)
         self.title(f"VR & 2D POV Funscript AI Generator - v" + VERSION)
-        self.geometry(f"{('800' if is_mac() else '700')}x910")
+        self.geometry(f"{('800' if is_mac() else '700')}x840")
         self.resizable(False, False)
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))

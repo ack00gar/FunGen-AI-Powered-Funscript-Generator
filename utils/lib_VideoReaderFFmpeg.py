@@ -1,9 +1,10 @@
 import subprocess
+
 import cv2
 import numpy as np
-import argparse
+
 from config import FFMPEG_PATH, FFPROBE_PATH, RENDER_RESOLUTION
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 from script_generator.video.info.video_info import get_video_info
 
 
@@ -55,16 +56,16 @@ class VideoReaderFFmpeg:
             self.duration = video_info.duration
 
             # limiting the frame height here has no additional performance cost and significantly improves speed for 1440p+ video
-            #scaling_factor = min(RENDER_RESOLUTION / self.width, RENDER_RESOLUTION / self.height)
+            # scaling_factor = min(RENDER_RESOLUTION / self.width, RENDER_RESOLUTION / self.height)
             # was having issues with the rendering of a 720p 2D video... < 1080p
             scaling_factor = min(1, RENDER_RESOLUTION / self.height)
-            #if scaling_factor > 1:
+            # if scaling_factor > 1:
             #    scaling_factor = 1
             self.width = int(self.width * scaling_factor)
             self.height = int(self.height * scaling_factor)
 
             logger.info(f"FPS: {self.fps}, Resolution: {self.width}x{self.height}, "
-                  f"Codec: {self.codec}, Total Frames: {self.total_frames}, Duration: {self.duration:.2f} ms")
+                        f"Codec: {self.codec}, Total Frames: {self.total_frames}, Duration: {self.duration:.2f} ms")
         except Exception as e:
             logger.error(f"Error initializing video info: {e}")
             raise
@@ -78,7 +79,7 @@ class VideoReaderFFmpeg:
         self.current_frame_number = start_frame
 
         if self.is_vr:
-            #arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
+            # arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
             arg_line = ""
             if self.unwarp:
                 if self.projection == "FISHEYE" or (self.projection == None and "FISHEYE" in self.video_path.upper()):
@@ -104,14 +105,14 @@ class VideoReaderFFmpeg:
                 arg_line = arg_line + f":w={self.width}:h={self.height}"
                 arg_line = arg_line + f":interp=lanczos:reset_rot=1"
                 arg_line = arg_line + f",lutyuv=y=gammaval(0.7)"
-                #arg_line = arg_line + f",eq=brightness=0.1:contrast=1.5"
-                #arg_line = arg_line + f",format=gray"
-                #arg_line = arg_line + f",histeq"
+                # arg_line = arg_line + f",eq=brightness=0.1:contrast=1.5"
+                # arg_line = arg_line + f",format=gray"
+                # arg_line = arg_line + f",histeq"
             else:
                 arg_line = "crop=w=iw/2:h=ih:x=0:y=0"
             # Add scale filter with height and auto-width (-1)
-            #arg_line += f",scale=-1:{target_height}"
-            #arg_line += f",scale=-1:{1080}"
+            # arg_line += f",scale=-1:{target_height}"
+            # arg_line += f",scale=-1:{1080}"
             # perf for on the fly downscale to 1080p were terrible
 
             cmd = [
@@ -124,7 +125,6 @@ class VideoReaderFFmpeg:
                 "-map", "0:v:0",
                 "-vf", arg_line,
                 "-f", "rawvideo",  # Output raw video data
-                #"-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
                 "-pix_fmt", "bgr24",
                 "-vsync", "0",  # Disable frame rate synchronization
                 "-threads", "0",  # Use maximum threads available
@@ -140,8 +140,7 @@ class VideoReaderFFmpeg:
                 "-i", self.video_path,
                 "-an",  # Disable audio processing
                 "-f", "rawvideo",  # Output raw video data
-                #"-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
-                "-pix_fmt", "bgr24",
+                "-pix_fmt", "bgr24",  # Pixel format (BGR for OpenCV)
                 "-vsync", "0",  # Disable frame rate synchronization
                 "-",  # Output to stdout
             ]
@@ -151,7 +150,7 @@ class VideoReaderFFmpeg:
             self.process.terminate()
 
         # Start FFmpeg process
-        #self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.frame_size = self.width * self.height * 3  # Size of one frame in bytes
 
@@ -216,37 +215,3 @@ class VideoReaderFFmpeg:
         if self.process:
             self.process.stdout.close()
             self.process = None
-
-
-def main(video_path, is_vr=False):
-    """
-    Display a video using the VideoReaderFFmpeg class.
-    :param video_path: Path to the video file.
-    :param is_vr: Whether the video is a VR video (default: False).
-    """
-    # Initialize the video reader
-    video_reader = VideoReaderFFmpeg(video_path, is_vr=is_vr)
-
-    # Display the video
-    while True:
-        ret, frame = video_reader.read()
-        if not ret:
-            break
-        cv2.imshow("Video", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):  # Press 'q' to exit
-            break
-
-    # Release resources
-    video_reader.release()
-    cv2.destroyAllWindows()
-
-
-if __name__ == "__main__":
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Display a video using FFmpeg.")
-    parser.add_argument("video_path", type=str, help="Path to the video file.")
-    parser.add_argument("--is_vr", action="store_true", help="Enable VR mode for processing VR videos.")
-    args = parser.parse_args()
-
-    # Run the main function
-    main(args.video_path, args.is_vr)

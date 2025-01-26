@@ -4,7 +4,7 @@ from typing import Generator, Optional
 
 from script_generator.state.app_state import AppState
 from script_generator.tasks.tasks import AnalyzeFrameTask
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 class AbstractTaskProcessor(threading.Thread):

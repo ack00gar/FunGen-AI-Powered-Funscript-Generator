@@ -1,7 +1,7 @@
 import subprocess
 
 from config import FFMPEG_PATH
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 def get_hwaccel_support():

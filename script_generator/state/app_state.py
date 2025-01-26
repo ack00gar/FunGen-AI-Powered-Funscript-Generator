@@ -20,8 +20,6 @@ class AppState:
 
         # Gui/settings debug
         self.save_debug_file: bool = True
-        # TODO REMOVE
-        # self.save_debug_video: bool = False
         self.live_preview_mode: bool = False
         self.reference_script: string = None
 
@@ -36,7 +34,7 @@ class AppState:
         self.vw_factor: float = 8.0
         self.rounding: int = 5
 
-        # TODO move this to a batch task class (so parallel inference is possible)
+        # TODO move this to a analyse results class
         self.funscript_data = []
         self.funscript_frames = []
         self.funscript_distances = []

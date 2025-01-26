@@ -4,9 +4,8 @@ from tkinter import messagebox
 from script_generator.debug.video_player.play import play_debug_video
 from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
-# TODO this callback is called on every frame. This doesn't seem correct or can be optized (instantiating Debugger, checks etc.)
 def debug_video(state: AppState):
     if not state.video_path:
         messagebox.showerror("Error", "Please select a video file.")

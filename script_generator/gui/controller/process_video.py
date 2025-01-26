@@ -5,9 +5,8 @@ from script_generator.scripts.tracking_analysis import tracking_analysis
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.object_detection.utils import check_skip_object_detection
 from script_generator.scripts.analyze_video import analyze_video
-from script_generator.utils.file import get_output_file_path
 from script_generator.utils.helpers import to_int_or_none
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 def video_analysis(state, root):
