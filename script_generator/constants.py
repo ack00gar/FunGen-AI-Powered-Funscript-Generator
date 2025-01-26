@@ -79,3 +79,9 @@ LOGO = os.path.join(PROJECT_PATH, "resources", "logo.png")
 ICON = os.path.join(PROJECT_PATH, "resources", "icon.ico")
 YOLO_MODELS = [os.path.join(MODELS_DIR, filename) for filename in MODEL_FILENAMES]
 MODEL_PATH = str(os.path.join(PROJECT_PATH, get_yolo_model_path(YOLO_MODELS)))
+
+##################################################################################################
+# DIV
+##################################################################################################
+
+FUNSCRIPT_AUTHOR = "FunGen_k00gar_AI"

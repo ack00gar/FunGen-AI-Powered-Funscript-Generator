@@ -7,3 +7,8 @@ class ProgressMessage(UIMessage):
         self.frames_processed = frames_processed
         self.total_frames = total_frames
         self.eta = eta
+
+class UpdateGUIState(UIMessage):
+    def __init__(self, attr, value):
+        self.attr = attr
+        self.value = value

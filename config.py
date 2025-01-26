@@ -4,9 +4,9 @@ from ultralytics import YOLO
 
 from script_generator.constants import MODEL_PATH
 from script_generator.utils.config import find_ffmpeg_path, find_ffprobe_path
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
-VERSION = "0.0.5"
+VERSION = "0.1.0"
 
 ##################################################################################################
 # FFMPEG
@@ -21,40 +21,49 @@ mac_ffprobe_path = "/usr/local/bin/ffprobe"
 lin_ffprobe_path = "/usr/bin/ffprobe"
 
 ##################################################################################################
+# USER PREFERENCES
+##################################################################################################
+
+COPY_FUNSCRIPT_TO_MOVIE_LOCATION = False
+
+##################################################################################################
 # PERFORMANCE
 ##################################################################################################
 
 RENDER_RESOLUTION = 1080 # Above 1080x1080 doesn't seem to improve detections
 TEXTURE_RESOLUTION = 1440 # Size that is used to texture the opengl sphere
-YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30 # Mac doesn't support batching due to onnx
+YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30 # Mac doesn't support batching
 YOLO_PERSIST = True # Big impact on performance but also improves tracking
+QUEUE_MAXSIZE = 200 # Bounded queue size to avoid memory blow-up as raw frames consume a lot of memory, does not increase performance
 
 ##################################################################################################
-# ADVANCED / DEVELOPMENT
+# ADVANCED
 ##################################################################################################
 
-
-PITCH=-25
-YAW=0
 YOLO_CONF = 0.3
-
-RUN_POSE_MODEL = False
-YOLO_MODEL = YOLO(MODEL_PATH, task="detect")
-YOLO_POSE_MODEL = None # YOLO("models/yolo11n-pose.mlpackage", task="pose")
-
-# Set the paths in your config
-
-UPDATE_PROGRESS_INTERVAL = 0.25 # Updates progress in the console and in gui
-# when enabled the queue will be processed one by one (use it on (QUEUE_MAXSIZE / frame rate) seconds longer videos or less)
-# raw frames take a lot of memory (RAM) so don't set the queue to high
-SEQUENTIAL_MODE = False
-QUEUE_MAXSIZE = 3000 if SEQUENTIAL_MODE else 500 # Bounded queue size to avoid memory blow-up
-DEBUG_PATH = "C:/cvr/funscript-generator/tmp_output"
-PROGRESS_BAR = True # disable when you want to print messages while debugging
-
+VR_TO_2D_PITCH=-25 # The dataset is trained on -25
+UPDATE_PROGRESS_INTERVAL = 0.1 # Updates progress in the console and in gui
 # Define custom colormap based on Lucife's heatmapColors
 STEP_SIZE = 120  # Speed step size for color transitions
 
+##################################################################################################
+# DEV
+##################################################################################################
+
+# when enabled the queue will be processed one by one (use it on (QUEUE_MAXSIZE / frame rate) seconds longer videos or less)
+# raw frames take a lot of memory (RAM) so don't set the queue to high
+SEQUENTIAL_MODE = False
+if SEQUENTIAL_MODE:
+    QUEUE_MAXSIZE = 3000
+
+##################################################################################################
+# PROG
+##################################################################################################
+
+# Preload the YOLO modal on launch
+YOLO_MODEL = YOLO(MODEL_PATH, task="detect")
+RUN_POSE_MODEL = False
+YOLO_POSE_MODEL = None # YOLO("models/yolo11n-pose.mlpackage", task="pose") #TODO pose model?
 
 FFMPEG_PATH = find_ffmpeg_path(win_ffmpeg_path, mac_ffmpeg_path, lin_ffmpeg_path)
 FFPROBE_PATH = find_ffprobe_path(win_ffprobe_path, mac_ffprobe_path, lin_ffprobe_path)

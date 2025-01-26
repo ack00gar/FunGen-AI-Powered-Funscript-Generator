@@ -5,7 +5,7 @@ from typing import List
 
 from tqdm import tqdm
 
-from config import QUEUE_MAXSIZE, SEQUENTIAL_MODE, PROGRESS_BAR, UPDATE_PROGRESS_INTERVAL
+from config import QUEUE_MAXSIZE, SEQUENTIAL_MODE, UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.object_detection.post_process_worker import PostProcessWorker
 from script_generator.object_detection.yolo_worker import YoloWorker
@@ -13,13 +13,13 @@ from script_generator.state.app_state import AppState
 from script_generator.tasks.abstract_task_processor import TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyzeVideoTask, AnalyzeFrameTask
 from script_generator.utils.file import check_create_output_folder
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 from script_generator.video.workers.ffmpeg_worker import VideoWorker
 from script_generator.video.workers.vr_to_2d_worker import VrTo2DWorker
 
 
 def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
-    logger.info(f"[OBJECT DETECTION] Starting up pipeline with profiling in {'sequential mode' if SEQUENTIAL_MODE else 'parallel mode'}...")
+    logger.info(f"[OBJECT DETECTION] Starting up pipeline{' in sequential mode' if SEQUENTIAL_MODE else ''}...")
 
     log_thread_stop_event = threading.Event()
     threads = []
@@ -119,62 +119,48 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
 
     label = 'Analyzing ' + ('VR' if state.video_info.is_vr else '2D') + ' video'
 
-    if PROGRESS_BAR:
-        with tqdm(
-                total=total_frames,
-                #desc="Analyzing video",
-                desc=label,
-                unit="f",
-                position=0,
-                unit_scale=False,
-                unit_divisor=1,
-                ncols=130
-        ) as progress_bar:
-            while not stop_event.is_set():
-                opengl_size = opengl_q.qsize()
-                yolo_size = yolo_q.qsize()
-                analysis_size = analysis_q.qsize()
-                frames_processed = results_q.qsize()
-
-                progress_bar.n = frames_processed
-                open_gl = f"OpenGL: {opengl_size:>3}, " if state.video_reader == "FFmpeg + OpenGL (Windows)" else ""
-                progress_bar.set_postfix_str(
-                    f"Queues: {open_gl}YOLO: {yolo_size:>3}, Analysis: {analysis_size:>3}"
-                )
-                progress_bar.refresh()
-
-                if frames_processed >= total_frames:
-                    stop_event.set()
-
-                if state.update_ui:
-                    elapsed_time = time.time() - state.analyze_task.start_time
-                    processing_rate = frames_processed / elapsed_time if elapsed_time > 0 else 0
-                    remaining_frames = total_frames - frames_processed
-                    eta = remaining_frames / processing_rate if processing_rate > 0 else float('inf')
-                    try:
-                        state.update_ui(ProgressMessage(
-                            process="OBJECT_DETECTION",
-                            frames_processed=frames_processed,
-                            total_frames=total_frames,
-                            eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
-                        ))
-                    except Exception as e:
-                        logger.error(f"Error in state.update_ui: {e}")
-
-                time.sleep(UPDATE_PROGRESS_INTERVAL)
-    else:
+    with tqdm(
+            total=total_frames,
+            #desc="Analyzing video",
+            desc=label,
+            unit="f",
+            position=0,
+            unit_scale=False,
+            unit_divisor=1,
+            ncols=130
+    ) as progress_bar:
         while not stop_event.is_set():
             opengl_size = opengl_q.qsize()
             yolo_size = yolo_q.qsize()
-            analysis_size = analysis_q.size()
+            analysis_size = analysis_q.qsize()
             frames_processed = results_q.qsize()
+
+            progress_bar.n = frames_processed
             open_gl = f"OpenGL: {opengl_size:>3}, " if state.video_reader == "FFmpeg + OpenGL (Windows)" else ""
-            logger.info(f"Queues: {open_gl}YOLO: {yolo_size:>3}, Analysis: {analysis_size:>3}, DONE: {frames_processed:>3}")
+            progress_bar.set_postfix_str(
+                f"Queues: {open_gl}YOLO: {yolo_size:>3}, Analysis: {analysis_size:>3}"
+            )
+            progress_bar.refresh()
 
             if frames_processed >= total_frames:
                 stop_event.set()
 
-            time.sleep(0.5)
+            if state.update_ui:
+                elapsed_time = time.time() - state.analyze_task.start_time
+                processing_rate = frames_processed / elapsed_time if elapsed_time > 0 else 0
+                remaining_frames = total_frames - frames_processed
+                eta = remaining_frames / processing_rate if processing_rate > 0 else float('inf')
+                try:
+                    state.update_ui(ProgressMessage(
+                        process="OBJECT_DETECTION",
+                        frames_processed=frames_processed,
+                        total_frames=total_frames,
+                        eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
+                    ))
+                except Exception as e:
+                    logger.error(f"Error in state.update_ui: {e}")
+
+            time.sleep(UPDATE_PROGRESS_INTERVAL)
 
 def log_performance(state, results_queue):
     analyze_task = state.analyze_task

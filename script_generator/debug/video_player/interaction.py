@@ -1,7 +1,7 @@
 import cv2
 
 from script_generator.debug.video_player.constants import BAR_HEIGHT
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 def mouse_callback(event, x, y, flags, param):

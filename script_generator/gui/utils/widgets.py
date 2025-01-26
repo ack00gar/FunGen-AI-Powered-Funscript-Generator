@@ -1,11 +1,14 @@
+import os
 import tkinter as tk
 from tkinter import ttk, filedialog, Button
 
+from script_generator.constants import LOGO
 from script_generator.gui.utils.tooltip import Tooltip
 
 PADDING_X = 5
 PADDING_Y = 5
 LABEL_WIDTH = 150
+
 
 class Widgets:
     @staticmethod
@@ -39,7 +42,6 @@ class Widgets:
         frame.bind("<Configure>", configure_grid)
 
         return frame
-
 
     @staticmethod
     def label(frame, text, tooltip_text=None, **grid_kwargs):
@@ -114,8 +116,9 @@ class Widgets:
 
         def on_change(val):
             setattr(state, attr, val)
+            state_val = val if os.path.exists(val) else None
             if command:
-                command(val)
+                command(state_val)
 
         # Ensure the container scales properly
         parent.grid_rowconfigure(row, weight=1)
@@ -269,6 +272,7 @@ class Widgets:
         window = tk.Toplevel(master)
         window.title(title)
         window.geometry(f"{width}x{height}")
+        window.iconphoto(False, tk.PhotoImage(file=LOGO))
 
         # Center the popup
         if master:
@@ -356,4 +360,161 @@ class Widgets:
             file_path.set(file)
             if callback:
                 callback(file)
+
+    @staticmethod
+    def frames_input(
+            parent,
+            label_text,
+            state,
+            attr,
+            row=0,
+            column=0,
+            label_width_px=LABEL_WIDTH,
+            entry_width_px=200,
+            callback=None,
+            tooltip_text=None
+    ):
+        """Creates a row of controls for editing time in H:M:S and frames format."""
+
+        def hms_to_frames(hours, minutes, seconds, fps):
+            if fps <= 0:
+                return 0
+            return int(hours * 3600 * fps + minutes * 60 * fps + seconds * fps)
+
+        def frames_to_hms(frames, fps):
+            if fps <= 0:
+                return (0, 0, 0)
+            total_seconds = frames / fps
+            h = int(total_seconds // 3600)
+            total_seconds = total_seconds % 3600
+            m = int(total_seconds // 60)
+            total_seconds = total_seconds % 60
+            s = int(total_seconds)
+            return (h, m, s)
+
+        # Main container
+        container = ttk.Frame(parent)
+        container.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
+        container.columnconfigure(1, weight=1)
+
+        initial_frames = getattr(state, attr, 0) or 0
+        value = tk.StringVar(value=str(initial_frames))
+
+        hours_var = tk.StringVar()
+        minutes_var = tk.StringVar()
+        seconds_var = tk.StringVar()
+        frames_var = tk.StringVar()
+
+        # A small mutable flag to prevent "ping-pong" re-entrancy
+        in_update = [False]
+
+        def on_fps_change(*_):
+            """ Recalculate HH:MM:SS whenever FPS or 'value' changes (externally). """
+            fps = getattr(state.video_info, "fps", 0) or 0
+            fps_label.config(text=" {state.video_info.fps} fps" if state.video_info else ' ? fps')
+
+            try:
+                f_ = int(value.get())
+            except ValueError:
+                f_ = 0
+
+            h_, m_, s_ = frames_to_hms(f_, fps)
+            hours_var.set(str(h_))
+            minutes_var.set(str(m_))
+            seconds_var.set(str(s_))
+
+        fps_var = tk.StringVar()
+        fps_var.trace_add("write", on_fps_change)
+
+        def update_from_hms(*_):
+            if in_update[0]:
+                return
+            in_update[0] = True
+            try:
+                fps = getattr(state.video_info, "fps", 0) or 0
+                if fps <= 0:
+                    return
+
+                try:
+                    h = int(hours_var.get())
+                    m = int(minutes_var.get())
+                    s = int(seconds_var.get())
+                except ValueError:
+                    return
+
+                new_frames = hms_to_frames(h, m, s, fps)
+                frames_var.set(str(new_frames))
+                value.set(str(new_frames))
+
+                if callback:
+                    callback(new_frames)
+            finally:
+                in_update[0] = False
+
+        def update_from_frames(*_):
+            if in_update[0]:
+                return
+            in_update[0] = True
+            try:
+                fps = getattr(state.video_info, "fps", 0) or 0
+                if fps <= 0:
+                    return
+
+                try:
+                    f_ = int(frames_var.get())
+                except ValueError:
+                    return
+
+                h_, m_, s_ = frames_to_hms(f_, fps)
+                hours_var.set(str(h_))
+                minutes_var.set(str(m_))
+                seconds_var.set(str(s_))
+                value.set(str(f_))
+
+                if callback:
+                    callback(f_)
+            finally:
+                in_update[0] = False
+
+        hours_var.trace_add("write", update_from_hms)
+        minutes_var.trace_add("write", update_from_hms)
+        seconds_var.trace_add("write", update_from_hms)
+        frames_var.trace_add("write", update_from_frames)
+        value.trace_add("write", on_fps_change)  # in case value is set externally
+
+        # Label on the left
+        label = tk.Label(container, text=label_text, anchor="w", width=label_width_px // 7)
+        label.grid(row=0, column=0, sticky="w", padx=(5, 2))
+
+        # Sub-container for the time fields
+        entry_container = ttk.Frame(container, width=entry_width_px)
+        entry_container.grid(row=0, column=1, sticky="ew", padx=(2, 5))
+        entry_container.grid_propagate(False)
+
+        def make_entry(parent_, textvar, width=4):
+            e = ttk.Entry(parent_, textvariable=textvar, width=width)
+            e.pack(side="left", padx=(0, 2))
+            return e
+
+        hours_entry = make_entry(entry_container, hours_var, width=6)
+        tk.Label(entry_container, text=":").pack(side="left")
+        minutes_entry = make_entry(entry_container, minutes_var, width=6)
+        tk.Label(entry_container, text=":").pack(side="left")
+        seconds_entry = make_entry(entry_container, seconds_var, width=6)
+        tk.Label(entry_container, text=" frame ").pack(side="left")
+        frames_entry = make_entry(entry_container, frames_var, width=23)
+        fps_label = tk.Label(entry_container, text=" ? fps")
+        fps_label.pack(side="left")
+
+        # Optional tooltip
+        if tooltip_text:
+            Tooltip(hours_entry, tooltip_text)
+            Tooltip(minutes_entry, tooltip_text)
+            Tooltip(seconds_entry, tooltip_text)
+            Tooltip(frames_entry, tooltip_text)
+
+        # Initialize the fields so they match initial_frames (and current FPS if set)
+        on_fps_change()
+
+        return container, (hours_entry, minutes_entry, seconds_entry, frames_entry), value
 

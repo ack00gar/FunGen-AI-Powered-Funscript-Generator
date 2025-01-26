@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from config import RENDER_RESOLUTION, FFPROBE_PATH
 from script_generator.debug.errors import FFProbeError
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 @dataclass
 class VideoInfo:

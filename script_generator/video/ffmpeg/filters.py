@@ -1,4 +1,4 @@
-from config import RENDER_RESOLUTION, PITCH
+from config import RENDER_RESOLUTION, VR_TO_2D_PITCH
 
 
 def get_vr_video_filters(video, video_reader, hwaccel):
@@ -18,7 +18,7 @@ def get_vr_video_filters(video, video_reader, hwaccel):
             scale,
             crop,
             f"{out_format}v360={projection}:in_stereo=2d:output=sg:iv_fov={iv_fov}:ih_fov={ih_fov}:"
-            f"d_fov={d_fov}:v_fov={v_fov}:h_fov={h_fov}:pitch={PITCH}:yaw=0:roll=0:"
+            f"d_fov={d_fov}:v_fov={v_fov}:h_fov={h_fov}:pitch={VR_TO_2D_PITCH}:yaw=0:roll=0:"
             f"w={RENDER_RESOLUTION}:h={RENDER_RESOLUTION}:interp=lanczos:reset_rot=1",
             "lutyuv=y=gammaval(0.7)"
         ]
@@ -26,7 +26,7 @@ def get_vr_video_filters(video, video_reader, hwaccel):
         filters = [
             scale,
             crop,
-            f"{out_format}lutyuv=y=gammaval(0.7)"  # TODO Process in open gl and move scale and crop to the gpu
+            f"{out_format}lutyuv=y=gammaval(0.7)"
         ]
 
     return ",".join(filters)

@@ -73,210 +73,130 @@ The pipeline for generating Funscript files is as follows:
 Before using this project, ensure you have the following installed:
 
 - **Python 3.8 or higher**
-- **FFmpeg** added to your path (for video processing)
+- **FFmpeg** added to your path or specified in the config
 - **CUDA** (optional, for GPU acceleration)
 
 ---
 
 ## Installation
 
-1. **Clone the repository**:
+### Clone the repository
    ```bash
    git clone https://github.com/ack00gar/VR-Funscript-AI-Generator.git
    cd VR-Funscript-AI-Generator
    ```
+### Install dependencies
 
-2. **Install dependencies**:
-   ```bash
-   pip install numpy opencv-python tqdm ultralytics scipy matplotlib simplification
-   ```
-
-3. **Use a venv as suggested by Zalunda**
-   * Install miniconda 
-   * Start a miniconda command prompt 
-   * Execute (assuming you already cloned VR-Funscript-AI-Generator and copied the model into models folder)
-   ```bash
-   conda create -n VRFunAIGen python=3.11
-   conda activate VRFunAIGen
-   pip install numpy opencv-python tqdm ultralytics scipy matplotlib simplification
-   pip uninstall torch torchvision torchaudio
-   pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-   cd <VR-Funscript-AI-Generator folder>
-   python FSGenerator.py
-   ```
-   
-   While executing, you’ll need to say “yes” a few times. The lines “pip uninstall / pip3 install” is to replace the “CPU” version of torch with a “cuda enabled / GPU” version (you might need to install nvidia CUDA stuff for it to works, I’m not sure).
-   
-   Zalunda also suggests the creation of a batch file, after the setup, to start the application in the right conda environment:
-
-   ```bash
-   @echo off
-   call <PATH_TO_MINICONDA>\miniconda3\condabin\conda activate VRFunAIGen
-   cd /d "<PATH_TO_SOURCES>\VR-Funscript-AI-Generator"
-   python FSGenerator.py
-   pause
-   ```
-
-4. **Download the YOLO model**:
-   - Place your YOLO model file (e.g., `k00gar-11n-200ep-best.mlpackage`) in the `models/` sub-directory.
-   - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
-
-5. **Update the params/config.py**:
-   - If ffmpeg and ffprobe paths are not in your system path, the program will default to the following values.
-   - You can update the params/config.py file, which contains:
-
-   ```bash
-   # ffmpeg and ffprobe paths - replace with your own if not in your system path   
-    win_ffmpeg_path = "C:/ffmpeg/bin/ffmpeg.exe"
-    mac_ffmpeg_path = "/usr/local/bin/ffmpeg"
-    lin_ffmpeg_path = "/usr/bin/ffmpeg"
-
-    win_ffprobe_path = "C:/ffmpeg/bin/ffprobe.exe"
-    mac_ffprobe_path = "/usr/local/bin/ffprobe"
-    lin_ffprobe_path = "/usr/bin/ffprobe"
-   ```
-
----
-
-### Libraries Used
-
-The project relies on the following Python libraries:
-
-- **numpy**: For numerical computations and array manipulations.
-- **opencv-python**: For computer vision tasks like video processing and image manipulation.
-- **tqdm**: For displaying progress bars during long-running tasks.
-- **ultralytics**: For YOLO object detection and tracking.
-- **scipy**: For scientific computing, including interpolation (interp1d).
-- **matplotlib**: For plotting and visualization.
-- **simplification**: For simplifying Funscript data.
-- **logging**: For logging debug and runtime information.
-- **argparse**: For parsing command-line arguments.
-- **subprocess**: For running external commands (e.g., FFmpeg).
-- **collections**: For specialized container datatypes like deque and defaultdict.
-- **datetime**: For handling timestamps and date-related operations.
-- **json**: For reading and writing JSON files.
-- **tkinter**: For creating a basic GUI for file selection and parameter configuration.
-
----
-
-## Howto & Video Input and Preprocessing
-
-### Input File Requirements
-
-The input video file should be a standard video file. For VR videos, ensure the file is in **Side-by-Side (SBS)** format. The algorithm will process the **left panel** by default.
-
-**Note**: While the algorithm can handle up to 8K videos, it is strongly recommended to process videos at **1920p resolution** for optimal performance. Videos should not be lower than **1080p** to maintain detection accuracy. If your video exceeds 1920p in height, the script will automatically suggest resizing options (1920p, 1440p, or 1080p) while preserving the aspect ratio.
-
-### Video Resizing
-
-If the input video height exceeds 1920 pixels, the script will prompt you to resize the video to a lower resolution. The resizing process uses **FFmpeg** and excludes audio by default. The following options are available:
-- **1920p**: Resize to 1920 pixels in height (recommended for most cases).
-- **1440p**: Resize to 1440 pixels in height.
-- **1080p**: Resize to 1080 pixels in height.
-
-### VR Video Projection and Undistortion
-
-For VR videos, the **projection type** and **undistortion settings** are critical for accurate object detection and tracking. The script supports two main projection types:
-1. **Fisheye**: Used for videos with a fisheye lens projection. The script automatically detects fisheye videos based on the filename or metadata.
-2. **Equirectangular**: Used for standard 360° VR videos. This is the default projection if fisheye is not detected.
-
-#### Key Parameters for VR Video Processing
-
-The undistortion process is handled using FFmpeg's `v360` filter, which corrects the video frames based on the specified projection and field-of-view (FOV) parameters. Key parameters include:
-- **Input Vertical FOV (`iv_fov`)**: The vertical field of view of the input video.
-- **Input Horizontal FOV (`ih_fov`)**: The horizontal field of view of the input video.
-- **Output Vertical FOV (`v_fov`)**: The desired vertical field of view after undistortion.
-- **Output Horizontal FOV (`h_fov`)**: The desired horizontal field of view after undistortion.
-- **Diagonal FOV (`d_fov`)**: The diagonal field of view used for undistortion.
-
-#### Example FFmpeg Command for VR Video Processing
-
-The following FFmpeg command is used for undistorting VR videos:
-
+#### Option 1: venv
+**If your GPU supports CUDA (NVIDIA)**
 ```bash
-ffmpeg -ss <start_time> -i <input_video> -vf "crop=w=iw/2:h=ih:x=0:y=0,v360=<type>:output=sg:iv_fov=<iv_fov>:ih_fov=<ih_fov>:d_fov=<d_fov>:v_fov=<v_fov>:h_fov=<h_fov>:pitch=-25:yaw=0:roll=0:w=<width>:h=<height>:interp=lanczos:reset_rot=1,lutyuv=y=gammaval(0.7)" -f rawvideo -pix_fmt bgr24 -vsync 0 -threads 0 -
+python -m venv VRFunAIGen
+VRFunAIGen\Scripts\activate # windows
+source myenv/bin/activate # mac
+pip install -e requirements.txt
+pip uninstall torch torchvision torchaudio
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+python FSGenerator.py
 ```
 
-#### Adjusting Projection Settings
+**If your GPU doesn't support cuda**
+```bash
+python -m venv VRFunAIGen
+VRFunAIGen\Scripts\activate # windows
+source myenv/bin/activate # mac
+pip install -e requirements.txt
+python FSGenerator.py
+```
 
-To ensure accurate detection and tracking, you may need to adjust the projection settings based on the specific characteristics of your VR video. These settings can be found and modified in the `utils/lib_VideoReaderFFmpeg.py` file. Use the `utils/test_detect_compare_unwarped.py` script to test different projection settings before processing the video.
+#### Option 2: Conda
+* Install miniconda (https://docs.anaconda.com/miniconda/install/)
+* Start a miniconda command prompt
+   
+**If your GPU supports CUDA (NVIDIA)**
+```bash
+conda create -n VRFunAIGen python=3.11
+conda activate VRFunAIGen
+pip install -e requirements.txt
+pip uninstall torch torchvision torchaudio
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+python FSGenerator.py
+```
+While executing, you’ll need to say “yes” a few times. The lines “pip uninstall / pip3 install” is to replace the “CPU” version of torch with a “cuda enabled / GPU” version (you might need to install nvidia CUDA stuff for it to works, I’m not sure).
+
+**If your GPU doesn't support cuda**
+```bash
+conda create -n VRFunAIGen python=3.11
+conda activate VRFunAIGen
+pip install -e requirements.txt
+python FSGenerator.py
+```
+
+### Download the YOLO model
+- Place your YOLO model file (e.g., `k00gar-11n-200ep-best.mlpackage`) in the `models/` sub-directory.
+- Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
+
+### Update config.py
+
+**FFMPEG**
+- If ffmpeg and ffprobe paths are not in your system path, the program will default to the following values.
+- You can update the params/config.py file, which contains:
+
+  ```bash
+  # ffmpeg and ffprobe paths - replace with your own if not in your system path   
+   win_ffmpeg_path = "C:/ffmpeg/bin/ffmpeg.exe"
+   mac_ffmpeg_path = "/usr/local/bin/ffmpeg"
+   lin_ffmpeg_path = "/usr/bin/ffmpeg"
+
+   win_ffprobe_path = "C:/ffmpeg/bin/ffprobe.exe"
+   mac_ffprobe_path = "/usr/local/bin/ffprobe"
+   lin_ffprobe_path = "/usr/bin/ffprobe"
+  ```
+
+**(Optional) User configurations**
+config.py also contains various user configurations that can be adjusted
+
+### Start script
+You can use Start windows.bat to launch the gui on windows if you installed with conda
 
 ---
 
-### Key Points to Remember
+## Command Line Usage
 
-1. **Video Resolution**: Resize videos to 1920p for optimal performance.
-2. **VR Video Projection**: Ensure the correct projection type (Fisheye or Equirectangular) is selected for undistortion.
-3. **Undistortion Settings**: Adjust FOV and other parameters in `utils/lib_VideoReaderFFmpeg.py` for accurate results.
-4. **Testing**: Use `utils/test_detect_compare_unwarped.py` to test projection settings before full processing.
-
----
-
-### Basic Command
-
-To process a video, run the following command:
+To generate a script with cmd or terminal, run the following command
 
 ```bash
-python FSGenerator.py /path/to/video.mp4
+python script_generator.cli.generate_funscript.py /path/to/video.mp4
 ```
-or Run the script directly from your IDE.
+---
+
+## Miscellaneous
+
+- For VR only **Fisheye** and **Equirectangular** 180° videos are supported
+- 2D POV videos have limited support
+- 2D / VR is automatically detected for fisheye/equirectangular detection make sure you keep the file format information in the filename (_FISHEYE190, _MKX200, _LR_180, etc.) 
+
+### Configuration / User settings
+
+See config.py for customizations and user settings (will be replaced with a yaml soon).
+
 
 ---
 
-### Output Files
+## Output Files
 
-The script generates the following files in the same directory as the input video:
+The script generates the following files in the output directory of you project folder:
 
-1. `_rawyolo.json`: Raw YOLO detection data.
+1. `_rawyolo.json`: Raw YOLO detection data. Can be re-used when re-generating scripts 
 2. `_cuts.json`: Detected scene changes.
-3. `_rawfunscript.json`: Raw Funscript data.
+3. `_rawfunscript.json`: Raw Funscript data. Can be re-used when re-generating script with different settings.
 4. `.funscript`: Final Funscript file.
 5. `_heatmap.png`: Heatmap visualization of the Funscript data.
 6. `_comparefunscripts.png`: Comparison visualization between the generated Funscript and the reference Funscript (if provided).
 7. `_adjusted.funscript`: Funscript file with adjusted amplitude.
+8. `_debug_logs.json`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
 
----
-
-## How It Works
-
-1. **YOLO Detection**: The script uses a YOLO model to detect and track objects in each video frame. For VR videos, it processes only the center third of the left half of the frame.
-2. **Scene Change Detection**: Detects scene changes to reset tracking and ensure accuracy.
-3. **Tracking and Funscript Generation**: Tracks specific objects (e.g., body parts) and generates Funscript data based on their movements.
-4. **Visualization (Test Mode)**: Displays bounding boxes and Funscript data in real-time for debugging and verification.
-5. **Debugging (Debug Mode)**: Saves detailed logs for debugging purposes.
-
----
-
-## Example
-
-1. **Generate Funscript**:
-   ```bash
-   python FSGenerator.py /path/to/vr_video.mp4
-   ```
-   This command starts the UI.
-
-   You can also simply run it from your IDE, giving it a `video_path` to process.
-
-2. **Debugging Example**:
-
-   The debugger is accessible from the GUI.
-
-   If you want to call it from the code, you can do the following: 
-
-   - Display a Specific Frame with debug information:
-     ```bash
-     debugger.display_frame(frame_id)
-     ```
-   - Play the Video with debug information:
-     ```bash
-     debugger.play_video(frame_id)
-     ```
-   - Record the Debugged Video:
-     ```bash
-     debugger.play_video(frame, record=True, downsize_ratio=2, duration=10)
-     ```
-
-   Or run `Display_debug_results.py` from your IDE with the desired parameters.
+In config.py you can set COPY_FUNSCRIPT_TO_MOVIE_LOCATION to True to copy the generated script to the same directory as your video.
+If a funscript already exists it will be renamed to {funscriptName}_{date}.funscript.bak
 
 ---
 

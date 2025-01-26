@@ -3,7 +3,7 @@ import os
 import time
 
 from script_generator.constants import OUTPUT_PATH
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 def write_json_to_file(file_path, data):

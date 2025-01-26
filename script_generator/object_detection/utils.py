@@ -5,7 +5,7 @@ from script_generator.gui.utils.widgets import Widgets
 from script_generator.object_detection.box_record import BoxRecord
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.utils.file import get_output_file_path, load_json_from_file
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 def check_skip_object_detection(state, root):

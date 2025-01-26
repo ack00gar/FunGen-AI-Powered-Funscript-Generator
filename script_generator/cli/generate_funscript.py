@@ -1,6 +1,6 @@
 import argparse
 from script_generator.scripts.generate_funscript import generate_funscript
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 def main():

@@ -4,12 +4,12 @@ from tkinter import ttk
 from script_generator.gui.controller.process_video import video_analysis
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
 from script_generator.gui.controller.debug_video import debug_video
-from script_generator.gui.messages.messages import UIMessage, ProgressMessage
+from script_generator.gui.messages.messages import UIMessage, ProgressMessage, UpdateGUIState
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.gui.views.popups.create_debug_video import render_debug_video_popup
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
 
 class FunscriptGeneratorPage(tk.Frame):
@@ -38,9 +38,7 @@ class FunscriptGeneratorPage(tk.Frame):
             file_types=[("Text Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")],
             state=state,
             tooltip_text="The video to generate a funscript for. For proper detection of fisheye keep the suffix like _FISHEYE190, _MKX200, etc. in the filename\n\nIn the future we'll add the option to override this in the UI.",
-            # if the file changes we need to make sure the video info is reset
-            # TODO add os.path.exists and update video_info immediately if found
-            command=lambda val: setattr(state, 'video_info', None)
+            command=lambda val: state.set_video_info()
         )
 
         Widgets.dropdown(
@@ -58,8 +56,8 @@ class FunscriptGeneratorPage(tk.Frame):
         # region OPTIONAL SETTINGS
         optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
 
-        Widgets.input(optional_settings, "Frame Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
-        Widgets.input(optional_settings, "Frame End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
+        Widgets.frames_input(optional_settings, "Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
+        Widgets.frames_input(optional_settings, "End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
         # endregion
 
         # region PROCESSING
@@ -160,7 +158,7 @@ class FunscriptGeneratorPage(tk.Frame):
         # region DEBUGGING
         debugging = Widgets.frame(wrapper, title="Debugging", main_section=True, row=5)
         general = Widgets.frame(debugging, title="General", row=0)
-        Widgets.checkbox(
+        _, _, live_preview_checked = Widgets.checkbox(
             general, "Live preview",
             state,
             "live_preview_mode",
@@ -169,7 +167,7 @@ class FunscriptGeneratorPage(tk.Frame):
         )
         Widgets.checkbox(
             general,
-            "Save debug information",
+            "Save debug metrics",
             state, "save_debug_file",
             tooltip_text="Saves a debug file to disk with all collected metrics.\nThis is a prerequisite for playing back the debug video with the debug statistics overlay.\nThis also contains all generated metrics.",
             row=1
@@ -215,7 +213,8 @@ class FunscriptGeneratorPage(tk.Frame):
 
             def process_update():
                 handlers = {
-                    ProgressMessage: handle_progress_message
+                    ProgressMessage: handle_progress_message,
+                    UpdateGUIState: handle_state_update
                 }
 
                 handler = handlers.get(type(msg))
@@ -223,6 +222,10 @@ class FunscriptGeneratorPage(tk.Frame):
                     handler(msg)
                 else:
                     logger.info(f"Unhandled message type: {type(msg)}")
+
+            def handle_state_update(state_msg: UpdateGUIState):
+                if state_msg.attr == "live_preview_mode":
+                    live_preview_checked.set(state_msg.value)
 
             def handle_progress_message(progress_msg: ProgressMessage):
                 progress_mapping = {

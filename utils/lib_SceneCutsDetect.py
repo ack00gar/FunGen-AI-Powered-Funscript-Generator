@@ -6,9 +6,9 @@ from tqdm import tqdm
 from config import UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.state.app_state import AppState
-from script_generator.utils.logger import logger
+from script_generator.debug.logger import logger
 
-
+# TODO where is this used? (implement in object detection pipeline?)
 def compute_histogram(frame):
     """
     Compute the normalized histogram of the H channel in the HSV color space.
@@ -20,7 +20,7 @@ def compute_histogram(frame):
     cv2.normalize(hist, hist)
     return hist
 
-
+# TODO where is this used? (implement in object detection pipeline?)
 def compare_histograms(hist1, hist2):
     """
     Compare two histograms using the correlation method.
@@ -30,7 +30,7 @@ def compare_histograms(hist1, hist2):
     """
     return cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
 
-
+# TODO where is this used? (implement in object detection pipeline?)
 def detect_scene_changes(state: AppState, crop=None, threshold=0.97, frame_start=0, frame_end=None):
     cap = cv2.VideoCapture(state.video_path)
     if not cap.isOpened():

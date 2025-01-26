@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 
+# TODO where is this used?
 class KalmanFilter:
     def __init__(self):
         self.kf = cv2.KalmanFilter(4, 2)
@@ -36,8 +37,7 @@ class KalmanFilter:
         self.prediction_count += 1
         return prediction[0]
 
-
-
+# TODO where is this used?
 class KalmanFilter_distance:
     def __init__(self):
         # Initialize a 1D Kalman filter (state: [distance, velocity])

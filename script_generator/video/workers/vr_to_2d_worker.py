@@ -3,7 +3,7 @@ import numpy as np
 from OpenGL.GL import *
 from OpenGL.GLU import *
 
-from config import RENDER_RESOLUTION, YAW, PITCH
+from config import RENDER_RESOLUTION, VR_TO_2D_PITCH
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.video.opengl.helpers import create_180_dome, render_dome
 
@@ -53,8 +53,8 @@ class VrTo2DWorker(AbstractTaskProcessor):
         glLoadIdentity()
         # the 3th parameter will zoom in and out to increase / decrease the FOV
         gluLookAt(0, 0, 0.5, 0, 0, -1, 0, 1, 0)
-        glRotatef(-YAW, 0, 1, 0)
-        glRotatef(-(PITCH + 90), 1, 0, 0)
+        glRotatef(0, 0, 1, 0)
+        glRotatef(-(VR_TO_2D_PITCH + 90), 1, 0, 0)
 
         glBindTexture(GL_TEXTURE_2D, texture_id)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
