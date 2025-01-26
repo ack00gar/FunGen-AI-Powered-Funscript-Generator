@@ -173,19 +173,19 @@ python -m script_generator.cli.generate_funscript.py /path/to/video.mp4
 
 #### Optional Arguments
 - **`--reuse-yolo`** *(bool, default=False)*  
-  Use an existing raw YOLO output file instead of generating a new one.
+  Re-use an existing raw YOLO output file instead of generating a new one when available.
 
 - **`--copy-funscript`** *(bool, default=True)*  
   Copies the final funscript to the movie directory.
 
 - **`--frame-start`** *(int, default=0)*  
-  The starting frame number for processing.
+  The starting frame number for processing (keep in Mind that this shouldn't be changed if you want a full funscript). Default is 0 (start from the beginning).
 
 - **`--frame-end`** *(int or None, default=None)*  
-  The ending frame number for processing. Set to `None` to process till the end.
+  The ending frame number for processing (keep in Mind that this shouldn't be changed if you want a full funscript). Default is None (process till the end).
 
 - **`--video-reader`** *(str, default=None)*  
-  Video reader to use. Valid options: `<VALID_VIDEO_READERS>`. Defaults are platform-specific.
+  Video reader to use. Valid options: `"FFmpeg", "FFmpeg + OpenGL (Windows)"`. Defaults are platform-specific.
 
 - **`--save-debug-file`** *(bool, default=True)*  
   Saves a debug file to disk with all collected metrics. Also allows you to re-use tracking data.

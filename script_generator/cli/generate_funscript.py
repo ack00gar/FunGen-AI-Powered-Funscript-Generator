@@ -22,7 +22,7 @@ def main():
         "--reuse-yolo",
         type=bool,
         default=False,
-        help="Use an existing raw YOLO output file instead of generating a new one. Default is False."
+        help="Re-use an existing raw YOLO output file instead of generating a new one when available. Default is False."
     )
     parser.add_argument(
         "--copy-funscript",
@@ -34,13 +34,13 @@ def main():
         "--frame-start",
         type=int,
         default=0,
-        help="The starting frame number for processing. Default is 0 (start from the beginning)."
+        help="The starting frame number for processing (keep in Mind that this shouldn't be changed if you want a full funscript). Default is 0 (start from the beginning)."
     )
     parser.add_argument(
         "--frame-end",
         type=int or None,
         default=None,
-        help="The ending frame number for processing. Default is None (process till the end)."
+        help="The ending frame number for processing (keep in Mind that this shouldn't be changed if you want a full funscript). Default is None (process till the end)."
     )
     parser.add_argument(
         "--video-reader",
