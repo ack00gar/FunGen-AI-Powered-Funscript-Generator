@@ -20,8 +20,7 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
     width, height = get_cropped_dimensions(video_info)
 
     video_player = VideoPlayer(
-        video_path=state.video_path,
-        video_info=video_info,
+        state=state,
         start_frame=start_frame,
         end_frame=end_frame
     )

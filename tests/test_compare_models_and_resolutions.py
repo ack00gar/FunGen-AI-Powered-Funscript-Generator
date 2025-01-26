@@ -2,8 +2,10 @@ import cv2
 from PIL import Image
 
 from script_generator.debug.logger import logger
-from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
 from ultralytics import YOLO
+
+from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
+
 
 def save_frames_as_gif(frames, output_path, duration=100, loop=0):
     #frames = [Image.fromarray(frame) for frame in frames]

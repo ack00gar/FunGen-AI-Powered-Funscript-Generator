@@ -162,7 +162,7 @@ class FunscriptGeneratorPage(tk.Frame):
             general, "Live preview",
             state,
             "live_preview_mode",
-            tooltip_text="Press 'q' to quit.\n\nWill show a live preview of what is being generated.\n\nFor debugging only this will reduce your performance.\nStage 1: Show bounding boxes during object detection.\nStage 2: Show funscript and metric overlay while the funscript is being processed.",
+            tooltip_text="Will show a live preview of what is being generated.\n\nFor debugging only this will reduce your performance.\nStage 1: Show bounding boxes during object detection.\nStage 2: Show funscript and metric overlay while the funscript is being processed.",
             row=0
         )
         Widgets.checkbox(

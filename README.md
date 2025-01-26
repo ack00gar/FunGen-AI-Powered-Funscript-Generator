@@ -72,11 +72,9 @@ The pipeline for generating Funscript files is as follows:
  
 Before using this project, ensure you have the following installed:
 
-- **Python 3.8 or higher**
-- **FFmpeg** added to your path or specified in the config
-- **CUDA** (optional, for GPU acceleration)
-
----
+- **Python 3.8 or higher (tested on 3.11 https://www.python.org/downloads/release/python-3118/)**
+- **FFmpeg** added to your path or specified in the config (https://www.ffmpeg.org/download.html)
+--
 
 ## Installation
 
@@ -167,6 +165,19 @@ To generate a script with cmd or terminal, run the following command
 ```bash
 python -m script_generator.cli.generate_funscript.py /path/to/video.mp4
 ```
+---
+
+## Performance & Parallel Processing
+Our pipeline's current bottleneck lies in the Python code within YOLO.track (the object detection library we use), which is challenging to parallelize effectively. We have plans to parallelize this in the future but for now it remains a limitation.
+
+Currently, we got about 35-40fps for 8192x4096 VR videos on an i5-13600K with a 4090 and 32GB DDR4 ram. Utilization is about 20% CPU, 20% video decoding and 7% GPU usage. We suspect this means performance should be similar for lower end NVIDIA cards.
+
+However, when you have high-performance hardware this also means effectively run multiple processes simultaneously via the command line or launching multiple instances of the GUI. For reference, the above test setup was able to process at a combined 100fps while still being CPU limited.
+
+**Important considerations:**
+- Each instance requires the YOLO model to load, so monitor your VRAM usage to determine how many instances your hardware can support. For example, an NVIDIA RTX 4090 can handle up to six instances simultaneously.
+- The optimal number of instances depends on a combination of factors, including your CPU, GPU, RAM, and system configuration. So experiment with different setups to find the ideal configuration for your hardware! 😊
+
 ---
 
 ## Miscellaneous
