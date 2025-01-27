@@ -62,7 +62,9 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
     else:
         # Setup OpenCV window
         window_name = "Debug Video"
-        cv2.namedWindow(window_name)
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        # zoom in the image is only 640x640 now
+        cv2.resizeWindow(window_name, int(width * 2), int(height * 2))
 
         # Attach mouse callback for seeking
         cv2.setMouseCallback(window_name, mouse_callback, param=video_player)

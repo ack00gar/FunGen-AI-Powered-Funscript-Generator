@@ -12,6 +12,8 @@ def get_funscript_value(interpolator, frame_id, fps):
     time_in_milliseconds = int((frame_id / fps) * 1000)
     return interpolator(time_in_milliseconds)
 
+FONT_SIZE = 0.3
+
 def draw_overlay(
     frame,
     frame_id,
@@ -47,15 +49,15 @@ def draw_overlay(
         class_name = box["class_name"]
         position = box["position"]
         color = CLASS_COLORS.get(class_name, (0, 255, 0))
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
         cv2.putText(
             frame,
             f"{class_name} {position}",
-            (x1, y1 - 10),
+            (x1, y1 - 5),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
+            FONT_SIZE,
             color,
-            2
+            1
         )
 
     # Display variables
@@ -66,26 +68,26 @@ def draw_overlay(
             f"{key}: {value}",
             (10, y_offset_stats),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
+            FONT_SIZE,
             (0, 0, 255),
-            2
+            1
         )
-        y_offset_stats += 20
+        y_offset_stats += 12
 
     # Draw locked penis box if present
     locked_penis_box = variables.get("locked_penis_box")
     if locked_penis_box and locked_penis_box.get("active", False):
         x1, y1, x2, y2 = locked_penis_box["box"]
         color = CLASS_COLORS.get("penis", (0, 255, 0))
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
         cv2.putText(
             frame,
             "Locked Penis",
-            (x1, y1 - 10),
+            (x1, y1 - 5),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
+            FONT_SIZE,
             color,
-            2
+            1
         )
 
     # Compute distance and funscript values for rolling buffer
