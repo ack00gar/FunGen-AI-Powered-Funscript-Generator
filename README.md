@@ -130,7 +130,7 @@ python FSGenerator.py
 ```
 
 ### Download the YOLO model
-- Place your YOLO model file (e.g., `k00gar-11n-200ep-best.mlpackage`) in the `models/` sub-directory.
+- Place your YOLO model file (e.g., `k00gar-11n-RGB-200ep-best.mlpackage`) in the `models/` sub-directory.
 - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
 
 ### Update config.py
