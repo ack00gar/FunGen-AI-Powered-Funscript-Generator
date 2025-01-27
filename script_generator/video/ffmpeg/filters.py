@@ -36,12 +36,13 @@ def get_vr_video_filters(video, video_reader, hwaccel, disable_opengl=False):
 
     return f"{','.join(filters)}"
 
+
 def get_2d_video_filters(video, width, height, hwaccel):
     cuda = hwaccel == "cuda"
 
-    if video.height > RENDER_RESOLUTION or video.width > width:
-        scale_filter = f"\"[0:0]scale_cuda={width}:{height},hwdownload,format=nv12" if cuda else f"scale={width}:{height}\""
+    if video.height > RENDER_RESOLUTION:
+        scale_width = int(video.width * (height / video.height))
+        crop = f",crop={width}:{height}:(iw-{width})/2:0"
+        return f"[0:0]scale_cuda={scale_width}:{height},hwdownload,format=nv12{crop}" if cuda else f"[0:0]scale={scale_width}:{height}{crop}"
     else:
-        scale_filter = "\"[0:0]hwdownload,format=nv12\"" if cuda else ""
-
-    return scale_filter
+        return "[0:0]hwdownload,format=nv12" if cuda else ""
