@@ -4,7 +4,9 @@ import os
 import sys
 from colorama import Fore, Style, init
 
-from script_generator.utils.file import ensure_path_exists
+def ensure_path_exists(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
 
 init(autoreset=True)
 
