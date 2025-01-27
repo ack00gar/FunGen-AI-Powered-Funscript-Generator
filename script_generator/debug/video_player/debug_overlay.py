@@ -19,20 +19,24 @@ def draw_overlay(
     frame_id,
     logs,
     funscript_interpolator,
+    funscript_interpolator_ref,
     distance_buffer,
     funscript_buffer,
+    funscript_buffer_ref,
     fps
 ):
     """
     Draws bounding boxes, text overlays, rolling window graphs, etc. on top of `frame`.
 
-    :param frame:                   The current video
-    :param frame_id:                The integer ID of the frame.
-    :param logs:                    A dict containing per-frame logs.
-    :param funscript_interpolator:  If present, used to compute funscript values.
-    :param distance_buffer:         Rolling buffer for 'distance' data.
-    :param funscript_buffer:        Rolling buffer for funscript values.
-    :param fps:                     The video frames per second.
+    :param frame:                       The current video
+    :param frame_id:                    The integer ID of the frame.
+    :param logs:                        A dict containing per-frame logs.
+    :param funscript_interpolator:      If present, used to compute funscript values.
+    :param funscript_interpolator_ref:  If present, used to compute funscript values.
+    :param distance_buffer:             Rolling buffer for 'distance' data.
+    :param funscript_buffer:            Rolling buffer for funscript values.
+    :param funscript_buffer_ref:        Rolling buffer for reference funscript values.
+    :param fps:                         The video frames per second.
     """
     # Pull the logs for this frame
     str_frame_id = str(frame_id)
@@ -90,9 +94,11 @@ def draw_overlay(
 
     # Compute distance and funscript values for rolling buffer
     distance = variables.get("distance", 0)
-    funscript_value = 0
+    funscript_value, funscript_value_ref = 0, 0
     if funscript_interpolator:
         funscript_value = get_funscript_value(funscript_interpolator, frame_id, fps)
+    if funscript_interpolator_ref:
+        funscript_value_ref = get_funscript_value(funscript_interpolator_ref, frame_id, fps)
 
     # Draw gauge (example usage)
     OverlayWidgets.draw_gauge(frame, funscript_value)
@@ -103,14 +109,20 @@ def draw_overlay(
     funscript_buffer = np.roll(funscript_buffer, -1)
     funscript_buffer[-1] = funscript_value
 
+    if funscript_interpolator_ref:
+        funscript_buffer_ref = np.roll(funscript_buffer_ref, -1)
+        funscript_buffer_ref[-1] = funscript_value_ref
+
     # Draw rolling window curves
     graph_height = 100
-    graph_y_start = frame.shape[0] - graph_height - 15
+    graph_y_start = frame.shape[0] - graph_height - 15 # B, G, R | R, G, B
     draw_rolling_window_curve(frame, distance_buffer, (0, 255, 0), 0.5, graph_height, graph_y_start)
     draw_rolling_window_curve(frame, funscript_buffer, (255, 0, 0), 0.5, graph_height, graph_y_start)
+    if funscript_interpolator_ref:
+        draw_rolling_window_curve(frame, funscript_buffer_ref, (0, 0, 255), 0.5, graph_height, graph_y_start)
 
     # Return updated buffers in case they need to be maintained externally
-    return distance_buffer, funscript_buffer
+    return distance_buffer, funscript_buffer, funscript_buffer_ref
 
 
 def draw_rolling_window_curve(frame, buffer, color, alpha, graph_height, graph_y_start):

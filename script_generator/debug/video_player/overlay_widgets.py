@@ -17,7 +17,7 @@ class OverlayWidgets:
     def draw_gauge(image, distance):
         gauge_width = 12
         gauge_height = 100
-        gauge_x = image.shape[1] - 20
+        gauge_x = image.shape[1] - 15
         gauge_y = image.shape[0] - 120
         cv2.rectangle(image, (gauge_x, gauge_y), (gauge_x + gauge_width, gauge_y + gauge_height), (0, 0, 0), -1)
         fill_height = int((distance / 100) * gauge_height)

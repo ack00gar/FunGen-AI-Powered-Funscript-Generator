@@ -89,7 +89,7 @@ class Widgets:
         entry_container = ttk.Frame(container, width=entry_width_px)
         entry_container.grid(row=0, column=1, sticky="ew", padx=(2, 5))
         entry_container.grid_propagate(False)  # Prevent resizing
-        entry = ttk.Entry(entry_container, textvariable=value)
+        entry = ttk.Entry(entry_container, textvariable=value, width=entry_width_px)
         entry.pack(fill="both", expand=True)
 
         if tooltip_text:

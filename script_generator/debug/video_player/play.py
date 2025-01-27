@@ -1,4 +1,6 @@
 import json
+import math
+import os
 import tempfile
 import time
 
@@ -11,6 +13,7 @@ from script_generator.debug.video_player.controls import draw_media_controls
 from script_generator.debug.video_player.debug_overlay import draw_overlay
 from script_generator.debug.video_player.interaction import mouse_callback
 from script_generator.debug.video_player.state import VideoPlayer
+from script_generator.funscript.util import load_funscript_json
 from script_generator.utils.file import get_output_file_path
 from script_generator.debug.logger import logger
 from script_generator.video.info.video_info import get_cropped_dimensions
@@ -27,27 +30,29 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
 
     # Prepare funscript interpolation if available
     funscript_path, _ = get_output_file_path(state.video_path, ".funscript")
-    try:
-        with open(funscript_path, "r") as f:
-            funscript_data = json.load(f)
-        actions = funscript_data.get("actions", [])
-        funscript_times = [action["at"] for action in actions]
-        funscript_positions = [action["pos"] for action in actions]
-        funscript_interpolator = interp1d(
-            funscript_times,
-            funscript_positions,
+    funscript_times, funscript_positions = load_funscript_json(funscript_path)
+    funscript_interpolator = interp1d(
+        funscript_times,
+        funscript_positions,
+        kind="linear",
+        fill_value="extrapolate"
+    )
+    funscript_interpolator_ref = None
+    if os.path.exists(state.reference_script):
+        funscript_times_ref, funscript_positions_ref = load_funscript_json(state.reference_script)
+        funscript_interpolator_ref = interp1d(
+            funscript_times_ref,
+            funscript_positions_ref,
             kind="linear",
             fill_value="extrapolate"
         )
-    except FileNotFoundError:
-        logger.error(f"Funscript file not found at {funscript_path}")
-        funscript_interpolator = None
 
     logs = load_logs(state)
 
     # Initialize rolling window buffers
     distance_buffer = np.zeros(rolling_window_size)
     funscript_buffer = np.zeros(rolling_window_size)
+    funscript_buffer_ref = np.zeros(rolling_window_size)
 
     # Initialize video writer if recording
     if save_video_mode:
@@ -69,11 +74,17 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         # Attach mouse callback for seeking
         cv2.setMouseCallback(window_name, mouse_callback, param=video_player)
 
-        frame_interval = 1.0 / state.max_preview_fps
-
     last_frame = video_player.current_frame
 
+    # TODO cleanup
+    def get_ceiled_fps(value):
+        try:
+            return math.ceil(float(value))
+        except (ValueError, TypeError):
+            return 60
+
     while True:
+        frame_interval = 1.0 / get_ceiled_fps(state.max_preview_fps)
         loop_start_time = time.time()
 
         # Handle user input
@@ -101,13 +112,15 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         frame = frame_bgr.copy()
 
         # Call your overlay function
-        distance_buffer, funscript_buffer = draw_overlay(
+        distance_buffer, funscript_buffer, funscript_buffer_ref = draw_overlay(
             frame=frame,
             frame_id=video_player.current_frame,
             logs=logs,
             funscript_interpolator=funscript_interpolator,
+            funscript_interpolator_ref=funscript_interpolator_ref,
             distance_buffer=distance_buffer,
             funscript_buffer=funscript_buffer,
+            funscript_buffer_ref=funscript_buffer_ref,
             fps=video_info.fps
         )
 

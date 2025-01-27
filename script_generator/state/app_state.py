@@ -1,3 +1,4 @@
+import math
 import os.path
 import string
 from typing import Literal
@@ -81,7 +82,7 @@ class AppState:
                 self.video_info = get_video_info(self.video_path)
                 self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self.video_path)
                 self.has_tracking_data, _, _ = get_metrics_file_info(self.video_path)
-                self.max_preview_fps = int(self.video_info.fps)
+                self.max_preview_fps = math.ceil(self.video_info.fps)
 
 
 def log_state_settings(state: AppState):
