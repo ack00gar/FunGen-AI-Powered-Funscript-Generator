@@ -1,0 +1,15 @@
+torch~=2.5.1
+torchvision~=0.20.1
+numpy
+ultralytics~=8.3.59
+glfw~=2.8.0
+pyopengl~=3.1.7
+imageio~=2.36.1
+tqdm~=4.67.1
+colorama~=0.4.6
+opencv-python~=4.10.0.84
+scipy~=1.15.1
+matplotlib~=3.10.0
+simplification~=0.7.13
+msgpack~=1.1.0
+pillow~=11.1.0

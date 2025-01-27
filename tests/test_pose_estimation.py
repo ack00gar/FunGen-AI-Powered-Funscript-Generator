@@ -2,7 +2,8 @@ from ultralytics import YOLO
 import numpy as np
 import cv2
 from collections import defaultdict
-from params.config import class_reverse_match
+from script_generator.constants import CLASS_REVERSE_MATCH
+from script_generator.debug.logger import logger
 
 #video_path = "/Users/k00gar/Downloads/Katrina Jade [ADD] Oct 16, 2024R_6kvr265_reenc.mp4"
 #video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
@@ -105,11 +106,11 @@ while cap.isOpened():
 
         # if less than 2 boxes of class "hand" in detect_results, print a message
         for cls, conf, box in zip(classes, confs, boxes):
-            if class_reverse_match.get(int(cls), 'unknown') == "hand":
+            if CLASS_REVERSE_MATCH.get(int(cls), 'unknown') == "hand":
                 hand_counter += 1
 
         if hand_counter < 2:
-            print(f"WARNING: {hand_counter} hand detected")
+            logger.warning(f"WARNING: {hand_counter} hand detected")
 
         frame = np.hstack((frame_1, frame_2))
 

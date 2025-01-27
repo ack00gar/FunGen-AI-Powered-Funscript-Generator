@@ -1,7 +1,11 @@
 import cv2
 from PIL import Image
-from utils.lib_VideoReaderFFmpeg import VideoReaderFFmpeg
+
+from script_generator.debug.logger import logger
 from ultralytics import YOLO
+
+from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
+
 
 def save_frames_as_gif(frames, output_path, duration=100, loop=0):
     #frames = [Image.fromarray(frame) for frame in frames]
@@ -14,7 +18,7 @@ def save_frames_as_gif(frames, output_path, duration=100, loop=0):
                   loop=loop,
                   optimize=True)
 
-    print(f"GIF saved to {output_path}")
+    logger.info(f"GIF saved to {output_path}")
 
 
 # Example usage
@@ -37,7 +41,7 @@ if __name__ == "__main__":
 
     for video_path in video:
         # read video until model finds an item of class == 'penis'
-        cap = VideoReaderFFmpeg(video_path, is_VR=True)
+        cap = VideoReaderFFmpeg(video_path, is_vr=True)
         # position at frame 32000
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
         while True:
@@ -56,7 +60,7 @@ if __name__ == "__main__":
             frame_id += 1
 
     """
-    cap = VideoReaderFFmpeg(video[0], is_VR=True)
+    cap = VideoReaderFFmpeg(video[0], is_vr=True)
     # position at frame 32000
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -92,7 +96,7 @@ if __name__ == "__main__":
     for model in models:
         for video_path in video:
             #cap = cv2.VideoCapture(video_path)
-            cap = VideoReaderFFmpeg(video_path, is_VR=True)
+            cap = VideoReaderFFmpeg(video_path, is_vr=True)
             # position at frame 32000
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
             ret, frame = cap.read()
