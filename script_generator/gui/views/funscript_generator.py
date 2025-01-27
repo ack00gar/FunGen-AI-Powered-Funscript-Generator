@@ -179,6 +179,17 @@ class FunscriptGeneratorPage(tk.Frame):
             tooltip_text="Saves a debug file to disk with all collected metrics.\nThis is a prerequisite for playing back the debug video with the debug statistics overlay.\nThis also contains all generated metrics.",
             row=1
         )
+        _, max_fps_e, max_fps = Widgets.input(
+            general,
+            "Max fps",
+            state=state,
+            attr="max_preview_fps",
+            row=1,
+            column=29,
+            label_width_px=45,
+            entry_width_px=10,
+            tooltip_text="The maximum FPS for the debug video"
+        )
         play_btn = Widgets.button(
             general,
             "Play debug video",
@@ -219,16 +230,16 @@ class FunscriptGeneratorPage(tk.Frame):
                 processing_btn.config(text="Start processing")
 
             if state.has_raw_yolo and state.has_tracking_data:
-                enable_widgets([play_btn, regenerate_btn, gen_video_btn])
+                enable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
                 set_progressbars_done([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
                 processing_btn.config(text="Re-run object detection and or tracking")
             elif state.has_raw_yolo and not state.has_tracking_data:
-                disable_widgets([play_btn, regenerate_btn, gen_video_btn])
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
                 set_progressbars_done([(yolo_p, yolo_p_perc)])
                 reset_progressbars([(track_p, track_p_perc)])
                 processing_btn.config(text="Re-run object detection and or start tracking")
             else:
-                disable_widgets([play_btn, regenerate_btn, gen_video_btn])
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
                 reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
                 processing_btn.config(text="Start processing")
 
@@ -245,6 +256,8 @@ class FunscriptGeneratorPage(tk.Frame):
                 processing_btn.config(text="Stop processing (WIP)")
             else:
                 enable_widgets(proc_widgets)
+
+            max_fps.set(str(state.max_preview_fps))
 
         # region UI UPDATE CALLBACK
         def update_ui(msg: UIMessage):
