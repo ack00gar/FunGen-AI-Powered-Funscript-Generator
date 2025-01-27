@@ -2,8 +2,9 @@ import json
 
 import numpy as np
 
-from script_generator.utils.file import get_output_file_path, load_json_from_file
 from script_generator.debug.logger import logger
+from script_generator.utils.file import get_output_file_path
+from script_generator.utils.json import load_json_from_file
 
 
 class DebugData:

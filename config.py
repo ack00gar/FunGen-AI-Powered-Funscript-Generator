@@ -24,7 +24,7 @@ lin_ffprobe_path = "/usr/bin/ffprobe"
 # PERFORMANCE
 ##################################################################################################
 
-RENDER_RESOLUTION = 640 # Above 1080x1080 doesn't seem to improve detections minimum of 640x640, has a huge impact on performance but at a quality cost (after changing you need to regenerate your data)
+RENDER_RESOLUTION = 640
 TEXTURE_RESOLUTION = RENDER_RESOLUTION * 1.3 # Texture size that is used to texture the opengl sphere
 YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30 # Mac doesn't support batching
 YOLO_PERSIST = True # Big impact on performance but also improves tracking
