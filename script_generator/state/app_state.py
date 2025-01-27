@@ -31,6 +31,7 @@ class AppState:
         self.save_debug_file: bool = True
         self.live_preview_mode: bool = False
         self.reference_script: string = None
+        self.max_preview_fps = 60
 
         # Gui/settings Funscript Tweaking Variables
         self.boost_enabled: bool = True
@@ -75,10 +76,12 @@ class AppState:
                 self.video_info = None
                 self.has_raw_yolo = False
                 self.has_tracking_data = False
+                self.max_preview_fps = 60
             else:
                 self.video_info = get_video_info(self.video_path)
                 self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self.video_path)
                 self.has_tracking_data, _, _ = get_metrics_file_info(self.video_path)
+                self.max_preview_fps = int(self.video_info.fps)
 
 
 def log_state_settings(state: AppState):
