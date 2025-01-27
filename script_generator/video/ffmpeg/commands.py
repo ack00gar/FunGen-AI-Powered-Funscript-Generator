@@ -27,7 +27,7 @@ def get_ffmpeg_read_cmd(video: VideoInfo, video_reader: str, hwaccel: str, frame
         *hwaccel_read,
         '-nostats', '-loglevel', 'warning',
         "-ss", str(start_time / 1000),  # Seek to start time in seconds
-        "-i", video.path,
+        "-i", f"\"{video.path}\"",
         "-an",  # Disable audio processing
         *video_filter,
         "-f", "rawvideo", "-pix_fmt", "bgr24",  # cv2 requires bgr (over rgb) and Yolo expects bgr images when using numpy frames (converts them internally)
