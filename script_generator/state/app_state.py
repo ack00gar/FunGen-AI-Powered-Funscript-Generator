@@ -24,7 +24,7 @@ class AppState:
         self.video_path: string = None
         self.frame_start: int = 0
         self.frame_end: int | None = None
-        self.video_reader: Literal["FFmpeg", "FFmpeg + OpenGL (Windows)"] = "FFmpeg" if is_mac() else "FFmpeg + OpenGL (Windows)"
+        self.video_reader: Literal["FFmpeg", "FFmpeg + OpenGL (Windows)"] = "FFmpeg" # if is_mac() else "FFmpeg + OpenGL (Windows)"
         self.copy_funscript_to_movie_dir = True
 
         # Gui/settings debug
