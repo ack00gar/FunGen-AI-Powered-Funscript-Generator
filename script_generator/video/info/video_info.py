@@ -65,11 +65,8 @@ def get_projection_and_fov_from_filename(filename):
     return {"projection": projection, "fov": fov, "is_fisheye": is_fisheye}
 
 def get_cropped_dimensions(video: VideoInfo):
-    if video.is_vr:
-        return RENDER_RESOLUTION, RENDER_RESOLUTION
-    else:
-        scaling_factor = min(1, RENDER_RESOLUTION / max(video.width, video.height))
-        return int(video.width * scaling_factor), int(video.height * scaling_factor)
+    # We crop 2d squarely in the center so both vr and 2d have the same dimensions
+    return RENDER_RESOLUTION, RENDER_RESOLUTION
 
 def get_video_info(video_path):
     try:
