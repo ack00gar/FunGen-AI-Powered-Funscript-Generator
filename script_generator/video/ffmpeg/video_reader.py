@@ -1,5 +1,7 @@
+import os
 import subprocess
 import cv2
+import imageio
 import numpy as np
 from script_generator.debug.logger import logger
 from script_generator.state.app_state import AppState
@@ -43,9 +45,14 @@ class VideoReaderFFmpeg:
         try:
             in_bytes = self.process.stdout.read(self.frame_size)
             if not in_bytes:
+                logger.warn("FFmpeg video reader could not read frame / end of file")
                 return False, None  # End of video
 
             frame = np.frombuffer(in_bytes, np.uint8).reshape((self.height, self.width, 3))
+
+            # output_path = os.path.join("C:/cvr/funscript-generator/tmp_output", f"frame_{self.current_frame_number:05d}.png")
+            # imageio.imwrite(output_path, frame)
+
             self.current_frame_number += 1
             self.current_time = (self.current_frame_number / self.state.video_info.fps) * 1000
 

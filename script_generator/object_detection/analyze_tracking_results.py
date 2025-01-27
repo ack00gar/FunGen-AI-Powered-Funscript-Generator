@@ -30,7 +30,7 @@ def analyze_tracking_results(state: AppState, results):
     cuts = []
 
     if state.live_preview_mode:
-        reader.set(cv2.CAP_PROP_POS_FRAMES, state.frame_start)
+        reader.set(cv2.CAP_PROP_POS_FRAMES, state.frame_start_track)
     else:
         reader.release()
 
@@ -157,11 +157,6 @@ def analyze_tracking_results(state: AppState, results):
         window_name = "Combined results"
         if state.live_preview_mode:
             ret, frame = reader.read()
-
-            if not frame.any():
-                logger.warn("Frame could not be read in live preview")
-                continue
-
             frame = frame.copy()
 
             for box in tracker.tracked_boxes:

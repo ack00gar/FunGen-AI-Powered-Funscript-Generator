@@ -34,7 +34,7 @@ def get_vr_video_filters(video, video_reader, hwaccel, disable_opengl=False):
             f"{out_format}lutyuv=y=gammaval(0.7)"
         ]
 
-    return f"\"{','.join(filters)}\""
+    return f"{','.join(filters)}"
 
 def get_2d_video_filters(video, width, height, hwaccel):
     cuda = hwaccel == "cuda"
