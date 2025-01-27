@@ -90,7 +90,7 @@ Before using this project, ensure you have the following installed:
 ```bash
 python -m venv VRFunAIGen
 VRFunAIGen\Scripts\activate # windows
-source myenv/bin/activate # mac
+source VRFunAIGen/bin/activate # mac
 pip install -r requirements.txt
 pip uninstall torch torchvision torchaudio
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
@@ -101,7 +101,7 @@ python FSGenerator.py
 ```bash
 python -m venv VRFunAIGen
 VRFunAIGen\Scripts\activate # windows
-source myenv/bin/activate # mac
+source VRFunAIGen/bin/activate # mac
 pip install -r requirements.txt
 python FSGenerator.py
 ```

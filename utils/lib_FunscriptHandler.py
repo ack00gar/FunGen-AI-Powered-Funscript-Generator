@@ -7,6 +7,7 @@ import shutil
 import cv2
 import matplotlib
 import numpy as np
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 from scipy.signal import savgol_filter
 from simplification.cutil import simplify_coords
 
@@ -14,7 +15,8 @@ from config import STEP_SIZE, VERSION
 from script_generator.constants import HEATMAP_COLORS, FUNSCRIPT_AUTHOR
 from script_generator.debug.logger import logger
 from script_generator.state.app_state import AppState
-from script_generator.utils.file import get_output_file_path, load_json_from_file
+from script_generator.utils.file import get_output_file_path
+from script_generator.utils.json import load_json_from_file
 
 matplotlib.use('Agg')  # Use a non-interactive backend
 import matplotlib.pyplot as plt

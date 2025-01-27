@@ -1,4 +1,4 @@
-from script_generator.utils.file import get_data_file_info
+from script_generator.utils.json import get_data_file_info
 
 
 def get_metrics_file_info(state):
