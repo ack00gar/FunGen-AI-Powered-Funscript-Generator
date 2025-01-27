@@ -15,12 +15,12 @@ class OverlayWidgets:
 
     @staticmethod
     def draw_gauge(image, distance):
-        gauge_width = 20
-        gauge_height = 200
-        gauge_x = int(3 * image.shape[1] / 4)
-        gauge_y = int(3 * image.shape[0] / 5)
+        gauge_width = 12
+        gauge_height = 100
+        gauge_x = image.shape[1] - 20
+        gauge_y = image.shape[0] - 120
         cv2.rectangle(image, (gauge_x, gauge_y), (gauge_x + gauge_width, gauge_y + gauge_height), (0, 0, 0), -1)
         fill_height = int((distance / 100) * gauge_height)
         cv2.rectangle(image, (gauge_x, gauge_y + gauge_height - fill_height), (gauge_x + gauge_width, gauge_y + gauge_height), (0, 255, 0), -1)
-        cv2.putText(image, str(int(distance)), (gauge_x, gauge_y + gauge_height - fill_height - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        cv2.putText(image, str(int(distance)), (gauge_x, gauge_y + gauge_height - fill_height - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.25, (0, 255, 0), 1)
         return image

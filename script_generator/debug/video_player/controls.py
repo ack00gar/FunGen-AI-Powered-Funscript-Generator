@@ -8,7 +8,7 @@ def draw_media_controls(frame, video_player: VideoPlayer):
     Draw a simple "progress bar" style media control at the bottom of the frame.
     """
     height, width, _ = frame.shape
-    bar_height = 20
+    bar_height = 10
     bar_y_start = height - bar_height
 
     # Background of the progress bar

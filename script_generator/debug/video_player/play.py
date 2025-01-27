@@ -1,5 +1,6 @@
 import json
 import tempfile
+import time
 
 import cv2
 import numpy as np
@@ -13,7 +14,6 @@ from script_generator.debug.video_player.state import VideoPlayer
 from script_generator.utils.file import get_output_file_path
 from script_generator.debug.logger import logger
 from script_generator.video.info.video_info import get_cropped_dimensions
-
 
 def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=100, save_video_mode=False):
     video_info = state.video_info
@@ -69,9 +69,13 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         # Attach mouse callback for seeking
         cv2.setMouseCallback(window_name, mouse_callback, param=video_player)
 
+        frame_interval = 1.0 / state.max_preview_fps
+
     last_frame = video_player.current_frame
 
     while True:
+        loop_start_time = time.time()
+
         # Handle user input
         if not save_video_mode and not handle_user_input(window_name, video_player):
             break
@@ -81,6 +85,8 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
 
         # Check if paused and the frame hasn't changed (allows seeking while being paused)
         if video_player.paused and video_player.current_frame == last_frame:
+            # Avoid a tight loop hogging CPU if paused
+            time.sleep(0.01)
             continue
 
         last_frame = video_player.current_frame
@@ -102,8 +108,7 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
             funscript_interpolator=funscript_interpolator,
             distance_buffer=distance_buffer,
             funscript_buffer=funscript_buffer,
-            fps=video_info.fps,
-            y_offset_start=frame.shape[0] - 250 # 250 is height of funscript preview
+            fps=video_info.fps
         )
 
         if save_video_mode:
@@ -112,7 +117,13 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         else:
             # Display the frame
             draw_media_controls(frame, video_player)
-            cv2.imshow(window_name, frame)
+            cv2.imshow("Debug Video", frame)
+
+            # Throttle the loop to maintain DESIRED_FPS if processing is faster
+            elapsed = time.time() - loop_start_time
+            remaining = frame_interval - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
 
     if save_video_mode:
         video_player.release()

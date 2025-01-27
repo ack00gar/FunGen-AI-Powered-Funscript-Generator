@@ -21,8 +21,7 @@ def draw_overlay(
     funscript_interpolator,
     distance_buffer,
     funscript_buffer,
-    fps,
-    y_offset_start=0,
+    fps
 ):
     """
     Draws bounding boxes, text overlays, rolling window graphs, etc. on top of `frame`.
@@ -34,7 +33,6 @@ def draw_overlay(
     :param distance_buffer:         Rolling buffer for 'distance' data.
     :param funscript_buffer:        Rolling buffer for funscript values.
     :param fps:                     The video frames per second.
-    :param y_offset_start:          The initial Y offset for drawing text.
     """
     # Pull the logs for this frame
     str_frame_id = str(frame_id)
@@ -106,8 +104,8 @@ def draw_overlay(
     funscript_buffer[-1] = funscript_value
 
     # Draw rolling window curves
-    graph_height = int(frame.shape[0] * 0.2)
-    graph_y_start = y_offset_start
+    graph_height = 100
+    graph_y_start = frame.shape[0] - graph_height - 15
     draw_rolling_window_curve(frame, distance_buffer, (0, 255, 0), 0.5, graph_height, graph_y_start)
     draw_rolling_window_curve(frame, funscript_buffer, (255, 0, 0), 0.5, graph_height, graph_y_start)
 
@@ -128,7 +126,7 @@ def draw_rolling_window_curve(frame, buffer, color, alpha, graph_height, graph_y
         x2 = int(width * ((i + 1) / len(buffer_clipped)))
         y1 = graph_y_start + graph_height - int((buffer_clipped[i] / 100) * graph_height)
         y2 = graph_y_start + graph_height - int((buffer_clipped[i + 1] / 100) * graph_height)
-        cv2.line(overlay, (x1, y1), (x2, y2), color, 2)
+        cv2.line(overlay, (x1, y1), (x2, y2), color, 1)
 
     cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
 
