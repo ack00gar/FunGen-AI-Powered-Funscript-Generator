@@ -91,7 +91,7 @@ Before using this project, ensure you have the following installed:
 python -m venv VRFunAIGen
 VRFunAIGen\Scripts\activate # windows
 source myenv/bin/activate # mac
-pip install -e requirements.txt
+pip install -r requirements.txt
 pip uninstall torch torchvision torchaudio
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 python FSGenerator.py
@@ -102,7 +102,7 @@ python FSGenerator.py
 python -m venv VRFunAIGen
 VRFunAIGen\Scripts\activate # windows
 source myenv/bin/activate # mac
-pip install -e requirements.txt
+pip install -r requirements.txt
 python FSGenerator.py
 ```
 
@@ -114,7 +114,7 @@ python FSGenerator.py
 ```bash
 conda create -n VRFunAIGen python=3.11
 conda activate VRFunAIGen
-pip install -e requirements.txt
+pip install -r requirements.txt
 pip uninstall torch torchvision torchaudio
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 python FSGenerator.py
@@ -125,7 +125,7 @@ While executing, you’ll need to say “yes” a few times. The lines “pip un
 ```bash
 conda create -n VRFunAIGen python=3.11
 conda activate VRFunAIGen
-pip install -e requirements.txt
+pip install -r requirements.txt
 python FSGenerator.py
 ```
 
