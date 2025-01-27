@@ -38,7 +38,7 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         fill_value="extrapolate"
     )
     funscript_interpolator_ref = None
-    if os.path.exists(state.reference_script):
+    if state.reference_script and os.path.exists(state.reference_script):
         funscript_times_ref, funscript_positions_ref = load_funscript_json(state.reference_script)
         funscript_interpolator_ref = interp1d(
             funscript_times_ref,
