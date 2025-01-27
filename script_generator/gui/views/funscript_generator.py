@@ -240,8 +240,9 @@ class FunscriptGeneratorPage(tk.Frame):
             proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, reader_dropdown, metrics_check, *start_f_widgets, *end_f_widgets,
                             boost_check, simp_check, tres_check, t_d_1, t_d_2, s_d_1, s_d_2, b_d_1, b_d_2]
             if state.is_processing:
-                disable_widgets(proc_widgets)
-                processing_btn.config(text="Stop processing")
+                # TODO remove the processing button and implement stop processing
+                disable_widgets([*proc_widgets, processing_btn])
+                processing_btn.config(text="Stop processing (WIP)")
             else:
                 enable_widgets(proc_widgets)
 
