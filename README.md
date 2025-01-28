@@ -163,7 +163,7 @@ You can use Start windows.bat to launch the gui on windows if you installed with
 To generate a script with cmd or terminal, run the following command
 
 ```bash
-python -m script_generator.cli.generate_funscript.py /path/to/video.mp4
+python -m script_generator.cli.generate_funscript /path/to/video.mp4
 ```
 
 ### Command-Line Arguments
