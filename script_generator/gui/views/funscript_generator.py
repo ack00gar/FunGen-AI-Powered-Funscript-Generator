@@ -46,16 +46,16 @@ class FunscriptGeneratorPage(tk.Frame):
             command=lambda val: update_video_path()
         )
 
-        _, _, reader_dropdown, _ = Widgets.dropdown(
-            attr="video_reader",
-            parent=video_selection,
-            label_text="Video Reader",
-            options=["FFmpeg", *([] if is_mac() else ["FFmpeg + OpenGL (Windows)"])],
-            default_value=state.video_reader,
-            tooltip_text=("On Mac only FFmpeg is supported" if is_mac() else "FFmpeg + OpenGL is usually about 30% faster on a good GPU."),
-            state=state,
-            row=1
-        )
+        # _, _, reader_dropdown, _ = Widgets.dropdown(
+        #     attr="video_reader",
+        #     parent=video_selection,
+        #     label_text="Video Reader",
+        #     options=["FFmpeg", *([] if is_mac() else ["FFmpeg + OpenGL (Windows)"])],
+        #     default_value=state.video_reader,
+        #     tooltip_text=("On Mac only FFmpeg is supported" if is_mac() else "FFmpeg + OpenGL is usually about 30% faster on a good GPU."),
+        #     state=state,
+        #     row=1
+        # )
         # endregion
 
         # region OPTIONAL SETTINGS
@@ -248,7 +248,7 @@ class FunscriptGeneratorPage(tk.Frame):
             else:
                 disable_widgets([processing_btn])
 
-            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, reader_dropdown, metrics_check, *start_f_widgets, *end_f_widgets,
+            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, metrics_check, *start_f_widgets, *end_f_widgets, # , reader_dropdown
                             boost_check, simp_check, tres_check, t_d_1, t_d_2, s_d_1, s_d_2, b_d_1, b_d_2]
             if state.is_processing:
                 # TODO remove the processing button and implement stop processing

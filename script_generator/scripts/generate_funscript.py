@@ -14,7 +14,7 @@ def generate_funscript(state: AppState):
         state.frame_end = to_int_or_none(state.frame_end)
 
         # analyze video if required
-        if not state.use_existing_raw_yolo or not get_raw_yolo_file_info(state.video_path):
+        if not state.use_existing_raw_yolo or not get_raw_yolo_file_info(state):
             analyze_video(state)
 
         tracking_analysis(state)

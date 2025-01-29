@@ -80,8 +80,7 @@ def analyze_tracking_results(state: AppState, results):
             unit="f",
             desc="Analyzing tracking data", position=0,
             unit_scale=False,
-            unit_divisor=1,
-            ncols=130
+            unit_divisor=1
     ):
         state.current_frame_id = frame_pos
         if frame_pos in cuts:
@@ -154,7 +153,7 @@ def analyze_tracking_results(state: AppState, results):
                 )
 
         # Display object detection tracking results in a live preview window
-        window_name = "Combined results"
+        window_name = "Tracking analysis preview"
         if state.live_preview_mode:
             ret, frame = reader.read()
             frame = frame.copy()

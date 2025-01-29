@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import tempfile
@@ -8,15 +7,16 @@ import cv2
 import numpy as np
 from scipy.interpolate import interp1d
 
-from script_generator.debug.debug_data import load_logs
+from script_generator.debug.debug_data import load_debug_metrics
+from script_generator.debug.logger import logger
 from script_generator.debug.video_player.controls import draw_media_controls
 from script_generator.debug.video_player.debug_overlay import draw_overlay
 from script_generator.debug.video_player.interaction import mouse_callback
 from script_generator.debug.video_player.state import VideoPlayer
 from script_generator.funscript.util import load_funscript_json
 from script_generator.utils.file import get_output_file_path
-from script_generator.debug.logger import logger
 from script_generator.video.info.video_info import get_cropped_dimensions
+
 
 def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=100, save_video_mode=False):
     video_info = state.video_info
@@ -47,7 +47,7 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
             fill_value="extrapolate"
         )
 
-    logs = load_logs(state)
+    logs = load_debug_metrics(state)
 
     # Initialize rolling window buffers
     distance_buffer = np.zeros(rolling_window_size)

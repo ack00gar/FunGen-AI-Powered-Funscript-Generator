@@ -57,8 +57,7 @@ from script_generator.debug.logger import logger
 #     for frame_pos in tqdm(
 #             range(total_frames_to_parse), desc="Detecting scene changes", position=0,
 #             unit_scale=False,
-#             unit_divisor=1,
-#             ncols=130
+#             unit_divisor=1
 #     ):
 #         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start + frame_pos * frame_step)
 #         ret, frame = cap.read()

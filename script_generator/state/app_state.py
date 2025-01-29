@@ -27,6 +27,7 @@ class AppState:
         self.frame_end: int | None = None
         self.video_reader: Literal["FFmpeg", "FFmpeg + OpenGL (Windows)"] = "FFmpeg" # if is_mac() else "FFmpeg + OpenGL (Windows)"
         self.copy_funscript_to_movie_dir = True
+        self.final_funscript_destination = "C:/cvr/funscript-generator/_generated" # If set the final script will be output to this directory instead of the movie location
 
         # Gui/settings debug
         self.save_debug_file: bool = True
@@ -79,10 +80,19 @@ class AppState:
                 self.has_tracking_data = False
                 self.max_preview_fps = 60
             else:
-                self.video_info = get_video_info(self.video_path)
-                self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self.video_path)
-                self.has_tracking_data, _, _ = get_metrics_file_info(self.video_path)
-                self.max_preview_fps = math.ceil(self.video_info.fps)
+                if os.path.exists(self.video_path) and not os.path.isdir(self.video_path):
+                    try:
+                        self.video_info = get_video_info(self.video_path)
+                        self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self)
+                        self.has_tracking_data, _, _ = get_metrics_file_info(self)
+                        self.max_preview_fps = math.ceil(self.video_info.fps)
+                    except:
+                        logger.warn(f"FFprobe failed for path: {self.video_path}")
+                    finally:
+                        return
+
+                self.video_path = None
+                self.set_video_info()
 
 
 def log_state_settings(state: AppState):

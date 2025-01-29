@@ -16,7 +16,7 @@ from script_generator.constants import HEATMAP_COLORS, FUNSCRIPT_AUTHOR
 from script_generator.debug.logger import logger
 from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
-from script_generator.utils.json import load_json_from_file
+from script_generator.utils.json_utils import load_json_from_file
 
 matplotlib.use('Agg')  # Use a non-interactive backend
 import matplotlib.pyplot as plt
@@ -115,11 +115,11 @@ class FunscriptGenerator:
             self.write_funscript(zip_adjusted_positions, output_path, state.video_info.fps)
 
             # copy funscript if specified
-            if state.copy_funscript_to_movie_dir:
+            if state.copy_funscript_to_movie_dir or state.final_funscript_destination:
                 copy = True
                 video_folder = os.path.dirname(state.video_path)
                 filename_base = os.path.basename(state.video_path)[:-4]
-                funscript_path = os.path.join(video_folder, f"{filename_base}.funscript")
+                funscript_path = os.path.join(state.final_funscript_destination, f"{filename_base}.funscript") if state.final_funscript_destination else os.path.join(video_folder, f"{filename_base}.funscript")
 
                 # Backup output file if it exists
                 if os.path.exists(funscript_path):
@@ -143,17 +143,18 @@ class FunscriptGenerator:
             logger.error(f"Error generating funscript: {e}")
             raise
 
+    # TODO replace with proper JSON serialization
     def write_funscript(self, distances, output_path, fps):
         with open(output_path, 'w') as f:
-            f.write(f'{{"version":"{VERSION}","inverted":false,"range":95,"author":"{FUNSCRIPT_AUTHOR}","actions":[{{"at": 0, "pos": 100}},')
+            f.write(f'{{"version":"{VERSION}","inverted":false,"range":100,"author":"{FUNSCRIPT_AUTHOR}","actions":[{{"at":0,"pos":100}},')
             i = 0
             for frame, position in distances:
                 time_ms = int(frame * 1000 / fps)
                 if i > 0:
                     f.write(",")
-                f.write(f' {{"at": {time_ms}, "pos": {int(position)}}}')
+                f.write(f'{{"at":{time_ms},"pos":{int(position)}}}')
                 i += 1
-            f.write("]}\n")
+            f.write("]}")
 
     def generate_heatmap(self, funscript_path, output_image_path):
         try:
