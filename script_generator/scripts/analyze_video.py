@@ -127,8 +127,7 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
             unit="f",
             position=0,
             unit_scale=False,
-            unit_divisor=1,
-            ncols=130
+            unit_divisor=1
     ) as progress_bar:
         while not stop_event.is_set():
             opengl_size = opengl_q.qsize()
@@ -139,7 +138,7 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
             progress_bar.n = frames_processed
             open_gl = f"OpenGL: {opengl_size:>3}, " if state.video_reader == "FFmpeg + OpenGL (Windows)" else ""
             progress_bar.set_postfix_str(
-                f"Queues: {open_gl}YOLO: {yolo_size:>3}, Analysis: {analysis_size:>3}"
+                f"Q's: {open_gl}YOLO: {yolo_size:>3}, Analysis: {analysis_size:>3}"
             )
             progress_bar.refresh()
 

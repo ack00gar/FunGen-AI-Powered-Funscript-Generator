@@ -9,7 +9,7 @@ from script_generator.gui.messages.messages import UpdateGUIState
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.utils.file import get_output_file_path
-from script_generator.utils.json import write_json_to_file
+from script_generator.utils.msgpack_utils import save_msgpack_json
 
 
 class PostProcessWorker(AbstractTaskProcessor):
@@ -154,8 +154,8 @@ class PostProcessWorker(AbstractTaskProcessor):
         self.state.analyze_task.end_time = time.time()
 
         # Write the detection records to a JSON file
-        raw_yolo_path, _ = get_output_file_path(self.state.video_path, "_rawyolo.json")
-        write_json_to_file(raw_yolo_path, self.records)
+        raw_yolo_path, _ = get_output_file_path(self.state.video_path, "_rawyolo.msgpack")
+        save_msgpack_json(raw_yolo_path, self.records)
 
 def handle_user_input(window_name):
     key = cv2.waitKey(1) & 0xFF

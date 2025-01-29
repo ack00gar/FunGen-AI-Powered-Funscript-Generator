@@ -10,7 +10,7 @@ frame = (44 * 60 + 26) * 60
 log_file, _ = get_output_file_path(video, "_debug_logs.json")
 debugger = Debugger(video, is_vr=True, video_reader="FFmpeg", log_file=log_file)
 
-debugger.load_logs()
+debugger.load_debug_metrics()
 
 
 #debugger.play_video(frame)

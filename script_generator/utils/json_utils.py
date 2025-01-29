@@ -43,19 +43,17 @@ def load_json_from_file(file_path):
 
 
 def get_data_file_info(video_path, suffix):
-    """
-    Checks if a data file exists, returns a true / false and the path and filename
-    """
     raw_yolo_path, raw_yolo_filename = get_output_file_path(video_path, suffix)
     if os.path.exists(raw_yolo_path):
-        yolo_data = load_json_from_file(raw_yolo_path)
-        if len(yolo_data) == 0:
-            logger.warn(f"Raw YOLO data file doesn't contain any data: {raw_yolo_path}")
+        file_size = os.path.getsize(raw_yolo_path)
+        if file_size <= 5: # prevent jsons with []
+            logger.warn(f"Raw YOLO data file is too small or empty: {raw_yolo_path} (size: {file_size} bytes)")
             try:
                 os.remove(raw_yolo_path)
-                logger.info(f"Deleted empty raw YOLO data file: {raw_yolo_path}")
+                logger.info(f"Deleted small raw YOLO data file: {raw_yolo_path}")
             except OSError as e:
                 logger.error(f"Error deleting raw YOLO file {raw_yolo_path}: {e}")
+            return False, None, None
         else:
             return True, raw_yolo_path, raw_yolo_filename
     return False, None, None

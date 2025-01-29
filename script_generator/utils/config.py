@@ -39,23 +39,23 @@ def find_ffprobe_path(win_ffprobe_path, mac_ffprobe_path, lin_ffprobe_path):
         else:
             raise FileNotFoundError("ffprobe not found in PATH and no default path for this OS")
 
-def get_yolo_model_path(YOLO_MODELS):
+def get_yolo_model_path(yolo_models):
     # Check if the device is an Apple device
     if platform.system() == 'Darwin':
-        logger.info(f"Apple device detected, loading {YOLO_MODELS[0]} for MPS inference.")
-        return YOLO_MODELS[0]
+        logger.info(f"Apple device detected, loading {yolo_models[0]} for MPS inference.")
+        return yolo_models[0]
 
     # Check if CUDA is available (for GPU support)
     elif torch.cuda.is_available():
-        logger.info(f"CUDA is available, loading {YOLO_MODELS[1]} for GPU inference.")
-        return YOLO_MODELS[1]
+        logger.info(f"CUDA is available, loading {yolo_models[1]} for GPU inference.")
+        return yolo_models[1]
 
     # Fallback to ONNX model for other platforms without CUDA
     else:
         logger.info("CUDA not available, if this is unexpected, please install CUDA and check your version of torch.")
         logger.info("You might need to install a dependency with the following command (example):")
         logger.info("pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118")
-        logger.info(f"Falling back to CPU inference, loading {YOLO_MODELS[2]}.")
+        logger.info(f"Falling back to CPU inference, loading {yolo_models[2]}.")
         logger.info("WARNING: CPU inference may be slow on some devices.")
 
-        return YOLO_MODELS[2]
+        return yolo_models[2]
