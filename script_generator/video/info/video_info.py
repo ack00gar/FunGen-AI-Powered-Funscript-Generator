@@ -16,6 +16,7 @@ class VideoInfo:
     duration: float = 0.0
     total_frames: int = 0
     fps: float = 0.0
+    bit_depth: int = 8
     is_vr: bool = False
     projection: str = field(init=False)
     fov: int = field(init=False)
@@ -74,7 +75,7 @@ def get_video_info(video_path):
             FFPROBE_PATH,
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=r_frame_rate,width,height,codec_name,nb_frames",
+            "-show_entries", "stream=r_frame_rate,width,height,codec_name,nb_frames,pix_fmt",
             "-show_entries", "format=duration",
             "-of", "json",
             video_path,
@@ -94,6 +95,13 @@ def get_video_info(video_path):
         height = int(stream.get("height", 0))
         r_frame_rate = stream.get("r_frame_rate", "0/1")
         nb_frames = stream.get("nb_frames", None)
+        pix_fmt = stream.get("pix_fmt", "unknown")
+        pix_fmt_bit_depth_map = {
+            "yuv420p": 8, "yuvj420p": 8, "nv12": 8, "rgb24": 8, "bgr24": 8,
+            "yuv420p10le": 10, "yuv420p10be": 10, "yuv422p10le": 10, "yuv444p10le": 10,
+            "yuv420p12le": 12, "yuv420p16le": 16, "yuv422p16le": 16, "yuv444p16le": 16,
+        }
+        bit_depth = pix_fmt_bit_depth_map.get(pix_fmt, 8)
 
         # Extract format-level metadata
         duration = float(info.get("format", {}).get("duration", 0))
@@ -109,14 +117,14 @@ def get_video_info(video_path):
         # Check if the video is VR (2:1 aspect ratio)
         is_vr = height == width // 2
 
-        logger.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {nb_frames} frames, {duration:.2f} seconds, is vr: {is_vr}")
+        logger.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {nb_frames} frames, {duration:.2f} sec, {bit_depth}-bit, is vr: {is_vr}")
 
         if is_vr:
             logger.info("Video Format: VR SBS - Based on its 2:1 ratio")
         else:
             logger.info("Video Format: 2D - Based on its ratio")
 
-        return VideoInfo(video_path, codec_name, width, height, duration, int(nb_frames), fps, is_vr)
+        return VideoInfo(video_path, codec_name, width, height, duration, int(nb_frames), fps, bit_depth, is_vr)
 
     except subprocess.CalledProcessError as e:
         logger.error(f"FFProbe command failed: {e.output.decode('utf-8')}")

@@ -10,14 +10,14 @@ def get_ffmpeg_read_cmd(video: VideoInfo, video_reader: str, hwaccel: str, frame
     start_time = (frame_start / video.fps) * 1000
 
     # Get supported hardware acceleration backends
-    hwaccel_read = get_hwaccel_read_args(hwaccel)
+    hwaccel_read = get_hwaccel_read_args(video, hwaccel)
 
     video_filter = ["-vf", vf] if vf else []
     if hwaccel == "vaapi":
         # VAAPI requires specific pixel formats and filters
         video_filter = ["-vf", f"{vf},format=nv12,hwupload"] if vf else ["-vf", "format=nv12,hwupload"]
 
-    if hwaccel == "cuda":
+    if hwaccel == "cuda" and video.bit_depth == 8:
         video_filter = ["-noautoscale"] + video_filter  # explicitly tell ffmpeg that scaling is done by cuda
 
     frame_size = width * height * 3  # Size of one frame in bytes
