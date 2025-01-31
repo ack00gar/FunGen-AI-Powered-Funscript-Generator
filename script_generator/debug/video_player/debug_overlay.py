@@ -39,11 +39,10 @@ def draw_overlay(
     :param fps:                         The video frames per second.
     """
     # Pull the logs for this frame
-    str_frame_id = str(frame_id)
     variables, bounding_boxes = {}, []
-    if str_frame_id in logs:
-        variables = logs[str_frame_id].get("variables", {})
-        bounding_boxes = logs[str_frame_id].get("bounding_boxes", [])
+    if frame_id in logs:
+        variables = logs[frame_id].get("variables", {})
+        bounding_boxes = logs[frame_id].get("bounding_boxes", [])
 
     # Draw bounding boxes
     for box in bounding_boxes:
