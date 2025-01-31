@@ -34,9 +34,13 @@ def get_preferred_hwaccel():
             return hw
     return None
 
-def get_hwaccel_read_args(hwaccel):
+def get_hwaccel_read_args(video_info, hwaccel):
     if hwaccel == "cuda":
-        return ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+        # hardware accelerated output is not supported with > 8 bit
+        if video_info.bit_depth == 8:
+            return ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+        else:
+            return ["-hwaccel", "cuda"]
     if hwaccel == "vaapi":
         return ["-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128"]
     if hwaccel == "amf":
