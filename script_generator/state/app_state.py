@@ -26,8 +26,8 @@ class AppState:
         self.frame_start: int = 0
         self.frame_end: int | None = None
         self.video_reader: Literal["FFmpeg", "FFmpeg + OpenGL (Windows)"] = "FFmpeg" # if is_mac() else "FFmpeg + OpenGL (Windows)"
-        self.copy_funscript_to_movie_dir = True
-        self.final_funscript_destination = None # If set the final script will be output to this directory instead of the movie location
+        self.copy_funscript_to_movie_dir = False
+        self.final_funscript_destination = "C:/cvr/funscript-generator/_generated" # If set the final script will be output to this directory instead of the movie location
 
         # Gui/settings debug
         self.save_debug_file: bool = True
