@@ -1,4 +1,6 @@
 from script_generator.constants import RENDER_RESOLUTION, VR_TO_2D_PITCH
+from script_generator.video.ffmpeg.hwaccel import supports_cuda_scale
+
 
 def get_video_filters(video, video_reader, hwaccel, width, height, disable_opengl=False):
     if video.is_vr:
@@ -15,7 +17,7 @@ def get_vr_video_filters(video, video_reader, hwaccel, disable_opengl=False):
     cuda = hwaccel == "cuda"
 
     # hardware accelerated output is not supported with > 8 bit
-    scale = f"[0:0]scale_cuda={RENDER_RESOLUTION * 2}:-2,hwdownload" if cuda and video.bit_depth == 8 else f"[0:0]scale={RENDER_RESOLUTION * 2}:-2"
+    scale = f"[0:0]scale_cuda={RENDER_RESOLUTION * 2}:-2,hwdownload" if supports_cuda_scale(video, hwaccel) else f"[0:0]scale={RENDER_RESOLUTION * 2}:-2"
     crop = f"crop={RENDER_RESOLUTION}:{RENDER_RESOLUTION}:0:0"
     out_format = f"format=nv12," if cuda else ""
 
@@ -45,6 +47,6 @@ def get_2d_video_filters(video, width, height, hwaccel):
         scale_width = int(video.width * (height / video.height))
         crop = f",crop={width}:{height}:(iw-{width})/2:0"
         # hardware accelerated output is not supported with > 8 bit
-        return f"[0:0]scale_cuda={scale_width}:{height},hwdownload,format=nv12{crop}" if cuda and video.bit_depth == 8 else f"[0:0]scale={scale_width}:{height}{crop}"
+        return f"[0:0]scale_cuda={scale_width}:{height},hwdownload,format=nv12{crop}" if supports_cuda_scale(video, hwaccel) else f"[0:0]scale={scale_width}:{height}{crop}"
     else:
         return "[0:0]hwdownload,format=nv12" if cuda else ""

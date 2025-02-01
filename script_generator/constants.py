@@ -20,7 +20,7 @@ YOLO_PERSIST = True  # Big impact on performance but also improves tracking
 ##################################################################################################
 
 YOLO_CONF = 0.3
-VR_TO_2D_PITCH = -25  # The dataset is trained on -25
+VR_TO_2D_PITCH = -21  # The dataset is trained on -25
 UPDATE_PROGRESS_INTERVAL = 0.2  # Updates progress in the console and in gui
 STEP_SIZE = 120  # Define custom colormap based on Lucife's heatmapColors | Speed step size for color transitions
 QUEUE_MAXSIZE = 100  # Bounded queue size to avoid memory blow-up as raw frames consume a lot of memory, does not increase performance

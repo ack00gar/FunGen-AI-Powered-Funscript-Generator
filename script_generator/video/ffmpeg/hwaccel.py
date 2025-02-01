@@ -27,6 +27,7 @@ def get_hwaccel_support():
         log.error(f"Error checking hardware acceleration support: {e}")
         return []
 
+
 def get_preferred_hwaccel():
     hwaccel_support = get_hwaccel_support()
     hwaccel_priority = ["cuda", "vaapi", "amf", "videotoolbox", "qsv", "d3d11va"]
@@ -34,6 +35,7 @@ def get_preferred_hwaccel():
         if hw in hwaccel_support:
             return hw
     return None
+
 
 def get_hwaccel_read_args(video_info, hwaccel):
     if hwaccel == "cuda":
@@ -53,3 +55,11 @@ def get_hwaccel_read_args(video_info, hwaccel):
     if hwaccel == "d3d11va":
         return ["-hwaccel", "d3d11va"]
     return []
+
+
+def supports_cuda_scale(video, ffmpeg_hwaccel):
+    return (
+            ffmpeg_hwaccel == "cuda"
+            and video.bit_depth == 8
+            and (video.codec_name != "h264" or (video.width <= 4096 and video.height <= 4096))
+    )
