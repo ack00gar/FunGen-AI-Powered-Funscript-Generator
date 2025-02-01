@@ -1,10 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import List, Dict, Optional
-
-import numpy as np
-
+from typing import Dict, Optional
 
 @dataclass
 class Task:
@@ -49,31 +46,4 @@ class Task:
                 self.profile[duration_key] = self.profile[end_key] - self.profile[start_key]
 
 
-@dataclass
-class AnalyzeVideoTask(Task):
-    tasks: List[Task] = field(default_factory=list)
 
-    def __init__(self):
-        super().__init__()
-        self.tasks = []
-        self._lock = Lock()
-        self.profile = {}
-        self.start_time = time.time()
-
-    def add_task(self, task: Task) -> Task:
-        with self._lock:
-            self.tasks.append(task)
-        return task
-
-    def get_tasks(self) -> List[Task]:
-        with self._lock:
-            return list(self.tasks)
-
-
-@dataclass
-class AnalyzeFrameTask(Task):
-    frame_pos: int = -1
-    preprocessed_frame: Optional[np.ndarray] = None  # Cropped frame from video stream
-    rendered_frame: Optional[np.ndarray] = None  # The final 2D image from OpenGL
-    yolo_results = None
-    # detections: List[Detection] = field(default_factory=list) # YOLO detection results

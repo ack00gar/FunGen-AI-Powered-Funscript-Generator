@@ -226,6 +226,10 @@ def analyze_tracking_results(state: AppState, results):
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
 
+    # stop processing when the task is force closed
+    if state.analyze_task and state.analyze_task.is_stopped:
+        return
+
     # Final UI update: we're done
     if state.update_ui:
         state.update_ui(ProgressMessage(

@@ -5,13 +5,14 @@ import numpy as np
 from script_generator.debug.errors import FFMpegError
 from script_generator.debug.logger import log, log_vid
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
-from script_generator.tasks.tasks import AnalyzeFrameTask
+from script_generator.video.analyse_frame_task import AnalyzeFrameTask
 from script_generator.video.ffmpeg.commands import get_ffmpeg_read_cmd
 
 
 class VideoWorker(AbstractTaskProcessor):
     process_type = TaskProcessorTypes.VIDEO
     process = None
+    read_frames = True
 
     def task_logic(self):
         cmd, frame_size, width, height = get_ffmpeg_read_cmd(
@@ -24,7 +25,7 @@ class VideoWorker(AbstractTaskProcessor):
         current_frame = self.state.frame_start
 
         try:
-            while True:
+            while self.read_frames:
                 in_bytes = self.process.stdout.read(frame_size)
                 if not in_bytes:
                     if current_frame == self.state.frame_start:
@@ -49,20 +50,23 @@ class VideoWorker(AbstractTaskProcessor):
                 current_frame += 1
 
         except Exception as e:
-            log_vid.error(f"Error reading frame: {e}")
-            raise
+            # Suppress any errors when the thread is force closed
+            if self.read_frames:
+                log_vid.error(f"Error reading frame: {e}")
+                raise e
 
         finally:
             self.stop_process()
             self.release()
 
     def release(self):
+        log_vid.debug("Stopping FFmpeg reader")
+        self.read_frames = False
+        self.stop_process()
         if self.process:
             self.process.terminate()
             try:
                 self.process.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 self.process.kill()
-            self.process.stdout.close()
-            self.process.stderr.close()
             self.process = None

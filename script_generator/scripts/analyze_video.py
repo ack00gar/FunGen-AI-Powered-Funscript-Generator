@@ -1,24 +1,21 @@
-import queue
 import threading
 import time
-from typing import List
+from typing import List, TYPE_CHECKING
 
 from tqdm import tqdm
 
-from script_generator.constants import QUEUE_MAXSIZE, SEQUENTIAL_MODE, UPDATE_PROGRESS_INTERVAL
+from script_generator.constants import SEQUENTIAL_MODE, UPDATE_PROGRESS_INTERVAL
+from script_generator.debug.logger import log
 from script_generator.gui.messages.messages import ProgressMessage
-from script_generator.object_detection.post_process_worker import PostProcessWorker
-from script_generator.object_detection.yolo_worker import YoloWorker
 from script_generator.state.app_state import AppState
 from script_generator.tasks.abstract_task_processor import TaskProcessorTypes
-from script_generator.tasks.tasks import AnalyzeVideoTask, AnalyzeFrameTask
+from script_generator.tasks.analyze_video_task import AnalyzeVideoTask
 from script_generator.utils.file import check_create_output_folder
-from script_generator.debug.logger import log
-from script_generator.video.workers.ffmpeg_worker import VideoWorker
-from script_generator.video.workers.vr_to_2d_worker import VrTo2DWorker
 
+if TYPE_CHECKING:
+    from script_generator.video.analyse_frame_task import AnalyzeFrameTask
 
-def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
+def analyze_video(state: AppState) -> List["AnalyzeFrameTask"]:
     log.info(f"[OBJECT DETECTION] Starting up pipeline{' in sequential mode' if SEQUENTIAL_MODE else ''}...")
 
     log_thread_stop_event = threading.Event()
@@ -41,24 +38,13 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
 
         use_open_gl = state.video_reader == "FFmpeg + OpenGL (Windows)"
 
-        state.analyze_task = AnalyzeVideoTask()
-
-        # Create queues
-        opengl_q = queue.Queue(maxsize=QUEUE_MAXSIZE)
-        yolo_q = queue.Queue(maxsize=QUEUE_MAXSIZE)
-        analysis_q = queue.Queue(maxsize=QUEUE_MAXSIZE)
-        result_q = queue.Queue(maxsize=0)
-
-        # Create threads
-        decode_thread = VideoWorker(state=state, output_queue=opengl_q if use_open_gl else yolo_q)
-        opengl_thread = VrTo2DWorker(state=state, input_queue=opengl_q, output_queue=yolo_q) if use_open_gl else None
-        yolo_thread = YoloWorker(state=state, input_queue=yolo_q, output_queue=analysis_q)
-        yolo_analysis_thread = PostProcessWorker(state=state, input_queue=analysis_q, output_queue=result_q)
+        # Create the task
+        a = AnalyzeVideoTask(state, use_open_gl)
 
         # Start logging thread
         queue_logging_thread = threading.Thread(
             target=log_progress,
-            args=(state, opengl_q, yolo_q, analysis_q, result_q, log_thread_stop_event),
+            args=(state, a, log_thread_stop_event),
             daemon=True,
         )
         queue_logging_thread.start()
@@ -72,13 +58,13 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
                 out_queue.put(None)
                 log.info(f"[OBJECT DETECTION] {thread_name} thread done in {time.time() - start_time} s")
 
-            run_thread(decode_thread, TaskProcessorTypes.VIDEO, opengl_q)
+            run_thread(a.decode_thread, TaskProcessorTypes.VIDEO, a.opengl_q)
             if use_open_gl:
-                run_thread(opengl_thread, TaskProcessorTypes.OPENGL, yolo_q)
-            run_thread(yolo_thread, TaskProcessorTypes.YOLO, analysis_q)
-            run_thread(yolo_analysis_thread, TaskProcessorTypes.YOLO_ANALYSIS, result_q)
+                run_thread(a.opengl_thread, TaskProcessorTypes.OPENGL, a.yolo_q)
+            run_thread(a.yolo_thread, TaskProcessorTypes.YOLO, a.analysis_q)
+            run_thread(a.yolo_analysis_thread, TaskProcessorTypes.YOLO_ANALYSIS, a.result_q)
         else:
-            threads = [decode_thread, opengl_thread, yolo_thread, yolo_analysis_thread] if use_open_gl else [decode_thread, yolo_thread, yolo_analysis_thread]
+            threads = [a.decode_thread, a.opengl_thread, a.yolo_thread, a.yolo_analysis_thread] if use_open_gl else [a.decode_thread, a.yolo_thread, a.yolo_analysis_thread]
             for thread in threads:
                 thread.start()
             for thread in threads:
@@ -93,7 +79,10 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
 
         log_thread_stop_event.set()
 
-        log_performance(state=state, results_queue=result_q)
+        if a.is_stopped:
+            return []
+
+        log_performance(state=state, results_queue=a.result_q)
 
         if state.update_ui:
             state.update_ui(ProgressMessage(
@@ -103,7 +92,7 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
                 eta="Done"
             ))
 
-        return result_q.queue
+        return a.result_q.queue
 
     except Exception as e:
         log.error(f"An error occurred during video analysis: {e}")
@@ -115,7 +104,7 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
         raise
 
 
-def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
+def log_progress(state, analyze_task, stop_event):
     total_frames = state.video_info.total_frames
 
     label = 'Analyzing ' + ('VR' if state.video_info.is_vr else '2D') + ' video'
@@ -130,10 +119,14 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
             unit_divisor=1
     ) as progress_bar:
         while not stop_event.is_set():
-            opengl_size = opengl_q.qsize()
-            yolo_size = yolo_q.qsize()
-            analysis_size = analysis_q.qsize()
-            frames_processed = results_q.qsize()
+            # close thread when the analysis task is force killed
+            if analyze_task.is_stopped:
+                stop_event.set()
+
+            opengl_size = analyze_task.opengl_q.qsize()
+            yolo_size = analyze_task.yolo_q.qsize()
+            analysis_size = analyze_task.analysis_q.qsize()
+            frames_processed = analyze_task.result_q.qsize()
 
             progress_bar.n = frames_processed
             open_gl = f"OpenGL: {opengl_size:>3}, " if state.video_reader == "FFmpeg + OpenGL (Windows)" else ""

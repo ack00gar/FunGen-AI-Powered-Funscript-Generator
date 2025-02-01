@@ -1,16 +1,18 @@
 import queue
 import threading
-from typing import Generator, Optional
-
-from script_generator.state.app_state import AppState
-from script_generator.tasks.tasks import AnalyzeFrameTask
+from typing import Generator, Optional, TYPE_CHECKING
+from enum import Enum
 from script_generator.debug.logger import log
 
+if TYPE_CHECKING:
+    from script_generator.video.analyse_frame_task import AnalyzeFrameTask
+    from script_generator.state.app_state import AppState
 
 class AbstractTaskProcessor(threading.Thread):
+
     process_type = ""
 
-    def __init__(self, state: AppState, output_queue: queue.Queue, input_queue: Optional[queue.Queue] = None):
+    def __init__(self, state: "AppState", output_queue: queue.Queue, input_queue: Optional[queue.Queue] = None):
         """
         Abstract thread class to handle lifecycle management and task handling boilerplate.
 
@@ -32,7 +34,7 @@ class AbstractTaskProcessor(threading.Thread):
         thread_name = threading.current_thread().name
         log.info(f"[{self.__class__.__name__}-{thread_name}] {message}")
 
-    def get_task(self) -> Generator[AnalyzeFrameTask, None, None]:
+    def get_task(self) -> Generator["AnalyzeFrameTask", None, None]:
         """
         Generator for retrieving tasks from the input queue.
         Yields tasks until a sentinel (None) is encountered or the thread is stopped.
@@ -46,7 +48,7 @@ class AbstractTaskProcessor(threading.Thread):
                 task = self.input_queue.get(timeout=1)
 
                 if task is None:
-                    self.input_queue.task_done() # Remove sentinel
+                    self.input_queue.task_done()  # Remove sentinel
                     self.state.analyze_task.end(self.process_type)
                     self.on_last_item()
                     self.finish_task(None)
@@ -110,7 +112,6 @@ class AbstractTaskProcessor(threading.Thread):
         if self.exception:
             raise self.exception
 
-from enum import Enum
 
 class TaskProcessorTypes(Enum):
     VIDEO = "Video processing"

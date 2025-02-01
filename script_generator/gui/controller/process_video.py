@@ -29,7 +29,15 @@ def video_analysis(state: AppState, root):
 
             if choice == "cancel":
                 return
-            elif choice == "use_existing":
+
+            state.update_ui(ProgressMessage(
+                process="TRACKING_ANALYSIS",
+                frames_processed=0,
+                total_frames=0,
+                eta="Queued"
+            ))
+
+            if choice == "use_existing":
                 if state.update_ui:
                     state.update_ui(ProgressMessage(
                         process="OBJECT_DETECTION",
@@ -38,13 +46,28 @@ def video_analysis(state: AppState, root):
                         eta="Done"
                     ))
             elif choice == "generate":
+                state.update_ui(ProgressMessage(
+                    process="OBJECT_DETECTION",
+                    frames_processed=0,
+                    total_frames=0,
+                    eta="Calculating..."
+                ))
                 analyze_video(state)
+
+            if state.analyze_task and state.analyze_task.is_stopped:
+                return
+
+            state.update_ui(UpdateGUIState(attr="has_raw_yolo", value=True))
 
             tracking_analysis(state)
 
+            state.update_ui(UpdateGUIState(attr="has_tracking_data", value=True))
             state.update_ui(UpdateGUIState(attr="is_processing", value=False))
+            state.analyze_task = None
 
         except Exception as e:
+            state.analyze_task = None
+            state.update_ui(UpdateGUIState(attr="is_processing", value=False))
             log.error(f"Error during video analysis: {e}")
             messagebox.showerror("Error", f"Could not process video:\n{e}")
             import traceback

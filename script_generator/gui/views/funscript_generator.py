@@ -1,16 +1,18 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 from script_generator.debug.logger import log
 from script_generator.gui.controller.debug_video import debug_video
 from script_generator.gui.controller.process_video import video_analysis
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
+from script_generator.gui.controller.stop_processing import stop_processing
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage, UpdateGUIState
 from script_generator.gui.utils.utils import enable_widgets, disable_widgets, set_progressbars_done, reset_progressbars
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.gui.views.popups.create_debug_video import render_debug_video_popup
+from script_generator.object_detection.util.utils import get_metrics_file_info
+from script_generator.object_detection.utils import get_raw_yolo_file_info
 from script_generator.state.app_state import AppState
-from script_generator.utils.helpers import is_mac
 
 
 class FunscriptGeneratorPage(tk.Frame):
@@ -68,21 +70,37 @@ class FunscriptGeneratorPage(tk.Frame):
         # region PROCESSING
         processing = Widgets.frame(wrapper, title="Processing", main_section=True, row=3)
         yolo_p_container, yolo_p, yolo_p_label, yolo_p_perc = Widgets.labeled_progress(processing, "Object Detection", row=0)
-        # scene_p_container, scene_p, scene_p_label, scene_p_perc = Widgets.labeled_progress(processing, "Scene detection", row=1)
         track_p_container, track_p, track_p_label, track_p_perc = Widgets.labeled_progress(processing, "Tracking Analysis", row=2)
 
-        def start_processing():
-            state.is_processing = True
-            reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
-            video_analysis(state, controller)
-            update_ui_for_state()
+        def handle_process_btn():
+            if not state.is_processing:
+                if state.analyze_task:
+                    state.analyze_task.is_stopped = False
+                state.is_processing = True
+                state.has_raw_yolo = False
+                state.has_tracking_data = False
+                reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
+                video_analysis(state, controller)
+                update_ui_for_state()
+            else:
+                # TODO add proper stop for analysis
+                if state.has_raw_yolo:
+                    messagebox.showwarning("WIP", f"Only the Object Detection process can be stopped for now")
+                    return
 
-        processing_btn = Widgets.button(processing, "Start processing", start_processing, row=3)
+                disable_widgets([processing_btn])
+                stop_processing(state)
+                state.is_processing = False
+                state.video_info.has_raw_yolo, _, _ = get_raw_yolo_file_info(state)
+                state.video_info.has_tracking_data, _, _ = get_metrics_file_info(state)
+                state.analyze_task = None
+                self.controller.after(500, update_ui_for_state)
+
+        processing_btn = Widgets.button(processing, "Start processing", handle_process_btn, row=3)
         # endregion
 
         # region FUNSCRIPT TWEAKING
         tweaking = Widgets.frame(wrapper, title="Funscript", main_section=True, row=4)
-        # tweaking.grid_rowconfigure(1, weight=10)
         tweaking_container = ttk.Frame(tweaking)
         tweaking_container.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
 
@@ -251,9 +269,8 @@ class FunscriptGeneratorPage(tk.Frame):
             proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, metrics_check, # , reader_dropdown, *start_f_widgets, *end_f_widgets
                             boost_check, simp_check, tres_check, t_d_1, t_d_2, s_d_1, s_d_2, b_d_1, b_d_2]
             if state.is_processing:
-                # TODO remove the processing button and implement stop processing
-                disable_widgets([*proc_widgets, processing_btn])
-                processing_btn.config(text="Stop processing (WIP)")
+                disable_widgets([*proc_widgets])
+                processing_btn.config(text="Stop processing")
             else:
                 enable_widgets(proc_widgets)
 
@@ -285,7 +302,6 @@ class FunscriptGeneratorPage(tk.Frame):
             def handle_progress_message(progress_msg: ProgressMessage):
                 progress_mapping = {
                     "OBJECT_DETECTION": (yolo_p, yolo_p_perc, "has_raw_yolo"),
-                    # "SCENE_DETECTION": (scene_p, scene_p_perc),
                     "TRACKING_ANALYSIS": (track_p, track_p_perc, "has_tracking_data"),
                 }
 
@@ -294,11 +310,10 @@ class FunscriptGeneratorPage(tk.Frame):
                     progress_bar["value"] = progress_msg.frames_processed
                     progress_bar["maximum"] = progress_msg.total_frames
                     percentage = (progress_msg.frames_processed / progress_msg.total_frames) * 100 if progress_msg.total_frames > 0 else 0
-                    is_done = progress_msg.frames_processed >= progress_msg.total_frames
+                    is_done = progress_msg.frames_processed >= progress_msg.total_frames > 0
                     progress_label.config(text="Done" if is_done else f"{percentage:.0f}% - ETA: {progress_msg.eta}")
 
                     if is_done or progress_msg.frames_processed == 0:
-                        setattr(state, state_attr, is_done)
                         update_ui_for_state()
 
             # Schedule the update on the main thread
