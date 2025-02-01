@@ -21,7 +21,7 @@ class App(tk.Tk):
             ctypes.windll.shcore.SetProcessDpiAwareness(2)  # For Windows DPI scaling
         # self.tk.call('tk', 'scaling', 1.0)
         self.title(f"VR & 2D POV Funscript AI Generator - v" + VERSION)
-        self.geometry('800x900' if is_mac() else '725x900')
+        self.geometry('800x900' if is_mac() else '722x900')
         self.resizable(False, False)
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))
@@ -38,8 +38,10 @@ class App(tk.Tk):
         file_menu = tk.Menu(menu_bar, tearoff=0)
         file_menu.add_command(label="Exit", command=self.quit)
         menu_bar.add_cascade(label="File", menu=file_menu)
-        menu_bar.add_command(label="Funscript generator", command=lambda: self.show_frame(PageNames.FUNSCRIPT_GENERATOR))
-        menu_bar.add_command(label="Settings", command=lambda: self.show_frame(PageNames.SETTINGS))
+        view_menu = tk.Menu(menu_bar, tearoff=0)
+        view_menu.add_command(label="Funscript generator", command=lambda: self.show_frame(PageNames.FUNSCRIPT_GENERATOR))
+        view_menu.add_command(label="Settings", command=lambda: self.show_frame(PageNames.SETTINGS))
+        menu_bar.add_cascade(label="View", menu=view_menu)
         self.config(menu=menu_bar)
 
         self.state = AppState()

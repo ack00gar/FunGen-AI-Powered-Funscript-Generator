@@ -1,6 +1,6 @@
 import subprocess
 
-from script_generator.debug.logger import log
+from script_generator.debug.logger import log_vid
 
 HW_TEST_CMDS = {
     "cuda": [
@@ -56,17 +56,17 @@ def _list_ffmpeg_hwaccels(ffmpeg_path):
             check=True
         )
         lines = [l.strip() for l in r.stdout.lower().replace("hardware acceleration methods:", "").splitlines() if l.strip()]
-        log.info(f"hardware acceleration methods compiled in FFmpeg binary: {', '.join(lines)}")
+        log_vid.info(f"hardware acceleration methods compiled in FFmpeg binary: {', '.join(lines)}")
         return lines
     except Exception as e:
-        log.error(e)
+        log_vid.error(e)
         return []
 
 def _test_hwaccel(ffmpeg_path, hw):
     if hw in HW_TEST_CMDS:
         cmd = [ffmpeg_path] + HW_TEST_CMDS[hw]
         ok, err = _run_cmd(cmd)
-        if not ok: log.debug(f"{hw} test failed: {err}")
+        if not ok: log_vid.debug(f"{hw} test failed: {err}")
         return ok
     ok, _ = _run_cmd([ffmpeg_path, "-init_hw_device", hw])
     return ok
@@ -75,9 +75,9 @@ def get_preferred_hwaccel(ffmpeg_path):
     supported = _list_ffmpeg_hwaccels(ffmpeg_path)
     for hw in ["cuda","vaapi","amf","videotoolbox","qsv","d3d11va"]:
         if hw in supported and _test_hwaccel(ffmpeg_path, hw):
-            log.info(f"Setting preferred FFmpeg hardware acceleration too: {hw}")
+            log_vid.info(f"Setting preferred FFmpeg hardware acceleration too: {hw}")
             return hw
-    log.info("No working hwaccel found.")
+    log_vid.info("No working hwaccel found.")
     return None
 
 def get_hwaccel_read_args(video_info, hwaccel):
