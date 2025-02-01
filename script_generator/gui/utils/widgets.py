@@ -65,7 +65,7 @@ class Widgets:
         return entry
 
     @staticmethod
-    def input(parent, label_text, state, attr, row=0, column=0, label_width_px=LABEL_WIDTH, entry_width_px=200, callback=None, tooltip_text=None):
+    def input(parent, label_text, state, attr, row=0, column=0, label_width_px=LABEL_WIDTH, entry_width_px=200, command=None, tooltip_text=None):
         container = ttk.Frame(parent)
         container.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
         container.columnconfigure(1, weight=1)
@@ -78,8 +78,8 @@ class Widgets:
 
         def on_value_change(*args):
             setattr(state, attr, value.get())
-            if callback:
-                callback(value.get())
+            if command:
+                command(value.get())
 
         value.trace_add("write", on_value_change)
 

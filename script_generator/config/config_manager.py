@@ -4,6 +4,7 @@ import os
 from script_generator.constants import CONFIG_FILE_PATH, CONFIG_VERSION, DEFAULT_CONFIG
 from script_generator.debug.logger import log, set_log_level
 from script_generator.object_detection.util.utils import get_yolo_model_path
+from script_generator.video.ffmpeg.hwaccel import get_preferred_hwaccel
 from script_generator.video.util.ffmpeg import get_ffmpeg_paths
 
 class ConfigManager:
@@ -51,6 +52,7 @@ class ConfigManager:
             ("ffmpeg_path", lambda: get_ffmpeg_paths()[0], self._is_valid_path),
             ("ffprobe_path", lambda: get_ffmpeg_paths()[1], self._is_valid_path),
             ("yolo_model_path", get_yolo_model_path, self._is_valid_path),
+            ("ffmpeg_hwaccel", lambda: get_preferred_hwaccel(config["ffmpeg_path"]) if config["ffmpeg_path"] else None, lambda val: val is not None)
         ]
 
         updated = False

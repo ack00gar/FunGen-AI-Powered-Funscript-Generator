@@ -10,7 +10,6 @@ from script_generator.debug.logger import log
 from script_generator.object_detection.util.utils import get_metrics_file_info, load_yolo_model
 from script_generator.object_detection.utils import get_raw_yolo_file_info
 from script_generator.tasks.tasks import AnalyzeVideoTask
-from script_generator.video.ffmpeg.hwaccel import get_preferred_hwaccel
 from script_generator.video.info.video_info import VideoInfo, get_video_info
 
 
@@ -84,7 +83,7 @@ class AppState:
         # App logic
         self.debug_data = DebugData(self)
         self.update_ui = None
-        self.ffmpeg_hwaccel = get_preferred_hwaccel() if self.ffmpeg_path else None
+        self.ffmpeg_hwaccel = c.get("ffmpeg_hwaccel")
         self.yolo_model = load_yolo_model(self.yolo_model_path)
 
     def set_is_cli(self, cli):
