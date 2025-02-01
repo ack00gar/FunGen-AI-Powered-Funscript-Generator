@@ -48,6 +48,12 @@ class ConfigManager:
         return self.config
 
     def _ensure_defaults(self, config):
+        # Add any missing keys from DEFAULT_CONFIG with their default values.
+        for key, default_value in DEFAULT_CONFIG.items():
+            if key not in config:
+                config[key] = default_value
+
+        # additional checks to verify that certain keys have valid values,
         checks = [
             ("ffmpeg_path", lambda: get_ffmpeg_paths()[0], self._is_valid_path),
             ("ffprobe_path", lambda: get_ffmpeg_paths()[1], self._is_valid_path),

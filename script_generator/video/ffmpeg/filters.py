@@ -45,7 +45,7 @@ def get_vr_video_filters(video, disable_opengl=False):
 
 def get_2d_video_filters(video, width, height):
     state = AppState()
-    cuda = state.hwaccel == "cuda"
+    cuda = state.ffmpeg_hwaccel == "cuda"
 
     if video.height > RENDER_RESOLUTION:
         scale_width = int(video.width * (height / video.height))

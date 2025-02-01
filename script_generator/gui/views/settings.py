@@ -1,9 +1,8 @@
 import tkinter as tk
-from tkinter import ttk
 
 from script_generator.debug.logger import set_log_level
-from script_generator.state.app_state import AppState
 from script_generator.gui.utils.widgets import Widgets
+from script_generator.state.app_state import AppState
 
 
 class SettingsPage(tk.Frame):
@@ -39,6 +38,17 @@ class SettingsPage(tk.Frame):
             command=lambda val: c.save(),
             select_folder=True,
             row=1
+        )
+
+        Widgets.checkbox(
+            general_settings,
+            "Backup old funscript",
+            state=self.state,
+            attr="make_funscript_backup",
+            default_value=False,
+            tooltip_text="Makes a backup of any funscript that might exist in the output location.\nFunscripts not made by this app are never overwritten and skipped.",
+            command=lambda val: c.save(),
+            row=2
         )
 
         ffmpeg_settings = Widgets.frame(self, title="YOLO (restart to apply changes)", main_section=True, row=1)

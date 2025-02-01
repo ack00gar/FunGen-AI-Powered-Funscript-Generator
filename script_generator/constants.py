@@ -1,7 +1,7 @@
 import os
 import platform
 
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 YOLO_VERSION = 1
 FUNSCRIPT_VERSION = 1
 CONFIG_VERSION = 1
@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
     "yolo_model_path": None,
     "copy_funscript_to_movie_dir": True,
     "funscript_output_dir": None,
+    "make_funscript_backup": True,
     "log_level": "INFO"
 }
 
