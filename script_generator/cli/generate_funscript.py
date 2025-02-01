@@ -1,9 +1,9 @@
 import argparse
 import os
 
-from config import VALID_VIDEO_READERS
+from script_generator.constants import VALID_VIDEO_READERS
 from script_generator.scripts.generate_funscript import generate_funscript
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
 
@@ -113,14 +113,14 @@ def main():
     video_reader = args.video_reader
     default_video_reader = "FFmpeg" if is_mac() else "FFmpeg + OpenGL (Windows)"
     if video_reader and video_reader not in VALID_VIDEO_READERS:
-        logger.warning(
+        log.warning(
             f"Invalid video reader specified: {video_reader}. Using default: {default_video_reader}."
         )
         args.video_reader = default_video_reader
 
     try:
-        logger.info(f"Processing video: {args.video_path}")
-        state = AppState(is_cli=True)
+        log.info(f"Processing video: {args.video_path}")
+        state = AppState()
         state.video_path = args.video_path
         state.use_existing_raw_yolo = args.reuse_yolo
         state.copy_funscript_to_movie_dir = args.copy_funscript
@@ -139,9 +139,9 @@ def main():
         state.rounding = args.rounding
 
         generate_funscript(state)
-        logger.info("Funscript generation complete.")
+        log.info("Funscript generation complete.")
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        log.error(f"An error occurred: {e}")
 
 
 if __name__ == "__main__":

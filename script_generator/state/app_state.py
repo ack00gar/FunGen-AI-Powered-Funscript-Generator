@@ -1,35 +1,49 @@
 import math
 import os.path
 import string
-from typing import Literal
+from typing import Literal, Optional
 
-from ultralytics import YOLO
-
-from script_generator.constants import MODEL_PATH
+from script_generator.config.config_manager import ConfigManager
 from script_generator.debug.debug_data import DebugData
-from script_generator.debug.logger import logger
-from script_generator.object_detection.util.utils import get_metrics_file_info
+from script_generator.debug.logger import log
+from script_generator.object_detection.util.utils import get_metrics_file_info, load_yolo_model
 from script_generator.object_detection.utils import get_raw_yolo_file_info
 from script_generator.tasks.tasks import AnalyzeVideoTask
-from script_generator.utils.file import get_output_file_path
-from script_generator.utils.helpers import is_mac
 from script_generator.video.ffmpeg.hwaccel import get_preferred_hwaccel
 from script_generator.video.info.video_info import VideoInfo, get_video_info
 
 
 class AppState:
-    def __init__(self, is_cli):
-        self.is_cli: bool = is_cli
+    _instance: Optional["AppState"] = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(AppState, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+
+        self.config_manager = ConfigManager(self)
+        c = self.config_manager
 
         # Gui/settings general
         self.video_path: string = None
         self.frame_start: int = 0
         self.frame_end: int | None = None
         self.video_reader: Literal["FFmpeg", "FFmpeg + OpenGL (Windows)"] = "FFmpeg" # if is_mac() else "FFmpeg + OpenGL (Windows)"
-        self.copy_funscript_to_movie_dir = False
-        self.final_funscript_destination = "C:/cvr/funscript-generator/_generated" # If set the final script will be output to this directory instead of the movie location
+        self.copy_funscript_to_movie_dir = True
+        self.copy_funscript_to_movie_dir = c.get("copy_funscript_to_movie_dir")
+        self.funscript_output_dir = c.get("funscript_output_dir")
+        self.ffmpeg_path = c.get("ffmpeg_path")
+        self.ffprobe_path = c.get("ffprobe_path")
+        self.yolo_model_path = c.get("yolo_model_path")
 
         # Gui/settings debug
+        self.log_level = c.get("log_level")
         self.save_debug_file: bool = True
         self.live_preview_mode: bool = False
         self.reference_script: string = None
@@ -68,8 +82,23 @@ class AppState:
         # App logic
         self.debug_data = DebugData(self)
         self.update_ui = None
-        self.ffmpeg_hwaccel = get_preferred_hwaccel()
-        self.yolo_model = YOLO(MODEL_PATH, task="detect")
+        self.ffmpeg_hwaccel = get_preferred_hwaccel() if self.ffmpeg_path else None
+        self.yolo_model = load_yolo_model(self.yolo_model_path)
+
+    def is_configured(self):
+        message_prefix = "Cannot process the video."
+        checks = [
+            (self.video_path, f"{message_prefix} Please select a valid video file."),
+            (self.ffprobe_path, f"{message_prefix} FFprobe is missing. Please provide the correct path."),
+            (self.ffmpeg_path, f"{message_prefix} FFMPEG is missing. Please provide the correct path."),
+            (self.yolo_model, f"{message_prefix} YOLO model is not loaded. Please make sure to download the YOLO model to the models directory."),
+        ]
+
+        for path, error_message in checks:
+            if not path:
+                return False, error_message
+
+        return True, None
 
     def set_video_info(self):
         # If movie changed
@@ -87,7 +116,7 @@ class AppState:
                         self.has_tracking_data, _, _ = get_metrics_file_info(self)
                         self.max_preview_fps = math.ceil(self.video_info.fps)
                     except:
-                        logger.warn(f"FFprobe failed for path: {self.video_path}")
+                        log.warn(f"FFprobe failed for path: {self.video_path}")
                     finally:
                         return
 
@@ -107,4 +136,5 @@ def log_state_settings(state: AppState):
     ]
 
     for setting_name, setting_value in settings:
-        logger.info(f"{setting_name}: {setting_value}")
+        log.info(f"{setting_name}: {setting_value}")
+

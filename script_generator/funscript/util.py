@@ -1,6 +1,6 @@
 import json
 
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 
 def load_funscript_json(funscript_path):
@@ -12,5 +12,5 @@ def load_funscript_json(funscript_path):
         funscript_positions = [action["pos"] for action in actions]
         return funscript_times, funscript_positions
     except FileNotFoundError:
-        logger.error(f"Funscript file not found at {funscript_path}")
+        log.error(f"Funscript file not found at {funscript_path}")
         raise

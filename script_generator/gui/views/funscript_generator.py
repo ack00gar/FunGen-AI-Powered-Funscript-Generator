@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from script_generator.gui.controller.debug_video import debug_video
 from script_generator.gui.controller.process_video import video_analysis
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
@@ -273,7 +273,7 @@ class FunscriptGeneratorPage(tk.Frame):
                 if handler:
                     handler(msg)
                 else:
-                    logger.info(f"Unhandled message type: {type(msg)}")
+                    log.info(f"Unhandled message type: {type(msg)}")
 
             def handle_state_update(state_msg: UpdateGUIState):
                 setattr(state, state_msg.attr, state_msg.value)

@@ -73,7 +73,7 @@ The pipeline for generating Funscript files is as follows:
 Before using this project, ensure you have the following installed:
 
 - **Python 3.8 or higher (tested on 3.11 https://www.python.org/downloads/release/python-3118/)**
-- **FFmpeg** added to your path or specified in the config (https://www.ffmpeg.org/download.html)
+- **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
 --
 
 ## Installation
@@ -133,25 +133,9 @@ python FSGenerator.py
 - Place your YOLO model file (e.g., `k00gar-11n-RGB-200ep-best.mlpackage`) in the `models/` sub-directory.
 - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
 
-### Update config.py
 
-**FFMPEG**
-- If ffmpeg and ffprobe paths are not in your system path, the program will default to the following values.
-- You can update the params/config.py file, which contains:
-
-  ```bash
-  # ffmpeg and ffprobe paths - replace with your own if not in your system path   
-   win_ffmpeg_path = "C:/ffmpeg/bin/ffmpeg.exe"
-   mac_ffmpeg_path = "/usr/local/bin/ffmpeg"
-   lin_ffmpeg_path = "/usr/bin/ffmpeg"
-
-   win_ffprobe_path = "C:/ffmpeg/bin/ffprobe.exe"
-   mac_ffprobe_path = "/usr/local/bin/ffprobe"
-   lin_ffprobe_path = "/usr/bin/ffprobe"
-  ```
-
-**(Optional) User configurations**
-config.py also contains various user configurations that can be adjusted
+**(Optional) Settings**
+Find the settings menu in the app to configure optional option.
 
 ### Start script
 You can use Start windows.bat to launch the gui on windows if you installed with conda

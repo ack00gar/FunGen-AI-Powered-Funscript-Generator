@@ -5,7 +5,7 @@ from typing import List
 
 from tqdm import tqdm
 
-from config import QUEUE_MAXSIZE, SEQUENTIAL_MODE, UPDATE_PROGRESS_INTERVAL
+from script_generator.constants import QUEUE_MAXSIZE, SEQUENTIAL_MODE, UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.object_detection.post_process_worker import PostProcessWorker
 from script_generator.object_detection.yolo_worker import YoloWorker
@@ -13,13 +13,13 @@ from script_generator.state.app_state import AppState
 from script_generator.tasks.abstract_task_processor import TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyzeVideoTask, AnalyzeFrameTask
 from script_generator.utils.file import check_create_output_folder
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from script_generator.video.workers.ffmpeg_worker import VideoWorker
 from script_generator.video.workers.vr_to_2d_worker import VrTo2DWorker
 
 
 def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
-    logger.info(f"[OBJECT DETECTION] Starting up pipeline{' in sequential mode' if SEQUENTIAL_MODE else ''}...")
+    log.info(f"[OBJECT DETECTION] Starting up pipeline{' in sequential mode' if SEQUENTIAL_MODE else ''}...")
 
     log_thread_stop_event = threading.Event()
     threads = []
@@ -32,11 +32,11 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
         state.set_video_info()
         if state.video_reader == "FFmpeg + OpenGL (Windows)":
             if not state.video_info.is_vr:
-                logger.warn("Disabled OpenGL in the pipeline as it's not needed for 2D videos")
+                log.warn("Disabled OpenGL in the pipeline as it's not needed for 2D videos")
                 state.video_reader = "FFmpeg"
 
             if state.video_info.is_fisheye:
-                logger.warn("Disabled OpenGL as fisheye is not yet supported with the opengl feature")
+                log.warn("Disabled OpenGL as fisheye is not yet supported with the opengl feature")
                 state.video_reader = "FFmpeg"
 
         use_open_gl = state.video_reader == "FFmpeg + OpenGL (Windows)"
@@ -70,7 +70,7 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
                 thread.start()
                 thread.join()
                 out_queue.put(None)
-                logger.info(f"[OBJECT DETECTION] {thread_name} thread done in {time.time() - start_time} s")
+                log.info(f"[OBJECT DETECTION] {thread_name} thread done in {time.time() - start_time} s")
 
             run_thread(decode_thread, TaskProcessorTypes.VIDEO, opengl_q)
             if use_open_gl:
@@ -106,7 +106,7 @@ def analyze_video(state: AppState) -> List[AnalyzeFrameTask]:
         return result_q.queue
 
     except Exception as e:
-        logger.error(f"An error occurred during video analysis: {e}")
+        log.error(f"An error occurred during video analysis: {e}")
         # Signal all threads to stop and perform cleanup
         log_thread_stop_event.set()
         for thread in threads:
@@ -158,7 +158,7 @@ def log_progress(state, opengl_q, yolo_q, analysis_q, results_q, stop_event):
                         eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                     ))
                 except Exception as e:
-                    logger.error(f"Error in state.update_ui: {e}")
+                    log.error(f"Error in state.update_ui: {e}")
 
             time.sleep(UPDATE_PROGRESS_INTERVAL)
 
@@ -223,4 +223,4 @@ def log_performance(state, results_queue):
     log_message += f"{'-' * 60}\n"
 
     for line in log_message.splitlines():
-        logger.info(line)
+        log.info(line)

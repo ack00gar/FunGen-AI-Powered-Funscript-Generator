@@ -7,12 +7,14 @@ from script_generator.object_detection.utils import check_skip_object_detection
 from script_generator.scripts.analyze_video import analyze_video
 from script_generator.state.app_state import AppState, log_state_settings
 from script_generator.utils.helpers import to_int_or_none
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 
 def video_analysis(state: AppState, root):
-    if not state.video_path:
-        messagebox.showerror("Error", "Please select a video file.")
+    configured, msg = state.is_configured()
+    if not configured:
+        log.warn(msg)
+        messagebox.showerror("Error", msg)
         return
 
     state.set_video_info()
@@ -43,7 +45,7 @@ def video_analysis(state: AppState, root):
             state.update_ui(UpdateGUIState(attr="is_processing", value=False))
 
         except Exception as e:
-            logger.error(f"Error during video analysis: {e}")
+            log.error(f"Error during video analysis: {e}")
             messagebox.showerror("Error", f"Could not process video:\n{e}")
             import traceback
             traceback.print_exc()

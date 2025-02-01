@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 from collections import defaultdict
 from script_generator.constants import CLASS_REVERSE_MATCH
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 #video_path = "/Users/k00gar/Downloads/Katrina Jade [ADD] Oct 16, 2024R_6kvr265_reenc.mp4"
 #video_path = "/Users/k00gar/Downloads/SLR_SLR Originals_Vote for me_1920p_51071_FISHEYE190_alpha.mp4"
@@ -110,7 +110,7 @@ while cap.isOpened():
                 hand_counter += 1
 
         if hand_counter < 2:
-            logger.warning(f"WARNING: {hand_counter} hand detected")
+            log.warning(f"WARNING: {hand_counter} hand detected")
 
         frame = np.hstack((frame_1, frame_2))
 

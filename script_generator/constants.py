@@ -1,6 +1,61 @@
 import os
+import platform
 
-from script_generator.utils.config import get_yolo_model_path
+VERSION = "0.1.1"
+YOLO_VERSION = 1
+FUNSCRIPT_VERSION = 1
+CONFIG_VERSION = 1
+
+##################################################################################################
+# PERFORMANCE
+##################################################################################################
+
+RENDER_RESOLUTION = 640
+TEXTURE_RESOLUTION = RENDER_RESOLUTION * 1.3  # Texture size that is used to texture the opengl sphere
+YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30  # Mac doesn't support batching
+YOLO_PERSIST = True  # Big impact on performance but also improves tracking
+
+##################################################################################################
+# ADVANCED
+##################################################################################################
+
+YOLO_CONF = 0.3
+VR_TO_2D_PITCH = -25  # The dataset is trained on -25
+UPDATE_PROGRESS_INTERVAL = 0.2  # Updates progress in the console and in gui
+STEP_SIZE = 120  # Define custom colormap based on Lucife's heatmapColors | Speed step size for color transitions
+QUEUE_MAXSIZE = 100  # Bounded queue size to avoid memory blow-up as raw frames consume a lot of memory, does not increase performance
+
+##################################################################################################
+# DEV
+##################################################################################################
+
+# when enabled the queue will be processed one by one (use it on (QUEUE_MAXSIZE / frame rate) seconds longer videos or less)
+# raw frames take a lot of memory (RAM) so don't set the queue to high
+SEQUENTIAL_MODE = False
+if SEQUENTIAL_MODE:
+    QUEUE_MAXSIZE = 3000
+
+##################################################################################################
+# DEFAULT CONFIG
+##################################################################################################
+
+DEFAULT_CONFIG = {
+    "config_version": CONFIG_VERSION,
+    "ffmpeg_path": None,
+    "ffprobe_path": None,
+    "yolo_model_path": None,
+    "copy_funscript_to_movie_dir": True,
+    "funscript_output_dir": None,
+    "log_level": "INFO"
+}
+
+##################################################################################################
+# PROG
+##################################################################################################
+
+RUN_POSE_MODEL = False
+YOLO_POSE_MODEL = None  # YOLO("models/yolo11n-pose.mlpackage", task="pose") #TODO pose model?
+VALID_VIDEO_READERS = ["FFmpeg", "FFmpeg + OpenGL (Windows)"]
 
 ##################################################################################################
 # OBJECT DETECTION
@@ -63,11 +118,11 @@ HEATMAP_COLORS = [
 
 PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_PATH = os.path.join(PROJECT_PATH, "output")
-MODELS_DIR = "models"
+MODELS_PATH = os.path.join(PROJECT_PATH, "models")
 MODEL_FILENAMES = [
-#    "k00gar-11n-200ep-best.mlpackage",
-#    "k00gar-11n-200ep-best.pt",
-#    "k00gar-11n-200ep-best.onnx",
+    #    "k00gar-11n-200ep-best.mlpackage",
+    #    "k00gar-11n-200ep-best.pt",
+    #    "k00gar-11n-200ep-best.onnx",
     "k00gar-11n-RGB-200ep-best.mlpackage",
     "k00gar-11n-RGB-200ep-best.pt",
     "k00gar-11n-RGB-200ep-best.onnx",
@@ -77,8 +132,7 @@ MODEL_FILENAMES = [
 ]
 LOGO = os.path.join(PROJECT_PATH, "resources", "logo.png")
 ICON = os.path.join(PROJECT_PATH, "resources", "icon.ico")
-YOLO_MODELS = [os.path.join(MODELS_DIR, filename) for filename in MODEL_FILENAMES]
-MODEL_PATH = str(os.path.join(PROJECT_PATH, get_yolo_model_path(YOLO_MODELS)))
+CONFIG_FILE_PATH = os.path.join(PROJECT_PATH, "config.json")
 
 ##################################################################################################
 # DIV

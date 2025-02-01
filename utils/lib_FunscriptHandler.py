@@ -11,9 +11,9 @@ from matplotlib.ticker import FuncFormatter, MaxNLocator
 from scipy.signal import savgol_filter
 from simplification.cutil import simplify_coords
 
-from config import STEP_SIZE, VERSION
+from script_generator.constants import STEP_SIZE, VERSION
 from script_generator.constants import HEATMAP_COLORS, FUNSCRIPT_AUTHOR
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
 from script_generator.utils.json_utils import load_json_from_file
@@ -32,26 +32,26 @@ class FunscriptGenerator:
 
         raw_funscript_path, _ = get_output_file_path(state.video_path, "_rawfunscript.json")
         if os.path.exists(raw_funscript_path) and (state.funscript_data is None or len(state.funscript_data) == 0):
-            logger.info("len funscript data is 0, trying to load file")
+            log.info("len funscript data is 0, trying to load file")
             # Read the funscript data from the JSON file
             with open(raw_funscript_path, 'r') as f:
-                logger.info(f"Loading funscript from {raw_funscript_path}")
+                log.info(f"Loading funscript from {raw_funscript_path}")
                 try:
                     data = json.load(f)
                 except Exception as e:
-                    logger.error(f"Error loading funscript from {raw_funscript_path}: {e}")
+                    log.error(f"Error loading funscript from {raw_funscript_path}: {e}")
                     return
         else:
             data = state.funscript_data
 
         try:
-            logger.info(f"Generating funscript based on {len(data)} points...")
+            log.info(f"Generating funscript based on {len(data)} points...")
 
             # Extract timestamps and positions
             ats = [p[0] for p in data]
             positions = [p[1] for p in data]
 
-            logger.info(f"Positions adjustment - step 1 (noise removal)")
+            log.info(f"Positions adjustment - step 1 (noise removal)")
             # Run the Savitzky-Golay filter
             positions = savgol_filter(positions, int(state.video_info.fps) // 4, 3)
 
@@ -60,33 +60,33 @@ class FunscriptGenerator:
 
             # Apply VW simplification if enabled
             if state.vw_simplification_enabled:
-                logger.info("Positions adjustment - step 2 (VW algorithm simplification)")
+                log.info("Positions adjustment - step 2 (VW algorithm simplification)")
                 zip_positions = simplify_coords(zip_positions, state.vw_factor)
-                logger.info(f"Length of VW filtered positions: {len(zip_positions)}")
+                log.info(f"Length of VW filtered positions: {len(zip_positions)}")
             else:
-                logger.info("Skipping positions adjustment - step 2 (VW algorithm simplification)")
+                log.info("Skipping positions adjustment - step 2 (VW algorithm simplification)")
 
             # Extract timestamps and positions
             ats = [p[0] for p in zip_positions]
             positions = [p[1] for p in zip_positions]
 
             # Remap positions to 0-100 range
-            logger.info("Positions adjustment - step 3 (remapping)")
+            log.info("Positions adjustment - step 3 (remapping)")
             adjusted_positions = np.interp(positions, (min(positions), max(positions)), (0, 100))
 
             # Apply thresholding
             if state.threshold_enabled:
-                logger.info(f"Positions adjustment - step 4 (thresholding)")
+                log.info(f"Positions adjustment - step 4 (thresholding)")
                 adjusted_positions = adjusted_positions.tolist()  # Convert to list
                 adjusted_positions = [
                     0 if p < state.threshold_low else 100 if p > state.threshold_high else p for p in
                     adjusted_positions]
             else:
-                logger.info("Skipping positions adjustment - step 4 (thresholding)")
+                log.info("Skipping positions adjustment - step 4 (thresholding)")
 
             # Apply amplitude boosting
             if state.boost_enabled:
-                logger.info("Positions adjustment - step 5 (amplitude boosting)")
+                log.info("Positions adjustment - step 5 (amplitude boosting)")
                 # self.boost_amplitude(adjusted_positions, boost_factor=1.2, min_value=0, max_value=100)
                 adjusted_positions = self.adjust_peaks_and_lows(
                     adjusted_positions,
@@ -94,53 +94,53 @@ class FunscriptGenerator:
                     low_reduction=state.boost_down_percent
                 )
             else:
-                logger.info("Skipping positions adjustment - step 5 (amplitude boosting)")
+                log.info("Skipping positions adjustment - step 5 (amplitude boosting)")
 
             # Round position values to the closest multiple of 5, still between 0 and 100
             if state.vw_simplification_enabled:
-                logger.info(
+                log.info(
                     f"Positions adjustment - step 6 (rounding to the closest multiple of {state.rounding})")
                 adjusted_positions = [round(p / state.rounding) * state.rounding for p in
                                       adjusted_positions]
 
             else:
-                logger.info(
+                log.info(
                     f"Skipping positions adjustment - step 6 (rounding to the closest multiple of {state.rounding})")
 
             # Recombine timestamps and adjusted positions
-            logger.info("Re-assembling ats and positions")
+            log.info("Re-assembling ats and positions")
             zip_adjusted_positions = list(zip(ats, adjusted_positions))
 
             # Write the final funscript
             self.write_funscript(zip_adjusted_positions, output_path, state.video_info.fps)
 
             # copy funscript if specified
-            if state.copy_funscript_to_movie_dir or state.final_funscript_destination:
+            if state.copy_funscript_to_movie_dir or state.funscript_output_dir:
                 copy = True
                 video_folder = os.path.dirname(state.video_path)
                 filename_base = os.path.basename(state.video_path)[:-4]
-                funscript_path = os.path.join(state.final_funscript_destination, f"{filename_base}.funscript") if state.final_funscript_destination else os.path.join(video_folder, f"{filename_base}.funscript")
+                funscript_path = os.path.join(state.funscript_output_dir, f"{filename_base}.funscript") if state.funscript_output_dir else os.path.join(video_folder, f"{filename_base}.funscript")
 
                 # Backup output file if it exists
                 if os.path.exists(funscript_path):
                     json_data = load_json_from_file(funscript_path)
                     if "author" in json_data and json_data["author"] == FUNSCRIPT_AUTHOR:
                         backup_path = os.path.join(video_folder, f"{filename_base}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript.bak")
-                        logger.info(f"Funscript {funscript_path} already exists, backing up as {backup_path}...")
+                        log.info(f"Funscript {funscript_path} already exists, backing up as {backup_path}...")
                         os.rename(funscript_path, backup_path)
                     else:
                         copy = False
-                        logger.warn(f"Skipping copying funscript to movie directory as the script in the destination directory is not made by this app.")
+                        log.warn(f"Skipping copying funscript to movie directory as the script in the destination directory is not made by this app.")
 
                 if copy:
                     shutil.copy(output_path, funscript_path)
 
-            logger.info(f"Funscript generated and saved to {output_path}")
+            log.info(f"Funscript generated and saved to {output_path}")
 
             # Generate a heatmap
             self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")
         except Exception as e:
-            logger.error(f"Error generating funscript: {e}")
+            log.error(f"Error generating funscript: {e}")
             raise
 
     # TODO replace with proper JSON serialization
@@ -161,7 +161,7 @@ class FunscriptGenerator:
             # Load funscript data
             times, positions, _, _ = self.load_funscript(funscript_path)
             if not times or not positions:
-                logger.info("Failed to load funscript data.")
+                log.info("Failed to load funscript data.")
                 return
 
             # add a timing: 0, position: 100 at the beginning if no value for 0
@@ -172,8 +172,8 @@ class FunscriptGenerator:
             # Print loaded data for debugging
             # logger.debug(f"Times: {times}")
             # logger.debug(f"Positions: {positions}")
-            logger.info(f"Total Actions: {len(times)}")
-            logger.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
+            log.info(f"Total Actions: {len(times)}")
+            log.info(f"Time Range: {times[0]} to {datetime.timedelta(seconds=int(times[-1] / 1000))}")
 
             # Calculate speed (position change per time interval)
             times = np.array(times)
@@ -186,7 +186,7 @@ class FunscriptGenerator:
             # We add 1e-10 to prevent dividing by zero
             speeds = np.abs(np.diff(filtered_positions) / (np.diff(filtered_times) + 1e-10)) * 1000  # Positions per second
 
-            logger.debug(f"Speeds: {speeds}")
+            log.debug(f"Speeds: {speeds}")
 
             def get_color(intensity):
                 if intensity <= 0:
@@ -248,9 +248,9 @@ class FunscriptGenerator:
             # Save the figure
             plt.savefig(output_image_path, bbox_inches='tight', dpi=200)  # Increase resolution
             plt.close()
-            logger.info(f"Funscript heatmap saved to {output_image_path}")
+            log.info(f"Funscript heatmap saved to {output_image_path}")
         except Exception as e:
-            logger.error(f"Error generating heatmap for funscript: {e}")
+            log.error(f"Error generating heatmap for funscript: {e}")
 
     def boost_amplitude(self, signal, boost_factor, min_value=0, max_value=100):
         """
@@ -345,19 +345,19 @@ class FunscriptGenerator:
     def load_funscript(self, funscript_path):
         # if the funscript path exists
         if not os.path.exists(funscript_path):
-            logger.error(f"Funscript not found at {funscript_path}")
+            log.error(f"Funscript not found at {funscript_path}")
             return None, None, None, None
 
         with open(funscript_path, 'r') as f:
             try:
-                logger.info(f"Loading funscript from {funscript_path}")
+                log.info(f"Loading funscript from {funscript_path}")
                 data = json.load(f)
             except json.JSONDecodeError as e:
-                logger.error(f"JSONDecodeError: {e}")
-                logger.error(f"Error occurred at line {e.lineno}, column {e.colno}")
-                logger.error("Dumping the problematic JSON data:")
+                log.error(f"JSONDecodeError: {e}")
+                log.error(f"Error occurred at line {e.lineno}, column {e.colno}")
+                log.error("Dumping the problematic JSON data:")
                 f.seek(0)  # Reset file pointer to the beginning
-                logger.error(f.read())
+                log.error(f.read())
                 return None, None, None, None
 
         times = []
@@ -366,7 +366,7 @@ class FunscriptGenerator:
         for action in data['actions']:
             times.append(action['at'])
             positions.append(action['pos'])
-        logger.info(f"Loaded funscript with {len(times)} actions")
+        log.info(f"Loaded funscript with {len(times)} actions")
 
         # Access the chapters
         chapters = data.get("metadata", {}).get("chapters", [])
@@ -379,7 +379,7 @@ class FunscriptGenerator:
                 chapter['startTime'] = chapter['startTime'][:8]
             if len(chapter['endTime']) > 8:
                 chapter['endTime'] = chapter['endTime'][:8]
-            logger.info(f"Chapter: {chapter['name']}, Start: {chapter['startTime']}, End: {chapter['endTime']}")
+            log.info(f"Chapter: {chapter['name']}, Start: {chapter['startTime']}, End: {chapter['endTime']}")
             # convert 00:00:00 to milliseconds
             startTime_ms = int(chapter['startTime'].split(':')[0]) * 60 * 60 * 1000 + int(
                 chapter['startTime'].split(':')[1]) * 60 * 1000 + int(chapter['startTime'].split(':')[2]) * 1000
@@ -511,7 +511,7 @@ class FunscriptGenerator:
 
         # TODO why is this empty sometimes? and result in errors
         if not gen_times or not gen_positions:
-            logger.error("Could not created combined plot")
+            log.error("Could not created combined plot")
             return
 
         # Create a flexible grid layout
@@ -616,7 +616,7 @@ class FunscriptGenerator:
             if times[i] == times[i - 1]:
                 times.pop(i)
                 positions.pop(i)
-                logger.info(f"Removed duplicate time value {times[i]}")
+                log.info(f"Removed duplicate time value {times[i]}")
                 break
 
         # Calculate speed (position change per time interval)
