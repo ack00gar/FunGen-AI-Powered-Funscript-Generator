@@ -176,7 +176,7 @@ def analyze_tracking_results(state: AppState, results):
                     state.offset_x
                 )
             else:
-                log.info("No active locked penis box to draw.")
+                log.debug("No active locked penis box to draw.")
 
             if tracker.glans_detected:
                 frame = OverlayWidgets.draw_bounding_box(

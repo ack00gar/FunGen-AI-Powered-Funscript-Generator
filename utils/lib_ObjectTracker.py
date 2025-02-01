@@ -277,7 +277,7 @@ class ObjectTracker:
         position_counts = {position: self.sex_position_history.count(position) for position in self.sex_position_history}
         most_frequent_position = max(position_counts, key=position_counts.get, default="Not relevant")
         if most_frequent_position != self.sex_position:
-            log.info(f"@{self.current_frame_id} - Sex position switched to: {most_frequent_position}")
+            log.debug(f"@{self.current_frame_id} - Sex position switched to: {most_frequent_position}")
             self.sex_position = most_frequent_position
             self.sex_position_reason = reason
 
@@ -559,7 +559,7 @@ class ObjectTracker:
         """
         if class_name == 'penis':
             if box is not None and self.penis_box is None:
-                log.info(f"@{self.current_frame_id} - Penis detected with confidence {conf}")
+                log.debug(f"@{self.current_frame_id} - Penis detected with confidence {conf}")
             self.penis_box = box
 
             if self.penis_box:
