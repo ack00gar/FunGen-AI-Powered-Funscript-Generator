@@ -30,6 +30,12 @@ HW_TEST_CMDS = {
         "-init_hw_device", "d3d11va=hw:0",
         "-f", "lavfi", "-i", "nullsrc=size=256x256:duration=0.1:rate=1",
         "-f", "null", "-"
+    ],
+    "videotoolbox": [
+        "-f", "lavfi", "-i", "nullsrc=size=256x256:duration=0.1:rate=1",
+        "-pix_fmt", "yuv420p",
+        "-c:v", "h264_videotoolbox",
+        "-f", "null", "-"
     ]
 }
 
