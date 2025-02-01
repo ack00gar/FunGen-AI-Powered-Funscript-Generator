@@ -107,7 +107,12 @@ def get_hwaccel_read_args(video_info, hwaccel):
     return []
 
 
+scale_cuda = None
 def _has_scale_cuda(ffmpeg_path):
+    global scale_cuda
+    if scale_cuda is not None:
+        return scale_cuda
+
     # Check if FFmpeg supports the scale_cuda filter.
     try:
         r = subprocess.run(
@@ -118,13 +123,13 @@ def _has_scale_cuda(ffmpeg_path):
             check=True
         )
         filters = r.stdout.lower()
-        has_scale_cuda = "scale_cuda" in filters
-        log_vid.info(f"FFmpeg has scale_cuda: {has_scale_cuda}")
-        return has_scale_cuda
+        scale_cuda = "scale_cuda" in filters
+        log_vid.info(f"FFmpeg {'supports' if scale_cuda else 'does not support'} scale_cuda")
+        return scale_cuda
     except Exception as e:
         log_vid.error(f"Failed to check scale_cuda support: {e}")
+        scale_cuda = False
         return False
-
 
 def supports_cuda_scale(state: "AppState"):
     video = state.video_info

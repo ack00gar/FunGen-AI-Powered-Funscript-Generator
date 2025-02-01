@@ -114,27 +114,40 @@ class FunscriptGenerator:
             self.write_funscript(zip_adjusted_positions, output_path, state.video_info.fps)
 
             # copy funscript if specified
-            if state.copy_funscript_to_movie_dir or state.funscript_output_dir:
-                copy = True
-                video_folder = os.path.dirname(state.video_path)
-                filename_base = os.path.basename(state.video_path)[:-4]
-                funscript_path = os.path.join(state.funscript_output_dir, f"{filename_base}.funscript") if state.funscript_output_dir else os.path.join(video_folder, f"{filename_base}.funscript")
+            destinations = {}
+            video_folder = os.path.dirname(state.video_path)
+            filename_base = os.path.splitext(os.path.basename(state.video_path))[0]
 
-                # Backup output file if it exists
-                if os.path.exists(funscript_path):
-                    json_data = load_json_from_file(funscript_path)
-                    if "author" in json_data and json_data["author"] == FUNSCRIPT_AUTHOR:
-                        backup_path = os.path.join(video_folder, f"{filename_base}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript.bak")
-                        log.info(f"Funscript {funscript_path} already exists, backing up as {backup_path}...")
-                        shutil.move(funscript_path, backup_path)
+            if state.copy_funscript_to_movie_dir:
+                movie_dest = os.path.join(video_folder, f"{filename_base}.funscript")
+                destinations["movie"] = movie_dest
+
+            if state.funscript_output_dir:
+                output_dest = os.path.join(state.funscript_output_dir, f"{filename_base}.funscript")
+                destinations["output"] = output_dest
+
+            for dest_name, dest_path in destinations.items():
+                do_copy = True
+
+                if os.path.exists(dest_path):
+                    json_data = load_json_from_file(dest_path)
+
+                    if json_data.get("author") == FUNSCRIPT_AUTHOR:
+                        if state.make_funscript_backup:
+                            timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+                            # Use the destination's directory for the backup path
+                            backup_path = os.path.join(os.path.dirname(dest_path), f"{filename_base}_{timestamp}.funscript.bak")
+                            log.info(f"Funscript made by this app already exists in {dest_path}, backing up as {backup_path}...")
+                            shutil.move(dest_path, backup_path)
                     else:
-                        copy = False
-                        log.warn(f"Skipping copying funscript to movie directory as the script in the destination directory is not made by this app.")
+                        log.warn(f"Skipping copying funscript to {dest_path} because the existing funscript in this destination was not created by this app.")
+                        do_copy = False
 
-                if copy:
-                    shutil.copy(output_path, funscript_path)
+                if do_copy:
+                    shutil.copy(output_path, dest_path)
+                    log.info(f"Copied funscript to {dest_path}.")
 
-            log.info(f"Funscript generated and saved to {output_path}")
+            log.info(f"Funscript generation complete")
 
             # Generate a heatmap
             self.generate_heatmap(output_path, output_path[:-10] + f"_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png")

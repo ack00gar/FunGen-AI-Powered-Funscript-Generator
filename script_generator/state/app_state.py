@@ -40,6 +40,7 @@ class AppState:
         self.copy_funscript_to_movie_dir = True
         self.copy_funscript_to_movie_dir = c.get("copy_funscript_to_movie_dir")
         self.funscript_output_dir = c.get("funscript_output_dir")
+        self.make_funscript_backup = c.get("make_funscript_backup")
         self.ffmpeg_path = c.get("ffmpeg_path")
         self.ffprobe_path = c.get("ffprobe_path")
         self.yolo_model_path = c.get("yolo_model_path")
