@@ -58,12 +58,12 @@ class FunscriptGeneratorPage(tk.Frame):
         # )
         # endregion
 
-        # region OPTIONAL SETTINGS
-        optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
-
-        _, start_f_widgets, _ = Widgets.frames_input(optional_settings, "Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
-        _, end_f_widgets, _ = Widgets.frames_input(optional_settings, "End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
-        # endregion
+        # # region OPTIONAL SETTINGS
+        # optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
+        #
+        # _, start_f_widgets, _ = Widgets.frames_input(optional_settings, "Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
+        # _, end_f_widgets, _ = Widgets.frames_input(optional_settings, "End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
+        # # endregion
 
         # region PROCESSING
         processing = Widgets.frame(wrapper, title="Processing", main_section=True, row=3)
@@ -248,7 +248,7 @@ class FunscriptGeneratorPage(tk.Frame):
             else:
                 disable_widgets([processing_btn])
 
-            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, metrics_check, *start_f_widgets, *end_f_widgets, # , reader_dropdown
+            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, metrics_check, # , reader_dropdown, *start_f_widgets, *end_f_widgets
                             boost_check, simp_check, tres_check, t_d_1, t_d_2, s_d_1, s_d_2, b_d_1, b_d_2]
             if state.is_processing:
                 # TODO remove the processing button and implement stop processing

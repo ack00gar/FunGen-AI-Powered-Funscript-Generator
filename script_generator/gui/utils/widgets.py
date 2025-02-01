@@ -235,7 +235,7 @@ class Widgets:
         return dropdown
 
     @staticmethod
-    def checkbox(parent, label_text, state, attr, command=None, label_left=True, row=0, column=0, label_width_px=150, tooltip_text=None, **grid_kwargs):
+    def checkbox(parent, label_text, state, attr, label_left=True, command=None, row=0, column=0, label_width_px=150, tooltip_text=None, **grid_kwargs):
         # Ensure the parent has a _checkbox_vars attribute to track BooleanVars
         if not hasattr(parent, "_checkbox_vars"):
             parent._checkbox_vars = {}
