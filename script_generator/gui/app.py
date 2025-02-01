@@ -33,12 +33,11 @@ class App(tk.Tk):
         self.container.grid(row=0, column=0, sticky="nsew")
         self.container.grid_columnconfigure(0, weight=1)
 
+        # App menu
         menu_bar = tk.Menu(self)
-
-        # File Menu
         file_menu = tk.Menu(menu_bar, tearoff=0)
-        # file_menu.add_command(label="Exit", command=self.quit)
-        # menu_bar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Exit", command=self.quit)
+        menu_bar.add_cascade(label="File", menu=file_menu)
         menu_bar.add_command(label="Funscript generator", command=lambda: self.show_frame(PageNames.FUNSCRIPT_GENERATOR))
         menu_bar.add_command(label="Settings", command=lambda: self.show_frame(PageNames.SETTINGS))
         self.config(menu=menu_bar)
