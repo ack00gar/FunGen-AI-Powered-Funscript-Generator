@@ -1,6 +1,10 @@
 import subprocess
+from typing import TYPE_CHECKING
 
 from script_generator.debug.logger import log_vid
+
+if TYPE_CHECKING:
+    from script_generator.state.app_state import AppState
 
 HW_TEST_CMDS = {
     "cuda": [
@@ -39,12 +43,14 @@ HW_TEST_CMDS = {
     ]
 }
 
+
 def _run_cmd(cmd):
     try:
         r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         return (r.returncode == 0, r.stderr)
     except Exception as e:
         return (False, str(e))
+
 
 def _list_ffmpeg_hwaccels(ffmpeg_path):
     try:
@@ -62,6 +68,7 @@ def _list_ffmpeg_hwaccels(ffmpeg_path):
         log_vid.error(e)
         return []
 
+
 def _test_hwaccel(ffmpeg_path, hw):
     if hw in HW_TEST_CMDS:
         cmd = [ffmpeg_path] + HW_TEST_CMDS[hw]
@@ -71,14 +78,16 @@ def _test_hwaccel(ffmpeg_path, hw):
     ok, _ = _run_cmd([ffmpeg_path, "-init_hw_device", hw])
     return ok
 
+
 def get_preferred_hwaccel(ffmpeg_path):
     supported = _list_ffmpeg_hwaccels(ffmpeg_path)
-    for hw in ["cuda","vaapi","amf","videotoolbox","qsv","d3d11va"]:
+    for hw in ["cuda", "vaapi", "amf", "videotoolbox", "qsv", "d3d11va"]:
         if hw in supported and _test_hwaccel(ffmpeg_path, hw):
             log_vid.info(f"Setting preferred FFmpeg hardware acceleration too: {hw}")
             return hw
     log_vid.info("No working hwaccel found.")
     return None
+
 
 def get_hwaccel_read_args(video_info, hwaccel):
     if hwaccel == "cuda":
@@ -97,9 +106,31 @@ def get_hwaccel_read_args(video_info, hwaccel):
         return ["-hwaccel", "d3d11va"]
     return []
 
-def supports_cuda_scale(video, ffmpeg_hwaccel):
+
+def _has_scale_cuda(ffmpeg_path):
+    # Check if FFmpeg supports the scale_cuda filter.
+    try:
+        r = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-filters"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        filters = r.stdout.lower()
+        has_scale_cuda = "scale_cuda" in filters
+        log_vid.info(f"FFmpeg has scale_cuda: {has_scale_cuda}")
+        return has_scale_cuda
+    except Exception as e:
+        log_vid.error(f"Failed to check scale_cuda support: {e}")
+        return False
+
+
+def supports_cuda_scale(state: "AppState"):
+    video = state.video_info
     return (
-        ffmpeg_hwaccel == "cuda"
+        state.ffmpeg_hwaccel == "cuda"
         and video.bit_depth == 8
         and (video.codec_name != "h264" or (video.width <= 4096 and video.height <= 4096))
+        and _has_scale_cuda(state.ffmpeg_path)
     )

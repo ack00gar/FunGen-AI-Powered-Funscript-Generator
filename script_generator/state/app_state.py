@@ -2,16 +2,17 @@ import math
 import os.path
 import string
 from tkinter import messagebox
-from typing import Literal, Optional
+from typing import Literal, Optional, TYPE_CHECKING
 
 from script_generator.config.config_manager import ConfigManager
 from script_generator.debug.debug_data import DebugData
 from script_generator.debug.logger import log
 from script_generator.object_detection.util.utils import get_metrics_file_info, load_yolo_model
 from script_generator.object_detection.utils import get_raw_yolo_file_info
-from script_generator.tasks.tasks import AnalyzeVideoTask
 from script_generator.video.info.video_info import VideoInfo, get_video_info
 
+if TYPE_CHECKING:
+    from script_generator.tasks.analyze_video_task import AnalyzeVideoTask
 
 class AppState:
     _instance: Optional["AppState"] = None
@@ -127,6 +128,10 @@ class AppState:
 
                 self.video_path = None
                 self.set_video_info()
+
+    def reload_video_info(self):
+        self.video_info = None
+        self.set_video_info()
 
 
 def log_state_settings(state: AppState):

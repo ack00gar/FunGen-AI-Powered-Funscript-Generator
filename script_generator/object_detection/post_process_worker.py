@@ -152,6 +152,10 @@ class PostProcessWorker(AbstractTaskProcessor):
             
 
     def on_last_item(self):
+        # stop processing when the task is force closed
+        if self.state.analyze_task and self.state.analyze_task.is_stopped:
+            return
+
         self.state.analyze_task.end_time = time.time()
 
         # Write the detection records to a JSON file

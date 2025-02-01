@@ -7,12 +7,11 @@ import shutil
 import cv2
 import matplotlib
 import numpy as np
-from matplotlib.ticker import FuncFormatter, MaxNLocator
 from scipy.signal import savgol_filter
 from simplification.cutil import simplify_coords
 
-from script_generator.constants import STEP_SIZE, VERSION
 from script_generator.constants import HEATMAP_COLORS, FUNSCRIPT_AUTHOR
+from script_generator.constants import STEP_SIZE, VERSION
 from script_generator.debug.logger import log
 from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
@@ -53,7 +52,7 @@ class FunscriptGenerator:
 
             log.info(f"Positions adjustment - step 1 (noise removal)")
             # Run the Savitzky-Golay filter
-            positions = savgol_filter(positions, int(state.video_info.fps) // 4, 3)
+            positions = savgol_filter(positions, int(state.video_info.fps // 4), 3)
 
             # zip adjusted positions
             zip_positions = list(zip(ats, positions))
@@ -127,7 +126,7 @@ class FunscriptGenerator:
                     if "author" in json_data and json_data["author"] == FUNSCRIPT_AUTHOR:
                         backup_path = os.path.join(video_folder, f"{filename_base}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.funscript.bak")
                         log.info(f"Funscript {funscript_path} already exists, backing up as {backup_path}...")
-                        os.rename(funscript_path, backup_path)
+                        shutil.move(funscript_path, backup_path)
                     else:
                         copy = False
                         log.warn(f"Skipping copying funscript to movie directory as the script in the destination directory is not made by this app.")
@@ -482,13 +481,7 @@ class FunscriptGenerator:
         screenshots = []
         for start, _ in sections:
             cap.set(cv2.CAP_PROP_POS_MSEC, start * 1000)
-            ret, frame = cap.read()
-            if is_vr:  # left side of the frame only
-                frame = frame[:, :frame.shape[1] // 2]
-            if ret:
-                screenshots.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            else:
-                screenshots.append(np.zeros((100, 160, 3), dtype=np.uint8))
+            screenshots.append(np.zeros((100, 160, 3), dtype=np.uint8))
         cap.release()
         return screenshots
 

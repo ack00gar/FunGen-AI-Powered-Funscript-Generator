@@ -17,7 +17,7 @@ def get_ffmpeg_read_cmd(state: AppState, frame_start: int | None, output="-", di
         # VAAPI requires specific pixel formats and filters
         video_filter = ["-vf", f"{vf},format=nv12,hwupload"] if vf else ["-vf", "format=nv12,hwupload"]
 
-    if supports_cuda_scale(video, state.ffmpeg_hwaccel):
+    if supports_cuda_scale(state):
         video_filter = ["-noautoscale"] + video_filter  # explicitly tell ffmpeg that scaling is done by cuda
 
     frame_size = width * height * 3  # Size of one frame in bytes

@@ -3,6 +3,7 @@ import os
 import tkinter as tk
 
 from script_generator.constants import LOGO, ICON
+from script_generator.gui.controller.stop_processing import stop_processing
 from script_generator.gui.views.funscript_generator import FunscriptGeneratorPage
 from script_generator.gui.views.settings import SettingsPage
 from script_generator.state.app_state import AppState
@@ -54,6 +55,8 @@ class App(tk.Tk):
         self.attributes("-topmost", True)
         self.after(200, self.reset_topmost)
 
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
     def reset_topmost(self):
         self.focus_force()
         self.attributes("-topmost", False)
@@ -80,6 +83,11 @@ class App(tk.Tk):
         elif page_name == PageNames.SETTINGS:
             return SettingsPage(parent=self.container, controller=self)
         return None
+
+    def on_close(self):
+        log.info("Application is closing...")
+        stop_processing(self.state)
+        self.destroy()
 
 
 class PageNames:
