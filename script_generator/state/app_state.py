@@ -1,6 +1,7 @@
 import math
 import os.path
 import string
+from tkinter import messagebox
 from typing import Literal, Optional
 
 from script_generator.config.config_manager import ConfigManager
@@ -27,6 +28,7 @@ class AppState:
             return
         self._initialized = True
 
+        self.is_cli = True
         self.config_manager = ConfigManager(self)
         c = self.config_manager
 
@@ -85,6 +87,9 @@ class AppState:
         self.ffmpeg_hwaccel = get_preferred_hwaccel() if self.ffmpeg_path else None
         self.yolo_model = load_yolo_model(self.yolo_model_path)
 
+    def set_is_cli(self, cli):
+        self.is_cli = cli
+
     def is_configured(self):
         message_prefix = "Cannot process the video."
         checks = [
@@ -115,8 +120,9 @@ class AppState:
                         self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self)
                         self.has_tracking_data, _, _ = get_metrics_file_info(self)
                         self.max_preview_fps = math.ceil(self.video_info.fps)
-                    except:
-                        log.warn(f"FFprobe failed for path: {self.video_path}")
+                    except Exception as e:
+                        if not self.is_cli:
+                            messagebox.showerror("Error", e)
                     finally:
                         return
 
