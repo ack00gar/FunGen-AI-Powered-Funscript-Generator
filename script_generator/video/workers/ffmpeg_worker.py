@@ -54,9 +54,15 @@ class VideoWorker(AbstractTaskProcessor):
 
         finally:
             self.stop_process()
+            self.release()
 
-    # TODO ffmpeg interrupt
-    # def release(self):
-    #     if self.process:
-    #         self.process.stdout.close()
-    #         self.process = None
+    def release(self):
+        if self.process:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            self.process.stdout.close()
+            self.process.stderr.close()
+            self.process = None

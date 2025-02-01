@@ -9,10 +9,11 @@ def get_video_filters(video, video_reader, hwaccel, width, height, disable_openg
         return get_2d_video_filters(video, width, height, hwaccel)
 
 def get_vr_video_filters(video, video_reader, hwaccel, disable_opengl=False):
+    fov = int(video.fov * 1)
     if video.is_fisheye:
-        projection, iv_fov, ih_fov, v_fov, h_fov, d_fov = "fisheye", 190, 190, 90, 90, 180
+        projection, iv_fov, ih_fov, v_fov, h_fov, d_fov = "fisheye", fov, fov, 90, 90, fov
     else:
-        projection, iv_fov, ih_fov, v_fov, h_fov, d_fov = "he", 180, 180, 90, 90, 180
+        projection, iv_fov, ih_fov, v_fov, h_fov, d_fov = "he", fov, fov, 90, 90, fov
 
     cuda = hwaccel == "cuda"
 
