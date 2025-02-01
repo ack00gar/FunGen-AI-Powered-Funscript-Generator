@@ -1,9 +1,6 @@
 import time
 
-from ultralytics import YOLO
-
-from config import YOLO_CONF, YOLO_BATCH_SIZE, YOLO_PERSIST
-from script_generator.constants import MODEL_PATH
+from script_generator.constants import YOLO_CONF, YOLO_BATCH_SIZE, YOLO_PERSIST
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 
 

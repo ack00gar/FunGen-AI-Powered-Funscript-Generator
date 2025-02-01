@@ -1,7 +1,7 @@
 import cv2
 from PIL import Image
 
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from ultralytics import YOLO
 
 from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
@@ -18,7 +18,7 @@ def save_frames_as_gif(frames, output_path, duration=100, loop=0):
                   loop=loop,
                   optimize=True)
 
-    logger.info(f"GIF saved to {output_path}")
+    log.info(f"GIF saved to {output_path}")
 
 
 # Example usage

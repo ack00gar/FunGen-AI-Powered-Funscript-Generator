@@ -3,9 +3,10 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 
-from config import RENDER_RESOLUTION, FFPROBE_PATH
+from script_generator.constants import RENDER_RESOLUTION
 from script_generator.debug.errors import FFProbeError
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
+
 
 @dataclass
 class VideoInfo:
@@ -61,7 +62,7 @@ def get_projection_and_fov_from_filename(filename):
             fov = pattern["fov"]
             is_fisheye = pattern["is_fisheye"]
             break
-    logger.info(f"Video Format: Projection={projection}, FOV={fov}, is_fisheye={is_fisheye}")
+    log.info(f"Video Format: Projection={projection}, FOV={fov}, is_fisheye={is_fisheye}")
 
     return {"projection": projection, "fov": fov, "is_fisheye": is_fisheye}
 
@@ -71,8 +72,13 @@ def get_cropped_dimensions(video: VideoInfo):
 
 def get_video_info(video_path):
     try:
+        from script_generator.state.app_state import AppState
+        state = AppState()
+        if not state.ffprobe_path:
+            return
+
         cmd = [
-            FFPROBE_PATH,
+            state.ffprobe_path,
             "-v", "error",
             "-select_streams", "v:0",
             "-show_entries", "stream=r_frame_rate,width,height,codec_name,nb_frames,pix_fmt",
@@ -117,18 +123,18 @@ def get_video_info(video_path):
         # Check if the video is VR (2:1 aspect ratio)
         is_vr = height == width // 2
 
-        logger.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {nb_frames} frames, {duration:.2f} sec, {bit_depth}-bit, is vr: {is_vr}")
+        log.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {nb_frames} frames, {duration:.2f} sec, {bit_depth}-bit, is vr: {is_vr}")
 
         if is_vr:
-            logger.info("Video Format: VR SBS - Based on its 2:1 ratio")
+            log.info("Video Format: VR SBS - Based on its 2:1 ratio")
         else:
-            logger.info("Video Format: 2D - Based on its ratio")
+            log.info("Video Format: 2D - Based on its ratio")
 
         return VideoInfo(video_path, codec_name, width, height, duration, int(nb_frames), fps, bit_depth, is_vr)
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFProbe command failed: {e.output.decode('utf-8')}")
+        log.error(f"FFProbe command failed: {e.output.decode('utf-8')}")
         raise FFProbeError("FFProbe command execution failed.")
     except (ValueError, KeyError, IndexError) as e:
-        logger.error(f"Error parsing FFProbe output: {e}")
+        log.error(f"Error parsing FFProbe output: {e}")
         raise FFProbeError("Failed to parse FFProbe output.")

@@ -4,13 +4,15 @@ import tkinter as tk
 
 from script_generator.constants import LOGO, ICON
 from script_generator.gui.views.funscript_generator import FunscriptGeneratorPage
+from script_generator.gui.views.settings import SettingsPage
 from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
-from script_generator.debug.logger import logger
-from config import VERSION
+from script_generator.debug.logger import log
+from script_generator.constants import VERSION
 
 # TODO this is a workaround and needs to be fixed properly
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 
 class App(tk.Tk):
     def __init__(self):
@@ -19,7 +21,7 @@ class App(tk.Tk):
             ctypes.windll.shcore.SetProcessDpiAwareness(2)  # For Windows DPI scaling
         # self.tk.call('tk', 'scaling', 1.0)
         self.title(f"VR & 2D POV Funscript AI Generator - v" + VERSION)
-        self.geometry(f"{('800' if is_mac() else '700')}x900")
+        self.geometry('800x900' if is_mac() else '700x900')
         self.resizable(False, False)
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))
@@ -31,7 +33,17 @@ class App(tk.Tk):
         self.container.grid(row=0, column=0, sticky="nsew")
         self.container.grid_columnconfigure(0, weight=1)
 
-        self.state = AppState(is_cli=False)
+        menu_bar = tk.Menu(self)
+
+        # File Menu
+        file_menu = tk.Menu(menu_bar, tearoff=0)
+        # file_menu.add_command(label="Exit", command=self.quit)
+        # menu_bar.add_cascade(label="File", menu=file_menu)
+        menu_bar.add_command(label="Funscript generator", command=lambda: self.show_frame(PageNames.FUNSCRIPT_GENERATOR))
+        menu_bar.add_command(label="Settings", command=lambda: self.show_frame(PageNames.SETTINGS))
+        self.config(menu=menu_bar)
+
+        self.state = AppState()
 
         # Dictionary to store pages
         self.frames = {}
@@ -53,7 +65,7 @@ class App(tk.Tk):
                 self.frames[page_name] = frame
                 frame.grid(row=0, column=0, sticky="nsew")
             else:
-                logger.info(f"Page '{page_name}' not found!")
+                log.info(f"Page '{page_name}' not found!")
                 return
 
         # Show the requested page
@@ -63,11 +75,15 @@ class App(tk.Tk):
     def create_page(self, page_name):
         if page_name == PageNames.FUNSCRIPT_GENERATOR:
             return FunscriptGeneratorPage(parent=self.container, controller=self)
-
+        elif page_name == PageNames.SETTINGS:
+            return SettingsPage(parent=self.container, controller=self)
         return None
+
 
 class PageNames:
     FUNSCRIPT_GENERATOR = "Funscript generator"
+    SETTINGS = "Settings"
+
 
 def start_app():
     app = App()

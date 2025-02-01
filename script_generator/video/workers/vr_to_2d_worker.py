@@ -3,7 +3,7 @@ import numpy as np
 from OpenGL.GL import *
 from OpenGL.GLU import *
 
-from config import RENDER_RESOLUTION, VR_TO_2D_PITCH
+from script_generator.constants import RENDER_RESOLUTION, VR_TO_2D_PITCH
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.video.opengl.helpers import create_180_dome, render_dome
 

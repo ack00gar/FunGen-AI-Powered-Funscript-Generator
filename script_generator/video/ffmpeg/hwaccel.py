@@ -1,7 +1,6 @@
 import subprocess
 
-from config import FFMPEG_PATH
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 
 def get_hwaccel_support():
@@ -10,8 +9,10 @@ def get_hwaccel_support():
     Returns a dictionary with supported backends.
     """
     try:
+        from script_generator.state.app_state import AppState
+        state = AppState()
         result = subprocess.run(
-            [FFMPEG_PATH, "-hwaccels"],
+            [state.ffmpeg_path, "-hwaccels"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -19,11 +20,11 @@ def get_hwaccel_support():
         )
         hwaccels = result.stdout.lower().replace("hardware acceleration methods:", "")
         hwaccel_lines = [line.strip() for line in str(hwaccels).splitlines() if line.strip()]
-        logger.info(f"hardware acceleration methods: {', '.join(hwaccel_lines)}")
+        log.info(f"hardware acceleration methods: {', '.join(hwaccel_lines)}")
 
         return hwaccel_lines
     except Exception as e:
-        logger.error(f"Error checking hardware acceleration support: {e}")
+        log.error(f"Error checking hardware acceleration support: {e}")
         return []
 
 def get_preferred_hwaccel():

@@ -2,9 +2,9 @@ import time
 
 import cv2
 
-from config import RUN_POSE_MODEL
+from script_generator.constants import RUN_POSE_MODEL
 from script_generator.constants import CLASS_REVERSE_MATCH, CLASS_COLORS
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from script_generator.gui.messages.messages import UpdateGUIState
 from script_generator.object_detection.object_detection_result import ObjectDetectionResult
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
@@ -58,9 +58,9 @@ class PostProcessWorker(AbstractTaskProcessor):
                     self.test_result.add_record(frame_pos, test_box)
 
                     # print and test the record
-                    logger.debug(f"Record : {record}")
-                    logger.debug(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
-                    logger.debug(f"Test box: {test_box}")
+                    log.debug(f"Record : {record}")
+                    log.debug(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
+                    log.debug(f"Test box: {test_box}")
 
             if RUN_POSE_MODEL:
                 ### POSE DETECTION - Hips and wrists
@@ -96,11 +96,11 @@ class PostProcessWorker(AbstractTaskProcessor):
                         self.records.append(record)
                         if state.live_preview_mode:
                             # Print and test the record
-                            logger.debug(f"Record : {record}")
-                            logger.debug(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
+                            log.debug(f"Record : {record}")
+                            log.debug(f"For class id: {int(cls)}, getting: {CLASS_REVERSE_MATCH.get(int(cls), 'unknown')}")
                             test_box = [[x1, y1, x2, y2], round(conf, 1), int(cls),
                                         CLASS_REVERSE_MATCH.get(int(cls), 'unknown'), 0]
-                            logger.debug(f"Test box: {test_box}")
+                            log.debug(f"Test box: {test_box}")
                             self.test_result.add_record(frame_pos, test_box)
 
             window_name = "Object detection tracking preview"

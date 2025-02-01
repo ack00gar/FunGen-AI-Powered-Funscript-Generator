@@ -4,7 +4,7 @@ from typing import Generator, Optional
 
 from script_generator.state.app_state import AppState
 from script_generator.tasks.tasks import AnalyzeFrameTask
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 
 class AbstractTaskProcessor(threading.Thread):
@@ -30,7 +30,7 @@ class AbstractTaskProcessor(threading.Thread):
         :param message: Message to log.
         """
         thread_name = threading.current_thread().name
-        logger.info(f"[{self.__class__.__name__}-{thread_name}] {message}")
+        log.info(f"[{self.__class__.__name__}-{thread_name}] {message}")
 
     def get_task(self) -> Generator[AnalyzeFrameTask, None, None]:
         """
@@ -81,7 +81,7 @@ class AbstractTaskProcessor(threading.Thread):
             self.exception = e  # Capture the exception
             # Propagate sentinel to the output queue
             self.output_queue.put(None)
-            logger.error(f"An error occurred during task execution on thread {self.process_type}: {e}")
+            log.error(f"An error occurred during task execution on thread {self.process_type}: {e}")
             # import traceback
             # traceback.print_exc()
         finally:

@@ -5,7 +5,7 @@ import numpy as np
 
 import json
 import msgpack
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 
 def load_msgpack_json(output_path):
@@ -17,7 +17,7 @@ def load_msgpack_json(output_path):
             with open(msgpack_path, "rb") as f:
                 return msgpack.unpackb(f.read(), raw=False, strict_map_key=False)
         except Exception as e:
-            logger.error(f"Failed to load from msgpack: {e}")
+            log.error(f"Failed to load from msgpack: {e}")
             raise
 
     if os.path.exists(json_path):
@@ -29,11 +29,11 @@ def load_msgpack_json(output_path):
                 f.write(msgpack.packb(data, use_bin_type=True))
 
             os.remove(json_path)
-            logger.info(f"Converted JSON to msgpack and removed the old file: {json_path}")
+            log.info(f"Converted JSON to msgpack and removed the old file: {json_path}")
 
             return data
         except Exception as e:
-            logger.error(f"Failed to load or convert JSON: {e}")
+            log.error(f"Failed to load or convert JSON: {e}")
             raise
 
     raise FileNotFoundError(f"Neither msgpack nor JSON file exists at {output_path}")
@@ -43,9 +43,9 @@ def save_msgpack_json(path, data):
     try:
         with open(path, "wb") as f:
             f.write(msgpack.packb(data, use_bin_type=True, default=_default_serializer))
-        logger.info(f"Data saved to msgpack in {(time.time() - start_time) * 1000}ms: {path}")
+        log.info(f"Data saved to msgpack in {(time.time() - start_time) * 1000}ms: {path}")
     except Exception as e:
-        logger.error(f"Failed to save to msgpack: {e}")
+        log.error(f"Failed to save to msgpack: {e}")
         raise
 
 def _default_serializer(obj):

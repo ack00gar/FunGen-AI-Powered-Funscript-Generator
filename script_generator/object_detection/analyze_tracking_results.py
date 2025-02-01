@@ -5,13 +5,13 @@ from datetime import timedelta
 import cv2
 from tqdm import tqdm
 
-from config import UPDATE_PROGRESS_INTERVAL
+from script_generator.constants import UPDATE_PROGRESS_INTERVAL
 from script_generator.constants import CLASS_COLORS
 from script_generator.debug.video_player.overlay_widgets import OverlayWidgets
 from script_generator.gui.messages.messages import ProgressMessage, UpdateGUIState
 from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
 from script_generator.video.info.video_info import get_cropped_dimensions
 from utils.lib_ObjectTracker import ObjectTracker
@@ -85,9 +85,9 @@ def analyze_tracking_results(state: AppState, results):
         state.current_frame_id = frame_pos
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
-            logger.info(f"Reaching cut at frame {frame_pos}")
+            log.info(f"Reaching cut at frame {frame_pos}")
             previous_distances = tracker.previous_distances
-            logger.info(f"Reinitializing tracker with previous distances: {previous_distances}")
+            log.info(f"Reinitializing tracker with previous distances: {previous_distances}")
             # tracker = ObjectTracker(fps, frame_pos, image_area, video_info.is_vr)
             tracker = ObjectTracker(state)
             tracker.previous_distances = previous_distances
@@ -176,7 +176,7 @@ def analyze_tracking_results(state: AppState, results):
                     state.offset_x
                 )
             else:
-                logger.info("No active locked penis box to draw.")
+                log.info("No active locked penis box to draw.")
 
             if tracker.glans_detected:
                 frame = OverlayWidgets.draw_bounding_box(

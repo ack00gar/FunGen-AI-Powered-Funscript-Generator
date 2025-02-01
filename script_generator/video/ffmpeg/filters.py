@@ -1,4 +1,4 @@
-from config import RENDER_RESOLUTION, VR_TO_2D_PITCH
+from script_generator.constants import RENDER_RESOLUTION, VR_TO_2D_PITCH
 
 def get_video_filters(video, video_reader, hwaccel, width, height, disable_opengl=False):
     if video.is_vr:

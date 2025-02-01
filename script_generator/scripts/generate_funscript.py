@@ -2,11 +2,16 @@ from script_generator.object_detection.utils import get_raw_yolo_file_info
 from script_generator.scripts.analyze_video import analyze_video
 from script_generator.scripts.tracking_analysis import tracking_analysis
 from script_generator.state.app_state import AppState, log_state_settings
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from script_generator.utils.helpers import to_int_or_none
 
 def generate_funscript(state: AppState):
     try:
+        configured, msg = state.is_configured()
+        if not configured:
+            log.warn(msg)
+            return
+
         state.set_video_info()
         log_state_settings(state)
 
@@ -19,6 +24,6 @@ def generate_funscript(state: AppState):
 
         tracking_analysis(state)
     except Exception as e:
-        logger.error(f"Error during video analysis: {e}")
+        log.error(f"Error during video analysis: {e}")
         import traceback
         traceback.print_exc()

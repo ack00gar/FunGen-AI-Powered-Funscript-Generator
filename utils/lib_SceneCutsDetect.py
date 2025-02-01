@@ -3,10 +3,10 @@ import time
 import cv2
 from tqdm import tqdm
 
-from config import UPDATE_PROGRESS_INTERVAL
+from script_generator.constants import UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.state.app_state import AppState
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 # TODO Re-implement? (implement in object detection pipeline?)
 # def compute_histogram(frame):
