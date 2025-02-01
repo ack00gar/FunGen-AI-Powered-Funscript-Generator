@@ -26,7 +26,7 @@ def analyze_tracking_results(state: AppState, results):
     reader = VideoReaderFFmpeg(state)
 
     state.frame_area = width * height
-
+    debug_window_open = False
     cuts = []
 
     if state.live_preview_mode:
@@ -154,6 +154,13 @@ def analyze_tracking_results(state: AppState, results):
 
         # Display object detection tracking results in a live preview window
         window_name = "Tracking analysis preview"
+
+        # we don't want to call cv2.getWindowProperty every iteration
+        if debug_window_open and not state.live_preview_mode:
+            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+                cv2.destroyWindow(window_name)
+                debug_window_open = False
+
         if state.live_preview_mode:
             ret, frame = reader.read()
             frame = frame.copy()
@@ -192,22 +199,15 @@ def analyze_tracking_results(state: AppState, results):
             # Reinitialize the window if needed
             if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1 and state.live_preview_mode:
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(window_name, int(width * 2), int(height * 2))
+                debug_window_open = True
             cv2.imshow(window_name, frame)
 
             if not handle_user_input(window_name) or not state.live_preview_mode:
-                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
-                    cv2.destroyWindow(window_name)
-
                 if state.update_ui and state.live_preview_mode:
                     state.update_ui(UpdateGUIState(attr="live_preview_mode", value=False))
 
                 state.live_preview_mode = False
-        # we don't want to call cv2.getWindowProperty every iteration
-        elif live_preview_mode_prev and not state.live_preview_mode:
-            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
-                cv2.destroyWindow(window_name)
-
-        live_preview_mode_prev = state.live_preview_mode
 
         # Update progress periodically
         if state.update_ui:

@@ -10,6 +10,7 @@ from script_generator.object_detection.object_detection_result import ObjectDete
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.utils.file import get_output_file_path
 from script_generator.utils.msgpack_utils import save_msgpack_json
+from script_generator.video.info.video_info import get_cropped_dimensions
 
 
 class PostProcessWorker(AbstractTaskProcessor):
@@ -19,8 +20,9 @@ class PostProcessWorker(AbstractTaskProcessor):
 
     def task_logic(self):
         state = self.state
+        width, height = get_cropped_dimensions(state.video_info)
 
-        live_preview_mode_prev = state.live_preview_mode
+        debug_window_open = False
         for task in self.get_task():
 
             frame_pos = task.frame_pos
@@ -104,6 +106,13 @@ class PostProcessWorker(AbstractTaskProcessor):
                             self.test_result.add_record(frame_pos, test_box)
 
             window_name = "Object detection tracking preview"
+
+            # we don't want to call cv2.getWindowProperty every iteration
+            if debug_window_open and not state.live_preview_mode:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+                    cv2.destroyWindow(window_name)
+                    debug_window_open = False
+
             if state.live_preview_mode:
                 # Display the YOLO results for testing
                 # det_results.plot()
@@ -127,23 +136,15 @@ class PostProcessWorker(AbstractTaskProcessor):
                 # Reinitialize the window if needed
                 if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1 and state.live_preview_mode:
                     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                    cv2.resizeWindow(window_name, int(width * 2), int(height * 2))
+                    debug_window_open = True
                 cv2.imshow(window_name, frame)
 
                 if not state.live_preview_mode or not handle_user_input(window_name):
-                    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
-                        cv2.destroyWindow(window_name)
-
                     if state.update_ui and state.live_preview_mode:
                         state.update_ui(UpdateGUIState(attr="live_preview_mode", value=False))
 
                     state.live_preview_mode = False
-
-            # we don't want to call cv2.getWindowProperty every iteration
-            elif live_preview_mode_prev and not state.live_preview_mode:
-                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
-                    cv2.destroyWindow(window_name)
-
-            live_preview_mode_prev = state.live_preview_mode
 
             task.rendered_frame = None # Clear memory
             task.yolo_results = None # Clear memory (yolo results contains a copy of the image)
