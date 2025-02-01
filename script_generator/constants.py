@@ -43,6 +43,7 @@ DEFAULT_CONFIG = {
     "config_version": CONFIG_VERSION,
     "ffmpeg_path": None,
     "ffprobe_path": None,
+    "ffmpeg_hwaccel": None,
     "yolo_model_path": None,
     "copy_funscript_to_movie_dir": True,
     "funscript_output_dir": None,

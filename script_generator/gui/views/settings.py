@@ -84,6 +84,16 @@ class SettingsPage(tk.Frame):
             row=1
         )
 
+        Widgets.input(
+            attr="ffmpeg_hwaccel",
+            parent=ffmpeg_settings,
+            label_text="Hardware acceleration",
+            state=self.state,
+            tooltip_text="Used hardware acceleration. Can be overwritten here or set to None to disable it when your\nexperiencing issues. However if you do, please let us know so we can better\nsupport you in the future.",
+            command=lambda val: c.save(),
+            row=2
+        )
+
         dev_settings = Widgets.frame(self, title="Dev", main_section=True, row=3)
 
         def handle_log_level(level):
