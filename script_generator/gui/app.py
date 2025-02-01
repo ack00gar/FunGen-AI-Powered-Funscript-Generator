@@ -44,6 +44,7 @@ class App(tk.Tk):
         self.config(menu=menu_bar)
 
         self.state = AppState()
+        self.state.set_is_cli(False)
 
         # Dictionary to store pages
         self.frames = {}

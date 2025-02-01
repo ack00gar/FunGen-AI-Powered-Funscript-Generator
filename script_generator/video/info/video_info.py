@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from script_generator.constants import RENDER_RESOLUTION
 from script_generator.debug.errors import FFProbeError
-from script_generator.debug.logger import log
+from script_generator.debug.logger import log, log_vid
 
 
 @dataclass
@@ -93,7 +93,8 @@ def get_video_info(video_path):
         # Parse the first video stream
         stream = info.get("streams", [{}])[0]
         if not stream:
-            raise FFProbeError("No video stream found in the file.")
+            log_vid.error(f"FFprobe was unable to detect a valid video stream in the specified file.")
+            raise FFProbeError(f"We were unable to process your video: FFprobe could not detect a valid video stream in the provided file. Please ensure that the file is a supported video format and try again.")
 
         # Extract stream metadata
         codec_name = stream.get("codec_name", "unknown")
