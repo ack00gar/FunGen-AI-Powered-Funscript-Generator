@@ -10,7 +10,7 @@ def get_ffmpeg_read_cmd(state: AppState, frame_start: int | None, output="-", di
     start_time = (frame_start / video.fps) * 1000
 
     # Get supported hardware acceleration backends
-    hwaccel_read = get_hwaccel_read_args(video, state.ffmpeg_hwaccel)
+    hwaccel_read = get_hwaccel_read_args(state)
 
     video_filter = ["-vf", vf] if vf else []
     if state.ffmpeg_hwaccel == "vaapi":

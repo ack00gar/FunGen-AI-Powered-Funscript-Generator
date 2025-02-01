@@ -89,9 +89,10 @@ def get_preferred_hwaccel(ffmpeg_path):
     return None
 
 
-def get_hwaccel_read_args(video_info, hwaccel):
+def get_hwaccel_read_args(state):
+    hwaccel = state.ffmpeg_hwaccel
     if hwaccel == "cuda":
-        if video_info.bit_depth == 8:
+        if supports_cuda_scale(state):
             return ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
         return ["-hwaccel", "cuda"]
     if hwaccel == "vaapi":
