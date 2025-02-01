@@ -3,9 +3,9 @@ import subprocess
 import numpy as np
 
 from script_generator.debug.errors import FFMpegError
+from script_generator.debug.logger import log, log_vid
 from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.tasks.tasks import AnalyzeFrameTask
-from script_generator.debug.logger import log
 from script_generator.video.ffmpeg.commands import get_ffmpeg_read_cmd
 
 
@@ -18,19 +18,21 @@ class VideoWorker(AbstractTaskProcessor):
             self.state,
             self.state.frame_start
         )
-        log.info(f"FFMPEG executing command: {' '.join(cmd)}")
+        log_vid.info(f"FFMPEG executing command: {' '.join(cmd)}")
 
-        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         current_frame = self.state.frame_start
 
-        while True:
-            try:
+        try:
+            while True:
                 in_bytes = self.process.stdout.read(frame_size)
                 if not in_bytes:
                     if current_frame == self.state.frame_start:
-                        raise FFMpegError(f"FFMPEG could not read any frames from stdout command: {' '.join(cmd)}")
+                        error_output = self.process.stderr.read().decode('utf-8', errors='replace')
+                        log_vid.error(f"FFMPEG could not read frames from this video\nFFMPEG command:\n{' '.join(cmd)}\nFFMPEG ERROR:\n{error_output}")
+                        raise FFMpegError(f"FFMPEG could not read frames from this video. See the log for details.")
                     else:
-                        log.info("FFMPEG received last frame")
+                        log_vid.info("FFMPEG received last frame")
                     break
 
                 task = AnalyzeFrameTask(frame_pos=current_frame)
@@ -46,11 +48,12 @@ class VideoWorker(AbstractTaskProcessor):
                 self.finish_task(task)
                 current_frame += 1
 
-            except Exception as e:
-                log.error(f"Error reading frame: {e}")
-                raise
+        except Exception as e:
+            log_vid.error(f"Error reading frame: {e}")
+            raise
 
-        self.stop_process()
+        finally:
+            self.stop_process()
 
     # TODO ffmpeg interrupt
     # def release(self):
