@@ -37,7 +37,9 @@ logging.basicConfig(
 
 log = logging.getLogger("Main")
 log_od = logging.getLogger("ObjectDetection")
-log_tr = logging.getLogger("ObjectDetection")
+log_tr = logging.getLogger("Tracking")
+log_vid = logging.getLogger("Video")
+log_fun = logging.getLogger("Funscript")
 
 
 def set_log_level(level: LogLevel):

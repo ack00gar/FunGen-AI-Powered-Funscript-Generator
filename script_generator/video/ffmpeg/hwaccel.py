@@ -59,7 +59,7 @@ def get_hwaccel_read_args(video_info, hwaccel):
 
 def supports_cuda_scale(video, ffmpeg_hwaccel):
     return (
-            ffmpeg_hwaccel == "cuda"
-            and video.bit_depth == 8
-            and (video.codec_name != "h264" or (video.width <= 4096 and video.height <= 4096))
+        ffmpeg_hwaccel == "cuda"
+        and video.bit_depth == 8
+        and (video.codec_name != "h264" or (video.width <= 4096 and video.height <= 4096))
     )
