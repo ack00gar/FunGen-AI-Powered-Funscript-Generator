@@ -9,30 +9,43 @@ from script_generator.constants import UPDATE_PROGRESS_INTERVAL
 from script_generator.constants import CLASS_COLORS
 from script_generator.debug.video_player.overlay_widgets import OverlayWidgets
 from script_generator.gui.messages.messages import ProgressMessage, UpdateGUIState
+from script_generator.object_detection.util.data import load_yolo_data
+from script_generator.object_detection.util.object_detection import make_data_boxes, parse_yolo_data_looking_for_penis
 from script_generator.state.app_state import AppState
 from script_generator.utils.file import get_output_file_path
-from script_generator.debug.logger import log
+from script_generator.debug.logger import log, log_tr
 from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
-from script_generator.video.info.video_info import get_cropped_dimensions
+from script_generator.video.data_classes.video_info import get_cropped_dimensions
 from utils.lib_ObjectTracker import ObjectTracker
 
 
-def analyze_tracking_results(state: AppState, results):
+def analyze_tracking_results(state: AppState):
+    exists, yolo_data, raw_yolo_path, _ = load_yolo_data(state)
+    results = make_data_boxes(yolo_data)
     width, height = get_cropped_dimensions(state.video_info)
     list_of_frames = results.get_all_frame_ids()  # Get all frame IDs with detections
 
+    # Looking for the first instance of penis within the YOLO results
+    first_penis_frame = parse_yolo_data_looking_for_penis(yolo_data, 0)
+    if first_penis_frame is None:
+        log_tr.error(f"No penis instance found in video. Further tracking is not possible.")
+        return
+
+    # Deciding whether we start from there or from a user-specified later frame
+    state.frame_start_track = max(max(first_penis_frame - int(state.video_info.fps), state.frame_start - int(state.video_info.fps)), 0)
+    state.frame_end = state.video_info.total_frames if not state.frame_end else state.frame_end
+
+    # logger.info(f"Frame Start adjusted to: {state.frame_start}")
+    log_tr.info(f"Frame Start adjusted to: {state.frame_start_track}")
+    
+
     video_info = state.video_info
     fps = video_info.fps
-    reader = VideoReaderFFmpeg(state)
+    reader = None
 
     state.frame_area = width * height
     debug_window_open = False
     cuts = []
-
-    if state.live_preview_mode:
-        reader.set(cv2.CAP_PROP_POS_FRAMES, state.frame_start_track)
-    else:
-        reader.release()
 
     """ discarding the scene detection for now
     # Load scene cuts if the file exists
@@ -85,9 +98,9 @@ def analyze_tracking_results(state: AppState, results):
         state.current_frame_id = frame_pos
         if frame_pos in cuts:
             # Reinitialize the tracker at scene cuts
-            log.info(f"Reaching cut at frame {frame_pos}")
+            log_tr.info(f"Reaching cut at frame {frame_pos}")
             previous_distances = tracker.previous_distances
-            log.info(f"Reinitializing tracker with previous distances: {previous_distances}")
+            log_tr.info(f"Reinitializing tracker with previous distances: {previous_distances}")
             # tracker = ObjectTracker(fps, frame_pos, image_area, video_info.is_vr)
             tracker = ObjectTracker(state)
             tracker.previous_distances = previous_distances
@@ -155,13 +168,20 @@ def analyze_tracking_results(state: AppState, results):
         # Display object detection tracking results in a live preview window
         window_name = "Tracking analysis preview"
 
-        # we don't want to call cv2.getWindowProperty every iteration
+        # Close window and release reader. Also, we don't want to call cv2.getWindowProperty every iteration
         if debug_window_open and not state.live_preview_mode:
             if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
                 cv2.destroyWindow(window_name)
                 debug_window_open = False
+            if reader:
+                reader.release()
+                reader = None
 
         if state.live_preview_mode:
+            if not reader:
+                reader = VideoReaderFFmpeg(state, frame_pos)
+                reader.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
+
             ret, frame = reader.read()
             frame = frame.copy()
 
@@ -183,7 +203,7 @@ def analyze_tracking_results(state: AppState, results):
                     state.offset_x
                 )
             else:
-                log.debug("No active locked penis box to draw.")
+                log_tr.debug("No active locked penis box to draw.")
 
             if tracker.glans_detected:
                 frame = OverlayWidgets.draw_bounding_box(
@@ -206,7 +226,6 @@ def analyze_tracking_results(state: AppState, results):
             if not handle_user_input(window_name) or not state.live_preview_mode:
                 if state.update_ui and state.live_preview_mode:
                     state.update_ui(UpdateGUIState(attr="live_preview_mode", value=False))
-
                 state.live_preview_mode = False
 
         # Update progress periodically
@@ -243,7 +262,7 @@ def analyze_tracking_results(state: AppState, results):
     state.funscript_data = list(zip(state.funscript_frames, state.funscript_distances))
 
     # Save the raw funscript data to JSON
-    raw_funscript_path, _ = get_output_file_path(state.video_path, "_rawfunscript.json")
+    raw_funscript_path, _ = get_output_file_path(state.video_path, ".json", "rawfunscript")
     with open(raw_funscript_path, 'w') as f:
         json.dump(state.funscript_data, f)
 

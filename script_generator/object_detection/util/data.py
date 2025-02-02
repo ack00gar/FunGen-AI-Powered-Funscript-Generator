@@ -3,22 +3,14 @@ import os
 import torch
 from ultralytics import YOLO
 
-from script_generator.constants import MODELS_PATH, MODEL_FILENAMES
-from script_generator.debug.logger import log
+from script_generator.constants import MODELS_PATH, MODEL_FILENAMES, OBJECT_DETECTION_VERSION
+from script_generator.debug.logger import log, log_od
+from script_generator.utils.file import get_output_file_path
 from script_generator.utils.helpers import is_mac
 from script_generator.utils.json_utils import get_data_file_info
+from script_generator.utils.msgpack_utils import save_msgpack_json, load_msgpack_json
+from script_generator.utils.version import version_is_less_than
 
-
-def get_metrics_file_info(state):
-    result_msgpack = get_data_file_info(state.video_path, "_debug_logs.msgpack")
-    if result_msgpack[0]:
-        return result_msgpack
-
-    result_json = get_data_file_info(state.video_path, "_debug_logs.json")
-    if result_json[0]:
-        return result_json
-
-    return False, None, None
 
 def get_yolo_model_path():
     yolo_models = [os.path.join(MODELS_PATH, filename) for filename in MODEL_FILENAMES]
@@ -48,3 +40,32 @@ def load_yolo_model(yolo_model_path):
         return None
 
     return YOLO(yolo_model_path, task="detect")
+
+
+def get_raw_yolo_file_info(state):
+    result_msgpack = get_data_file_info(state.video_path, ".msgpack", "rawyolo")
+    if result_msgpack[0]:
+        return result_msgpack
+
+    return False, None, None
+
+
+def save_yolo_data(state, data):
+    path, _ = get_output_file_path(state.video_path, ".msgpack", "rawyolo")
+    json_data = {"version": OBJECT_DETECTION_VERSION, "data": data}
+    save_msgpack_json(path, json_data)
+
+
+def load_yolo_data(state):
+    exists, path, filename = get_raw_yolo_file_info(state)
+    if not exists:
+        return False, None, path, filename
+
+    json = load_msgpack_json(path)
+
+    if not isinstance(json, dict) or not json.get("version") or version_is_less_than(json["version"], OBJECT_DETECTION_VERSION) or not json.get("data"):
+        if version_is_less_than(json["version"], OBJECT_DETECTION_VERSION):
+            log_od.warn(f"A raw yolo was found but was skipped due to an outdated version: {path}")
+        return False, None, path, filename
+
+    return True, json["data"], path, filename

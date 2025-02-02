@@ -1,7 +1,8 @@
 import json
+import os
 import re
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict, fields
 
 from script_generator.constants import RENDER_RESOLUTION
 from script_generator.debug.errors import FFProbeError
@@ -22,12 +23,21 @@ class VideoInfo:
     projection: str = field(init=False)
     fov: int = field(init=False)
     is_fisheye = False
+    size_bytes: int = -1
 
     def __post_init__(self):
         info = get_projection_and_fov_from_filename(self.path)
         self.projection = info["projection"]
         self.fov = info["fov"]
         self.is_fisheye = info["is_fisheye"]
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=4)
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "VideoInfo":
+        data = json.loads(json_str)
+        return cls(**{field.name: data.get(field.name) for field in fields(cls)})
 
 
 def get_projection_and_fov_from_filename(filename):
@@ -123,6 +133,7 @@ def get_video_info(video_path):
 
         # Check if the video is VR (2:1 aspect ratio)
         is_vr = height == width // 2
+        size_bytes = os.path.getsize(video_path)
 
         log.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {nb_frames} frames, {duration:.2f} sec, {bit_depth}-bit, is vr: {is_vr}")
 
@@ -131,7 +142,7 @@ def get_video_info(video_path):
         else:
             log.info("Video Format: 2D - Based on its ratio")
 
-        return VideoInfo(video_path, codec_name, width, height, duration, int(nb_frames), fps, bit_depth, is_vr)
+        return VideoInfo(video_path, codec_name, width, height, duration, int(nb_frames), fps, bit_depth, is_vr, size_bytes)
 
     except subprocess.CalledProcessError as e:
         log.error(f"FFProbe command failed: {e.output.decode('utf-8')}")

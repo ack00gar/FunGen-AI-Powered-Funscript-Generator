@@ -147,60 +147,28 @@ You can use Start windows.bat to launch the gui on windows if you installed with
 To generate a script with cmd or terminal, run the following command
 
 ```bash
-python -m script_generator.cli.generate_funscript /path/to/video.mp4
+python -m script_generator.cli.generate_funscript_single /path/to/video.mp4
 ```
 
 ### Command-Line Arguments
 #### Required Arguments
-- **`video_path`** *(str)*  
-  Path to the input video file.  
+- **`video_path`** Path to the input video file.  
 
 #### Optional Arguments
-- **`--reuse-yolo`** *(bool, default=False)*  
-  Re-use an existing raw YOLO output file instead of generating a new one when available.
+- **`--reuse-yolo`** Re-use an existing raw YOLO output file instead of generating a new one when available.
+- **`--copy-funscript`** Copies the final funscript to the movie directory.
+- **`--save-debug-file`** Saves a debug file to disk with all collected metrics. Also allows you to re-use tracking data.
 
-- **`--copy-funscript`** *(bool, default=True)*  
-  Copies the final funscript to the movie directory.
-
-- **`--frame-start`** *(int, default=0)*  
-  The starting frame number for processing (keep in Mind that this shouldn't be changed if you want a full funscript). Default is 0 (start from the beginning).
-
-- **`--frame-end`** *(int or None, default=None)*  
-  The ending frame number for processing (keep in Mind that this shouldn't be changed if you want a full funscript). Default is None (process till the end).
-
-- **`--video-reader`** *(str, default=None)*  
-  Video reader to use. Valid options: `"FFmpeg", "FFmpeg + OpenGL (Windows)"`. Defaults are platform-specific.
-
-- **`--save-debug-file`** *(bool, default=True)*  
-  Saves a debug file to disk with all collected metrics. Also allows you to re-use tracking data.
-
-#### Funscript Tweaking Settings
-- **`--boost-enabled`** *(bool, default=True)*  
-  Enable boosting to adjust the motion range dynamically.
-
-- **`--boost-up-percent`** *(int, default=10)*  
-  Increase the peaks by a specified percentage to enhance upper motion limits.
-
-- **`--boost-down-percent`** *(int, default=15)*  
-  Reduce the lower peaks by a specified percentage to limit downward motion.
-
-- **`--threshold-enabled`** *(bool, default=True)*  
-  Enable thresholding to control motion mapping within specified bounds.
-
-- **`--threshold-low`** *(int, default=10)*  
-  Values below this threshold are mapped to 0, limiting lower boundary motion.
-
-- **`--threshold-high`** *(int, default=90)*  
-  Values above this threshold are mapped to 100, limiting upper boundary motion.
-
-- **`--vw-simplification-enabled`** *(bool, default=True)*  
-  Simplify the generated script to reduce the number of points, making it user-friendly.
-
-- **`--vw-factor`** *(float, default=8.0)*  
-  Determines the degree of simplification. Higher values lead to fewer points.
-
-- **`--rounding`** *(int, default=5)*  
-  Set the rounding factor for script values to adjust precision.
+#### Optional Funscript Tweaking Settings
+- **`--boost-enabled`** Enable boosting to adjust the motion range dynamically.
+- **`--boost-up-percent`** Increase the peaks by a specified percentage to enhance upper motion limits.
+- **`--boost-down-percent`** Reduce the lower peaks by a specified percentage to limit downward motion.
+- **`--threshold-enabled`** Enable thresholding to control motion mapping within specified bounds.
+- **`--threshold-low`** Values below this threshold are mapped to 0, limiting lower boundary motion.
+- **`--threshold-high`** Values above this threshold are mapped to 100, limiting upper boundary motion.
+- **`--vw-simplification-enabled`** Simplify the generated script to reduce the number of points, making it user-friendly.
+- **`--vw-factor`** Determines the degree of simplification. Higher values lead to fewer points.
+- **`--rounding`** Set the rounding factor for script values to adjust precision.
 
 ---
 
@@ -234,14 +202,14 @@ See config.py for customizations and user settings (will be replaced with a yaml
 
 The script generates the following files in the output directory of you project folder:
 
-1. `_rawyolo.json`: Raw YOLO detection data. Can be re-used when re-generating scripts 
-2. `_cuts.json`: Detected scene changes.
+1. `_rawyolo.msgpack`: Raw YOLO detection data. Can be re-used when re-generating scripts 
+2. `_cuts.msgpack`: Detected scene changes.
 3. `_rawfunscript.json`: Raw Funscript data. Can be re-used when re-generating script with different settings.
 4. `.funscript`: Final Funscript file.
 5. `_heatmap.png`: Heatmap visualization of the Funscript data.
 6. `_comparefunscripts.png`: Comparison visualization between the generated Funscript and the reference Funscript (if provided).
 7. `_adjusted.funscript`: Funscript file with adjusted amplitude.
-8. `_debug_logs.json`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
+8. `_metrics.msgpack`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
 
 ---
 

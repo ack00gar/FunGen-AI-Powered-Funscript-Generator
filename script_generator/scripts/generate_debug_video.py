@@ -17,7 +17,7 @@ def generate_debug_video(state: AppState, frame_start: int, frame_end: int):
 
         log.info(f"Generating debug video raw video generated now converting...")
 
-        debug_video_path, _ = get_output_file_path(state.video_path, "_debug.mp4", True)
+        debug_video_path, _ = get_output_file_path(state.video_path, "_debug.mp4", None, True)
         ffmpeg_command = [
             state.ffmpeg_path, "-y",
             *get_hwaccel_read_args(state),

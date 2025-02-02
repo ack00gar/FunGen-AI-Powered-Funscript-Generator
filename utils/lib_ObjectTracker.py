@@ -3,7 +3,7 @@ from collections import deque
 import numpy as np
 
 from script_generator.constants import CLASS_NAMES
-from script_generator.debug.logger import log
+from script_generator.debug.logger import log_tr
 
 
 class LockedPenisBox:
@@ -257,7 +257,7 @@ class ObjectTracker:
         if other_box is None:
             return None
         if penis_box is None:
-            log.warning(f"Penis box is None for frame {self.current_frame_id}, cannot compute distance")
+            log_tr.warning(f"Penis box is None for frame {self.current_frame_id}, cannot compute distance")
             return None
         ox1, oy1, ox2, oy2 = other_box
         y_pos = (oy1 + 2 * oy2) // 3
@@ -277,7 +277,7 @@ class ObjectTracker:
         position_counts = {position: self.sex_position_history.count(position) for position in self.sex_position_history}
         most_frequent_position = max(position_counts, key=position_counts.get, default="Not relevant")
         if most_frequent_position != self.sex_position:
-            log.debug(f"@{self.current_frame_id} - Sex position switched to: {most_frequent_position}")
+            log_tr.debug(f"@{self.current_frame_id} - Sex position switched to: {most_frequent_position}")
             self.sex_position = most_frequent_position
             self.sex_position_reason = reason
 
@@ -336,7 +336,7 @@ class ObjectTracker:
                 and not self.penetration:  # equivalent to 3 seconds
             if self.locked_penis_box.active:  # is_active():
                 self.locked_penis_box.deactivate()
-                log.info(f"@{self.current_frame_id} - Deactivated locked_penis_box")
+                log_tr.debug(f"@{self.current_frame_id} - Deactivated locked_penis_box")
 
         if self.locked_penis_box.is_active() and self.locked_penis_box.visible < 100 and not self.glans_detected:
             self.penetration = True
@@ -367,7 +367,7 @@ class ObjectTracker:
                             close_up_detected = True
                             self.detect_sex_position_change('Close up', 'Butt box size beyond threshold')
                             if not self.close_up:
-                                log.info(
+                                log_tr.debug(
                                     f"@{self.current_frame_id} - Close up detected - butt size beyond threshold: {int((butt_box_area / self.image_area) * 100)}%"
                                 )
                                 self.close_up = True
@@ -381,7 +381,7 @@ class ObjectTracker:
                             close_up_detected = True
                             self.detect_sex_position_change('Close up', 'No penis detected')
                             if not self.close_up:
-                                log.info(f"@{self.current_frame_id} - Close up detected - no penis detected")
+                                log_tr.info(f"@{self.current_frame_id} - Close up detected - no penis detected")
                                 self.close_up = True
                             self.penetration = False
                             distance = 100
@@ -391,7 +391,7 @@ class ObjectTracker:
                     close_up_detected = True
                     self.detect_sex_position_change('Close up', 'No penis detected')
                     if not self.close_up:
-                        log.info(f"@{self.current_frame_id} - Close up detected - no penis detected")
+                        log_tr.info(f"@{self.current_frame_id} - Close up detected - no penis detected")
                         self.close_up = True
                     self.penetration = False
                     distance = 100
@@ -559,7 +559,7 @@ class ObjectTracker:
         """
         if class_name == 'penis':
             if box is not None and self.penis_box is None:
-                log.debug(f"@{self.current_frame_id} - Penis detected with confidence {conf}")
+                log_tr.debug(f"@{self.current_frame_id} - Penis detected with confidence {conf}")
             self.penis_box = box
 
             if self.penis_box:

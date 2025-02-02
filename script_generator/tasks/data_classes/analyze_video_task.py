@@ -5,10 +5,10 @@ from threading import Lock
 from typing import List, TYPE_CHECKING
 
 from script_generator.constants import QUEUE_MAXSIZE
-from script_generator.tasks.abstract_task import Task
+from script_generator.tasks.data_classes.abstract_task import Task
 
-from script_generator.object_detection.post_process_worker import PostProcessWorker
-from script_generator.object_detection.yolo_worker import YoloWorker
+from script_generator.object_detection.workers.post_process_worker import PostProcessWorker
+from script_generator.object_detection.workers.yolo_worker import YoloWorker
 from script_generator.video.workers.ffmpeg_worker import VideoWorker
 from script_generator.video.workers.vr_to_2d_worker import VrTo2DWorker
 

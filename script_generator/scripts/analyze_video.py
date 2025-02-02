@@ -8,12 +8,14 @@ from script_generator.constants import SEQUENTIAL_MODE, UPDATE_PROGRESS_INTERVAL
 from script_generator.debug.logger import log
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.state.app_state import AppState
-from script_generator.tasks.abstract_task_processor import TaskProcessorTypes
-from script_generator.tasks.analyze_video_task import AnalyzeVideoTask
+from script_generator.tasks.workers.abstract_task_processor import TaskProcessorTypes
+from script_generator.tasks.data_classes.analyze_video_task import AnalyzeVideoTask
+from script_generator.utils.data_classes.meta_data import MetaData
 from script_generator.utils.file import check_create_output_folder
 
 if TYPE_CHECKING:
     from script_generator.video.analyse_frame_task import AnalyzeFrameTask
+
 
 def analyze_video(state: AppState) -> List["AnalyzeFrameTask"]:
     log.info(f"[OBJECT DETECTION] Starting up pipeline{' in sequential mode' if SEQUENTIAL_MODE else ''}...")
@@ -24,6 +26,9 @@ def analyze_video(state: AppState) -> List["AnalyzeFrameTask"]:
     try:
         # make sure the output folder exists for this video
         check_create_output_folder(state.video_path)
+
+        # Get meta file
+        meta = MetaData.get_create_meta(state)
 
         # Initialize batch task
         state.set_video_info()
@@ -91,6 +96,8 @@ def analyze_video(state: AppState) -> List["AnalyzeFrameTask"]:
                 total_frames=state.video_info.total_frames,
                 eta="Done"
             ))
+
+        meta.finish_analyze_video(state)
 
         return a.result_q.queue
 

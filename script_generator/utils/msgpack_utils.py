@@ -20,22 +20,6 @@ def load_msgpack_json(output_path):
             log.error(f"Failed to load from msgpack: {e}")
             raise
 
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, "r") as f:
-                data = json.load(f)
-
-            with open(msgpack_path, "wb") as f:
-                f.write(msgpack.packb(data, use_bin_type=True))
-
-            os.remove(json_path)
-            log.info(f"Converted JSON to msgpack and removed the old file: {json_path}")
-
-            return data
-        except Exception as e:
-            log.error(f"Failed to load or convert JSON: {e}")
-            raise
-
     raise FileNotFoundError(f"Neither msgpack nor JSON file exists at {output_path}")
 
 def save_msgpack_json(path, data):

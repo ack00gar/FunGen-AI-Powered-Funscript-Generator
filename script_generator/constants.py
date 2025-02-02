@@ -2,8 +2,9 @@ import os
 import platform
 
 VERSION = "0.2.0"
-YOLO_VERSION = 1
-FUNSCRIPT_VERSION = 1
+OBJECT_DETECTION_VERSION = "0.1.0"
+TRACKING_VERSION = "0.1.0"
+FUNSCRIPT_VERSION = "0.1.0"
 CONFIG_VERSION = 1
 
 ##################################################################################################
@@ -58,6 +59,7 @@ DEFAULT_CONFIG = {
 RUN_POSE_MODEL = False
 YOLO_POSE_MODEL = None  # YOLO("models/yolo11n-pose.mlpackage", task="pose") #TODO pose model?
 VALID_VIDEO_READERS = ["FFmpeg", "FFmpeg + OpenGL (Windows)"]
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
 
 ##################################################################################################
 # OBJECT DETECTION

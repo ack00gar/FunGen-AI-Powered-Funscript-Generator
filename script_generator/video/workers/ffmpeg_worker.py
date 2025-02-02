@@ -3,8 +3,8 @@ import subprocess
 import numpy as np
 
 from script_generator.debug.errors import FFMpegError
-from script_generator.debug.logger import log, log_vid
-from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
+from script_generator.debug.logger import log_vid
+from script_generator.tasks.workers.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.video.analyse_frame_task import AnalyzeFrameTask
 from script_generator.video.ffmpeg.commands import get_ffmpeg_read_cmd
 

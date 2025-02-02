@@ -1,7 +1,8 @@
 import time
 
 from script_generator.constants import YOLO_CONF, YOLO_BATCH_SIZE, YOLO_PERSIST
-from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
+from script_generator.debug.logger import log_od
+from script_generator.tasks.workers.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 
 
 class YoloWorker(AbstractTaskProcessor):
@@ -25,6 +26,8 @@ class YoloWorker(AbstractTaskProcessor):
                     self.process_batch(batch, tasks)
                     batch = []
                     tasks = []
+            else:
+                log_od.warn(f"Rendered frame missing on Yolo task")
 
         # Process any remaining tasks in the batch
         if batch:

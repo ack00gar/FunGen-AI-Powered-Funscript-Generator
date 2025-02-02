@@ -3,9 +3,9 @@ import os
 from script_generator.constants import CLASS_REVERSE_MATCH
 from script_generator.debug.logger import log
 from script_generator.gui.utils.widgets import Widgets
-from script_generator.object_detection.box_record import BoxRecord
-from script_generator.object_detection.object_detection_result import ObjectDetectionResult
-from script_generator.utils.json_utils import get_data_file_info
+from script_generator.object_detection.data_classes.box_record import BoxRecord
+from script_generator.object_detection.data_classes.object_detection_result import ObjectDetectionResult
+from script_generator.object_detection.util.data import get_raw_yolo_file_info
 
 
 def check_skip_object_detection(state, root):
@@ -31,17 +31,6 @@ def check_skip_object_detection(state, root):
     return "generate"
 
 
-def get_raw_yolo_file_info(state):
-    result_msgpack = get_data_file_info(state.video_path, "_rawyolo.msgpack")
-    if result_msgpack[0]:
-        return result_msgpack
-
-    result_json = get_data_file_info(state.video_path, "_rawyolo.json")
-    if result_json[0]:
-        return result_json
-
-    return False, None, None
-
 def make_data_boxes(records):
     """
     Convert YOLO records into BoxRecord objects.
@@ -56,6 +45,7 @@ def make_data_boxes(records):
         box_record = BoxRecord(box, conf, cls, class_name, track_id)
         result.add_record(frame_idx, box_record)
     return result
+
 
 def parse_yolo_data_looking_for_penis(data, start_frame):
     """
