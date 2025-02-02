@@ -84,29 +84,6 @@ Before using this project, ensure you have the following installed:
    cd VR-Funscript-AI-Generator
    ```
 ### Install dependencies
-
-#### Option 1: venv
-**If your GPU supports CUDA (NVIDIA)**
-```bash
-python -m venv VRFunAIGen
-VRFunAIGen\Scripts\activate # windows
-source VRFunAIGen/bin/activate # mac
-pip install -r requirements.txt
-pip uninstall torch torchvision torchaudio
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-python FSGenerator.py
-```
-
-**If your GPU doesn't support cuda**
-```bash
-python -m venv VRFunAIGen
-VRFunAIGen\Scripts\activate # windows
-source VRFunAIGen/bin/activate # mac
-pip install -r requirements.txt
-python FSGenerator.py
-```
-
-#### Option 2: Conda
 * Install miniconda (https://docs.anaconda.com/miniconda/install/)
 * Start a miniconda command prompt
    
