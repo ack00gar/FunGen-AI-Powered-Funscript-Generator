@@ -47,6 +47,7 @@ class App(tk.Tk):
 
         self.state = state if state else AppState()
         self.state.set_is_cli(False)
+        self.state.set_root(self)
 
         # Dictionary to store pages
         self.frames = {}

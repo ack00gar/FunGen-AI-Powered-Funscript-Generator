@@ -69,9 +69,12 @@ def generate_funscript(state: AppState, root):
             state.analyze_task = None
             state.update_ui(UpdateGUIState(attr="is_processing", value=False))
             log.error(f"Error during video analysis: {e}")
-            messagebox.showerror("Error", f"Could not process video:\n{e}")
             import traceback
             traceback.print_exc()
+
+            # if GUI is enabled make sure to use the main thread
+            if state.root:
+                state.root.after(0, messagebox.showerror, "Error", f"Could not process video:\n{e}")
 
     processing_thread = threading.Thread(target=run)
     processing_thread.start()
