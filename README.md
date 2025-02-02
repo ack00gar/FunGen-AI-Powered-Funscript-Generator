@@ -84,7 +84,7 @@ Before using this project, ensure you have the following installed:
    cd VR-Funscript-AI-Generator
    ```
 ### Install dependencies
-* Install miniconda (https://docs.anaconda.com/miniconda/install/)
+* Install miniconda (https://docs.anaconda.com/miniconda/install/) (We removed venv as all the bat files use conda)
 * Start a miniconda command prompt
    
 **If your GPU supports CUDA (NVIDIA)**
@@ -121,13 +121,20 @@ You can use Start windows.bat to launch the gui on windows if you installed with
 
 ## Command Line Usage
 
-To generate a script with cmd or terminal, run the following command
+To generate a single script with cmd or terminal, run the following command
 
 ```bash
 python -m script_generator.cli.generate_funscript_single /path/to/video.mp4
 ```
+See examples/windows/Process single video.bat for an example
 
-### Command-Line Arguments
+To generate scripts for all files in a folder use
+```bash
+python -m script_generator.cli.generate_funscript_folder /path/to/folder
+```
+See examples/windows/Process folder.bat for an example
+
+### Command-Line Arguments (Shared)
 #### Required Arguments
 - **`video_path`** Path to the input video file.  
 
@@ -147,14 +154,17 @@ python -m script_generator.cli.generate_funscript_single /path/to/video.mp4
 - **`--vw-factor`** Determines the degree of simplification. Higher values lead to fewer points.
 - **`--rounding`** Set the rounding factor for script values to adjust precision.
 
+
+### Command-Line Arguments (Folder mode)
+- **`--replace-outdated`** Will regenerate outdated funscripts.
+- **`--replace-up-to-date`** Will regenerate funscripts that are up to date and made by this app too.
+- **`--num-workers`** Number of subprocesses to run in parallel. If you have beefy hardware 4 seems to be the sweet spot but technically your VRAM is the limit.
 ---
 
 ## Performance & Parallel Processing
-Our pipeline's current bottleneck lies in the Python code within YOLO.track (the object detection library we use), which is challenging to parallelize effectively. We have plans to parallelize this in the future but for now it remains a limitation.
+Our pipeline's current bottleneck lies in the Python code within YOLO.track (the object detection library we use), which is challenging to parallelize effectively.
 
-Currently, we got about 35-40fps for 8192x4096 VR videos on an i5-13600K with a 4090 and 32GB DDR4 ram. Utilization is about 20% CPU, 20% video decoding and 7% GPU usage. We suspect this means performance should be similar for lower end NVIDIA cards.
-
-However, when you have high-performance hardware this also means effectively run multiple processes simultaneously via the command line or launching multiple instances of the GUI. For reference, the above test setup was able to process at a combined 100fps while still being CPU limited.
+However, when you have high-performance hardware you can use the command line (see above) to processes multiple videos simultaneously. Alternatively you can launch multiple instances of the GUI.
 
 **Important considerations:**
 - Each instance requires the YOLO model to load, so monitor your VRAM usage to determine how many instances your hardware can support. For example, an NVIDIA RTX 4090 can handle up to six instances simultaneously.
