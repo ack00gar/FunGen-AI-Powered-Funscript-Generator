@@ -22,7 +22,7 @@ class App(tk.Tk):
             ctypes.windll.shcore.SetProcessDpiAwareness(2)  # For Windows DPI scaling
         # self.tk.call('tk', 'scaling', 1.0)
         self.title(f"VR & 2D POV Funscript AI Generator - v" + VERSION)
-        self.geometry('800x900' if is_mac() else '708x790')
+        self.geometry('780x800' if is_mac() else '708x790')
         self.resizable(False, False)
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))
