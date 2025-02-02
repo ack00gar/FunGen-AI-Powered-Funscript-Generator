@@ -95,8 +95,17 @@ def extract_section(times, positions, start, end):
 def capture_screenshots(video_path, is_vr, sections):
     cap = cv2.VideoCapture(video_path)
     screenshots = []
+
     for start, _ in sections:
         cap.set(cv2.CAP_PROP_POS_MSEC, start * 1000)
-        screenshots.append(np.zeros((100, 160, 3), dtype=np.uint8))
+        ret, frame = cap.read()
+
+        if ret and frame is not None:
+            if is_vr:
+                frame = frame[:, :frame.shape[1] // 2]
+            screenshots.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        else:
+            screenshots.append(np.zeros((100, 160, 3), dtype=np.uint8))
+
     cap.release()
     return screenshots
