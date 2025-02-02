@@ -5,14 +5,13 @@ from tkinter import messagebox
 from typing import Literal, Optional, TYPE_CHECKING
 
 from script_generator.config.config_manager import ConfigManager
-from script_generator.debug.debug_data import DebugData
+from script_generator.debug.debug_data import DebugData, get_metrics_file_info
 from script_generator.debug.logger import log
-from script_generator.object_detection.util.utils import get_metrics_file_info, load_yolo_model
-from script_generator.object_detection.utils import get_raw_yolo_file_info
-from script_generator.video.info.video_info import VideoInfo, get_video_info
+from script_generator.object_detection.util.data import load_yolo_model, get_raw_yolo_file_info
+from script_generator.video.data_classes.video_info import VideoInfo, get_video_info
 
 if TYPE_CHECKING:
-    from script_generator.tasks.analyze_video_task import AnalyzeVideoTask
+    from script_generator.tasks.data_classes.analyze_video_task import AnalyzeVideoTask
 
 class AppState:
     _instance: Optional["AppState"] = None
@@ -137,13 +136,7 @@ class AppState:
 
 def log_state_settings(state: AppState):
     settings = [
-        ("Processing video", state.video_path),
-        ("Video Reader", state.video_reader),
-        ("Debug Mode", state.save_debug_file),
-        ("Live Preview Mode", state.live_preview_mode),
-        ("Frame Start", state.frame_start),
-        ("Frame End", state.frame_end),
-        ("Reference Script", state.reference_script),
+        ("Processing video", state.video_path)
     ]
 
     for setting_name, setting_value in settings:

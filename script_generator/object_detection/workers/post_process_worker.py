@@ -6,11 +6,12 @@ from script_generator.constants import RUN_POSE_MODEL
 from script_generator.constants import CLASS_REVERSE_MATCH, CLASS_COLORS
 from script_generator.debug.logger import log
 from script_generator.gui.messages.messages import UpdateGUIState
-from script_generator.object_detection.object_detection_result import ObjectDetectionResult
-from script_generator.tasks.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
+from script_generator.object_detection.data_classes.object_detection_result import ObjectDetectionResult
+from script_generator.object_detection.util.data import save_yolo_data
+from script_generator.tasks.workers.abstract_task_processor import AbstractTaskProcessor, TaskProcessorTypes
 from script_generator.utils.file import get_output_file_path
 from script_generator.utils.msgpack_utils import save_msgpack_json
-from script_generator.video.info.video_info import get_cropped_dimensions
+from script_generator.video.data_classes.video_info import get_cropped_dimensions
 
 
 class PostProcessWorker(AbstractTaskProcessor):
@@ -158,9 +159,7 @@ class PostProcessWorker(AbstractTaskProcessor):
 
         self.state.analyze_task.end_time = time.time()
 
-        # Write the detection records to a JSON file
-        raw_yolo_path, _ = get_output_file_path(self.state.video_path, "_rawyolo.msgpack")
-        save_msgpack_json(raw_yolo_path, self.records)
+        save_yolo_data(self.state, self.records)
 
 def handle_user_input(window_name):
     key = cv2.waitKey(1) & 0xFF

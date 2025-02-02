@@ -16,13 +16,13 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 class App(tk.Tk):
-    def __init__(self):
+    def __init__(self, state: AppState= None):
         super().__init__()
         if hasattr(ctypes, "windll"):
             ctypes.windll.shcore.SetProcessDpiAwareness(2)  # For Windows DPI scaling
         # self.tk.call('tk', 'scaling', 1.0)
         self.title(f"VR & 2D POV Funscript AI Generator - v" + VERSION)
-        self.geometry('800x900' if is_mac() else '722x790')
+        self.geometry('800x900' if is_mac() else '708x790')
         self.resizable(False, False)
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))
@@ -45,7 +45,7 @@ class App(tk.Tk):
         menu_bar.add_cascade(label="View", menu=view_menu)
         self.config(menu=menu_bar)
 
-        self.state = AppState()
+        self.state = state if state else AppState()
         self.state.set_is_cli(False)
 
         # Dictionary to store pages
@@ -95,7 +95,7 @@ class PageNames:
     SETTINGS = "Settings"
 
 
-def start_app():
-    app = App()
+def start_app(state: AppState= None):
+    app = App(state)
     app.show_frame(PageNames.FUNSCRIPT_GENERATOR)
     app.mainloop()

@@ -38,12 +38,11 @@ def load_json_from_file(file_path):
 
     with open(file_path, 'r') as f:
         data = json.load(f)
-        log.info(f"Loaded data from {file_path}, length: {len(data)}")
     return data
 
 
-def get_data_file_info(video_path, suffix):
-    raw_yolo_path, raw_yolo_filename = get_output_file_path(video_path, suffix)
+def get_data_file_info(video_path, suffix, filename=None):
+    raw_yolo_path, raw_yolo_filename = get_output_file_path(video_path, suffix, filename)
     if os.path.exists(raw_yolo_path):
         file_size = os.path.getsize(raw_yolo_path)
         if file_size <= 5: # prevent jsons with []

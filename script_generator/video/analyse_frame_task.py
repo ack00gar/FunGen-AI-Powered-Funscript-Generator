@@ -3,7 +3,7 @@ from typing import Optional
 
 import numpy as np
 
-from script_generator.tasks.abstract_task import Task
+from script_generator.tasks.data_classes.abstract_task import Task
 
 
 @dataclass

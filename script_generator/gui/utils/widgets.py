@@ -98,12 +98,12 @@ class Widgets:
         return container, entry, value
 
     @staticmethod
-    def button(parent, button_text, on_click, row=0, column=0, tooltip_text=None, style_name="Custom.TButton"):
+    def button(parent, button_text, on_click, row=0, column=0, tooltip_text=None, style_name="Custom.TButton", sticky="w"):
         style = ttk.Style()
         style.configure(style_name, padding=(10, 3))
 
         button = ttk.Button(parent, text=button_text, command=on_click, style=style_name)
-        button.grid(row=row, column=column, sticky="w", padx=PADDING_X, pady=PADDING_Y)
+        button.grid(row=row, column=column, sticky=sticky, padx=PADDING_X, pady=PADDING_Y)
 
         if tooltip_text:
             Tooltip(button, tooltip_text)

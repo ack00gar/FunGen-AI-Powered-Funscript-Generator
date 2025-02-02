@@ -1,12 +1,10 @@
-import os
 import threading
 from tkinter import messagebox
 
-from script_generator.debug.video_player.play import play_debug_video
-from script_generator.object_detection.util.utils import get_metrics_file_info
-from script_generator.state.app_state import AppState
-from script_generator.utils.file import get_output_file_path
+from script_generator.debug.debug_data import get_metrics_file_info
 from script_generator.debug.logger import log
+from script_generator.debug.video_player.play import play_debug_video
+from script_generator.state.app_state import AppState
 from script_generator.utils.helpers import is_mac
 
 

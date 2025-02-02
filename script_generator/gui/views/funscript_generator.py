@@ -1,17 +1,19 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+from script_generator.debug.debug_data import get_metrics_file_info
 from script_generator.debug.logger import log
+from script_generator.funscript.debug.heatmap import generate_heatmap
+from script_generator.funscript.debug.report import create_funscript_report
 from script_generator.gui.controller.debug_video import debug_video
-from script_generator.gui.controller.process_video import video_analysis
+from script_generator.gui.controller.generate_funscript import generate_funscript
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
 from script_generator.gui.controller.stop_processing import stop_processing
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage, UpdateGUIState
 from script_generator.gui.utils.utils import enable_widgets, disable_widgets, set_progressbars_done, reset_progressbars
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.gui.views.popups.create_debug_video import render_debug_video_popup
-from script_generator.object_detection.util.utils import get_metrics_file_info
-from script_generator.object_detection.utils import get_raw_yolo_file_info
+from script_generator.object_detection.util.data import get_raw_yolo_file_info
 from script_generator.state.app_state import AppState
 
 
@@ -30,7 +32,7 @@ class FunscriptGeneratorPage(tk.Frame):
         # endregion
 
         # region VIDEO SELECTION
-        video_selection = Widgets.frame(wrapper, title="Video Selection", main_section=True)
+        video_selection = Widgets.frame(wrapper, title="Video", main_section=True)
 
         def update_video_path():
             state.set_video_info()
@@ -80,7 +82,7 @@ class FunscriptGeneratorPage(tk.Frame):
                 state.has_raw_yolo = False
                 state.has_tracking_data = False
                 reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
-                video_analysis(state, controller)
+                generate_funscript(state, controller)
                 update_ui_for_state()
             else:
                 # TODO add proper stop for analysis
@@ -228,14 +230,30 @@ class FunscriptGeneratorPage(tk.Frame):
             state=state,
             row=0
         )
-        debug_video_section = Widgets.frame(debugging, title="Share debug video", row=2)
+        debug_video_section = Widgets.frame(debugging, title="Share debug files", row=2)
         gen_video_btn = Widgets.button(
             debug_video_section,
             "Generate sharable debug video",
             lambda: Widgets.create_popup(title="Generate debug video", master=controller, width=650, height=205, content_builder=lambda window, user_action: render_debug_video_popup(window, state)),
-            row=1,
             column=0,
-            tooltip_text="Render a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement."
+            tooltip_text="Render a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement.",
+            sticky="ew"
+        )
+        gen_report_btn = Widgets.button(
+            debug_video_section,
+            "Generate report",
+            lambda: create_funscript_report(state),
+            column=1,
+            tooltip_text="Generates a heatmap of your funscript",
+            sticky="ew"
+        )
+        gen_heatmap_btn = Widgets.button(
+            debug_video_section,
+            "Generate heatmap",
+            lambda: generate_heatmap(state),
+            column=2,
+            tooltip_text="Generates a heatmap of your funscript",
+            sticky="ew"
         )
         # endregion
 
@@ -248,16 +266,16 @@ class FunscriptGeneratorPage(tk.Frame):
                 processing_btn.config(text="Start processing")
 
             if state.has_raw_yolo and state.has_tracking_data:
-                enable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
+                enable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
                 processing_btn.config(text="Re-run object detection and or tracking")
             elif state.has_raw_yolo and not state.has_tracking_data:
-                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc)])
                 reset_progressbars([(track_p, track_p_perc)])
                 processing_btn.config(text="Re-run object detection and or start tracking")
             else:
-                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
                 reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
                 processing_btn.config(text="Start processing")
 
