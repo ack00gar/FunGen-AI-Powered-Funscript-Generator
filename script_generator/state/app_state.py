@@ -26,6 +26,7 @@ class AppState:
         if self._initialized:
             return
         self._initialized = True
+        self.root = None
 
         self.is_cli = True
         self.config_manager = ConfigManager(self)
@@ -90,6 +91,9 @@ class AppState:
     def set_is_cli(self, cli):
         self.is_cli = cli
 
+    def set_root(self, root):
+        self.root = root
+
     def is_configured(self):
         message_prefix = "Cannot process the video."
         checks = [
@@ -108,6 +112,17 @@ class AppState:
     def set_video_info(self):
         # If movie changed
         if self.video_info is None or self.video_info.path != self.video_path:
+
+            # TODO move this to a task an remove this here
+            self.funscript_data = []
+            self.funscript_frames = []
+            self.funscript_distances = []
+            self.offset_x: int = 0
+            self.frame_start_track = 0
+            self.current_frame_id = 0
+            self.frame_area = 0
+            self.debug_data = DebugData(self)
+
             if not self.video_path:
                 self.video_info = None
                 self.has_raw_yolo = False
@@ -120,19 +135,9 @@ class AppState:
                         self.has_raw_yolo, _, _ = get_raw_yolo_file_info(self)
                         self.has_tracking_data, _, _ = get_metrics_file_info(self)
                         self.max_preview_fps = math.ceil(self.video_info.fps)
-
-                        # TODO move this to a task an remove this here
-                        self.funscript_data = []
-                        self.funscript_frames = []
-                        self.funscript_distances = []
-                        self.offset_x: int = 0
-                        self.frame_start_track = 0
-                        self.current_frame_id = 0
-                        self.frame_area = 0
-                        self.debug_data = DebugData(self)
                     except Exception as e:
                         if not self.is_cli:
-                            messagebox.showerror("Error", e)
+                            messagebox.showerror("Error", str(e))
                     finally:
                         return
 

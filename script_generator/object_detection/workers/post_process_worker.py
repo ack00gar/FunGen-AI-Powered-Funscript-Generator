@@ -20,6 +20,8 @@ class PostProcessWorker(AbstractTaskProcessor):
     test_result = ObjectDetectionResult()  # Test result object for debugging
 
     def task_logic(self):
+        self.records = []
+        self.test_result = ObjectDetectionResult()
         state = self.state
         width, height = get_cropped_dimensions(state.video_info)
 

@@ -15,6 +15,9 @@ class VideoWorker(AbstractTaskProcessor):
     read_frames = True
 
     def task_logic(self):
+        self.process = None
+        self.read_frames = True
+
         cmd, frame_size, width, height = get_ffmpeg_read_cmd(
             self.state,
             self.state.frame_start
