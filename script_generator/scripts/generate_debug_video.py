@@ -25,7 +25,7 @@ def generate_debug_video(state: AppState, frame_start: int, frame_end: int):
             "-c:v", "hevc_nvenc" if state.ffmpeg_hwaccel == "cuda" else "libx265",
             "-preset", "p4" if state.ffmpeg_hwaccel == "cuda" else "fast",
             *(["-b:v", "5000k"] if state.ffmpeg_hwaccel == "cuda" else []),
-            *(["-crf", "26"] if state.ffmpeg_hwaccel != "cuda" else []),
+            *(["-crf", "20"] if state.ffmpeg_hwaccel != "cuda" else []),
             "-movflags", "+faststart",
             debug_video_path
         ]
