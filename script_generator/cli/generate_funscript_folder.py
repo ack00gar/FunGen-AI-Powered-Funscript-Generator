@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from collections import deque
+from datetime import timedelta
 
 from script_generator.cli.shared.common_args import (
     add_shared_generate_funscript_args,
@@ -135,27 +136,56 @@ def main():
 
         log.info(f"Starting batch generation with up to {args.num_workers} parallel subprocesses.")
 
+        # Dictionary to keep track of the submitted tasks
+        future_to_video = {}
+
+        global_start_time = time.time()  # overall start time for the batch
+
         # Use a ThreadPoolExecutor to limit concurrency.
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_workers) as executor:
-            futures = []
+            running = []
             # Submit all tasks.
             while tasks:
                 video_path = tasks.popleft()
-                log.info(f"[Submit] {video_path}")
-                future = executor.submit(run_task, video_path)
-                futures.append((video_path, future))
+                log.debug(f"[Submit] {video_path}")
+                running.append(video_path)
+                future = executor.submit(run_task_timed, video_path)
+                future_to_video[future] = video_path
                 time.sleep(0.1)  # slight delay to stagger submissions
 
-            # Wait for all submitted tasks to complete.
-            for video_path, future in futures:
+            total_count = len(future_to_video)
+            completed_count = 0
+            processing_times = []  # times for completed tasks
+
+            # Process futures as they complete.
+            for future in concurrent.futures.as_completed(future_to_video):
+                video_path = future_to_video[future]
                 try:
-                    ret = future.result()  # blocks until the task completes
-                    if ret == 0:
-                        log.info(f"[Done] {video_path}")
-                    else:
-                        log.warning(f"[Failed] {video_path} (exit code {ret})")
+                    ret, elapsed = future.result()
                 except Exception as e:
                     log.error(f"Error processing {video_path}: {e}", exc_info=True)
+                    ret, elapsed = -1, 0
+                completed_count += 1
+                processing_times.append(elapsed)
+
+                # Gather names of movies still in progress.
+                currently_processing = [
+                    v for fut, v in future_to_video.items() if not fut.done()
+                ]
+                total_run_time = time.time() - global_start_time
+                average_time = sum(processing_times) / len(processing_times) if processing_times else 0
+
+
+                queued_paths = "\n".join(f" - {movie}" for movie in running) if running else "None"
+                log.info(
+                    f"Progress: {completed_count}/{total_count} completed. Total run time: {str(timedelta(seconds=int(total_run_time)))} Average time per completed movie: {str(timedelta(seconds=int(average_time)))} seconds (not taking into account progress on running processes)."
+                    f"Queued Movies:\n{queued_paths}"
+                )
+
+                if ret == 0:
+                    log.info(f"[Done] {video_path}")
+                else:
+                    log.warning(f"[Failed] {video_path} (exit code {ret})")
 
         log.info("All funscript generation tasks completed.")
 
@@ -175,6 +205,17 @@ def run_task(video_path):
     # Wait for the process to finish. Because we used /WAIT on Windows
     proc.wait()
     return proc.returncode
+
+
+def run_task_timed(video_path):
+    """
+    Wraps run_task to record how long it takes.
+    Returns a tuple: (exit code, elapsed_time_in_seconds).
+    """
+    start = time.time()
+    ret = run_task(video_path)
+    elapsed = time.time() - start
+    return ret, elapsed
 
 if __name__ == "__main__":
     main()

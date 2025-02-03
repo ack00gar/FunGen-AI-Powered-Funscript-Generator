@@ -75,7 +75,6 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
 
     last_frame = video_player.current_frame
 
-    # TODO cleanup
     def get_ceiled_fps(value):
         try:
             return math.ceil(float(value))

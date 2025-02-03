@@ -162,12 +162,18 @@ See examples/windows/Process folder.bat for an example
 ---
 
 ## Performance & Parallel Processing
-Our pipeline's current bottleneck lies in the Python code within YOLO.track (the object detection library we use), which is challenging to parallelize effectively.
+Our pipeline's current bottleneck lies in the Python code within YOLO.track (the object detection library we use), which is challenging to parallelize effectively in a single process.
 
 However, when you have high-performance hardware you can use the command line (see above) to processes multiple videos simultaneously. Alternatively you can launch multiple instances of the GUI.
 
+We tested speeds of about 60 to 110 fps for 8k 8bit vr videos when running a single process. Which translates to faster then realtime processing already. However, running in parallel mode we tested 
+speeds of about 160 to 190 frames per second (for object detection). Meaning processing times of about 20 to 30 minutes for 8bit 8k VR videos for the complete process. More then twice the speed of realtime!
+
+Keep in mind your results may vary as this is very dependent on your hardware. Cuda capable cards will have an advantage here. However, since the pipeline is largely CPU and video decode bottlenecked 
+a top of the line card like the 4090 is not required to get similar results. Having enough VRAM to run 3-6 processes, paired with a good CPU, will speed things up considerably though. 
+
 **Important considerations:**
-- Each instance requires the YOLO model to load, so monitor your VRAM usage to determine how many instances your hardware can support. For example, an NVIDIA RTX 4090 can handle up to six instances simultaneously.
+- Each instance requires the YOLO model to load which means you'll need to keep checks on your VRAM to see how many you can load.
 - The optimal number of instances depends on a combination of factors, including your CPU, GPU, RAM, and system configuration. So experiment with different setups to find the ideal configuration for your hardware! 😊
 
 ---
