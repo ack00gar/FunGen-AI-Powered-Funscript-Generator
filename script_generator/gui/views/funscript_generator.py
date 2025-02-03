@@ -1,16 +1,20 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
-from script_generator.debug.logger import logger
+from script_generator.debug.debug_data import get_metrics_file_info
+from script_generator.debug.logger import log
+from script_generator.funscript.debug.heatmap import generate_heatmap
+from script_generator.funscript.debug.report import create_funscript_report
 from script_generator.gui.controller.debug_video import debug_video
-from script_generator.gui.controller.process_video import video_analysis
+from script_generator.gui.controller.generate_funscript import generate_funscript
 from script_generator.gui.controller.regenerate_funscript import regenerate_funscript
+from script_generator.gui.controller.stop_processing import stop_processing
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage, UpdateGUIState
 from script_generator.gui.utils.utils import enable_widgets, disable_widgets, set_progressbars_done, reset_progressbars
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.gui.views.popups.create_debug_video import render_debug_video_popup
+from script_generator.object_detection.util.data import get_raw_yolo_file_info
 from script_generator.state.app_state import AppState
-from script_generator.utils.helpers import is_mac
 
 
 class FunscriptGeneratorPage(tk.Frame):
@@ -28,7 +32,7 @@ class FunscriptGeneratorPage(tk.Frame):
         # endregion
 
         # region VIDEO SELECTION
-        video_selection = Widgets.frame(wrapper, title="Video Selection", main_section=True)
+        video_selection = Widgets.frame(wrapper, title="Video", main_section=True)
 
         def update_video_path():
             state.set_video_info()
@@ -46,43 +50,59 @@ class FunscriptGeneratorPage(tk.Frame):
             command=lambda val: update_video_path()
         )
 
-        _, _, reader_dropdown, _ = Widgets.dropdown(
-            attr="video_reader",
-            parent=video_selection,
-            label_text="Video Reader",
-            options=["FFmpeg", *([] if is_mac() else ["FFmpeg + OpenGL (Windows)"])],
-            default_value=state.video_reader,
-            tooltip_text=("On Mac only FFmpeg is supported" if is_mac() else "FFmpeg + OpenGL is usually about 30% faster on a good GPU."),
-            state=state,
-            row=1
-        )
+        # _, _, reader_dropdown, _ = Widgets.dropdown(
+        #     attr="video_reader",
+        #     parent=video_selection,
+        #     label_text="Video Reader",
+        #     options=["FFmpeg", *([] if is_mac() else ["FFmpeg + OpenGL (Windows)"])],
+        #     default_value=state.video_reader,
+        #     tooltip_text=("On Mac only FFmpeg is supported" if is_mac() else "FFmpeg + OpenGL is usually about 30% faster on a good GPU."),
+        #     state=state,
+        #     row=1
+        # )
         # endregion
 
-        # region OPTIONAL SETTINGS
-        optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
-
-        _, start_f_widgets, _ = Widgets.frames_input(optional_settings, "Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
-        _, end_f_widgets, _ = Widgets.frames_input(optional_settings, "End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
-        # endregion
+        # # region OPTIONAL SETTINGS
+        # optional_settings = Widgets.frame(wrapper, title="Optional settings", main_section=True, row=2)
+        #
+        # _, start_f_widgets, _ = Widgets.frames_input(optional_settings, "Start", state=state, attr="frame_start", tooltip_text="Where to start processing the video. If you have a 60fps video starting at 10s would mean frame 600")
+        # _, end_f_widgets, _ = Widgets.frames_input(optional_settings, "End", state=state, attr="frame_end", tooltip_text="Where to end processing the video. If you have a 60fps video stopping  at 10s would mean frame 600", row=1)
+        # # endregion
 
         # region PROCESSING
         processing = Widgets.frame(wrapper, title="Processing", main_section=True, row=3)
         yolo_p_container, yolo_p, yolo_p_label, yolo_p_perc = Widgets.labeled_progress(processing, "Object Detection", row=0)
-        # scene_p_container, scene_p, scene_p_label, scene_p_perc = Widgets.labeled_progress(processing, "Scene detection", row=1)
         track_p_container, track_p, track_p_label, track_p_perc = Widgets.labeled_progress(processing, "Tracking Analysis", row=2)
 
-        def start_processing():
-            state.is_processing = True
-            reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
-            video_analysis(state, controller)
-            update_ui_for_state()
+        def handle_process_btn():
+            if not state.is_processing:
+                if state.analyze_task:
+                    state.analyze_task.is_stopped = False
+                state.is_processing = True
+                state.has_raw_yolo = False
+                state.has_tracking_data = False
+                reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
+                generate_funscript(state, controller)
+                update_ui_for_state()
+            else:
+                # TODO add proper stop for analysis
+                if state.has_raw_yolo:
+                    messagebox.showwarning("WIP", f"Only the Object Detection process can be stopped for now")
+                    return
 
-        processing_btn = Widgets.button(processing, "Start processing", start_processing, row=3)
+                disable_widgets([processing_btn])
+                stop_processing(state)
+                state.is_processing = False
+                state.video_info.has_raw_yolo, _, _ = get_raw_yolo_file_info(state)
+                state.video_info.has_tracking_data, _, _ = get_metrics_file_info(state)
+                state.analyze_task = None
+                self.controller.after(500, update_ui_for_state)
+
+        processing_btn = Widgets.button(processing, "Start processing", handle_process_btn, row=3)
         # endregion
 
         # region FUNSCRIPT TWEAKING
         tweaking = Widgets.frame(wrapper, title="Funscript", main_section=True, row=4)
-        # tweaking.grid_rowconfigure(1, weight=10)
         tweaking_container = ttk.Frame(tweaking)
         tweaking_container.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
 
@@ -210,14 +230,30 @@ class FunscriptGeneratorPage(tk.Frame):
             state=state,
             row=0
         )
-        debug_video_section = Widgets.frame(debugging, title="Share debug video", row=2)
+        debug_video_section = Widgets.frame(debugging, title="Share debug files", row=2)
         gen_video_btn = Widgets.button(
             debug_video_section,
             "Generate sharable debug video",
             lambda: Widgets.create_popup(title="Generate debug video", master=controller, width=650, height=205, content_builder=lambda window, user_action: render_debug_video_popup(window, state)),
-            row=1,
             column=0,
-            tooltip_text="Render a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement."
+            tooltip_text="Render a debug video once funscript processing is complete that can be\neasily shared on Discord for showcasing issues or areas of improvement.",
+            sticky="ew"
+        )
+        gen_report_btn = Widgets.button(
+            debug_video_section,
+            "Generate report",
+            lambda: create_funscript_report(state),
+            column=1,
+            tooltip_text="Generates a heatmap of your funscript",
+            sticky="ew"
+        )
+        gen_heatmap_btn = Widgets.button(
+            debug_video_section,
+            "Generate heatmap",
+            lambda: generate_heatmap(state),
+            column=2,
+            tooltip_text="Generates a heatmap of your funscript",
+            sticky="ew"
         )
         # endregion
 
@@ -230,16 +266,16 @@ class FunscriptGeneratorPage(tk.Frame):
                 processing_btn.config(text="Start processing")
 
             if state.has_raw_yolo and state.has_tracking_data:
-                enable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
+                enable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
                 processing_btn.config(text="Re-run object detection and or tracking")
             elif state.has_raw_yolo and not state.has_tracking_data:
-                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc)])
                 reset_progressbars([(track_p, track_p_perc)])
                 processing_btn.config(text="Re-run object detection and or start tracking")
             else:
-                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e])
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
                 reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
                 processing_btn.config(text="Start processing")
 
@@ -248,12 +284,11 @@ class FunscriptGeneratorPage(tk.Frame):
             else:
                 disable_widgets([processing_btn])
 
-            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, reader_dropdown, metrics_check, *start_f_widgets, *end_f_widgets,
+            proc_widgets = [fs_entry, fs_button, ref_entry, ref_button, metrics_check, # , reader_dropdown, *start_f_widgets, *end_f_widgets
                             boost_check, simp_check, tres_check, t_d_1, t_d_2, s_d_1, s_d_2, b_d_1, b_d_2]
             if state.is_processing:
-                # TODO remove the processing button and implement stop processing
-                disable_widgets([*proc_widgets, processing_btn])
-                processing_btn.config(text="Stop processing (WIP)")
+                disable_widgets([*proc_widgets])
+                processing_btn.config(text="Stop processing")
             else:
                 enable_widgets(proc_widgets)
 
@@ -273,7 +308,7 @@ class FunscriptGeneratorPage(tk.Frame):
                 if handler:
                     handler(msg)
                 else:
-                    logger.info(f"Unhandled message type: {type(msg)}")
+                    log.info(f"Unhandled message type: {type(msg)}")
 
             def handle_state_update(state_msg: UpdateGUIState):
                 setattr(state, state_msg.attr, state_msg.value)
@@ -285,7 +320,6 @@ class FunscriptGeneratorPage(tk.Frame):
             def handle_progress_message(progress_msg: ProgressMessage):
                 progress_mapping = {
                     "OBJECT_DETECTION": (yolo_p, yolo_p_perc, "has_raw_yolo"),
-                    # "SCENE_DETECTION": (scene_p, scene_p_perc),
                     "TRACKING_ANALYSIS": (track_p, track_p_perc, "has_tracking_data"),
                 }
 
@@ -294,11 +328,10 @@ class FunscriptGeneratorPage(tk.Frame):
                     progress_bar["value"] = progress_msg.frames_processed
                     progress_bar["maximum"] = progress_msg.total_frames
                     percentage = (progress_msg.frames_processed / progress_msg.total_frames) * 100 if progress_msg.total_frames > 0 else 0
-                    is_done = progress_msg.frames_processed >= progress_msg.total_frames
+                    is_done = progress_msg.frames_processed >= progress_msg.total_frames > 0
                     progress_label.config(text="Done" if is_done else f"{percentage:.0f}% - ETA: {progress_msg.eta}")
 
                     if is_done or progress_msg.frames_processed == 0:
-                        setattr(state, state_attr, is_done)
                         update_ui_for_state()
 
             # Schedule the update on the main thread

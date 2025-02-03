@@ -65,7 +65,7 @@ class Widgets:
         return entry
 
     @staticmethod
-    def input(parent, label_text, state, attr, row=0, column=0, label_width_px=LABEL_WIDTH, entry_width_px=200, callback=None, tooltip_text=None):
+    def input(parent, label_text, state, attr, row=0, column=0, label_width_px=LABEL_WIDTH, entry_width_px=200, command=None, tooltip_text=None):
         container = ttk.Frame(parent)
         container.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
         container.columnconfigure(1, weight=1)
@@ -78,8 +78,8 @@ class Widgets:
 
         def on_value_change(*args):
             setattr(state, attr, value.get())
-            if callback:
-                callback(value.get())
+            if command:
+                command(value.get())
 
         value.trace_add("write", on_value_change)
 
@@ -98,12 +98,12 @@ class Widgets:
         return container, entry, value
 
     @staticmethod
-    def button(parent, button_text, on_click, row=0, column=0, tooltip_text=None, style_name="Custom.TButton"):
+    def button(parent, button_text, on_click, row=0, column=0, tooltip_text=None, style_name="Custom.TButton", sticky="w"):
         style = ttk.Style()
         style.configure(style_name, padding=(10, 3))
 
         button = ttk.Button(parent, text=button_text, command=on_click, style=style_name)
-        button.grid(row=row, column=column, sticky="w", padx=PADDING_X, pady=PADDING_Y)
+        button.grid(row=row, column=column, sticky=sticky, padx=PADDING_X, pady=PADDING_Y)
 
         if tooltip_text:
             Tooltip(button, tooltip_text)
@@ -111,7 +111,7 @@ class Widgets:
         return button
 
     @staticmethod
-    def file_selection(parent, label_text, button_text, file_selector_title, file_types, state, attr, command=None, row=0, label_width_px=150, button_width_px=100, tooltip_text=None):
+    def file_selection(parent, label_text, button_text, file_selector_title, file_types, state, attr, command=None, row=0, label_width_px=150, button_width_px=100, tooltip_text=None, select_folder=False):
         container = tk.Frame(parent)
         container.grid(row=row, column=0, sticky="nsew", padx=5, pady=5)
 
@@ -128,7 +128,7 @@ class Widgets:
         # Configure the container's internal layout
         container.columnconfigure(1, weight=1)
 
-        file_path = tk.StringVar()
+        file_path = tk.StringVar(value=getattr(state, attr, ""))
 
         # Label for file selection with fixed pixel width
         label = tk.Label(container, text=label_text, anchor="w", width=label_width_px // 7)
@@ -142,7 +142,15 @@ class Widgets:
         button_container = tk.Frame(container, width=button_width_px, bg="lightgreen")  # Set button container background
         button_container.grid(row=0, column=2, sticky="e", padx=(2, 5))
         button_container.grid_propagate(False)  # Prevent resizing
-        button = ttk.Button(button_container, text=button_text, command=lambda: Widgets._browse_file(file_path, file_selector_title, file_types, lambda val: setattr(state, attr, val)))
+        def browse():
+            if select_folder:
+                selected_path = filedialog.askdirectory(title=file_selector_title)
+            else:
+                selected_path = filedialog.askopenfilename(title=file_selector_title, filetypes=file_types)
+            if selected_path:
+                file_path.set(selected_path)
+                setattr(state, attr, selected_path)
+        button = ttk.Button(button_container, text=button_text, command=browse)
         button.pack(fill="both", expand=True)
 
         # Update state whenever the file path changes
@@ -178,7 +186,7 @@ class Widgets:
         return container, progress_bar, progress_label, percentage_label
 
     @staticmethod
-    def dropdown(parent, label_text, options, default_value, state, attr, row=0, column=0, label_width_px=LABEL_WIDTH, tooltip_text=None, **grid_kwargs):
+    def dropdown(parent, label_text, options, default_value, state, attr, row=0, column=0, command=None, label_width_px=LABEL_WIDTH, tooltip_text=None, **grid_kwargs):
         selected_value = tk.StringVar(value=default_value)
 
         # Create a container for the dropdown
@@ -195,8 +203,15 @@ class Widgets:
         dropdown = ttk.Combobox(container, textvariable=selected_value, values=options, state="readonly")
         dropdown.grid(row=0, column=1, sticky="ew", padx=(2, 5))
 
+        def on_change(val):
+            if getattr(state, attr) != val:
+                setattr(state, attr, val)
+
+                if command:
+                    command(val)
+
         # Bind selection changes to update the state
-        dropdown.bind("<<ComboboxSelected>>", lambda _: setattr(state, attr, selected_value.get()))
+        dropdown.bind("<<ComboboxSelected>>", lambda _: on_change(selected_value.get()))
 
         if tooltip_text:
             Tooltip(dropdown, tooltip_text)
@@ -220,7 +235,7 @@ class Widgets:
         return dropdown
 
     @staticmethod
-    def checkbox(parent, label_text, state, attr, label_left=True, row=0, column=0, label_width_px=150, tooltip_text=None, **grid_kwargs):
+    def checkbox(parent, label_text, state, attr, label_left=True, command=None, row=0, column=0, label_width_px=150, tooltip_text=None, **grid_kwargs):
         # Ensure the parent has a _checkbox_vars attribute to track BooleanVars
         if not hasattr(parent, "_checkbox_vars"):
             parent._checkbox_vars = {}
@@ -236,6 +251,11 @@ class Widgets:
         container.grid(row=row, column=column, sticky="ew", padx=5, pady=5)
         container.columnconfigure(1, weight=1)  # Allow checkbox to adjust dynamically
 
+        def on_check():
+            setattr(state, attr, is_checked.get())
+            if command:
+                command(is_checked.get())
+
         if label_left:
             # Label with fixed pixel width and sticky west alignment
             label = tk.Label(container, text=label_text, anchor="w", width=label_width_px // 7)
@@ -246,7 +266,7 @@ class Widgets:
                 container,
                 text="",  # No text since the label is on the left
                 variable=is_checked,
-                command=lambda: setattr(state, attr, is_checked.get())
+                command=on_check
             )
             checkbox.grid(row=0, column=1, sticky="w")  # Explicit sticky west for checkbox alignment
         else:
@@ -255,7 +275,7 @@ class Widgets:
                 container,
                 text=label_text,
                 variable=is_checked,
-                command=lambda: setattr(state, attr, is_checked.get())
+                command= on_check
             )
             checkbox.grid(row=0, column=0, sticky="w", **grid_kwargs)
 
@@ -522,4 +542,3 @@ class Widgets:
         on_fps_change()
         # TODO readd hours_entry, minutes_entry, seconds_entry,
         return container, (frames_entry,), value
-

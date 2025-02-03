@@ -1,4 +1,3 @@
-
 @echo off
 cd /d "%~dp0"
 set "CONDA_PATH=C:\Users\%USERNAME%\miniconda3\Scripts\activate.bat"
