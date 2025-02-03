@@ -26,7 +26,6 @@ def create_combined_plot(state: AppState, ref_sections, gen_sections, screenshot
         gen_positions (list): Positions from the generated funscript.
     """
 
-    # TODO why is this empty sometimes? and result in errors
     if not gen_times or not gen_positions:
         log_fun.error("Could not created combined plot")
         return
