@@ -73,7 +73,7 @@ The pipeline for generating Funscript files is as follows:
 Before using this project, ensure you have the following installed:
 
 - **Python 3.8 or higher (tested on 3.11 https://www.python.org/downloads/release/python-3118/)**
-- **FFmpeg** added to your path or specified in the config (https://www.ffmpeg.org/download.html)
+- **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
 --
 
 ## Installation
@@ -84,30 +84,7 @@ Before using this project, ensure you have the following installed:
    cd VR-Funscript-AI-Generator
    ```
 ### Install dependencies
-
-#### Option 1: venv
-**If your GPU supports CUDA (NVIDIA)**
-```bash
-python -m venv VRFunAIGen
-VRFunAIGen\Scripts\activate # windows
-source VRFunAIGen/bin/activate # mac
-pip install -r requirements.txt
-pip uninstall torch torchvision torchaudio
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-python FSGenerator.py
-```
-
-**If your GPU doesn't support cuda**
-```bash
-python -m venv VRFunAIGen
-VRFunAIGen\Scripts\activate # windows
-source VRFunAIGen/bin/activate # mac
-pip install -r requirements.txt
-python FSGenerator.py
-```
-
-#### Option 2: Conda
-* Install miniconda (https://docs.anaconda.com/miniconda/install/)
+* Install miniconda (https://docs.anaconda.com/miniconda/install/) (We removed venv as all the bat files use conda)
 * Start a miniconda command prompt
    
 **If your GPU supports CUDA (NVIDIA)**
@@ -133,25 +110,9 @@ python FSGenerator.py
 - Place your YOLO model file (e.g., `k00gar-11n-RGB-200ep-best.mlpackage`) in the `models/` sub-directory.
 - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
 
-### Update config.py
 
-**FFMPEG**
-- If ffmpeg and ffprobe paths are not in your system path, the program will default to the following values.
-- You can update the params/config.py file, which contains:
-
-  ```bash
-  # ffmpeg and ffprobe paths - replace with your own if not in your system path   
-   win_ffmpeg_path = "C:/ffmpeg/bin/ffmpeg.exe"
-   mac_ffmpeg_path = "/usr/local/bin/ffmpeg"
-   lin_ffmpeg_path = "/usr/bin/ffmpeg"
-
-   win_ffprobe_path = "C:/ffmpeg/bin/ffprobe.exe"
-   mac_ffprobe_path = "/usr/local/bin/ffprobe"
-   lin_ffprobe_path = "/usr/bin/ffprobe"
-  ```
-
-**(Optional) User configurations**
-config.py also contains various user configurations that can be adjusted
+**(Optional) Settings**
+Find the settings menu in the app to configure optional option.
 
 ### Start script
 You can use Start windows.bat to launch the gui on windows if you installed with conda
@@ -160,72 +121,50 @@ You can use Start windows.bat to launch the gui on windows if you installed with
 
 ## Command Line Usage
 
-To generate a script with cmd or terminal, run the following command
+To generate a single script with cmd or terminal, run the following command
 
 ```bash
-python -m script_generator.cli.generate_funscript /path/to/video.mp4
+python -m script_generator.cli.generate_funscript_single /path/to/video.mp4
 ```
+See examples/windows/Process single video.bat for an example
 
-### Command-Line Arguments
+To generate scripts for all files in a folder use
+```bash
+python -m script_generator.cli.generate_funscript_folder /path/to/folder
+```
+See examples/windows/Process folder.bat for an example
+
+### Command-Line Arguments (Shared)
 #### Required Arguments
-- **`video_path`** *(str)*  
-  Path to the input video file.  
+- **`video_path`** Path to the input video file.  
 
 #### Optional Arguments
-- **`--reuse-yolo`** *(bool, default=False)*  
-  Re-use an existing raw YOLO output file instead of generating a new one when available.
+- **`--reuse-yolo`** Re-use an existing raw YOLO output file instead of generating a new one when available.
+- **`--copy-funscript`** Copies the final funscript to the movie directory.
+- **`--save-debug-file`** Saves a debug file to disk with all collected metrics. Also allows you to re-use tracking data.
 
-- **`--copy-funscript`** *(bool, default=True)*  
-  Copies the final funscript to the movie directory.
+#### Optional Funscript Tweaking Settings
+- **`--boost-enabled`** Enable boosting to adjust the motion range dynamically.
+- **`--boost-up-percent`** Increase the peaks by a specified percentage to enhance upper motion limits.
+- **`--boost-down-percent`** Reduce the lower peaks by a specified percentage to limit downward motion.
+- **`--threshold-enabled`** Enable thresholding to control motion mapping within specified bounds.
+- **`--threshold-low`** Values below this threshold are mapped to 0, limiting lower boundary motion.
+- **`--threshold-high`** Values above this threshold are mapped to 100, limiting upper boundary motion.
+- **`--vw-simplification-enabled`** Simplify the generated script to reduce the number of points, making it user-friendly.
+- **`--vw-factor`** Determines the degree of simplification. Higher values lead to fewer points.
+- **`--rounding`** Set the rounding factor for script values to adjust precision.
 
-- **`--frame-start`** *(int, default=0)*  
-  The starting frame number for processing (keep in Mind that this shouldn't be changed if you want a full funscript). Default is 0 (start from the beginning).
 
-- **`--frame-end`** *(int or None, default=None)*  
-  The ending frame number for processing (keep in Mind that this shouldn't be changed if you want a full funscript). Default is None (process till the end).
-
-- **`--video-reader`** *(str, default=None)*  
-  Video reader to use. Valid options: `"FFmpeg", "FFmpeg + OpenGL (Windows)"`. Defaults are platform-specific.
-
-- **`--save-debug-file`** *(bool, default=True)*  
-  Saves a debug file to disk with all collected metrics. Also allows you to re-use tracking data.
-
-#### Funscript Tweaking Settings
-- **`--boost-enabled`** *(bool, default=True)*  
-  Enable boosting to adjust the motion range dynamically.
-
-- **`--boost-up-percent`** *(int, default=10)*  
-  Increase the peaks by a specified percentage to enhance upper motion limits.
-
-- **`--boost-down-percent`** *(int, default=15)*  
-  Reduce the lower peaks by a specified percentage to limit downward motion.
-
-- **`--threshold-enabled`** *(bool, default=True)*  
-  Enable thresholding to control motion mapping within specified bounds.
-
-- **`--threshold-low`** *(int, default=10)*  
-  Values below this threshold are mapped to 0, limiting lower boundary motion.
-
-- **`--threshold-high`** *(int, default=90)*  
-  Values above this threshold are mapped to 100, limiting upper boundary motion.
-
-- **`--vw-simplification-enabled`** *(bool, default=True)*  
-  Simplify the generated script to reduce the number of points, making it user-friendly.
-
-- **`--vw-factor`** *(float, default=8.0)*  
-  Determines the degree of simplification. Higher values lead to fewer points.
-
-- **`--rounding`** *(int, default=5)*  
-  Set the rounding factor for script values to adjust precision.
-
+### Command-Line Arguments (Folder mode)
+- **`--replace-outdated`** Will regenerate outdated funscripts.
+- **`--replace-up-to-date`** Will regenerate funscripts that are up to date and made by this app too.
+- **`--num-workers`** Number of subprocesses to run in parallel. If you have beefy hardware 4 seems to be the sweet spot but technically your VRAM is the limit.
 ---
 
 ## Performance & Parallel Processing
-Our pipeline's current bottleneck lies in the Python code within YOLO.track (the object detection library we use), which is challenging to parallelize effectively. We have plans to parallelize this in the future but for now it remains a limitation.
+Our pipeline's current bottleneck lies in the Python code within YOLO.track (the object detection library we use), which is challenging to parallelize effectively.
 
-Currently, we got about 35-40fps for 8192x4096 VR videos on an i5-13600K with a 4090 and 32GB DDR4 ram. Utilization is about 20% CPU, 20% video decoding and 7% GPU usage. We suspect this means performance should be similar for lower end NVIDIA cards.
-
-However, when you have high-performance hardware this also means effectively run multiple processes simultaneously via the command line or launching multiple instances of the GUI. For reference, the above test setup was able to process at a combined 100fps while still being CPU limited.
+However, when you have high-performance hardware you can use the command line (see above) to processes multiple videos simultaneously. Alternatively you can launch multiple instances of the GUI.
 
 **Important considerations:**
 - Each instance requires the YOLO model to load, so monitor your VRAM usage to determine how many instances your hardware can support. For example, an NVIDIA RTX 4090 can handle up to six instances simultaneously.
@@ -250,14 +189,14 @@ See config.py for customizations and user settings (will be replaced with a yaml
 
 The script generates the following files in the output directory of you project folder:
 
-1. `_rawyolo.json`: Raw YOLO detection data. Can be re-used when re-generating scripts 
-2. `_cuts.json`: Detected scene changes.
+1. `_rawyolo.msgpack`: Raw YOLO detection data. Can be re-used when re-generating scripts 
+2. `_cuts.msgpack`: Detected scene changes.
 3. `_rawfunscript.json`: Raw Funscript data. Can be re-used when re-generating script with different settings.
 4. `.funscript`: Final Funscript file.
 5. `_heatmap.png`: Heatmap visualization of the Funscript data.
 6. `_comparefunscripts.png`: Comparison visualization between the generated Funscript and the reference Funscript (if provided).
 7. `_adjusted.funscript`: Funscript file with adjusted amplitude.
-8. `_debug_logs.json`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
+8. `_metrics.msgpack`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
 
 ---
 

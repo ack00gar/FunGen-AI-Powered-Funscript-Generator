@@ -1,49 +1,50 @@
-import json
-
-import numpy as np
-
-from script_generator.debug.logger import logger
+from script_generator.constants import TRACKING_VERSION
+from script_generator.debug.logger import log_tr
 from script_generator.utils.file import get_output_file_path
-from script_generator.utils.json import load_json_from_file
+from script_generator.utils.json_utils import get_data_file_info
+from script_generator.utils.msgpack_utils import save_msgpack_json, load_msgpack_json
+from script_generator.utils.version import version_is_less_than
 
 
 class DebugData:
     def __init__(self, state):
         self.app_state = state
-        self.logs = {}
+        self.metrics = {}
 
     def add_frame(self, frame_id, variables=None, bounding_boxes=None):
-        if frame_id not in self.logs:
-            self.logs[frame_id] = {"variables": {}, "bounding_boxes": []}
+        if frame_id not in self.metrics:
+            self.metrics[frame_id] = {"variables": {}, "bounding_boxes": []}
 
         if variables:
-            self.logs[frame_id]["variables"].update(variables)
+            self.metrics[frame_id]["variables"].update(variables)
 
         if bounding_boxes:
-            self.logs[frame_id]["bounding_boxes"].extend(bounding_boxes)
+            self.metrics[frame_id]["bounding_boxes"].extend(bounding_boxes)
 
     def save_debug_file(self):
-        debug_log_path, _ = get_output_file_path(self.app_state.video_path, "_debug_logs.json")
-        try:
-            with open(debug_log_path, "w") as f:
-                json.dump(self.logs, f, indent=4, default=self._default_serializer)
-            logger.info(f"Debug data saved to {debug_log_path}")
-        except Exception as e:
-            logger.error(f"Failed to save logs: {e}")
+        save_debug_metrics(self.app_state, self.metrics)
 
-    @staticmethod
-    def _default_serializer(obj):
-        """Convert NumPy types to native Python types for JSON serialization."""
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        else:
-            raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+def save_debug_metrics(state, data):
+    path, _ = get_output_file_path(state.video_path, ".msgpack", "metrics")
+    json_data = {"version": TRACKING_VERSION, "data": data}
+    save_msgpack_json(path, json_data)
 
+def load_debug_metrics(state):
+    exists, path, filename = get_metrics_file_info(state)
+    if not exists:
+        return False, None, path, filename
 
-def load_logs(state):
-    log_path, _ = get_output_file_path(state.video_path, "_debug_logs.json")
-    return load_json_from_file(log_path)
+    json = load_msgpack_json(path)
+
+    if not isinstance(json, dict) or not json.get("version") or version_is_less_than(json["version"], TRACKING_VERSION) or not json.get("data"):
+        log_tr.warn(f"Debug metrics file was found but was skipped due to an outdated version: {path}")
+        return False, None, path, filename
+
+    return True, json["data"], path, filename
+
+def get_metrics_file_info(state):
+    result_msgpack = get_data_file_info(state.video_path, ".msgpack", "metrics")
+    if result_msgpack[0]:
+        return result_msgpack
+
+    return False, None, None

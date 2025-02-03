@@ -3,10 +3,10 @@ import time
 import cv2
 from tqdm import tqdm
 
-from config import UPDATE_PROGRESS_INTERVAL
+from script_generator.constants import UPDATE_PROGRESS_INTERVAL
 from script_generator.gui.messages.messages import ProgressMessage
 from script_generator.state.app_state import AppState
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 # TODO Re-implement? (implement in object detection pipeline?)
 # def compute_histogram(frame):
@@ -57,8 +57,7 @@ from script_generator.debug.logger import logger
 #     for frame_pos in tqdm(
 #             range(total_frames_to_parse), desc="Detecting scene changes", position=0,
 #             unit_scale=False,
-#             unit_divisor=1,
-#             ncols=130
+#             unit_divisor=1
 #     ):
 #         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_start + frame_pos * frame_step)
 #         ret, frame = cap.read()

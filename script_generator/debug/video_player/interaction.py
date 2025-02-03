@@ -1,7 +1,7 @@
 import cv2
 
 from script_generator.debug.video_player.constants import BAR_HEIGHT
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 
 
 def mouse_callback(event, x, y, flags, param):
@@ -19,4 +19,4 @@ def mouse_callback(event, x, y, flags, param):
             width = int(video_player.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             target_frame = int((x / width) * video_player.total_frames)
             video_player.set_frame(target_frame)
-            logger.info(f"Seek to frame: {target_frame}")
+            log.info(f"Seek to frame: {target_frame}")

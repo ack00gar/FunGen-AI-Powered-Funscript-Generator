@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import tempfile
@@ -8,18 +7,20 @@ import cv2
 import numpy as np
 from scipy.interpolate import interp1d
 
-from script_generator.debug.debug_data import load_logs
+from script_generator.debug.debug_data import load_debug_metrics
+from script_generator.debug.logger import log
 from script_generator.debug.video_player.controls import draw_media_controls
 from script_generator.debug.video_player.debug_overlay import draw_overlay
 from script_generator.debug.video_player.interaction import mouse_callback
 from script_generator.debug.video_player.state import VideoPlayer
-from script_generator.funscript.util import load_funscript_json
+from script_generator.funscript.util.util import load_funscript_json
 from script_generator.utils.file import get_output_file_path
-from script_generator.debug.logger import logger
-from script_generator.video.info.video_info import get_cropped_dimensions
+from script_generator.video.data_classes.video_info import get_cropped_dimensions
+
 
 def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=100, save_video_mode=False):
     video_info = state.video_info
+    _, metrics, _, _ = load_debug_metrics(state)
     width, height = get_cropped_dimensions(video_info)
 
     video_player = VideoPlayer(
@@ -47,8 +48,6 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
             fill_value="extrapolate"
         )
 
-    logs = load_logs(state)
-
     # Initialize rolling window buffers
     distance_buffer = np.zeros(rolling_window_size)
     funscript_buffer = np.zeros(rolling_window_size)
@@ -63,7 +62,7 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         output_fps = video_info.fps
         frame_size = (width, height)
         video_writer = cv2.VideoWriter(temp_video_path, fourcc, output_fps, frame_size)
-        logger.info(f"Recording debug video to temporary file: {temp_video_path}")
+        log.info(f"Recording debug video to temporary file: {temp_video_path}")
     else:
         # Setup OpenCV window
         window_name = "Debug Video"
@@ -115,7 +114,7 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         distance_buffer, funscript_buffer, funscript_buffer_ref = draw_overlay(
             frame=frame,
             frame_id=video_player.current_frame,
-            logs=logs,
+            logs=metrics,
             funscript_interpolator=funscript_interpolator,
             funscript_interpolator_ref=funscript_interpolator_ref,
             distance_buffer=distance_buffer,

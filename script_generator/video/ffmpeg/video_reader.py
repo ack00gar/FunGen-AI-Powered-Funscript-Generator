@@ -3,7 +3,7 @@ import subprocess
 import cv2
 import imageio
 import numpy as np
-from script_generator.debug.logger import logger
+from script_generator.debug.logger import log
 from script_generator.state.app_state import AppState
 from script_generator.video.ffmpeg.commands import get_ffmpeg_read_cmd
 
@@ -27,13 +27,11 @@ class VideoReaderFFmpeg:
             self.process.terminate()
 
         cmd, self.frame_size, self.width, self.height = get_ffmpeg_read_cmd(
-            self.state.video_info,
-            self.state.video_reader,
-            self.state.ffmpeg_hwaccel,
+            self.state,
             start_frame,
             disable_opengl=True
         )
-        logger.info(f"Starting FFmpeg reader with command: {' '.join(cmd)}")
+        log.info(f"Starting FFmpeg reader with command: {' '.join(cmd)}")
 
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
@@ -45,7 +43,7 @@ class VideoReaderFFmpeg:
         try:
             in_bytes = self.process.stdout.read(self.frame_size)
             if not in_bytes:
-                logger.warn("FFmpeg video reader could not read frame / end of file")
+                log.warn("FFmpeg video reader could not read frame / end of file")
                 return False, None  # End of video
 
             frame = np.frombuffer(in_bytes, np.uint8).reshape((self.height, self.width, 3))
@@ -58,7 +56,7 @@ class VideoReaderFFmpeg:
 
             return True, frame
         except Exception as e:
-            logger.error(f"Error reading frame: {e}")
+            log.error(f"Error reading frame: {e}")
             return False, None
 
     def set(self, prop_id, value):
@@ -67,7 +65,7 @@ class VideoReaderFFmpeg:
             self.start_frame = int(value)
             self._start_process(start_frame=self.start_frame)
         else:
-            logger.error(f"Unsupported property ID: {prop_id}")
+            log.error(f"Unsupported property ID: {prop_id}")
 
     def get(self, prop_id):
         """Get properties like FPS, width, height (mimics OpenCV's cap.get())."""
@@ -78,7 +76,7 @@ class VideoReaderFFmpeg:
             cv2.CAP_PROP_FRAME_COUNT: self.state.video_info.total_frames,
             cv2.CAP_PROP_POS_FRAMES: self.current_frame_number,
         }
-        return props.get(prop_id, logger.error(f"Unsupported property ID: {prop_id}"))
+        return props.get(prop_id, log.error(f"Unsupported property ID: {prop_id}"))
 
     def release(self):
         """Release resources and terminate the FFmpeg process."""
