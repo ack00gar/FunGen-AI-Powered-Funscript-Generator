@@ -1,7 +1,7 @@
 import os
 
 from script_generator.constants import CLASS_REVERSE_MATCH
-from script_generator.debug.logger import log
+from script_generator.debug.logger import log, log_tr
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.object_detection.data_classes.box_record import BoxRecord
 from script_generator.object_detection.data_classes.object_detection_result import ObjectDetectionResult
@@ -71,5 +71,5 @@ def parse_yolo_data_looking_for_penis(data, start_frame):
             prev_frame = frame_idx
 
             if cons_frames > threshold:
-                log.info(f"First instance of Glans/Penis found in frame {frame_idx - threshold}")
+                log_tr.info(f"First instance of Glans/Penis found in frame {frame_idx - threshold}")
                 return penis_frame - threshold
