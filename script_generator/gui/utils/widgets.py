@@ -227,7 +227,7 @@ class Widgets:
         dropdown = ttk.Combobox(parent, textvariable=selected_value, values=values, width=5, state="readonly")
         dropdown.grid(row=row, column=column + 1, sticky="w", padx=PADDING_X, pady=PADDING_Y)
 
-        dropdown.bind("<<ComboboxSelected>>", lambda _: setattr(state, attr, int(selected_value.get())))
+        dropdown.bind("<<ComboboxSelected>>", lambda _: setattr(state, attr, float(selected_value.get())))
 
         if tooltip_text:
             Tooltip(dropdown, tooltip_text)
