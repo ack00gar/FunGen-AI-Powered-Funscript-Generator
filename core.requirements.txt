@@ -1,5 +1,3 @@
-torch~=2.5.1
-torchvision~=0.20.1
 numpy
 ultralytics~=8.3.59
 glfw~=2.8.0
