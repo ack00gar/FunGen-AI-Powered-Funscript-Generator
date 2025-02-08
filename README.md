@@ -4,7 +4,7 @@ This project is a Python-based tool for generating Funscript files from VR video
 
 If you find this project useful, consider supporting me on:
 
-- **Ko-fi**: [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/H2H818EIJV) 
+- **Ko-fi**: [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/H2H818EIJV)
 - **Patreon**: [https://www.patreon.com/c/k00gar](https://www.patreon.com/c/k00gar)
 
 Your support helps me continue developing and improving this project!
@@ -41,7 +41,7 @@ This project started as a dream to automate Funscript generation for VR videos. 
 - **Transition to YOLO**: To improve accuracy and speed, the project shifted to using YOLO object detection. A custom YOLO model was trained on a dataset of VR video frames, significantly improving detection quality. The new approach runs at 90 FPS on a Mac mini M4 pro, making it much more efficient.
 
 - **Original Post**: For more details and discussions, check out the original post on EroScripts:  
-[VR Funscript Generation Helper (Python + CV/AI)](https://discuss.eroscripts.com/t/vr-funscript-generation-helper-python-now-cv-ai/202554)
+  [VR Funscript Generation Helper (Python + CV/AI)](https://discuss.eroscripts.com/t/vr-funscript-generation-helper-python-now-cv-ai/202554)
 
 ---
 
@@ -69,52 +69,58 @@ The pipeline for generating Funscript files is as follows:
 ---
 
 ## Prerequisites
- 
+
 Before using this project, ensure you have the following installed:
 
 - **Python 3.8 or higher (tested on 3.11 https://www.python.org/downloads/release/python-3118/)**
-- **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
---
+- ## **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
 
 ## Installation
 
 ### Clone the repository
-   ```bash
-   git clone https://github.com/ack00gar/VR-Funscript-AI-Generator.git
-   cd VR-Funscript-AI-Generator
-   ```
+
+```bash
+git clone https://github.com/ack00gar/VR-Funscript-AI-Generator.git
+cd VR-Funscript-AI-Generator
+```
+
 ### Install dependencies
-* Install miniconda (https://docs.anaconda.com/miniconda/install/) (We removed venv as all the bat files use conda)
-* Start a miniconda command prompt
-   
-**If your GPU supports CUDA (NVIDIA)**
+
+- Install miniconda (https://docs.anaconda.com/miniconda/install/) (We removed venv as all the bat files use conda)
+- Start a miniconda command prompt
+
+#### If your GPU supports CUDA (NVIDIA)
+
 ```bash
 conda create -n VRFunAIGen python=3.11
 conda activate VRFunAIGen
-pip install -r requirements.txt
-pip uninstall torch torchvision torchaudio
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -r core.requirements.txt
+pip install -r cuda.requirements.txt
 python FSGenerator.py
 ```
+
 While executing, you’ll need to say “yes” a few times. The lines “pip uninstall / pip3 install” is to replace the “CPU” version of torch with a “cuda enabled / GPU” version (you might need to install nvidia CUDA stuff for it to works, I’m not sure).
 
-**If your GPU doesn't support cuda**
+#### If your GPU doesn't support cuda
+
 ```bash
 conda create -n VRFunAIGen python=3.11
 conda activate VRFunAIGen
-pip install -r requirements.txt
+pip install -r core.requirements.txt
+pip install -r cpu.requirements.txt
 python FSGenerator.py
 ```
 
 ### Download the YOLO model
+
 - Place your YOLO model file (e.g., `k00gar-11n-RGB-200ep-best.mlpackage`) in the `models/` sub-directory.
 - Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
-
 
 **(Optional) Settings**
 Find the settings menu in the app to configure optional option.
 
 ### Start script
+
 You can use Start windows.bat to launch the gui on windows if you installed with conda
 
 ---
@@ -126,24 +132,31 @@ To generate a single script with cmd or terminal, run the following command
 ```bash
 python -m script_generator.cli.generate_funscript_single /path/to/video.mp4
 ```
+
 See examples/windows/Process single video.bat for an example
 
 To generate scripts for all files in a folder use
+
 ```bash
 python -m script_generator.cli.generate_funscript_folder /path/to/folder
 ```
+
 See examples/windows/Process folder.bat for an example
 
 ### Command-Line Arguments (Shared)
+
 #### Required Arguments
-- **`video_path`** Path to the input video file.  
+
+- **`video_path`** Path to the input video file.
 
 #### Optional Arguments
+
 - **`--reuse-yolo`** Re-use an existing raw YOLO output file instead of generating a new one when available.
 - **`--copy-funscript`** Copies the final funscript to the movie directory.
 - **`--save-debug-file`** Saves a debug file to disk with all collected metrics. Also allows you to re-use tracking data.
 
 #### Optional Funscript Tweaking Settings
+
 - **`--boost-enabled`** Enable boosting to adjust the motion range dynamically.
 - **`--boost-up-percent`** Increase the peaks by a specified percentage to enhance upper motion limits.
 - **`--boost-down-percent`** Reduce the lower peaks by a specified percentage to limit downward motion.
@@ -154,25 +167,28 @@ See examples/windows/Process folder.bat for an example
 - **`--vw-factor`** Determines the degree of simplification. Higher values lead to fewer points.
 - **`--rounding`** Set the rounding factor for script values to adjust precision.
 
-
 ### Command-Line Arguments (Folder mode)
+
 - **`--replace-outdated`** Will regenerate outdated funscripts.
 - **`--replace-up-to-date`** Will regenerate funscripts that are up to date and made by this app too.
 - **`--num-workers`** Number of subprocesses to run in parallel. If you have beefy hardware 4 seems to be the sweet spot but technically your VRAM is the limit.
+
 ---
 
 ## Performance & Parallel Processing
+
 Our pipeline's current bottleneck lies in the Python code within YOLO.track (the object detection library we use), which is challenging to parallelize effectively in a single process.
 
 However, when you have high-performance hardware you can use the command line (see above) to processes multiple videos simultaneously. Alternatively you can launch multiple instances of the GUI.
 
-We tested speeds of about 60 to 110 fps for 8k 8bit vr videos when running a single process. Which translates to faster then realtime processing already. However, running in parallel mode we tested 
+We tested speeds of about 60 to 110 fps for 8k 8bit vr videos when running a single process. Which translates to faster then realtime processing already. However, running in parallel mode we tested
 speeds of about 160 to 190 frames per second (for object detection). Meaning processing times of about 20 to 30 minutes for 8bit 8k VR videos for the complete process. More then twice the speed of realtime!
 
-Keep in mind your results may vary as this is very dependent on your hardware. Cuda capable cards will have an advantage here. However, since the pipeline is largely CPU and video decode bottlenecked 
-a top of the line card like the 4090 is not required to get similar results. Having enough VRAM to run 3-6 processes, paired with a good CPU, will speed things up considerably though. 
+Keep in mind your results may vary as this is very dependent on your hardware. Cuda capable cards will have an advantage here. However, since the pipeline is largely CPU and video decode bottlenecked
+a top of the line card like the 4090 is not required to get similar results. Having enough VRAM to run 3-6 processes, paired with a good CPU, will speed things up considerably though.
 
 **Important considerations:**
+
 - Each instance requires the YOLO model to load which means you'll need to keep checks on your VRAM to see how many you can load.
 - The optimal number of instances depends on a combination of factors, including your CPU, GPU, RAM, and system configuration. So experiment with different setups to find the ideal configuration for your hardware! 😊
 
@@ -182,12 +198,11 @@ a top of the line card like the 4090 is not required to get similar results. Hav
 
 - For VR only **Fisheye** and **Equirectangular** 180° videos are supported
 - 2D POV videos have limited support
-- 2D / VR is automatically detected for fisheye/equirectangular detection make sure you keep the file format information in the filename (_FISHEYE190, _MKX200, _LR_180, etc.) 
+- 2D / VR is automatically detected for fisheye/equirectangular detection make sure you keep the file format information in the filename (\_FISHEYE190, \_MKX200, \_LR_180, etc.)
 
 ### Configuration / User settings
 
 See config.py for customizations and user settings (will be replaced with a yaml soon).
-
 
 ---
 
@@ -195,7 +210,7 @@ See config.py for customizations and user settings (will be replaced with a yaml
 
 The script generates the following files in the output directory of you project folder:
 
-1. `_rawyolo.msgpack`: Raw YOLO detection data. Can be re-used when re-generating scripts 
+1. `_rawyolo.msgpack`: Raw YOLO detection data. Can be re-used when re-generating scripts
 2. `_cuts.msgpack`: Detected scene changes.
 3. `_rawfunscript.json`: Raw Funscript data. Can be re-used when re-generating script with different settings.
 4. `.funscript`: Final Funscript file.
