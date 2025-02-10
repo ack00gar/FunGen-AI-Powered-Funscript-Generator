@@ -36,6 +36,11 @@ def create_funscript(state):
         ats = [p[0] for p in data]
         positions = [p[1] for p in data]
 
+        # saving raw, unfiltered funscript for advanced scripters
+        zip_raw_positions = zip(ats, positions)
+        raw_unfiltered_funscript_path, _ = get_output_file_path(state.video_path, ".funscript", "rawfunscript")
+        write_funscript(zip_raw_positions, raw_unfiltered_funscript_path, state.video_info.fps)
+
         log_fun.info(f"Positions adjustment - step 1 (noise removal)")
         # Run the Savitzky-Golay filter
         positions = savgol_filter(positions, int(state.video_info.fps // 4), 3)
