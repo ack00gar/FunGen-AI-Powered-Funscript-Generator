@@ -33,7 +33,8 @@ def analyze_tracking_results(state: AppState):
 
     # Deciding whether we start from there or from a user-specified later frame
     state.frame_start_track = max(max(first_penis_frame - int(state.video_info.fps), state.frame_start - int(state.video_info.fps)), 0)
-    state.frame_end = state.video_info.total_frames if not state.frame_end else state.frame_end
+    # state.frame_end = state.video_info.total_frames if not state.frame_end else state.frame_end
+    frame_end = state.video_info.total_frames if not state.frame_end else state.frame_end
 
     # logger.info(f"Frame Start adjusted to: {state.frame_start}")
     log_tr.info(f"Frame Start adjusted to: {state.frame_start_track}")
@@ -89,7 +90,8 @@ def analyze_tracking_results(state: AppState):
 
     for frame_pos in tqdm(
             # range(state.frame_start, state.frame_end), unit="f", desc="Analyzing tracking data", position=0,
-            range(state.frame_start_track, state.frame_end),
+            # range(state.frame_start_track, state.frame_end),
+            range(state.frame_start_track, frame_end),
             unit="f",
             desc="Analyzing tracking data", position=0,
             unit_scale=False,
@@ -235,13 +237,15 @@ def analyze_tracking_results(state: AppState):
                 last_ui_update_time = current_time
                 elapsed_time = current_time - start_time
                 frames_processed = frame_pos - state.frame_start + 1
-                frames_remaining = state.frame_end - frame_pos - 1
+                # frames_remaining = state.frame_end - frame_pos - 1
+                frames_remaining = frame_end - frame_pos - 1
                 eta = (elapsed_time / frames_processed) * frames_remaining if frames_processed > 0 else 0
 
                 state.update_ui(ProgressMessage(
                     process="TRACKING_ANALYSIS",
                     frames_processed=frames_processed,
-                    total_frames=state.frame_end,
+                    # total_frames=state.frame_end,
+                    total_frames=frame_end,
                     eta=time.strftime("%H:%M:%S", time.gmtime(eta)) if eta != float('inf') else "Calculating..."
                 ))
 
