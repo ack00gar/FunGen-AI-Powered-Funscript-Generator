@@ -27,6 +27,6 @@ def check_existing_funscript(dest_path: str, filename_base: str, make_funscript_
 
     out_of_date = False
     if is_ours:
-        out_of_date = version_is_less_than(json_data.get("version"), FUNSCRIPT_VERSION)
+        out_of_date = version_is_less_than(json_data.get("version", "0.0.1"), FUNSCRIPT_VERSION)
 
     return True, is_ours, backup_path, out_of_date
