@@ -1,8 +1,10 @@
 import os
 import platform
 
+import torch
+
 VERSION = "0.2.0"
-OBJECT_DETECTION_VERSION = "0.1.0"
+OBJECT_DETECTION_VERSION = "1.0.0"
 TRACKING_VERSION = "0.1.0"
 FUNSCRIPT_VERSION = "0.1.0"
 CONFIG_VERSION = 1
@@ -13,7 +15,7 @@ CONFIG_VERSION = 1
 
 RENDER_RESOLUTION = 640
 TEXTURE_RESOLUTION = RENDER_RESOLUTION * 1.3  # Texture size that is used to texture the opengl sphere
-YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30  # Mac doesn't support batching
+YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" or not torch.cuda.is_available() else 30  # Mac doesn't support batching. Note TensorRT (.engine) is compiled for a batch size of 30
 YOLO_PERSIST = True  # Big impact on performance but also improves tracking
 
 ##################################################################################################
@@ -49,7 +51,8 @@ DEFAULT_CONFIG = {
     "copy_funscript_to_movie_dir": True,
     "funscript_output_dir": None,
     "make_funscript_backup": True,
-    "log_level": "INFO"
+    "log_level": "INFO",
+    "tracking_logic_version": 1
 }
 
 ##################################################################################################
@@ -90,10 +93,11 @@ CLASS_NAMES = {
     'hips center': 10
 }
 CLASS_COLORS = {
+    "locked_penis": (0, 255, 255), # yellow
     "penis": (255, 0, 0),  # red
     "glans": (0, 128, 0),  # green
     "pussy": (0, 0, 255),  # blue
-    "butt": (255, 255, 0),  # yellow
+    "butt": (0, 180, 255),  # deep yellow
     "anus": (128, 0, 128),  # purple
     "breast": (255, 165, 0),  # orange
     "navel": (0, 255, 255),  # cyan
