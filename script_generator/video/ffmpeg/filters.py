@@ -47,10 +47,21 @@ def get_2d_video_filters(video, width, height):
     state = AppState()
     cuda = state.ffmpeg_hwaccel == "cuda"
 
-    if video.height > RENDER_RESOLUTION:
-        scale_width = int(video.width * (height / video.height))
-        crop = f",crop={width}:{height}:(iw-{width})/2:0"
-        # hardware accelerated output is not supported with > 8 bit
-        return f"[0:v]scale_cuda={scale_width}:{height},hwdownload,format=nv12{crop}" if supports_cuda_scale(state) else f"[0:v]scale={scale_width}:{height}{crop}"
+    # in portrait, we squash the video because we don't really know where the penis is
+    if video.height > video.width:
+        if supports_cuda_scale(state):
+            return f"[0:v]scale_cuda={width}:{height},hwdownload,format=nv12"
+        else:
+            return f"[0:v]scale={width}:{height}"
+
+    # in landscape, we crop to the center
     else:
-        return "[0:v]hwdownload,format=nv12" if cuda else ""
+        if video.height > RENDER_RESOLUTION:
+            scale_width = int(video.width * (height / video.height))
+            crop = f",crop={width}:{height}:(iw-{width})/2:0"
+            if supports_cuda_scale(state):
+                return f"[0:v]scale_cuda={scale_width}:{height},hwdownload,format=nv12{crop}"
+            else:
+                return f"[0:v]scale={scale_width}:{height}{crop}"
+        else:
+            return "[0:v]hwdownload,format=nv12" if cuda else ""
