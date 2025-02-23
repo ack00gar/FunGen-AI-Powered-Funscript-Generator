@@ -59,7 +59,7 @@ class SettingsPage(tk.Frame):
             label_text="YOLO model",
             button_text="Browse",
             file_selector_title="Select YOLO model",
-            file_types=[("YOLO Model Files", "*.onnx"), ("YOLO Model Files", "*.pt"), ("TensorRT", "*.engine"), ("CoreML Model Files", "*.mlmodel"), ("All Files", "*.*")],
+            file_types=[("YOLO Model Files", "*.onnx *.pt *.engine *.mlmodel"), ("All Files", "*.*")],
             state=self.state,
             tooltip_text="Path to the YOLO model file.",
             command=lambda val: c.save(),
