@@ -175,4 +175,5 @@ RIGHT_BRACKET = 93
 # DIV
 ##################################################################################################
 
-FUNSCRIPT_AUTHOR = "FunGen_k00gar_AI"
+FUNSCRIPT_AUTHOR = "FunGen"
+OLD_FUNSCRIPT_AUTHOR = "FunGen_k00gar_AI"
