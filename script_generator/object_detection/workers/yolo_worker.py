@@ -29,19 +29,24 @@ class YoloWorker(AbstractTaskProcessor):
             else:
                 log_od.warn(f"Rendered frame missing on Yolo task")
 
-        # Process any remaining tasks in the batch
+        # Process any remaining tasks in the batch with padding
         if batch:
+            # Pad the batch with the last frame to reach YOLO_BATCH_SIZE
+            last_frame = batch[-1]
+            while len(batch) < YOLO_BATCH_SIZE:
+                batch.append(last_frame.copy())
+
             self.process_batch(batch, tasks)
 
     def process_batch(self, frames, tasks):
         start_time = time.time()
         # Yolo expects bgr images when using numpy frames
         # yolo_results = self.state.yolo_model(frames, conf=YOLO_CONF, verbose=False) # replace with this line for pipeline speed testing
-        yolo_results = self.state.yolo_model.track(frames, persist=YOLO_PERSIST, conf=YOLO_CONF, verbose=False)
-        avg_time = (time.time() - start_time) / len(tasks)
+        yolo_results = self.state.yolo_model.track(frames, persist=YOLO_PERSIST, conf=YOLO_CONF, verbose=False) # , tracker="bytetrack.yaml") # , iou=0.5, show=True
+        avg_time = (time.time() - start_time) / len(tasks)  # Use original tasks length, not padded
 
-        for t, result in zip(tasks, yolo_results):
+        # Only process the actual tasks, ignore padded results
+        for t, result in zip(tasks, yolo_results[:len(tasks)]):
             t.yolo_results = result
-            batch_time = time.time() - start_time
             t.duration(str(self.process_type), avg_time)
             self.finish_task(t)

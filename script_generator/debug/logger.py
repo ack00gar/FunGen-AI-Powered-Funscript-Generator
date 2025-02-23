@@ -36,7 +36,8 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("Main")
-log_od = logging.getLogger("ObjectDetection")
+log_od = logging.getLogger("Detection")
+log_sc = logging.getLogger("Scene")
 log_tr = logging.getLogger("Tracking")
 log_vid = logging.getLogger("Video")
 log_fun = logging.getLogger("Funscript")

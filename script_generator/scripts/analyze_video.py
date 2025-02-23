@@ -14,11 +14,11 @@ from script_generator.utils.data_classes.meta_data import MetaData
 from script_generator.utils.file import check_create_output_folder
 
 if TYPE_CHECKING:
-    from script_generator.video.analyse_frame_task import AnalyzeFrameTask
+    pass
 
 
-def analyze_video(state: AppState) -> List["AnalyzeFrameTask"]:
-    log_od.info(f"[OBJECT DETECTION] Starting up pipeline{' in sequential mode' if SEQUENTIAL_MODE else ''}...")
+def analyze_video(state: AppState):
+    log_od.info(f"OBJECT DETECTION Starting up pipeline...")
 
     log_thread_stop_event = threading.Event()
     threads = []
@@ -80,7 +80,8 @@ def analyze_video(state: AppState) -> List["AnalyzeFrameTask"]:
                 if thread is not None:
                     thread.check_exception()
 
-        state.analyze_task.end_time = time.time()
+        if state.analyze_task:
+            state.analyze_task.end_time = time.time()
 
         log_thread_stop_event.set()
 

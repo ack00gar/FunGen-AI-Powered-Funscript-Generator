@@ -1,7 +1,8 @@
 from script_generator.state.app_state import AppState
+from script_generator.video.data_classes.video_info import get_cropped_dimensions
 from script_generator.video.ffmpeg.filters import get_video_filters
-from script_generator.video.ffmpeg.hwaccel import get_hwaccel_read_args, supports_cuda_scale
-from script_generator.video.data_classes.video_info import get_cropped_dimensions, VideoInfo
+from script_generator.video.ffmpeg.hwaccel import get_hwaccel_read_args, supports_scale_cuda
+
 
 def get_ffmpeg_read_cmd(state: AppState, frame_start: int | None, output="-", disable_opengl=False):
     video = state.video_info
@@ -17,7 +18,7 @@ def get_ffmpeg_read_cmd(state: AppState, frame_start: int | None, output="-", di
         # VAAPI requires specific pixel formats and filters
         video_filter = ["-vf", f"{vf},format=nv12,hwupload"] if vf else ["-vf", "format=nv12,hwupload"]
 
-    if supports_cuda_scale(state):
+    if supports_scale_cuda(state):
         video_filter = ["-noautoscale"] + video_filter  # explicitly tell ffmpeg that scaling is done by cuda
 
     frame_size = width * height * 3  # Size of one frame in bytes

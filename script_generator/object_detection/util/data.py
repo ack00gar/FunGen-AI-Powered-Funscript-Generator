@@ -63,9 +63,11 @@ def load_yolo_data(state):
 
     json = load_msgpack_json(path)
 
-    if not isinstance(json, dict) or not json.get("version") or version_is_less_than(json["version"], OBJECT_DETECTION_VERSION) or not json.get("data"):
-        if version_is_less_than(json["version"], OBJECT_DETECTION_VERSION):
-            log_od.warn(f"A raw yolo was found but was skipped due to an outdated version: {path}")
-        return False, None, path, filename
+    # TODO re-enable
+    # if not isinstance(json, dict) or not json.get("version") or version_is_less_than(json["version"], OBJECT_DETECTION_VERSION) or not json.get("data"):
+    #     if version_is_less_than(json["version"], OBJECT_DETECTION_VERSION):
+    #         # TODO add message box and reprocess if out of date
+    #         log_od.warn(f"A raw yolo was found but was skipped due to an outdated version: {path}")
+    #     return False, None, path, filename
 
     return True, json["data"], path, filename

@@ -16,6 +16,7 @@ def create_funscript(state):
     output_path, _ = get_output_file_path(state.video_path, ".funscript")
 
     raw_funscript_path, _ = get_output_file_path(state.video_path, ".json", "rawfunscript")
+
     if os.path.exists(raw_funscript_path) and (state.funscript_data is None or len(state.funscript_data) == 0):
         log_fun.info("len funscript data is 0, trying to load file")
         # Read the funscript data from the JSON file
@@ -28,6 +29,9 @@ def create_funscript(state):
                 return
     else:
         data = state.funscript_data
+
+    if not data:
+        log_fun.warn(f"No funscript data found")
 
     try:
         log_fun.info(f"Generating funscript based on {len(data)} points...")

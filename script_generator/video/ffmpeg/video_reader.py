@@ -59,24 +59,9 @@ class VideoReaderFFmpeg:
             log.error(f"Error reading frame: {e}")
             return False, None
 
-    def set(self, prop_id, value):
-        """Set properties like frame position (mimics OpenCV's cap.set())."""
-        if prop_id == cv2.CAP_PROP_POS_FRAMES:
-            self.start_frame = int(value)
-            self._start_process(start_frame=self.start_frame)
-        else:
-            log.error(f"Unsupported property ID: {prop_id}")
-
-    def get(self, prop_id):
-        """Get properties like FPS, width, height (mimics OpenCV's cap.get())."""
-        props = {
-            cv2.CAP_PROP_FPS: self.state.video_info.fps,
-            cv2.CAP_PROP_FRAME_WIDTH: self.width,
-            cv2.CAP_PROP_FRAME_HEIGHT: self.height,
-            cv2.CAP_PROP_FRAME_COUNT: self.state.video_info.total_frames,
-            cv2.CAP_PROP_POS_FRAMES: self.current_frame_number,
-        }
-        return props.get(prop_id, log.error(f"Unsupported property ID: {prop_id}"))
+    def set_frame(self, frame_id):
+        self.start_frame = int(frame_id)
+        self._start_process(start_frame=frame_id)
 
     def release(self):
         """Release resources and terminate the FFmpeg process."""

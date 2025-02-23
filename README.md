@@ -2,13 +2,6 @@
 
 This project is a Python-based tool for generating Funscript files from VR videos using Computer Vision (CV) and AI techniques. It leverages YOLO (You Only Look Once) object detection and custom tracking algorithms to automate the process of creating Funscript files for interactive devices.
 
-If you find this project useful, consider supporting me on:
-
-- **Ko-fi**: [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/H2H818EIJV)
-- **Patreon**: [https://www.patreon.com/c/k00gar](https://www.patreon.com/c/k00gar)
-
-Your support helps me continue developing and improving this project!
-
 Join the **Discord community** for discussions and support: [Discord Community](https://discord.gg/WYkjMbtCZA)
 
 The necessary YOLO models will also be available via the Discord.
@@ -112,9 +105,25 @@ python FSGenerator.py
 ```
 
 ### Download the YOLO model
+- Place the YOLO model file(s) in the `models/` sub-directory. If you aren't sure you can add all the models and let the app decide the best option for you.
 
-- Place your YOLO model file (e.g., `k00gar-11n-RGB-200ep-best.mlpackage`) in the `models/` sub-directory.
-- Alternatively, you can specify a custom path to the model using the `--yolo_model` argument.
+We support multiple model formats across Windows, macOS, and Linux.
+#### Recommendations
+- NVIDIA Cards: we recommend the .engine model
+- AMD Cards: we recommend .pt (requires ROCm see below)
+- Mac: we recommend .mlmodel
+
+#### Models
+- **.pt (PyTorch)**: Requires CUDA (for NVIDIA GPUs) or ROCm (for AMD GPUs) for acceleration.
+- **.onnx (ONNX Runtime)**: Best for CPU users as it offers broad compatibility and efficiency.
+- **.engine (TensorRT)**: For NVIDIA GPUs: Provides very significant efficiency improvements.
+- **.mlmodel (Core ML)**: Optimized for macOS users. Runs efficiently on Apple devices with Core ML.
+
+In most cases, the app will automatically detect the best model from your models directory at launch, but if the right model wasn't present at this time or the right dependencies where not installed, you might need to override it under settings. The same applies when we release a new version of the model.
+
+
+### AMD GPU acceleration
+Coming soon
 
 **(Optional) Settings**
 Find the settings menu in the app to configure optional option.

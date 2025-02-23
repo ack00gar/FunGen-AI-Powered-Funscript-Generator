@@ -83,7 +83,7 @@ def get_preferred_hwaccel(ffmpeg_path):
     supported = _list_ffmpeg_hwaccels(ffmpeg_path)
     for hw in ["cuda", "vaapi", "amf", "videotoolbox", "qsv", "d3d11va"]:
         if hw in supported and _test_hwaccel(ffmpeg_path, hw):
-            log_vid.info(f"Setting preferred FFmpeg hardware acceleration too: {hw}")
+            log_vid.info(f"Setting preferred FFmpeg hardware acceleration to: {hw}")
             return hw
     log_vid.info("No working hwaccel found.")
     return None
@@ -92,7 +92,7 @@ def get_preferred_hwaccel(ffmpeg_path):
 def get_hwaccel_read_args(state):
     hwaccel = state.ffmpeg_hwaccel
     if hwaccel == "cuda":
-        if supports_cuda_scale(state):
+        if supports_scale_cuda(state):
             return ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
         return ["-hwaccel", "cuda"]
     if hwaccel == "vaapi":
@@ -108,13 +108,18 @@ def get_hwaccel_read_args(state):
     return []
 
 
+_filters_checked = False
 scale_cuda = None
-def _has_scale_cuda(ffmpeg_path):
-    global scale_cuda
-    if scale_cuda is not None:
-        return scale_cuda
+scale_npp = None
 
-    # Check if FFmpeg supports the scale_cuda filter.
+def _get_ffmpeg_filters(ffmpeg_path):
+    """
+    Runs FFmpeg once to check support for both scale_cuda and scale_npp filters.
+    """
+    global _filters_checked, scale_cuda, scale_npp
+    if _filters_checked:
+        return
+
     try:
         r = subprocess.run(
             [ffmpeg_path, "-hide_banner", "-filters"],
@@ -125,18 +130,29 @@ def _has_scale_cuda(ffmpeg_path):
         )
         filters = r.stdout.lower()
         scale_cuda = "scale_cuda" in filters
-        log_vid.info(f"FFmpeg {'supports' if scale_cuda else 'does not support'} scale_cuda")
-        return scale_cuda
+        scale_npp = "scale_npp" in filters
+        log_vid.info(f"FFmpeg supports scale_cuda: {scale_cuda}, scale_npp: {scale_npp}")
     except Exception as e:
-        log_vid.error(f"Failed to check scale_cuda support: {e}")
+        log_vid.error(f"Failed to retrieve FFmpeg filters: {e}")
         scale_cuda = False
-        return False
+        scale_npp = False
+    _filters_checked = True
 
-def supports_cuda_scale(state: "AppState"):
+
+def _supports_scale_acceleration(state):
     video = state.video_info
     return (
-        state.ffmpeg_hwaccel == "cuda"
-        and video.bit_depth == 8
-        and (video.codec_name != "h264" or (video.width <= 4096 and video.height <= 4096))
-        and _has_scale_cuda(state.ffmpeg_path)
+        state.ffmpeg_hwaccel == "cuda" and
+        video.bit_depth == 8 and
+        (video.codec_name != "h264" or (video.width <= 4096 and video.height <= 4096))
     )
+
+def supports_scale_cuda(state: "AppState"):
+    if not _filters_checked:
+        _get_ffmpeg_filters(state.ffmpeg_path)
+
+    return _supports_scale_acceleration(state) and scale_cuda
+
+def supports_scale_npp(state: "AppState"):
+    return _supports_scale_acceleration(state) and scale_npp
+

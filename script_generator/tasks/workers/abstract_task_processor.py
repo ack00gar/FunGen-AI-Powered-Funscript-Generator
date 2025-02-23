@@ -84,8 +84,8 @@ class AbstractTaskProcessor(threading.Thread):
             # Propagate sentinel to the output queue
             self.output_queue.put(None)
             log.error(f"An error occurred during task execution on thread {self.process_type}: {e}")
-            # import traceback
-            # traceback.print_exc()
+            import traceback
+            traceback.print_exc()
         finally:
             self._stop_event.set()
 
