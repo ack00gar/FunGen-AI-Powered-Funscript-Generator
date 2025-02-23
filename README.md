@@ -20,6 +20,7 @@ Before using this project, ensure you have the following installed:
 
 - **Python 3.8 or higher (tested on 3.11 https://www.python.org/downloads/release/python-3118/)**
 - **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
+- **Miniconda** (https://docs.anaconda.com/miniconda/install/)
 
 ## Installation
 
@@ -30,12 +31,9 @@ git clone https://github.com/ack00gar/VR-Funscript-AI-Generator.git
 cd VR-Funscript-AI-Generator
 ```
 
-### Install dependencies
+### Start a miniconda command prompt
 
-- Install miniconda (https://docs.anaconda.com/miniconda/install/) (We removed venv as all the bat files use conda)
-- Start a miniconda command prompt
-
-#### If your GPU supports CUDA (NVIDIA)
+### If your GPU supports CUDA (NVIDIA)
 
 ```bash
 conda create -n VRFunAIGen python=3.11
@@ -47,7 +45,7 @@ python FSGenerator.py
 
 While executing, you’ll need to say “yes” a few times. The lines “pip uninstall / pip3 install” is to replace the “CPU” version of torch with a “cuda enabled / GPU” version (you might need to install nvidia CUDA stuff for it to works, I’m not sure).
 
-#### If your GPU doesn't support cuda
+### If your GPU doesn't support cuda
 
 ```bash
 conda create -n VRFunAIGen python=3.11
