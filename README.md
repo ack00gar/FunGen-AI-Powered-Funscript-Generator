@@ -40,6 +40,7 @@ conda create -n VRFunAIGen python=3.11
 conda activate VRFunAIGen
 pip install -r core.requirements.txt
 pip install -r cuda.requirements.txt
+pip install tensorrt
 python FSGenerator.py
 ```
 
