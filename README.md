@@ -68,7 +68,7 @@ We support multiple model formats across Windows, macOS, and Linux.
 #### Models
 - **.pt (PyTorch)**: Requires CUDA (for NVIDIA GPUs) or ROCm (for AMD GPUs) for acceleration.
 - **.onnx (ONNX Runtime)**: Best for CPU users as it offers broad compatibility and efficiency.
-- **.engine (TensorRT)**: For NVIDIA GPUs: Provides very significant efficiency improvements.
+- **.engine (TensorRT)**: For NVIDIA GPUs: Provides very significant efficiency improvements (this file needs to be build by running "Generate TensorRT.bat" after adding the base ".pt" model to the models directory)
 - **.mlmodel (Core ML)**: Optimized for macOS users. Runs efficiently on Apple devices with Core ML.
 
 In most cases, the app will automatically detect the best model from your models directory at launch, but if the right model wasn't present at this time or the right dependencies where not installed, you might need to override it under settings. The same applies when we release a new version of the model.
