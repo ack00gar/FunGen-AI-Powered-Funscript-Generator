@@ -11,6 +11,7 @@ from script_generator.debug.logger import log
 
 
 def generate_funscript(state: AppState, root):
+    state.load_yolo()
     configured, msg = state.is_configured()
     if not configured:
         log.warn(msg)

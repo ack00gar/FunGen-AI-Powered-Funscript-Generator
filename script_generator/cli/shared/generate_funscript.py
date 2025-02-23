@@ -7,6 +7,7 @@ from script_generator.utils.helpers import to_int_or_none
 
 def generate_funscript_cli(state: AppState):
     try:
+        state.load_yolo()
         configured, msg = state.is_configured()
         if not configured:
             log.warn(msg)
