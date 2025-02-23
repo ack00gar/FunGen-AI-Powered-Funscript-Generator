@@ -34,7 +34,7 @@ def mouse_callback(event, x, y, flags, params: Tuple["AppState", "VideoPlayer"])
                     state.update_ui(UpdateGUIState(attr="static_debug_frame", value=None))
                 video_player.paused = True
 
-            video_player.funscript_graph.reset()
+            # video_player.funscript_graph.reset()
 
             target_frame = int((x / width) * video_player.total_frames)
             video_player.set_frame(target_frame)
