@@ -53,7 +53,7 @@ def load_yolo_model(yolo_model_path):
     if not yolo_model_path or not os.path.exists(str(yolo_model_path)):
         log.warn("The YOLO model is missing. Please download and place the appropriate YOLO model in the models directory.")
         return None
-
+    log.info(f"Loading YOLO model: {yolo_model_path}")
     return YOLO(yolo_model_path, task="detect")
 
 
