@@ -21,13 +21,25 @@ def find_model(extension):
     return None
 
 
+def is_compute_compatible(required_major=8, required_minor=9):
+    """Checks if the current GPU has the required compute capability."""
+    if torch.cuda.is_available():
+        gpu_major, gpu_minor = torch.cuda.get_device_capability()
+        if gpu_major > required_major or (gpu_major == required_major and gpu_minor >= required_minor):
+            return True
+        else:
+            log.info(f"❌ Incompatible NVIDIA Cuda Compute Capability: Expected {required_major}.{required_minor}, but found {gpu_major}.{gpu_minor}. Falling back to .pt model for compatibility.")
+        return False
+    return False
+
+
 def get_yolo_model_path():
     """Selects the appropriate YOLO model based on platform and hardware capabilities."""
 
     model_checks = [
         (".mlpackage", is_mac(), "Apple device detected, using MPS inference."),
-        (".engine", torch.cuda.is_available(), "CUDA available, using GPU inference using TensorRT."),
-        (".pt", torch.cuda.is_available(), "CUDA available, using GPU inference (better TensorRT model not found but recommended)."),
+        (".engine", torch.cuda.is_available() and is_compute_compatible(), "CUDA available and compatible, using GPU inference with TensorRT."),
+        (".pt", torch.cuda.is_available(), "CUDA available, using GPU inference (TensorRT model not found or not compatible with Compute capability)."),
         (".onnx", True, "CUDA not available, using ONNX model for CPU inference.")
     ]
 
@@ -38,7 +50,7 @@ def get_yolo_model_path():
                 log.info("WARNING: CPU inference may be slow on some devices.")
             return model_path
 
-    log.error("No suitable model found. Check your MODEL_FILENAMES list.")
+    log.error("No suitable model found. Please make sure to download one of our models and place it in the models directory.")
     return None
 
 def load_yolo_model(yolo_model_path):
