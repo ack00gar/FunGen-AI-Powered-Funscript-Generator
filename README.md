@@ -1,62 +1,16 @@
-# VR-Funscript-AI-Generator
+# FunGen
 
-This project is a Python-based tool for generating Funscript files from VR videos using Computer Vision (CV) and AI techniques. It leverages YOLO (You Only Look Once) object detection and custom tracking algorithms to automate the process of creating Funscript files for interactive devices.
+FunGen is a Python-based tool that uses AI to generate Funscript files from VR and 2D POV videos. It enables fully automated funscript creation for individual scenes or entire folders of videos.
 
 Join the **Discord community** for discussions and support: [Discord Community](https://discord.gg/WYkjMbtCZA)
 
-The necessary YOLO models will also be available via the Discord.
+Note: The necessary YOLO models will also be available via the Discord.
 
 ---
 
-## DISCLAIMER
+### DISCLAIMER
 
-This project is at its very early stages of development, still faulty and broken, and is for research and educational purposes only. It is not intended for commercial use.
-Please, do not use this project for any commercial purposes without prior consent from the author. It is for individual use only.
-
----
-
-## Features
-
-- **YOLO Object Detection**: Uses a pre-trained YOLO model to detect and track objects in video frames.
-- **Funscript Generation**: Generates Funscript data based on the tracked objects' movements.
-- **Scene Change Detection**: Automatically detects scene changes in the video to improve tracking accuracy.
-- **Visualization**: Provides real-time visualization of object tracking and Funscript data (in test mode).
-- **VR Support**: Optimized for VR videos, with options to process specific regions of the frame.
-
----
-
-## Project Genesis and Evolution
-
-This project started as a dream to automate Funscript generation for VR videos. Here’s a brief history of its development:
-
-- **Initial Approach (OpenCV Trackers)**: The first version relied on OpenCV trackers to detect and track objects in the video. While functional, the approach was slow (8–20 FPS) and struggled with occlusions and complex scenes.
-
-- **Transition to YOLO**: To improve accuracy and speed, the project shifted to using YOLO object detection. A custom YOLO model was trained on a dataset of VR video frames, significantly improving detection quality. The new approach runs at 90 FPS on a Mac mini M4 pro, making it much more efficient.
-
-- **Original Post**: For more details and discussions, check out the original post on EroScripts:  
-  [VR Funscript Generation Helper (Python + CV/AI)](https://discuss.eroscripts.com/t/vr-funscript-generation-helper-python-now-cv-ai/202554)
-
----
-
-## YOLO Model
-
-The YOLO model used in this project is based on YOLOv11n, which was fine-tuned with 10 new classes and 4,500+ frames randomly extracted from a VR video library. Here’s how the model was developed:
-
-- **Initial Training**: A few hundred frames were manually tagged and boxed to create an initial dataset. The model was trained on this dataset to generate preliminary detection results.
-- **Iterative Improvement**: The trained model was used to suggest bounding boxes in additional frames. The suggested boxes were manually adjusted, and the dataset was expanded. This process was repeated iteratively to improve the model’s accuracy.
-- **Final Training**: After gathering 4,500+ images and 30,149 annotations, the model was trained for 200 epochs. YOLOv11s and YOLOv11m were also tested, but YOLOv11n was chosen for its balance of accuracy and inference speed.
-- **Hardware**: The model runs on a Mac using MPS (Metal Performance Shaders) for accelerated inference on ARM chips. Other versions of the model (ONNX and PT) are also available for use on other platforms.
-
----
-
-## Pipeline Overview
-
-The pipeline for generating Funscript files is as follows:
-
-1. **YOLO Object Detection**: A YOLO model detects relevant objects (e.g., penis, hands, mouth, etc.) in each frame of the video. The detection results are saved to a `.json` file.
-2. **Tracking Algorithm**: A custom tracking algorithm processes the YOLO detection results to track the positions of objects over time. The algorithm calculates distances and interactions between objects to determine the Funscript position.
-3. **Funscript Generation**: The tracked data is used to generate a raw Funscript file.
-4. **Simplifier**: The raw Funscript data is simplified to remove noise and smooth out the motion. The final `.funscript` file is saved.
+This project is still at the early stages of development. It is not intended for commercial use. Please, do not use this project for any commercial purposes without prior consent from the author. It is for individual use only.
 
 ---
 
@@ -65,7 +19,7 @@ The pipeline for generating Funscript files is as follows:
 Before using this project, ensure you have the following installed:
 
 - **Python 3.8 or higher (tested on 3.11 https://www.python.org/downloads/release/python-3118/)**
-- ## **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
+- **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
 
 ## Installation
 
@@ -224,6 +178,27 @@ The script generates the following files in the output directory of you project 
 7. `_metrics.msgpack`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
 
 ---
+
+## About the project
+### Project Genesis and Evolution
+
+This project started as a dream to automate Funscript generation for VR videos. Here’s a brief history of its development:
+
+- **Initial Approach (OpenCV Trackers)**: The first version relied on OpenCV trackers to detect and track objects in the video. While functional, the approach was slow (8–20 FPS) and struggled with occlusions and complex scenes.
+- **Transition to YOLO**: To improve accuracy and speed, the project shifted to using YOLO object detection. A custom YOLO model was trained on a dataset of 1000nds annotated VR video frames, significantly improving detection quality.
+- **Original Post**: For more details and discussions, check out the original post on EroScripts:  
+  [VR Funscript Generation Helper (Python + CV/AI)](https://discuss.eroscripts.com/t/vr-funscript-generation-helper-python-now-cv-ai/202554)
+
+### Pipeline Overview
+
+The pipeline for generating Funscript files is as follows:
+
+1. **YOLO Object Detection**: A YOLO model detects relevant objects (e.g., penis, hands, mouth, etc.) in each frame of the video. 
+2. **Tracking Algorithm**: A custom tracking algorithm processes the YOLO detection results to track the positions of objects over time. The algorithm calculates distances and interactions between objects to determine the Funscript positions.
+3. **Funscript Generation**: The tracked data is used to generate a raw Funscript file.
+4. **Simplifier**: The raw Funscript data is simplified to remove noise and smooth out the motion resulting in a final `.funscript` file.
+
+----
 
 ## Contributing
 
