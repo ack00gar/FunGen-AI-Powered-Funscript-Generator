@@ -128,14 +128,14 @@ PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_PATH = os.path.join(PROJECT_PATH, "output")
 MODELS_PATH = os.path.join(PROJECT_PATH, "models")
 MODEL_FILENAMES = [
-    "FunGen-12s-pov-1.0.0.engine",
-    "FunGen-12s-pov-1.0.0.pt",
-    "FunGen-12s-pov-1.0.0.mlpackage",
-    "FunGen-12s-pov-1.0.0.onnx",
-    "FunGen-12s-mix-1.0.0.engine",
-    "FunGen-12s-mix-1.0.0.mlpackage",
-    "FunGen-12s-mix-1.0.0.pt",
-    "FunGen-12s-mix-1.0.0.onnx",
+    "FunGen-12s-pov-1.1 .0.engine",
+    "FunGen-12s-pov-1.1.0.pt",
+    "FunGen-12s-pov-1.1.0.mlpackage",
+    "FunGen-12s-pov-1.1.0.onnx",
+    "FunGen-12s-mix-1.1.0.engine",
+    "FunGen-12s-mix-1.1.0.mlpackage",
+    "FunGen-12s-mix-1.1.0.pt",
+    "FunGen-12s-mix-1.1.0.onnx",
     "FunGen-11n-mix-1.0.0.engine",
     "FunGen-11n-mix-1.0.0.mlpackage",
     "FunGen-11n-mix-1.0.0.onnx",
