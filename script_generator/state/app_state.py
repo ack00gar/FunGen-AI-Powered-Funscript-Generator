@@ -108,7 +108,7 @@ class AppState:
             (self.video_path, f"{message_prefix} Please select a valid video file."),
             (self.ffprobe_path, f"{message_prefix} FFprobe is missing. Please provide the correct path."),
             (self.ffmpeg_path, f"{message_prefix} FFMPEG is missing. Please provide the correct path."),
-            (self.yolo_model, f"{message_prefix} YOLO model is not loaded. Please make sure to download the YOLO model to the models directory."),
+            (self.yolo_model_path, f"{message_prefix} YOLO model is not loaded. Please make sure to download the YOLO model to the models directory."),
         ]
 
         for path, error_message in checks:

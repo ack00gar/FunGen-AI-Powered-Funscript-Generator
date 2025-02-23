@@ -12,27 +12,42 @@ from script_generator.utils.msgpack_utils import save_msgpack_json, load_msgpack
 from script_generator.utils.version import version_is_less_than
 
 
+def find_model_by_extension(extension):
+    """Finds the first model that matches the given file extension."""
+    for filename in MODEL_FILENAMES:
+        if filename.endswith(extension):
+            return os.path.join(MODELS_PATH, filename)
+    return None
+
 def get_yolo_model_path():
-    yolo_models = [os.path.join(MODELS_PATH, filename) for filename in MODEL_FILENAMES]
-    # Check if the device is an Apple device
+    """Selects the appropriate YOLO model based on platform and hardware capabilities."""
     if is_mac():
-        log.info(f"Apple device detected, loading {yolo_models[0]} for MPS inference.")
-        return yolo_models[0]
+        model_path = find_model_by_extension(".mlpackage")
+        if model_path:
+            log.info(f"Apple device detected, loading {model_path} for MPS inference.")
+            return model_path
 
-    # Check if CUDA is available (for GPU support)
-    elif torch.cuda.is_available():
-        log.info(f"CUDA is available, loading {yolo_models[1]} for GPU inference.")
-        return yolo_models[1]
+    if torch.cuda.is_available():
+        model_path = find_model_by_extension(".engine")
+        if model_path:
+            log.info(f"CUDA is available, loading {model_path} for GPU inference.")
+            return model_path
 
-    # Fallback to ONNX model for other platforms without CUDA
-    else:
-        log.info("CUDA not available, if this is unexpected, please install CUDA and check your version of torch.")
-        log.info("You might need to install a dependency with the following command (example):")
-        log.info("pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118")
-        log.info(f"Falling back to CPU inference, loading {yolo_models[2]}.")
+        model_path = find_model_by_extension(".pt")
+        if model_path:
+            log.info(f"CUDA is available, loading {model_path} for GPU inference.")
+            return model_path
+
+    # Default to ONNX for CPU-based inference
+    model_path = find_model_by_extension(".onnx")
+    if model_path:
+        log.info("CUDA not available, falling back to ONNX model for CPU inference.")
         log.info("WARNING: CPU inference may be slow on some devices.")
+        return model_path
 
-        return yolo_models[2]
+    # Fallback in case no model is found
+    log.error("No suitable model found. Check your MODEL_FILENAMES list.")
+    return None
 
 def load_yolo_model(yolo_model_path):
     if not yolo_model_path or not os.path.exists(str(yolo_model_path)):
