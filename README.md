@@ -57,7 +57,6 @@ The pipeline for generating Funscript files is as follows:
 2. **Tracking Algorithm**: A custom tracking algorithm processes the YOLO detection results to track the positions of objects over time. The algorithm calculates distances and interactions between objects to determine the Funscript position.
 3. **Funscript Generation**: The tracked data is used to generate a raw Funscript file.
 4. **Simplifier**: The raw Funscript data is simplified to remove noise and smooth out the motion. The final `.funscript` file is saved.
-5. **Heatmap Generation**: A heatmap is generated to visualize the Funscript data.
 
 ---
 
@@ -122,10 +121,10 @@ We support multiple model formats across Windows, macOS, and Linux.
 In most cases, the app will automatically detect the best model from your models directory at launch, but if the right model wasn't present at this time or the right dependencies where not installed, you might need to override it under settings. The same applies when we release a new version of the model.
 
 
-### AMD GPU acceleration
+#### AMD GPU acceleration
 Coming soon
 
-**(Optional) Settings**
+### (Optional) Settings
 Find the settings menu in the app to configure optional option.
 
 ### Start script
@@ -207,11 +206,8 @@ a top of the line card like the 4090 is not required to get similar results. Hav
 
 - For VR only **Fisheye** and **Equirectangular** 180° videos are supported
 - 2D POV videos have limited support
-- 2D / VR is automatically detected for fisheye/equirectangular detection make sure you keep the file format information in the filename (\_FISHEYE190, \_MKX200, \_LR_180, etc.)
-
-### Configuration / User settings
-
-See config.py for customizations and user settings (will be replaced with a yaml soon).
+- 2D / VR is automatically detected for fisheye/equirectangular detection (make sure you keep the file format information in the filename _FISHEYE190, _MKX200, _LR_180, etc.)
+- 2D / VR settings can also be overwritten in the UI if the app doesn't detect it properly
 
 ---
 
@@ -220,13 +216,12 @@ See config.py for customizations and user settings (will be replaced with a yaml
 The script generates the following files in the output directory of you project folder:
 
 1. `_rawyolo.msgpack`: Raw YOLO detection data. Can be re-used when re-generating scripts
-2. `_cuts.msgpack`: Detected scene changes.
-3. `_rawfunscript.json`: Raw Funscript data. Can be re-used when re-generating script with different settings.
-4. `.funscript`: Final Funscript file.
-5. `_heatmap.png`: Heatmap visualization of the Funscript data.
-6. `_comparefunscripts.png`: Comparison visualization between the generated Funscript and the reference Funscript (if provided).
-7. `_adjusted.funscript`: Funscript file with adjusted amplitude.
-8. `_metrics.msgpack`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
+2. `_rawfunscript.json`: Raw Funscript data. Can be re-used when re-generating script with different settings.
+3. `.funscript`: Final Funscript file.
+4. `_heatmap.png`: Heatmap visualization of the Funscript data.
+5. `_comparefunscripts.png`: Comparison visualization between the generated Funscript and the reference Funscript (if provided).
+6. `_adjusted.funscript`: Funscript file with adjusted amplitude.
+7. `_metrics.msgpack`: Contains all the raw metrics collected and can be used to debug your video when processing is completed.
 
 ---
 
