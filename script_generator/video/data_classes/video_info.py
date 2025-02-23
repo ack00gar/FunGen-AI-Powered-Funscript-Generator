@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field, asdict, fields
+from datetime import timedelta
 
 from script_generator.constants import RENDER_RESOLUTION
 from script_generator.debug.errors import FFProbeError
@@ -34,6 +35,10 @@ class VideoInfo:
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=4)
 
+    def log_stats(self):
+        log_vid.info(
+            f"Video Info: codec: {self.codec_name}, dimensions: {self.width}x{self.height}, fps: {self.fps:.2f}, num frames: {self.total_frames}, duration: {str(timedelta(seconds=int(self.duration)))}, {self.bit_depth}-bit, is vr: {self.is_vr}, projection: {self.projection}, fov: {self.fov}, is_fisheye: {self.is_fisheye}")
+
     @classmethod
     def from_json(cls, json_str: str) -> "VideoInfo":
         data = json.loads(json_str)
@@ -41,7 +46,7 @@ class VideoInfo:
 
 
 def get_projection_and_fov_from_filename(filename):
-    filename = filename.replace("_FB360", "")
+    filename = filename.replace("_FB360", "") # 3D audio format
     projection = "LR_180"
     is_fisheye = False
     fov = 180
@@ -71,8 +76,8 @@ def get_projection_and_fov_from_filename(filename):
             projection = pattern["projection"]
             fov = pattern["fov"]
             is_fisheye = pattern["is_fisheye"]
+            is_vr = True
             break
-    log_vid.info(f"Video Format: Projection={projection}, FOV={fov}, is_fisheye={is_fisheye}")
 
     return {"projection": projection, "fov": fov, "is_fisheye": is_fisheye}
 
@@ -134,13 +139,6 @@ def get_video_info(video_path):
         # Check if the video is VR (2:1 aspect ratio)
         is_vr = height == width // 2
         size_bytes = os.path.getsize(video_path)
-
-        log_vid.info(f"Video Info: {codec_name}, {width}x{height}, {fps:.2f} fps, {nb_frames} frames, {duration:.2f} sec, {bit_depth}-bit, is vr: {is_vr}")
-
-        if is_vr:
-            log_vid.info("Video Format: VR SBS - Based on its 2:1 ratio")
-        else:
-            log_vid.info("Video Format: 2D - Based on its ratio")
 
         return VideoInfo(video_path, codec_name, width, height, duration, int(nb_frames), fps, bit_depth, is_vr, size_bytes)
 

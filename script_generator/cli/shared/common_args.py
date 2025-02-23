@@ -4,9 +4,11 @@ import os
 from script_generator.constants import VALID_VIDEO_READERS
 from script_generator.debug.logger import log
 from script_generator.state.app_state import AppState
+from ultralytics import settings
 
 # TODO this is a workaround and needs to be fixed properly
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+settings.update({"sync": False}) # Disable analytics and crash reporting
 
 def add_shared_generate_funscript_args(parser: argparse.ArgumentParser) -> None:
     """

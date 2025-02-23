@@ -1,11 +1,11 @@
-from script_generator.object_detection.util.data import get_raw_yolo_file_info, load_yolo_data
-from script_generator.scripts.analyze_video import analyze_video
-from script_generator.scripts.tracking_analysis import tracking_analysis
-from script_generator.state.app_state import AppState, log_state_settings
 from script_generator.debug.logger import log
+from script_generator.object_detection.util.data import load_yolo_data
+from script_generator.scripts.analyze_video import analyze_video
+from script_generator.state.app_state import AppState, log_state_settings
 from script_generator.utils.helpers import to_int_or_none
 
-def generate_funscript(state: AppState):
+
+def generate_funscript_cli(state: AppState):
     try:
         configured, msg = state.is_configured()
         if not configured:
@@ -23,8 +23,10 @@ def generate_funscript(state: AppState):
         # analyze video if required
         if not state.use_existing_raw_yolo or not exists:
             analyze_video(state)
+        else:
+            log.info("Skipping yolo analysis as it was already generated")
 
-        tracking_analysis(state)
+        generate_funscript(state)
     except Exception as e:
         log.error(f"Error during video analysis: {e}")
         import traceback

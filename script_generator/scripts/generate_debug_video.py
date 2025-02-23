@@ -34,7 +34,7 @@ def generate_debug_video(state: AppState, frame_start: int, frame_end: int):
 
         subprocess.run(ffmpeg_command)
 
-        os.remove(temp_video_path)
+        # os.remove(temp_video_path)
         log.info(f"Debug video generated and stored in: {debug_video_path}")
 
     thread = threading.Thread(target=run)

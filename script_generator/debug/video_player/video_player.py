@@ -1,5 +1,7 @@
 import cv2
+import numpy as np
 
+from script_generator.constants import FUNSCRIPT_BUFFER_SIZE
 from script_generator.state.app_state import AppState
 from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
 
@@ -13,12 +15,21 @@ class VideoPlayer:
         self.end_frame = state.video_info.total_frames if not end_frame else end_frame
         self.current_frame = 0
 
-        self.cap = VideoReaderFFmpeg(state, start_frame)
+        # for rolling funscripts
+        # self.funscript_graph = FunscriptGraph(state)
+
+        # a buffer to show outliers longer then 1 frame and slowly fade them out
+        self.outlier_buffer = []
+
+        self.reader = VideoReaderFFmpeg(state, start_frame)
         self.paused = False
 
+        if start_frame != 0:
+            self.set_frame(start_frame)
+
     def release(self):
-        if self.cap:
-            self.cap.release()
+        if self.reader:
+            self.reader.release()
 
     def set_frame(self, frame_id):
         if frame_id < 0:
@@ -27,10 +38,10 @@ class VideoPlayer:
             frame_id = self.total_frames - 1
 
         self.current_frame = frame_id
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+        self.reader.set_frame(self.current_frame)
 
     def read_frame(self):
-        ret, frame = self.cap.read()
+        ret, frame = self.reader.read()
         if ret and not self.paused:
             self.current_frame += 1
         return ret, frame

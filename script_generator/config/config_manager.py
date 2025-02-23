@@ -7,6 +7,7 @@ from script_generator.object_detection.util.data import get_yolo_model_path
 from script_generator.video.ffmpeg.hwaccel import get_preferred_hwaccel
 from script_generator.video.util.ffmpeg import get_ffmpeg_paths
 
+
 class ConfigManager:
     def __init__(self, app_state):
         self.app_state = app_state

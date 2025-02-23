@@ -9,18 +9,21 @@ from scipy.interpolate import interp1d
 
 from script_generator.debug.debug_data import load_debug_metrics
 from script_generator.debug.logger import log
-from script_generator.debug.video_player.controls import draw_media_controls
+from script_generator.debug.video_player.controls import draw_media_controls, draw_media_controls_static_overlay
 from script_generator.debug.video_player.debug_overlay import draw_overlay
 from script_generator.debug.video_player.interaction import mouse_callback
-from script_generator.debug.video_player.state import VideoPlayer
+from script_generator.debug.video_player.video_player import VideoPlayer
 from script_generator.funscript.util.util import load_funscript_json
 from script_generator.utils.file import get_output_file_path
 from script_generator.video.data_classes.video_info import get_cropped_dimensions
+from script_generator.debug.video_player.interaction import mouse_callback, handle_user_input
 
 
 def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=100, save_video_mode=False):
     video_info = state.video_info
-    _, metrics, _, _ = load_debug_metrics(state)
+    metrics_exist, metrics, metrics_path, _ = load_debug_metrics(state)
+    if not metrics_exist:
+        log.warn(f"Could not play debug video as metrics file was not found in: {metrics_path}")
     width, height = get_cropped_dimensions(video_info)
 
     video_player = VideoPlayer(
@@ -31,13 +34,14 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
 
     # Prepare funscript interpolation if available
     funscript_path, _ = get_output_file_path(state.video_path, ".funscript")
-    funscript_times, funscript_positions = load_funscript_json(funscript_path)
+    funscript_found = os.path.exists(funscript_path)
+    funscript_times, funscript_positions = load_funscript_json(funscript_path) if funscript_found else ([], [])
     funscript_interpolator = interp1d(
         funscript_times,
         funscript_positions,
         kind="linear",
         fill_value="extrapolate"
-    )
+    ) if funscript_found and len(funscript_times) > 0 and len(funscript_positions) > 0 else None
     funscript_interpolator_ref = None
     if state.reference_script and os.path.exists(state.reference_script):
         funscript_times_ref, funscript_positions_ref = load_funscript_json(state.reference_script)
@@ -69,15 +73,17 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         # zoom in the image is only 640x640 now
         cv2.resizeWindow(window_name, int(width * 2), int(height * 2))
+        media_controls_overlay = np.array([])
 
         # Attach mouse callback for seeking
-        cv2.setMouseCallback(window_name, mouse_callback, param=video_player)
+        cv2.setMouseCallback(window_name, mouse_callback, param=(state, video_player))
 
     last_frame = video_player.current_frame
 
     def get_ceiled_fps(value):
         try:
-            return math.ceil(float(value))
+            fps = math.ceil(float(value))
+            return 60 if fps == 0 else fps
         except (ValueError, TypeError):
             return 60
 
@@ -86,11 +92,22 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         loop_start_time = time.time()
 
         # Handle user input
-        if not save_video_mode and not handle_user_input(window_name, video_player):
+        if not save_video_mode and not handle_user_input(window_name, state, video_player, metrics):
             break
 
         if video_player.current_frame >= video_player.end_frame:
             break
+
+        if state.static_debug_frame:
+            static_frame = to_int_or_fallback(state.static_debug_frame, None)
+            if static_frame:
+                new_frame = static_frame
+                if new_frame == last_frame:
+                    time.sleep(0.01)
+                    continue
+                else:
+                    video_player.current_frame = new_frame
+                    video_player.set_frame(video_player.current_frame)
 
         # Check if paused and the frame hasn't changed (allows seeking while being paused)
         if video_player.paused and video_player.current_frame == last_frame:
@@ -111,6 +128,7 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
 
         # Call your overlay function
         distance_buffer, funscript_buffer, funscript_buffer_ref = draw_overlay(
+            state=state,
             frame=frame,
             frame_id=video_player.current_frame,
             logs=metrics,
@@ -128,6 +146,12 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         else:
             # Display the frame
             draw_media_controls(frame, video_player)
+
+            if not media_controls_overlay.any():
+                media_controls_overlay = draw_media_controls_static_overlay(metrics, frame)
+
+            frame = cv2.addWeighted(frame, 1.0, media_controls_overlay, 1.0, 0)
+
             cv2.imshow("Debug Video", frame)
 
             # Throttle the loop to maintain DESIRED_FPS if processing is faster
@@ -141,18 +165,3 @@ def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=1
         return temp_video_path
     else:
         cv2.destroyAllWindows()
-
-
-def handle_user_input(window_name, video_player):
-    key = cv2.waitKey(1) & 0xFF
-
-    # Check if the window has been closed
-    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
-        return False
-
-    if key == ord("q"):
-        return False
-    elif key == ord(" "):  # Toggle pause on space bar
-        video_player.paused = not video_player.paused
-
-    return True

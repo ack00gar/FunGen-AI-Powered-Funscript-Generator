@@ -11,8 +11,9 @@ from script_generator.gui.controller.regenerate_funscript import regenerate_funs
 from script_generator.gui.controller.stop_processing import stop_processing
 from script_generator.gui.messages.messages import UIMessage, ProgressMessage, UpdateGUIState
 from script_generator.gui.utils.utils import enable_widgets, disable_widgets, set_progressbars_done, reset_progressbars
-from script_generator.gui.utils.widgets import Widgets
+from script_generator.gui.utils.widgets import Widgets, LABEL_WIDTH
 from script_generator.gui.views.popups.create_debug_video import render_debug_video_popup
+from script_generator.gui.views.popups.edit_video_info import render_video_edit_popup
 from script_generator.object_detection.util.data import get_raw_yolo_file_info
 from script_generator.state.app_state import AppState
 
@@ -34,9 +35,15 @@ class FunscriptGeneratorPage(tk.Frame):
         # region VIDEO SELECTION
         video_selection = Widgets.frame(wrapper, title="Video", main_section=True)
 
+
         def update_video_path():
             state.set_video_info()
             update_ui_for_state()
+            fov = f", FOV {state.video_info.fov}" if state.video_info and state.video_info.is_vr else ""
+            new_label = f"VR: {state.video_info.is_vr}, Fisheye: {state.video_info.is_fisheye}{fov}" if state.video_info else ""
+            video_label.config(text=new_label)
+            video_info_btn.show(state.video_info)
+            ref_path.set(state.reference_script if state.reference_script else "")
 
         _, fs_entry, fs_button, _ = Widgets.file_selection(
             attr="video_path",
@@ -47,19 +54,15 @@ class FunscriptGeneratorPage(tk.Frame):
             file_types=[("Text Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")],
             state=state,
             tooltip_text="The video to generate a funscript for. For proper detection of fisheye keep the suffix like _FISHEYE190, _MKX200, etc. in the filename\n\nIn the future we'll add the option to override this in the UI.",
-            command=lambda val: update_video_path()
+            command=lambda val: update_video_path(),
+            pady=(0, 0)
         )
 
-        # _, _, reader_dropdown, _ = Widgets.dropdown(
-        #     attr="video_reader",
-        #     parent=video_selection,
-        #     label_text="Video Reader",
-        #     options=["FFmpeg", *([] if is_mac() else ["FFmpeg + OpenGL (Windows)"])],
-        #     default_value=state.video_reader,
-        #     tooltip_text=("On Mac only FFmpeg is supported" if is_mac() else "FFmpeg + OpenGL is usually about 30% faster on a good GPU."),
-        #     state=state,
-        #     row=1
-        # )
+        video_info_container = Widgets.frame(video_selection, row=1, padx=(0, 0), pady=(0, 5), min_height=35)
+        video_label = Widgets.label(video_info_container, "", None, align="left", padx=(LABEL_WIDTH + 17, 0), sticky="w", row=0)
+        video_info_btn = Widgets.button(video_info_container, "Edit", command=lambda: Widgets.create_popup(
+            title="Edit video settings", master=controller, width=350, height=120, content_builder=lambda window, user_action: render_video_edit_popup(window, state, update_video_path)),
+                                        tooltip_text="Override the default detected values", visible=False, default_style=True, padx=(0, 10), column=90, row=0)
         # endregion
 
         # # region OPTIONAL SETTINGS
@@ -205,10 +208,23 @@ class FunscriptGeneratorPage(tk.Frame):
             state=state,
             attr="max_preview_fps",
             row=1,
-            column=29,
+            column=28,
             label_width_px=45,
-            entry_width_px=10,
+            width=55,
             tooltip_text="The maximum FPS for the debug video"
+        )
+        _, _, debug_mode_dropdown, _ = Widgets.dropdown(
+            attr="debug_mode",
+            parent=general,
+            label_text="Mode",
+            options=["funscript", "detection"],
+            default_value=state.debug_mode,
+            tooltip_text="Change the debug metrics\nfunscript: Script overlay and funscript metrics\ndetection: Shows object detection boxes, confidence score and tracking id",
+            state=state,
+            label_width_px=33,
+            dropdown_width_px=80,
+            row=1,
+            column=29
         )
         play_btn = Widgets.button(
             general,
@@ -216,10 +232,10 @@ class FunscriptGeneratorPage(tk.Frame):
             lambda: debug_video(state),
             row=1,
             column=30,
-            tooltip_text="Opens a debug video player overlaid with debugging information (Press space to pause).\n\nThis overlay shows object detection boxes and a live funscript overlay,\namong other useful debugging information.\nCan only be triggered after the funscript generation process has completed.\nNeeds the 'Save debug information' option activated during processing."
+            tooltip_text="Opens a debug video player overlaid with debugging metrics (Press space to pause).\n\nThis overlay shows object detection boxes and a live funscript overlay,\namong other useful debugging information.\nCan only be triggered after the funscript generation process has completed.\nNeeds the 'Save debug metrics' option activated during processing."
         )
         script_compare = Widgets.frame(debugging, title="Script compare", row=1)
-        _, ref_entry, ref_button, _ = Widgets.file_selection(
+        _, ref_entry, ref_button, ref_path = Widgets.file_selection(
             attr="reference_script",
             parent=script_compare,
             label_text="Reference Script",
@@ -266,16 +282,16 @@ class FunscriptGeneratorPage(tk.Frame):
                 processing_btn.config(text="Start processing")
 
             if state.has_raw_yolo and state.has_tracking_data:
-                enable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
+                enable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, debug_mode_dropdown, gen_report_btn, gen_heatmap_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
                 processing_btn.config(text="Re-run object detection and or tracking")
             elif state.has_raw_yolo and not state.has_tracking_data:
-                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, debug_mode_dropdown, gen_report_btn, gen_heatmap_btn])
                 set_progressbars_done([(yolo_p, yolo_p_perc)])
                 reset_progressbars([(track_p, track_p_perc)])
                 processing_btn.config(text="Re-run object detection and or start tracking")
             else:
-                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, gen_report_btn, gen_heatmap_btn])
+                disable_widgets([play_btn, regenerate_btn, gen_video_btn, max_fps_e, debug_mode_dropdown, gen_report_btn, gen_heatmap_btn])
                 reset_progressbars([(yolo_p, yolo_p_perc), (track_p, track_p_perc)])
                 processing_btn.config(text="Start processing")
 

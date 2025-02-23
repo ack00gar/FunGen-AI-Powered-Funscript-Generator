@@ -1,4 +1,5 @@
 import json
+import orjson
 import os
 import time
 
@@ -22,7 +23,7 @@ def write_json_to_file(file_path, data):
 
         # Write the data to the file (overwrites if it exists)
     with open(file_path, 'w') as f:
-        json.dump(data, f)
+        orjson.dump(data, f)
     export_end = time.time()
     log.info(f"Done in {export_end - export_start} seconds.")
 

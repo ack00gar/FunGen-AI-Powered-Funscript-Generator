@@ -3,7 +3,7 @@ import platform
 
 import torch
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 OBJECT_DETECTION_VERSION = "1.0.0"
 TRACKING_VERSION = "0.1.0"
 FUNSCRIPT_VERSION = "0.1.0"
@@ -128,19 +128,48 @@ PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_PATH = os.path.join(PROJECT_PATH, "output")
 MODELS_PATH = os.path.join(PROJECT_PATH, "models")
 MODEL_FILENAMES = [
-    #    "k00gar-11n-200ep-best.mlpackage",
-    #    "k00gar-11n-200ep-best.pt",
-    #    "k00gar-11n-200ep-best.onnx",
+    "FunGen-12s-pov-1.0.0.engine",
+    "FunGen-12s-pov-1.0.0.pt",
+    "FunGen-12s-pov-1.0.0.mlpackage",
+    "FunGen-12s-pov-1.0.0.onnx",
+    "FunGen-12s-mix-1.0.0.engine",
+    "FunGen-12s-mix-1.0.0.mlpackage",
+    "FunGen-12s-mix-1.0.0.pt",
+    "FunGen-12s-mix-1.0.0.onnx",
+    "FunGen-11n-mix-1.0.0.engine",
+    "FunGen-11n-mix-1.0.0.mlpackage",
+    "FunGen-11n-mix-1.0.0.onnx",
+    "FunGen-11n-mix-1.0.0.pt",
+    "FunGen-11s-mix-1.0.0.engine",
+    "FunGen-11s-mix-1.0.0.mlpackage",
+    "FunGen-11s-mix-1.0.0.onnx",
+    "FunGen-11s-mix-1.0.0.pt",
     "k00gar-11n-RGB-200ep-best.mlpackage",
     "k00gar-11n-RGB-200ep-best.pt",
-    "k00gar-11n-RGB-200ep-best.onnx",
-    "yolo11n-pose.mlpackage",
-    "yolo11n-pose.pt",
-    "yolo11n-pose.onnx"
+    "k00gar-11n-RGB-200ep-best.onnx"
 ]
 LOGO = os.path.join(PROJECT_PATH, "resources", "logo.png")
 ICON = os.path.join(PROJECT_PATH, "resources", "icon.ico")
 CONFIG_FILE_PATH = os.path.join(PROJECT_PATH, "config.json")
+
+##################################################################################################
+# DEBUG VIDEO
+##################################################################################################
+
+FUNSCRIPT_BUFFER_SIZE = 500
+
+##################################################################################################
+# KEY CODES
+##################################################################################################
+
+LEFT = 2424832
+RIGHT = 2555904
+SPACE = 32
+Q = 113
+COMMA = 44
+PERIOD = 46
+LEFT_BRACKET = 91
+RIGHT_BRACKET = 93
 
 ##################################################################################################
 # DIV
