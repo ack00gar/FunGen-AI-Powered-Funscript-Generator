@@ -15,7 +15,7 @@ CONFIG_VERSION = 1
 
 RENDER_RESOLUTION = 640
 TEXTURE_RESOLUTION = RENDER_RESOLUTION * 1.3  # Texture size that is used to texture the opengl sphere
-YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" or not torch.cuda.is_available() else 30  # Mac doesn't support batching. Note TensorRT (.engine) is compiled for a batch size of 30
+YOLO_BATCH_SIZE = 1 if platform.system() == "Darwin" else 30  # Mac doesn't support batching. Note TensorRT (.engine) and .onnx is compiled for a batch size of 30
 YOLO_PERSIST = True  # Big impact on performance but also improves tracking
 
 ##################################################################################################
