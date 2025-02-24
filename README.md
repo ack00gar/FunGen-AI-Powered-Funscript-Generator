@@ -86,7 +86,7 @@ Find the settings menu in the app to configure optional option.
 
 ## Start script
 
-You can use Start windows.bat to launch the gui on windows if you installed with conda
+You can use Start windows.bat to launch the gui on windows.
 
 ---
 
