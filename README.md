@@ -55,9 +55,10 @@ python FSGenerator.py
 ```
 
 ### Download the YOLO model
-- Place the YOLO model file(s) in the `models/` sub-directory. If you aren't sure you can add all the models and let the app decide the best option for you.
+Go to our discord to download the latest YOLO model for free. When downloaded place the YOLO model file(s) in the `models/` sub-directory. If you aren't sure you can add all the models and let the app decide the best option for you.
 
 We support multiple model formats across Windows, macOS, and Linux.
+
 #### Recommendations
 - NVIDIA Cards: we recommend the .engine model
 - AMD Cards: we recommend .pt (requires ROCm see below)
