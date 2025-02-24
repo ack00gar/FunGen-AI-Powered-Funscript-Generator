@@ -27,11 +27,16 @@ Before using this project, ensure you have the following installed:
 ### Clone the repository
 
 ```bash
-git clone https://github.com/ack00gar/VR-Funscript-AI-Generator.git
-cd VR-Funscript-AI-Generator
+git clone https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGen
+cd FunGen
 ```
 
 ### Start a miniconda command prompt
+After installing Miniconda look for a program called "Anaconda prompt (miniconda3)"
+Then navigate to the root folder of the project for example on windows:
+```
+cd /d D:\path\to\fungenfolder
+```
 
 ### If your GPU supports CUDA (NVIDIA)
 
