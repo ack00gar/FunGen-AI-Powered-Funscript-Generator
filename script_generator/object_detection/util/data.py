@@ -3,7 +3,7 @@ import os
 import torch
 from ultralytics import YOLO
 
-from script_generator.constants import MODELS_PATH, MODEL_FILENAMES, OBJECT_DETECTION_VERSION
+from script_generator.constants import MODELS_PATH, MODEL_FILENAMES, OBJECT_DETECTION_VERSION, YOLO_BATCH_SIZE
 from script_generator.debug.logger import log
 from script_generator.utils.file import get_output_file_path
 from script_generator.utils.helpers import is_mac
@@ -49,7 +49,7 @@ def load_yolo_model(yolo_model_path):
             log.warn("The YOLO model is missing. Please download and place the appropriate YOLO model in the models directory.")
         return None
 
-    log.info(f"Loading YOLO model: {yolo_model_path}")
+    log.info(f"Loading YOLO model, batch size: {YOLO_BATCH_SIZE}, model path {yolo_model_path}")
     return YOLO(yolo_model_path, task="detect")
 
 
