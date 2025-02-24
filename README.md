@@ -92,7 +92,10 @@ You can use Start windows.bat to launch the gui on windows.
 
 # Command Line Usage
 
-To generate a single script with cmd or terminal, run the following command
+FunGen supports a GUI for all it's features but we also provide command line usage for those who prefer this. 
+Below are some examples on how to generate script with the command line:
+
+**To generate a single script with cmd or terminal, run the following command**
 
 ```bash
 python -m script_generator.cli.generate_funscript_single /path/to/video.mp4
@@ -100,7 +103,7 @@ python -m script_generator.cli.generate_funscript_single /path/to/video.mp4
 
 See examples/windows/Process single video.bat for an example
 
-To generate scripts for all files in a folder use
+**To generate scripts for all files in a folder use**
 
 ```bash
 python -m script_generator.cli.generate_funscript_folder /path/to/folder
