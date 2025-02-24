@@ -33,9 +33,9 @@ cd FunGen
 
 ### Start a miniconda command prompt
 After installing Miniconda look for a program called "Anaconda prompt (miniconda3)"
-Then navigate to the root folder of the project for example on windows:
+Then navigate to the root folder of the project for example on windows (correct the path):
 ```
-cd /d D:\path\to\fungenfolder
+cd /d C:\path\to\fungenfolder
 ```
 
 ### If your GPU supports CUDA (NVIDIA)
