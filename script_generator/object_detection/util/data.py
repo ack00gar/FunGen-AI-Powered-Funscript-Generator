@@ -49,7 +49,7 @@ def load_yolo_model(yolo_model_path):
             log.warn("The YOLO model is missing. Please download and place the appropriate YOLO model in the models directory.")
         return None
 
-    log.info(f"Loading YOLO model, batch size: {YOLO_BATCH_SIZE}, model path {yolo_model_path}")
+    log.info(f"Loading YOLO model: {yolo_model_path}")
     return YOLO(yolo_model_path, task="detect")
 
 
