@@ -1,5 +1,6 @@
 import ctypes
 import os
+import platform
 import tkinter as tk
 from ultralytics import settings
 
@@ -29,7 +30,8 @@ class App(tk.Tk):
         self.geometry('780x1000' if is_mac() else '708x975')
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))
-        self.iconbitmap(ICON)
+        if platform.system() == "Windows":
+            self.iconbitmap(ICON) # Ensure icon works for Windows and is skipped on Linux
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
