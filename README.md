@@ -20,7 +20,7 @@ Before using this project, ensure you have the following installed:
 
 - **Python 3.8 or higher (tested on 3.11 https://www.python.org/downloads/release/python-3118/)**
 - **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
-- **Miniconda** (https://docs.anaconda.com/miniconda/install/)
+- **Miniconda** (https://www.anaconda.com/docs/getting-started/miniconda/install)
 
 # Installation
 
