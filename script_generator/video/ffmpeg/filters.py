@@ -54,14 +54,17 @@ def get_2d_video_filters(video, width, height):
         else:
             return f"[0:v]scale={width}:{height}"
 
-    # in landscape, we crop to the center
-    else:
-        if video.height > RENDER_RESOLUTION:
-            scale_width = int(video.width * (height / video.height))
-            crop = f",crop={width}:{height}:(iw-{width})/2:0"
-            if supports_scale_cuda(state):
-                return f"[0:v]scale_cuda={scale_width}:{height},hwdownload,format=nv12{crop}"
-            else:
-                return f"[0:v]scale={scale_width}:{height}{crop}"
+    if video.width > video.height:
+        new_width = 640
+        new_height = int((video.height / video.width) * new_width)
+
+        if supports_scale_cuda(state):
+            scale_filter = f"scale_cuda={new_width}:{new_height},hwdownload,format=nv12"
         else:
-            return "[0:v]hwdownload,format=nv12" if cuda else ""
+            scale_filter = f"scale={new_width}:{new_height}"
+
+        if new_height < 640:
+            pad_y = (640 - new_height) // 2
+            return f"[0:v]{scale_filter},pad=640:640:0:{pad_y}:black"
+        else:
+            return f"[0:v]{scale_filter}"
