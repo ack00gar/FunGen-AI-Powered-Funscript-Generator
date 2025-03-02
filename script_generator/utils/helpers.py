@@ -5,6 +5,9 @@ from functools import reduce
 def is_mac():
     return platform.system() == "Darwin"
 
+def is_windows():
+    return platform.system() == "Windows"
+
 def to_int_or_none(value):
     try:
         return int(value)
