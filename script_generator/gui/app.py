@@ -11,7 +11,7 @@ from script_generator.gui.views.help import HelpPage
 from script_generator.gui.views.help_debug_video import HelpDebugVideoPage
 from script_generator.gui.views.settings import SettingsPage
 from script_generator.state.app_state import AppState
-from script_generator.utils.helpers import is_mac
+from script_generator.utils.helpers import is_mac, is_windows
 from script_generator.debug.logger import log
 from script_generator.constants import VERSION
 
@@ -30,8 +30,8 @@ class App(tk.Tk):
         self.geometry('780x1000' if is_mac() else '708x975')
 
         self.iconphoto(False, tk.PhotoImage(file=LOGO))
-        if platform.system() == "Windows":
-            self.iconbitmap(ICON) # Ensure icon works for Windows and is skipped on Linux
+        if is_windows() or is_mac():
+            self.iconbitmap(ICON) # Ensure icon works for Windows and mac but is skipped on Linux
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
