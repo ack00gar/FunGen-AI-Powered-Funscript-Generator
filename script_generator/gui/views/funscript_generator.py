@@ -175,7 +175,7 @@ class FunscriptGeneratorPage(tk.Frame):
             label_text="Rounding",
             state=self.state,
             attr='rounding',
-            values=[5, 10],
+            values=[1, 5, 10],
             row=2,
             tooltip_text="Rounding factor for values"
         )

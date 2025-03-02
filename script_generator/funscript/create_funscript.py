@@ -91,7 +91,7 @@ def create_funscript(state):
             log_fun.info("Skipping positions adjustment - step 5 (amplitude boosting)")
 
         # Round position values to the closest multiple of 5, still between 0 and 100
-        if state.vw_simplification_enabled:
+        if state.vw_simplification_enabled and state.rounding != 1:
             log_fun.info(
                 f"Positions adjustment - step 6 (rounding to the closest multiple of {state.rounding})")
             adjusted_positions = [round(p / state.rounding) * state.rounding for p in
@@ -99,7 +99,7 @@ def create_funscript(state):
 
         else:
             log_fun.info(
-                f"Skipping positions adjustment - step 6 (rounding to the closest multiple of {state.rounding})")
+                f"Skipping positions adjustment - step 6 (rounding)")
 
         # Recombine timestamps and adjusted positions
         log_fun.info("Re-assembling ats and positions")
