@@ -433,8 +433,9 @@ class Widgets:
     def disclaimer(parent, tooltip_text=None):
         footer_label = ttk.Label(
             parent,
-            text="Individual and personal use only.\nNot for commercial use.\nhttps://github.com/ack00gar",
-            font=("Arial", 10, "italic", "bold"), justify="center"
+            # text="Individual and personal use only.\nNot for commercial use.\nhttps://github.com/ack00gar",
+            text="Individual and personal use only. Not for commercial use.",
+            font=("Arial", 10), justify="center"
         )
         footer_label.grid(row=8, column=0, columnspan=100, padx=5, pady=(10, 20), sticky="s")
 

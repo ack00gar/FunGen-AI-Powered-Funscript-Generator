@@ -6,6 +6,7 @@ from script_generator.constants import LEFT, RIGHT, SPACE, Q, COMMA, PERIOD, LEF
 from script_generator.debug.logger import log
 from script_generator.gui.messages.messages import UpdateGUIState
 from script_generator.video.data_classes.video_info import get_cropped_dimensions
+from script_generator.constants import GAUGE_HEIGHT, GAUGE_WIDTH
 
 if TYPE_CHECKING:
     from script_generator.state.app_state import AppState
@@ -39,6 +40,12 @@ def mouse_callback(event, x, y, flags, params: Tuple["AppState", "VideoPlayer"])
             target_frame = int((x / width) * video_player.total_frames)
             video_player.set_frame(target_frame)
             log.info(f"Seek to frame: {target_frame}")
+
+    elif event == cv2.EVENT_RBUTTONDOWN:
+        width, height = get_cropped_dimensions(video_info)
+        new_x = max(0, min(x, width - GAUGE_WIDTH))
+        new_y = max(0, min(y, height) - GAUGE_HEIGHT)
+        video_player.gauge_position = new_x, new_y
 
 
 def handle_user_input(window_name, state: "AppState", video_player: "VideoPlayer", metrics):
