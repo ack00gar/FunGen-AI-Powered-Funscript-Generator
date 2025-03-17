@@ -81,7 +81,7 @@ CLASS_PRIORITY_ORDER = {
 }
 CLASS_NAMES = {
     'face': 0,
-    'hand': 1, 'left hand': 1, 'right hand': 1,
+    'hand': 1,  # 'left hand': 1, 'right hand': 1,
     'penis': 2,
     'glans': 3,
     'pussy': 4,
@@ -157,6 +157,8 @@ CONFIG_FILE_PATH = os.path.join(PROJECT_PATH, "config.json")
 ##################################################################################################
 
 FUNSCRIPT_BUFFER_SIZE = 500
+
+GAUGE_WIDTH, GAUGE_HEIGHT = 12, 100
 
 ##################################################################################################
 # KEY CODES
