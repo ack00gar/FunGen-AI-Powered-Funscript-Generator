@@ -3,6 +3,7 @@ import numpy as np
 
 from script_generator.constants import CLASS_COLORS
 from script_generator.debug.video_player.overlay_widgets import OverlayWidgets
+from script_generator.debug.video_player.video_player import VideoPlayer
 from script_generator.state.app_state import AppState
 
 
@@ -17,6 +18,7 @@ FONT_SIZE = 0.3
 
 def draw_overlay(
     state: "AppState",
+    video_player: VideoPlayer,
     frame,
     frame_id,
     logs,
@@ -128,7 +130,7 @@ def draw_overlay(
     graph_y_start = frame.shape[0] - graph_height - 15  # B, G, R | R, G, B
     if state.debug_mode == "funscript":
         # Draw gauge (example usage)
-        OverlayWidgets.draw_gauge(frame, funscript_value)
+        OverlayWidgets.draw_gauge(frame, funscript_value, *video_player.gauge_position)
 
         draw_rolling_window_curve(frame, distance_buffer, (0, 255, 0), 0.5, graph_height, graph_y_start)
         draw_rolling_window_curve(frame, funscript_buffer, (255, 0, 0), 0.5, graph_height, graph_y_start)

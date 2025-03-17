@@ -62,13 +62,13 @@ class AppState:
 
         # Gui/settings Funscript Tweaking Variables
         self.boost_enabled: bool = True
-        self.boost_up_percent: int = 10
+        self.boost_up_percent: int = 15
         self.boost_down_percent: int = 15
         self.threshold_enabled: bool = True
         self.threshold_low: int = 10
         self.threshold_high: int = 90
         self.vw_simplification_enabled: bool = True
-        self.vw_factor: float = 8.0
+        self.vw_factor: float = 4.0
         self.rounding: int = 5
 
         # TODO remove when swtiched to tracking logic v2

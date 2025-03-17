@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
 
-from script_generator.constants import FUNSCRIPT_BUFFER_SIZE
+from script_generator.constants import FUNSCRIPT_BUFFER_SIZE, GAUGE_WIDTH, GAUGE_HEIGHT
 from script_generator.state.app_state import AppState
+from script_generator.video.data_classes.video_info import get_cropped_dimensions
 from script_generator.video.ffmpeg.video_reader import VideoReaderFFmpeg
 
 
@@ -17,6 +18,10 @@ class VideoPlayer:
 
         # for rolling funscripts
         # self.funscript_graph = FunscriptGraph(state)
+
+        # gauge position
+        width, height = get_cropped_dimensions(self.video_info)
+        self.gauge_position = (width - GAUGE_WIDTH), (height - GAUGE_HEIGHT)
 
         # a buffer to show outliers longer then 1 frame and slowly fade them out
         self.outlier_buffer = []
