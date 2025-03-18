@@ -40,6 +40,11 @@ HW_TEST_CMDS = {
         "-pix_fmt", "yuv420p",
         "-c:v", "h264_videotoolbox",
         "-f", "null", "-"
+    ],
+    "vulkan": [
+        "-init_hw_device", "vulkan",
+        "-f", "lavfi", "-i", "testsrc=size=256x256:duration=0.1:rate=1",
+        "-f", "null", "-"
     ]
 }
 
@@ -81,7 +86,7 @@ def _test_hwaccel(ffmpeg_path, hw):
 
 def get_preferred_hwaccel(ffmpeg_path):
     supported = _list_ffmpeg_hwaccels(ffmpeg_path)
-    for hw in ["cuda", "vaapi", "amf", "videotoolbox", "qsv", "d3d11va"]:
+    for hw in ["cuda", "vaapi", "amf", "videotoolbox", "qsv", "d3d11va", "vulkan"]:
         if hw in supported and _test_hwaccel(ffmpeg_path, hw):
             log_vid.info(f"Setting preferred FFmpeg hardware acceleration to: {hw}")
             return hw
@@ -105,6 +110,8 @@ def get_hwaccel_read_args(state):
         return ["-hwaccel", "qsv"]
     if hwaccel == "d3d11va":
         return ["-hwaccel", "d3d11va"]
+    if hwaccel == "vulkan":
+        return ["-hwaccel", "vulkan"]
     return []
 
 
@@ -155,4 +162,3 @@ def supports_scale_cuda(state: "AppState"):
 
 def supports_scale_npp(state: "AppState"):
     return _supports_scale_acceleration(state) and scale_npp
-
