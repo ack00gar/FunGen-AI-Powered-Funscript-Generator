@@ -94,12 +94,14 @@ class SettingsPage(tk.Frame):
             row=1
         )
 
-        Widgets.input(
+        Widgets.dropdown(
             attr="ffmpeg_hwaccel",
             parent=ffmpeg_settings,
             label_text="Hardware acceleration",
-            state=self.state,
+            options=["None", "cuda", "vaapi", "amf", "qsv", "d3d11va", "videotoolbox", "vulkan"],
+            default_value=self.state.ffmpeg_hwaccel,
             tooltip_text="Used hardware acceleration. Can be overwritten here or set to None to disable it when your\nexperiencing issues. However if you do, please let us know so we can better\nsupport you in the future.",
+            state=self.state,
             command=lambda val: c.save(),
             row=2
         )
