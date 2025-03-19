@@ -16,6 +16,7 @@ from script_generator.gui.views.popups.create_debug_video import render_debug_vi
 from script_generator.gui.views.popups.edit_video_info import render_video_edit_popup
 from script_generator.object_detection.util.data import get_raw_yolo_file_info
 from script_generator.state.app_state import AppState
+import os
 
 
 class FunscriptGeneratorPage(tk.Frame):
@@ -55,7 +56,8 @@ class FunscriptGeneratorPage(tk.Frame):
             state=state,
             tooltip_text="The video to generate a funscript for. For proper detection of fisheye keep the suffix like _FISHEYE190, _MKX200, etc. in the filename\n\nIn the future we'll add the option to override this in the UI.",
             command=lambda val: update_video_path(),
-            pady=(0, 0)
+            pady=(0, 0),
+            initial_dir=os.path.dirname(str(state.video_path)) if state.video_path else None
         )
 
         video_info_container = Widgets.frame(video_selection, row=1, padx=(0, 0), pady=(0, 5), min_height=35)
@@ -244,7 +246,8 @@ class FunscriptGeneratorPage(tk.Frame):
             file_types=[("Funscript Files", "*.funscript"), ("All Files", "*.*")],
             tooltip_text="If provided the reference script will be compared in the\nfunscript report that is generated on completion and be shown\nin the live display funscript overlay when enabled.",
             state=state,
-            row=0
+            row=0,
+            initial_dir=os.path.dirname(str(state.reference_script)) if state.reference_script else None
         )
         debug_video_section = Widgets.frame(debugging, title="Share debug files", row=2)
         gen_video_btn = Widgets.button(
