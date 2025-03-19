@@ -172,7 +172,7 @@ class Widgets:
         return button
 
     @staticmethod
-    def file_selection(parent, label_text, button_text, file_selector_title, file_types, state, attr, command=None, row=0, label_width_px=150, button_width_px=100, tooltip_text=None, select_folder=False, **grid_kwargs):
+    def file_selection(parent, label_text, button_text, file_selector_title, file_types, state, attr, command=None, row=0, label_width_px=150, button_width_px=100, tooltip_text=None, select_folder=False, initial_dir=None, **grid_kwargs):
         grid_kwargs.setdefault("pady", 5)
         grid_kwargs.setdefault("padx", 5)
         grid_kwargs.setdefault("sticky","nsew")
@@ -208,10 +208,29 @@ class Widgets:
         button_container.grid(row=0, column=2, sticky="e", padx=(2, 5))
         button_container.grid_propagate(False)  # Prevent resizing
         def browse():
+            current_path = getattr(state, attr, "")
+            initial_directory = initial_dir
+
+            if initial_directory is None and current_path and os.path.exists(current_path):
+                initial_directory = os.path.dirname(current_path)
+
+            if initial_directory is None or not os.path.exists(initial_directory):
+                initial_directory = os.path.abspath(os.path.dirname(__file__))
+                # I don't know a better way to do this, I've set it to go back to the project root if know previous path exists.
+                for _ in range(3):
+                    initial_directory = os.path.dirname(initial_directory)
+
             if select_folder:
-                selected_path = filedialog.askdirectory(title=file_selector_title)
+                selected_path = filedialog.askdirectory(
+                    title=file_selector_title,
+                    initialdir=initial_directory
+                )
             else:
-                selected_path = filedialog.askopenfilename(title=file_selector_title, filetypes=file_types)
+                selected_path = filedialog.askopenfilename(
+                    title=file_selector_title,
+                    filetypes=file_types,
+                    initialdir=initial_directory
+                )
             if selected_path:
                 file_path.set(selected_path)
                 setattr(state, attr, selected_path)
