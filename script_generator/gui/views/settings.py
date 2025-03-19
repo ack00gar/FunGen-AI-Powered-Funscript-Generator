@@ -3,6 +3,7 @@ import tkinter as tk
 from script_generator.debug.logger import set_log_level
 from script_generator.gui.utils.widgets import Widgets
 from script_generator.state.app_state import AppState
+import os
 
 
 class SettingsPage(tk.Frame):
@@ -25,7 +26,6 @@ class SettingsPage(tk.Frame):
             command=lambda val: c.save(),
             row=0
         )
-
         Widgets.file_selection(
             attr="funscript_output_dir",
             parent=general_settings,
@@ -37,7 +37,8 @@ class SettingsPage(tk.Frame):
             tooltip_text="Set an optional output folder where the final funscript will be copied to.",
             command=lambda val: c.save(),
             select_folder=True,
-            row=1
+            row=1,
+            initial_dir=self.state.funscript_output_dir if self.state.funscript_output_dir and os.path.exists(self.state.funscript_output_dir) else None
         )
 
         Widgets.checkbox(
@@ -63,7 +64,8 @@ class SettingsPage(tk.Frame):
             state=self.state,
             tooltip_text="Path to the YOLO model file.",
             command=lambda val: c.save(),
-            row=0
+            row=0,
+            initial_dir=os.path.dirname(self.state.yolo_model_path) if self.state.yolo_model_path else None
         )
 
         ffmpeg_settings = Widgets.frame(self, title="FFmpeg", main_section=True, row=2)
@@ -78,7 +80,8 @@ class SettingsPage(tk.Frame):
             state=self.state,
             tooltip_text="Path to the FFmpeg executable.",
             command=lambda val: c.save(),
-            row=0
+            row=0,
+            initial_dir=os.path.dirname(self.state.ffmpeg_path) if self.state.ffmpeg_path else None
         )
 
         Widgets.file_selection(
@@ -91,7 +94,8 @@ class SettingsPage(tk.Frame):
             state=self.state,
             tooltip_text="Path to the FFprobe executable.",
             command=lambda val: c.save(),
-            row=1
+            row=1,
+            initial_dir=os.path.dirname(self.state.ffprobe_path) if self.state.ffprobe_path else None
         )
 
         Widgets.dropdown(
