@@ -22,6 +22,9 @@ Before using this project, ensure you have the following installed:
 - **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
 - **Miniconda** (https://www.anaconda.com/docs/getting-started/miniconda/install)
 
+Easy install of Miniconda for Windows users:
+Click Start, type "cmd", right click on Command Prompt, and select "Run as administrator." Enter "winget install -e --id Anaconda.Miniconda3" and press enter. Miniconda should then download and install.
+
 # Installation
 
 ### Clone the repository
