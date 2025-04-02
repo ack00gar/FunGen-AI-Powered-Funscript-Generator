@@ -6,7 +6,7 @@ import torch
 VERSION = "0.3.0"
 OBJECT_DETECTION_VERSION = "1.0.0"
 TRACKING_VERSION = "0.1.0"
-FUNSCRIPT_VERSION = "0.1.0"
+FUNSCRIPT_VERSION = "0.1.1"
 CONFIG_VERSION = 1
 
 ##################################################################################################
@@ -168,6 +168,7 @@ LEFT = 2424832
 RIGHT = 2555904
 SPACE = 32
 Q = 113
+ESC = 27
 COMMA = 44
 PERIOD = 46
 LEFT_BRACKET = 91

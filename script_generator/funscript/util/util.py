@@ -67,14 +67,42 @@ def load_funscript(funscript_path):
     return times, positions, relevant_chapters_export, irrelevant_chapters_export
 
 # TODO replace with proper JSON serialization
-def write_funscript(distances, output_path, fps):
-    with open(output_path, 'w') as f:
-        f.write(f'{{"version":"{FUNSCRIPT_VERSION}","inverted":false,"range":100,"author":"{FUNSCRIPT_AUTHOR}","actions":[{{"at":0,"pos":100}},')
+def write_funscript(distances, output_path, fps, timestamps = None):
+    chapters = ""
+    # Iterate through the chapters to form this format : "chapters":[{"endTime":"00:08:26.200","name":"BJ1","startTime":"00:06:04.466"},{"endTime":"00:15:14.699","name":"BJ2","startTime":"00:09:13.733"}]
+    if timestamps:
         i = 0
-        for frame, position in distances:
+        len_t = len(timestamps)
+        chapters = ',"chapters":['
+        for timestamp in timestamps:
+            chapters += f'{{"startTime":"{timestamp[2]}","endTime":"{timestamp[3]}","name":"{timestamp[4]}"}}'
+            chapters += "," if i < len_t - 1 else ""
+            i += 1
+        chapters += "]"
+
+    output = f'{{"version":"{FUNSCRIPT_VERSION}","inverted":false,"range":100,"author":"{FUNSCRIPT_AUTHOR}"{chapters},"actions":[{{"at":0,"pos":100}},'
+    i = 0
+    for frame, position in distances:
+        if position :
             time_ms = int(frame * 1000 / fps)
             if i > 0:
-                f.write(",")
-            f.write(f'{{"at":{time_ms},"pos":{int(position)}}}')
+                output += ","
+            output += f'{{"at":{time_ms},"pos":{int(position)}}}'
             i += 1
-        f.write("]}")
+    output += "]}"
+
+    with open(output_path, 'w') as f:
+        f.write(output)
+
+
+    # with open(output_path, 'w') as f:
+    #     f.write(f'{{"version":"{FUNSCRIPT_VERSION}","inverted":false,"range":100,"author":"{FUNSCRIPT_AUTHOR}","actions":[{{"at":0,"pos":100}},')
+    #     i = 0
+    #     for frame, position in distances:
+    #         if position :
+    #             time_ms = int(frame * 1000 / fps)
+    #             if i > 0:
+    #                 f.write(",")
+    #             f.write(f'{{"at":{time_ms},"pos":{int(position)}}}')
+    #             i += 1
+    #     f.write("]}")

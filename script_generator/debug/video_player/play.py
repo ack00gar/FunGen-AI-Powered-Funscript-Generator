@@ -19,7 +19,7 @@ from script_generator.video.data_classes.video_info import get_cropped_dimension
 from script_generator.debug.video_player.interaction import mouse_callback, handle_user_input
 
 
-def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=100, save_video_mode=False):
+def play_debug_video(state, start_frame=0, end_frame=None, rolling_window_size=300, save_video_mode=False):
     video_info = state.video_info
     metrics_exist, metrics, metrics_path, _ = load_debug_metrics(state)
     if not metrics_exist:

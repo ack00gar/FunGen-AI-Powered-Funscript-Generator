@@ -1,9 +1,10 @@
 import math
-from collections import deque
+from collections import deque, Counter
 import numpy as np
 
 from script_generator.constants import CLASS_NAMES
 from script_generator.debug.logger import log_tr
+from utils.lib_KalmanFilter import KalmanFilter_distance
 
 
 class LockedPenisBox:
@@ -80,8 +81,9 @@ class ObjectTracker:
             global_state
         """
         self.state = state
+        self.frame_end = state.video_info.total_frames
         self.class_names = CLASS_NAMES  # List of class names to track
-        # self.distance_kf = KF.KalmanFilter()  # Kalman filter for distance smoothing
+        self.distance_kf = KalmanFilter_distance()  # Kalman filter for distance smoothing
 
         self.frame = None  # Current video frame
         self.current_frame_id = state.current_frame_id  # frame_pos  # Current frame ID
@@ -107,8 +109,11 @@ class ObjectTracker:
         # Sex position tracking
         self.sex_position = "Not relevant"  # Current sex position
         self.sex_position_reason = ""  # Reason for the current sex position
-        max_history = int(self.fps) * 10  # Maximum history for sex position tracking
+        max_history = int(self.fps) * 4  # Maximum history for sex position tracking
         self.sex_position_history = deque(maxlen=max_history)  # History of sex positions
+        self.last_sex_position_change_index = 0
+        self.sex_position_segments = [[0, 0, "Not relevant", "Initial segment"]]  # List of position segments
+        self.segment_cache = {}  # Cache for segment-specific calculations
 
         # Position and distance tracking
         self.tracked_positions = {}  # Tracked positions for each track_id
@@ -141,28 +146,14 @@ class ObjectTracker:
             int: Filtered distance.
         """
         if raw_distance is None:
-            # Predict distance using exponential moving average (EMA)
-            filtered_distance = (
-                0.1 * self.previous_distances[-3]
-                + 0.2 * self.previous_distances[-2]
-                + 0.7 * self.previous_distances[-1]
-            )
+            # Predict distance using Kalman filter
+            filtered_distance = self.distance_kf.predict()
         else:
-            # Apply EMA to raw distance
-            ema_distance = (
-                0.1 * self.previous_distances[-2]
-                + 0.2 * self.previous_distances[-1]
-                + 0.7 * raw_distance
-            )
-
-            # Limit speed of distance change
-            if abs(self.distance - ema_distance) > self.max_speed:
-                ema_distance = self.distance + np.sign(ema_distance - self.distance) * self.max_speed
-
-            filtered_distance = ema_distance
+            self.distance_kf.update(raw_distance)
+            filtered_distance = raw_distance
 
         # Ensure distance is within bounds (0-100)
-        filtered_distance = int(max(0, min(100, filtered_distance)))
+        # filtered_distance = int(max(0, min(100, filtered_distance)))
         self.distance = filtered_distance
 
         # Update previous distances
@@ -263,23 +254,82 @@ class ObjectTracker:
         y_pos = (oy1 + 2 * oy2) // 3
         x_pos = (ox1 + ox2) // 2
         px1, py1, px2, py2 = penis_box
-        return math.sqrt((x_pos - px2) ** 2 + (y_pos - py2) ** 2)
+        return math.sqrt((x_pos - ((px1 + px2) // 2)) ** 2 + (y_pos - py2) ** 2)
 
     def detect_sex_position_change(self, sex_position, reason):
         """
-        Detect and log changes in the sex position.
+        Detect and update the current sex position based on history.
 
         Args:
-            sex_position (str): New sex position.
-            reason (str): Reason for the change.
+            sex_position (str): The new sex position.
+            reason (str): The reason for the change.
         """
         self.sex_position_history.append(sex_position)
-        position_counts = {position: self.sex_position_history.count(position) for position in self.sex_position_history}
-        most_frequent_position = max(position_counts, key=position_counts.get, default="Not relevant")
+
+        if sex_position == self.sex_position:
+            return  # No change, exit early
+
+        # Use Counter to efficiently count positions
+        position_counts = Counter(self.sex_position_history)
+        most_frequent_position = position_counts.most_common(1)[0][0]
+
         if most_frequent_position != self.sex_position:
             log_tr.debug(f"@{self.current_frame_id} - Sex position switched to: {most_frequent_position}")
             self.sex_position = most_frequent_position
             self.sex_position_reason = reason
+
+            # Find the last change
+            self.last_sex_position_change_index = next(
+                (i for i, pos in enumerate(reversed(self.sex_position_history)) if pos != most_frequent_position),
+                len(self.sex_position_history))
+            if len(self.sex_position_segments) > 0:
+                self.sex_position_segments[-1][1] = self.current_frame_id - self.last_sex_position_change_index
+            self.sex_position_segments.append(
+                [self.current_frame_id - self.last_sex_position_change_index + 1, self.frame_end, self.sex_position, self.sex_position_reason])
+
+    def clean_and_merge_segments(self, min_duration=15):
+        """
+        Remove short segments and merge adjacent segments of the same position.
+
+        Args:
+            min_duration (int): Minimum duration (in frames) for a segment to be kept.
+        """
+        if len(self.sex_position_segments) < 2:
+            return  # Not enough segments to process
+
+        merged_segments = []
+        i = 0
+        min_duration = min_duration * self.fps
+
+        while i < len(self.sex_position_segments):
+            start, end, position, reason = self.sex_position_segments[i]
+            duration = end - start
+
+            # If this is a short segment and surrounded by the same position
+            if duration < min_duration and 0 < i < len(self.sex_position_segments) - 1:
+                prev_start, prev_end, prev_position, _ = self.sex_position_segments[i - 1]
+                next_start, next_end, next_position, next_reason = self.sex_position_segments[i + 1]
+
+                if prev_position == next_position:
+                    log_tr.debug(f"Merging short segment @{start}-{end} into surrounding {prev_position}.")
+                    # Extend previous segment to include the short one and next segment
+                    merged_segments[-1][1] = next_end  # Merge with next segment
+                    i += 1  # Skip next segment as it's merged
+                else:
+                    log_tr.debug(f"Merging short segment @{start}-{end} into previous {prev_position}.")
+                    merged_segments[-1][1] = end  # Merge with previous segment
+
+            else:
+                # Merge with the last segment if positions match
+                if merged_segments and merged_segments[-1][2] == position:
+                    log_tr.debug(f"Merging consecutive segment @{start}-{end} into previous {position}.")
+                    merged_segments[-1][1] = end  # Extend previous segment
+                else:
+                    merged_segments.append([start, end, position, reason])
+
+            i += 1
+
+        self.sex_position_segments = merged_segments
 
     def tracking_logic(self, state, sorted_boxes):
         """
@@ -569,20 +619,6 @@ class ObjectTracker:
                     if self.locked_penis_box.is_active():
                         if current_height > self.locked_penis_box.get_height():
                             self.locked_penis_box.update(self.penis_box, current_height)
-
-                        # Move locked penis box towards current penis box
-                        if self.isVR:
-                            max_move = 180 // int(self.fps)
-                        else:
-                            # in 2D POV, camera is not still, actuation needs to be faster
-                            max_move = 360 // int(self.fps)
-
-                        if abs(self.penis_box[0] - self.locked_penis_box.get_box()[0]) > max_move:
-                            px1 = self.penis_box[0] + np.sign(self.penis_box[0] - self.locked_penis_box.get_box()[0]) * max_move
-                        if abs(self.penis_box[2] - self.locked_penis_box.get_box()[2]) > max_move:
-                            px2 = self.penis_box[2] + np.sign(self.penis_box[2] - self.locked_penis_box.get_box()[2]) * max_move
-                        if abs(self.penis_box[3] - self.locked_penis_box.get_box()[3]) > max_move:
-                            py2 = self.locked_penis_box.get_box()[3] + np.sign(self.penis_box[3] - self.locked_penis_box.get_box()[3]) * max_move
 
                         self.locked_penis_box.update((px1, py2 - self.locked_penis_box.get_height(), px2, py2), self.locked_penis_box.get_height())
 

@@ -1,4 +1,4 @@
-from script_generator.analysis.workers.analyze_tracking_results_v1 import analyze_tracking_results_v1
+from script_generator.analysis.workers.analyze_tracking_results_v1_test3 import analyze_tracking_results_v1
 from script_generator.analysis.workers.analyze_tracking_results_v2 import analyze_tracking_results_v2
 from script_generator.debug.logger import log_tr
 from script_generator.funscript.create_funscript import create_funscript

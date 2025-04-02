@@ -1,5 +1,5 @@
 from script_generator.constants import CLASS_PRIORITY_ORDER
-
+from typing import Dict, List, Tuple
 
 class ObjectDetectionResult:
     def __init__(self):
@@ -45,3 +45,23 @@ class ObjectDetectionResult:
         :return: A list of frame IDs.
         """
         return list(self.frame_data.keys())
+
+    def get_all_boxes(self, total_frames: int) -> Dict[int, List[Tuple]]:
+        """
+        Retrieve all bounding boxes for all frames, including empty records for frames with no detections.
+
+        Args:
+            total_frames: Total number of frames in the video.
+
+        Returns:
+            A dictionary where:
+            - Keys are frame IDs.
+            - Values are lists of sorted bounding boxes for that frame (empty list if no boxes).
+        """
+        all_boxes = {}
+        for frame_id in range(total_frames):
+            if frame_id in self.frame_data:
+                all_boxes[frame_id] = self.get_boxes(frame_id)
+            else:
+                all_boxes[frame_id] = []  # Empty record for frames with no detections
+        return all_boxes

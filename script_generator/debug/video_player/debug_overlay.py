@@ -98,7 +98,7 @@ def draw_overlay(
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
             cv2.putText(
                 frame,
-                "Locked Penis",
+                "Locked P.",
                 (x1, y1 - 5),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 FONT_SIZE,
