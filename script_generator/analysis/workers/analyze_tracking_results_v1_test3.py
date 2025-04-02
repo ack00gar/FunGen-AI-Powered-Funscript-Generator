@@ -1422,9 +1422,9 @@ def analyze_tracking_results_v1(state: AppState):
 
     if amplification:
         amplified_funscript_data = _normalize_funscript_sparse(vw_funscript_data, segments)
-        log_tr.inf("Pass 9 - Amplification activated")
+        log_tr.info("Pass 9 - Amplification activated")
     else:
-        log_tr.inf("Pass 9 - Amplification deactivated")
+        log_tr.info("Pass 9 - Amplification deactivated")
         amplified_funscript_data = vw_funscript_data
 
     cleaned_data = amplified_funscript_data[:]  # Copy data
