@@ -3,7 +3,7 @@ import platform
 
 import torch
 
-VERSION = "0.3.0"
+VERSION = "0.3.1 - Crash-Dummies"
 OBJECT_DETECTION_VERSION = "1.0.0"
 TRACKING_VERSION = "0.1.0"
 FUNSCRIPT_VERSION = "0.1.1"
