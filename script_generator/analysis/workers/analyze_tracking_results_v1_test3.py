@@ -294,7 +294,7 @@ def _calculate_normalized_distance_to_base(locked_penis_box: Tuple[int, int, int
     return normalized_distance
     #return int((distance / max_distance) * 100 if max_distance > 0 else 100)
 
-def _normalize_funscript_sparse(funscript_data, segments):
+def prev_normalize_funscript_sparse(funscript_data, segments):
     result = deepcopy(funscript_data)
 
     for seg_counter, segment in enumerate(segments):
@@ -310,8 +310,8 @@ def _normalize_funscript_sparse(funscript_data, segments):
         segment_data = [result[i] for i in segment_indices]
         values = [x[1] for x in segment_data]
 
-        p01 = np.percentile(values, 1)
-        p99 = np.percentile(values, 99)
+        p01 = np.percentile(values, 5)
+        p99 = np.percentile(values, 95)
 
         scale_range = p99 - p01
 
@@ -331,7 +331,7 @@ def _normalize_funscript_sparse(funscript_data, segments):
                         val = 50  # If no variation, set to mid-range
                     else:
                         # Rescale values within p01 - p99 range
-                        val = (val - p01) / scale_range * 100
+                        val = ((val - p01) / scale_range) * 100
 
                         # Apply specific scaling for certain positions
                         # if position_type in ['Handjob / Blowjob', 'Footjob', 'Boobjob']:
@@ -340,6 +340,76 @@ def _normalize_funscript_sparse(funscript_data, segments):
             val = int(max(0, min(100, round(val))))  # Ensure final value stays in bounds
             result[i] = (frame, val)
 
+    return result
+
+
+def _normalize_funscript_sparse(funscript_data, segments):
+    result = deepcopy(funscript_data)
+    for seg_counter, segment in enumerate(segments):
+        position_type = segment['major_position']
+        start_frame = segment['start_frame']
+        end_frame = segment['end_frame']
+        # Extract only frames within this segment
+        segment_indices = [i for i, (f, _) in enumerate(result) if start_frame <= f <= end_frame]
+        if not segment_indices:
+            continue  # Skip empty segments
+
+        segment_data = [result[i] for i in segment_indices]
+        values = [x[1] for x in segment_data]
+
+        # Still use percentiles for outlier detection
+        p01 = np.percentile(values, 5)
+        p99 = np.percentile(values, 95)
+
+        # But also track the min and max of non-outlier values
+        filtered_values = [v for v in values if p01 <= v <= p99]
+        if not filtered_values:
+            # If all values are outliers, use the full range
+            filtered_min = min(values)
+            filtered_max = max(values)
+        else:
+            filtered_min = min(filtered_values)
+            filtered_max = max(filtered_values)
+
+        scale_range = filtered_max - filtered_min
+
+        # Adjust the values properly
+        for i in segment_indices:
+            frame, val = result[i]
+            if position_type in ['Not relevant', 'Close up']:
+                val = 100  # Directly set to 100
+            else:
+                if val <= p01:
+                    # For values below p01, preserve relative differences
+                    # Map them to the range 0-5 based on their position relative to min
+                    min_val = min(values)
+                    if val == min_val and min_val == p01:
+                        val = 0
+                    elif min_val == p01:
+                        val = 0  # Edge case
+                    else:
+                        val = ((val - min_val) / (p01 - min_val)) * 5
+
+                elif val >= p99:
+                    # For values above p99, preserve relative differences
+                    # Map them to the range 95-100 based on their position relative to max
+                    max_val = max(values)
+                    if val == max_val and max_val == p99:
+                        val = 100
+                    elif max_val == p99:
+                        val = 100  # Edge case
+                    else:
+                        val = 95 + ((val - p99) / (max_val - p99)) * 5
+
+                else:
+                    # For non-outlier values, scale them to range 5-95
+                    if scale_range < 1e-6:
+                        val = 50  # If no variation, set to mid-range
+                    else:
+                        val = 5 + ((val - filtered_min) / scale_range) * 90
+
+            val = int(max(0, min(100, round(val))))  # Ensure final value stays in bounds
+            result[i] = (frame, val)
     return result
 
 def interpolate_box(box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int], t: float) -> Tuple[int, int, int, int]:
@@ -1418,7 +1488,7 @@ def analyze_tracking_results_v1(state: AppState):
     # PASS 9 - Amplifying signal
     log_tr.info("Pass 9 - Amplifying signal + Simplifying pass 2")
 
-    amplification = False
+    amplification = True
 
     if amplification:
         amplified_funscript_data = _normalize_funscript_sparse(vw_funscript_data, segments)
