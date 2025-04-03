@@ -73,14 +73,18 @@ def write_funscript(distances, output_path, fps, timestamps = None):
     if timestamps:
         i = 0
         len_t = len(timestamps)
-        chapters = ',"chapters":['
+        chapters = '"chapters":['
         for timestamp in timestamps:
             chapters += f'{{"startTime":"{timestamp[2]}","endTime":"{timestamp[3]}","name":"{timestamp[4]}"}}'
             chapters += "," if i < len_t - 1 else ""
             i += 1
         chapters += "]"
 
-    output = f'{{"app_version":"{VERSION}","version":"{FUNSCRIPT_VERSION}","inverted":false,"range":100,"author":"{FUNSCRIPT_AUTHOR}"{chapters},"actions":[{{"at":0,"pos":100}},'
+    output = f'{{"version":"1.0","inverted":false,"range":100,"author":"{FUNSCRIPT_AUTHOR}","actions":[{{"at":0,"pos":100}},'
+
+    # order distances by frame asc
+    distances = sorted(distances, key=lambda x: x[0])
+
     i = 0
     for frame, position in distances:
         if position :
@@ -89,7 +93,7 @@ def write_funscript(distances, output_path, fps, timestamps = None):
                 output += ","
             output += f'{{"at":{time_ms},"pos":{int(position)}}}'
             i += 1
-    output += "]}"
+    output += f'], "metadata":{{"app_version":"{VERSION}", "version":"{FUNSCRIPT_VERSION}", {chapters}}}}}'
 
     with open(output_path, 'w') as f:
         f.write(output)
