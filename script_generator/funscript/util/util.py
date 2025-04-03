@@ -1,7 +1,7 @@
 import json
 import os
 
-from script_generator.constants import FUNSCRIPT_AUTHOR, FUNSCRIPT_VERSION
+from script_generator.constants import FUNSCRIPT_AUTHOR, FUNSCRIPT_VERSION, VERSION
 from script_generator.debug.logger import log
 
 
@@ -80,7 +80,7 @@ def write_funscript(distances, output_path, fps, timestamps = None):
             i += 1
         chapters += "]"
 
-    output = f'{{"version":"{FUNSCRIPT_VERSION}","inverted":false,"range":100,"author":"{FUNSCRIPT_AUTHOR}"{chapters},"actions":[{{"at":0,"pos":100}},'
+    output = f'{{"app_version":"{VERSION}","version":"{FUNSCRIPT_VERSION}","inverted":false,"range":100,"author":"{FUNSCRIPT_AUTHOR}"{chapters},"actions":[{{"at":0,"pos":100}},'
     i = 0
     for frame, position in distances:
         if position :
