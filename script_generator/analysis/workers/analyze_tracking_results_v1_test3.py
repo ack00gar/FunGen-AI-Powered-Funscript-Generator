@@ -1041,8 +1041,6 @@ def analyze_tracking_results_v1(state: AppState):
             penis_consecutive_detections = penis['consecutive_detections']
             penis_consecutive_non_detections = penis['consecutive_non_detections']
             penis_max_height = penis['max_height']
-            if frame_pos == 20930:
-                log_tr.info(f"Penis max height: {penis_max_height}")
             penis_max_penetration_height = penis['max_penetration_height']
             penis_visible_part = penis['visible_part']
             penis_glans_detected = penis['glans_detected']
@@ -1115,9 +1113,6 @@ def analyze_tracking_results_v1(state: AppState):
                                 max_height = penis_max_height
 
                             dist = _calculate_normalized_distance_to_base(penis_box, class_name, box_coords, max_height)
-
-                            if frame_pos == 20930:
-                                log_tr.info(f"Distance: {dist} for box {box_coords} of class {class_name} where penis max height is {max_height} and penis box is {str(penis_box)}")
 
                             comp_distance += dist
                             nb_touching += 1
@@ -1194,10 +1189,16 @@ def analyze_tracking_results_v1(state: AppState):
 
         if transition_active:
             if remaining_transition_frames > 0:
-                # previous distance + 1 or -1 depending on the sign of the previous distance - comp_distance
-                transition_distance = distance[-1] + (1 if (comp_distance - distance[-1] > 0) else -1)
-                # comp_distance = transition_distance
-                remaining_transition_frames -= 1
+                if comp_distance - distance[-1] == 0:
+                    transition_distance = distance[-1]
+                    log_tr.info(f"Used {transition_frames - remaining_transition_frames} transition frames before meeting at {comp_distance}")
+                    transition_active = False
+                    remaining_transition_frames = transition_frames
+                else:
+                    # previous distance + 1 or -1 depending on the sign of the previous distance - comp_distance
+                    transition_distance = distance[-1] + (1 if (comp_distance - distance[-1] > 0) else -1)
+                    # comp_distance = transition_distance
+                    remaining_transition_frames -= 1
                 distance.append(transition_distance)
             else:
                 transition_active = False
@@ -1544,13 +1545,4 @@ def analyze_tracking_results_v1(state: AppState):
 
     write_funscript(amplified_funscript_data, output_path, state.video_info.fps, timestamps)
 
-    # write_funscript(custom_normalized, output_path, state.video_info.fps, timestamps)
-
-
-
     # endregion
-
-
-
-
-
