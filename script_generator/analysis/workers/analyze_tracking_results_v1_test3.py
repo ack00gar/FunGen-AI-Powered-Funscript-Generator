@@ -454,7 +454,7 @@ def analyze_tracking_results_v1(state: AppState):
     interpolated_frames = [[] for _ in range(total_frames)]
     total_interpolated = 0
 
-    MAX_GAP = 10  # Limit interpolation to 10-frame gaps
+    MAX_GAP = int_fps  # 10  # Limit interpolation to MAX_GAP frames gaps
 
     for frame_pos in tqdm(range(total_frames), desc="Pass 1 - Interpolating boxes (linear)", unit="f"):
         frame_boxes = sorted_boxes[frame_pos] if frame_pos < len(sorted_boxes) else []
