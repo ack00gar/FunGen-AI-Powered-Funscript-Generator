@@ -87,12 +87,11 @@ def write_funscript(distances, output_path, fps, timestamps = None):
 
     i = 0
     for frame, position in distances:
-        if position :
-            time_ms = int(frame * 1000 / fps)
-            if i > 0:
-                output += ","
-            output += f'{{"at":{time_ms},"pos":{int(position)}}}'
-            i += 1
+        time_ms = int(frame * 1000 / fps)
+        if i > 0:
+            output += ","
+        output += f'{{"at":{time_ms},"pos":{int(position)}}}'
+        i += 1
     output += f'], "metadata":{{"app_version":"{VERSION}", "version":"{FUNSCRIPT_VERSION}", {chapters}}}}}'
 
     with open(output_path, 'w') as f:
