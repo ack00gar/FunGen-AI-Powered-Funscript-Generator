@@ -15,6 +15,7 @@ from script_generator.debug.logger import log, log_tr
 # from utils.lib_ObjectTracker import ObjectTracker
 from script_generator.utils.file import get_output_file_path
 from script_generator.funscript.util.util import write_funscript
+from script_generator.funscript.util.export_funscript import export_funscript
 
 
 def _assign_frame_position(contacts: List[Dict]) -> str:
@@ -1491,6 +1492,8 @@ def analyze_tracking_results_v1(state: AppState):
 
     amplification = True
 
+    vw_funscript_data = sorted(vw_funscript_data, key=lambda x: x[0])
+
     if amplification:
         amplified_funscript_data = _normalize_funscript_sparse(vw_funscript_data, segments)
         log_tr.info("Pass 9 - Amplification activated")
@@ -1543,6 +1546,8 @@ def analyze_tracking_results_v1(state: AppState):
 
     output_path, _ = get_output_file_path(state.video_path, ".funscript")
 
-    write_funscript(amplified_funscript_data, output_path, state.video_info.fps, timestamps)
+    write_funscript(cleaned_data, output_path, state.video_info.fps, timestamps)
+
+    export_funscript(state)
 
     # endregion
