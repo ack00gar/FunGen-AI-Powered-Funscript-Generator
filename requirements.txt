@@ -7,5 +7,6 @@ PyOpenGL
 imgui
 scipy
 rdp
-simplify
+simplification
 orjson
+scenedetect[opencv]
