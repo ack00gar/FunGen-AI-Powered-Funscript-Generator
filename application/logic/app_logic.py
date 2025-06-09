@@ -138,6 +138,8 @@ class ApplicationLogic:
         self.stop_batch_event = threading.Event()
         # An event to signal when a single video's analysis is complete
         self.single_video_analysis_complete_event = threading.Event()
+        # Event to ensure saving is complete before the next batch item
+        self.save_and_reset_complete_event = threading.Event()
 
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
@@ -280,14 +282,24 @@ class ApplicationLogic:
                 # Wait a moment for the video to be fully loaded by the processor
                 time.sleep(1.0)  # Small delay to ensure video processor is ready
 
-                if self.stop_batch_event.is_set(): break
+                if self.stop_batch_event.is_set():
+                    break
 
                 # --- 2. Run Full Analysis ---
                 self.single_video_analysis_complete_event.clear()
+                self.save_and_reset_complete_event.clear() # Clear the new event before waiting
                 self.stage_processor.start_full_analysis()
 
-                # Wait for the analysis of this single video to complete or be aborted
+
+                # --- 3. Wait for analysis thread to finish ---
                 self.single_video_analysis_complete_event.wait()
+                if self.stop_batch_event.is_set():
+                    break
+
+                # --- 4. Wait for the GUI thread to save the results before proceeding ---
+                self.logger.debug("Batch loop: Waiting for save/reset signal from GUI thread...")
+                self.save_and_reset_complete_event.wait(timeout=120) # Add a timeout for safety
+                self.logger.debug("Batch loop: Save/reset signal received. Proceeding to next video.")
 
                 if self.stop_batch_event.is_set():
                     break

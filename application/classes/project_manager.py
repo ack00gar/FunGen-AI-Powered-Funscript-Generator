@@ -119,7 +119,7 @@ class ProjectManager:
 
     def save_project_dialog(self, save_as: bool = False):
         if not self.project_file_path or save_as:
-            suggested_filename, initial_dir_save = self.get_suggested_save_path_and_dir(save_as)
+            suggested_filename, initial_dir_save = self.get_suggested_save_path_and_dir(save_as) if self.get_suggested_save_path_and_dir(save_as) else ("", None)
 
             if hasattr(self.app, 'show_file_dialog_for_project_save'):
                 self.app.show_file_dialog_for_project_save(self.save_project, suggested_filename, initial_dir_save)
