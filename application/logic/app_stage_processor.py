@@ -342,10 +342,14 @@ class AppStageProcessor:
                 return
 
             # --- Stage 3 (or Finish) ---
-            if selected_mode_idx == 1:
-                self.gui_event_queue.put(
-                    ("analysis_message", "AI CV (2-Stage) analysis completed successfully.", "Completed"))
-            elif selected_mode_idx == 0:
+            if selected_mode_idx == 1: # For 2-Stage analysis
+                completion_payload = {
+                    "message": "AI CV (2-Stage) analysis completed successfully.",
+                    "status": "Completed",
+                    "video_path": fm.video_path
+                }
+                self.gui_event_queue.put(("analysis_message", completion_payload, None))
+            elif selected_mode_idx == 0: # For 3-Stage analysis
                 self.current_analysis_stage = 3
                 atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
@@ -362,7 +366,19 @@ class AppStageProcessor:
 
                 self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in
                                                         s2_output_data.get("all_s2_frame_objects_list", [])}
-                self._execute_stage3_optical_flow_module(segments_for_s3)
+                stage3_success = self._execute_stage3_optical_flow_module(segments_for_s3)
+                if self.stop_stage_event.is_set():
+                    return # Exit if aborted during S3
+
+                if stage3_success:
+                    # Create the self-contained completion message
+                    completion_payload = {
+                        "message": "AI CV (3-Stage) analysis completed successfully.",
+                        "status": "Completed",
+                        "video_path": fm.video_path
+                    }
+                    self.gui_event_queue.put(("analysis_message", completion_payload, None))
+
         finally:
             self.full_analysis_active = False
             self.current_analysis_stage = 0
@@ -660,7 +676,8 @@ class AppStageProcessor:
         while not self.gui_event_queue.empty():
             try:
                 queue_item = self.gui_event_queue.get_nowait()
-                if not isinstance(queue_item, tuple) or len(queue_item) < 2: continue
+                if not isinstance(queue_item, tuple) or len(queue_item) < 2:
+                    continue
 
                 event_type, data1, data2 = queue_item[0], queue_item[1], queue_item[2] if len(queue_item) > 2 else None
 
@@ -693,19 +710,12 @@ class AppStageProcessor:
                     if isinstance(prog_data, dict):
                         self.stage1_progress_value = prog_val if prog_val != -1.0 else self.stage1_progress_value
                         self.stage1_progress_label = str(prog_data.get("message", ""))
-                        t_el, fps, eta = prog_data.get("time_elapsed", 0.0), prog_data.get("fps",
-                                                                                           0.0), prog_data.get("eta",
-                                                                                                               0.0)
-                        current, total = prog_data.get("current", 0), prog_data.get("total", 0)
+                        t_el, fps, eta = prog_data.get("time_elapsed", 0.0), prog_data.get("fps", 0.0), prog_data.get(
+                            "eta", 0.0)
                         self.stage1_time_elapsed_str = f"{int(t_el // 3600):02d}:{int((t_el % 3600) // 60):02d}:{int(t_el % 60):02d}"
                         self.stage1_processing_fps_str = f"{int(fps)} FPS"
                         if math.isnan(eta) or math.isinf(eta):
-                            if current >= total and total > 0:
-                                self.stage1_eta_str = "Done"
-                            elif t_el > 1 and fps < 0.01 and current < total:
-                                self.stage1_eta_str = "Stalled"
-                            else:
-                                self.stage1_eta_str = "Calculating..."
+                            self.stage1_eta_str = "Calculating..."
                         elif eta > 0:
                             self.stage1_eta_str = f"{int(eta // 3600):02d}:{int((eta % 3600) // 60):02d}:{int(eta % 60):02d}"
                         else:
@@ -717,8 +727,7 @@ class AppStageProcessor:
                     queue_data = data1
                     if isinstance(queue_data, dict):
                         self.stage1_frame_queue_size = queue_data.get("frame_q_size", self.stage1_frame_queue_size)
-                        self.stage1_result_queue_size = queue_data.get("result_q_size",
-                                                                       self.stage1_result_queue_size)
+                        self.stage1_result_queue_size = queue_data.get("result_q_size", self.stage1_result_queue_size)
                 elif event_type == "stage2_dual_progress":
                     main_step_info, sub_step_info = data1, data2
                     if isinstance(main_step_info, tuple) and len(main_step_info) == 3:
@@ -734,39 +743,11 @@ class AppStageProcessor:
                     if data2 is not None: self.stage2_progress_label = str(data2)
                 elif event_type == "stage2_results_success":
                     packaged_data, s2_overlay_path_written = data1, data2
-                    was_ranged_run = packaged_data.get("was_ranged", False)
-                    range_frames = packaged_data.get("range_frames", (None, None))
                     results_dict = packaged_data.get("results_dict", {})
                     primary_actions = results_dict.get("primary_actions", [])
-                    secondary_actions = results_dict.get("secondary_actions", [])
-                    video_segments = results_dict.get("video_segments", [])
-                    start_ms, end_ms = 0, 0
-                    if was_ranged_run:
-                        start_f, end_f = range_frames
-                        start_ms = fs_proc.frame_to_ms(start_f if start_f is not None else 0)
-                        end_ms = fs_proc.frame_to_ms(
-                            end_f) if end_f is not None and end_f != -1 else fs_proc.get_script_end_time_ms('primary')
-                    if was_ranged_run:
-                        fs_proc.clear_actions_in_range_and_inject_new(1, primary_actions, start_ms, end_ms, "S2 Update")
-                        fs_proc.clear_actions_in_range_and_inject_new(2, secondary_actions, start_ms, end_ms,
-                                                                      "S2 Update")
-                    else:
-                        fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2")
-                        fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2")
-                    new_chapters = [VideoSegment.from_dict(s) for s in video_segments if isinstance(s, dict)]
-                    if was_ranged_run:
-                        start_ms, end_ms = fs_proc.frame_to_ms(range_frames[0]), fs_proc.frame_to_ms(
-                            range_frames[1] if range_frames[1] != -1 else fs_proc.app.processor.total_frames - 1)
-                        chapters_to_keep = [ch for ch in fs_proc.video_chapters if
-                                            fs_proc.frame_to_ms(ch.end_frame_id) < start_ms or fs_proc.frame_to_ms(
-                                                ch.start_frame_id) > end_ms]
-                        fs_proc.video_chapters[:] = sorted(chapters_to_keep + new_chapters,
-                                                           key=lambda c: c.start_frame_id)
-                    else:
-                        fs_proc.video_chapters[:] = new_chapters
-                    if s2_overlay_path_written and isinstance(s2_overlay_path_written, str) and os.path.exists(
-                            s2_overlay_path_written):
-                        fm.load_stage2_overlay_data(s2_overlay_path_written)
+                    fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2")
+                    fs_proc.clear_timeline_history_and_set_new_baseline(2, results_dict.get("secondary_actions", []),
+                                                                        "Stage 2")
                     self.stage2_status_text = "S2 Completed. Results Processed."
                     self.app.project_manager.project_dirty = True
                     self.logger.info("Processed Stage 2 results.")
@@ -790,61 +771,46 @@ class AppStageProcessor:
                         t_el_s3, fps_s3, eta_s3 = prog_data.get("time_elapsed", 0.0), prog_data.get("fps",
                                                                                                     0.0), prog_data.get(
                             "eta", 0.0)
-                        current_s3_seg, total_s3_segs = prog_data.get('current_segment_idx', 0), prog_data.get(
-                            'total_segments', 0)
-                        current_s3_frame, total_s3_frames_in_seg = prog_data.get('frame_in_segment', 0), prog_data.get(
-                            'total_frames_in_segment', 0)
                         self.stage3_time_elapsed_str = f"{int(t_el_s3 // 3600):02d}:{int((t_el_s3 % 3600) // 60):02d}:{int(t_el_s3 % 60):02d}" if not math.isnan(
                             t_el_s3) else "Calculating..."
                         self.stage3_processing_fps_str = f"{fps_s3:.1f} FPS" if not math.isnan(fps_s3) else "N/A FPS"
-                        is_s3_done = (
-                                    current_s3_seg >= total_s3_segs and total_s3_segs > 0 and current_s3_frame >= total_s3_frames_in_seg and total_s3_frames_in_seg > 0)
+                        is_s3_done = (prog_data.get('current_segment_idx', 0) >= prog_data.get('total_segments',
+                                                                                               0) and prog_data.get(
+                            'total_segments', 0) > 0)
                         if math.isnan(eta_s3) or math.isinf(eta_s3):
                             if is_s3_done:
                                 self.stage3_eta_str = "Done"
-                            elif t_el_s3 > 1 and (math.isnan(fps_s3) or fps_s3 < 0.01) and not is_s3_done:
-                                self.stage3_eta_str = "Stalled"
                             else:
                                 self.stage3_eta_str = "Calculating..."
-                        elif eta_s3 == -1:
-                            self.stage3_eta_str = "N/A"
                         elif eta_s3 > 0 and not is_s3_done:
                             self.stage3_eta_str = f"{int(eta_s3 // 3600):02d}:{int((eta_s3 % 3600) // 60):02d}:{int(eta_s3 % 60):02d}"
-                        elif is_s3_done:
-                            self.stage3_eta_str = "Done"
                         else:
-                            self.stage3_eta_str = "Calculating..."
+                            self.stage3_eta_str = "Done"
                 elif event_type == "stage3_status_update":
                     self.stage3_status_text = str(data1)
                     if data2 is not None: self.stage3_overall_progress_label = str(data2)
                 elif event_type == "analysis_message":
-                    log_msg, status_override = str(data1), data2
-                    self.logger.info(log_msg, extra={'status_message': True})
-                    if status_override == "Completed":
-                        if self.app.file_manager.video_path:
-                            self.app.file_manager.save_raw_funscripts_after_generation(self.app.file_manager.video_path)
-                        else:
-                            self.logger.warning("Could not save raw funscript backup, video path is missing.")
-                        if self.app.app_settings.get("enable_auto_post_processing", False):
-                            self.logger.info("Triggering auto post-processing after completed analysis.")
-                            if hasattr(self.app, 'funscript_processor') and hasattr(self.app.funscript_processor,
-                                                                                    'apply_automatic_post_processing'):
-                                try:
-                                    self.app.funscript_processor.apply_automatic_post_processing()
-                                    self.logger.info("Saving final funscripts after post-processing...")
-                                    if self.app.file_manager.video_path:
-                                        self.app.file_manager.save_final_funscripts(self.app.file_manager.video_path)
+                    payload = data1 if isinstance(data1, dict) else {}
+                    log_msg = payload.get("message", str(data1))
+                    status_override = payload.get("status", data2)
+                    video_path_from_event = payload.get("video_path")
 
-                                except Exception as e_post:
-                                    self.logger.error(
-                                        f"Error during automatic post-processing after analysis: {e_post}",
-                                        exc_info=True)
-                            else:
-                                self.logger.error(
-                                    "Funscript processor or apply_automatic_post_processing method not found on app.")
+                    if log_msg:
+                        self.logger.info(log_msg, extra={'status_message': True})
+
+                    if status_override == "Completed":
+                        if not video_path_from_event:
+                            self.logger.warning("Completion event is missing its video path. Cannot save funscripts.")
                         else:
-                            self.logger.info("Auto post-processing disabled, skipping after analysis completion.")
-                    if status_override == "Aborted":
+                            self.app.file_manager.save_raw_funscripts_after_generation(video_path_from_event)
+                            if self.app.app_settings.get("enable_auto_post_processing", False):
+                                self.logger.info("Triggering auto post-processing after completed analysis.")
+                                self.app.funscript_processor.apply_automatic_post_processing()
+                            else:
+                                self.logger.info("Auto post-processing disabled, skipping.")
+                            self.logger.info("Saving final funscripts...")
+                            self.app.file_manager.save_final_funscripts(video_path_from_event)
+                    elif status_override == "Aborted":
                         if self.current_analysis_stage == 1 or self.stage1_status_text.startswith(
                             "Running"): self.stage1_status_text = "S1 Aborted."
                         if self.current_analysis_stage == 2 or self.stage2_status_text.startswith(
@@ -858,6 +824,11 @@ class AppStageProcessor:
                             "Running"): self.stage2_status_text = "S2 Failed."
                         if self.current_analysis_stage == 3 or self.stage3_status_text.startswith(
                             "Running"): self.stage3_status_text = "S3 Failed."
+
+                    # --- Signal the batch loop to continue, regardless of outcome ---
+                    if self.app.is_batch_processing_active and hasattr(self.app, 'save_and_reset_complete_event'):
+                        self.logger.debug(f"Signaling batch loop to continue after handling '{status_override}' status.")
+                        self.app.save_and_reset_complete_event.set()
                 else:
                     self.logger.warning(f"Unknown GUI event type received: {event_type}")
             except Exception as e:
