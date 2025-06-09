@@ -62,7 +62,7 @@ class ProjectManager:
             self.app.file_dialog_bridge.show_open_project_dialog(self.load_project)
         elif hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance,
                                                            'file_dialog'):  # If GUI instance is on app
-            suggested_filename, initial_dir = self.get_suggested_save_path_and_dir(save_as=False)  # For initial dir
+            suggested_filename, initial_dir = self.get_suggested_save_path_and_dir(save_as=False) if self.get_suggested_save_path_and_dir(save_as=False) else ("", None)
             self.app.gui_instance.file_dialog.show(
                 title="Open Project",
                 is_save=False,
