@@ -8,5 +8,5 @@ if not exist "%CONDA_PATH%" (
     exit /b 1
 )
 call "%CONDA_PATH%" VRFunAIGen
-python FSGenerator.py
+python main.py
 pause
