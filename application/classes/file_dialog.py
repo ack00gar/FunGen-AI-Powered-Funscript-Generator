@@ -34,8 +34,12 @@ class ImGuiFileDialog:
         self.title: str = ""
         self.is_save_dialog: bool = False
         self.current_dir: str = os.getcwd()
-        self.selected_file: str = ""
-        self.entered_filename: str = ""
+
+        # UNIFIED STATE: One variable to rule them all. Holds the name of the
+        # file selected in the list (for Open) OR the filename in the input box (for Save).
+        self.selection: str = ""
+
+        # Extension filtering
         self.extension_filter: str = ""
         self.extension_groups: list[tuple[str, list[str]]] = []
         self.active_extension_index: int = 0
@@ -61,8 +65,7 @@ class ImGuiFileDialog:
         self.extension_filter = extension_filter
         self.extension_groups = self._parse_extension_filter(extension_filter)
         self.active_extension_index = 0
-        self.selected_file = initial_filename or ""
-        self.entered_filename = initial_filename or ""
+        self.selection = initial_filename or ""
 
         if initial_path and os.path.isdir(initial_path):
             self.current_dir = initial_path
@@ -103,7 +106,7 @@ class ImGuiFileDialog:
             if os.path.isdir(path):
                 if imgui.button(name, width=-1):
                     self.current_dir = path
-                    self.selected_file = ""
+                    self.selection = ""
         imgui.end_child()
 
     def _draw_directory_navigation(self):
@@ -114,13 +117,12 @@ class ImGuiFileDialog:
         parent_dir = os.path.dirname(self.current_dir)
         if os.path.isdir(parent_dir) and parent_dir != self.current_dir:
             self.current_dir = parent_dir
-            self.selected_file = ""
+            self.selection = ""
 
     def _draw_filter_selector(self):
         imgui.align_text_to_frame_padding()
         imgui.text("File Type:")
         imgui.same_line()
-
         if self.extension_groups:
             filter_names = [name for name, _ in self.extension_groups]
             imgui.set_next_item_width(imgui.get_content_region_available_width() - 60)
@@ -130,7 +132,6 @@ class ImGuiFileDialog:
         else:
             imgui.set_next_item_width(imgui.get_content_region_available_width() - 60)
             imgui.text("All Files")
-
         imgui.same_line()
         if imgui.button("Up", width=50):
             self._navigate_up()
@@ -143,76 +144,78 @@ class ImGuiFileDialog:
                 return
 
             items = sorted(os.listdir(self.current_dir), key=str.lower)
-            directories, files = [], []
+            directories, files, special_packages = [], [], []
+
             for item in items:
                 full_path = os.path.join(self.current_dir, item)
-                if os.path.isdir(full_path):
+                if item.lower().endswith('.mlpackage') and os.path.isdir(full_path):
+                    special_packages.append(item)
+                elif os.path.isdir(full_path):
                     directories.append(item)
                 elif os.path.isfile(full_path):
                     files.append(item)
 
+            selectable_items = sorted(files + special_packages, key=str.lower)
             self._draw_directories(directories)
-            self._draw_files(files)
+            self._draw_files(selectable_items)
 
-        except PermissionError:
-            imgui.text("Permission denied to access this directory.")
         except Exception as e:
             self.logger.error(f"Error reading directory '{self.current_dir}': {e}", exc_info=True)
             imgui.text(f"Error reading directory: {e}")
 
     def _draw_directories(self, directories: list[str]):
-        for d in directories:
+        for i, d in enumerate(directories):
+            imgui.push_id(f"dir_{i}")
             imgui.selectable(f"[DIR] {d}", False)
             if imgui.is_item_hovered() and imgui.is_mouse_double_clicked(0):
                 self.current_dir = os.path.join(self.current_dir, d)
-                self.selected_file = ""
-                self.entered_filename = ""
+                self.selection = ""
+            imgui.pop_id()
 
     def _draw_files(self, files: list[str]):
-        filtered_files = []
-        if self.extension_groups and self.active_extension_index < len(self.extension_groups):
-            _, active_exts = self.extension_groups[self.active_extension_index]
-            if "*" in active_exts:
-                filtered_files = files
-            else:
-                for f in files:
-                    for ext in active_exts:
-                        if f.lower().endswith(f".{ext.lower()}"):
-                            filtered_files.append(f)
-                            break
-        else:
-            filtered_files = files
-
+        filtered_files = self._filter_files(files)
         for f in filtered_files:
-            is_selected = (self.selected_file == f)
-            if imgui.selectable(f"[FILE] {f}", is_selected):
-                # For any click, update the selection for highlighting.
-                self.selected_file = f
-                # **REMOVED FAULTY LOGIC**: We no longer overwrite the input box on click.
+            imgui.push_id(f)
+            is_selected = (self.selection == f)
+            label = f"[PKG] {f}" if f.lower().endswith('.mlpackage') else f"[FILE] {f}"
+
+            if imgui.selectable(label, is_selected):
+                self.selection = f  # A click always updates the selection.
 
             if imgui.is_item_hovered() and imgui.is_mouse_double_clicked(0):
-                # Double-clicking a file in an "Open" dialog confirms it.
                 if not self.is_save_dialog:
                     self._confirm_selection()
+            imgui.pop_id()
+
+    def _filter_files(self, files: list[str]) -> list[str]:
+        if not self.extension_groups:
+            return files
+
+        _, active_exts = self.extension_groups[self.active_extension_index]
+        if "*" in active_exts:
+            return files
+
+        filtered_files = []
+        for f in files:
+            is_allowed = any(f.lower().endswith(f".{ext.lower()}") for ext in active_exts)
+            if is_allowed:
+                filtered_files.append(f)
+        return filtered_files
 
     def _draw_bottom_bar(self):
         imgui.separator()
         confirm = False
+
+        imgui.text("File name:")
+        imgui.same_line()
         if self.is_save_dialog:
-            imgui.text("File name:")
-            imgui.same_line()
-            enter_pressed, self.entered_filename = imgui.input_text(
-                "##filename_input",
-                self.entered_filename,
-                256,
-                flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE
+            enter_pressed, self.selection = imgui.input_text(
+                "##filename_input", self.selection, 256, flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE
             )
             if enter_pressed:
                 confirm = True
         else:
-            imgui.text("File name:")
-            imgui.same_line()
-            imgui.input_text("##filename_display", self.selected_file, 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+            imgui.input_text("##filename_display", self.selection, 256, flags=imgui.INPUT_TEXT_READ_ONLY)
 
         button_width = 80
         cursor_x = imgui.get_cursor_pos().x + imgui.get_content_region_available().x - (
@@ -220,8 +223,7 @@ class ImGuiFileDialog:
         imgui.set_cursor_pos_x(cursor_x)
 
         action_button_text = "Save" if self.is_save_dialog else "Open"
-        filename_for_action = self.entered_filename if self.is_save_dialog else self.selected_file
-        is_enabled = bool(filename_for_action)
+        is_enabled = bool(self.selection)
 
         if not is_enabled:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
@@ -242,10 +244,12 @@ class ImGuiFileDialog:
             self._confirm_selection()
 
     def _confirm_selection(self):
-        final_filename = self.entered_filename if self.is_save_dialog else self.selected_file
-        if not final_filename: return
-        file_path = os.path.join(self.current_dir, final_filename)
-        if self.is_save_dialog and os.path.exists(file_path) and not os.path.isdir(file_path):
+        if not self.selection: return
+        file_path = os.path.join(self.current_dir, self.selection)
+        if self.is_save_dialog and os.path.isdir(file_path):
+            self.logger.warning(f"Cannot save, '{self.selection}' is a directory.")
+            return
+        if self.is_save_dialog and os.path.exists(file_path):
             self.show_overwrite_confirm = True
             self.overwrite_file_path = file_path
             return
