@@ -1,0 +1,11 @@
+opencv-python
+numpy
+ultralytics
+msgpack
+glfw
+PyOpenGL
+imgui
+scipy
+rdp
+simplify
+orjson
