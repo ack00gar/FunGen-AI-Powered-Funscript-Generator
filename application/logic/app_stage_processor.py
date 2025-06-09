@@ -562,7 +562,7 @@ class AppStageProcessor:
 
         tracker_config_s3 = {
             "confidence_threshold": self.app_settings.get('tracker_confidence_threshold', 0.4),  # Example name
-            "roi_padding": self.app_settings.get('tracker_roi_padding', 30),
+            "roi_padding": self.app_settings.get('tracker_roi_padding', 20),
             "roi_update_interval": self.app_settings.get('s3_roi_update_interval', DEFAULT_ROI_UPDATE_INTERVAL),
             "roi_smoothing_factor": self.app_settings.get('tracker_roi_smoothing_factor',
                                                           DEFAULT_ROI_SMOOTHING_FACTOR),

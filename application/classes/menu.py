@@ -565,11 +565,12 @@ class MainMenu:
                                 "Output Delay Shift (frames)##FunscriptDelayTrackerMenu",
                                 calibration_mgr.funscript_output_delay_frames, 1)
                             if changed_fod_val:
-                                calibration_mgr.funscript_output_delay_frames = new_fod_val_int
+                                calibration_mgr.funscript_output_delay_frames = max(0, min(new_fod_val_int, 20))
                                 calibration_mgr.update_tracker_delay_params()
                             if imgui.is_item_hovered(): imgui.set_tooltip(
-                                "Adjusts generated Funscript timing. Positive values make actions happen earlier; negative values make them later. Calibrate first.")
+                                "Adjusts generated Funscript timing (0-20). Positive values make actions happen earlier. Calibrate first.")
                             imgui.separator()
+
 
                         if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu",
                                                    flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
