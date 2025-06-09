@@ -1,0 +1,13 @@
+name: FunGen # Replace with your actual environment name
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - ffmpeg # This will install ffmpeg and ffprobe from conda-forge
+  # - other_conda_package
+  - pip:
+    # - Add your pip dependencies here, if any, from requirements.txt
+    # - example_pip_package==1.2.3
+    # - another_pip_package>=2.0
