@@ -84,7 +84,7 @@ class Stage3OpticalFlowProcessor:
                 tracker_model_path=self.common_app_config.get('yolo_det_model_path', ''), # Not used for S3 flow, but needed by init
                 pose_model_path=self.common_app_config.get('yolo_pose_model_path', ''),   # Not used for S3 flow
                 confidence_threshold=self.tracker_config.get('confidence_threshold', 0.4),
-                roi_padding=self.tracker_config.get('roi_padding', 30),
+                roi_padding=self.tracker_config.get('roi_padding', 20),
                 roi_update_interval=self.tracker_config.get('roi_update_interval', DEFAULT_ROI_UPDATE_INTERVAL),
                 roi_smoothing_factor=self.tracker_config.get('roi_smoothing_factor', DEFAULT_ROI_SMOOTHING_FACTOR),
                 dis_flow_preset=self.tracker_config.get('dis_flow_preset', "ULTRAFAST"),

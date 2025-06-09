@@ -53,7 +53,10 @@ class AppCalibration:
         delay_ms = self.calibration_timeline_point_ms - current_video_time_ms
         delay_frames = round((delay_ms / 1000.0) * self.app.processor.fps)
 
-        self.funscript_output_delay_frames = int(delay_frames)
+        # Clamp the calculated delay between 0 and 20 frames
+        clamped_delay_frames = max(0, min(delay_frames, 20))
+        self.funscript_output_delay_frames = int(clamped_delay_frames)
+
         # Save to app_settings when confirmed
         self.app.app_settings.set("funscript_output_delay_frames", self.funscript_output_delay_frames)
         self.update_tracker_delay_params()  # Update tracker immediately
@@ -87,10 +90,11 @@ class AppCalibration:
         """Called by AppLogic when settings are loaded or project is loaded."""
         # Get the setting from AppSettings, using current value as default if not found
         defaults = self.app.app_settings.get_default_settings()
-        self.funscript_output_delay_frames = self.app.app_settings.get(
+        loaded_delay = self.app.app_settings.get(
             "funscript_output_delay_frames",
             defaults.get("funscript_output_delay_frames", 0)  # Default to 0 if not in defaults either
         )
+        self.funscript_output_delay_frames = max(0, min(loaded_delay, 20))
         self.update_tracker_delay_params()  # Ensure tracker is updated if setting changes
 
     def save_settings_to_app(self):
