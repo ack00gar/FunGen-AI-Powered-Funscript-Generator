@@ -856,36 +856,36 @@ class VideoProcessor:
             if system == 'darwin':  # macOS
                 if 'videotoolbox' in available_on_app:
                     hwaccel_args = ['-hwaccel', 'videotoolbox']
-                    self.logger.info("Auto-selected 'videotoolbox' for macOS.")
+                    self.logger.debug("Auto-selected 'videotoolbox' for macOS.")
             elif system == 'linux':
                 if 'nvdec' in available_on_app:  # NVIDIA specific
                     hwaccel_args = ['-hwaccel', 'nvdec', '-hwaccel_output_format', 'cuda']
-                    self.logger.info("Auto-selected 'nvdec' (NVIDIA) for Linux.")
+                    self.logger.debug("Auto-selected 'nvdec' (NVIDIA) for Linux.")
                 elif 'cuda' in available_on_app:  # Older NVIDIA or if nvdec not listed
                     hwaccel_args = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
-                    self.logger.info("Auto-selected 'cuda' (NVIDIA) for Linux.")
+                    self.logger.debug("Auto-selected 'cuda' (NVIDIA) for Linux.")
                 elif 'qsv' in available_on_app:  # Intel QuickSync
                     hwaccel_args = ['-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv']
-                    self.logger.info("Auto-selected 'qsv' (Intel) for Linux.")
+                    self.logger.debug("Auto-selected 'qsv' (Intel) for Linux.")
                 elif 'vaapi' in available_on_app:  # Common for Intel/AMD on Linux
                     hwaccel_args = ['-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi']
-                    self.logger.info("Auto-selected 'vaapi' for Linux.")
+                    self.logger.debug("Auto-selected 'vaapi' for Linux.")
             elif system == 'windows':
                 if 'nvdec' in available_on_app:
                     hwaccel_args = ['-hwaccel', 'nvdec', '-hwaccel_output_format', 'cuda']
-                    self.logger.info("Auto-selected 'nvdec' (NVIDIA) for Windows.")
+                    self.logger.debug("Auto-selected 'nvdec' (NVIDIA) for Windows.")
                 elif 'cuda' in available_on_app:
                     hwaccel_args = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
-                    self.logger.info("Auto-selected 'cuda' (NVIDIA) for Windows.")
+                    self.logger.debug("Auto-selected 'cuda' (NVIDIA) for Windows.")
                 elif 'qsv' in available_on_app:
                     hwaccel_args = ['-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv']
-                    self.logger.info("Auto-selected 'qsv' (Intel) for Windows.")
+                    self.logger.debug("Auto-selected 'qsv' (Intel) for Windows.")
                 elif 'd3d11va' in available_on_app:
                     hwaccel_args = ['-hwaccel', 'd3d11va']
-                    self.logger.info("Auto-selected 'd3d11va' for Windows.")
+                    self.logger.debug("Auto-selected 'd3d11va' for Windows.")
                 elif 'dxva2' in available_on_app:
                     hwaccel_args = ['-hwaccel', 'dxva2']
-                    self.logger.info("Auto-selected 'dxva2' for Windows.")
+                    self.logger.debug("Auto-selected 'dxva2' for Windows.")
 
             if not hwaccel_args:
                 self.logger.info(
