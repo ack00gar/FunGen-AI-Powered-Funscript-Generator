@@ -810,7 +810,17 @@ class MainMenu:
                         imgui.set_tooltip(
                             "If enabled, batch processing and single analysis will save final .funscript files next to the source video.\nIf disabled, they will be saved in the video's subfolder within the main Output Folder.")
 
-                    # Output Folder controls - Corrected
+                    c_gen_roll, current_gen_roll_val = imgui.checkbox(
+                        "Generate .roll file (Timeline 2)",
+                        self.app.app_settings.get("generate_roll_file", True)
+                    )
+                    if c_gen_roll:
+                        self.app.app_settings.set("generate_roll_file", current_gen_roll_val)
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("When enabled, a .roll.funscript file for Timeline 2 will be generated during analysis and saving.")
+
+
+                    # Output Folder controls
                     imgui.text("Output Folder:")
                     imgui.push_item_width(-1) # Use full available width
                     current_output_folder = self.app.app_settings.get("output_folder_path", "output")
@@ -821,6 +831,21 @@ class MainMenu:
                     imgui.pop_item_width()
                     if imgui.is_item_hovered():
                         imgui.set_tooltip("All generated files (msgpack, project files, etc.) will be saved in a subfolder here, named after the video.\nManually enter a relative (e.g. 'output') or absolute path.")
+
+                    imgui.separator()
+                    imgui.text("Batch Processing Defaults:")
+
+                    current_overwrite_strat = self.app.app_settings.get("batch_mode_overwrite_strategy", 0)
+                    if imgui.radio_button("Process All (skips own matching version)##BatchOverwrite0",
+                                          current_overwrite_strat == 0):
+                        self.app.app_settings.set("batch_mode_overwrite_strategy", 0)
+                    if imgui.is_item_hovered(): imgui.set_tooltip(
+                        "Default for batch mode. Will process all videos, but intelligently skips files already created by the current version of this program.")
+
+                    if imgui.radio_button("Skip if Funscript Exists##BatchOverwrite1", current_overwrite_strat == 1):
+                        self.app.app_settings.set("batch_mode_overwrite_strategy", 1)
+                    if imgui.is_item_hovered(): imgui.set_tooltip(
+                        "Default for batch mode. Will only process videos that do not have a corresponding .funscript file.")
 
                 imgui.separator()
 

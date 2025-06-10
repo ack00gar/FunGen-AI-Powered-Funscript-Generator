@@ -67,8 +67,10 @@ class GUI:
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
+        self.batch_overwrite_mode_ui = 0  # 0: Process All, 1: Skip Existing
         self.batch_apply_post_processing_ui = True
         self.batch_copy_funscript_to_video_location_ui = True
+        self.batch_generate_roll_file_ui = True
 
         self.control_panel_ui.timeline_editor1 = self.timeline_editor1
         self.control_panel_ui.timeline_editor2 = self.timeline_editor2
@@ -615,37 +617,54 @@ class GUI:
                 if imgui.radio_button("2-Stage (Detect + Segment Only)", self.selected_batch_method_idx_ui == 1):
                     self.selected_batch_method_idx_ui = 1
 
+                # --- Overwrite Mode Selection ---
                 imgui.separator()
-                imgui.spacing()
+                imgui.text("File Handling:")
+                if imgui.radio_button("Process All Videos (Skips own matching version)",
+                                      self.batch_overwrite_mode_ui == 0):
+                    self.batch_overwrite_mode_ui = 0
+                if imgui.radio_button("Process Only if Funscript is Missing", self.batch_overwrite_mode_ui == 1):
+                    self.batch_overwrite_mode_ui = 1
 
-                # --- New checkboxes for batch options ---
-                imgui.text("Options:")
-                _, self.batch_apply_post_processing_ui = imgui.checkbox("Apply Auto Post-Processing", self.batch_apply_post_processing_ui)
-                _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video file", self.batch_copy_funscript_to_video_location_ui)
+                # --- Output Options ---
+                imgui.separator()
+                imgui.text("Output Options:")
+                _, self.batch_apply_post_processing_ui = imgui.checkbox("Apply Auto Post-Processing",
+                                                                        self.batch_apply_post_processing_ui)
+                imgui.same_line()
+
+                # Disable roll file generation for 2-stage mode which doesn't produce it
+                is_3_stage = self.selected_batch_method_idx_ui == 0
+                if not is_3_stage:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+                _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file (Timeline 2)",
+                                                                     self.batch_generate_roll_file_ui if is_3_stage else False)
+
+                if not is_3_stage:
+                    imgui.pop_style_var()
+                    imgui.internal.pop_item_flag()
+
+                imgui.same_line()
+                _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video",
+                                                                                   self.batch_copy_funscript_to_video_location_ui)
 
                 imgui.separator()
-                imgui.spacing()
 
-                # Center buttons
-                style = imgui.get_style()
-                button_width = 100
-                total_buttons_width = (button_width * 2) + style.item_spacing[0]
-                content_width = imgui.get_content_region_available_width()
-                if content_width > total_buttons_width:
-                    imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (content_width - total_buttons_width) / 2)
-
-                # Pass the selected index when "Yes" is clicked
-                if imgui.button("Yes", width=button_width):
+                if imgui.button("Yes", width=100):
                     app._initiate_batch_processing_from_confirmation(
                         self.selected_batch_method_idx_ui,
                         self.batch_apply_post_processing_ui,
-                        self.batch_copy_funscript_to_video_location_ui
+                        self.batch_copy_funscript_to_video_location_ui,
+                        self.batch_overwrite_mode_ui,
+                        self.batch_generate_roll_file_ui
                     )
                     imgui.close_current_popup()
 
                 imgui.same_line()
 
-                if imgui.button("No", width=button_width):
+                if imgui.button("No", width=100):
                     app._cancel_batch_processing_from_confirmation()
                     imgui.close_current_popup()
 
