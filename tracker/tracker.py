@@ -8,41 +8,29 @@ from ultralytics import YOLO
 import logging
 
 from funscript.dual_axis_funscript import DualAxisFunscript
-from config.constants import *
+from config import constants
 
-# Define DEVICE_TO_USE logic (ensure torch is imported if needed, or handle absence)
-try:
-    import torch
-    if platform.processor() == 'arm' and platform.system() == 'Darwin':
-        DEVICE_TO_USE = 'mps'
-    elif torch.cuda.is_available():
-        DEVICE_TO_USE = 'cuda'
-    else:
-        DEVICE_TO_USE = 'cpu'
-except Exception as e:
-    print(f"Device detection error for tracker: {e}")
-    DEVICE_TO_USE = 'cpu' # Fallback
 
 class ROITracker:
     def __init__(self,
-                 app_logic_instance: Optional[Any], # Made Optional
+                 app_logic_instance: Optional[Any],
                  tracker_model_path: str,
                  pose_model_path: Optional[str] = None,
-                 confidence_threshold: float = 0.4,
-                 roi_padding: int = 20,
-                 roi_update_interval: int = 100,
-                 roi_smoothing_factor: float = DEFAULT_ROI_SMOOTHING_FACTOR,
-                 dis_flow_preset: str = "ULTRAFAST",
-                 dis_finest_scale: Optional[int] = 5,
-                 target_size_preprocess: Tuple[int, int] = (640, 640),
-                 flow_history_window_smooth: int = 3,
+                 confidence_threshold: float = constants.DEFAULT_TRACKER_CONFIDENCE_THRESHOLD,
+                 roi_padding: int = constants.DEFAULT_TRACKER_ROI_PADDING,
+                 roi_update_interval: int = constants.DEFAULT_ROI_UPDATE_INTERVAL,
+                 roi_smoothing_factor: float = constants.DEFAULT_ROI_SMOOTHING_FACTOR,
+                 dis_flow_preset: str = constants.DEFAULT_DIS_FLOW_PRESET,
+                 dis_finest_scale: Optional[int] = constants.DEFAULT_DIS_FINEST_SCALE,
+                 target_size_preprocess: Tuple[int, int] = (constants.YOLO_INPUT_SIZE, constants.YOLO_INPUT_SIZE),
+                 flow_history_window_smooth: int = constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW,
                  adaptive_flow_scale: bool = True,
                  use_sparse_flow: bool = False,
-                 max_frames_for_roi_persistence: int = DEFAULT_ROI_PERSISTENCE_FRAMES,
-                 base_amplification_factor: float = DEFAULT_BASE_AMPLIFICATION,
+                 max_frames_for_roi_persistence: int = constants.DEFAULT_ROI_PERSISTENCE_FRAMES,
+                 base_amplification_factor: float = constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION,
                  class_specific_amplification_multipliers: Optional[Dict[str, float]] = None,
                  logger: Optional[logging.Logger] = None,
-                 inversion_detection_split_ratio: float = 4.0
+                 inversion_detection_split_ratio: float = constants.INVERSION_DETECTION_SPLIT_RATIO
                  ):
         self.app = app_logic_instance # Can be None if instantiated by Stage 3
 
@@ -100,7 +88,7 @@ class ROITracker:
         self.frames_since_target_lost: int = 0
 
         self.base_amplification_factor = base_amplification_factor
-        self.class_specific_amplification_multipliers = class_specific_amplification_multipliers if class_specific_amplification_multipliers is not None else DEFAULT_CLASS_AMP_MULTIPLIERS
+        self.class_specific_amplification_multipliers = class_specific_amplification_multipliers if class_specific_amplification_multipliers is not None else constants.DEFAULT_CLASS_AMP_MULTIPLIERS
         self.logger.info(f"Base Amplification: {self.base_amplification_factor}x")
         self.logger.info(f"Class Specific Amp Multipliers: {self.class_specific_amplification_multipliers}")
 
@@ -108,10 +96,12 @@ class ROITracker:
         self.output_delay_frames: int = self.app.tracker.output_delay_frames if self.app and hasattr(self.app, 'tracker') else 0
         self.current_video_fps_for_delay: float = self.app.tracker.current_video_fps_for_delay if self.app and hasattr(self.app, 'tracker') else 30.0
         # Sensitivity and offsets should also be settable or taken from defaults if no app
-        self.y_offset = self.app.tracker.y_offset if self.app and hasattr(self.app, 'tracker') else DEFAULT_Y_OFFSET
-        self.x_offset = self.app.tracker.x_offset if self.app and hasattr(self.app, 'tracker') else DEFAULT_X_OFFSET
-        self.sensitivity = self.app.tracker.sensitivity if self.app and hasattr(self.app, 'tracker') else DEFAULT_SENSITIVITY
-
+        self.y_offset = self.app.tracker.y_offset if self.app and hasattr(self.app,
+                                                                          'tracker') else constants.DEFAULT_LIVE_TRACKER_Y_OFFSET
+        self.x_offset = self.app.tracker.x_offset if self.app and hasattr(self.app,
+                                                                          'tracker') else constants.DEFAULT_LIVE_TRACKER_X_OFFSET
+        self.sensitivity = self.app.tracker.sensitivity if self.app and hasattr(self.app,
+                                                                                'tracker') else constants.DEFAULT_LIVE_TRACKER_SENSITIVITY
 
         self.dis_flow_preset = dis_flow_preset
         self.dis_finest_scale = dis_finest_scale
@@ -364,7 +354,7 @@ class ROITracker:
         if self.app and hasattr(self.app, 'discarded_tracking_classes'):
             discarded_classes_runtime = self.app.discarded_tracking_classes
 
-        results = self.yolo(frame, device=DEVICE_TO_USE,  verbose=False, conf=self.confidence_threshold)
+        results = self.yolo(frame, device=constants.DEVICE,  verbose=False, conf=self.confidence_threshold)
         for result in results:
             for box in result.boxes:
                 conf = float(box.conf[0])

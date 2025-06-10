@@ -14,7 +14,7 @@ from simplification.cutil import simplify_coords_vw
 from copy import deepcopy
 
 from video.video_processor import VideoProcessor
-from config.constants import *
+from config import constants
 
 _of_debug_prints_stage2 = False
 
@@ -78,7 +78,7 @@ class BaseSegment:
         block_status = ""
         for frame in sorted(self.frames, key=lambda f: f.frame_id):
             box = getattr(frame, box_attribute_name, None)
-            is_synthesized = box and box.status not in [STATUS_DETECTED, STATUS_SMOOTHED]
+            is_synthesized = box and box.status not in [constants.STATUS_DETECTED, constants.STATUS_SMOOTHED]
             if is_synthesized:
                 if not in_occlusion_block:
                     in_occlusion_block = True
@@ -105,7 +105,7 @@ class BaseSegment:
 class BoxRecord:
     def __init__(self, frame_id: int, bbox: Union[np.ndarray, List[float], Tuple[float, float, float, float]],
                  confidence: float, class_id: int, class_name: str,
-                 status: str = STATUS_DETECTED, yolo_input_size: int = 640,
+                 status: str = constants.STATUS_DETECTED, yolo_input_size: int = 640,
                  track_id: Optional[int] = None):  # track_id will be populated by Stage 2 tracker
         self.frame_id = int(frame_id)
         self.bbox = np.array(bbox, dtype=np.float32)
@@ -190,7 +190,7 @@ class FrameObject:
         self.boxes: List[BoxRecord] = []
         # Store the effective discard set for use in parse_raw_detections
         self._effective_discard_classes_for_parse = classes_to_discard_runtime_set if classes_to_discard_runtime_set is not None else set(
-            CLASSES_TO_DISCARD_CONST)
+            constants.CLASSES_TO_DISCARD_BY_DEFAULT)
         self.parse_raw_detections(raw_detections_input or [])
 
         # Original Stage 2 attributes
@@ -226,7 +226,7 @@ class FrameObject:
 
     def get_preferred_penis_box(self, actual_video_type: str = '2D', vr_vertical_third_filter: bool = False) -> \
     Optional[BoxRecord]:
-        penis_detections = [b for b in self.boxes if b.class_name == PENIS_CLASS_NAME_CONST and not b.is_excluded]
+        penis_detections = [b for b in self.boxes if b.class_name == constants.PENIS_CLASS_NAME and not b.is_excluded]
         if not penis_detections: return None
         penis_detections.sort(key=lambda d: (d.bbox[3], d.area), reverse=True)
         selected_penis = penis_detections[0]
@@ -260,7 +260,7 @@ class FrameObject:
                 "bbox": list(box_dims),
                 "confidence": 1.0,  # Confidence is high as it's a "locked" concept
                 "class_id": -1,
-                "class_name": PENIS_CLASS_NAME_CONST,  # Use a common class name
+                "class_name": constants.PENIS_CLASS_NAME,  # Use a common class name
                 "status": "ATR_LOCKED",  # Custom status
                 "track_id": None,  # ATR locked penis is a derived concept, not directly tracked object
                 "width": w, "height": h,
@@ -287,7 +287,7 @@ class FrameObject:
                 "bbox": list(kp_box),
                 "confidence": 0.9,  # High confidence as it's a processed box
                 "class_id": -1,
-                "class_name": PENIS_CLASS_NAME_CONST,  # Use a common class name
+                "class_name": constants.PENIS_CLASS_NAME,  # Use a common class name
                 "status": "ATR_VISIBLE_P",  # Custom status
                 "track_id": None,  # Derived concept
                 "width": w, "height": h,
@@ -295,7 +295,7 @@ class FrameObject:
                 "cy": kp_box[1] + h / 2,
                 "area_perc": 0,  # Can calculate if needed
                 "is_excluded": False,
-                "role_in_frame": "pref_penis",  # <--- USE EXISTING ROLE FOR DISTINCT COLOR
+                "role_in_frame": "pref_penis",
             }
             frame_data["yolo_boxes"].append(overlay_kp_box)
 
@@ -345,7 +345,7 @@ class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with 
         # 2. To find position_short_name_val, we need to search the dictionary:
         position_short_name_key_val = "NR"  # Default if not found
 
-        for key, info in POSITION_INFO_MAPPING_CONST.items():
+        for key, info in constants.POSITION_INFO_MAPPING.items():
             if info["long_name"] == self.major_position:
                 position_short_name_key_val = key
                 break
@@ -394,7 +394,7 @@ class AppStateContainer:
         self.frames: List[FrameObject] = []
         FrameObject._id_counter = 0
 
-        self.effective_discard_classes = set(CLASSES_TO_DISCARD_CONST)
+        self.effective_discard_classes = set(constants.CLASSES_TO_DISCARD_BY_DEFAULT)
         if discarded_classes_runtime_arg:
             self.effective_discard_classes.update(discarded_classes_runtime_arg)
         if logger and discarded_classes_runtime_arg:
@@ -430,7 +430,7 @@ class AppStateContainer:
                     center_x_cond = (yolo_input_size / 3 <= box_rec.cx <= 2 * yolo_input_size / 3)
                     # ATR's central third also included a y-check: y1 <= cy <= y2
                     # center_y_cond = (yolo_input_size / 3 <= box_rec.cy <= 2 * yolo_input_size / 3)
-                    if box_rec.class_name != PENIS_CLASS_NAME_CONST and not center_x_cond:  # Only X filter for now
+                    if box_rec.class_name != constants.PENIS_CLASS_NAME and not center_x_cond:  # Only X filter for now
                         box_rec.is_excluded = True
                         box_rec.status = "Excluded_VR_Filter_Peripheral"
             self.frames.append(fo)
@@ -772,7 +772,7 @@ def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logg
                                 confidence=min(last_box_rec.confidence, box_rec.confidence) * 0.8,  # Reduced conf
                                 class_id=box_rec.class_id,  # Assume class is consistent
                                 class_name=box_rec.class_name,
-                                status=STATUS_GENERATED_LINEAR,  # Mark as interpolated
+                                status=consants.STATUS_GENERATED_LINEAR,  # Mark as interpolated
                                 yolo_input_size=frame_obj.yolo_input_size,
                                 track_id=box_rec.track_id
                             )
@@ -848,7 +848,7 @@ def atr_pass_3_build_locked_penis(state: AppStateContainer, logger: Optional[log
 
             # Check for glans contact with this selected_penis_box_rec
             glans_boxes_in_frame = [b for b in frame_obj.boxes if
-                                    b.class_name == GLANS_CLASS_NAME_CONST and not b.is_excluded]
+                                    b.class_name == constants.GLANS_CLASS_NAME and not b.is_excluded]
             for glans_br in glans_boxes_in_frame:
                 if _atr_calculate_iou(selected_penis_box_rec.box, glans_br.box) > 0.05:  # Small IOU to confirm overlap
                     frame_glans_detected = True
@@ -958,7 +958,7 @@ def atr_pass_4_assign_positions_and_segments(state: AppStateContainer, logger: O
             contacts_for_frame_determination = []  # For _atr_assign_frame_position
 
             for box_rec in frame_obj.boxes:
-                if box_rec.is_excluded or box_rec.class_name == PENIS_CLASS_NAME_CONST or box_rec.class_name == GLANS_CLASS_NAME_CONST:
+                if box_rec.is_excluded or box_rec.class_name == constants.PENIS_CLASS_NAME or box_rec.class_name == constants.GLANS_CLASS_NAME:
                     continue
 
                 iou_with_lp = _atr_calculate_iou(lp_box_coords, box_rec.bbox)

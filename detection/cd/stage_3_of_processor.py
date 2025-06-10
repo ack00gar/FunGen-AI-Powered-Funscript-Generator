@@ -1,15 +1,13 @@
-import os
 import time
 import logging
-import numpy as np
-import cv2 # Ensure OpenCV is available
+import cv2
 from typing import Optional, List, Dict, Any, Tuple
 
 from funscript.dual_axis_funscript import DualAxisFunscript
 from video.video_processor import VideoProcessor
-from tracker.tracker import ROITracker # ROITracker will be instantiated here
-from detection.cd.stage_2_cd import FrameObject, ATRSegment
-from config.constants import *
+from tracker.tracker import ROITracker
+from detection.cd.stage_2_cd import FrameObject, ATRSegment, ATRLockedPenisState
+from config import constants
 
 # Helper to avoid NameError if constants are not directly in tracker anymore
 
@@ -85,22 +83,29 @@ class Stage3OpticalFlowProcessor:
                 pose_model_path=self.common_app_config.get('yolo_pose_model_path', ''),   # Not used for S3 flow
                 confidence_threshold=self.tracker_config.get('confidence_threshold', 0.4),
                 roi_padding=self.tracker_config.get('roi_padding', 20),
-                roi_update_interval=self.tracker_config.get('roi_update_interval', DEFAULT_ROI_UPDATE_INTERVAL),
-                roi_smoothing_factor=self.tracker_config.get('roi_smoothing_factor', DEFAULT_ROI_SMOOTHING_FACTOR),
+                roi_update_interval=self.tracker_config.get('roi_update_interval',
+                                                            constants.DEFAULT_ROI_UPDATE_INTERVAL),
+                roi_smoothing_factor=self.tracker_config.get('roi_smoothing_factor',
+                                                             constants.DEFAULT_ROI_SMOOTHING_FACTOR),
+                base_amplification_factor=self.tracker_config.get('base_amplification_factor',
+                                                                  constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
+
                 dis_flow_preset=self.tracker_config.get('dis_flow_preset', "ULTRAFAST"),
                 target_size_preprocess=self.tracker_config.get('target_size_preprocess', (640,640)),
                 flow_history_window_smooth=self.tracker_config.get('flow_history_window_smooth', 3),
                 adaptive_flow_scale=self.tracker_config.get('adaptive_flow_scale', True),
                 use_sparse_flow=self.tracker_config.get('use_sparse_flow', False), # S3 typically uses dense
-                max_frames_for_roi_persistence=self.tracker_config.get('max_frames_for_roi_persistence', DEFAULT_ROI_PERSISTENCE_FRAMES), # Not really used in S3 like in live
-                base_amplification_factor=self.tracker_config.get('base_amplification_factor', DEFAULT_BASE_AMPLIFICATION),
+                max_frames_for_roi_persistence=self.tracker_config.get('max_frames_for_roi_persistence', constants.DEFAULT_ROI_PERSISTENCE_FRAMES), # Not really used in S3 like in live
                 class_specific_amplification_multipliers=self.tracker_config.get('class_specific_amplification_multipliers', None),
                 logger=self.logger.getChild("ROITracker_S3")
             )
             # Set parameters that might not be in __init__ or need override for S3
-            self.roi_tracker_instance.y_offset = self.tracker_config.get('y_offset', DEFAULT_Y_OFFSET)
-            self.roi_tracker_instance.x_offset = self.tracker_config.get('x_offset', DEFAULT_X_OFFSET)
-            self.roi_tracker_instance.sensitivity = self.tracker_config.get('sensitivity', DEFAULT_SENSITIVITY)
+            self.roi_tracker_instance.y_offset = self.tracker_config.get('y_offset',
+                                                                         constants.DEFAULT_LIVE_TRACKER_Y_OFFSET)
+            self.roi_tracker_instance.x_offset = self.tracker_config.get('x_offset',
+                                                                         constants.DEFAULT_LIVE_TRACKER_X_OFFSET)
+            self.roi_tracker_instance.sensitivity = self.tracker_config.get('sensitivity',
+                                                                            constants.DEFAULT_LIVE_TRACKER_SENSITIVITY)
             self.roi_tracker_instance.output_delay_frames = self.common_app_config.get('output_delay_frames', 0)
             self.roi_tracker_instance.current_video_fps_for_delay = self.common_app_config.get('video_fps', 30.0)
             self.roi_tracker_instance.tracking_mode = "YOLO_ROI" # S3 operates in a mode analogous to YOLO_ROI for ROI definition
@@ -235,8 +240,8 @@ class Stage3OpticalFlowProcessor:
                                 interacting_objects_for_roi_calc
                             )
                             if segment_obj.major_position == "Handjob / Blowjob" and candidate_roi_xywh:
-                                narrow_factor = self.common_app_config.get("roi_narrow_factor_hjbj", DEFAULT_ROI_NARROW_FACTOR_HJBJ)
-                                min_roi_dim = self.common_app_config.get("min_roi_dim_hjbj", DEFAULT_MIN_ROI_DIM_HJBJ)
+                                narrow_factor = self.common_app_config.get("roi_narrow_factor_hjbj", constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ)
+                                min_roi_dim = self.common_app_config.get("min_roi_dim_hjbj", constants.DEFAULT_MIN_ROI_DIM_HJBJ)
                                 rx, ry, rw, rh = candidate_roi_xywh
                                 rw_new = max(min_roi_dim, int(rw * narrow_factor))
                                 rh_new = max(min_roi_dim, int(rh * narrow_factor))

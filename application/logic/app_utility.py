@@ -2,7 +2,7 @@ import numpy as np
 from typing import Dict, Tuple
 
 
-from config.constants import HEATMAP_COLORS_TIMELINE, STEP_SIZE_TIMELINE, TIMELINE_COLOR_ALPHA, STATUS_DETECTED, STATUS_SMOOTHED
+from config.constants import TIMELINE_HEATMAP_COLORS, TIMELINE_COLOR_SPEED_STEP, TIMELINE_COLOR_ALPHA, STATUS_DETECTED, STATUS_SMOOTHED
 
 
 class AppUtility:
@@ -47,8 +47,8 @@ class AppUtility:
 
     def get_speed_color_from_map(self, speed_pps: float) -> tuple:
         intensity = speed_pps
-        heatmap_colors_list = HEATMAP_COLORS_TIMELINE
-        step_val = STEP_SIZE_TIMELINE
+        heatmap_colors_list = TIMELINE_HEATMAP_COLORS
+        step_val = TIMELINE_COLOR_SPEED_STEP
         alpha_val = TIMELINE_COLOR_ALPHA
 
         if np.isnan(intensity):
