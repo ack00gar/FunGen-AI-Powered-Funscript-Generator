@@ -827,6 +827,18 @@ class ROITracker:
                 if current_single_axis_output == "primary": primary_to_write = final_secondary_pos
                 else: secondary_to_write = final_secondary_pos
 
+            # Determine if this is a file processing context (like "track in chapter") vs. pure live tracking.
+            # The presence of `frame_index` is a strong indicator of file processing.
+            # When `is_from_live_tracker` is False, the `max_history` limit in DualAxisFunscript is bypassed.
+            is_file_processing_context = frame_index is not None
+
+            self.funscript.add_action(
+                timestamp_ms=int(round(adjusted_frame_time_ms)),
+                primary_pos=primary_to_write,
+                secondary_pos=secondary_to_write,
+                is_from_live_tracker=(not is_file_processing_context)
+            )
+
             self.funscript.add_action(int(round(adjusted_frame_time_ms)), primary_to_write, secondary_to_write)
             action_log_list.append({
                 "at": int(round(adjusted_frame_time_ms)), "pos": primary_to_write, "secondary_pos": secondary_to_write,
