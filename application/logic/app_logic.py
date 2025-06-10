@@ -140,6 +140,10 @@ class ApplicationLogic:
         self.single_video_analysis_complete_event = threading.Event()
         # Event to ensure saving is complete before the next batch item
         self.save_and_reset_complete_event = threading.Event()
+        # State to hold the selected batch processing method
+        self.batch_processing_method_idx: int = 0
+        self.batch_apply_post_processing: bool = True
+        self.batch_copy_funscript_to_video_location: bool = True
 
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
@@ -210,7 +214,7 @@ class ApplicationLogic:
         self.show_batch_confirmation_dialog = True
         self.energy_saver.reset_activity_timer()  # Ensure UI is responsive
 
-    def _initiate_batch_processing_from_confirmation(self):
+    def _initiate_batch_processing_from_confirmation(self, selected_method_idx: int, apply_post_processing: bool, copy_to_video_location: bool):
         """
         [Private] Called from the GUI when the user clicks 'Yes' in the confirmation dialog.
         This method starts the actual batch processing thread.
@@ -221,14 +225,19 @@ class ApplicationLogic:
             self._cancel_batch_processing_from_confirmation()
             return
 
+        # Store the user's choice from the dialog
+        self.batch_processing_method_idx = selected_method_idx
+        self.batch_apply_post_processing = apply_post_processing
+        self.batch_copy_funscript_to_video_location = copy_to_video_location
+        self.logger.info(f"User confirmed. Starting batch processing with method index: {self.batch_processing_method_idx}.")
+        self.logger.info(f"Batch settings: Post-Processing={self.batch_apply_post_processing}, Copy Funscript={self.batch_copy_funscript_to_video_location}")
+
+
         # Set up batch processing state from the confirmed data
         self.batch_video_paths = list(self.batch_confirmation_videos)
         self.is_batch_processing_active = True
         self.current_batch_video_index = -1
         self.stop_batch_event.clear()
-
-        self.logger.info(f"User confirmed. Starting batch processing for {len(self.batch_video_paths)} videos.",
-                         extra={'status_message': True})
 
         # Start the background thread
         self.batch_processing_thread = threading.Thread(target=self._run_batch_processing_thread, daemon=True)

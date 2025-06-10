@@ -1,12 +1,23 @@
-import json
+import orjson
 import time
 import datetime
+import numpy as np
 from typing import TYPE_CHECKING, Optional, Dict, Tuple
 
 from config.constants import *  # Should include AUTOSAVE_FILE, PROJECT_FILE_EXTENSION, VERSION
 
 if TYPE_CHECKING:
     from application.logic.app_logic import ApplicationLogic
+
+# Add a handler to convert NumPy types to standard Python types for JSON serialization
+def numpy_default_handler(obj):
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 
 class ProjectManager:
@@ -80,8 +91,8 @@ class ProjectManager:
             # self.app.energy_saver.reset_activity_timer() # Activity related to user interaction
 
         try:
-            with open(filepath, 'r') as f:
-                project_data = json.load(f)
+            with open(filepath, 'rb') as f:
+                project_data = orjson.loads(f.read())
 
             # Reset application state before loading new project data
             self.app.reset_project_state(for_new_project=False)  # False indicates it's for loading
@@ -142,8 +153,8 @@ class ProjectManager:
         project_data["version"] = VERSION
 
         try:
-            with open(filepath, 'w') as f:
-                json.dump(project_data, f, indent=4)
+            with open(filepath, 'wb') as f:
+                f.write(orjson.dumps(project_data, default=numpy_default_handler))
             self.project_file_path = filepath
             self.project_dirty = False  # Saved, so no longer dirty
             self.app.logger.info(f"Project saved to '{os.path.basename(filepath)}'.", extra={'status_message': True})
@@ -180,9 +191,15 @@ class ProjectManager:
         autosave_data = self._get_project_state_as_dict()
         autosave_data["version"] = VERSION + "_autosave"  # Distinguish autosave version
 
+        # Ensure there is data to save before writing the file
+        if not autosave_data.get("video_path") and not autosave_data.get("funscript_actions_timeline1"):
+             self.app.logger.info("Autosave skipped: No content to save.")
+             self.last_autosave_time = time.time()
+             return
+
         try:
-            with open(AUTOSAVE_FILE, 'w') as f:
-                json.dump(autosave_data, f, indent=4)
+            with open(AUTOSAVE_FILE, 'wb') as f:
+                f.write(orjson.dumps(autosave_data, default=numpy_default_handler))
             if not is_exit_save:
                 self.app.logger.info(
                     f"State autosaved to {os.path.basename(AUTOSAVE_FILE)}", extra={'status_message': True})

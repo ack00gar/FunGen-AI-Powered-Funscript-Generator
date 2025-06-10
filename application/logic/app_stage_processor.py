@@ -293,8 +293,14 @@ class AppStageProcessor:
     def _run_full_analysis_thread_target(self):
         fm = self.app.file_manager
         fs_proc = self.app.funscript_processor
-        selected_mode_idx = self.app.app_state_ui.selected_tracker_type_idx
         stage1_success = False
+
+        if self.app.is_batch_processing_active:
+            selected_mode_idx = self.app.batch_processing_method_idx
+            self.logger.info(f"[Thread] Using batch processing method index: {selected_mode_idx}")
+        else:
+            selected_mode_idx = self.app.app_state_ui.selected_tracker_type_idx
+
 
         try:
             # --- Stage 1 ---
@@ -807,12 +813,25 @@ class AppStageProcessor:
                         if not video_path_from_event:
                             self.logger.warning("Completion event is missing its video path. Cannot save funscripts.")
                         else:
+                            # --- Update the central chapter list from the event data BEFORE saving ---
+                            if segments_from_event is not None:
+                                self.logger.info(f"Updating app state with {len(segments_from_event)} chapters for saving.")
+                                self.app.funscript_processor.video_chapters = [
+                                    VideoSegment.from_dict(chap_data) for chap_data in segments_from_event if isinstance(chap_data, dict)
+                                ]
+
                             self.app.file_manager.save_raw_funscripts_after_generation(video_path_from_event)
-                            if self.app.app_settings.get("enable_auto_post_processing", False):
+                            post_processing_enabled = self.app.app_settings.get("enable_auto_post_processing", False)
+                            if self.app.is_batch_processing_active:
+                                # If in batch mode, use the choice made in the batch dialog
+                                post_processing_enabled = self.app.batch_apply_post_processing
+
+                            if post_processing_enabled:
                                 self.logger.info("Triggering auto post-processing after completed analysis.")
                                 self.app.funscript_processor.apply_automatic_post_processing()
                             else:
-                                self.logger.info("Auto post-processing disabled, skipping.")
+                                self.logger.info("Auto post-processing disabled for this run, skipping.")
+
                             self.logger.info("Saving final funscripts...")
                             self.app.file_manager.save_final_funscripts(video_path_from_event, chapters=segments_from_event)
                             # --- Save the project file for the completed video ---
