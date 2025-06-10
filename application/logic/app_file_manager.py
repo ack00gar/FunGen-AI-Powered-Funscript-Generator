@@ -2,6 +2,7 @@ import os
 import json
 import orjson
 import msgpack
+import time
 from typing import List, Optional, Dict, Tuple
 
 from application.utils.video_segment import VideoSegment
@@ -200,6 +201,18 @@ class AppFileManager:
         self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
 
+    def _get_funscript_data(self, filepath: str) -> Optional[Dict]:
+        """Safely reads and returns the entire parsed dictionary from a funscript file."""
+        if not os.path.exists(filepath):
+            return None
+        try:
+            with open(filepath, 'rb') as f:
+                data = orjson.loads(f.read())
+            return data
+        except Exception as e:
+            self.logger.warning(f"Could not parse funscript data from file: {filepath}. Error: {e}")
+            return None
+
     def _save_funscript_file(self, filepath: str, actions: List[Dict], chapters: Optional[List[VideoSegment]] = None):
         """
         A centralized, high-performance method to save a single funscript file.
@@ -208,6 +221,19 @@ class AppFileManager:
         if not actions:
             self.logger.info(f"No actions to save to {os.path.basename(filepath)}.", extra={'status_message': True})
             return
+
+        # --- Backup logic before saving ---
+        if os.path.exists(filepath):
+            try:
+                # Create a unique backup filename with a Unix timestamp
+                backup_path = f"{filepath}.{int(time.time())}.bak"
+                os.rename(filepath, backup_path)
+                self.logger.info(f"Created backup of existing file: {os.path.basename(backup_path)}")
+            except Exception as e:
+                self.logger.error(f"Failed to create backup for {os.path.basename(filepath)}: {e}")
+                # We can decide whether to proceed with the overwrite or not.
+                # For safety, let's proceed but the user is warned.
+
 
         funscript_data = {
             "version": "1.0",
@@ -551,10 +577,23 @@ class AppFileManager:
 
         # Always save to the output directory
         if primary_actions:
-            path_in_output = self.get_output_path_for_file(video_path, "_t1.funscript")
+            path_in_output = self.get_output_path_for_file(video_path, ".funscript")
             self._save_funscript_file(path_in_output, primary_actions, chapters_to_save)
-        if secondary_actions:
-            path_in_output_t2 = self.get_output_path_for_file(video_path, "_t2.funscript")
+
+        # 1. Start with the global setting as the default.
+        generate_roll = self.app.app_settings.get("generate_roll_file", True)
+        # 2. If in batch mode, override with the specific choice made for that batch.
+        if self.app.is_batch_processing_active:
+            generate_roll = self.app.batch_generate_roll_file
+
+        # --- Main funscript saving ---
+        if primary_actions:
+            path_in_output = self.get_output_path_for_file(video_path, ".funscript")
+            self._save_funscript_file(path_in_output, primary_actions, chapters_to_save)
+
+        # --- Roll funscript saving now respects the final 'generate_roll' value ---
+        if secondary_actions and generate_roll:
+            path_in_output_t2 = self.get_output_path_for_file(video_path, ".roll.funscript")
             self._save_funscript_file(path_in_output_t2, secondary_actions, None)
 
         # Additionally, save next to the video if the setting is enabled
@@ -562,10 +601,11 @@ class AppFileManager:
             self.logger.info("Also saving a copy of the final funscript next to the video file.")
             base, _ = os.path.splitext(video_path)
             if primary_actions:
-                path_next_to_vid = f"{base}_t1.funscript"
+                path_next_to_vid = f"{base}.funscript"
                 self._save_funscript_file(path_next_to_vid, primary_actions, chapters_to_save)
-            if secondary_actions:
-                path_next_to_vid_t2 = f"{base}_t2.funscript"
+            if secondary_actions and generate_roll:
+                path_next_to_vid_t2 = f"{base}.roll.funscript"
                 self._save_funscript_file(path_next_to_vid_t2, secondary_actions, None)
+
 
     

@@ -97,6 +97,8 @@ class AppSettings:
             # --- Output Settings ---
             "output_folder_path": "output",
             "autosave_final_funscript_to_video_location": True,
+            "batch_mode_overwrite_strategy": 0,  # 0=Process All, 1=Skip Existing
+            "generate_roll_file": True,
             # --- Tracking Settings ---
             "discarded_tracking_classes": [],
             "tracking_axis_mode": "both",

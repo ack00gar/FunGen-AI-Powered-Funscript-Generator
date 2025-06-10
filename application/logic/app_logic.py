@@ -144,6 +144,8 @@ class ApplicationLogic:
         self.batch_processing_method_idx: int = 0
         self.batch_apply_post_processing: bool = True
         self.batch_copy_funscript_to_video_location: bool = True
+        self.batch_overwrite_mode: int = 0  # 0 for Process All, 1 for Skip Existing
+        self.batch_generate_roll_file: bool = True
 
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
@@ -214,24 +216,28 @@ class ApplicationLogic:
         self.show_batch_confirmation_dialog = True
         self.energy_saver.reset_activity_timer()  # Ensure UI is responsive
 
-    def _initiate_batch_processing_from_confirmation(self, selected_method_idx: int, apply_post_processing: bool, copy_to_video_location: bool):
+    def _initiate_batch_processing_from_confirmation(self, selected_method_idx: int, apply_post_processing: bool,
+                                                     copy_to_video_location: bool, overwrite_mode: int,
+                                                     generate_roll: bool):
         """
         [Private] Called from the GUI when the user clicks 'Yes' in the confirmation dialog.
         This method starts the actual batch processing thread.
         """
-        if self.is_batch_processing_active: return  # Safety check
+        if self.is_batch_processing_active: return
         if not self.batch_confirmation_videos:
             self.logger.error("Batch confirmation accepted, but no videos were found in the list.")
             self._cancel_batch_processing_from_confirmation()
             return
 
-        # Store the user's choice from the dialog
+        # --- MODIFIED: Store all user choices from the dialog ---
         self.batch_processing_method_idx = selected_method_idx
         self.batch_apply_post_processing = apply_post_processing
         self.batch_copy_funscript_to_video_location = copy_to_video_location
-        self.logger.info(f"User confirmed. Starting batch processing with method index: {self.batch_processing_method_idx}.")
-        self.logger.info(f"Batch settings: Post-Processing={self.batch_apply_post_processing}, Copy Funscript={self.batch_copy_funscript_to_video_location}")
+        self.batch_overwrite_mode = overwrite_mode
+        self.batch_generate_roll_file = generate_roll
 
+        self.logger.info(
+            f"User confirmed. Starting batch processing with method: {selected_method_idx}, post-proc: {apply_post_processing}, copy: {copy_to_video_location}, overwrite: {overwrite_mode}, gen_roll: {generate_roll}")
 
         # Set up batch processing state from the confirmed data
         self.batch_video_paths = list(self.batch_confirmation_videos)
@@ -276,43 +282,58 @@ class ApplicationLogic:
                     break
 
                 self.current_batch_video_index = i
-                self.logger.info(
-                    f"Batch processing video {i + 1}/{len(self.batch_video_paths)}: {os.path.basename(video_path)}")
+                video_basename = os.path.basename(video_path)
+                self.logger.info(f"Batch processing video {i + 1}/{len(self.batch_video_paths)}: {video_basename}")
 
-                # --- 1. Open Video ---
-                # The open_video_from_path is asynchronous in nature if it just updates the GUI
-                # We need to ensure it completes before moving on. For this logic, we assume it's blocking enough.
-                # A more robust solution might use another event.
+                # --- Pre-flight checks for overwrite strategy ---
+                # This is now the very first step for each video in the loop.
+                path_next_to_video = os.path.splitext(video_path)[0] + ".funscript"
+
+                funscript_to_check = None
+                if os.path.exists(path_next_to_video):
+                    funscript_to_check = path_next_to_video
+
+                if funscript_to_check:
+                    if self.batch_overwrite_mode == 1:
+                        self.logger.info(
+                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'.")
+                        continue
+
+                    if self.batch_overwrite_mode == 0:
+                        funscript_data = self.file_manager._get_funscript_data(funscript_to_check)
+                        if funscript_data:
+                            author = funscript_data.get('author', '')
+                            metadata = funscript_data.get('metadata', {})
+                            # Ensure metadata is a dict before calling .get() on it
+                            version = metadata.get('version', '') if isinstance(metadata, dict) else ''
+
+                            if author.startswith("FunGen") and version == FUNSCRIPT_VERSION:
+                                self.logger.info(
+                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists.")
+                                continue
+
+                # --- End of pre-flight checks ---
+
                 open_success = self.file_manager.open_video_from_path(video_path)
                 if not open_success:
                     self.logger.error(f"Failed to open video, skipping: {video_path}")
                     continue
 
-                # Wait a moment for the video to be fully loaded by the processor
-                time.sleep(1.0)  # Small delay to ensure video processor is ready
+                time.sleep(1.0)
+                if self.stop_batch_event.is_set(): break
 
-                if self.stop_batch_event.is_set():
-                    break
-
-                # --- 2. Run Full Analysis ---
                 self.single_video_analysis_complete_event.clear()
-                self.save_and_reset_complete_event.clear() # Clear the new event before waiting
+                self.save_and_reset_complete_event.clear()
                 self.stage_processor.start_full_analysis()
 
-
-                # --- 3. Wait for analysis thread to finish ---
                 self.single_video_analysis_complete_event.wait()
-                if self.stop_batch_event.is_set():
-                    break
+                if self.stop_batch_event.is_set(): break
 
-                # --- 4. Wait for the GUI thread to save the results before proceeding ---
                 self.logger.debug("Batch loop: Waiting for save/reset signal from GUI thread...")
-                self.save_and_reset_complete_event.wait(timeout=120) # Add a timeout for safety
+                self.save_and_reset_complete_event.wait(timeout=120)
                 self.logger.debug("Batch loop: Save/reset signal received. Proceeding to next video.")
 
-                if self.stop_batch_event.is_set():
-                    break
-
+                if self.stop_batch_event.is_set(): break
         except Exception as e:
             self.logger.error(f"An error occurred during the batch process: {e}", exc_info=True)
         finally:
