@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from application.utils.time_format import _format_time
-from config.constants import POSITION_INFO_MAPPING_CONST, DEFAULT_CHAPTER_FPS
+from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS
 from application.utils.video_segment import VideoSegment
 
 
@@ -20,10 +20,10 @@ class VideoNavigationUI:
         self.show_edit_chapter_dialog = False
 
         # Prepare data for dialogs
-        self.position_short_name_keys = list(POSITION_INFO_MAPPING_CONST.keys())
+        self.position_short_name_keys = list(POSITION_INFO_MAPPING.keys())
         # IMPROVEMENT: Make display names more user-friendly by removing the internal key.
         self.position_display_names = [
-            f"{POSITION_INFO_MAPPING_CONST[key]['short_name']} ({POSITION_INFO_MAPPING_CONST[key]['long_name']})"
+            f"{POSITION_INFO_MAPPING[key]['short_name']} ({POSITION_INFO_MAPPING[key]['long_name']})"
             for key in self.position_short_name_keys
         ] if self.position_short_name_keys else ["N/A"]
 
@@ -607,7 +607,7 @@ class VideoNavigationUI:
                 self.chapter_edit_data["position_short_name_key"] = self.position_short_name_keys[
                     self.selected_position_idx_in_dialog]
             current_selected_key = self.chapter_edit_data.get("position_short_name_key")
-            long_name_display = POSITION_INFO_MAPPING_CONST.get(current_selected_key, {}).get("long_name",
+            long_name_display = POSITION_INFO_MAPPING.get(current_selected_key, {}).get("long_name",
                                                                                               "N/A") if current_selected_key else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display}")
             changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##CreateWin",
@@ -682,7 +682,7 @@ class VideoNavigationUI:
                 self.chapter_edit_data["position_short_name_key"] = self.position_short_name_keys[
                     self.selected_position_idx_in_dialog]
             pos_key_edit_display = self.chapter_edit_data.get("position_short_name_key")
-            long_name_display_edit = POSITION_INFO_MAPPING_CONST.get(pos_key_edit_display, {}).get("long_name",
+            long_name_display_edit = POSITION_INFO_MAPPING.get(pos_key_edit_display, {}).get("long_name",
                                                                                                    "N/A") if pos_key_edit_display else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display_edit}")
             changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##EditWin",

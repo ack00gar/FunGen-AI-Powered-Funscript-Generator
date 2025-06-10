@@ -1,10 +1,11 @@
 import orjson
+import os
 import time
 import datetime
 import numpy as np
 from typing import TYPE_CHECKING, Optional, Dict, Tuple
 
-from config.constants import *  # Should include AUTOSAVE_FILE, PROJECT_FILE_EXTENSION, VERSION
+from config.constants import AUTOSAVE_FILE, PROJECT_FILE_EXTENSION, APP_VERSION
 
 if TYPE_CHECKING:
     from application.logic.app_logic import ApplicationLogic
@@ -150,7 +151,7 @@ class ProjectManager:
 
     def save_project(self, filepath: str):
         project_data = self._get_project_state_as_dict()  # Gets data from all app sub-modules
-        project_data["version"] = VERSION
+        project_data["version"] = APP_VERSION
 
         try:
             with open(filepath, 'wb') as f:
@@ -189,7 +190,7 @@ class ProjectManager:
         )
 
         autosave_data = self._get_project_state_as_dict()
-        autosave_data["version"] = VERSION + "_autosave"  # Distinguish autosave version
+        autosave_data["version"] = APP_VERSION + "_autosave"  # Distinguish autosave version
 
         # Ensure there is data to save before writing the file
         if not autosave_data.get("video_path") and not autosave_data.get("funscript_actions_timeline1"):

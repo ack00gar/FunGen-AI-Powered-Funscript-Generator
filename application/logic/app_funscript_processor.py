@@ -5,7 +5,7 @@ from typing import List, Dict, Optional, Tuple
 
 from application.utils.video_segment import VideoSegment
 from funscript.dual_axis_funscript import DualAxisFunscript
-from config.constants import POSITION_INFO_MAPPING_CONST
+from config.constants import POSITION_INFO_MAPPING
 from application.utils.time_format import _format_time
 
 

@@ -1,8 +1,9 @@
 import imgui
-from config.constants import POSITION_INFO_MAPPING_CONST
 import os
-import detection.cd.stage_1_cd as stage1_module
 
+
+import detection.cd.stage_1_cd as stage1_module
+from config import constants
 
 class ControlPanelUI:
     def __init__(self, app):
@@ -154,7 +155,7 @@ class ControlPanelUI:
 
             # --- Queue Visualization and Suggestions ---
             frame_q_size = stage_proc.stage1_frame_queue_size
-            frame_q_max = stage1_module.QUEUE_MAXSIZE
+            frame_q_max = constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
 
             # Determine bar color and suggestion message based on user-defined logic
@@ -443,7 +444,7 @@ class ControlPanelUI:
             imgui.table_headers_row()
 
             # FIXED LOGIC: Iterate over unique display names to prevent duplicate rows.
-            unique_long_names = sorted(list(set(d.get("long_name") for d in POSITION_INFO_MAPPING_CONST.values())))
+            unique_long_names = sorted(list(set(d.get("long_name") for d in constants.POSITION_INFO_MAPPING.values())))
             all_display_names = ["Default"] + unique_long_names
 
             for long_name in all_display_names:
@@ -489,7 +490,7 @@ class ControlPanelUI:
             self.app.app_settings.set("auto_post_processing_rdp_epsilon", 15)
             self.app.app_settings.set("auto_post_processing_clamp_lower_threshold_primary", 10)
             self.app.app_settings.set("auto_post_processing_clamp_upper_threshold_primary", 90)
-            self.app.app_settings.set("auto_post_processing_amplification_config", {})
+            self.app.app_settings.set("auto_post_processing_amplification_config", constants.DEFAULT_AUTO_POST_AMP_CONFIG)
             self.app.project_manager.project_dirty = True
             self.app.logger.info("Automatic post-processing settings have been reset to their defaults.",
                                  extra={'status_message': True})

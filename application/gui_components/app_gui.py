@@ -20,7 +20,7 @@ from application.gui_components.video_navigation_ui import VideoNavigationUI, Ch
 from application.gui_components.info_graphs_ui import InfoGraphsUI
 
 
-from config.constants import *
+from config.constants import APP_WINDOW_TITLE
 
 
 class GUI:
@@ -121,7 +121,7 @@ class GUI:
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, gl.GL_TRUE)
         self.window = glfw.create_window(
-            self.window_width, self.window_height, "FunGen v0.5 - AI Computer Vision", None, None
+            self.window_width, self.window_height, APP_WINDOW_TITLE, None, None
         )
         if not self.window:
             glfw.terminate()

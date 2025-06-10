@@ -6,7 +6,7 @@ import time
 from typing import List, Optional, Dict, Tuple
 
 from application.utils.video_segment import VideoSegment
-from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, VERSION, FUNSCRIPT_VERSION
+from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, FUNSCRIPT_METADATA_VERSION
 
 
 class AppFileManager:
@@ -237,7 +237,7 @@ class AppFileManager:
 
         funscript_data = {
             "version": "1.0",
-            "author": f"FunGen beta {VERSION}",
+            "author": f"FunGen beta {APP_VERSION}",
             "inverted": False,
             "range": 100,
             "actions": sorted(actions, key=lambda x: x["at"]),  # Ensure sorted
@@ -255,7 +255,7 @@ class AppFileManager:
                     extra={'status_message': True})
 
             funscript_data["metadata"] = {
-                "version": f"{FUNSCRIPT_VERSION}",
+                "version": f"{FUNSCRIPT_METADATA_VERSION}",
                 "chapters_fps": current_fps,
                 "chapters": [chapter.to_funscript_chapter_dict(current_fps) for chapter in chapters]
             }

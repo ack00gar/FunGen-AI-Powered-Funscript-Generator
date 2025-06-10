@@ -5,29 +5,15 @@ from multiprocessing import Process, Queue, Event, Value, freeze_support
 from threading import Thread as PyThread
 from queue import Empty, Full
 from ultralytics import YOLO
-import platform
 import os
 import argparse
 import logging
 from typing import Optional, Tuple, List
 import subprocess
 from queue import Queue as StdLibQueue
-import torch
 
 from video.video_processor import VideoProcessor
-from config.constants import QUEUE_MAXSIZE
-
-# --- Default CONFIG ---
-DEVICE_TO_USE = 'cpu'
-try:
-    if platform.processor() == 'arm' and platform.system() == 'Darwin':
-        DEVICE_TO_USE = 'mps'
-    elif torch.cuda.is_available():
-        DEVICE_TO_USE = 'cuda'
-    else:
-        DEVICE_TO_USE = 'cpu'
-except Exception as e:
-    print(f"Device detection error for tracker: {e}")
+from config import constants
 
 
 class Stage1QueueMonitor:
@@ -250,7 +236,7 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_model_path_local
                 frame_id, frame = item
 
                 # Perform pure detection
-                results = model(frame, device=DEVICE_TO_USE, verbose=False, imgsz=yolo_input_size_consumer, conf=confidence_threshold)
+                results = model(frame, device=constants.DEVICE, verbose=False, imgsz=yolo_input_size_consumer, conf=confidence_threshold)
 
                 detections = []
                 for r_idx, r in enumerate(results): # Process results
@@ -611,7 +597,7 @@ def perform_yolo_analysis(
     queue_monitor = Stage1QueueMonitor()
 
     process_logger.info(
-        f"[S1 Lib] YOLO device: {DEVICE_TO_USE}. P: {num_producers_arg}, C: {num_consumers_arg} for '{os.path.basename(video_path_arg)}'.")
+        f"[S1 Lib] YOLO device: {constants.DEVICE}. P: {num_producers_arg}, C: {num_consumers_arg} for '{os.path.basename(video_path_arg)}'.")
     if progress_callback: progress_callback(0, 1, "Initializing Stage 1...", 0, 0, 0)
 
     last_queue_log_time = time.time()
@@ -676,7 +662,7 @@ def perform_yolo_analysis(
         if progress_callback: progress_callback(0, 0, msg, time.time() - s1_start_time, 0, 0)
         return None
 
-    frame_processing_queue = Queue(maxsize=QUEUE_MAXSIZE)
+    frame_processing_queue = Queue(maxsize=constants.STAGE1_FRAME_QUEUE_MAXSIZE)
     yolo_result_queue = Queue() # Unbounded, logger proc will handle consumption
     producers_list = []
     consumers_list = []

@@ -9,7 +9,7 @@ import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
 
-from config.constants import *
+from config import constants
 from application.utils.video_segment import VideoSegment
 
 
@@ -587,21 +587,18 @@ class AppStageProcessor:
         tracker_config_s3 = {
             "confidence_threshold": self.app_settings.get('tracker_confidence_threshold', 0.4),  # Example name
             "roi_padding": self.app_settings.get('tracker_roi_padding', 20),
-            "roi_update_interval": self.app_settings.get('s3_roi_update_interval', DEFAULT_ROI_UPDATE_INTERVAL),
-            "roi_smoothing_factor": self.app_settings.get('tracker_roi_smoothing_factor',
-                                                          DEFAULT_ROI_SMOOTHING_FACTOR),
+            "roi_update_interval": self.app_settings.get('s3_roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
+            "roi_smoothing_factor": self.app_settings.get('tracker_roi_smoothing_factor', constants.DEFAULT_ROI_SMOOTHING_FACTOR),
             "dis_flow_preset": self.app_settings.get('tracker_dis_flow_preset', "ULTRAFAST"),
             "target_size_preprocess": self.app.tracker.target_size_preprocess if self.app.tracker else (640, 640),
             "flow_history_window_smooth": self.app_settings.get('tracker_flow_history_window_smooth', 3),
             "adaptive_flow_scale": self.app_settings.get('tracker_adaptive_flow_scale', True),
-            "use_sparse_flow": self.app_settings.get('tracker_use_sparse_flow', False),  # S3 usually dense
-            "base_amplification_factor": self.app_settings.get('tracker_base_amplification',
-                                                               DEFAULT_BASE_AMPLIFICATION),
-            "class_specific_amplification_multipliers": self.app_settings.get('tracker_class_specific_multipliers',
-                                                                              DEFAULT_CLASS_AMP_MULTIPLIERS),
-            "y_offset": self.app_settings.get('tracker_y_offset', DEFAULT_Y_OFFSET),
-            "x_offset": self.app_settings.get('tracker_x_offset', DEFAULT_X_OFFSET),
-            "sensitivity": self.app_settings.get('tracker_sensitivity', DEFAULT_SENSITIVITY),
+            "use_sparse_flow": self.app_settings.get('tracker_use_sparse_flow', False),
+            "base_amplification_factor": self.app_settings.get('tracker_base_amplification', constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
+            "class_specific_amplification_multipliers": self.app_settings.get('tracker_class_specific_multipliers', constants.DEFAULT_CLASS_AMP_MULTIPLIERS),
+            "y_offset": self.app_settings.get('tracker_y_offset', constants.DEFAULT_LIVE_TRACKER_Y_OFFSET),
+            "x_offset": self.app_settings.get('tracker_x_offset', constants.DEFAULT_LIVE_TRACKER_X_OFFSET),
+            "sensitivity": self.app_settings.get('tracker_sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY),
         }
 
         video_fps_s3 = 30.0
@@ -621,9 +618,8 @@ class AppStageProcessor:
             "output_delay_frames": self.app.tracker.output_delay_frames if self.app.tracker else 0,
             "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10 + (
                 self.app.tracker.output_delay_frames if self.app.tracker else 0)),
-            "roi_narrow_factor_hjbj": self.app_settings.get("roi_narrow_factor_hjbj",
-                                                            DEFAULT_ROI_NARROW_FACTOR_HJBJ),
-            "min_roi_dim_hjbj": self.app_settings.get("min_roi_dim_hjbj", DEFAULT_MIN_ROI_DIM_HJBJ),
+            "roi_narrow_factor_hjbj": self.app_settings.get("roi_narrow_factor_hjbj", constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ),
+            "min_roi_dim_hjbj": self.app_settings.get("min_roi_dim_hjbj", constants.DEFAULT_MIN_ROI_DIM_HJBJ),
             "tracking_axis_mode": self.app.tracking_axis_mode,
             "single_axis_output_target": self.app.single_axis_output_target,
             "s3_show_roi_debug": self.app_settings.get("s3_show_roi_debug", False),
@@ -715,7 +711,7 @@ class AppStageProcessor:
                     scene_list, status_text = data1, data2
                     self.scene_detection_status = status_text
                     fs_proc.video_chapters.clear()
-                    default_pos_key = next(iter(POSITION_INFO_MAPPING_CONST), "Default")
+                    default_pos_key = next(iter(constants.POSITION_INFO_MAPPING), "Default")
                     for start_frame, end_frame in scene_list:
                         fs_proc.create_new_chapter_from_data({
                             "start_frame_str": str(start_frame),
@@ -855,7 +851,7 @@ class AppStageProcessor:
                             self.app.file_manager.save_final_funscripts(video_path_from_event, chapters=segments_from_event)
                             # --- Save the project file for the completed video ---
                             self.logger.info("Saving project file for completed video...")
-                            project_filepath = self.app.file_manager.get_output_path_for_file(video_path_from_event, PROJECT_FILE_EXTENSION)
+                            project_filepath = self.app.file_manager.get_output_path_for_file(video_path_from_event, constants.PROJECT_FILE_EXTENSION)
                             self.app.project_manager.save_project(project_filepath)
                     elif status_override == "Aborted":
                         if self.current_analysis_stage == 1 or self.stage1_status_text.startswith(

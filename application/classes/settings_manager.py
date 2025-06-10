@@ -26,110 +26,72 @@ class AppSettings:
         self.load_settings()
 
     def get_default_settings(self):
-        default_cores = os.cpu_count() if os.cpu_count() else 4
-        temp_initial_window_width = 1800
-        temp_initial_gauge_width = 100
+        # The new constants file is now the source of truth.
+        # This method now assembles the default dictionary from those constants.
+        from config import constants  # Import the refactored constants module
+        import platform
+
+        # Select the correct shortcut dictionary based on the operating system
+        shortcuts = constants.DEFAULT_SHORTCUTS_MACOS if platform.system() == "Darwin" else constants.DEFAULT_SHORTCUTS_WINDOWS
+
         defaults = {
+            # General
             "yolo_det_model_path": "",
             "yolo_pose_model_path": "",
-            "num_producers_stage1": 1,
-            "num_consumers_stage1": max(default_cores // 2, 1),
+            "output_folder_path": constants.DEFAULT_OUTPUT_FOLDER,
+            "logging_level": "INFO",
+
+            # UI & Layout
+            "window_width": constants.DEFAULT_WINDOW_WIDTH,
+            "window_height": constants.DEFAULT_WINDOW_HEIGHT,
+            "ui_layout_mode": constants.DEFAULT_UI_LAYOUT,
+            "global_font_scale": 1.0,
+            "show_funscript_interactive_timeline": True,
+            "show_funscript_interactive_timeline2": False,
+            "show_funscript_timeline": True,
+            "show_heatmap": True,
+            "show_stage2_overlay": True,
+            "show_gauge_window": True,
+            "show_lr_dial_graph": True,
+
+            # File Handling & Output
+            "autosave_final_funscript_to_video_location": True,
+            "generate_roll_file": True,
+            "batch_mode_overwrite_strategy": 0,  # 0=Process All, 1=Skip Existing
+
+            # Performance & System
+            "num_producers_stage1": constants.DEFAULT_S1_NUM_PRODUCERS,
+            "num_consumers_stage1": constants.DEFAULT_S1_NUM_CONSUMERS,
+            "hardware_acceleration_method": "auto",
+            "ffmpeg_path": "ffmpeg",
+
+            # Autosave & Energy Saver
             "autosave_enabled": True,
             "autosave_interval_seconds": 60,
             "autosave_on_exit": True,
-            "funscript_editor_shortcuts": {
-                "add_point_0": "#", "add_point_10": "1", "add_point_20": "2",
-                "add_point_30": "3", "add_point_40": "4", "add_point_50": "5",
-                "add_point_60": "6", "add_point_70": "7", "add_point_80": "8",
-                "add_point_90": "9", "add_point_100": "0",
-                "seek_next_frame": "RIGHT_ARROW",
-                "seek_prev_frame": "LEFT_ARROW",
-                "nudge_next_frame": "SHIFT+RIGHT_ARROW",
-                "nudge_prev_frame": "SHIFT+LEFT_ARROW",
-                "nudge_selection_pos_up": "UP_ARROW",
-                "nudge_selection_pos_down": "DOWN_ARROW",
-                "delete_selected_point": "DELETE",
-                "delete_selected_point_alt": "BACKSPACE",
-                "select_all_points": "CTRL+A",
-                "undo_timeline1": "CTRL+Z",
-                "redo_timeline1": "CTRL+Y",
-                "undo_timeline2": "CTRL+ALT+Z",
-                "redo_timeline2": "CTRL+ALT+Y",
-                "copy_selection": "CTRL+C",
-                "paste_selection": "CTRL+V",
-                "toggle_playback": "SPACE"
-            },
-            "window_width": temp_initial_window_width,
-            "window_height": 1000,
-            "timeline_zoom_factor_ms_per_px": 20.0,
-            "timeline_pan_offset_ms": 0.0,
-            "show_gauge_window": True,
-            "gauge_window_pos_x": temp_initial_window_width - temp_initial_gauge_width - 20,
-            "gauge_window_pos_y": 35,
-            "gauge_window_size_w": temp_initial_gauge_width,
-            "gauge_window_size_h": 220,
-            "show_lr_dial_graph": True,
-            "lr_dial_window_pos_x": -1,
-            "lr_dial_window_pos_y": 35,
-            "lr_dial_window_size_w": 150,
-            "lr_dial_window_size_h": 180,
-            "main_menu_bar_height_for_gauge_default_y": 25,
-            "show_funscript_interactive_timeline": True,
-            "show_funscript_interactive_timeline2": False,
-            "show_funscript_timeline": False,
-            "show_heatmap": True,
-            "show_stage2_overlay": True,
-            "funscript_output_delay_frames": 3,
-            # --- Energy Saver Settings ---
             "energy_saver_enabled": True,
             "energy_saver_threshold_seconds": 30.0,
             "energy_saver_fps": 1,
             "main_loop_normal_fps_target": 60,
-            # --- UI Settings ---
-            "ui_layout_mode": "fixed",  # "fixed" or "floating"
-            "show_control_panel_window": True,
-            "show_video_display_window": True,
-            # --- Hardware Acceleration Settings ---
-            "hardware_acceleration_method": "auto",  # "auto", "videotoolbox", "none"
-            "ffmpeg_path": "ffmpeg",
-            # --- Logging Settings ---
-            "logging_level": "INFO",
-            # --- Output Settings ---
-            "output_folder_path": "output",
-            "autosave_final_funscript_to_video_location": True,
-            "batch_mode_overwrite_strategy": 0,  # 0=Process All, 1=Skip Existing
-            "generate_roll_file": True,
-            # --- Tracking Settings ---
-            "discarded_tracking_classes": [],
+
+            # Tracking & Processing
+            "funscript_output_delay_frames": 3,
+            "discarded_tracking_classes": constants.CLASSES_TO_DISCARD_BY_DEFAULT,
             "tracking_axis_mode": "both",
             "single_axis_output_target": "primary",
-            "enable_auto_post_processing": False,
-            "auto_post_processing_sg_window": 7,  # Savitzky-Golay window length (odd number >= 3)
-            "auto_post_processing_sg_polyorder": 3,  # Savitzky-Golay polynomial order ( < window)
-            "auto_post_processing_rdp_epsilon": 15,  # RDP epsilon
-            "auto_post_processing_clamp_lower_threshold_primary": 15,  # For primary: clamp values < this to 0
-            "auto_post_processing_clamp_upper_threshold_primary": 85,  # For primary: clamp values > this to 100
-            "auto_post_processing_amplification_config": {
-                "Blowjob": {"scale_factor": 1.3, "center_value": 60},
-                "Handjob": {"scale_factor": 1.3, "center_value": 60},
-                "Cowgirl / Missionary": {"scale_factor": 1.1, "center_value": 50},
-                "Rev. Cowgirl / Doggy": {"scale_factor": 1.1, "center_value": 50},
-                "Boobjob": {"scale_factor": 1.2, "center_value": 55},
-                "Footjob": {"scale_factor": 1.2, "center_value": 50},
-                "Default": {"scale_factor": 1.0, "center_value": 50}  # Fallback
-            }
-        }
 
-        import platform
-        if platform.system() == "Darwin":  # macOS
-            if "funscript_editor_shortcuts" in defaults:
-                defaults["funscript_editor_shortcuts"]["undo_timeline1"] = "SUPER+Z"
-                defaults["funscript_editor_shortcuts"]["redo_timeline1"] = "SUPER+SHIFT+Z"
-                defaults["funscript_editor_shortcuts"]["undo_timeline2"] = "SUPER+ALT+Z"
-                defaults["funscript_editor_shortcuts"]["redo_timeline2"] = "SUPER+ALT+SHIFT+Z"
-                defaults["funscript_editor_shortcuts"]["copy_selection"] = "SUPER+C"
-                defaults["funscript_editor_shortcuts"]["paste_selection"] = "SUPER+V"
-                defaults["funscript_editor_shortcuts"]["select_all_points"] = "SUPER+A"
+            # Auto Post-Processing
+            "enable_auto_post_processing": False,
+            "auto_post_processing_sg_window": constants.DEFAULT_AUTO_POST_SG_WINDOW,
+            "auto_post_processing_sg_polyorder": constants.DEFAULT_AUTO_POST_SG_POLYORDER,
+            "auto_post_processing_rdp_epsilon": constants.DEFAULT_AUTO_POST_RDP_EPSILON,
+            "auto_post_processing_clamp_lower_threshold_primary": constants.DEFAULT_AUTO_POST_CLAMP_LOW,
+            "auto_post_processing_clamp_upper_threshold_primary": constants.DEFAULT_AUTO_POST_CLAMP_HIGH,
+            "auto_post_processing_amplification_config": constants.DEFAULT_AUTO_POST_AMP_CONFIG,
+
+            # Shortcuts
+            "funscript_editor_shortcuts": shortcuts,
+        }
         return defaults
 
     def load_settings(self):
