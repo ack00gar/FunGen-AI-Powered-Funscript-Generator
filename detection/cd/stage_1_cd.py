@@ -802,18 +802,28 @@ def perform_yolo_analysis(
         else:
             process_logger.warning(f"[S1 Lib] Producer loop finished. {producers_finished_normally}/{len(producers_list)} finished normally. Stop: {stop_event_internal.is_set()}")
 
-        # Signal consumers to stop or finish, only if producers are done or we are stopping
-        if not stop_event_internal.is_set() and producers_finished_normally == len(producers_list):
-            process_logger.info("[S1 Lib] Producers done. Sending sentinels to consumers.")
-            for i in range(len(consumers_list)): # Send one sentinel per consumer
-                try: queue_monitor.frame_queue_put(frame_processing_queue, None)
+        # --- Wait for the frame queue to be drained ---
+        process_logger.info("[S1 Lib] Waiting for consumers to process remaining frames...")
+        while not stop_event_internal.is_set():
+            frame_q_size = queue_monitor.get_frame_queue_size()
+            if frame_q_size == 0:
+                process_logger.info("[S1 Lib] Frame queue is empty. Consumers are ready for shutdown.")
+                break
+
+            # Optional: Log the remaining queue size periodically
+            process_logger.info(f"[S1 Lib] Draining frame queue: {frame_q_size} items remaining...")
+            time.sleep(0.5)  # Prevent a busy-wait loop
+
+        if not stop_event_internal.is_set():
+            process_logger.info("[S1 Lib] Sending sentinels to consumers.")
+            for i in range(len(consumers_list)):
+                try:
+                    queue_monitor.frame_queue_put(frame_processing_queue, None)
                 except Full:
-                    process_logger.warning(f"[S1 Lib] Frame queue full when trying to put sentinel {i+1}/{len(consumers_list)}. Stop: {stop_event_internal.is_set()}")
-                    if stop_event_internal.is_set(): break # Don't persist if stopping
-                    time.sleep(0.1) # Wait a bit and retry if needed, or assume consumer will pick up
-        elif stop_event_internal.is_set():
-            process_logger.info("[S1 Lib] Stop event active. Consumers will be joined/terminated without all sentinels potentially.")
-            # Consumers should also react to stop_event_internal directly.
+                    process_logger.warning(
+                        f"[S1 Lib] Frame queue full when trying to put sentinel {i + 1}/{len(consumers_list)}.")
+                    if stop_event_internal.is_set(): break
+                    time.sleep(0.1)
 
         process_logger.info("[S1 Lib] Orchestrator now waiting for consumers.")
         consumers_alive_flags = [True] * len(consumers_list)
