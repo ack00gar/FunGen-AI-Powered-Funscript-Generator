@@ -29,18 +29,21 @@ class Stage1QueueMonitor:
             queue.put(item)
 
     def frame_queue_get(self, queue, block=True, timeout=None):
-        item = queue.get(block=block, timeout=timeout)
-        with self.frame_queue_gets.get_lock(): self.frame_queue_gets.value += 1
-        return item
+        with self.frame_queue_gets.get_lock():
+            item = queue.get(block=block, timeout=timeout)
+            self.frame_queue_gets.value += 1
+            return item
 
     def result_queue_put(self, queue, item):
-        with self.result_queue_puts.get_lock(): self.result_queue_puts.value += 1
-        queue.put(item)
+        with self.result_queue_puts.get_lock():
+            self.result_queue_puts.value += 1
+            queue.put(item)
 
     def result_queue_get(self, queue, block=True, timeout=None):
-        item = queue.get(block=block, timeout=timeout)
-        with self.result_queue_gets.get_lock(): self.result_queue_gets.value += 1
-        return item
+        with self.result_queue_gets.get_lock():
+            item = queue.get(block=block, timeout=timeout)
+            self.result_queue_gets.value += 1
+            return item
 
     def get_frame_queue_size(self):
         with self.frame_queue_puts.get_lock(), self.frame_queue_gets.get_lock():
