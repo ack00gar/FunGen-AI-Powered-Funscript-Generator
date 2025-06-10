@@ -231,18 +231,19 @@ class VideoProcessor:
             self.video_path = ""
             self.video_info = {}
             return False
+
+        info = self.video_info
+        # Check for side-by-side (SBS) aspect ratio (approx. 2:1)
+        is_sbs_resolution = (info['width'] >= 1.8 * info['height'] and
+                             info['width'] <= 2.2 * info['height'] and
+                             info['width'] > 1000)
+        # Check for top-and-bottom (TB) aspect ratio (approx. 1:2)
+        is_tb_resolution = (info['height'] >= 1.8 * info['width'] and
+                            info['height'] <= 2.2 * info['width'] and
+                            info['height'] > 1000)
+
         if self.video_type_setting == 'auto':
             # --- Heuristic 1: Determine if the video is '2D' or 'VR' ---
-            info = self.video_info
-            # Check for side-by-side (SBS) aspect ratio (approx. 2:1)
-            is_sbs_resolution = (info['width'] >= 1.8 * info['height'] and
-                                 info['width'] <= 2.2 * info['height'] and
-                                 info['width'] > 1000)
-            # Check for top-and-bottom (TB) aspect ratio (approx. 1:2)
-            is_tb_resolution = (info['height'] >= 1.8 * info['width'] and
-                                info['height'] <= 2.2 * info['width'] and
-                                info['height'] > 1000)
-
             upper_video_path = video_path.upper()
             # General keywords to identify a video as potentially VR
             vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH']
@@ -265,7 +266,7 @@ class VideoProcessor:
             suggested_layout = '_sbs'  # Default layout is SBS
 
             # Evidence from resolution (for layout)
-            if is_tb_resolution:
+            if is_tb_resolution:  # This will now work correctly
                 suggested_layout = '_tb'
                 self.logger.info("Resolution (H > 1.8*W) suggests Top-Bottom (TB) layout.")
 
