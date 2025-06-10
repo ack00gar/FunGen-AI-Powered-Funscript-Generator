@@ -122,29 +122,46 @@ class Stage3OpticalFlowProcessor:
 
         s3_start_time = time.time()
         total_frames_processed_s3 = 0
+
+        relevant_segments = [
+            seg for seg in self.atr_segments
+            if seg.major_position not in ["Not Relevant", "Close Up"]
+        ]
+
+        if not relevant_segments:
+            self.logger.info("S3 OF: No relevant segments to process.")
+            if self.video_processor:
+                self.video_processor.reset(close_video=True)
+            return {"primary_actions": [], "secondary_actions": []}
+
         estimated_total_frames_s3 = sum(
             (seg.end_frame_id - max(0, seg.start_frame_id - self.common_app_config.get('num_warmup_frames_s3', 10)) + 1)
-            for seg in self.atr_segments
+            for seg in relevant_segments
         )
-        if estimated_total_frames_s3 == 0 and self.atr_segments: # Handle case where segments might be empty or start=end
-             estimated_total_frames_s3 = len(self.atr_segments) # At least 1 frame per segment for ETA
+        if estimated_total_frames_s3 == 0 and relevant_segments:
+            estimated_total_frames_s3 = len(relevant_segments)
 
-        # Make sure tracker is "started" for S3 processing context
-        self.roi_tracker_instance.start_tracking() # Resets flow history, internal counters etc.
+        self.roi_tracker_instance.start_tracking()
 
-        for seg_idx, segment_obj in enumerate(self.atr_segments):
+        relevant_seg_count = len(relevant_segments)
+        processed_relevant_count = 0
+
+        for original_idx, segment_obj in enumerate(self.atr_segments):
             if self.stop_event.is_set():
                 self.logger.info("S3 OF: Stop event detected during segment processing.")
                 return {"error": "S3 OF processing stopped by user."}
 
-            # Skip "Not Relevant" or "Close Up" segments
             if segment_obj.major_position in ["Not Relevant", "Close Up"]:
-                self.logger.info(f"S3 OF: Skipping segment {seg_idx + 1}/{len(self.atr_segments)} because its position is '{segment_obj.major_position}'.")
                 continue
 
+            processed_relevant_count += 1
+
+            # The old check for "Not Relevant" is now redundant here because of the pre-filtering.
 
             segment_name_for_progress = f"{segment_obj.major_position} (F{segment_obj.start_frame_id}-{segment_obj.end_frame_id})"
-            self.logger.info(f"S3 OF: Processing segment {seg_idx + 1}/{len(self.atr_segments)}: {segment_name_for_progress}")
+            self.logger.info(
+                f"S3 OF: Processing segment {processed_relevant_count}/{relevant_seg_count}: {segment_name_for_progress}")
+
 
             # Reset tracker's internal state for each new segment (it's done by start_tracking, but good to be explicit for flow logic)
             self.roi_tracker_instance.internal_frame_counter = 0 # Reset for ROI update interval logic within this segment
@@ -171,8 +188,15 @@ class Stage3OpticalFlowProcessor:
 
                 self._update_fps() # Update FPS calculation for this module
                 time_elapsed_s3 = time.time() - s3_start_time
-                eta_s3 = ((estimated_total_frames_s3 - total_frames_processed_s3) / self.current_fps) if self.current_fps > 0 and total_frames_processed_s3 < estimated_total_frames_s3 else 0.0
 
+                average_fps_s3 = total_frames_processed_s3 / time_elapsed_s3 if time_elapsed_s3 > 1 else 0.0
+                remaining_frames_s3 = estimated_total_frames_s3 - total_frames_processed_s3
+
+                # Only calculate ETA if we have a valid average speed and frames remaining.
+                if average_fps_s3 > 0 and remaining_frames_s3 > 0:
+                    eta_s3 = remaining_frames_s3 / average_fps_s3
+                else:
+                    eta_s3 = 0.0
 
                 current_frame_image = self.video_processor._get_specific_frame(frame_id_to_process)
                 if current_frame_image is None:
@@ -309,22 +333,22 @@ class Stage3OpticalFlowProcessor:
                 self.roi_tracker_instance.internal_frame_counter += 1
                 total_frames_processed_s3 +=1
 
-                # Update progress
                 if segment_obj.start_frame_id <= frame_id_to_process <= segment_obj.end_frame_id:
                     processed_in_seg_for_progress = frame_id_to_process - segment_obj.start_frame_id + 1
                     if processed_in_seg_for_progress % 10 == 0 or processed_in_seg_for_progress == num_frames_in_actual_segment_for_progress:
                         self.progress_callback(
-                            seg_idx + 1, len(self.atr_segments), segment_name_for_progress,
+                            processed_relevant_count, relevant_seg_count, segment_name_for_progress,
                             processed_in_seg_for_progress, num_frames_in_actual_segment_for_progress,
-                            self.current_fps, time_elapsed_s3, eta_s3
+                            self.current_fps, time_elapsed_s3, eta_s3,
+                            original_idx + 1 # Pass absolute index
                         )
-            # Final progress for the segment
+            # Final progress update for the segment
             self.progress_callback(
-                seg_idx + 1, len(self.atr_segments), segment_name_for_progress,
+                processed_relevant_count, relevant_seg_count, segment_name_for_progress,
                 num_frames_in_actual_segment_for_progress, num_frames_in_actual_segment_for_progress,
-                self.current_fps, time_elapsed_s3, eta_s3
+                self.current_fps, time_elapsed_s3, eta_s3,
+                original_idx + 1 # Pass absolute index
             )
-
 
         if self.video_processor:
             self.video_processor.reset(close_video=True)
