@@ -39,24 +39,31 @@ DEFAULT_CLASS_AMP_MULTIPLIERS = {
 }
 
 ##################################################################################################
+# STAGE 1
+##################################################################################################
+
+QUEUE_MAXSIZE = 99
+
+##################################################################################################
 # STAGE 2
 ##################################################################################################
 
 # --- Constants from original stage_2_OF_filler_chapters_dev.py ---
 PENIS_CLASS_NAME_CONST = "penis"
 GLANS_CLASS_NAME_CONST = "glans"
-CLASS_PRIORITY_CONST = {"pussy": 8, "butt": 7, "face": 6, "hand": 5, "default": 1, "breast": 4,
-                        "foot": 3}  # Expanded based on generate_tracked_classes
+CLASS_PRIORITY_CONST = {"pussy": 8, "butt": 7, "face": 6, "hand": 5, "breast": 4, "foot": 3}
 LEAD_BODY_PARTS_CONST = ["pussy", "butt", "face", "hand"]
 POSITION_INFO_MAPPING_CONST = {
-    "nothing":{"long_name" : "Not Relevant", "short_name": "NR"},
-    "closeup":{"long_name" : "Close Up", "short_name": "CloseUp"},
-    "pussy":  {"long_name": "Cowgirl / Missionary", "short_name": "CG/Miss."},
-    "butt":   {"long_name": "Rev. Cowgirl / Doggy", "short_name": "Rev.CG/Doggy"},
-    "face":   {"long_name": "Handjob / Blowjob",      "short_name": "HJ/BJ"},
-    "hand":   {"long_name": "Handjob / Blowjob",      "short_name": "HJ/BJ"},
-    "foot":   {"long_name": "Footjob",              "short_name": "FootJ"},
-    "breast": {"long_name": "Boobjob",              "short_name": "BoobJ"}
+    "NR": {"long_name": "Not Relevant", "short_name": "NR"},
+    "C-Up": {"long_name": "Close Up", "short_name": "C-Up"},
+    "CG/Miss.":   {"long_name": "Cowgirl / Missionary", "short_name": "CG/Miss."},
+    "R.CG/Dog.":    {"long_name": "Rev. Cowgirl / Doggy", "short_name": "R.CG/Dog"},
+    "BJ":      {"long_name": "Blowjob", "short_name": "BJ"},
+    "HJ":      {"long_name": "Handjob", "short_name": "HJ"},
+    "FootJ":    {"long_name": "Footjob", "short_name": "FootJ"},
+    "BoobJ":  {"long_name": "Boobjob", "short_name": "BoobJ"},
+    # Deprecating old combined keys by removing them or pointing them to a default
+    # The 'face' and 'hand' keys are now ambiguous and should be removed to enforce the new specific logic.
 }
 
 

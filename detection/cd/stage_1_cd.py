@@ -15,9 +15,9 @@ from queue import Queue as StdLibQueue
 import torch
 
 from video.video_processor import VideoProcessor
+from config.constants import QUEUE_MAXSIZE
 
 # --- Default CONFIG ---
-QUEUE_MAXSIZE = 100
 DEVICE_TO_USE = 'cpu'
 try:
     if platform.processor() == 'arm' and platform.system() == 'Darwin':
@@ -38,8 +38,9 @@ class Stage1QueueMonitor:
         self.result_queue_gets = Value('i', 0)
 
     def frame_queue_put(self, queue, item):
-        with self.frame_queue_puts.get_lock(): self.frame_queue_puts.value += 1
-        queue.put(item)
+        with self.frame_queue_puts.get_lock():
+            self.frame_queue_puts.value += 1
+            queue.put(item)
 
     def frame_queue_get(self, queue, block=True, timeout=None):
         item = queue.get(block=block, timeout=timeout)
