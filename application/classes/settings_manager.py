@@ -110,7 +110,8 @@ class AppSettings:
             "auto_post_processing_clamp_lower_threshold_primary": 15,  # For primary: clamp values < this to 0
             "auto_post_processing_clamp_upper_threshold_primary": 85,  # For primary: clamp values > this to 100
             "auto_post_processing_amplification_config": {
-                "Handjob / Blowjob": {"scale_factor": 1.3, "center_value": 60},
+                "Blowjob": {"scale_factor": 1.3, "center_value": 60},
+                "Handjob": {"scale_factor": 1.3, "center_value": 60},
                 "Cowgirl / Missionary": {"scale_factor": 1.1, "center_value": 50},
                 "Rev. Cowgirl / Doggy": {"scale_factor": 1.1, "center_value": 50},
                 "Boobjob": {"scale_factor": 1.2, "center_value": 55},
