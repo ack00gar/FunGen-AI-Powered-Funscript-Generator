@@ -203,7 +203,8 @@ class AppStageProcessor:
 
     def _stage3_progress_callback(self, current_segment_idx, total_segments, current_segment_name,
                                   frame_in_segment, total_frames_in_segment,
-                                  processing_fps=0.0, time_elapsed=0.0, eta_seconds=0.0):
+                                  processing_fps=0.0, time_elapsed=0.0, eta_seconds=0.0,
+                                  original_segment_idx=None):
         segment_progress = float(frame_in_segment) / total_frames_in_segment if total_frames_in_segment > 0 else 0.0
         overall_progress = (float(
             current_segment_idx - 1) + segment_progress) / total_segments if total_segments > 0 else 0.0
@@ -216,10 +217,12 @@ class AppStageProcessor:
             "overall_progress": overall_progress,
             "fps": processing_fps,
             "time_elapsed": time_elapsed,
-            "eta": eta_seconds
+            "eta": eta_seconds,
+            "original_segment_idx": original_segment_idx
         }
 
         self.gui_event_queue.put(("stage3_progress_update", progress_data, None))
+
 
     def start_full_analysis(self):
         fm = self.app.file_manager
@@ -788,7 +791,16 @@ class AppStageProcessor:
                 elif event_type == "stage3_progress_update":
                     prog_data = data1
                     if isinstance(prog_data, dict):
-                        self.stage3_current_segment_label = f"Seg {prog_data.get('current_segment_idx', 0)}/{prog_data.get('total_segments', 0)}: {prog_data.get('current_segment_name', '')}"
+                        rel_idx = prog_data.get('current_segment_idx', 0)
+                        rel_total = prog_data.get('total_segments', 0)
+                        abs_idx = prog_data.get('original_segment_idx')
+                        seg_name = prog_data.get('current_segment_name', '')
+
+                        if abs_idx is not None:
+                            self.stage3_current_segment_label = f"Chapter {rel_idx}/{rel_total} (Abs. #{abs_idx}): {seg_name}"
+                        else:
+                            self.stage3_current_segment_label = f"Chapter {rel_idx}/{rel_total}: {seg_name}"
+
                         self.stage3_segment_progress_value = prog_data.get('segment_progress', 0.0)
                         self.stage3_overall_progress_value = prog_data.get('overall_progress', 0.0)
                         self.stage3_overall_progress_label = f"Overall S3: {self.stage3_overall_progress_value * 100:.0f}%"
@@ -798,16 +810,17 @@ class AppStageProcessor:
                             "eta", 0.0)
                         self.stage3_time_elapsed_str = f"{int(t_el_s3 // 3600):02d}:{int((t_el_s3 % 3600) // 60):02d}:{int(t_el_s3 % 60):02d}" if not math.isnan(
                             t_el_s3) else "Calculating..."
-                        self.stage3_processing_fps_str = f"{fps_s3:.1f} FPS" if not math.isnan(fps_s3) else "N/A FPS"
-                        is_s3_done = (prog_data.get('current_segment_idx', 0) >= prog_data.get('total_segments',
-                                                                                               0) and prog_data.get(
-                            'total_segments', 0) > 0)
+                        self.stage3_processing_fps_str = f"{fps_s3:.1f} FPS" if not math.isnan(
+                            fps_s3) else "N/A FPS"
+
+                        current_seg_idx = prog_data.get('current_segment_idx', 0)
+                        total_segs = prog_data.get('total_segments', 0)
+                        seg_progress = prog_data.get('segment_progress', 0.0)
+                        is_s3_done = (current_seg_idx >= total_segs and seg_progress >= 0.99 and total_segs > 0)
+
                         if math.isnan(eta_s3) or math.isinf(eta_s3):
-                            if is_s3_done:
-                                self.stage3_eta_str = "Done"
-                            else:
-                                self.stage3_eta_str = "Calculating..."
-                        elif eta_s3 > 0 and not is_s3_done:
+                            self.stage3_eta_str = "Calculating..."
+                        elif eta_s3 > 1.0 and not is_s3_done:  # ETA > 1 second threshold
                             self.stage3_eta_str = f"{int(eta_s3 // 3600):02d}:{int((eta_s3 % 3600) // 60):02d}:{int(eta_s3 % 60):02d}"
                         else:
                             self.stage3_eta_str = "Done"
