@@ -250,8 +250,11 @@ class Stage3OpticalFlowProcessor:
                                 rx_new = max(0, min(rx_new, processed_frame_for_tracker.shape[1] - rw_new))
                                 ry_new = max(0, min(ry_new, processed_frame_for_tracker.shape[0] - rh_new))
                                 candidate_roi_xywh = (rx_new, ry_new, rw_new, rh_new)
-                    self.roi_tracker_instance.roi = self.roi_tracker_instance._smooth_roi_transition(candidate_roi_xywh) if candidate_roi_xywh else None
 
+                    # Only update the ROI if a valid new candidate was found.
+                    # Otherwise, the existing ROI persists for the remainder of the segment.
+                    if candidate_roi_xywh:
+                        self.roi_tracker_instance.roi = self.roi_tracker_instance._smooth_roi_transition(candidate_roi_xywh)
 
                 # --- Optical Flow Processing ---
                 final_primary_pos, final_secondary_pos = 50, 50
