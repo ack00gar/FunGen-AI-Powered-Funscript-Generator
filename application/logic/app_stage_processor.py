@@ -321,6 +321,12 @@ class AppStageProcessor:
                 stage1_success = self._execute_stage1_logic(frame_range=frame_range_for_s1, output_path=target_s1_path)
 
             if self.stop_stage_event.is_set() or not stage1_success:
+                self.logger.info("[Thread] Exiting after Stage 1 due to stop event or failure.")
+                # If S1 fails, ensure any downstream stages are not left as 'Queued...'
+                if "Queued" in self.stage2_status_text:
+                    self.gui_event_queue.put(("stage2_status_update", "Skipped", "S1 Failed/Aborted"))
+                if "Queued" in self.stage3_status_text:
+                    self.gui_event_queue.put(("stage3_status_update", "Skipped", "S1 Failed/Aborted"))
                 return
 
             # --- Stage 2 ---
@@ -348,6 +354,10 @@ class AppStageProcessor:
                 s2_output_data = stage2_run_results.get("data", {})
 
             if self.stop_stage_event.is_set() or not stage2_success:
+                self.logger.info("[Thread] Exiting after Stage 2 due to stop event or failure.")
+                # If S2 fails, ensure S3 is not left as 'Queued...'
+                if selected_mode_idx == 0 and "Queued" in self.stage3_status_text:
+                     self.gui_event_queue.put(("stage3_status_update", "Skipped", "S2 Failed/Aborted"))
                 return
 
             # --- Stage 3 (or Finish) ---
