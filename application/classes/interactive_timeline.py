@@ -604,6 +604,13 @@ class InteractiveFunscriptTimeline:
             if actions_list and visible_actions_indices_range:
                 s_idx, e_idx = visible_actions_indices_range
 
+                # FIX: Re-validate indices against the current length of actions_list to prevent
+                # a race condition where the list is modified by another thread after the
+                # indices were calculated.
+                current_list_len = len(actions_list)
+                s_idx = min(s_idx, current_list_len)
+                e_idx = min(e_idx, current_list_len)
+
                 # --- Lines ---
                 # To draw lines between points actions_list[i] and actions_list[i+1],
                 # we iterate from s_idx up to e_idx-1 (or len(actions_list)-1 if e_idx is at the end)
@@ -612,31 +619,6 @@ class InteractiveFunscriptTimeline:
                     p1_poss_list = []
                     p2_ats_list = []
                     p2_poss_list = []
-
-                    # Iterate up to one before the end of the visible segment or list, whichever comes first
-                    # The loop for p1 should go up to actual_render_e_idx_for_p1 - 1
-                    # The points involved are from s_idx to e_idx-1. Lines are between these.
-                    # So p1 iterates from s_idx to e_idx-2. p2 is i+1.
-                    # If e_idx points to the element *after* the last visible one,
-                    # then the last visible point is at e_idx-1.
-                    # Lines are drawn for pairs (actions_list[i], actions_list[i+1]).
-                    # i ranges from s_idx to e_idx-2, if we consider points within [s_idx, e_idx-1].
-                    # Or, more simply, iterate i from s_idx to min(e_idx, len(actions_list)-1)-1
-
-                    # Iterate from s_idx up to, but not including, the point at e_idx-1 if we want to form pairs
-                    # The points to consider for drawing are from index s_idx to e_idx-1.
-                    # Lines are between point[i] and point[i+1].
-                    # So 'i' goes from s_idx to e_idx-2.
-                    # 'i+1' goes from s_idx+1 to e_idx-1.
-                    # All these indices must be < len(actions_list).
-
-                    # Corrected loop range for collecting line segments
-                    # We need pairs (actions_list[i], actions_list[i+1])
-                    # where both i and i+1 are valid indices.
-                    # The points themselves are in actions_list[s_idx ... e_idx-1]
-                    # So i goes from s_idx to e_idx-2
-                    # And i+1 goes from s_idx+1 to e_idx-1
-                    # All indices must be less than len(actions_list)
 
                     # Iterate for the first point of the segment
                     for i in range(s_idx, e_idx):  # Iterate through all potentially visible points
