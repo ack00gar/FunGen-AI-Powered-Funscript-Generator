@@ -343,12 +343,13 @@ class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with 
         position_long_name_val = self.major_position
 
         # 2. To find position_short_name_val, we need to search the dictionary:
-        position_short_name_val = "N/A"  # Default if not found
+        position_short_name_key_val = "NR"  # Default if not found
 
         for key, info in POSITION_INFO_MAPPING_CONST.items():
             if info["long_name"] == self.major_position:
-                position_short_name_val = info["short_name"]
-                break  # Found it, no need to continue
+                position_short_name_key_val = key
+                break
+
 
         # ATR's funscript generation is 1D. Range/offset might not directly map.
         # These can be calculated from the self.atr_funscript_distance values within this segment's frames.
@@ -364,7 +365,7 @@ class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with 
         return {'start_frame_id': self.start_frame_id, 'end_frame_id': self.end_frame_id,
                 'class_name': self.major_position,  # Using major_position as class_name
                 'position_long_name': position_long_name_val,
-                'position_short_name': position_short_name_val,
+                'position_short_name': position_short_name_key_val,
                 'segment_type': "ATR_Segment", 'duration': self.duration,  # Use a new type
                 'occlusions': occlusion_info,  # Placeholder
                 'raw_range_val_ud': raw_range_val_ud,
@@ -462,27 +463,29 @@ def _atr_assign_frame_position(contacts: List[Dict]) -> str:
 
     detected_class_names = {contact["class_name"] for contact in contacts} # Use a set for faster lookups
 
-    # More explicit prioritization
+    # Explicit prioritization
     if 'pussy' in detected_class_names:
         return 'Cowgirl / Missionary' # Highest priority if pussy is involved
     if 'butt' in detected_class_names:
         return 'Rev. Cowgirl / Doggy' # Next highest
 
-    # If neither pussy nor butt, then check for other combinations
+    # Check for face and hand for more specific acts
     has_face = 'face' in detected_class_names
     has_hand = 'hand' in detected_class_names
-    has_breast = 'breast' in detected_class_names
-    has_foot = 'foot' in detected_class_names
 
-    if has_face and has_hand: return 'Handjob / Blowjob'
-    if has_face: return 'Handjob / Blowjob'
+    # If face is involved, it's a Blowjob, regardless of hand presence.
+    if has_face:
+        return 'Blowjob'
 
-    # If only hand is primary after pussy/butt/face checks
-    if has_hand and has_breast: return 'Boobjob'
-    if has_hand: return 'Handjob / Blowjob' # Default hand interaction
+    # If no face, but hand is present, it's a Handjob.
+    if has_hand:
+        return 'Handjob'
 
-    if has_foot: return 'Footjob'
-    if has_breast: return 'Boobjob' # If only breast contact (e.g. paizuri without hands visible)
+    # Check for other positions if the above are not met
+    if 'breast' in detected_class_names:
+        return 'Boobjob'
+    if 'foot' in detected_class_names:
+        return 'Footjob'
 
     return "Not Relevant"
 

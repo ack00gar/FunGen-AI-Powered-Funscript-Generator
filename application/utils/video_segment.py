@@ -27,49 +27,50 @@ class VideoSegment:
         self.user_roi_fixed = user_roi_fixed
         self.user_roi_initial_point_relative = user_roi_initial_point_relative
 
-        # default_colors = {
-        #     "BJ": (0.9, 0.4, 0.4, 0.8), "HJ": (0.4, 0.9, 0.4, 0.8),
-        #     "CG/Miss.": (0.4, 0.4, 0.9, 0.8), "Rev.CG/Doggy": (0.9, 0.6, 0.2, 0.8),
-        #     "FootJ": (0.9, 0.9, 0.3, 0.8), "BoobJ": (0.9, 0.3, 0.6, 0.8),
-        #     "default": (0.6, 0.6, 0.6, 0.7), "teaser": (0.7, 0.7, 0.9, 0.8)
-        # }
-
         default_colors = {
-            "HJ/BJ": (0.9, 0.4, 0.4, 0.8), "NR": (0.4, 0.9, 0.4, 0.8),
-            "CG/Miss.": (0.4, 0.4, 0.9, 0.8), "Rev.CG/Doggy": (0.9, 0.6, 0.2, 0.8),
-            "FootJ": (0.9, 0.9, 0.3, 0.8), "BoobJ": (0.9, 0.3, 0.6, 0.8),
-            "default": (0.6, 0.6, 0.6, 0.7), "CloseUp": (0.7, 0.7, 0.9, 0.8)
+            "BJ": (0.9, 0.4, 0.4, 0.8),
+            "HJ": (0.4, 0.9, 0.4, 0.8),
+            "NR": (0.6, 0.6, 0.6, 0.7),
+            "CG/Miss.": (0.4, 0.4, 0.9, 0.8),
+            "Rev.CG/Doggy": (0.9, 0.6, 0.2, 0.8),
+            "FootJ": (0.9, 0.9, 0.3, 0.8),
+            "BoobJ": (0.9, 0.3, 0.6, 0.8),
+            "CloseUp": (0.7, 0.7, 0.9, 0.8),
+            "default": (0.5, 0.5, 0.5, 0.7)
         }
+
         if color:
             self.color = tuple(color)  # Ensure it's a tuple
         else:
-            # Try to match color based on position_short_name (which often matches keys in default_colors)
-            key_for_color_lookup = self.position_short_name.lower()
+            self.color = default_colors.get(self.position_short_name, default_colors["default"])
 
-            # A more robust way to get a key, trying short_name then class_name
-            # if self.position_short_name and self.position_short_name.lower() in default_colors:
-            #    key_for_color_lookup = self.position_short_name.lower()
-            # elif self.class_name and self.class_name.lower() in default_colors: # Fallback to class_name
-            #    key_for_color_lookup = self.class_name.lower()
-            # else: # Try to find a key that might be part of a longer name
-            found_key = None
-            for k in default_colors.keys():
-                if k in key_for_color_lookup:  # e.g. if key_for_color_lookup is "cg/miss." and k is "cg/miss."
-                    found_key = k
-                    break
-
-            type_color = default_colors.get(found_key if found_key else key_for_color_lookup)  # Try found_key first
-
-            if type_color:
-                self.color = type_color
-            else:  # Fallback hash if no match
-                h = hash(self.class_name if self.class_name else "default_fallback")
-                self.color = (
-                    ((h & 0xFF0000) >> 16) / 255.0 * 0.7 + 0.1,
-                    ((h & 0x00FF00) >> 8) / 255.0 * 0.7 + 0.1,
-                    (h & 0x0000FF) / 255.0 * 0.7 + 0.1,
-                    0.8
-                )
+            # # Try to match color based on position_short_name (which often matches keys in default_colors)
+            # key_for_color_lookup = self.position_short_name.lower()
+            #
+            # # A more robust way to get a key, trying short_name then class_name
+            # # if self.position_short_name and self.position_short_name.lower() in default_colors:
+            # #    key_for_color_lookup = self.position_short_name.lower()
+            # # elif self.class_name and self.class_name.lower() in default_colors: # Fallback to class_name
+            # #    key_for_color_lookup = self.class_name.lower()
+            # # else: # Try to find a key that might be part of a longer name
+            # found_key = None
+            # for k in default_colors.keys():
+            #     if k in key_for_color_lookup:  # e.g. if key_for_color_lookup is "cg/miss." and k is "cg/miss."
+            #         found_key = k
+            #         break
+            #
+            # type_color = default_colors.get(found_key if found_key else key_for_color_lookup)  # Try found_key first
+            #
+            # if type_color:
+            #     self.color = type_color
+            # else:  # Fallback hash if no match
+            #     h = hash(self.class_name if self.class_name else "default_fallback")
+            #     self.color = (
+            #         ((h & 0xFF0000) >> 16) / 255.0 * 0.7 + 0.1,
+            #         ((h & 0x00FF00) >> 8) / 255.0 * 0.7 + 0.1,
+            #         (h & 0x0000FF) / 255.0 * 0.7 + 0.1,
+            #         0.8
+            #     )
 
     @staticmethod
     def _frames_to_timecode(frames: int, fps: float) -> str:

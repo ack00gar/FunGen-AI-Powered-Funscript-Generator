@@ -21,8 +21,9 @@ class VideoNavigationUI:
 
         # Prepare data for dialogs
         self.position_short_name_keys = list(POSITION_INFO_MAPPING_CONST.keys())
+        # IMPROVEMENT: Make display names more user-friendly by removing the internal key.
         self.position_display_names = [
-            f"{key} - {POSITION_INFO_MAPPING_CONST[key]['short_name']} ({POSITION_INFO_MAPPING_CONST[key]['long_name']})"
+            f"{POSITION_INFO_MAPPING_CONST[key]['short_name']} ({POSITION_INFO_MAPPING_CONST[key]['long_name']})"
             for key in self.position_short_name_keys
         ] if self.position_short_name_keys else ["N/A"]
 
