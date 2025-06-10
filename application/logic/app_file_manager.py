@@ -535,17 +535,24 @@ class AppFileManager:
             return
 
         save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
+        if self.app.is_batch_processing_active:
+            save_next_to_video = self.app.batch_copy_funscript_to_video_location
+
 
         primary_actions = self.app.funscript_processor.get_actions('primary')
         secondary_actions = self.app.funscript_processor.get_actions('secondary')
-        chapters_to_save = chapters if chapters is not None else self.app.funscript_processor.video_chapters
 
+        chapters_to_save = []
+        if chapters is not None:
+            chapters_to_save = [VideoSegment.from_dict(chap_data) for chap_data in chapters if
+                                isinstance(chap_data, dict)]
+        else:
+            chapters_to_save = self.app.funscript_processor.video_chapters
 
         # Always save to the output directory
         if primary_actions:
             path_in_output = self.get_output_path_for_file(video_path, "_t1.funscript")
             self._save_funscript_file(path_in_output, primary_actions, chapters_to_save)
-
         if secondary_actions:
             path_in_output_t2 = self.get_output_path_for_file(video_path, "_t2.funscript")
             self._save_funscript_file(path_in_output_t2, secondary_actions, None)
@@ -556,7 +563,7 @@ class AppFileManager:
             base, _ = os.path.splitext(video_path)
             if primary_actions:
                 path_next_to_vid = f"{base}_t1.funscript"
-                self._save_funscript_file(path_next_to_vid, primary_actions, chapters)
+                self._save_funscript_file(path_next_to_vid, primary_actions, chapters_to_save)
             if secondary_actions:
                 path_next_to_vid_t2 = f"{base}_t2.funscript"
                 self._save_funscript_file(path_next_to_vid_t2, secondary_actions, None)

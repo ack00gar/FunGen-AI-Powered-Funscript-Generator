@@ -65,6 +65,10 @@ class GUI:
         self.info_graphs_ui = InfoGraphsUI(self.app)
         self.chapter_list_window_ui = ChapterListWindow(self.app)
 
+        # UI state for the dialog's radio buttons
+        self.selected_batch_method_idx_ui = 0
+        self.batch_apply_post_processing_ui = True
+        self.batch_copy_funscript_to_video_location_ui = True
 
         self.control_panel_ui.timeline_editor1 = self.timeline_editor1
         self.control_panel_ui.timeline_editor2 = self.timeline_editor2
@@ -597,16 +601,32 @@ class GUI:
             popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
                          main_viewport.pos[1] + main_viewport.size[1] * 0.5)
 
-            # --- FIX: Unpack the popup_pos tuple into two arguments ---
             imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
 
-            # Begin the modal dialog
             if imgui.begin_popup_modal("Batch Confirmation", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
                 imgui.text_wrapped(app.batch_confirmation_message)
                 imgui.separator()
+
+                # Radio buttons for method selection
+                imgui.text("Select Batch Processing Method:")
+                if imgui.radio_button("3-Stage (Detect + Segment + Flow)", self.selected_batch_method_idx_ui == 0):
+                    self.selected_batch_method_idx_ui = 0
+                imgui.same_line()
+                if imgui.radio_button("2-Stage (Detect + Segment Only)", self.selected_batch_method_idx_ui == 1):
+                    self.selected_batch_method_idx_ui = 1
+
+                imgui.separator()
                 imgui.spacing()
 
-                # --- Center buttons ---
+                # --- New checkboxes for batch options ---
+                imgui.text("Options:")
+                _, self.batch_apply_post_processing_ui = imgui.checkbox("Apply Auto Post-Processing", self.batch_apply_post_processing_ui)
+                _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video file", self.batch_copy_funscript_to_video_location_ui)
+
+                imgui.separator()
+                imgui.spacing()
+
+                # Center buttons
                 style = imgui.get_style()
                 button_width = 100
                 total_buttons_width = (button_width * 2) + style.item_spacing[0]
@@ -614,14 +634,17 @@ class GUI:
                 if content_width > total_buttons_width:
                     imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (content_width - total_buttons_width) / 2)
 
-                # "Yes" button
+                # Pass the selected index when "Yes" is clicked
                 if imgui.button("Yes", width=button_width):
-                    app._initiate_batch_processing_from_confirmation()
+                    app._initiate_batch_processing_from_confirmation(
+                        self.selected_batch_method_idx_ui,
+                        self.batch_apply_post_processing_ui,
+                        self.batch_copy_funscript_to_video_location_ui
+                    )
                     imgui.close_current_popup()
 
                 imgui.same_line()
 
-                # "No" button
                 if imgui.button("No", width=button_width):
                     app._cancel_batch_processing_from_confirmation()
                     imgui.close_current_popup()
@@ -843,7 +866,6 @@ class GUI:
             self.lr_dial_window_ui.render(),
             self._render_batch_confirmation_dialog(),
             self._render_scene_detection_progress_modal(),
-            #self.app.file_manager.handle_unconsumed_drop() if self.app.file_manager.last_dropped_files else None,
             self.file_dialog.draw() if self.file_dialog.open else None,
             self._render_status_message(app_state)
         ))
