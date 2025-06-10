@@ -20,7 +20,7 @@ from application.gui_components.video_navigation_ui import VideoNavigationUI, Ch
 from application.gui_components.info_graphs_ui import InfoGraphsUI
 
 
-from config.constants import APP_WINDOW_TITLE
+from config import constants
 
 
 class GUI:
@@ -121,7 +121,7 @@ class GUI:
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, gl.GL_TRUE)
         self.window = glfw.create_window(
-            self.window_width, self.window_height, APP_WINDOW_TITLE, None, None
+            self.window_width, self.window_height, constants.APP_WINDOW_TITLE, None, None
         )
         if not self.window:
             glfw.terminate()
@@ -240,7 +240,7 @@ class GUI:
                 round((1.0 - pos_norm) * target_height))
             px, py = np.clip(px, 0, target_width - 1), np.clip(py, 0, target_height - 1)
 
-            default_color_tuple_rgba = self.app.utility.get_speed_color_from_map(STEP_SIZE_TIMELINE * 2.5)
+            default_color_tuple_rgba = self.app.utility.get_speed_color_from_map(constants.TIMELINE_COLOR_SPEED_STEP * 2.5)
             # --- MODIFIED COLOR CONVERSION ---
             point_color_cv_bgra = (
                 int(default_color_tuple_rgba[2] * 255),  # Blue
