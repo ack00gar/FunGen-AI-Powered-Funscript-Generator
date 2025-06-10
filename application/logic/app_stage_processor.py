@@ -348,6 +348,10 @@ class AppStageProcessor:
                 is_ranged_data_source=is_s1_data_source_ranged
             )
             stage2_success = stage2_run_results.get("success", False)
+
+            if stage2_success and s2_overlay_path and os.path.exists(s2_overlay_path):
+                self.gui_event_queue.put(("load_s2_overlay", s2_overlay_path, None))
+
             if stage2_success:
                 # --- Capture the generated chapters locally ---
                 video_segments_for_funscript = stage2_run_results["data"].get("video_segments", [])
@@ -780,6 +784,11 @@ class AppStageProcessor:
                                 fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
                     self.stage2_status_text = "S2 Segmentation Processed."
                     self.app.project_manager.project_dirty = True
+                elif event_type == "load_s2_overlay":
+                    overlay_path = data1
+                    if overlay_path and os.path.exists(overlay_path):
+                        self.logger.info(f"Loading generated Stage 2 overlay data from: {overlay_path}")
+                        fm.load_stage2_overlay_data(overlay_path)
                 elif event_type == "stage3_progress_update":
                     prog_data = data1
                     if isinstance(prog_data, dict):
