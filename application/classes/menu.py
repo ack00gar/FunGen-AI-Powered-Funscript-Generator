@@ -219,10 +219,10 @@ class MainMenu:
                         self.app.logger.info("UI Layout changed to Fixed Panels.", extra={'status_message': True})
 
                 is_floating_mode = app_state.ui_layout_mode == 'floating'
-                # Assign the single boolean return value to one variable
                 if imgui.radio_button("Floating Windows##UILayoutModeFloating", is_floating_mode):
                     if not is_floating_mode:
                         app_state.ui_layout_mode = 'floating'
+                        app_state.just_switched_to_floating = True
                         self.app.project_manager.project_dirty = True
                         self.app.logger.info("UI Layout changed to Floating Windows.", extra={'status_message': True})
 

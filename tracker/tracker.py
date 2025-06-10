@@ -1,4 +1,5 @@
 import cv2
+from collections import Counter
 import numpy as np
 import time
 import platform
@@ -28,7 +29,7 @@ class ROITracker:
                  tracker_model_path: str,
                  pose_model_path: Optional[str] = None,
                  confidence_threshold: float = 0.4,
-                 roi_padding: int = 30,
+                 roi_padding: int = 20,
                  roi_update_interval: int = 100,
                  roi_smoothing_factor: float = DEFAULT_ROI_SMOOTHING_FACTOR,
                  dis_flow_preset: str = "ULTRAFAST",
@@ -40,7 +41,8 @@ class ROITracker:
                  max_frames_for_roi_persistence: int = DEFAULT_ROI_PERSISTENCE_FRAMES,
                  base_amplification_factor: float = DEFAULT_BASE_AMPLIFICATION,
                  class_specific_amplification_multipliers: Optional[Dict[str, float]] = None,
-                 logger: Optional[logging.Logger] = None
+                 logger: Optional[logging.Logger] = None,
+                 inversion_detection_split_ratio: float = 4.0
                  ):
         self.app = app_logic_instance # Can be None if instantiated by Stage 3
 
@@ -165,12 +167,75 @@ class ROITracker:
         self.show_masks: bool = False
         self.show_stats: bool = False
 
+        # Properties for thrust vs. ride detection
+        self.enable_inversion_detection: bool = True  # Master switch for this feature
+        # The ratio to split the ROI for inversion detection.
+        # e.g., 3.0 means the lower 1/3 is compared against the upper 2/3.
+        self.inversion_detection_split_ratio = inversion_detection_split_ratio
+        self.motion_mode: str = 'undetermined'  # Can be 'thrusting', 'riding', or 'undetermined'
+        self.motion_mode_history: List[str] = []
+        self.motion_mode_history_window: int = 30  # Buffer size, e.g., 1s at 30fps
+        self.motion_inversion_threshold: float = 1.2  # Motion in one region must be 20% greater than the other to trigger a change
+
         self.last_frame_time_sec_fps: Optional[float] = None
         self.current_fps: float = 0.0
         self.current_effective_amp_factor: float = self.base_amplification_factor # Initial value
         self.stats_display: List[str] = []
         self.logger.info(
             f"Tracker fully initialized (ROI Persistence: {self.max_frames_for_roi_persistence} frames, ROI Smoothing: {self.roi_smoothing_factor}). App instance {'provided' if self.app else 'not provided (e.g. S3 mode)'}.")
+
+    def _calculate_flow_in_sub_regions(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray]) \
+            -> Tuple[float, float, float, float, Optional[np.ndarray]]:
+        """
+        Calculates optical flow for the entire patch. It returns the overall
+        median flow and the motion magnitude in the lower nth of the patch (for thrusting)
+        versus the upper rest of the patch (for riding). The split is controlled by
+        `self.inversion_detection_split_ratio`.
+
+        Returns:
+            A tuple of (overall_dy, overall_dx, lower_region_magnitude, upper_region_magnitude, flow_field)
+        """
+        # 1. Handle edge cases where flow cannot be calculated
+        if self.flow_dense is None or prev_patch_gray is None or prev_patch_gray.shape != patch_gray.shape:
+            return 0.0, 0.0, 0.0, 0.0, None
+
+        # Ensure arrays are C-continuous before passing to OpenCV
+        prev_patch_cont = np.ascontiguousarray(prev_patch_gray)
+        patch_cont = np.ascontiguousarray(patch_gray)
+
+        # 2. Calculate optical flow for the entire patch ONCE
+        flow = self.flow_dense.calc(prev_patch_cont, patch_cont, None)
+        if flow is None:
+            return 0.0, 0.0, 0.0, 0.0, None
+
+        # 3. Get the overall median flow vector (this is our main signal)
+        overall_dy = np.median(flow[..., 1])
+        overall_dx = np.median(flow[..., 0])
+
+        # 4. Analyze the lower nth vs the upper rest of the flow field for motion magnitude
+        h, _, _ = flow.shape
+        lower_magnitude = 0.0
+        upper_magnitude = 0.0
+
+        # Ensure the ratio is valid to prevent division by zero or illogical splits.
+        if self.inversion_detection_split_ratio > 1.0:
+            # Calculate the height of the lower region based on the ratio.
+            # e.g., if ratio is 3, lower_region_h is one-third of the total height.
+            lower_region_h = int(h / self.inversion_detection_split_ratio)
+
+            # Check if the calculated height is a meaningful split of the patch
+            if lower_region_h > 0 and lower_region_h < h:
+                # The upper region is the "rest" of the patch, from the top to the start of the lower region.
+                upper_region_flow_vertical = flow[0:h - lower_region_h, :, 1]
+                # The lower region is the bottom 'nth' of the patch.
+                lower_region_flow_vertical = flow[h - lower_region_h:h, :, 1]
+
+                # Calculate magnitude as the median of the absolute vertical movements in each region.
+                upper_magnitude = np.median(np.abs(upper_region_flow_vertical))
+                lower_magnitude = np.median(np.abs(lower_region_flow_vertical))
+
+        return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
+
 
     def set_tracking_mode(self, mode: str):
         if mode in ["YOLO_ROI", "USER_FIXED_ROI"]:
@@ -492,69 +557,130 @@ class ROITracker:
                                  current_roi_patch_gray: np.ndarray,
                                  prev_roi_patch_gray: Optional[np.ndarray],
                                  prev_sparse_features: Optional[np.ndarray]) \
-            -> Tuple[int, int, float, float, Optional[np.ndarray]]: # Returns primary_pos, secondary_pos, dy_smooth, dx_smooth, updated_sparse_features
-        primary_pos, secondary_pos = 50, 50
-        dy_raw, dx_raw = 0.0, 0.0
-        flow_field_for_vis = None
-        updated_sparse_features_out = prev_sparse_features # Use a different name for output to avoid confusion with self.prev_features_main_roi
+            -> Tuple[int, int, float, float, Optional[np.ndarray]]:
 
-        dx_raw, dy_raw, flow_field_for_vis, updated_sparse_features_out = self._calculate_flow_in_patch(
-            current_roi_patch_gray, prev_roi_patch_gray,
-            use_sparse=self.use_sparse_flow, prev_features_for_sparse=prev_sparse_features)
+        updated_sparse_features_out = None
+        dy_raw, dx_raw, lower_mag, upper_mag = 0.0, 0.0, 0.0, 0.0
+        flow_field_for_vis = None  # Initialize here to ensure it's always defined
 
+        if self.use_sparse_flow:
+            dx_raw, dy_raw, _, updated_sparse_features_out = self._calculate_flow_in_patch(
+                current_roi_patch_gray, prev_roi_patch_gray, use_sparse=True,
+                prev_features_for_sparse=prev_sparse_features
+            )
+        else:
+            # Use our sub-region analysis method for dense flow
+            # Ensure _calculate_flow_in_sub_regions returns flow_field_for_vis if you intend to use it
+            dy_raw, dx_raw, lower_mag, upper_mag, flow_field_for_vis = self._calculate_flow_in_sub_regions(
+                current_roi_patch_gray, prev_roi_patch_gray
+            )
+
+        # Check if the feature is enabled AND if the video processor has identified the video as VR.
+
+        is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+
+        if self.enable_inversion_detection and is_vr_video:
+            # This logic now ONLY runs for VR videos.
+            current_dominant_motion = 'undetermined'
+            if lower_mag > upper_mag * self.motion_inversion_threshold:
+                current_dominant_motion = 'thrusting'
+            elif upper_mag > lower_mag * self.motion_inversion_threshold:
+                current_dominant_motion = 'riding'
+
+            self.motion_mode_history.append(current_dominant_motion)
+            if len(self.motion_mode_history) > self.motion_mode_history_window:
+                self.motion_mode_history.pop(0)
+
+            if self.motion_mode_history:  # Check if history is not empty before processing
+                most_common = Counter(self.motion_mode_history).most_common(1)[0]
+                if most_common[1] > self.motion_mode_history_window // 2:
+                    if self.motion_mode != most_common[0]:
+                        self.motion_mode = most_common[0]
+                        self.logger.info(f"Motion mode changed to: {self.motion_mode}")
+        else:
+            # If the feature is disabled or the video is 2D, ensure we are in the default, non-inverting state.
+            self.motion_mode = 'thrusting'  # Default non-inverting mode
+
+        # Smooth the raw dx/dy values from the overall flow
         self.primary_flow_history_smooth.append(dy_raw)
-        self.secondary_flow_history_smooth.append(dx_raw)
-        if len(self.primary_flow_history_smooth) > self.flow_history_window_smooth: self.primary_flow_history_smooth.pop(0)
-        if len(self.secondary_flow_history_smooth) > self.flow_history_window_smooth: self.secondary_flow_history_smooth.pop(0)
+        self.secondary_flow_history_smooth.append(dx_raw)  # FIX: Append dx_raw here
+
+        if len(self.primary_flow_history_smooth) > self.flow_history_window_smooth:
+            self.primary_flow_history_smooth.pop(0)
+        if len(self.secondary_flow_history_smooth) > self.flow_history_window_smooth:
+            self.secondary_flow_history_smooth.pop(0)
+
         dy_smooth = np.median(self.primary_flow_history_smooth) if self.primary_flow_history_smooth else dy_raw
         dx_smooth = np.median(self.secondary_flow_history_smooth) if self.secondary_flow_history_smooth else dx_raw
 
-        size_factor = self.get_current_penis_size_factor() if self.tracking_mode == "YOLO_ROI" else 1.0 # Size factor only for YOLO ROI mode
-        effective_amp_factor = self._get_effective_amplification_factor()
-
+        # Calculate the base positions before potential inversion
+        size_factor = self.get_current_penis_size_factor()
         if self.adaptive_flow_scale:
-            primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive", "flow_max_primary_adaptive", size_factor, True)
-            secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive", "flow_max_secondary_adaptive", size_factor, False)
+            base_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
+                                                            "flow_max_primary_adaptive", size_factor, True)
+            secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive",
+                                                         "flow_max_secondary_adaptive", size_factor, False)
         else:
-            # For Stage 3, tracking_mode might be YOLO_ROI but size_factor isn't from live penis tracking.
-            # So, if app is None (S3 context usually), size_factor should be 1.0 or based on S3 specific context.
-            # The get_current_penis_size_factor() only makes sense for live YOLO_ROI.
-            # Let's assume for S3, size_factor should be 1.0 when not using live YOLO_ROI tracking.
-            # This is handled by the ternary operator in size_factor assignment above.
-            manual_scale_multiplier = (self.sensitivity / 10.0) * \
-                                      (1.0 / size_factor if self.tracking_mode == "YOLO_ROI" and self.app else 1.0) * \
-                                      effective_amp_factor
-
-            primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
+            effective_amp_factor = self._get_effective_amplification_factor()
+            manual_scale_multiplier = (self.sensitivity / 10.0) * (1.0 / size_factor) * effective_amp_factor
+            base_primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
             secondary_pos = int(np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
 
+        # Apply inversion based on the detected mode (which is now correctly handled for non-VR video)
+        primary_pos = 100 - base_primary_pos
+        if self.motion_mode == 'thrusting':
+            #primary_pos = 100 - base_primary_pos
+            primary_pos = base_primary_pos
+
         # Visualization logic (only if self.app is present, for live mode)
-        if self.app and self.roi and self.show_flow and processed_frame_draw_target is not None : # Added processed_frame_draw_target check
+        if self.app and self.roi and self.show_flow:  # Removed redundant processed_frame_draw_target is not None
             rx, ry, rw, rh = self.roi
             # Ensure ROI is within bounds of the frame meant for drawing
             if ry + rh <= processed_frame_draw_target.shape[0] and rx + rw <= processed_frame_draw_target.shape[1]:
                 roi_display_patch = processed_frame_draw_target[ry:ry + rh, rx:rx + rw]
-                if roi_display_patch.size > 0: # Check if patch is not empty
+                if roi_display_patch.size > 0:  # Check if patch is not empty
                     if flow_field_for_vis is not None and self.flow_dense:
                         try:
-                            mag, ang = cv2.cartToPolar(flow_field_for_vis[..., 0], flow_field_for_vis[..., 1])
-                            hsv = np.zeros_like(roi_display_patch)
-                            hsv[..., 1] = 255
-                            hsv[..., 0] = ang * 180 / np.pi / 2
-                            hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
-                            vis = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-                            processed_frame_draw_target[ry:ry + rh, rx:rx + rw] = cv2.addWeighted(roi_display_patch, 0.5, vis, 0.5, 0)
+                            # Ensure flow_field_for_vis has the correct shape for cv2.cartToPolar
+                            # It should be a 2-channel array (dx, dy)
+                            if flow_field_for_vis.shape[-1] == 2:
+                                mag, ang = cv2.cartToPolar(flow_field_for_vis[..., 0], flow_field_for_vis[..., 1])
+                                hsv = np.zeros_like(roi_display_patch)
+                                hsv[..., 1] = 255
+                                hsv[..., 0] = ang * 180 / np.pi / 2
+                                hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
+                                vis = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+                                # Ensure vis and roi_display_patch have same data type and shape for addWeighted
+                                processed_frame_draw_target[ry:ry + rh, rx:rx + rw] = cv2.addWeighted(roi_display_patch,
+                                                                                                     0.5, vis.astype(roi_display_patch.dtype), 0.5, 0)
+                            else:
+                                self.logger.warning(
+                                    f"flow_field_for_vis has unexpected shape: {flow_field_for_vis.shape}. Expected (H, W, 2).")
+
                         except cv2.error as e:
                             self.logger.error(f"Flow vis error: {e}")
                     if self.use_sparse_flow and updated_sparse_features_out is not None and self.show_tracking_points:
+                        # Draw sparse features relative to the ROI patch
                         for pt in updated_sparse_features_out:
                             x, y = pt.ravel()
-                            cv2.circle(roi_display_patch, (int(x), int(y)), 2,(0, 255, 255), -1)
-                    cx, cy = rw // 2, rh // 2
-                    cv2.arrowedLine(roi_display_patch, (cx, cy), (cx + int(dx_smooth * 5), cy + int(dy_smooth * 5)), (0, 0, 255), 1)
-            else:
-                self.logger.warning(f"ROI {self.roi} out of bounds for drawing on frame shape {processed_frame_draw_target.shape}")
+                            # Check if point is within the bounds of the roi_display_patch before drawing
+                            if 0 <= x < rw and 0 <= y < rh:
+                                cv2.circle(roi_display_patch, (int(x), int(y)), 2, (0, 255, 255), -1)
+                            else:
+                                self.logger.warning(f"Sparse feature point ({x}, {y}) out of bounds for ROI patch.")
 
+                    # Draw arrow relative to the ROI patch
+                    cx, cy = rw // 2, rh // 2
+                    # Ensure the arrow endpoints are within the patch bounds
+                    arrow_end_x = int(cx + dx_smooth * 5)
+                    arrow_end_y = int(cy + dy_smooth * 5)
+                    # Clip arrow coordinates to stay within roi_display_patch
+                    arrow_end_x = np.clip(arrow_end_x, 0, rw - 1)
+                    arrow_end_y = np.clip(arrow_end_y, 0, rh - 1)
+                    cv2.arrowedLine(roi_display_patch, (cx, cy), (arrow_end_x, arrow_end_y), (0, 0, 255), 1)
+            else:
+                self.logger.warning(
+                    f"ROI {self.roi} out of bounds for drawing on frame shape {processed_frame_draw_target.shape}")
 
         return primary_pos, secondary_pos, dy_smooth, dx_smooth, updated_sparse_features_out
 
@@ -576,6 +702,14 @@ class ROITracker:
                                        (self.roi is None) or \
                                        (not self.penis_last_known_box and self.frames_since_target_lost < self.max_frames_for_roi_persistence and \
                                         self.internal_frame_counter % max(1, self.roi_update_interval // 3) == 0)
+
+            self.stats_display = [
+                f"T-FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
+            if frame_index is not None: self.stats_display.append(f"FIdx:{frame_index}")
+            if self.main_interaction_class: self.stats_display.append(f"Interact: {self.main_interaction_class}")
+            # Add this new line for our mode status
+            if self.enable_inversion_detection:
+                self.stats_display.append(f"Mode: {self.motion_mode}")
 
             if run_detection_this_frame:
                 detected_objects_this_frame = self.detect_objects(processed_frame)
@@ -627,59 +761,56 @@ class ROITracker:
 
         elif self.tracking_mode == "USER_FIXED_ROI":
             self.current_effective_amp_factor = self._get_effective_amplification_factor()
-            self.stats_display = [f"UserROI FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
+            self.stats_display = [
+                f"UserROI FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
             if frame_index is not None: self.stats_display.append(f"FIdx:{frame_index}")
 
-            if self.user_roi_fixed and self.user_roi_initial_point_relative is not None and self.tracking_active:
+            if self.user_roi_fixed and self.tracking_active:
                 urx, ury, urw, urh = self.user_roi_fixed
                 urx_c, ury_c = max(0, urx), max(0, ury)
-                urw_c, urh_c = min(urw, current_frame_gray.shape[1] - urx_c), min(urh, current_frame_gray.shape[0] - ury_c)
+                urw_c, urh_c = min(urw, current_frame_gray.shape[1] - urx_c), min(urh,
+                                                                                  current_frame_gray.shape[0] - ury_c)
 
                 if urw_c > 0 and urh_c > 0:
                     current_user_roi_patch_gray = current_frame_gray[ury_c: ury_c + urh_c, urx_c: urx_c + urw_c]
-                    if current_user_roi_patch_gray.size > 0 and \
-                            self.prev_gray_user_roi_patch is not None and \
-                            current_user_roi_patch_gray.shape == self.prev_gray_user_roi_patch.shape and \
-                            self.flow_dense:
-                        prev_patch_cont = np.ascontiguousarray(self.prev_gray_user_roi_patch)
-                        current_patch_cont = np.ascontiguousarray(current_user_roi_patch_gray)
-                        flow_vectors = self.flow_dense.calc(prev_patch_cont, current_patch_cont, None)
 
-                        if flow_vectors is not None:
-                            px_rel, py_rel = self.user_roi_initial_point_relative
-                            patch_h, patch_w = current_user_roi_patch_gray.shape
-                            clamped_px_rel = max(0, min(int(px_rel), patch_w - 1))
-                            clamped_py_rel = max(0, min(int(py_rel), patch_h - 1))
-                            dx_raw = flow_vectors[clamped_py_rel, clamped_px_rel, 0]
-                            dy_raw = flow_vectors[clamped_py_rel, clamped_px_rel, 1]
+                    # We must temporarily set self.roi to the user's fixed ROI so that visualization
+                    # inside process_main_roi_content works correctly (e.g., drawing the flow arrow).
+                    original_yolo_roi = self.roi
+                    self.roi = (urx_c, ury_c, urw_c, urh_c)
 
-                            self.primary_flow_history_smooth.append(dy_raw)
-                            self.secondary_flow_history_smooth.append(dx_raw)
-                            if len(self.primary_flow_history_smooth) > self.flow_history_window_smooth: self.primary_flow_history_smooth.pop(0)
-                            if len(self.secondary_flow_history_smooth) > self.flow_history_window_smooth: self.secondary_flow_history_smooth.pop(0)
-                            dy_smooth = np.median(self.primary_flow_history_smooth) if self.primary_flow_history_smooth else dy_raw
-                            dx_smooth = np.median(self.secondary_flow_history_smooth) if self.secondary_flow_history_smooth else dx_raw
-                            self.user_roi_current_flow_vector = (dx_smooth, dy_smooth)
+                    # This call now handles everything: sparse/dense flow, smoothing, adaptive scaling, and inversion.
+                    final_primary_pos, final_secondary_pos, dy_smooth, dx_smooth, _ = \
+                        self.process_main_roi_content(
+                            processed_frame,
+                            current_user_roi_patch_gray,
+                            self.prev_gray_user_roi_patch,
+                            None  # This mode doesn't use/manage sparse features
+                        )
 
-                            if self.user_roi_tracked_point_relative is not None:
-                                new_tracked_x = self.user_roi_tracked_point_relative[0] + dx_smooth
-                                new_tracked_y = self.user_roi_tracked_point_relative[1] + dy_smooth
-                                self.user_roi_tracked_point_relative = (
-                                    max(0, min(new_tracked_x, patch_w - 1)),
-                                    max(0, min(new_tracked_y, patch_h - 1))
-                                )
-                            manual_scale_multiplier = (self.sensitivity / 10.0) * self.current_effective_amp_factor
-                            final_primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
-                            final_secondary_pos = int(np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
-                        else:
-                            final_primary_pos, final_secondary_pos = 50, 50
-                            self.user_roi_current_flow_vector = (0.0, 0.0)
-                    else:
-                        final_primary_pos, final_secondary_pos = 50, 50
-                        self.user_roi_current_flow_vector = (0.0, 0.0)
-                    if current_user_roi_patch_gray.size > 0:
-                        self.prev_gray_user_roi_patch = np.ascontiguousarray(current_user_roi_patch_gray)
-                    else: self.prev_gray_user_roi_patch = None
+                    # Restore the original YOLO_ROI to not disrupt its logic.
+                    self.roi = original_yolo_roi
+
+                    self.user_roi_current_flow_vector = (dx_smooth, dy_smooth)
+
+                    if self.user_roi_tracked_point_relative:
+                        prev_x_rel, prev_y_rel = self.user_roi_tracked_point_relative
+
+                        # Add the smoothed flow vector to the previous position
+                        # dx_smooth is horizontal motion, dy_smooth is vertical motion
+                        new_x_rel = prev_x_rel + dx_smooth
+                        new_y_rel = prev_y_rel + dy_smooth
+
+                        # Clamp the new coordinates to ensure the point stays within the ROI boundaries
+                        clamped_x_rel = max(0.0, min(new_x_rel, float(urw_c)))
+                        clamped_y_rel = max(0.0, min(new_y_rel, float(urh_c)))
+
+                        # Update the state with the new, clamped position for the next frame
+                        self.user_roi_tracked_point_relative = (clamped_x_rel, clamped_y_rel)
+
+                    # Update the previous patch for the next frame's calculation.
+                    self.prev_gray_user_roi_patch = np.ascontiguousarray(current_user_roi_patch_gray)
+
                 else:
                     self.prev_gray_user_roi_patch = None
                     final_primary_pos, final_secondary_pos = 50, 50
@@ -728,26 +859,35 @@ class ROITracker:
             if not self.penis_last_known_box:
                 cv2.putText(processed_frame, f"Lost: {self.frames_since_target_lost}/{self.max_frames_for_roi_persistence}",
                             (rx, ry + rh + 10), cv2.FONT_HERSHEY_PLAIN, 0.6, (0, 0, 255), 1)
-        elif self.tracking_mode == "USER_FIXED_ROI" and self.show_roi and self.user_roi_fixed and self.user_roi_initial_point_relative:
+
+            # Add motion mode indicator text for VR videos
+            is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+            if self.enable_inversion_detection and is_vr_video:
+                mode_text = self.motion_mode.capitalize()
+                mode_color = (0, 255, 0) if self.motion_mode == 'thrusting' else (255, 100, 255) if self.motion_mode == 'riding' else (255, 255, 0)
+                cv2.putText(processed_frame, mode_text, (rx + 5, ry + rh - 5), cv2.FONT_HERSHEY_PLAIN, 0.8, mode_color, 1)
+
+        # The logic is simplified to only draw the box, as the motion arrow is now
+        # handled by the shared process_main_roi_content function.
+        elif self.tracking_mode == "USER_FIXED_ROI" and self.show_roi and self.user_roi_fixed:
             urx, ury, urw, urh = self.user_roi_fixed
             urx_c, ury_c = max(0, urx), max(0, ury)
             urw_c, urh_c = min(urw, processed_frame.shape[1] - urx_c), min(urh, processed_frame.shape[0] - ury_c)
             cv2.rectangle(processed_frame, (urx_c, ury_c), (urx_c + urw_c, ury_c + urh_c), (0, 255, 255), 2)
+
+            # Draw the tracked point to visualize its movement
             if self.user_roi_tracked_point_relative:
-                abs_tracked_x_vid = urx_c + int(self.user_roi_tracked_point_relative[0])
-                abs_tracked_y_vid = ury_c + int(self.user_roi_tracked_point_relative[1])
-                abs_tracked_x_vid = max(urx_c, min(abs_tracked_x_vid, urx_c + urw_c - 1))
-                abs_tracked_y_vid = max(ury_c, min(abs_tracked_y_vid, ury_c + urh_c - 1))
-                cv2.circle(processed_frame, (abs_tracked_x_vid, abs_tracked_y_vid), 5, (50, 255, 50), -1)
-                if self.show_flow:
-                    dx_f, dy_f = self.user_roi_current_flow_vector
-                    cv2.arrowedLine(processed_frame, (abs_tracked_x_vid, abs_tracked_y_vid),
-                                    (abs_tracked_x_vid + int(dx_f * 10), abs_tracked_y_vid + int(dy_f * 10)), (255, 0, 255), 1)
-            elif self.user_roi_initial_point_relative:
-                px_rel, py_rel = self.user_roi_initial_point_relative
-                abs_px, abs_py = urx_c + int(px_rel), ury_c + int(py_rel)
-                abs_px, abs_py = max(urx_c, min(abs_px, urx_c + urw_c - 1)), max(ury_c, min(abs_py, ury_c + urh_c - 1))
-                cv2.circle(processed_frame, (abs_px, abs_py), 3, (255, 100, 100), -1)
+                point_x_abs = urx_c + int(self.user_roi_tracked_point_relative[0])
+                point_y_abs = ury_c + int(self.user_roi_tracked_point_relative[1])
+                cv2.circle(processed_frame, (point_x_abs, point_y_abs), 3, (0, 255, 0), -1)
+
+            # Add motion mode indicator text for VR videos
+            is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+            if self.enable_inversion_detection and is_vr_video:
+                mode_text = self.motion_mode.capitalize()
+                mode_color = (0, 255, 0) if self.motion_mode == 'thrusting' else (255, 100, 255) if self.motion_mode == 'riding' else (255, 255, 0)
+                cv2.putText(processed_frame, mode_text, (urx_c + 5, ury_c + urh_c - 5), cv2.FONT_HERSHEY_PLAIN, 0.8, mode_color, 1)
+
 
         if self.show_stats:
             for i, stat_text in enumerate(self.stats_display):
@@ -783,6 +923,17 @@ class ROITracker:
         for lst in [self.primary_flow_history_smooth, self.secondary_flow_history_smooth, self.class_history]:
             lst.clear()
         # self.current_effective_amp_factor = self._get_effective_amplification_factor() # Done per frame/segment start
+
+        # Dynamically set the motion history window to match the video's FPS (~1 second buffer)
+        if self.app and hasattr(self.app, 'processor') and self.app.processor.fps > 0:
+            new_window_size = int(round(self.app.processor.fps))
+            self.motion_mode_history_window = new_window_size
+            self.logger.info(f"Motion history window set to video FPS: {new_window_size} frames.")
+        else:
+            # Fallback to the default if FPS is not available
+            self.motion_mode_history_window = 30
+            self.logger.info(f"Falling back to default motion history window: {self.motion_mode_history_window} frames.")
+
 
         if self.tracking_mode == "YOLO_ROI": # Also applies to S3 like processing
             self.frames_since_target_lost = 0

@@ -137,6 +137,9 @@ class AppStateUI:
         self.lr_dial_window_size = (default_lr_dial_size_w, default_lr_dial_size_h)
         self.lr_dial_value = 50.0  # Live value from script (0-100, default 50)
 
+        self.fixed_layout_geometry = {}
+        self.just_switched_to_floating = False
+
         # Timeline sync state with video playback
         self.timeline_interaction_active = False  # True if user is dragging points/selection box in a timeline
         self.last_synced_frame_index_timeline = -1  # Last video frame index timeline was auto-panned to

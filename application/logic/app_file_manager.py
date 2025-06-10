@@ -504,7 +504,7 @@ class AppFileManager:
             ext = os.path.splitext(path)[1].lower()
             if ext == '.funscript':
                 self.load_funscript_to_timeline(path, 1)
-            elif ext == '.json':  # Per existing logic for project files
+            elif ext == PROJECT_FILE_EXTENSION:
                 self.app.project_manager.load_project(path)
             elif ext == '.msgpack':
                 self.load_stage2_overlay_data(path)
@@ -525,7 +525,7 @@ class AppFileManager:
         # Model paths are handled by AppLogic's save_app_settings directly
         pass
 
-    def save_final_funscripts(self, video_path: str):
+    def save_final_funscripts(self, video_path: str, chapters: Optional[List[Dict]] = None):
         """
         Saves the final (potentially post-processed) funscripts.
         Adheres to the 'autosave_final_funscript_to_video_location' setting.
@@ -538,12 +538,14 @@ class AppFileManager:
 
         primary_actions = self.app.funscript_processor.get_actions('primary')
         secondary_actions = self.app.funscript_processor.get_actions('secondary')
-        chapters = self.app.funscript_processor.video_chapters
+        chapters_to_save = chapters if chapters is not None else self.app.funscript_processor.video_chapters
+
 
         # Always save to the output directory
         if primary_actions:
             path_in_output = self.get_output_path_for_file(video_path, "_t1.funscript")
-            self._save_funscript_file(path_in_output, primary_actions, chapters)
+            self._save_funscript_file(path_in_output, primary_actions, chapters_to_save)
+
         if secondary_actions:
             path_in_output_t2 = self.get_output_path_for_file(video_path, "_t2.funscript")
             self._save_funscript_file(path_in_output_t2, secondary_actions, None)

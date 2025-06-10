@@ -707,8 +707,11 @@ class GUI:
             available_height_for_main_panels = max(100,
                                                    self.window_height - panel_y_start - interactive_timelines_total_height)
 
+            # Clear previous geometry to ensure it's fresh for the current layout
+            app_state.fixed_layout_geometry = {}
+
             if app_state.show_video_display_window:
-                # --- RENDER WITH VIDEO PANEL (Original Logic) ---
+                # --- RENDER WITH VIDEO PANEL ---
                 control_panel_w, graphs_panel_w = 380, 380
                 video_panel_w = self.window_width - control_panel_w - graphs_panel_w
                 if video_panel_w < 100:
@@ -717,12 +720,26 @@ class GUI:
 
                 video_nav_bar_h = 150
                 video_render_h = max(50, available_height_for_main_panels - video_nav_bar_h)
+                video_area_x_start = control_panel_w
+                graphs_area_x_start = control_panel_w + video_panel_w
 
+                # --- CAPTURE GEOMETRY (for this specific layout) ---
+                app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w,
+                                                                                                       available_height_for_main_panels)}
+                app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start),
+                                                                   'size': (video_panel_w, video_render_h)}
+                app_state.fixed_layout_geometry['VideoNavigation'] = {
+                    'pos': (video_area_x_start, panel_y_start + video_render_h),
+                    'size': (video_panel_w, video_nav_bar_h)}
+                app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start),
+                                                                 'size': (graphs_panel_w,
+                                                                          available_height_for_main_panels)}
+
+                # --- RENDER PANELS ---
                 imgui.set_next_window_position(0, panel_y_start)
                 imgui.set_next_window_size(control_panel_w, available_height_for_main_panels)
                 self._time_render("ControlPanelUI", self.control_panel_ui.render)
 
-                video_area_x_start = control_panel_w
                 imgui.set_next_window_position(video_area_x_start, panel_y_start)
                 imgui.set_next_window_size(video_panel_w, video_render_h)
                 self._time_render("VideoDisplayUI", self.video_display_ui.render)
@@ -731,7 +748,6 @@ class GUI:
                 imgui.set_next_window_size(video_panel_w, video_nav_bar_h)
                 self._time_render("VideoNavigationUI", self.video_navigation_ui.render, video_panel_w)
 
-                graphs_area_x_start = control_panel_w + video_panel_w
                 imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
                 imgui.set_next_window_size(graphs_panel_w, available_height_for_main_panels)
                 self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
@@ -739,28 +755,73 @@ class GUI:
                 # --- RENDER WITHOUT VIDEO PANEL ---
                 control_panel_w = self.window_width / 2
                 graphs_panel_w = self.window_width - control_panel_w
+                graphs_area_x_start = control_panel_w
 
+                # --- CAPTURE GEOMETRY (for this specific layout) ---
+                app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w,
+                                                                                                       available_height_for_main_panels)}
+                app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start),
+                                                                 'size': (graphs_panel_w,
+                                                                          available_height_for_main_panels)}
+
+                # --- RENDER PANELS ---
                 imgui.set_next_window_position(0, panel_y_start)
                 imgui.set_next_window_size(control_panel_w, available_height_for_main_panels)
                 self._time_render("ControlPanelUI", self.control_panel_ui.render)
 
-                graphs_area_x_start = control_panel_w
                 imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
                 imgui.set_next_window_size(graphs_panel_w, available_height_for_main_panels)
                 self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
 
-
+            # Capture timeline geometry (this is common to both layouts)
             timeline_current_y_start = panel_y_start + available_height_for_main_panels
             if app_state.show_funscript_interactive_timeline:
+                app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start),
+                                                                'size': (self.window_width, timeline1_render_h)}
                 self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start,
                                   timeline1_render_h)
                 timeline_current_y_start += timeline1_render_h
             if app_state.show_funscript_interactive_timeline2:
+                app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start),
+                                                                'size': (self.window_width, timeline2_render_h)}
                 self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start,
                                   timeline2_render_h)
 
         else:  # 'floating' mode
             # --- FLOATING WINDOWS LAYOUT ---
+            if app_state.just_switched_to_floating:
+                # Apply geometry from the dictionary, checking if each key exists
+                if 'ControlPanel' in app_state.fixed_layout_geometry:
+                    geom = app_state.fixed_layout_geometry['ControlPanel']
+                    imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
+                    imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+
+                if 'VideoDisplay' in app_state.fixed_layout_geometry:
+                    geom = app_state.fixed_layout_geometry['VideoDisplay']
+                    imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
+                    imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+
+                if 'VideoNavigation' in app_state.fixed_layout_geometry:
+                    geom = app_state.fixed_layout_geometry['VideoNavigation']
+                    imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
+                    imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+
+                if 'InfoGraphs' in app_state.fixed_layout_geometry:
+                    geom = app_state.fixed_layout_geometry['InfoGraphs']
+                    imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
+                    imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+
+                if 'Timeline1' in app_state.fixed_layout_geometry:
+                    geom = app_state.fixed_layout_geometry['Timeline1']
+                    imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
+                    imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+
+                if 'Timeline2' in app_state.fixed_layout_geometry:
+                    geom = app_state.fixed_layout_geometry['Timeline2']
+                    imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
+                    imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
+
+            # Render all the floating windows
             self._time_render("ControlPanelUI", self.control_panel_ui.render)
             self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
             self._time_render("VideoDisplayUI", self.video_display_ui.render)
@@ -768,7 +829,12 @@ class GUI:
             self._time_render("TimelineEditor1", self.timeline_editor1.render)
             self._time_render("TimelineEditor2", self.timeline_editor2.render)
 
+            # Reset the flag at the end of the frame
+            if app_state.just_switched_to_floating:
+                app_state.just_switched_to_floating = False
+
         # --- Common Components ---
+        # This section and the new lines should be at the end of render_gui()
         if hasattr(app_state, 'show_chapter_list_window') and app_state.show_chapter_list_window:
             self._time_render("ChapterListWindow", self.chapter_list_window_ui.render)
 
@@ -777,7 +843,7 @@ class GUI:
             self.lr_dial_window_ui.render(),
             self._render_batch_confirmation_dialog(),
             self._render_scene_detection_progress_modal(),
-            self.app.file_manager.handle_unconsumed_drop() if self.app.file_manager.last_dropped_files else None,
+            #self.app.file_manager.handle_unconsumed_drop() if self.app.file_manager.last_dropped_files else None,
             self.file_dialog.draw() if self.file_dialog.open else None,
             self._render_status_message(app_state)
         ))
@@ -789,7 +855,8 @@ class GUI:
             self._log_performance()
 
         imgui.render()
-        if self.impl: self.impl.render(imgui.get_draw_data())
+        if self.impl:
+            self.impl.render(imgui.get_draw_data())
 
     def _render_status_message(self, app_state):  # Helper for status message
         if app_state.status_message and time.time() < app_state.status_message_time:
