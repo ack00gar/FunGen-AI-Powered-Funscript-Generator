@@ -5,8 +5,8 @@ from typing import List, Dict, Optional, Tuple
 
 from application.utils.video_segment import VideoSegment
 from funscript.dual_axis_funscript import DualAxisFunscript
-from config.constants import POSITION_INFO_MAPPING
 from application.utils.time_format import _format_time
+from config import constants
 
 
 class AppFunscriptProcessor:
@@ -164,7 +164,7 @@ class AppFunscriptProcessor:
                 return None if return_chapter_object else None  # Explicitly return None
 
             pos_short_key = data.get("position_short_name_key")
-            pos_info = POSITION_INFO_MAPPING_CONST.get(pos_short_key, {})
+            pos_info = constants.POSITION_INFO_MAPPING.get(pos_short_key, {})
             pos_short_name = pos_info.get("short_name", pos_short_key if pos_short_key else "N/A")
             pos_long_name = pos_info.get("long_name", "Unknown Position")
 
@@ -225,7 +225,7 @@ class AppFunscriptProcessor:
             chapter_to_update.end_frame_id = end_frame
 
             pos_short_key = new_data.get("position_short_name_key")
-            pos_info = POSITION_INFO_MAPPING_CONST.get(pos_short_key, {})
+            pos_info = constants.POSITION_INFO_MAPPING.get(pos_short_key, {})
             chapter_to_update.position_short_name = pos_info.get("short_name",
                                                                  pos_short_key if pos_short_key else chapter_to_update.position_short_name)
             chapter_to_update.position_long_name = pos_info.get("long_name", chapter_to_update.position_long_name)
@@ -833,7 +833,7 @@ class AppFunscriptProcessor:
                 return
 
         merged_pos_short_key = chapter1.position_short_name
-        merged_pos_info = POSITION_INFO_MAPPING_CONST.get(merged_pos_short_key, {})
+        merged_pos_info = constants.POSITION_INFO_MAPPING.get(merged_pos_short_key, {})
         merged_pos_short_name = merged_pos_info.get("short_name",
                                                     merged_pos_short_key if merged_pos_short_key else "N/A")
         merged_pos_long_name = f"Merged: {chapter1.position_long_name} & {chapter2.position_long_name}"
@@ -938,7 +938,7 @@ class AppFunscriptProcessor:
 
         # Use properties from the first chapter for the merged chapter metadata
         merged_pos_short_key = chapter1.position_short_name
-        merged_pos_info = POSITION_INFO_MAPPING_CONST.get(merged_pos_short_key, {})
+        merged_pos_info = constants.POSITION_INFO_MAPPING.get(merged_pos_short_key, {})
         merged_pos_short_name = merged_pos_info.get("short_name",
                                                     merged_pos_short_key if merged_pos_short_key else "N/A")
         merged_pos_long_name = f"Merged (Gap Tracked): {chapter1.position_long_name} & {chapter2.position_long_name}"
@@ -1006,7 +1006,7 @@ class AppFunscriptProcessor:
 
         # Use properties from the first chapter
         merged_pos_short_key = chapter1.position_short_name
-        merged_pos_info = POSITION_INFO_MAPPING_CONST.get(merged_pos_short_key, {})
+        merged_pos_info = constants.POSITION_INFO_MAPPING.get(merged_pos_short_key, {})
         merged_pos_short_name = merged_pos_info.get("short_name",
                                                     merged_pos_short_key if merged_pos_short_key else "N/A")
         merged_pos_long_name = f"Filled Gap from {chapter1.position_short_name} to {chapter2.position_short_name}"
