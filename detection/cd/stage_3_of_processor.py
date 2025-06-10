@@ -73,6 +73,10 @@ class Stage3OpticalFlowProcessor:
             self.logger.error(f"S3 OF: VideoProcessor could not open video: {self.video_path}")
             return False
 
+        video_type_for_tracker = self.video_processor.determined_video_type
+        self.logger.info(f"S3 OF: Determined video type is '{video_type_for_tracker}'. Passing to ROITracker.")
+
+
         # Initialize ROITracker instance for S3 processing
         # ROITracker's __init__ will need to handle app_logic_instance=None
         # by taking all necessary configs directly.
@@ -97,7 +101,8 @@ class Stage3OpticalFlowProcessor:
                 use_sparse_flow=self.tracker_config.get('use_sparse_flow', False), # S3 typically uses dense
                 max_frames_for_roi_persistence=self.tracker_config.get('max_frames_for_roi_persistence', constants.DEFAULT_ROI_PERSISTENCE_FRAMES), # Not really used in S3 like in live
                 class_specific_amplification_multipliers=self.tracker_config.get('class_specific_amplification_multipliers', None),
-                logger=self.logger.getChild("ROITracker_S3")
+                logger=self.logger.getChild("ROITracker_S3"),
+                determined_video_type=video_type_for_tracker
             )
             # Set parameters that might not be in __init__ or need override for S3
             self.roi_tracker_instance.y_offset = self.tracker_config.get('y_offset',

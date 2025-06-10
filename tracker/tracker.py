@@ -30,9 +30,11 @@ class ROITracker:
                  base_amplification_factor: float = constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION,
                  class_specific_amplification_multipliers: Optional[Dict[str, float]] = None,
                  logger: Optional[logging.Logger] = None,
-                 inversion_detection_split_ratio: float = constants.INVERSION_DETECTION_SPLIT_RATIO
+                 inversion_detection_split_ratio: float = constants.INVERSION_DETECTION_SPLIT_RATIO,
+                 determined_video_type: str = '2D'
                  ):
         self.app = app_logic_instance # Can be None if instantiated by Stage 3
+        self.determined_video_type = determined_video_type
 
         if logger:
             self.logger = logger
@@ -567,7 +569,7 @@ class ROITracker:
 
         # Check if the feature is enabled AND if the video processor has identified the video as VR.
 
-        is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+        is_vr_video = self.determined_video_type == 'VR'
 
         if self.enable_inversion_detection and is_vr_video:
             # This logic now ONLY runs for VR videos.
