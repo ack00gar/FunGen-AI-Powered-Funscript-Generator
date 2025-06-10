@@ -1307,12 +1307,6 @@ class VideoProcessor:
                 if self.tracker and self.enable_tracker_processing:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
                         time.time() * 1000)
-                    if self.tracker.tracking_mode == "USER_FIXED_ROI" and self.tracker.prev_gray_user_roi_patch is None and self.tracker.user_roi_fixed:
-                        frame_gray_for_patch = cv2.cvtColor(frame_np, cv2.COLOR_BGR2GRAY)
-                        urx, ury, urw, urh = self.tracker.user_roi_fixed
-                        patch = frame_gray_for_patch[ury:ury + urh, urx:urx + urw]
-                        self.tracker.prev_gray_user_roi_patch = np.ascontiguousarray(patch)
-                        self.logger.info(f"Captured initial patch for tracker on chapter {current_chapter_id}")
                     try:
                         processed_frame_for_gui = self.tracker.process_frame(frame_np.copy(), timestamp_ms)[0]
                     except Exception as e:

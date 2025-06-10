@@ -79,7 +79,7 @@ class AppSettings:
             "show_funscript_timeline": False,
             "show_heatmap": True,
             "show_stage2_overlay": True,
-            "funscript_output_delay_frames": 0,
+            "funscript_output_delay_frames": 3,
             # --- Energy Saver Settings ---
             "energy_saver_enabled": True,
             "energy_saver_threshold_seconds": 30.0,

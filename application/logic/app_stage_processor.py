@@ -336,7 +336,10 @@ class AppStageProcessor:
                 is_ranged_data_source=is_s1_data_source_ranged
             )
             stage2_success = stage2_run_results.get("success", False)
-            s2_output_data = stage2_run_results.get("data", {})
+            if stage2_success:
+                # --- Capture the generated chapters locally ---
+                video_segments_for_funscript = stage2_run_results["data"].get("video_segments", [])
+                s2_output_data = stage2_run_results.get("data", {})
 
             if self.stop_stage_event.is_set() or not stage2_success:
                 return
@@ -346,7 +349,8 @@ class AppStageProcessor:
                 completion_payload = {
                     "message": "AI CV (2-Stage) analysis completed successfully.",
                     "status": "Completed",
-                    "video_path": fm.video_path
+                    "video_path": fm.video_path,
+                    "video_segments": video_segments_for_funscript
                 }
                 self.gui_event_queue.put(("analysis_message", completion_payload, None))
             elif selected_mode_idx == 0: # For 3-Stage analysis
@@ -794,6 +798,7 @@ class AppStageProcessor:
                     log_msg = payload.get("message", str(data1))
                     status_override = payload.get("status", data2)
                     video_path_from_event = payload.get("video_path")
+                    segments_from_event = payload.get("video_segments")
 
                     if log_msg:
                         self.logger.info(log_msg, extra={'status_message': True})
@@ -809,7 +814,11 @@ class AppStageProcessor:
                             else:
                                 self.logger.info("Auto post-processing disabled, skipping.")
                             self.logger.info("Saving final funscripts...")
-                            self.app.file_manager.save_final_funscripts(video_path_from_event)
+                            self.app.file_manager.save_final_funscripts(video_path_from_event, chapters=segments_from_event)
+                            # --- Save the project file for the completed video ---
+                            self.logger.info("Saving project file for completed video...")
+                            project_filepath = self.app.file_manager.get_output_path_for_file(video_path_from_event, PROJECT_FILE_EXTENSION)
+                            self.app.project_manager.save_project(project_filepath)
                     elif status_override == "Aborted":
                         if self.current_analysis_stage == 1 or self.stage1_status_text.startswith(
                             "Running"): self.stage1_status_text = "S1 Aborted."
