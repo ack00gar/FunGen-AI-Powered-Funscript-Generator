@@ -234,7 +234,6 @@ class AppFileManager:
                 # We can decide whether to proceed with the overwrite or not.
                 # For safety, let's proceed but the user is warned.
 
-
         funscript_data = {
             "version": "1.0",
             "author": f"FunGen beta {APP_VERSION}",
@@ -263,7 +262,7 @@ class AppFileManager:
         try:
             # Use orjson for high-performance writing
             with open(filepath, 'wb') as f:
-                f.write(orjson.dumps(funscript_data, option=orjson.OPT_INDENT_2))
+                f.write(orjson.dumps(funscript_data))
             self.logger.info(f"Funscript saved to {os.path.basename(filepath)}",
                              extra={'status_message': True})
         except Exception as e:
