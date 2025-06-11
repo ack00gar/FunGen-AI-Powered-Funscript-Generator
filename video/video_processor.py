@@ -1232,8 +1232,8 @@ class VideoProcessor:
                             self.tracker.reconfigure_for_chapter(current_chapter)
                         else:  # In a gap or a chapter without a configured ROI
                             self.tracker.set_tracking_mode("YOLO_ROI")  # Fallback mode
-                            self.tracker.roi = None  # Invalidate ROI
-                            self.tracker.stop_tracking()  # Stop generating actions
+                            #self.tracker.roi = None  # Invalidate ROI
+                            #self.tracker.stop_tracking()  # Stop generating actions
                     self.last_processed_chapter_id = current_chapter_id
 
                 # If we entered a chapter and tracking is not active, start it
