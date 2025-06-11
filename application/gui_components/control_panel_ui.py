@@ -200,8 +200,24 @@ class ControlPanelUI:
             self._render_automatic_post_processing_new(self.app.funscript_processor)
 
     def _render_ai_model_settings(self):
-        file_mgr = self.app.file_manager
         stage_proc = self.app.stage_processor
+
+        # The 'file_mgr' variable is no longer needed here for Browse.
+        # We will access the file dialog directly via the gui_instance.
+
+        # Callback functions to update the model paths
+        def update_detection_model_path(path: str):
+            self.app.yolo_detection_model_path_setting = path
+            # Mark project as dirty to prompt user to save changes
+            self.app.project_manager.project_dirty = True
+            self.app.logger.info(
+                f"Detection model path selected: {path}. Please Apply & Save settings to load and persist.")
+
+        def update_pose_model_path(path: str):
+            self.app.yolo_pose_model_path_setting = path
+            # Mark project as dirty to prompt user to save changes
+            self.app.project_manager.project_dirty = True
+            self.app.logger.info(f"Pose model path selected: {path}. Please Apply & Save settings to load and persist.")
 
         # YOLO Detection Model
         current_yolo_path_display = self.app.yolo_detection_model_path_setting or "Not set"
@@ -209,7 +225,18 @@ class ControlPanelUI:
                          flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
         if imgui.button("Browse##S1YOLOBrowse"):
-            file_mgr.browse_for_model_path("detection")
+            # Corrected implementation using the file dialog
+            if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                initial_dir = os.path.dirname(
+                    self.app.yolo_detection_model_path_setting) if self.app.yolo_detection_model_path_setting else None
+                self.app.gui_instance.file_dialog.show(
+                    title="Select YOLO Detection Model",
+                    is_save=False,
+                    callback=update_detection_model_path,
+                    extension_filter="AI Models (*.pt *.onnx *.mlpackage),*.pt;*.onnx;*.mlpackage|All Files,*.*",
+                    initial_path=initial_dir
+                )
+
         if imgui.is_item_hovered(): imgui.set_tooltip(
             "Path to the YOLO object detection model file (.pt, .onnx, .mlpackage).")
 
@@ -218,7 +245,18 @@ class ControlPanelUI:
         imgui.input_text("Pose Model##PoseYOLOPath", current_pose_path_display, 256, flags=imgui.INPUT_TEXT_READ_ONLY)
         imgui.same_line()
         if imgui.button("Browse##PoseYOLOBrowse"):
-            file_mgr.browse_for_model_path("pose")
+            # Corrected implementation using the file dialog
+            if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                initial_dir = os.path.dirname(
+                    self.app.yolo_pose_model_path_setting) if self.app.yolo_pose_model_path_setting else None
+                self.app.gui_instance.file_dialog.show(
+                    title="Select YOLO Pose Model",
+                    is_save=False,
+                    callback=update_pose_model_path,
+                    extension_filter="AI Models (*.pt *.onnx *.mlpackage),*.pt;*.onnx;*.mlpackage|All Files,*.*",
+                    initial_path=initial_dir
+                )
+
         if imgui.is_item_hovered(): imgui.set_tooltip(
             "Path to the YOLO pose estimation model file (.pt, .onnx, .mlpackage).")
 
