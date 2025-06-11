@@ -258,7 +258,7 @@ class InfoGraphsUI:
             source_text = stats["path"]
         imgui.text_wrapped(f"Source: {source_text}")
         imgui.separator()
-        col_width1 = 180
+        col_width1 = 180*imgui.get_io().font_global_scale
         imgui.text("Number of Points:")
         imgui.same_line(col_width1)
         imgui.text(f"{stats['num_points']}")
