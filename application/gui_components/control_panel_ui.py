@@ -476,7 +476,7 @@ class ControlPanelUI:
             roi_status = "Not Set"
             if self.app.tracker:
                 if selected_mode_idx == 2:
-                    roi_status = f"Tracking '{self.app.tracker.current_primary_class}'" if self.app.tracker.current_primary_class else "Searching..."
+                    roi_status = f"Tracking '{self.app.tracker.main_interaction_class}'" if self.app.tracker.main_interaction_class else "Searching..."
                 elif selected_mode_idx == 3:
                     roi_status = "Set" if self.app.tracker.user_roi_fixed else "Not Set"
             imgui.text(f"  - ROI Status: {roi_status}")
