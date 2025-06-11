@@ -53,6 +53,7 @@ class AppSettings:
             "show_stage2_overlay": True,
             "show_gauge_window": True,
             "show_lr_dial_graph": True,
+            "show_chapter_list_window": False,
 
             # File Handling & Output
             "autosave_final_funscript_to_video_location": True,
@@ -92,6 +93,10 @@ class AppSettings:
             # Shortcuts
             "funscript_editor_shortcuts": shortcuts,
         }
+
+        defaults["funscript_editor_shortcuts"]["jump_to_next_point"] = "."
+        defaults["funscript_editor_shortcuts"]["jump_to_prev_point"] = ","
+
         return defaults
 
     def load_settings(self):

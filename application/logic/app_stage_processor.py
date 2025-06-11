@@ -75,11 +75,21 @@ class AppStageProcessor:
 
         self.S2_TOTAL_MAIN_STEPS_FALLBACK = getattr(stage2_module, 'ATR_PASS_COUNT', 6)
 
+        self.scene_detection_time_elapsed_str: str = "00:00:00"
+        self.scene_detection_processing_fps_str: str = "0 FPS"
+        self.scene_detection_eta_str: str = "N/A"
+
     # --- Progress callback for scene detection ---
-    def _scene_detection_progress_callback(self, current_frame: int, total_frames: int):
+    def _scene_detection_progress_callback(self, current_frame: int, total_frames: int, time_elapsed: float,
+                                           processing_fps: float, eta_seconds: float):
         progress = float(current_frame) / total_frames if total_frames > 0 else 0.0
-        status_text = f"Processing frame {current_frame} of {total_frames}"
-        self.gui_event_queue.put(("scene_detection_progress", progress, status_text))
+        progress_data = {
+            "message": f"Processing frame {current_frame} of {total_frames}",
+            "time_elapsed": time_elapsed,
+            "fps": processing_fps,
+            "eta": eta_seconds
+        }
+        self.gui_event_queue.put(("scene_detection_progress", progress, progress_data))
 
     # --- Thread target for running scene detection ---
     def _run_scene_detection_thread(self):
@@ -705,11 +715,18 @@ class AppStageProcessor:
                 event_type, data1, data2 = queue_item[0], queue_item[1], queue_item[2] if len(queue_item) > 2 else None
 
                 if event_type == "scene_detection_progress":
-                    progress_val, status_text = data1, data2
+                    progress_val, data = data1, data2
                     if progress_val >= 0:
                         self.scene_detection_progress = progress_val
-                    if status_text:
-                        self.scene_detection_status = status_text
+                    if isinstance(data, dict):
+                        self.scene_detection_status = data.get("message", "Processing...")
+                        t_el, fps, eta = data.get("time_elapsed", 0.0), data.get("fps", 0.0), data.get("eta", 0.0)
+                        self.scene_detection_time_elapsed_str = f"{int(t_el // 3600):02d}:{int((t_el % 3600) // 60):02d}:{int(t_el % 60):02d}"
+                        self.scene_detection_processing_fps_str = f"{int(fps)} FPS"
+                        if math.isnan(eta) or math.isinf(eta):
+                            self.scene_detection_eta_str = "Calculating..."
+                        else:
+                            self.scene_detection_eta_str = f"{int(eta // 3600):02d}:{int((eta % 3600) // 60):02d}:{int(eta % 60):02d}"
                 elif event_type == "scene_detection_finished":
                     scene_list, status_text = data1, data2
                     self.scene_detection_status = status_text

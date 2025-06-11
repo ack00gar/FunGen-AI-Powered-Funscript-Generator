@@ -193,6 +193,35 @@ class DualAxisFunscript:
         self.last_timestamp_secondary = 0
         self.logger.info("Cleared all actions from DualAxisFunscript.")
 
+    def get_next_action(self, current_time_ms: int, axis: str = 'primary') -> Optional[Dict]:
+        """
+        Finds the first action with a timestamp strictly greater than the given time.
+        """
+        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list:
+            return None
+        action_timestamps = [a['at'] for a in actions_list]
+        # bisect_right finds an insertion point which comes after any existing entries of current_time_ms
+        idx = bisect.bisect_right(action_timestamps, current_time_ms)
+        if idx < len(actions_list):
+            return actions_list[idx]
+        return None
+
+    def get_prev_action(self, current_time_ms: int, axis: str = 'primary') -> Optional[Dict]:
+        """
+        Finds the first action with a timestamp strictly less than the given time.
+        """
+        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list:
+            return None
+        action_timestamps = [a['at'] for a in actions_list]
+        # bisect_left finds the insertion point for current_time_ms
+        idx = bisect.bisect_left(action_timestamps, current_time_ms)
+        if idx > 0:
+            # The action at idx-1 is the one just before current_time_ms
+            return actions_list[idx - 1]
+        return None
+
     @property
     def actions(self) -> List[Dict]:
         return self.primary_actions
@@ -602,3 +631,40 @@ class DualAxisFunscript:
                 f"Total {total_cleared_count} points cleared in time range [{start_time_ms}ms - {end_time_ms}ms].")
 
 
+    def shift_points_time(self, axis: str, time_delta_ms: int):
+        """
+        Shifts the timestamp of all points by a given millisecond delta.
+        Ensures that no timestamp becomes negative.
+        """
+        actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list_ref:
+            return
+
+        # Check for negative shift that would make the first point's timestamp negative
+        if time_delta_ms < 0 and actions_list_ref[0]['at'] + time_delta_ms < 0:
+            actual_delta_ms = -actions_list_ref[0]['at']
+            self.logger.warning(
+                f"Original shift of {time_delta_ms}ms was too large. "
+                f"Adjusted to {actual_delta_ms}ms to prevent negative timestamps."
+            )
+        else:
+            actual_delta_ms = time_delta_ms
+
+        if actual_delta_ms == 0 and time_delta_ms != 0:
+            self.logger.info("No shift applied as it would result in negative timestamps.")
+            return
+
+        for action in actions_list_ref:
+            action['at'] += actual_delta_ms
+
+        # Re-sorting is good practice, though not strictly necessary if all points are shifted equally.
+        actions_list_ref.sort(key=lambda x: x['at'])
+
+        # Update last timestamp for the axis
+        last_ts = actions_list_ref[-1]['at'] if actions_list_ref else 0
+        if axis == 'primary':
+            self.last_timestamp_primary = last_ts
+        else:
+            self.last_timestamp_secondary = last_ts
+
+        self.logger.info(f"Shifted {len(actions_list_ref)} points on {axis} axis by {actual_delta_ms}ms.")

@@ -151,7 +151,6 @@ class VideoNavigationUI:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
 
-
     def _render_chapter_bar(self, fs_proc, total_video_frames: int, bar_width: float, bar_height: float):
         style = imgui.get_style()  # Get style for frame_padding
         draw_list = imgui.get_window_draw_list()
@@ -189,10 +188,9 @@ class VideoNavigationUI:
             if segment.user_roi_fixed:
                 icon_pos_x = seg_start_x + 3
                 icon_pos_y = bar_start_y + (bar_height - imgui.get_text_line_height()) / 2
-                icon_color = imgui.get_color_u32_rgba(1.0, 1.0, 0.2, 0.9) # Bright Yellow
+                icon_color = imgui.get_color_u32_rgba(1.0, 1.0, 0.2, 0.9)  # Bright Yellow
                 # Using a simple character as an icon. A texture could be used for a nicer look.
                 draw_list.add_text(icon_pos_x, icon_pos_y, icon_color, "[R]")
-
 
             segment_color_tuple = segment.color
             if not (isinstance(segment_color_tuple, (tuple, list)) and len(segment_color_tuple) in [3, 4]):
@@ -294,7 +292,7 @@ class VideoNavigationUI:
 
         if self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0 and total_video_frames > 0:
             current_norm_pos = self.app.processor.current_frame_index / total_video_frames
-            #marker_x = bar_start_x + current_norm_pos * bar_width
+            # marker_x = bar_start_x + current_norm_pos * bar_width
             marker_x = effective_marker_area_start_x + current_norm_pos * effective_marker_area_width
             marker_col = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.7)
             draw_list.add_line(marker_x, bar_start_y, marker_x, bar_start_y + bar_height, marker_col, thickness=2.0)
@@ -306,7 +304,6 @@ class VideoNavigationUI:
 
         is_mouse_over_bar = full_bar_rect_min[0] <= mouse_pos[0] <= full_bar_rect_max[0] and \
                             full_bar_rect_min[1] <= mouse_pos[1] <= full_bar_rect_max[1]
-
 
         if is_mouse_over_bar and imgui.is_mouse_clicked(1) and \
                 not action_on_segment_this_frame:
@@ -415,7 +412,6 @@ class VideoNavigationUI:
                     # Seek to the start of the chapter to make it easy for the user
                     if self.app.processor:
                         self.app.processor.seek_video(selected_chapter.start_frame_id)
-
 
             can_delete = num_selected > 0
             delete_label = f"Delete Selected Chapter(s) ({num_selected})" if num_selected > 0 else "Delete Selected Chapter(s)"
@@ -671,8 +667,7 @@ class VideoNavigationUI:
                     self.selected_position_idx_in_dialog = 0
             except ValueError:  # Should not happen if above logic is correct, but as a fallback
                 self.selected_position_idx_in_dialog = 0
-                if self.position_short_name_keys: self.chapter_edit_data["position_short_name_key"] = \
-                self.position_short_name_keys[0]
+                if self.position_short_name_keys: self.chapter_edit_data["position_short_name_key"] = self.position_short_name_keys[0]
 
             clicked_pos_edit, self.selected_position_idx_in_dialog = imgui.combo("Position##EditWin",
                                                                                  self.selected_position_idx_in_dialog,
@@ -747,8 +742,10 @@ class VideoNavigationUI:
 
 
 class ChapterListWindow:
-    def __init__(self, app):
+    def __init__(self, app, nav_ui):
         self.app = app
+        self.nav_ui = nav_ui
+        self.list_context_selected_chapters = []
 
     def render(self):
         app_state = self.app.app_state_ui
@@ -756,7 +753,7 @@ class ChapterListWindow:
             return
 
         window_flags = imgui.WINDOW_NO_COLLAPSE
-        imgui.set_next_window_size(550, 300, condition=imgui.APPEARING)
+        imgui.set_next_window_size(650, 350, condition=imgui.APPEARING)
 
         is_open, app_state.show_chapter_list_window = imgui.begin(
             "Chapter List##ChapterListWindow",
@@ -766,7 +763,75 @@ class ChapterListWindow:
 
         if is_open:
             fs_proc = self.app.funscript_processor
-            if not fs_proc or not fs_proc.video_chapters:
+            if not fs_proc:
+                imgui.text("Funscript processor not available.")
+                imgui.end()
+                return
+
+            # --- RENDER ACTION BUTTONS ---
+            num_selected = len(self.list_context_selected_chapters)
+
+            # --- Merge Button ---
+            can_merge = num_selected == 2
+            if not can_merge:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+            if imgui.button("Merge Selected"):
+                if can_merge:
+                    chaps_to_merge = sorted(self.list_context_selected_chapters, key=lambda c: c.start_frame_id)
+                    fs_proc.merge_selected_chapters(chaps_to_merge[0], chaps_to_merge[1])
+                    self.list_context_selected_chapters.clear()
+
+            if not can_merge:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Select exactly two chapters to merge.")
+
+            imgui.same_line()
+
+            # --- Track Gap & Merge Button ---
+            can_track_gap, gap_c1, gap_c2, _, _ = self._get_gap_info(fs_proc)
+            if not can_track_gap:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+            if imgui.button("Track Gap & Merge"):
+                if can_track_gap:
+                    self._handle_track_gap_and_merge(fs_proc, gap_c1, gap_c2)
+                    self.list_context_selected_chapters.clear()
+
+            if not can_track_gap:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Select two chapters with a frame gap between them to track the gap and merge.")
+
+            imgui.same_line()
+
+            # --- Create Chapter in Gap & Track Button ---
+            can_create_in_gap, create_c1, create_c2, gap_start, gap_end = self._get_gap_info(fs_proc)
+            if not can_create_in_gap:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+            if imgui.button("Create Chapter in Gap & Track"):
+                if can_create_in_gap:
+                    self._handle_create_chapter_in_gap(fs_proc, create_c1, gap_start, gap_end)
+                    self.list_context_selected_chapters.clear()
+
+            if not can_create_in_gap:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Select two chapters with a gap to create a new chapter within that gap and start tracking.")
+
+            imgui.separator()
+
+            # --- RENDER TABLE ---
+            if not fs_proc.video_chapters:
                 imgui.text("No chapters loaded.")
                 imgui.end()
                 return
@@ -775,29 +840,49 @@ class ChapterListWindow:
                            imgui.TABLE_RESIZABLE |
                            imgui.TABLE_SIZING_STRETCH_PROP)
 
-            if imgui.begin_table("ChapterListTable", 5, flags=table_flags):
-                # Adjusted weights for better column proportions based on feedback.
-                imgui.table_setup_column("Color", init_width_or_weight=0.1)
+            if imgui.begin_table("ChapterListTable", 7, flags=table_flags):
+                imgui.table_setup_column("##Select", init_width_or_weight=0.15)
+                imgui.table_setup_column("#", init_width_or_weight=0.15)
+                imgui.table_setup_column("Color", init_width_or_weight=0.25)
                 imgui.table_setup_column("Position", init_width_or_weight=1.0)
                 imgui.table_setup_column("Start", init_width_or_weight=0.9)
                 imgui.table_setup_column("End", init_width_or_weight=0.9)
-                imgui.table_setup_column("Action", init_width_or_weight=0.2)
+                imgui.table_setup_column("Actions", init_width_or_weight=0.6)
                 imgui.table_headers_row()
 
                 # Get FPS once for time calculation
                 fps = self.app.processor.fps if self.app.processor and self.app.processor.fps > 0 else DEFAULT_CHAPTER_FPS
-
                 sorted_chapters = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
+                chapters_to_remove_from_selection = []
 
-                for chapter in list(sorted_chapters):
+                for i, chapter in enumerate(list(sorted_chapters)):
                     imgui.table_next_row()
 
-                    # Color Column
+                    # Selection Checkbox
+                    imgui.table_next_column()
+                    imgui.push_id(f"select_{chapter.unique_id}")
+                    is_selected = chapter in self.list_context_selected_chapters
+                    changed, new_val = imgui.checkbox("", is_selected)
+                    if changed:
+                        if new_val:
+                            if chapter not in self.list_context_selected_chapters:
+                                self.list_context_selected_chapters.append(chapter)
+                        else:
+                            if chapter in self.list_context_selected_chapters:
+                                self.list_context_selected_chapters.remove(chapter)
+                        self.list_context_selected_chapters.sort(key=lambda c: c.start_frame_id)
+                    imgui.pop_id()
+
+                    # Chapter Number
+                    imgui.table_next_column()
+                    imgui.text(str(i + 1))
+
+                    # Color
                     imgui.table_next_column()
                     draw_list = imgui.get_window_draw_list()
                     cursor_pos = imgui.get_cursor_screen_pos()
-                    swatch_start = (cursor_pos[0] + 4, cursor_pos[1] + 2)
-                    swatch_end = (cursor_pos[0] + imgui.get_column_width() - 4, cursor_pos[1] + 18)
+                    swatch_start = (cursor_pos[0] + 2, cursor_pos[1] + 2)
+                    swatch_end = (cursor_pos[0] + imgui.get_column_width() - 2, swatch_start[1] + 16)
                     color_tuple = chapter.color if isinstance(chapter.color, (tuple, list)) else (0.5, 0.5, 0.5, 0.7)
                     color_u32 = imgui.get_color_u32_rgba(*color_tuple)
                     draw_list.add_rect_filled(swatch_start[0], swatch_start[1], swatch_end[0], swatch_end[1], color_u32, rounding=3.0)
@@ -808,25 +893,103 @@ class ChapterListWindow:
                     if imgui.is_item_hovered():
                         imgui.set_tooltip(f"ID: {chapter.unique_id}\nType: {chapter.segment_type}\nSource: {chapter.source}")
 
-                    # Start Time (Frame) Column
+                    # Start Time / Frame
                     imgui.table_next_column()
                     start_time_s = chapter.start_frame_id / fps
-                    start_time_str = _format_time(self.app, start_time_s)
-                    imgui.text(f"{start_time_str} ({chapter.start_frame_id})")
+                    imgui.text(f"{_format_time(self.app, start_time_s)} ({chapter.start_frame_id})")
 
-                    # End Time (Frame) Column
+                    # End Time / Frame
                     imgui.table_next_column()
                     end_time_s = chapter.end_frame_id / fps
-                    end_time_str = _format_time(self.app, end_time_s)
-                    imgui.text(f"{end_time_str} ({chapter.end_frame_id})")
+                    imgui.text(f"{_format_time(self.app, end_time_s)} ({chapter.end_frame_id})")
 
-                    # Action Column
+                    # Actions
                     imgui.table_next_column()
-                    imgui.push_id(f"delete_btn_{chapter.unique_id}")
+                    imgui.push_id(f"actions_{chapter.unique_id}")
+                    if imgui.button("Edit"):
+                        self._open_edit_dialog(chapter)
+                    imgui.same_line()
                     if imgui.button("Delete"):
                         fs_proc.delete_video_chapters_by_ids([chapter.unique_id])
+                        if chapter in self.list_context_selected_chapters:
+                            chapters_to_remove_from_selection.append(chapter)
                     imgui.pop_id()
 
-                imgui.end_table()
+                if chapters_to_remove_from_selection:
+                    for chap in chapters_to_remove_from_selection:
+                        self.list_context_selected_chapters.remove(chap)
 
+                imgui.end_table()
         imgui.end()
+
+    def _get_gap_info(self, fs_proc):
+        if len(self.list_context_selected_chapters) != 2:
+            return False, None, None, 0, 0
+
+        chapters = sorted(self.list_context_selected_chapters, key=lambda c: c.start_frame_id)
+        c1, c2 = chapters[0], chapters[1]
+
+        gap_start = c1.end_frame_id + 1
+        gap_end = c2.start_frame_id - 1
+
+        if gap_end >= gap_start:
+            return True, c1, c2, gap_start, gap_end
+        return False, None, None, 0, 0
+
+    def _handle_track_gap_and_merge(self, fs_proc, c1, c2):
+        self.app.logger.info(f"UI Action: Initiating track gap then merge between {c1.unique_id} and {c2.unique_id}")
+        gap_start = c1.end_frame_id + 1
+        gap_end = c2.start_frame_id - 1
+
+        fs_proc._record_timeline_action(1, f"Prepare for Gap Track & Merge: {c1.unique_id[:4]}+{c2.unique_id[:4]}")
+        self.app.set_pending_action_after_tracking(
+            action_type='finalize_gap_merge_after_tracking',
+            chapter1_id=c1.unique_id,
+            chapter2_id=c2.unique_id
+        )
+        fs_proc.scripting_start_frame = gap_start
+        fs_proc.scripting_end_frame = gap_end
+        fs_proc.scripting_range_active = True
+        fs_proc.selected_chapter_for_scripting = None
+        self.app.project_manager.project_dirty = True
+
+        if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
+            self.app.event_handlers.handle_start_live_tracker_click()
+        else:
+            self.app.logger.error("handle_start_live_tracker_click not found.")
+            self.app.clear_pending_action_after_tracking()
+
+    def _handle_create_chapter_in_gap(self, fs_proc, c1, gap_start, gap_end):
+        self.app.logger.info(f"UI Action: Creating new chapter in gap after {c1.unique_id}")
+        gap_chapter_data = {
+            "start_frame_str": str(gap_start),
+            "end_frame_str": str(gap_end),
+            "segment_type": c1.segment_type,
+            "position_short_name_key": c1.position_short_name,
+            "source": "manual_gap_fill_track"
+        }
+        new_chapter = fs_proc.create_new_chapter_from_data(gap_chapter_data, return_chapter_object=True)
+        if new_chapter:
+            fs_proc.set_scripting_range_from_chapter(new_chapter)
+            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
+                self.app.event_handlers.handle_start_live_tracker_click()
+            else:
+                self.app.logger.error("handle_start_live_tracker_click not found.")
+        else:
+            self.app.logger.error("Failed to create new chapter in gap.")
+
+    def _open_edit_dialog(self, chapter):
+        self.nav_ui.chapter_to_edit_id = chapter.unique_id
+        self.nav_ui.chapter_edit_data = {
+            "start_frame_str": str(chapter.start_frame_id),
+            "end_frame_str": str(chapter.end_frame_id),
+            "segment_type": chapter.segment_type,
+            "position_short_name_key": chapter.position_short_name,
+            "source": chapter.source
+        }
+        try:
+            self.nav_ui.selected_position_idx_in_dialog = self.nav_ui.position_short_name_keys.index(
+                chapter.position_short_name)
+        except (ValueError, IndexError):
+            self.nav_ui.selected_position_idx_in_dialog = 0
+        self.nav_ui.show_edit_chapter_dialog = True

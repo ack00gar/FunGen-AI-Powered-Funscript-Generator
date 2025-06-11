@@ -37,6 +37,8 @@ class InteractiveFunscriptTimeline:
         self.marquee_start_screen_pos = None
         self.marquee_end_screen_pos = None
 
+        self.shift_frames_amount = 1
+
     def _get_target_funscript_details(self) -> Tuple[Optional[object], Optional[str]]:
         if self.app.funscript_processor:
             return self.app.funscript_processor._get_target_funscript_object_and_axis(self.timeline_num)
@@ -47,6 +49,22 @@ class InteractiveFunscriptTimeline:
         if funscript_instance and axis_name:
             return getattr(funscript_instance, f"{axis_name}_actions", None)
         return None
+
+    def _perform_time_shift(self, frame_delta: int):
+        fs_proc = self.app.funscript_processor
+        video_fps_for_calc = self.app.processor.fps if self.app.processor and self.app.processor.fps and self.app.processor.fps > 0 else 0
+        if video_fps_for_calc <= 0:
+            self.app.logger.warning(f"T{self.timeline_num}: Cannot shift time. Video FPS is not available.",
+                                    extra={'status_message': True})
+            return
+
+        time_delta_ms = int(round((frame_delta / video_fps_for_calc) * 1000.0))
+        op_desc = f"Shifted All Points by {frame_delta} frames"
+
+        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+        if self._call_funscript_method('shift_points_time', 'time shift', time_delta_ms=time_delta_ms):
+            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+            self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
 
     # --- COPY/PASTE HELPER METHODS ---
     def _get_selected_actions_for_copy(self) -> List[Dict]:
@@ -210,6 +228,29 @@ class InteractiveFunscriptTimeline:
                     script_info_text += "(Secondary Axis - Empty)"
 
             # --- Buttons ---
+            # Clear Button
+            num_selected_for_clear = len(self.multi_selected_action_indices)
+            clear_button_text = f"Clear Sel. ({num_selected_for_clear})" if num_selected_for_clear > 0 and has_actions else "Clear All"
+            clear_op_disabled = not (
+                    allow_editing_timeline and has_actions and target_funscript_instance_for_render and axis_name_for_render)
+            if clear_op_disabled:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+            if imgui.button(f"{clear_button_text}##ClearButton{window_id_suffix}"):
+                if not clear_op_disabled:
+                    indices_to_clear = list(self.multi_selected_action_indices) if num_selected_for_clear > 0 else None
+                    op_desc = f"Cleared {len(indices_to_clear) if indices_to_clear else 'All'} Point(s)"
+                    fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                    target_funscript_instance_for_render.clear_points(axis=axis_name_for_render,
+                                                                      selected_indices=indices_to_clear)
+                    if indices_to_clear: self.multi_selected_action_indices.clear()
+                    self.selected_action_idx = -1
+                    self.dragging_action_idx = -1
+                    fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                    self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+            if clear_op_disabled: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.same_line()
+
             if imgui.button(f"Unload##Unload{window_id_suffix}"):
                 if allow_editing_timeline and has_actions and target_funscript_instance_for_render:
                     op_desc = "Funscript Unloaded via Timeline"
@@ -391,27 +432,31 @@ class InteractiveFunscriptTimeline:
             if clamp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
             imgui.same_line()
 
-            # Clear Button
-            num_selected_for_clear = len(self.multi_selected_action_indices)
-            clear_button_text = f"Clear Sel. ({num_selected_for_clear})" if num_selected_for_clear > 0 and has_actions else "Clear All"
-            clear_op_disabled = not (
-                    allow_editing_timeline and has_actions and target_funscript_instance_for_render and axis_name_for_render)
-            if clear_op_disabled:
+            # --- Time Shift controls ---
+            time_shift_disabled_bool = not allow_editing_timeline or not has_actions or not (
+                        self.app.processor and self.app.processor.fps and self.app.processor.fps > 0)
+            if time_shift_disabled_bool:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"{clear_button_text}##ClearButton{window_id_suffix}"):
-                if not clear_op_disabled:
-                    indices_to_clear = list(self.multi_selected_action_indices) if num_selected_for_clear > 0 else None
-                    op_desc = f"Cleared {len(indices_to_clear) if indices_to_clear else 'All'} Point(s)"
-                    fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                    target_funscript_instance_for_render.clear_points(axis=axis_name_for_render,
-                                                                      selected_indices=indices_to_clear)
-                    if indices_to_clear: self.multi_selected_action_indices.clear()
-                    self.selected_action_idx = -1
-                    self.dragging_action_idx = -1
-                    fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                    self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
-            if clear_op_disabled: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+
+            if imgui.button(f"<<##ShiftLeft{window_id_suffix}"):
+                if not time_shift_disabled_bool and self.shift_frames_amount > 0:
+                    self._perform_time_shift(-self.shift_frames_amount)
+            imgui.same_line()
+
+            imgui.push_item_width(80 * self.app.app_settings.get("global_font_scale", 1.0))
+            _, self.shift_frames_amount = imgui.input_int(f"Frames##ShiftAmount{window_id_suffix}",
+                                                          self.shift_frames_amount, 1, 10)
+            if self.shift_frames_amount < 0: self.shift_frames_amount = 0  # Prevent negative shift amounts in the box
+            imgui.pop_item_width()
+            imgui.same_line()
+            if imgui.button(f">>##ShiftRight{window_id_suffix}"):
+                if not time_shift_disabled_bool and self.shift_frames_amount > 0:
+                    self._perform_time_shift(self.shift_frames_amount)
+
+            if time_shift_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)

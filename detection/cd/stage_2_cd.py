@@ -1,12 +1,9 @@
 import numpy as np
 import msgpack
 import threading
-import argparse
 import math
 import os
-from collections import deque, defaultdict  # Added defaultdict
 from typing import List, Dict, Any, Optional, Tuple, Union
-import bisect
 import logging
 import cv2
 from scipy.signal import savgol_filter, find_peaks
@@ -642,7 +639,7 @@ def _atr_normalize_funscript_sparse_per_segment(state: AppStateContainer, logger
             fo.atr_funscript_distance = int(np.clip(round(val), 0, 100))
 
 
-# --- New Step 0: Global Object Tracking (Simple IoU Tracker) ---
+# --- Step 0: Global Object Tracking (Simple IoU Tracker) ---
 def simple_iou_tracker_step0(state: AppStateContainer, logger: Optional[logging.Logger]):
     _debug_log(logger, "Starting Step 0: Simple IoU Object Tracking")
 
@@ -772,7 +769,7 @@ def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logg
                                 confidence=min(last_box_rec.confidence, box_rec.confidence) * 0.8,  # Reduced conf
                                 class_id=box_rec.class_id,  # Assume class is consistent
                                 class_name=box_rec.class_name,
-                                status=consants.STATUS_GENERATED_LINEAR,  # Mark as interpolated
+                                status=constants.STATUS_INTERPOLATED,  # Mark as interpolated
                                 yolo_input_size=frame_obj.yolo_input_size,
                                 track_id=box_rec.track_id
                             )
@@ -987,8 +984,10 @@ def atr_pass_4_assign_positions_and_segments(state: AppStateContainer, logger: O
                     contributing_classes = ['pussy']
                 elif assigned_pos_for_frame == 'Rev. Cowgirl / Doggy':
                     contributing_classes = ['butt']
-                elif assigned_pos_for_frame == 'Handjob / Blowjob':
+                elif assigned_pos_for_frame == 'Blowjob':
                     contributing_classes = ['face', 'hand']
+                elif assigned_pos_for_frame == 'Handjob':
+                    contributing_classes = ['hand']
                 elif assigned_pos_for_frame == 'Boobjob':
                     contributing_classes = ['breast', 'hand']  # Or just breast
                 elif assigned_pos_for_frame == 'Footjob':
@@ -1045,16 +1044,21 @@ def atr_pass_5_determine_distance(state: AppStateContainer, logger: Optional[log
 
             if current_pos_for_frame == "Cowgirl / Missionary":
                 relevant_classes_for_pos = ["pussy"]
-                if not lp_state.glans_detected: is_penetration_pos = True
+                if not lp_state.glans_detected:
+                    is_penetration_pos = True
             elif current_pos_for_frame == "Rev. Cowgirl / Doggy":
                 relevant_classes_for_pos = ["butt"]
-                if not lp_state.glans_detected: is_penetration_pos = True
-            elif current_pos_for_frame == "Handjob / Blowjob":
+                if not lp_state.glans_detected:
+                    is_penetration_pos = True
+            elif current_pos_for_frame == "Blowjob":
                 relevant_classes_for_pos = ["face", "hand"]
+            elif current_pos_for_frame == "Handjob":
+                relevant_classes_for_pos = ["hand"]
             elif current_pos_for_frame == "Boobjob":
                 relevant_classes_for_pos = ["breast"]
             elif current_pos_for_frame == "Footjob":
                 relevant_classes_for_pos = ["foot"]
+
 
             if not relevant_classes_for_pos:  # Includes "Not Relevant" and "Close Up"
                 comp_dist_for_frame = 100.0
@@ -1251,7 +1255,7 @@ def load_yolo_results_stage2(msgpack_file_path: str, stop_event: threading.Event
             print(f"Error loading/unpacking msgpack {msgpack_file_path}: {e}")
         return None
 
-def perform_contact_analysis(  # Renamed from original Stage 2's perform_contact_analysis
+def perform_contact_analysis(
         video_path_arg: str, msgpack_file_path_arg: str,
         progress_callback: callable, stop_event: threading.Event,
         app_logic_instance=None,  # To access AppStateContainer-like features
@@ -1324,7 +1328,7 @@ def perform_contact_analysis(  # Renamed from original Stage 2's perform_contact
     video_info_dict = vp.video_info.copy()
     video_info_dict['actual_video_type'] = vp.determined_video_type  # Store determined type
     logger.info(f"ATR S2 VP Info: {video_info_dict}")
-    vp.reset(close_video=True);
+    vp.reset(close_video=True)
     del vp  # Release VP resources after getting info
 
     # 2. Load YOLO results (now with track_id)
@@ -1397,8 +1401,6 @@ def perform_contact_analysis(  # Renamed from original Stage 2's perform_contact
         atr_progress_wrapper(main_step_tuple_for_callback, "Completed", 1, 1, True)
 
     # --- Funscript Data Population from ATR results ---
-    # state.funscript_frames and state.funscript_distances are already populated by atr_pass_7_8_simplify_signal
-    # state.funscript_distances_lr will be neutral as ATR is single-axis
     if state.funscript_frames:
         state.funscript_distances_lr = [50] * len(state.funscript_frames)
     else:  # If no frames (e.g. very short video or error), ensure lists are empty
@@ -1455,7 +1457,6 @@ def perform_contact_analysis(  # Renamed from original Stage 2's perform_contact
     if generate_funscript_actions_arg:
         current_video_fps = state.video_info.get('fps', 0)
         if current_video_fps > 0 and final_funscript_frames:
-            # ... (logic to convert frames to ms and create actions list remains the same, but now uses `final_...` lists) ...
             temp_primary_actions = {}
             temp_secondary_actions = {}
             for fid, pos_primary, pos_secondary in zip(final_funscript_frames, final_funscript_distances,
@@ -1478,8 +1479,6 @@ def perform_contact_analysis(  # Renamed from original Stage 2's perform_contact
     if not generate_funscript_actions_arg:
         return_dict["atr_segments_objects"] = state.atr_segments
         return_dict["all_s2_frame_objects_list"] = state.frames
-
-
 
     if output_overlay_msgpack_path:
         logger.info(f"Preparing to save ATR Stage 2 overlay data to: {output_overlay_msgpack_path}")
@@ -1509,80 +1508,3 @@ def perform_contact_analysis(  # Renamed from original Stage 2's perform_contact
     logger.info(f"--- ATR-based Stage 2 Analysis Finished. Segments: {len(video_segments_for_gui)} ---")
     return return_dict
 
-
-if __name__ == "__main__":
-    print("ATR-based Stage 2 - Standalone Execution Mode")
-    parser = argparse.ArgumentParser(description="ATR-based Stage 2: Contact Analysis & Funscript Gen")
-    parser.add_argument("--video_path", type=str, required=True, help="Path to video")
-    parser.add_argument("--msgpack_file", type=str, required=True,
-                        help="Path to .msgpack from Stage 1 (with track_ids)")
-    parser.add_argument("--yolo_input_size", type=int, default=640, help="YOLO input size used in Stage 1")
-    # Add other relevant CLI args from original Stage 2 if needed (video_type, vr_format, etc.)
-    parser.add_argument("--debug_prints", action='store_true', help="Enable detailed debug prints for ATR S2")
-    parser.add_argument("--log_level", type=str, default="INFO",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
-    parser.add_argument("--output_dir", type=str, default=".", help="Directory to save output files (e.g., overlay)")
-
-    args = parser.parse_args()
-
-    main_cli_logger = logging.getLogger("ATR_S2_CLI_Test")
-    main_cli_logger.setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
-    if not main_cli_logger.hasHandlers():
-        cli_handler = logging.StreamHandler();
-        cli_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        cli_handler.setFormatter(cli_formatter);
-        main_cli_logger.addHandler(cli_handler)
-
-
-    class MockProgressCallbackForATRTest:  # Simplified for ATR steps
-        def __init__(self, logger_instance): self.logger = logger_instance
-
-        def __call__(self, main_step_tuple, sub_step_tuple, force_update=False):
-            main_curr, main_total, main_name = main_step_tuple
-            sub_curr, sub_total, sub_name = sub_step_tuple
-            main_prog_perc = (main_curr / main_total * 100) if main_total > 0 else 0
-            sub_prog_perc = (sub_curr / sub_total * 100) if sub_total > 0 else 0
-
-            progress_msg = (f"Progress: {main_name} ({main_curr}/{main_total} - {main_prog_perc:.1f}%) => "
-                            f"{sub_name} ({sub_curr}/{sub_total} - {sub_prog_perc:.1f}%)")
-            self.logger.info(progress_msg)
-
-
-    mock_stop_event = threading.Event()
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    if not os.path.exists(args.video_path):
-        main_cli_logger.error(f"Video file not found: {args.video_path}")
-    elif not os.path.exists(args.msgpack_file):
-        main_cli_logger.error(f"Msgpack file not found: {args.msgpack_file}")
-    else:
-        main_cli_logger.info(f"Starting ATR Stage 2 standalone test with: {args.video_path}")
-        base_name = os.path.splitext(os.path.basename(args.video_path))[0]
-        cli_output_overlay_path = os.path.join(args.output_dir, f"{base_name}_atr_stage2_overlay_CLI.msgpack")
-
-        results = perform_contact_analysis(  # Call the ATR-infused version
-            video_path_arg=args.video_path,
-            msgpack_file_path_arg=args.msgpack_file,
-            progress_callback=MockProgressCallbackForATRTest(main_cli_logger),  # Use the ATR-style mock
-            stop_event=mock_stop_event,
-            app_logic_instance=None,  # No full app logic in standalone
-            parent_logger_arg=main_cli_logger,
-            output_overlay_msgpack_path=cli_output_overlay_path,
-            yolo_input_size_arg=args.yolo_input_size,
-            enable_of_debug_prints=args.debug_prints,
-            # Pass other necessary args, e.g. video_type, vr settings if they affect ATR logic.
-            # For now, defaults in perform_contact_analysis will be used if not provided.
-        )
-        if results:
-            main_cli_logger.info("\n--- ATR Stage 2 Standalone Test Results ---")
-            if "error" in results: main_cli_logger.error(f"Error: {results['error']}")
-            video_segs = results.get('video_segments', [])
-            main_cli_logger.info(f"Video Segments (ATR): {len(video_segs)}")
-            primary_actions = results.get('primary_actions', [])
-            secondary_actions = results.get('secondary_actions', [])  # Should be neutral
-            main_cli_logger.info(f"Primary Actions generated (ATR): {len(primary_actions)}")
-            main_cli_logger.info(f"Secondary Actions generated (ATR): {len(secondary_actions)}")
-            if results.get("overlay_msgpack_path"):
-                main_cli_logger.info(f"Overlay data saved to: {results['overlay_msgpack_path']}")
-        else:
-            main_cli_logger.error("ATR Stage 2 Standalone test returned None or an error occurred.")

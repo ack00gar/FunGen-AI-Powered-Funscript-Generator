@@ -221,17 +221,52 @@ DEFAULT_S3_WARMUP_FRAMES = 10
 ####################################################################################################
 # AUTO POST-PROCESSING DEFAULTS
 ####################################################################################################
-DEFAULT_AUTO_POST_SG_WINDOW = 7
-DEFAULT_AUTO_POST_SG_POLYORDER = 3
-DEFAULT_AUTO_POST_RDP_EPSILON = 1.5
-DEFAULT_AUTO_POST_CLAMP_LOW = 10
-DEFAULT_AUTO_POST_CLAMP_HIGH = 90
 DEFAULT_AUTO_POST_AMP_CONFIG = {
-    "Blowjob": {"scale_factor": 1.3, "center_value": 60},
-    "Handjob": {"scale_factor": 1.3, "center_value": 60},
-    "Cowgirl / Missionary": {"scale_factor": 1.1, "center_value": 50},
-    "Rev. Cowgirl / Doggy": {"scale_factor": 1.1, "center_value": 50},
-    "Boobjob": {"scale_factor": 1.2, "center_value": 55},
-    "Footjob": {"scale_factor": 1.2, "center_value": 50},
-    "Default": {"scale_factor": 1.0, "center_value": 50}
+    "Default": {
+        "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.0, "center_value": 50,
+        "clamp_lower": 10, "clamp_upper": 90
+    },
+    "Cowgirl / Missionary": {
+        "sg_window": 11, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.1, "center_value": 50,
+        "clamp_lower": 10, "clamp_upper": 90
+    },
+    "Rev. Cowgirl / Doggy": {
+        "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.1, "center_value": 50,
+        "clamp_lower": 10, "clamp_upper": 90
+    },
+    "Blowjob": {
+        "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.3, "center_value": 60,
+        "clamp_lower": 10, "clamp_upper": 90
+    },
+    "Handjob": {
+        "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.3, "center_value": 60,
+        "clamp_lower": 10, "clamp_upper": 90
+    },
+    "Boobjob": {
+        "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.2, "center_value": 55,
+        "clamp_lower": 10, "clamp_upper": 90
+    },
+    "Footjob": {
+        "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.2, "center_value": 50,
+        "clamp_lower": 10, "clamp_upper": 90
+    },
+    "Close Up": {
+        "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.0, "center_value": 100,
+        "clamp_lower": 100, "clamp_upper": 100  # Less aggressive clamping for close-ups
+    },
+    "Not Relevant": {
+        "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.0, "center_value": 100,
+        "clamp_lower": 100, "clamp_upper": 100
+    }
 }
+
+# These global fallbacks are now derived from the "Default" profile for consistency.
+DEFAULT_AUTO_POST_SG_WINDOW = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["sg_window"]
+DEFAULT_AUTO_POST_SG_POLYORDER = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["sg_polyorder"]
+DEFAULT_AUTO_POST_RDP_EPSILON = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["rdp_epsilon"]
+
+# The old global clamping constants are no longer the primary source of truth, but can be kept for other uses if needed.
+# It's better to derive them from the new dictionary as well to maintain a single source of truth.
+DEFAULT_AUTO_POST_CLAMP_LOW = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_lower"]
+DEFAULT_AUTO_POST_CLAMP_HIGH = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_upper"]
+
