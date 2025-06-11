@@ -226,20 +226,26 @@ class ROITracker:
 
         return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
 
-
     def set_tracking_mode(self, mode: str):
         if mode in ["YOLO_ROI", "USER_FIXED_ROI"]:
             if self.tracking_mode != mode:
                 self.tracking_mode = mode
                 self.logger.info(f"Tracker mode set to: {self.tracking_mode}")
-                if self.tracking_active:
-                    self.stop_tracking()
+                # DO NOT STOP TRACKING. This allows for seamless transitions.
+                # Instead, clear the state relevant to the new mode.
                 if mode == "YOLO_ROI":
                     self.clear_user_defined_roi_and_point()
+                    # Also clear YOLO-specific state for a clean transition
+                    self.prev_gray_main_roi, self.prev_features_main_roi = None, None
+                    self.roi = None
                 elif mode == "USER_FIXED_ROI":
+                    # When switching to user ROI, invalidate any existing YOLO ROI
                     self.roi = None
                     self.penis_last_known_box = None
                     self.main_interaction_class = None
+                    # Clear flow history to prevent using old data in the new fixed ROI
+                    self.primary_flow_history_smooth.clear()
+                    self.secondary_flow_history_smooth.clear()
         else:
             self.logger.warning(f"Attempted to set invalid tracking mode: {mode}")
 
