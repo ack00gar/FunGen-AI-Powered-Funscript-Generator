@@ -75,23 +75,14 @@ class AppEventHandlers:
 
         current_frame = self.app.processor.current_frame_index
         fps = self.app.processor.fps
-        if fps <= 0:
-            self.logger.warning("Cannot jump: Invalid video FPS.")
-            return
 
-        current_time_ms = int(current_frame * (1000.0 / fps))
-
-        target_action = None
+        target_frame = None
         if direction == 'next':
-            # Add 1ms to ensure we find a point strictly after the current time
-            target_action = fs.get_next_action(current_time_ms + 1, 'primary')
+            target_frame = fs.find_next_jump_frame(current_frame, fps, 'primary')
         elif direction == 'prev':
-            target_action = fs.get_prev_action(current_time_ms, 'primary')
+            target_frame = fs.find_prev_jump_frame(current_frame, fps, 'primary')
 
-        if target_action:
-            target_time_ms = target_action['at']
-            target_frame = int(target_time_ms * (fps / 1000.0))
-
+        if target_frame is not None:
             total_frames = self.app.processor.total_frames
             if total_frames > 0:
                 target_frame = min(target_frame, total_frames - 1)
@@ -100,8 +91,7 @@ class AppEventHandlers:
             self.app.app_state_ui.force_timeline_pan_to_current_frame = True
             self.app.energy_saver.reset_activity_timer()
         else:
-            self.logger.info(f"No {direction} point found.", extra={'status_message': True})
-
+            self.logger.info(f"No {direction} point found to jump to.", extra={'status_message': True})
 
     def handle_abort_process_click(self):
         stage_processor = self.app.stage_processor

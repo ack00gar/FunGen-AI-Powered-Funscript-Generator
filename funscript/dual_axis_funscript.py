@@ -193,34 +193,48 @@ class DualAxisFunscript:
         self.last_timestamp_secondary = 0
         self.logger.info("Cleared all actions from DualAxisFunscript.")
 
-    def get_next_action(self, current_time_ms: int, axis: str = 'primary') -> Optional[Dict]:
+    def find_next_jump_frame(self, current_frame: int, fps: float, axis: str = 'primary') -> Optional[int]:
         """
-        Finds the first action with a timestamp strictly greater than the given time.
+        Finds the frame index of the first action that occurs on a frame
+        strictly after the current frame.
         """
+        if not fps > 0: return None
         actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
-        if not actions_list:
-            return None
-        action_timestamps = [a['at'] for a in actions_list]
-        # bisect_right finds an insertion point which comes after any existing entries of current_time_ms
-        idx = bisect.bisect_right(action_timestamps, current_time_ms)
-        if idx < len(actions_list):
-            return actions_list[idx]
+        if not actions_list: return None
+
+        current_time_ms = current_frame * (1000.0 / fps)
+
+        # Find the first action strictly after the current time
+        for action in actions_list:
+            if action['at'] > current_time_ms:
+                target_frame = int(action['at'] * (fps / 1000.0))
+                # Ensure we are actually moving to a new frame
+                if target_frame > current_frame:
+                    return target_frame
         return None
 
-    def get_prev_action(self, current_time_ms: int, axis: str = 'primary') -> Optional[Dict]:
+    def find_prev_jump_frame(self, current_frame: int, fps: float, axis: str = 'primary') -> Optional[int]:
         """
-        Finds the first action with a timestamp strictly less than the given time.
+        Finds the frame index of the last action that occurs on a frame
+        strictly before the current frame.
         """
+        if not fps > 0: return None
         actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
-        if not actions_list:
-            return None
-        action_timestamps = [a['at'] for a in actions_list]
-        # bisect_left finds the insertion point for current_time_ms
-        idx = bisect.bisect_left(action_timestamps, current_time_ms)
-        if idx > 0:
-            # The action at idx-1 is the one just before current_time_ms
-            return actions_list[idx - 1]
-        return None
+        if not actions_list: return None
+
+        last_valid_frame = None
+        # Find the last action that is on a frame strictly before the current one
+        for action in actions_list:
+            # We must use a strict < comparison on time to find previous points
+            if action['at'] < (current_frame * (1000.0 / fps)):
+                target_frame = int(action['at'] * (fps / 1000.0))
+                # Ensure it's a different frame before we consider it
+                if target_frame < current_frame:
+                    last_valid_frame = target_frame
+            else:
+                # List is sorted, no more valid points past this
+                break
+        return last_valid_frame
 
     @property
     def actions(self) -> List[Dict]:
