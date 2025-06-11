@@ -754,7 +754,7 @@ class GUI:
 
             if app_state.show_video_display_window:
                 # --- RENDER WITH VIDEO PANEL ---
-                control_panel_w, graphs_panel_w = 380, 380
+                control_panel_w, graphs_panel_w = 380*font_scale, 380*font_scale
                 video_panel_w = self.window_width - control_panel_w - graphs_panel_w
                 if video_panel_w < 100:
                     video_panel_w = 100
