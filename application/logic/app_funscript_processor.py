@@ -1085,7 +1085,16 @@ class AppFunscriptProcessor:
 
         # --- Get Configurations ---
         processing_config = self.app.app_settings.get("auto_post_processing_amplification_config", {})
-        default_params = processing_config.get("Default", constants.DEFAULT_AUTO_POST_AMP_CONFIG.get("Default", {}))
+
+        # Create a robust default_params dictionary by merging user settings with system defaults.
+        # 1. Start with the hardcoded system defaults from constants.
+        base_defaults = constants.DEFAULT_AUTO_POST_AMP_CONFIG.get("Default", {})
+        # 2. Get the user's configured defaults, if they exist.
+        user_defaults = processing_config.get("Default", {})
+        # 3. Create a new dictionary starting with the base defaults and update it with the user's settings.
+        #    This ensures all keys are present, with user values overriding where specified.
+        default_params = base_defaults.copy()
+        default_params.update(user_defaults)
 
         # --- Record State for Undo ---
         op_desc = "Auto Post-Process" + (f" on range" if frame_range else "")
@@ -1123,7 +1132,11 @@ class AppFunscriptProcessor:
                     if effective_end_ms <= effective_start_ms:
                         continue
 
+                    # Get chapter-specific params, falling back to the robust default_params
                     params = processing_config.get(chapter.position_long_name, default_params)
+
+                    # With the corrected default_params, these .get() calls are now safe.
+                    # If a key is missing from the chapter-specific `params`, it will be found in `default_params`.
                     sg_win = params.get("sg_window", default_params.get("sg_window"))
                     sg_poly = params.get("sg_polyorder", default_params.get("sg_polyorder"))
                     rdp_eps = params.get("rdp_epsilon", default_params.get("rdp_epsilon"))
@@ -1144,7 +1157,8 @@ class AppFunscriptProcessor:
                                                         effective_end_ms)
             else:
                 self.logger.info(f"No chapters found. Applying default settings to {axis} axis for the full range.")
-                params = default_params
+                params = default_params  # Use the robust defaults
+                # Direct access is now safe because we guaranteed the keys exist.
                 funscript_obj.apply_savitzky_golay(axis, params["sg_window"], params["sg_polyorder"], range_start_ms,
                                                    range_end_ms)
                 funscript_obj.simplify_rdp(axis, params["rdp_epsilon"], range_start_ms, range_end_ms)
