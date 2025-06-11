@@ -419,14 +419,14 @@ class ApplicationLogic:
 
     def set_pending_action_after_tracking(self, action_type: str, **kwargs):
         """Stores information about an action to be performed after tracking."""
-        self.pending_action_after_tracking_info = {"type": action_type, "data": kwargs}
+        self.pending_action_after_tracking = {"type": action_type, "data": kwargs}
         self.logger.info(f"Pending action set after tracking: {action_type} with data {kwargs}")
 
     def clear_pending_action_after_tracking(self):
         """Clears any pending action."""
-        if self.pending_action_after_tracking_info:
-            self.logger.info(f"Cleared pending action: {self.pending_action_after_tracking_info.get('type')}")
-        self.pending_action_after_tracking_info = None
+        if self.pending_action_after_tracking:
+            self.logger.info(f"Cleared pending action: {self.pending_action_after_tracking.get('type')}")
+        self.pending_action_after_tracking = None
 
     def on_processing_stopped(self, was_scripting_session: bool = False,
                               scripted_frame_range: Optional[Tuple[int, int]] = None):
@@ -439,7 +439,8 @@ class ApplicationLogic:
 
         # Handle pending actions like merge-gap first
         if self.pending_action_after_tracking:
-            action_info = self.pending_action_after_tracking_info
+            action_info = self.pending_action_after_tracking
+            self.clear_pending_action_after_tracking()
             self.clear_pending_action_after_tracking()
             self.logger.info(f"Processing pending action: {action_info['type']}")
             action_type = action_info['type']

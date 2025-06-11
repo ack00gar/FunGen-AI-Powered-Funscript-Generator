@@ -63,7 +63,7 @@ class GUI:
         self.video_display_ui = VideoDisplayUI(self.app, self)  # Pass self for texture updates
         self.video_navigation_ui = VideoNavigationUI(self.app, self)  # Pass self for texture methods
         self.info_graphs_ui = InfoGraphsUI(self.app)
-        self.chapter_list_window_ui = ChapterListWindow(self.app)
+        self.chapter_list_window_ui = ChapterListWindow(self.app, nav_ui=self.video_navigation_ui)
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -559,8 +559,15 @@ class GUI:
             elif check_and_run_shortcut("seek_next_frame", lambda: None):  # Lambda as placeholder
                 seek_delta_frames = 1
                 processed_seek = True
+            elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
+                pass
+            elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
+                pass
 
             if processed_seek and seek_delta_frames != 0:
+                if self.app.processor and self.app.processor.video_info:
+                    new_frame = self.app.processor.current_frame_index + seek_delta_frames
+
                 if self.app.processor and self.app.processor.video_info:
                     new_frame = self.app.processor.current_frame_index + seek_delta_frames
                     total_frames_vid = self.app.processor.total_frames
@@ -687,8 +694,18 @@ class GUI:
         if imgui.begin_popup_modal("Scene Detection Progress", None, flags=popup_flags)[0]:
             imgui.text("Detecting Video Scenes...")
             imgui.text_wrapped(f"Status: {stage_proc.scene_detection_status}")
-            imgui.progress_bar(stage_proc.scene_detection_progress, size=(250, 0),
-                               overlay=f"{stage_proc.scene_detection_progress * 100:.0f}%")
+
+            # FIXED: Display an animated spinner if progress is not updating,
+            # otherwise show the actual progress bar.
+            progress = stage_proc.scene_detection_progress
+            if progress > 0.001:
+                imgui.progress_bar(progress, size=(250, 0), overlay=f"{progress * 100:.0f}%")
+            else:
+                spinner_chars = "|/-\\"
+                spinner_index = int(time.time() * 4) % 4
+                imgui.text(f"Processing... {spinner_chars[spinner_index]}")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("The process is running. Progress reporting is currently unavailable.")
 
             imgui.separator()
             if imgui.button("Cancel", width=120):
@@ -754,7 +771,7 @@ class GUI:
 
             if app_state.show_video_display_window:
                 # --- RENDER WITH VIDEO PANEL ---
-                control_panel_w, graphs_panel_w = 380*font_scale, 380*font_scale
+                control_panel_w, graphs_panel_w = 450*font_scale, 450*font_scale
                 video_panel_w = self.window_width - control_panel_w - graphs_panel_w
                 if video_panel_w < 100:
                     video_panel_w = 100
@@ -884,7 +901,7 @@ class GUI:
             self.gauge_window_ui.render(),
             self.lr_dial_window_ui.render(),
             self._render_batch_confirmation_dialog(),
-            self._render_scene_detection_progress_modal(),
+            #self._render_scene_detection_progress_modal(),
             self.file_dialog.draw() if self.file_dialog.open else None,
             self._render_status_message(app_state)
         ))

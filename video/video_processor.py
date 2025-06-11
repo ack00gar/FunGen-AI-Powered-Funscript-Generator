@@ -68,6 +68,7 @@ class VideoProcessor:
         self.ffmpeg_process: Optional[subprocess.Popen] = None  # Main output process (pipe2 if active)
         self.ffmpeg_pipe1_process: Optional[subprocess.Popen] = None  # Pipe1 process, if active
         self.is_processing = False
+        self.is_paused = True
         self.processing_thread = None
         self.current_frame = None
         self.fps = 0.0
@@ -112,41 +113,50 @@ class VideoProcessor:
         self.batch_fetch_size = 50
 
     # --- Scene Detection Method ---
-    def detect_scenes(self, threshold: float = 27.0, progress_callback=None, stop_event: Optional[threading.Event] = None) -> List[Tuple[int, int]]:
+    def detect_scenes(self, threshold: float = 27.0, progress_callback=None,
+                      stop_event: Optional[threading.Event] = None) -> List[Tuple[int, int]]:
         """
-        Uses PySceneDetect's modern API to find scene cuts.
+        Uses PySceneDetect's modern API to find scene cuts with a manual processing loop
+        to ensure progress reporting.
         Returns a list of (start_frame, end_frame) tuples for each scene.
         """
         if not self.video_path:
             self.logger.error("Cannot detect scenes: No video loaded.")
             return []
 
-        self.logger.info("Starting scene detection with modern PySceneDetect API...")
+        self.logger.info("Starting scene detection with corrected manual frame processing loop...")
         if hasattr(self.app, 'set_status_message'):
             self.app.set_status_message("Detecting scenes...")
 
         try:
-            # Use the modern open_video() function which replaces VideoManager
             video = open_video(self.video_path)
             total_frames = video.duration.get_frames()
 
-            # SceneManager and ContentDetector are still the correct way to find scenes
             scene_manager = SceneManager()
             scene_manager.add_detector(ContentDetector(threshold=threshold))
 
-            # This internal callback will be used by detect_scenes
-            # It allows us to check the stop_event as well.
-            def internal_callback(frame_im, frame_num):
+            if progress_callback:
+                progress_callback(0, total_frames, 0, 0, 0)
+
+            while True:
+                frame_image = video.read()
+                if frame_image is False:
+                    break
+
                 if stop_event and stop_event.is_set():
-                    # This raises an exception that SceneManager catches to stop processing.
                     raise InterruptedError("Scene detection cancelled by user.")
+
+                # --- THIS IS THE FIX ---
+                # Call the correct private method `_process_frame` as suggested by the error.
+                # The expected arguments are (frame_image, frame_number).
+                scene_manager._process_frame(frame_image, video.frame_number)
+
                 if progress_callback:
-                    progress_callback(frame_num, total_frames)
+                    progress_callback(video.frame_number, total_frames)
 
-            # Find all scenes in the video, passing our internal callback
-            scene_manager.detect_scenes(video, callback=internal_callback)
+            # post_process is not a method on SceneManager, this is done when getting the list.
+            # scene_manager.post_process()
 
-            # get_scene_list returns a list of (start_timecode, end_timecode)
             scene_list_raw = scene_manager.get_scene_list()
 
             if scene_list_raw and self.total_frames > 0:
@@ -1069,6 +1079,7 @@ class VideoProcessor:
             return
 
         self.is_processing = True
+        self.is_paused = False
         self.stop_event.clear()
         self.processing_thread = threading.Thread(target=self._processing_loop)
         self.processing_thread.daemon = True
@@ -1088,6 +1099,7 @@ class VideoProcessor:
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
 
         self.is_processing = False  # Signal loop to stop
+        self.is_paused = True
         self.stop_event.set()  # Also signal via event
 
         thread_to_join = self.processing_thread
@@ -1122,6 +1134,7 @@ class VideoProcessor:
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
 
         self.is_processing = False
+        self.is_paused = True
         self.stop_event.set()
 
         if join_thread:

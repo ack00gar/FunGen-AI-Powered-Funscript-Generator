@@ -63,11 +63,53 @@ class AppEventHandlers:
 
         self.app.energy_saver.reset_activity_timer()
 
+    def handle_jump_to_point(self, direction: str):
+        if not self.app.processor or not self.app.processor.is_video_open():
+            self.logger.info("Cannot jump: No video loaded.", extra={'status_message': True})
+            return
+
+        fs = self.app.processor.tracker.funscript
+        if not fs:
+            self.logger.info("Cannot jump: Funscript object not available.", extra={'status_message': True})
+            return
+
+        current_frame = self.app.processor.current_frame_index
+        fps = self.app.processor.fps
+        if fps <= 0:
+            self.logger.warning("Cannot jump: Invalid video FPS.")
+            return
+
+        current_time_ms = int(current_frame * (1000.0 / fps))
+
+        target_action = None
+        if direction == 'next':
+            # Add 1ms to ensure we find a point strictly after the current time
+            target_action = fs.get_next_action(current_time_ms + 1, 'primary')
+        elif direction == 'prev':
+            target_action = fs.get_prev_action(current_time_ms, 'primary')
+
+        if target_action:
+            target_time_ms = target_action['at']
+            target_frame = int(target_time_ms * (fps / 1000.0))
+
+            total_frames = self.app.processor.total_frames
+            if total_frames > 0:
+                target_frame = min(target_frame, total_frames - 1)
+
+            self.app.processor.seek_video(target_frame)
+            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            self.app.energy_saver.reset_activity_timer()
+        else:
+            self.logger.info(f"No {direction} point found.", extra={'status_message': True})
+
+
     def handle_abort_process_click(self):
         stage_processor = self.app.stage_processor
         if stage_processor.full_analysis_active:
             stage_processor.abort_stage_processing()
             self.app.on_processing_stopped() # If aborting stage proc should also check pending app logic actions
+        elif stage_processor.scene_detection_active:
+            stage_processor.abort_stage_processing()
         elif self.app.processor and self.app.processor.is_processing:
             self.app.processor.stop_processing()
         elif self.app.is_setting_user_roi_mode:  # Abort ROI selection

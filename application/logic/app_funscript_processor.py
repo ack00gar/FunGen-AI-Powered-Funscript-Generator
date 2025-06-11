@@ -834,10 +834,8 @@ class AppFunscriptProcessor:
 
         merged_pos_short_key = chapter1.position_short_name
         merged_pos_info = constants.POSITION_INFO_MAPPING.get(merged_pos_short_key, {})
-        merged_pos_short_name = merged_pos_info.get("short_name",
-                                                    merged_pos_short_key if merged_pos_short_key else "N/A")
-        merged_pos_long_name = f"Merged: {chapter1.position_long_name} & {chapter2.position_long_name}"
-        if len(merged_pos_long_name) > 70: merged_pos_long_name = merged_pos_long_name[:67] + "..."
+        merged_pos_short_name = chapter1.position_short_name # Set directly from chapter1
+        merged_pos_long_name = chapter1.position_long_name # Set directly from chapter1
 
         # Derived class_name from position key
         merged_derived_class_name = merged_pos_short_key if merged_pos_short_key else "MergedChapter"
@@ -850,9 +848,10 @@ class AppFunscriptProcessor:
             segment_type=chapter1.segment_type,
             position_short_name=merged_pos_short_name,
             position_long_name=merged_pos_long_name,
-            source="manual_merge",
-            color=None
+            source="manual_merge", # The source indicates the merge action
+            color=chapter1.color
         )
+
         # Duration will be calculated by VideoSegment if not passed, or we can set it
         merged_chapter.duration = new_end_frame - new_start_frame
 
@@ -918,47 +917,42 @@ class AppFunscriptProcessor:
         if chapter1.start_frame_id > chapter2.start_frame_id:
             chapter1, chapter2 = chapter2, chapter1
 
-        new_merged_start_frame = chapter1.start_frame_id
-        new_merged_end_frame = chapter2.end_frame_id
+        new_start_frame = chapter1.start_frame_id
+        new_end_frame = chapter2.end_frame_id
 
-        # Check for overlap with *other* chapters (excluding the two being merged)
-        ids_to_ignore_for_overlap_check = {chapter1_id, chapter2_id}
-        temp_chapters_for_check = [ch for ch in self.video_chapters if
-                                   ch.unique_id not in ids_to_ignore_for_overlap_check]
-        for other_ch in temp_chapters_for_check:
-            if max(new_merged_start_frame, other_ch.start_frame_id) <= min(new_merged_end_frame, other_ch.end_frame_id):
-                self.logger.error(
-                    f"Final merge operation aborted: Resulting chapter [{new_merged_start_frame}-{new_merged_end_frame}] "
-                    f"would overlap with existing chapter '{other_ch.unique_id}'. Funscript for gap remains.")
-                self.app.set_status_message("Error: Merge would cause chapter overlap. Gap tracked.",
-                                            level=logging.ERROR)
-                # The funscript was already modified by tracking. The undo will handle reverting it.
-                # No chapter changes are made in this error case.
-                return
+        # --- FIX: Instead of aborting on overlap, collect all chapters to be replaced ---
+        ids_to_delete = {chapter1_id, chapter2_id}
+        chapters_to_keep = []
+
+        for other_ch in self.video_chapters:
+            # If the chapter is one of the selected ones, it's already marked for deletion.
+            if other_ch.unique_id in ids_to_delete:
+                continue
+          # If this 'other' chapter is fully contained within the new merged range, mark it for deletion too.
+            if other_ch.start_frame_id >= new_start_frame and other_ch.end_frame_id <= new_end_frame:
+                self.logger.info(f"Gap merge will consume existing chapter: {other_ch.unique_id} ({other_ch.position_long_name})")
+                ids_to_delete.add(other_ch.unique_id)
 
         # Use properties from the first chapter for the merged chapter metadata
         merged_pos_short_key = chapter1.position_short_name
-        merged_pos_info = constants.POSITION_INFO_MAPPING.get(merged_pos_short_key, {})
-        merged_pos_short_name = merged_pos_info.get("short_name",
-                                                    merged_pos_short_key if merged_pos_short_key else "N/A")
-        merged_pos_long_name = f"Merged (Gap Tracked): {chapter1.position_long_name} & {chapter2.position_long_name}"
-        if len(merged_pos_long_name) > 70: merged_pos_long_name = merged_pos_long_name[:67] + "..."
-        merged_derived_class_name = chapter1.class_name  # Or a new derived name like "MergedGapTracked"
+        merged_pos_short_name = chapter1.position_short_name
+        merged_pos_long_name = chapter1.position_long_name
+        merged_derived_class_name = chapter1.class_name
 
         merged_chapter = VideoSegment(
-            start_frame_id=new_merged_start_frame,
-            end_frame_id=new_merged_end_frame,
+            start_frame_id = new_start_frame,
+            end_frame_id = new_end_frame,
             class_id=chapter1.class_id,
             class_name=merged_derived_class_name,
             segment_type=chapter1.segment_type,
             position_short_name=merged_pos_short_name,
             position_long_name=merged_pos_long_name,
-            source="manual_gap_track_merge"
-            # Color will be auto-assigned by VideoSegment
+            source="manual_gap_track_merge" # The source indicates the merge action
+            # Color will be auto-assigned by VideoSegment, or could be chapter1.color
         )
 
         # Update chapter list: remove old chapters, add new merged one
-        self.video_chapters = [ch for ch in self.video_chapters if ch.unique_id not in [chapter1_id, chapter2_id]]
+        self.video_chapters = [ch for ch in self.video_chapters if ch.unique_id not in ids_to_delete]
         self.video_chapters.append(merged_chapter)
         self.video_chapters.sort(key=lambda c: c.start_frame_id)
 
@@ -1007,10 +1001,8 @@ class AppFunscriptProcessor:
         # Use properties from the first chapter
         merged_pos_short_key = chapter1.position_short_name
         merged_pos_info = constants.POSITION_INFO_MAPPING.get(merged_pos_short_key, {})
-        merged_pos_short_name = merged_pos_info.get("short_name",
-                                                    merged_pos_short_key if merged_pos_short_key else "N/A")
-        merged_pos_long_name = f"Filled Gap from {chapter1.position_short_name} to {chapter2.position_short_name}"
-        if len(merged_pos_long_name) > 70: merged_pos_long_name = merged_pos_long_name[:67] + "..."
+        merged_pos_short_name = chapter1.position_short_name # Set directly
+        merged_pos_long_name = chapter1.position_long_name # Set directly
 
         merged_derived_class_name = merged_pos_short_key if merged_pos_short_key else "GapFilledChapter"
 
@@ -1023,7 +1015,7 @@ class AppFunscriptProcessor:
             position_short_name=merged_pos_short_name,
             position_long_name=merged_pos_long_name,
             source="manual_merge_gap_fill",
-            color=None
+            color=chapter1.color # Inherit color
         )
         merged_chapter.duration = new_end_frame - new_start_frame
 
@@ -1080,106 +1072,91 @@ class AppFunscriptProcessor:
     def apply_automatic_post_processing(self, frame_range: Optional[Tuple[int, int]] = None):
         """
         Applies a series of post-processing steps to the funscript(s).
-        If frame_range is provided (e.g., from a live tracking session), processing is limited to that range.
-        Otherwise, it applies to the full script.
+        This implementation is now context-aware, applying different settings
+        based on video chapters. If no chapters exist, it uses default settings.
+        If frame_range is provided, processing is limited to that range.
         """
         funscript_obj = self.get_funscript_obj()
         if not funscript_obj:
             self.logger.warning("Post-Processing: Funscript object not available.")
             return
 
-        start_ms: Optional[int] = None
-        end_ms: Optional[int] = None
-        current_fps = self._get_current_fps()
+        self.logger.info("--- Starting Context-Aware Post-Processing ---")
 
-        if frame_range and current_fps > 0:
-            start_frame, end_frame = frame_range
-            start_ms = self.frame_to_ms(start_frame)
-            end_ms = self.frame_to_ms(end_frame) if end_frame != -1 else None  # None means to the end of the script
-            self.logger.info(
-                f"--- Starting Post-Processing for range: Frames {start_frame}-{end_frame if end_frame != -1 else 'End'} ({start_ms}ms-{end_ms or 'End'}ms) ---")
-        else:
-            self.logger.info("--- Starting Post-Processing for full script ---")
+        # --- Get Configurations ---
+        processing_config = self.app.app_settings.get("auto_post_processing_amplification_config", {})
+        default_params = processing_config.get("Default", constants.DEFAULT_AUTO_POST_AMP_CONFIG.get("Default", {}))
 
-        # --- Get Parameters ---
-        sg_window = self.app.app_settings.get("auto_post_processing_sg_window", 7)
-        sg_polyorder = self.app.app_settings.get("auto_post_processing_sg_polyorder", 3)
-        rdp_epsilon = self.app.app_settings.get("auto_post_processing_rdp_epsilon", 1.5)
-        clamp_lower_thresh_pri = self.app.app_settings.get("auto_post_processing_clamp_lower_threshold_primary", 10)
-        clamp_upper_thresh_pri = self.app.app_settings.get("auto_post_processing_clamp_upper_threshold_primary", 90)
-        amp_config = self.app.app_settings.get("auto_post_processing_amplification_config", {})
-        default_amp_params = amp_config.get("Default", {"scale_factor": 1.0, "center_value": 50})
+        # --- Record State for Undo ---
+        op_desc = "Auto Post-Process" + (f" on range" if frame_range else "")
+        if funscript_obj.primary_actions: self._record_timeline_action(1, f"{op_desc} (T1)")
+        if funscript_obj.secondary_actions: self._record_timeline_action(2, f"{op_desc} (T2)")
 
-        # --- Process Primary Axis ---
-        if funscript_obj.primary_actions:
-            self.logger.info("Post-Processing: Primary Axis...")
-            op_desc = "Auto Post-Process (Primary)" + (f" on range" if frame_range else "")
-            self._record_timeline_action(1, op_desc)
+        # --- Determine Time Range ---
+        range_start_ms, range_end_ms = None, None
+        if frame_range:
+            current_fps = self._get_current_fps()
+            if current_fps > 0:
+                start_frame, end_frame = frame_range
+                range_start_ms = self.frame_to_ms(start_frame)
+                range_end_ms = self.frame_to_ms(end_frame) if end_frame != -1 else None
+                self.logger.info(
+                    f"Processing limited to range: Frames {start_frame}-{end_frame if end_frame != -1 else 'End'}")
 
-            self.logger.info(f"Applying Savitzky-Golay (Primary): Window={sg_window}, Polyorder={sg_polyorder}")
-            funscript_obj.apply_savitzky_golay('primary', sg_window, sg_polyorder, start_time_ms=start_ms,
-                                               end_time_ms=end_ms)
+        # --- Process Each Timeline (Axis) ---
+        for axis in ['primary', 'secondary']:
+            if not getattr(funscript_obj, f"{axis}_actions", []):
+                continue
 
-            self.logger.info(f"Applying RDP Simplification (Primary): Epsilon={rdp_epsilon}")
-            funscript_obj.simplify_rdp('primary', rdp_epsilon, start_time_ms=start_ms, end_time_ms=end_ms)
+            self.logger.info(f"Post-Processing: {axis.capitalize()} Axis...")
 
-            self.logger.info(
-                f"Applying Threshold Clamping (Primary): Lower={clamp_lower_thresh_pri}, Upper={clamp_upper_thresh_pri}")
-            funscript_obj.clamp_points_thresholded('primary', clamp_lower_thresh_pri, clamp_upper_thresh_pri,
-                                                   start_time_ms=start_ms, end_time_ms=end_ms)
-
-            # Amplification based on chapter type
             if self.video_chapters:
-                self.logger.info("Applying chapter-based amplification (Primary)...")
+                self.logger.info(f"Applying chapter-based settings for {axis} axis...")
                 for chapter in self.video_chapters:
                     chapter_start_ms = self.frame_to_ms(chapter.start_frame_id)
                     chapter_end_ms = self.frame_to_ms(chapter.end_frame_id)
 
-                    # Determine the actual processing range for this chapter by intersecting with the global range
-                    effective_start_ms = max(start_ms, chapter_start_ms) if start_ms is not None else chapter_start_ms
-                    effective_end_ms = min(end_ms, chapter_end_ms) if end_ms is not None else chapter_end_ms
+                    effective_start_ms = max(range_start_ms,
+                                             chapter_start_ms) if range_start_ms is not None else chapter_start_ms
+                    effective_end_ms = min(range_end_ms, chapter_end_ms) if range_end_ms is not None else chapter_end_ms
 
                     if effective_end_ms <= effective_start_ms:
-                        continue  # This chapter is outside the processing range
+                        continue
 
-                    chapter_key = chapter.position_long_name
-                    params = amp_config.get(chapter_key, default_amp_params)
+                    params = processing_config.get(chapter.position_long_name, default_params)
+                    sg_win = params.get("sg_window", default_params.get("sg_window"))
+                    sg_poly = params.get("sg_polyorder", default_params.get("sg_polyorder"))
+                    rdp_eps = params.get("rdp_epsilon", default_params.get("rdp_epsilon"))
+                    amp_scale = params.get("scale_factor", default_params.get("scale_factor"))
+                    amp_center = params.get("center_value", default_params.get("center_value"))
+                    clamp_low = params.get("clamp_lower", default_params.get("clamp_lower"))
+                    clamp_high = params.get("clamp_upper", default_params.get("clamp_upper"))
 
                     self.logger.debug(
-                        f"Amplifying Primary: Chapter '{chapter_key}' ({effective_start_ms}ms - {effective_end_ms}ms) with Scale={params['scale_factor']}, Center={params['center_value']}")
-                    funscript_obj.amplify_points_values(
-                        axis='primary',
-                        scale_factor=params["scale_factor"],
-                        center_value=params["center_value"],
-                        start_time_ms=effective_start_ms,
-                        end_time_ms=effective_end_ms
-                    )
+                        f"Processing {axis} in '{chapter.position_long_name}' ({effective_start_ms}-{effective_end_ms}ms) with params: {params}")
+
+                    funscript_obj.apply_savitzky_golay(axis, sg_win, sg_poly, effective_start_ms, effective_end_ms)
+                    funscript_obj.simplify_rdp(axis, rdp_eps, effective_start_ms, effective_end_ms)
+                    if axis == 'primary':
+                        funscript_obj.clamp_points_thresholded(axis, clamp_low, clamp_high, effective_start_ms,
+                                                               effective_end_ms)
+                    funscript_obj.amplify_points_values(axis, amp_scale, amp_center, effective_start_ms,
+                                                        effective_end_ms)
             else:
-                self.logger.info(f"No chapters found. Applying default amplification to the processing range.")
-                funscript_obj.amplify_points_values(
-                    axis='primary',
-                    scale_factor=default_amp_params["scale_factor"],
-                    center_value=default_amp_params["center_value"],
-                    start_time_ms=start_ms,
-                    end_time_ms=end_ms
-                )
-            self._finalize_action_and_update_ui(1, op_desc)
+                self.logger.info(f"No chapters found. Applying default settings to {axis} axis for the full range.")
+                params = default_params
+                funscript_obj.apply_savitzky_golay(axis, params["sg_window"], params["sg_polyorder"], range_start_ms,
+                                                   range_end_ms)
+                funscript_obj.simplify_rdp(axis, params["rdp_epsilon"], range_start_ms, range_end_ms)
+                if axis == 'primary':
+                    funscript_obj.clamp_points_thresholded(axis, params["clamp_lower"], params["clamp_upper"],
+                                                           range_start_ms, range_end_ms)
+                funscript_obj.amplify_points_values(axis, params["scale_factor"], params["center_value"],
+                                                    range_start_ms, range_end_ms)
 
-        # --- Process Secondary Axis (SG and RDP only) ---
-        if funscript_obj.secondary_actions:
-            self.logger.info("Post-Processing: Secondary Axis...")
-            op_desc_sec = "Auto Post-Process (Secondary)" + (f" on range" if frame_range else "")
-            self._record_timeline_action(2, op_desc_sec)
+            timeline_num = 1 if axis == 'primary' else 2
+            self._finalize_action_and_update_ui(timeline_num, op_desc)
 
-            self.logger.info(f"Applying Savitzky-Golay (Secondary): Window={sg_window}, Polyorder={sg_polyorder}")
-            funscript_obj.apply_savitzky_golay('secondary', sg_window, sg_polyorder, start_time_ms=start_ms,
-                                               end_time_ms=end_ms)
-
-            self.logger.info(f"Applying RDP Simplification (Secondary): Epsilon={rdp_epsilon}")
-            funscript_obj.simplify_rdp('secondary', rdp_epsilon, start_time_ms=start_ms, end_time_ms=end_ms)
-
-            self._finalize_action_and_update_ui(2, op_desc_sec)
-
-        self.logger.info("--- Post-Processing Finished ---")
+        self.logger.info("--- Context-Aware Post-Processing Finished ---")
         self.app.set_status_message("Post-processing applied.", duration=5.0)
         self.app.energy_saver.reset_activity_timer()
