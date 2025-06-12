@@ -704,7 +704,6 @@ class ROITracker:
 
         return primary_pos, secondary_pos, dy_smooth, dx_smooth, updated_sparse_features_out
 
-
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None,
                       min_write_frame_id: Optional[int] = None) \
             -> Tuple[np.ndarray, Optional[List[Dict]]]:
@@ -713,15 +712,17 @@ class ROITracker:
         current_frame_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
         final_primary_pos, final_secondary_pos = 50, 50
         action_log_list = []
-        detected_objects_this_frame: List[Dict] = [] # Initialize for YOLO_ROI mode
+        detected_objects_this_frame: List[Dict] = []  # Initialize for YOLO_ROI mode
 
         self.current_effective_amp_factor = self._get_effective_amplification_factor()
 
         if self.tracking_mode == "YOLO_ROI":
             run_detection_this_frame = (self.internal_frame_counter % self.roi_update_interval == 0) or \
                                        (self.roi is None) or \
-                                       (not self.penis_last_known_box and self.frames_since_target_lost < self.max_frames_for_roi_persistence and \
-                                        self.internal_frame_counter % max(1, self.roi_update_interval // 3) == 0)
+                                       (
+                                                   not self.penis_last_known_box and self.frames_since_target_lost < self.max_frames_for_roi_persistence and \
+                                                   self.internal_frame_counter % max(1,
+                                                                                     self.roi_update_interval // 3) == 0)
 
             self.stats_display = [
                 f"T-FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
@@ -733,17 +734,20 @@ class ROITracker:
 
             if run_detection_this_frame:
                 detected_objects_this_frame = self.detect_objects(processed_frame)
-                penis_boxes = [obj["box"] for obj in detected_objects_this_frame if obj["class_name"].lower() == "penis"]
+                penis_boxes = [obj["box"] for obj in detected_objects_this_frame if
+                               obj["class_name"].lower() == "penis"]
                 if penis_boxes:
                     self.frames_since_target_lost = 0
                     self._update_penis_tracking(penis_boxes[0])
-                    interacting_objs = self._find_interacting_objects(self.penis_last_known_box, detected_objects_this_frame)
+                    interacting_objs = self._find_interacting_objects(self.penis_last_known_box,
+                                                                      detected_objects_this_frame)
                     current_best_interaction_name = None
                     if interacting_objs:
                         interacting_objs.sort(key=lambda x: self.CLASS_PRIORITY.get(x["class_name"].lower(), 99))
                         current_best_interaction_name = interacting_objs[0]["class_name"].lower()
                     self.update_main_interaction_class(current_best_interaction_name)
-                    combined_roi_candidate = self._calculate_combined_roi(processed_frame.shape[:2], self.penis_last_known_box, interacting_objs)
+                    combined_roi_candidate = self._calculate_combined_roi(processed_frame.shape[:2],
+                                                                          self.penis_last_known_box, interacting_objs)
                     self.roi = self._smooth_roi_transition(combined_roi_candidate)
                 else:
                     if self.penis_last_known_box: self.logger.info("Primary target (penis) lost in detection cycle.")
@@ -761,7 +765,8 @@ class ROITracker:
                     self.secondary_flow_history_smooth.clear()
                     self.frames_since_target_lost = 0
 
-            self.stats_display = [f"T-FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
+            self.stats_display = [
+                f"T-FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
             if frame_index is not None: self.stats_display.append(f"FIdx:{frame_index}")
             if self.main_interaction_class: self.stats_display.append(f"Interact: {self.main_interaction_class}")
 
@@ -772,7 +777,8 @@ class ROITracker:
                 if main_roi_patch_gray.size > 0:
                     # process_main_roi_content returns updated_sparse_features, which we store in self.prev_features_main_roi
                     final_primary_pos, final_secondary_pos, _, _, self.prev_features_main_roi = \
-                        self.process_main_roi_content(processed_frame, main_roi_patch_gray, self.prev_gray_main_roi, self.prev_features_main_roi)
+                        self.process_main_roi_content(processed_frame, main_roi_patch_gray, self.prev_gray_main_roi,
+                                                      self.prev_features_main_roi)
                     self.prev_gray_main_roi = main_roi_patch_gray.copy()
                 else:
                     self.prev_gray_main_roi = None
@@ -795,55 +801,42 @@ class ROITracker:
                     current_user_roi_patch_gray = current_frame_gray[ury_c: ury_c + urh_c, urx_c: urx_c + urw_c]
                     dy_raw, dx_raw = 0.0, 0.0
 
-                    # --- NEW LOGIC BRANCH ---
                     if self.enable_user_roi_sub_tracking and self.prev_gray_user_roi_patch is not None and self.user_roi_tracked_point_relative and self.flow_dense:
                         if self.prev_gray_user_roi_patch.shape == current_user_roi_patch_gray.shape:
-                            # 1. Calculate flow field for the entire User ROI patch
                             flow = self.flow_dense.calc(np.ascontiguousarray(self.prev_gray_user_roi_patch),
                                                         np.ascontiguousarray(current_user_roi_patch_gray), None)
 
                             if flow is not None:
-                                # 2. Define the smaller tracking box around the tracked point
                                 track_w, track_h = self.user_roi_tracking_box_size
                                 box_center_x, box_center_y = self.user_roi_tracked_point_relative
-
-                                # Top-left corner of the tracking box, relative to the User ROI patch
                                 box_x1 = int(box_center_x - track_w / 2)
                                 box_y1 = int(box_center_y - track_h / 2)
                                 box_x2 = box_x1 + track_w
                                 box_y2 = box_y1 + track_h
-
-                                # 3. Clamp the box coordinates to the patch boundaries
                                 patch_h, patch_w = current_user_roi_patch_gray.shape
                                 box_x1_c, box_y1_c = max(0, box_x1), max(0, box_y1)
                                 box_x2_c, box_y2_c = min(patch_w, box_x2), min(patch_h, box_y2)
 
-                                # 4. Extract the flow from just this sub-region (the "green box")
                                 if box_x2_c > box_x1_c and box_y2_c > box_y1_c:
                                     sub_flow = flow[box_y1_c:box_y2_c, box_x1_c:box_x2_c]
                                     if sub_flow.size > 0:
                                         dx_raw = np.median(sub_flow[..., 0])
                                         dy_raw = np.median(sub_flow[..., 1])
 
-                        # This section is now shared by both old and new logic paths
-                        # 5. Smooth the calculated raw dx/dy values
                         self.primary_flow_history_smooth.append(dy_raw)
                         self.secondary_flow_history_smooth.append(dx_raw)
 
-                        if len(
-                            self.primary_flow_history_smooth) > self.flow_history_window_smooth: self.primary_flow_history_smooth.pop(
-                            0)
-                        if len(
-                            self.secondary_flow_history_smooth) > self.flow_history_window_smooth: self.secondary_flow_history_smooth.pop(
-                            0)
+                        if len(self.primary_flow_history_smooth) > self.flow_history_window_smooth:
+                            self.primary_flow_history_smooth.pop(0)
+                        if len(self.secondary_flow_history_smooth) > self.flow_history_window_smooth:
+                            self.secondary_flow_history_smooth.pop(0)
 
                         dy_smooth = np.median(
                             self.primary_flow_history_smooth) if self.primary_flow_history_smooth else dy_raw
                         dx_smooth = np.median(
                             self.secondary_flow_history_smooth) if self.secondary_flow_history_smooth else dx_raw
 
-                        # 6. Apply scaling and generate final position (same as in process_main_roi_content)
-                        size_factor = self.get_current_penis_size_factor()  # This is 1.0 in User ROI mode, harmless
+                        size_factor = self.get_current_penis_size_factor()
                         if self.adaptive_flow_scale:
                             final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
                                                                              "flow_max_primary_adaptive", size_factor,
@@ -859,32 +852,56 @@ class ROITracker:
                             final_secondary_pos = int(
                                 np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
 
-                        # Note: In User ROI mode, riding/thrusting logic is not applied, so no inversion is needed here.
-
                         self.user_roi_current_flow_vector = (dx_smooth, dy_smooth)
 
-                        # 7. Update the tracked point's position using the new, precise flow vector
                         if self.user_roi_tracked_point_relative:
                             prev_x_rel, prev_y_rel = self.user_roi_tracked_point_relative
                             new_x_rel = prev_x_rel + dx_smooth
                             new_y_rel = prev_y_rel + dy_smooth
                             self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))),
                                                                     max(0.0, min(new_y_rel, float(urh_c))))
-
                     else:
-                        # --- ORIGINAL LOGIC BRANCH (if new feature is disabled or state is invalid) ---
-                        # Fallback to calculating flow on the whole User ROI
-                        original_yolo_roi = self.roi
-                        self.roi = (urx_c, ury_c, urw_c, urh_c)
+                        # --- CORRECTED LOGIC BRANCH ---
+                        # Fallback to calculating flow on the whole User ROI without calling YOLO-specific methods.
+                        dx_raw, dy_raw, _, _ = self._calculate_flow_in_patch(
+                            current_user_roi_patch_gray,
+                            self.prev_gray_user_roi_patch,
+                            use_sparse=self.use_sparse_flow,
+                            prev_features_for_sparse=None
+                        )
 
-                        final_primary_pos, final_secondary_pos, dy_smooth, dx_smooth, _ = \
-                            self.process_main_roi_content(
-                                processed_frame,
-                                current_user_roi_patch_gray,
-                                self.prev_gray_user_roi_patch,
-                                None
-                            )
-                        self.roi = original_yolo_roi
+                        # Smooth the calculated raw dx/dy values
+                        self.primary_flow_history_smooth.append(dy_raw)
+                        self.secondary_flow_history_smooth.append(dx_raw)
+
+                        if len(self.primary_flow_history_smooth) > self.flow_history_window_smooth:
+                            self.primary_flow_history_smooth.pop(0)
+                        if len(self.secondary_flow_history_smooth) > self.flow_history_window_smooth:
+                            self.secondary_flow_history_smooth.pop(0)
+
+                        dy_smooth = np.median(
+                            self.primary_flow_history_smooth) if self.primary_flow_history_smooth else dy_raw
+                        dx_smooth = np.median(
+                            self.secondary_flow_history_smooth) if self.secondary_flow_history_smooth else dx_raw
+
+                        # Apply scaling and generate final position
+                        size_factor = 1.0  # No object detection in this mode
+                        if self.adaptive_flow_scale:
+                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
+                                                                             "flow_max_primary_adaptive", size_factor,
+                                                                             True)
+                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive",
+                                                                               "flow_max_secondary_adaptive",
+                                                                               size_factor, False)
+                        else:
+                            effective_amp_factor = self._get_effective_amplification_factor()
+                            manual_scale_multiplier = (self.sensitivity / 10.0) * effective_amp_factor
+                            final_primary_pos = int(
+                                np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
+                            final_secondary_pos = int(
+                                np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
+
+                        # Update state
                         self.user_roi_current_flow_vector = (dx_smooth, dy_smooth)
                         if self.user_roi_tracked_point_relative:
                             prev_x_rel, prev_y_rel = self.user_roi_tracked_point_relative
@@ -905,8 +922,9 @@ class ROITracker:
                 self.user_roi_current_flow_vector = (0.0, 0.0)
 
         if self.app and self.tracking_active and \
-           (min_write_frame_id is None or (frame_index is not None and frame_index >= min_write_frame_id)):
-            delay_ms = (self.output_delay_frames / self.current_video_fps_for_delay) * 1000.0 if self.current_video_fps_for_delay > 0 else 0.0
+                (min_write_frame_id is None or (frame_index is not None and frame_index >= min_write_frame_id)):
+            delay_ms = (
+                                   self.output_delay_frames / self.current_video_fps_for_delay) * 1000.0 if self.current_video_fps_for_delay > 0 else 0.0
             adjusted_frame_time_ms = frame_time_ms - delay_ms
             current_tracking_axis_mode = self.app.tracking_axis_mode
             current_single_axis_output = self.app.single_axis_output_target
@@ -915,15 +933,16 @@ class ROITracker:
             if current_tracking_axis_mode == "both":
                 primary_to_write, secondary_to_write = final_primary_pos, final_secondary_pos
             elif current_tracking_axis_mode == "vertical":
-                if current_single_axis_output == "primary": primary_to_write = final_primary_pos
-                else: secondary_to_write = final_primary_pos
+                if current_single_axis_output == "primary":
+                    primary_to_write = final_primary_pos
+                else:
+                    secondary_to_write = final_primary_pos
             elif current_tracking_axis_mode == "horizontal":
-                if current_single_axis_output == "primary": primary_to_write = final_secondary_pos
-                else: secondary_to_write = final_secondary_pos
+                if current_single_axis_output == "primary":
+                    primary_to_write = final_secondary_pos
+                else:
+                    secondary_to_write = final_secondary_pos
 
-            # Determine if this is a file processing context (like "track in chapter") vs. pure live tracking.
-            # The presence of `frame_index` is a strong indicator of file processing.
-            # When `is_from_live_tracker` is False, the `max_history` limit in DualAxisFunscript is bypassed.
             is_file_processing_context = frame_index is not None
 
             self.funscript.add_action(
@@ -937,7 +956,8 @@ class ROITracker:
             action_log_list.append({
                 "at": int(round(adjusted_frame_time_ms)), "pos": primary_to_write, "secondary_pos": secondary_to_write,
                 "raw_ud_pos_computed": final_primary_pos, "raw_lr_pos_computed": final_secondary_pos,
-                "mode": current_tracking_axis_mode, "target": current_single_axis_output if current_tracking_axis_mode != "both" else "N/A",
+                "mode": current_tracking_axis_mode,
+                "target": current_single_axis_output if current_tracking_axis_mode != "both" else "N/A",
                 "raw_at": frame_time_ms, "delay_applied_ms": delay_ms,
                 "roi_main": self.roi if self.tracking_mode == "YOLO_ROI" else self.user_roi_fixed,
                 "amp": self.current_effective_amp_factor
@@ -948,46 +968,51 @@ class ROITracker:
 
         if self.tracking_mode == "YOLO_ROI" and self.show_roi and self.roi:
             rx, ry, rw, rh = self.roi
-            color = self.get_class_color(self.main_interaction_class or ("penis" if self.penis_last_known_box else "persisting"))
+            color = self.get_class_color(
+                self.main_interaction_class or ("penis" if self.penis_last_known_box else "persisting"))
             cv2.rectangle(processed_frame, (rx, ry), (rx + rw, ry + rh), color, 1)
             status_text = self.main_interaction_class or ('P' if self.penis_last_known_box else 'Lost...')
             cv2.putText(processed_frame, f"ROI:{status_text}", (rx, ry - 2), cv2.FONT_HERSHEY_PLAIN, 0.7, color, 1)
             if not self.penis_last_known_box:
-                cv2.putText(processed_frame, f"Lost: {self.frames_since_target_lost}/{self.max_frames_for_roi_persistence}",
+                cv2.putText(processed_frame,
+                            f"Lost: {self.frames_since_target_lost}/{self.max_frames_for_roi_persistence}",
                             (rx, ry + rh + 10), cv2.FONT_HERSHEY_PLAIN, 0.6, (0, 0, 255), 1)
 
-            # Add motion mode indicator text for VR videos
-            is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+            is_vr_video = self.app and hasattr(self.app,
+                                               'processor') and self.app.processor.determined_video_type == 'VR'
             if self.enable_inversion_detection and is_vr_video:
                 mode_text = self.motion_mode.capitalize()
-                mode_color = (0, 255, 0) if self.motion_mode == 'thrusting' else (255, 100, 255) if self.motion_mode == 'riding' else (255, 255, 0)
-                cv2.putText(processed_frame, mode_text, (rx + 5, ry + rh - 5), cv2.FONT_HERSHEY_PLAIN, 0.8, mode_color, 1)
+                mode_color = (0, 255, 0) if self.motion_mode == 'thrusting' else (255, 100,
+                                                                                  255) if self.motion_mode == 'riding' else (
+                    255, 255, 0)
+                cv2.putText(processed_frame, mode_text, (rx + 5, ry + rh - 5), cv2.FONT_HERSHEY_PLAIN, 0.8, mode_color,
+                            1)
 
-        # The logic is simplified to only draw the box, as the motion arrow is now
-        # handled by the shared process_main_roi_content function.
         elif self.tracking_mode == "USER_FIXED_ROI" and self.show_roi and self.user_roi_fixed:
             urx, ury, urw, urh = self.user_roi_fixed
             urx_c, ury_c = max(0, urx), max(0, ury)
             urw_c, urh_c = min(urw, processed_frame.shape[1] - urx_c), min(urh, processed_frame.shape[0] - ury_c)
             cv2.rectangle(processed_frame, (urx_c, ury_c), (urx_c + urw_c, ury_c + urh_c), (0, 255, 255), 2)
 
-            # Draw the tracked point to visualize its movement
             if self.user_roi_tracked_point_relative:
                 point_x_abs = urx_c + int(self.user_roi_tracked_point_relative[0])
                 point_y_abs = ury_c + int(self.user_roi_tracked_point_relative[1])
                 cv2.circle(processed_frame, (point_x_abs, point_y_abs), 3, (0, 255, 0), -1)
 
-            # Add motion mode indicator text for VR videos
-            is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+            is_vr_video = self.app and hasattr(self.app,
+                                               'processor') and self.app.processor.determined_video_type == 'VR'
             if self.enable_inversion_detection and is_vr_video:
                 mode_text = self.motion_mode.capitalize()
-                mode_color = (0, 255, 0) if self.motion_mode == 'thrusting' else (255, 100, 255) if self.motion_mode == 'riding' else (255, 255, 0)
-                cv2.putText(processed_frame, mode_text, (urx_c + 5, ury_c + urh_c - 5), cv2.FONT_HERSHEY_PLAIN, 0.8, mode_color, 1)
-
+                mode_color = (0, 255, 0) if self.motion_mode == 'thrusting' else (255, 100,
+                                                                                  255) if self.motion_mode == 'riding' else (
+                    255, 255, 0)
+                cv2.putText(processed_frame, mode_text, (urx_c + 5, ury_c + urh_c - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
+                            mode_color, 1)
 
         if self.show_stats:
             for i, stat_text in enumerate(self.stats_display):
-                cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 220, 220), 1)
+                cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 220, 220),
+                            1)
 
         self.internal_frame_counter += 1
         return processed_frame, action_log_list if action_log_list else None
