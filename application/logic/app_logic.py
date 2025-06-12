@@ -368,7 +368,7 @@ class ApplicationLogic:
     def user_roi_and_point_set(self, roi_rect_video_coords: Tuple[int, int, int, int],
                                point_video_coords: Tuple[int, int]):
         if self.chapter_id_for_roi_setting:
-            # --- NEW: Logic for setting chapter-specific ROI ---
+            # --- Logic for setting chapter-specific ROI ---
             target_chapter = next((ch for ch in self.funscript_processor.video_chapters
                                    if ch.unique_id == self.chapter_id_for_roi_setting), None)
             if target_chapter:
@@ -414,8 +414,8 @@ class ApplicationLogic:
             else:
                 self.logger.error("Tracker or Processor not available to set user ROI.", extra={'status_message': True})
 
-            self.exit_set_user_roi_mode()
-            self.energy_saver.reset_activity_timer()
+        self.exit_set_user_roi_mode()
+        self.energy_saver.reset_activity_timer()
 
     def set_pending_action_after_tracking(self, action_type: str, **kwargs):
         """Stores information about an action to be performed after tracking."""
