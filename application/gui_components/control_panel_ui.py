@@ -82,8 +82,17 @@ class ControlPanelUI:
 
         if clicked and new_idx != app_state.selected_tracker_type_idx:
             app_state.selected_tracker_type_idx = new_idx
-            mode_map = {0: "YOLO_ROI", 1: "YOLO_ROI", 2: "YOLO_ROI", 3: "USER_FIXED_ROI"}
-            self.app.tracker.set_tracking_mode(mode_map.get(new_idx, "YOLO_ROI"))
+
+            # The index for "Live Optical Flow (User ROI)" is 3
+            if new_idx == 3:
+                # First, immediately set the tracker's mode to be consistent with the UI.
+                self.app.tracker.set_tracking_mode("USER_FIXED_ROI")
+                # Second, enter the special mode to wait for the user to draw the ROI.
+                self.app.enter_set_user_roi_mode()
+            else:
+                # For all other modes, the original behavior is correct.
+                mode_map = {0: "YOLO_ROI", 1: "YOLO_ROI", 2: "YOLO_ROI"}
+                self.app.tracker.set_tracking_mode(mode_map.get(new_idx, "YOLO_ROI"))
 
         # --- Tracking Axes ---
         self._render_tracking_axes_mode(stage_proc)

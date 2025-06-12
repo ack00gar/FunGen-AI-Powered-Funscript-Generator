@@ -379,6 +379,14 @@ class AppStageProcessor:
 
             # --- Stage 3 (or Finish) ---
             if selected_mode_idx == 1: # For 2-Stage analysis
+                if stage2_success:
+                    packaged_data = {
+                        "results_dict": s2_output_data,
+                        "was_ranged": is_s1_data_source_ranged,
+                        "range_frames": (range_start_frame, range_end_frame)
+                    }
+                    self.gui_event_queue.put(("stage2_results_success", packaged_data, s2_overlay_path))
+
                 completion_payload = {
                     "message": "AI CV (2-Stage) analysis completed successfully.",
                     "status": "Completed",
@@ -780,13 +788,21 @@ class AppStageProcessor:
                         self.stage2_sub_progress_label = f"{sub_name} ({int(sub_current)}/{int(sub_total)})"
                 elif event_type == "stage2_status_update":
                     self.stage2_status_text = str(data1)
-                    if data2 is not None: self.stage2_progress_label = str(data2)
+                    if data2 is not None:
+                        self.stage2_progress_label = str(data2)
                 elif event_type == "stage2_results_success":
                     packaged_data, s2_overlay_path_written = data1, data2
                     results_dict = packaged_data.get("results_dict", {})
+                    video_segments_data = results_dict.get("video_segments", [])
+                    fs_proc.video_chapters.clear()
+                    if isinstance(video_segments_data, list):
+                        for seg_data in video_segments_data:
+                            if isinstance(seg_data, dict):
+                                fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
                     primary_actions = results_dict.get("primary_actions", [])
                     fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(2, results_dict.get("secondary_actions", []),
+                    fs_proc.clear_timeline_history_and_set_new_baseline(2,
+                                                                        results_dict.get("secondary_actions", []),
                                                                         "Stage 2")
                     self.stage2_status_text = "S2 Completed. Results Processed."
                     self.app.project_manager.project_dirty = True
