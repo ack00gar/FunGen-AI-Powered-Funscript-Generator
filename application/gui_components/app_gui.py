@@ -544,11 +544,8 @@ class GUI:
                 (check_and_run_shortcut("undo_timeline2", fs_proc.perform_undo_redo, 2, 'undo') or \
                  check_and_run_shortcut("redo_timeline2", fs_proc.perform_undo_redo, 2, 'redo')):
             pass
-
-        # Play/Pause (Spacebar - ensure it's checked without requiring specific modifiers unless defined)
-        #elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control("play_pause")):
-        #    pass
-
+        elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control, "play_pause"):
+            pass
         # Video Seeking (Arrow keys - ensure these are checked without specific modifiers unless defined)
         elif video_loaded:
             seek_delta_frames = 0
