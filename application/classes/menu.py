@@ -17,9 +17,8 @@ class MainMenu:
             file_mgr = self.app.file_manager
             fs_proc = self.app.funscript_processor
             stage_proc = self.app.stage_processor
-            event_handlers = self.app.event_handlers
 
-            # --- FILE MENU (Reorganized for Clarity) ---
+            # --- FILE MENU ---
             if imgui.begin_menu("File", True):
 
                 # --- Project Creation ---
@@ -72,40 +71,92 @@ class MainMenu:
                 # --- Import Sub-Menu ---
                 if imgui.begin_menu("Import..."):
                     if imgui.menu_item("Funscript to Timeline 1...")[0]:
-                        self.app.event_handlers.handle_load_funscript_dialog(1)
+                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
+                            initial_dir = os.path.dirname(file_mgr.video_path) if file_mgr.video_path else None
+                            self.app.gui_instance.file_dialog.show(
+                                title="Import Funscript to Timeline 1", is_save=False,
+                                callback=lambda fp: file_mgr.load_funscript_to_timeline(fp, timeline_num=1),
+                                extension_filter="Funscript Files (*.funscript),*.funscript|All files (*.*),*.*",
+                                initial_path=initial_dir
+                            )
                     if imgui.is_item_hovered(): imgui.set_tooltip("Load a .funscript file into the primary timeline.")
 
                     if imgui.menu_item("Funscript to Timeline 2...")[0]:
-                        self.app.event_handlers.handle_load_funscript_dialog(2)
+                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
+                            initial_dir = os.path.dirname(file_mgr.video_path) if file_mgr.video_path else None
+                            self.app.gui_instance.file_dialog.show(
+                                title="Import Funscript to Timeline 2", is_save=False,
+                                callback=lambda fp: file_mgr.load_funscript_to_timeline(fp, timeline_num=2),
+                                extension_filter="Funscript Files (*.funscript),*.funscript|All files (*.*),*.*",
+                                initial_path=initial_dir
+                            )
                     if imgui.is_item_hovered(): imgui.set_tooltip("Load a .funscript file into the secondary timeline.")
 
                     imgui.separator()
                     if imgui.menu_item("Stage 2 Overlay Data...")[0]:
-                        self.app.event_handlers.handle_load_s2_overlay_dialog()
-                    if imgui.is_item_hovered(): imgui.set_tooltip(
-                        "Load pre-computed Stage 2 analysis data for display.")
+                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
+                            initial_dir = None
+                            if file_mgr.stage2_output_msgpack_path:
+                                initial_dir = os.path.dirname(file_mgr.stage2_output_msgpack_path)
+                            elif file_mgr.video_path:
+                                path_in_output = file_mgr.get_output_path_for_file(file_mgr.video_path, "_stage2_overlay.msgpack")
+                                initial_dir = os.path.dirname(path_in_output)
+                            self.app.gui_instance.file_dialog.show(
+                                title="Load Stage 2 Overlay Data", is_save=False,
+                                callback=lambda fp: file_mgr.load_stage2_overlay_data(fp),
+                                extension_filter="MsgPack Files (*.msgpack),*.msgpack|All files (*.*),*.*",
+                                initial_path=initial_dir
+                            )
+                    if imgui.is_item_hovered(): imgui.set_tooltip("Load pre-computed Stage 2 analysis data for display.")
                     imgui.end_menu()
 
                 # --- Export Sub-Menu ---
                 if imgui.begin_menu("Export..."):
                     if imgui.menu_item("Funscript from Timeline 1...")[0]:
-                        self.app.event_handlers.handle_save_funscript_dialog(1)
+                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
+                            suggested_filename = "output.funscript"
+                            initial_dir = None
+                            if file_mgr.video_path:
+                                path_in_output = file_mgr.get_output_path_for_file(file_mgr.video_path, ".funscript")
+                                suggested_filename = os.path.basename(path_in_output)
+                                initial_dir = os.path.dirname(path_in_output)
+                            self.app.gui_instance.file_dialog.show(
+                                title="Export Funscript from Timeline 1", is_save=True,
+                                callback=lambda fp: file_mgr.save_funscript_from_timeline(fp, timeline_num=1),
+                                extension_filter="Funscript Files (*.funscript),*.funscript|All files (*.*),*.*",
+                                initial_filename=suggested_filename,
+                                initial_path=initial_dir
+                            )
                     if imgui.is_item_hovered(): imgui.set_tooltip("Save the primary timeline as a .funscript file.")
 
                     if imgui.menu_item("Funscript from Timeline 2...")[0]:
-                        self.app.event_handlers.handle_save_funscript_dialog(2)
+                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
+                            suggested_filename = "output.roll.funscript"
+                            initial_dir = None
+                            if file_mgr.video_path:
+                                path_in_output = file_mgr.get_output_path_for_file(file_mgr.video_path, ".roll.funscript")
+                                suggested_filename = os.path.basename(path_in_output)
+                                initial_dir = os.path.dirname(path_in_output)
+                            self.app.gui_instance.file_dialog.show(
+                                title="Export Funscript from Timeline 2", is_save=True,
+                                callback=lambda fp: file_mgr.save_funscript_from_timeline(fp, timeline_num=2),
+                                extension_filter="Funscript Files (*.funscript),*.funscript|All files (*.*),*.*",
+                                initial_filename=suggested_filename,
+                                initial_path=initial_dir
+                            )
                     if imgui.is_item_hovered(): imgui.set_tooltip("Save the secondary timeline as a .funscript file.")
                     imgui.end_menu()
                 imgui.separator()
 
                 # --- Exit ---
                 if imgui.menu_item("Exit")[0]:
-                    event_handlers.request_app_exit()
+                    if hasattr(self.app, 'gui_instance') and self.app.gui_instance.window:
+                        glfw.set_window_should_close(self.app.gui_instance.window, True)
                 if imgui.is_item_hovered(): imgui.set_tooltip("Exit the application.")
 
                 imgui.end_menu()
 
-            # --- EDIT MENU (Unchanged) ---
+            # --- EDIT MENU ---
             if imgui.begin_menu("Edit", True):
                 manager_t1 = fs_proc._get_undo_manager(1)
                 can_undo_t1 = manager_t1.can_undo() if manager_t1 else False
@@ -192,7 +243,7 @@ class MainMenu:
                                                                         selected=app_state.show_lr_dial_graph)
                 if clicked: self.app.project_manager.project_dirty = True
 
-                # FIXED: Added defensive hasattr check
+                # Added defensive hasattr check
                 if not hasattr(app_state, 'show_chapter_list_window'):
                     app_state.show_chapter_list_window = False
                 clicked, app_state.show_chapter_list_window = imgui.menu_item("Chapter List",
@@ -212,7 +263,7 @@ class MainMenu:
                 imgui.unindent()
                 imgui.end_menu()
 
-            # --- STATUS MESSAGE (Unaltered) ---
+            # --- STATUS MESSAGE ---
             if app_state.status_message and time.time() < app_state.status_message_time:
                 text_size_status = imgui.calc_text_size(app_state.status_message)
                 menu_bar_width = imgui.get_window_width()
