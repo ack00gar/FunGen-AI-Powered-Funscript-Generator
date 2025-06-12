@@ -1171,6 +1171,22 @@ class AppFunscriptProcessor:
             timeline_num = 1 if axis == 'primary' else 2
             self._finalize_action_and_update_ui(timeline_num, op_desc)
 
+        # --- Final RDP Pass to Seam Chapters ---
+        final_rdp_enabled = self.app.app_settings.get("auto_post_proc_final_rdp_enabled", False)
+        if final_rdp_enabled:
+            final_rdp_epsilon = self.app.app_settings.get("auto_post_proc_final_rdp_epsilon", 10.0)
+            self.logger.info(f"Applying final RDP pass with epsilon={final_rdp_epsilon} to seam chapter joints.")
+
+            final_op_desc = op_desc + " + Final RDP"
+            for axis in ['primary', 'secondary']:
+                if getattr(funscript_obj, f"{axis}_actions", []):
+                    funscript_obj.simplify_rdp(axis=axis, epsilon=final_rdp_epsilon, start_time_ms=None,
+                                               end_time_ms=None, selected_indices=None)
+            if funscript_obj.primary_actions:
+                self._finalize_action_and_update_ui(1, final_op_desc)
+            if funscript_obj.secondary_actions:
+                self._finalize_action_and_update_ui(2, final_op_desc)
+
         self.logger.info("--- Context-Aware Post-Processing Finished ---")
         self.app.set_status_message("Post-processing applied.", duration=5.0)
         self.app.energy_saver.reset_activity_timer()

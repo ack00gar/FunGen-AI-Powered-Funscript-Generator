@@ -753,9 +753,12 @@ class ControlPanelUI:
                                                            current_axis_mode_idx, axis_modes)
         if axis_mode_changed:
             old_mode = self.app.tracking_axis_mode
-            if new_axis_mode_idx == 0: self.app.tracking_axis_mode = "both"
-            elif new_axis_mode_idx == 1: self.app.tracking_axis_mode = "vertical"
-            else: self.app.tracking_axis_mode = "horizontal"
+            if new_axis_mode_idx == 0:
+                self.app.tracking_axis_mode = "both"
+            elif new_axis_mode_idx == 1:
+                self.app.tracking_axis_mode = "vertical"
+            else:
+                self.app.tracking_axis_mode = "horizontal"
             if old_mode != self.app.tracking_axis_mode:
                 self.app.project_manager.project_dirty = True
                 self.app.logger.info(f"Tracking axis mode set to: {self.app.tracking_axis_mode}", extra={'status_message': True})
@@ -776,7 +779,8 @@ class ControlPanelUI:
                     self.app.logger.info(f"Single axis output target set to: {self.app.single_axis_output_target}", extra={'status_message': True})
                     self.app.energy_saver.reset_activity_timer()
         if disable_axis_controls:
-            imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
 
     def _render_class_filtering_content(self):
         available_classes = self.app.get_available_tracking_classes()
@@ -799,8 +803,10 @@ class ControlPanelUI:
                 imgui.pop_id()
                 if clicked:
                     changed_any_class = True
-                    if new_is_discarded: discarded_classes_set.add(class_name)
-                    else: discarded_classes_set.remove(class_name)
+                    if new_is_discarded:
+                        discarded_classes_set.add(class_name)
+                    else:
+                        discarded_classes_set.remove(class_name)
                 col_idx = (col_idx + 1) % num_columns
             imgui.end_table()
         if changed_any_class:
@@ -815,7 +821,8 @@ class ControlPanelUI:
                 self.app.project_manager.project_dirty = True
                 self.app.logger.info("All class discard filters cleared.", extra={'status_message': True})
                 self.app.energy_saver.reset_activity_timer()
-        if imgui.is_item_hovered(): imgui.set_tooltip("Unchecks all classes, enabling all classes for tracking/analysis.")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Unchecks all classes, enabling all classes for tracking/analysis.")
 
     def _render_user_roi_tracking_panel(self):
         set_roi_button_disabled = self.app.stage_processor.full_analysis_active or not (self.app.processor and self.app.processor.is_video_open())
@@ -824,10 +831,13 @@ class ControlPanelUI:
         set_roi_text = "Set ROI & Point##UserSetROI"
         if self.app.is_setting_user_roi_mode: set_roi_text = "Cancel Set ROI##UserCancelSetROI"
         if imgui.button(set_roi_text, width=-1):
-            if self.app.is_setting_user_roi_mode: self.app.exit_set_user_roi_mode()
-            else: self.app.enter_set_user_roi_mode()
+            if self.app.is_setting_user_roi_mode:
+                self.app.exit_set_user_roi_mode()
+            else:
+                self.app.enter_set_user_roi_mode()
         if set_roi_button_disabled:
-            imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
         if self.app.is_setting_user_roi_mode:
             imgui.text_ansi_colored("Selection Active: Draw ROI then click point on video.", 1.0, 0.7, 0.2)
         roi_status = "Set" if self.app.tracker and self.app.tracker.user_roi_fixed and self.app.tracker.user_roi_initial_point_relative else "Not Set"
@@ -1016,6 +1026,36 @@ class ControlPanelUI:
             self.app.project_manager.project_dirty = True
             self.app.logger.info("All post-processing profiles reset to defaults.", extra={'status_message': True})
 
+        imgui.separator()
+
+        # --- SECTION for Final RDP ---
+        imgui.text("Final Smoothing Pass")
+        final_rdp_enabled = self.app.app_settings.get("auto_post_proc_final_rdp_enabled", False)
+        changed_final_rdp, new_final_rdp_enabled = imgui.checkbox("Run Final RDP Pass to Seam Chapters",
+                                                                  final_rdp_enabled)
+        if changed_final_rdp:
+            self.app.app_settings.set("auto_post_proc_final_rdp_enabled", new_final_rdp_enabled)
+            self.app.project_manager.project_dirty = True
+
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "After all other processing, run one final simplification pass\n"
+                "on the entire script. This can help smooth out the joints\n"
+                "between chapters that used different processing settings."
+            )
+
+        if final_rdp_enabled:
+            imgui.same_line()
+            imgui.push_item_width(120)
+            final_rdp_epsilon = self.app.app_settings.get("auto_post_proc_final_rdp_epsilon", 10.0)
+            changed_epsilon, new_epsilon = imgui.slider_float("Epsilon##FinalRDPEpsilon", final_rdp_epsilon, 0.1, 20.0,
+                                                              "%.2f")
+            if changed_epsilon:
+                self.app.app_settings.set("auto_post_proc_final_rdp_epsilon", new_epsilon)
+                self.app.project_manager.project_dirty = True
+            imgui.pop_item_width()
+        # --- END NEW SECTION ---
+
         if proc_tools_disabled:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
@@ -1031,8 +1071,11 @@ class ControlPanelUI:
             imgui.text_wrapped("   EXACT visual moment corresponding to the selected point.")
             imgui.text_wrapped("3. Press 'Confirm Visual Match' below.")
         if imgui.button("Confirm Visual Match##ConfirmCalibration", width=-1):
-            if calibration_mgr.calibration_reference_point_selected: calibration_mgr.confirm_latency_calibration()
-            else: self.app.logger.info("Please select a reference point on Timeline 1 first.", extra={'status_message': True})
+            if calibration_mgr.calibration_reference_point_selected:
+                calibration_mgr.confirm_latency_calibration()
+            else:
+                self.app.logger.info("Please select a reference point on Timeline 1 first.",
+                                     extra={'status_message': True})
         if imgui.button("Cancel Calibration##CancelCalibration", width=-1):
             calibration_mgr.is_calibration_mode_active = False
             calibration_mgr.calibration_reference_point_selected = False
@@ -1042,7 +1085,8 @@ class ControlPanelUI:
     def _render_range_selection(self, stage_proc, fs_proc, event_handlers):
         range_disabled = stage_proc.full_analysis_active or (self.app.processor and self.app.processor.is_processing) or self.app.is_setting_user_roi_mode
         if range_disabled:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
         clicked_active, new_active = imgui.checkbox("Enable Range Processing", fs_proc.scripting_range_active)
         if clicked_active: event_handlers.handle_scripting_range_active_toggle(new_active)
         if fs_proc.scripting_range_active:
@@ -1050,67 +1094,97 @@ class ControlPanelUI:
             imgui.push_item_width(imgui.get_content_region_available()[0] * 0.4)
             changed_start, new_start = imgui.input_int("Start##SR_InputStart", fs_proc.scripting_start_frame, flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
             if changed_start: event_handlers.handle_scripting_start_frame_input(new_start)
-            imgui.same_line(); imgui.text(" "); imgui.same_line()
-            changed_end, new_end = imgui.input_int("End (-1)##SR_InputEnd", fs_proc.scripting_end_frame, flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
+            imgui.same_line()
+            imgui.text(" ")
+            imgui.same_line()
+            changed_end, new_end = imgui.input_int("End (-1)##SR_InputEnd", fs_proc.scripting_end_frame,
+                                                   flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE)
             if changed_end: event_handlers.handle_scripting_end_frame_input(new_end)
             imgui.pop_item_width()
             start_disp, end_disp = fs_proc.get_scripting_range_display_text()
             imgui.text(f"Active Range: Frames: {start_disp} to {end_disp}")
-            if fs_proc.selected_chapter_for_scripting: imgui.text(f"Chapter: {fs_proc.selected_chapter_for_scripting.class_name} ({fs_proc.selected_chapter_for_scripting.segment_type})")
-            if imgui.button("Clear Range Selection##ClearRangeButton"): event_handlers.clear_scripting_range_selection()
+            if fs_proc.selected_chapter_for_scripting:
+                imgui.text(f"Chapter: {fs_proc.selected_chapter_for_scripting.class_name} ({fs_proc.selected_chapter_for_scripting.segment_type})")
+            if imgui.button("Clear Range Selection##ClearRangeButton"):
+                event_handlers.clear_scripting_range_selection()
         else:
             imgui.text_disabled("Range processing not active. Enable checkbox or select a chapter.")
         if range_disabled:
-            imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
 
     def _render_funscript_processing_tools(self, fs_proc, event_handlers):
         proc_tools_disabled = self.app.stage_processor.full_analysis_active or (self.app.processor and self.app.processor.is_processing) or self.app.is_setting_user_roi_mode
         if proc_tools_disabled:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
         axis_options = ["Primary Axis", "Secondary Axis"]
         current_axis_idx = 0 if fs_proc.selected_axis_for_processing == 'primary' else 1
         changed_axis, new_axis_idx = imgui.combo("Target Axis##ProcAxis", current_axis_idx, axis_options)
-        if changed_axis: event_handlers.set_selected_axis_for_processing('primary' if new_axis_idx == 0 else 'secondary')
+        if changed_axis:
+            event_handlers.set_selected_axis_for_processing('primary' if new_axis_idx == 0 else 'secondary')
         imgui.separator()
         imgui.text("Apply To:")
         range_label = fs_proc.get_operation_target_range_label()
-        if imgui.radio_button(f"{range_label}##OpTargetRange", fs_proc.operation_target_mode == 'apply_to_scripting_range'): fs_proc.operation_target_mode = 'apply_to_scripting_range'
+        if imgui.radio_button(f"{range_label}##OpTargetRange", fs_proc.operation_target_mode == 'apply_to_scripting_range'):
+            fs_proc.operation_target_mode = 'apply_to_scripting_range'
         imgui.same_line()
-        if imgui.radio_button("Selected Points##OpTargetSelect", fs_proc.operation_target_mode == 'apply_to_selected_points'): fs_proc.operation_target_mode = 'apply_to_selected_points'
+        if imgui.radio_button("Selected Points##OpTargetSelect", fs_proc.operation_target_mode == 'apply_to_selected_points'):
+            fs_proc.operation_target_mode = 'apply_to_selected_points'
         def prep_op():
             if fs_proc.operation_target_mode == 'apply_to_selected_points':
                 editor = self.timeline_editor1 if fs_proc.selected_axis_for_processing == 'primary' else self.timeline_editor2
                 fs_proc.current_selection_indices = list(editor.multi_selected_action_indices) if editor else []
-                if not fs_proc.current_selection_indices: self.app.logger.info("No points selected for operation.", extra={'status_message': True})
+                if not fs_proc.current_selection_indices:
+                    self.app.logger.info("No points selected for operation.", extra={'status_message': True})
         imgui.separator()
         imgui.text("Points operations")
-        if imgui.button("Clamp to 0##Clamp0"): prep_op(); fs_proc.handle_funscript_operation('clamp_0')
+        if imgui.button("Clamp to 0##Clamp0"):
+            prep_op()
+            fs_proc.handle_funscript_operation('clamp_0')
         imgui.same_line()
-        if imgui.button("Clamp to 100##Clamp100"): prep_op(); fs_proc.handle_funscript_operation('clamp_100')
+        if imgui.button("Clamp to 100##Clamp100"):
+            prep_op()
+            fs_proc.handle_funscript_operation('clamp_100')
         imgui.same_line()
-        if imgui.button("Invert##InvertPoints"): prep_op(); fs_proc.handle_funscript_operation('invert')
+        if imgui.button("Invert##InvertPoints"):
+            prep_op()
+            fs_proc.handle_funscript_operation('invert')
         imgui.same_line()
-        if imgui.button("Clear##ClearPoints"): prep_op(); fs_proc.handle_funscript_operation('clear')
+        if imgui.button("Clear##ClearPoints"):
+            prep_op()
+            fs_proc.handle_funscript_operation('clear')
         imgui.separator()
         imgui.text("Amplify Values")
         f_ch, f_new = imgui.slider_float("Factor##AmplifyFactor", fs_proc.amplify_factor_input, 0.1, 3.0, "%.2f")
-        if f_ch: fs_proc.amplify_factor_input = f_new
+        if f_ch:
+            fs_proc.amplify_factor_input = f_new
         c_ch, c_new = imgui.slider_int("Center##AmplifyCenter", fs_proc.amplify_center_input, 0, 100)
-        if c_ch: fs_proc.amplify_center_input = c_new
-        if imgui.button("Apply Amplify##ApplyAmplify"): prep_op(); fs_proc.handle_funscript_operation('amplify')
+        if c_ch:
+            fs_proc.amplify_center_input = c_new
+        if imgui.button("Apply Amplify##ApplyAmplify"):
+            prep_op(); fs_proc.handle_funscript_operation('amplify')
         imgui.separator()
         imgui.text("Savitzky-Golay Filter")
         wl_ch, wl_new = imgui.slider_int("Window Length##SGWin", fs_proc.sg_window_length_input, 3, 99)
-        if wl_ch: event_handlers.update_sg_window_length(wl_new)
+        if wl_ch:
+            event_handlers.update_sg_window_length(wl_new)
         max_po = max(1, fs_proc.sg_window_length_input - 1)
         po_val = min(fs_proc.sg_polyorder_input, max_po)
         po_ch, po_new = imgui.slider_int("Polyorder##SGPoly", po_val, 1, max_po)
-        if po_ch: fs_proc.sg_polyorder_input = po_new
-        if imgui.button("Apply Savitzky-Golay##ApplySG"): prep_op(); fs_proc.handle_funscript_operation('apply_sg')
+        if po_ch:
+            fs_proc.sg_polyorder_input = po_new
+        if imgui.button("Apply Savitzky-Golay##ApplySG"):
+            prep_op()
+            fs_proc.handle_funscript_operation('apply_sg')
         imgui.separator()
         imgui.text("RDP Simplification")
         e_ch, e_new = imgui.slider_float("Epsilon##RDPEps", fs_proc.rdp_epsilon_input, 0.01, 20.0, "%.2f")
-        if e_ch: fs_proc.rdp_epsilon_input = e_new
-        if imgui.button("Apply RDP##ApplyRDP"): prep_op(); fs_proc.handle_funscript_operation('apply_rdp')
+        if e_ch:
+            fs_proc.rdp_epsilon_input = e_new
+        if imgui.button("Apply RDP##ApplyRDP"):
+            prep_op()
+            fs_proc.handle_funscript_operation('apply_rdp')
         if proc_tools_disabled:
-            imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
