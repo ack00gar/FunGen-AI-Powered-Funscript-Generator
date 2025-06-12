@@ -25,20 +25,30 @@ class AppFileManager:
     def _set_yolo_model_path_callback(self, filepath: str, model_type: str):
         """Callback for setting YOLO model paths from file dialogs."""
         if model_type == "detection":
+            # Use the settings manager to set and persist the new path immediately.
+            self.app.app_settings.set("yolo_det_model_path", filepath)
+
+            # Also update the live application state.
             self.app.yolo_detection_model_path_setting = filepath
             self.app.yolo_det_model_path = filepath
             if self.app.tracker:
                 self.app.tracker.det_model_path = filepath
-                self.app.save_app_settings()
+
             self.logger.info(f"Stage 1 YOLO Detection model path set: {os.path.basename(filepath)}",
                              extra={'status_message': True})
         elif model_type == "pose":
+            # Use the settings manager to set and persist the new path immediately.
+            self.app.app_settings.set("yolo_pose_model_path", filepath)
+
+            # Also update the live application state.
             self.app.yolo_pose_model_path_setting = filepath
             self.app.yolo_pose_model_path = filepath
             if self.app.tracker:
                 self.app.tracker.pose_model_path = filepath
-                self.app.save_app_settings()
+
             self.logger.info(f"YOLO Pose model path set: {os.path.basename(filepath)}", extra={'status_message': True})
+
+        # Mark the project as dirty because this setting can also be saved per-project.
         self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
 

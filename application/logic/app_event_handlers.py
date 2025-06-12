@@ -126,22 +126,23 @@ class AppEventHandlers:
         current_tracker_mode = self.app.tracker.tracking_mode
 
         if current_tracker_mode == "USER_FIXED_ROI":
-            if not (self.app.tracker.user_roi_fixed and self.app.tracker.user_roi_initial_point_relative):
-                self.logger.info("User Defined ROI: Please set ROI and point first using 'Set ROI & Point' button.",
+            # FIX: Check for a global ROI OR a chapter-specific ROI at the current frame
+            has_global_roi = bool(self.app.tracker.user_roi_fixed and self.app.tracker.user_roi_initial_point_relative)
+
+            has_chapter_roi_at_current_frame = False
+            if not has_global_roi:
+                if self.app.processor and self.app.funscript_processor:
+                    current_frame = self.app.processor.current_frame_index
+                    chapter_at_cursor = self.app.funscript_processor.get_chapter_at_frame(current_frame)
+                    if chapter_at_cursor and chapter_at_cursor.user_roi_fixed and chapter_at_cursor.user_roi_initial_point_relative:
+                        has_chapter_roi_at_current_frame = True
+
+            if not has_global_roi and not has_chapter_roi_at_current_frame:
+                self.logger.info("User Defined ROI: Please set a global ROI or a chapter-specific ROI for the current position first.",
                                  extra={'status_message': True, 'duration': 5.0})
                 return
             self.logger.info("Starting User Defined ROI tracking.")
         elif current_tracker_mode == "YOLO_ROI":
-            # This case might be for a future "Live Optical Flow" based on YOLO ROI,
-            # but current UI only has "AI CV (Stages)" and "User Defined ROI (Live)"
-            # For now, assume if tracker.tracking_mode is YOLO_ROI, this button is for that type of live tracking.
-            # However, the primary "AI CV Tracking" button now calls `handle_start_ai_cv_analysis`
-            # which is for the two-stage process.
-            # This path for "Live Tracker" with YOLO_ROI needs clarification or might be deprecated by the UI structure.
-            # For now, let's assume this means "live YOLO-based tracking if that was a thing"
-            # The current UI implies this button is *only* for "User Defined ROI" when that mode is selected.
-            # If selected_tracking_mode_idx from UI pointed to YOLO_ROI for *this* live button, it would go here.
-            # But the UI structure seems to have separate buttons/panels.
             self.logger.info("Starting Live Tracker (YOLO_ROI mode - if applicable).")
         else:
             self.logger.error(f"Unknown tracker mode for live start: {current_tracker_mode}");
@@ -175,6 +176,7 @@ class AppEventHandlers:
             self.app.processor.set_tracker_processing_enabled(True)
         self.logger.info("Live Tracker reset.", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
+
 
     def handle_scripting_range_active_toggle(self, new_active_state: bool):
         fs_proc = self.app.funscript_processor
