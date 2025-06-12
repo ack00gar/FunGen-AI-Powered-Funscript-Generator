@@ -1063,14 +1063,21 @@ class VideoProcessor:
             self.logger.warning("Video not loaded.")
             return
 
-        self.processing_start_frame_limit = self.current_frame_index  # Default to current
-        if start_frame is not None and 0 <= start_frame < self.total_frames:
-            self.processing_start_frame_limit = start_frame
-        elif start_frame is not None:  # Invalid start_frame
-            self.logger.warning(f"Start frame {start_frame} out of bounds ({self.total_frames} total). Not starting.")
-            return
+        # If resuming from pause, always start from the current frame.
+        # Otherwise, start a new session from the specified frame or the current one.
+        effective_start_frame = self.current_frame_index
+        if not self.is_paused and start_frame is not None:
+            if 0 <= start_frame < self.total_frames:
+                effective_start_frame = start_frame
+            else:
+                self.logger.warning(f"Start frame {start_frame} out of bounds ({self.total_frames} total). Not starting.")
+                return
+        elif self.is_paused:
+             self.logger.info(f"Resuming processing from paused state at frame {self.current_frame_index}.")
 
-        self.processing_end_frame_limit = -1  # Means no end limit by default
+        self.processing_start_frame_limit = effective_start_frame
+
+        self.processing_end_frame_limit = -1
         if end_frame is not None and end_frame >= 0:
             self.processing_end_frame_limit = min(end_frame, self.total_frames - 1)
 
@@ -1084,8 +1091,11 @@ class VideoProcessor:
         self.processing_thread = threading.Thread(target=self._processing_loop)
         self.processing_thread.daemon = True
         self.processing_thread.start()
-        if self.tracker:
+
+        # Only start the tracker if it's not already active. This preserves state on resume.
+        if self.tracker and self.enable_tracker_processing and not self.tracker.tracking_active:
             self.tracker.start_tracking()
+
         self.logger.info(
             f"Started GUI processing. Range: {self.processing_start_frame_limit} to "
             f"{self.processing_end_frame_limit if self.processing_end_frame_limit != -1 else 'EOS'}")
@@ -1098,22 +1108,23 @@ class VideoProcessor:
         was_scripting_session = self.enable_tracker_processing and self.tracker and self.tracker.tracking_active
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
 
-        self.is_processing = False  # Signal loop to stop
+        self.is_processing = False
         self.is_paused = True
-        self.stop_event.set()  # Also signal via event
+        self.stop_event.set()
 
         thread_to_join = self.processing_thread
         if thread_to_join and thread_to_join.is_alive():
             if threading.current_thread() is not thread_to_join:
                 self.logger.info(f"Joining processing thread: {thread_to_join.name}")
-                thread_to_join.join(timeout=1.0)  # Wait for loop to exit
+                thread_to_join.join(timeout=1.0)
                 if thread_to_join.is_alive():
                     self.logger.warning("Processing thread did not join cleanly after pause signal.")
         self.processing_thread = None
 
-        if self.tracker and self.enable_tracker_processing:
-            self.logger.info("Signaling tracker to stop/pause.")
-            self.tracker.stop_tracking()
+        # Do not stop the tracker on a simple pause. This preserves the tracking state.
+        # if self.tracker and self.enable_tracker_processing:
+        #     self.logger.info("Signaling tracker to stop/pause.")
+        #     self.tracker.stop_tracking()
 
         if self.app:
             self.app.on_processing_stopped(was_scripting_session=was_scripting_session,
@@ -1134,7 +1145,7 @@ class VideoProcessor:
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
 
         self.is_processing = False
-        self.is_paused = True
+        self.is_paused = False
         self.stop_event.set()
 
         if join_thread:

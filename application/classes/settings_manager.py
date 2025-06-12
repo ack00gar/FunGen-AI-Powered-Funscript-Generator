@@ -96,6 +96,7 @@ class AppSettings:
 
         defaults["funscript_editor_shortcuts"]["jump_to_next_point"] = "."
         defaults["funscript_editor_shortcuts"]["jump_to_prev_point"] = ","
+        defaults["funscript_editor_shortcuts"]["toggle_playback"] = "SPACE"
 
         return defaults
 

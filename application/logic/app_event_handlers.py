@@ -26,17 +26,27 @@ class AppEventHandlers:
             self.app.processor.seek_video(0)
         elif action_name == "prev_frame":
             self.app.processor.seek_video(max(0, current_frame - 1))
+
         elif action_name == "play_pause":
-            self.app.processor.set_tracker_processing_enabled(False)
             if self.app.processor.is_processing:
+                # This is a PAUSE action on an active session.
+                # The state of `enable_tracker_processing` is preserved.
                 self.app.processor.pause_processing()
                 self.logger.info("Video paused.", extra={'status_message': True})
             else:
+                # This is a PLAY/RESUME action.
+                # If starting from a fully stopped state (not paused), it's a playback-only request.
+                if not self.app.processor.is_paused:
+                    self.app.processor.set_tracker_processing_enabled(False)
+
+                # Now start processing. If it was a paused tracking session,
+                # enable_tracker_processing is still True. If it was a fresh start,
+                # it has just been set to False.
                 start_f = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else current_frame
-                # If scripting_end_frame is -1, VideoProcessor's start_processing handles "to end"
                 end_f = fs_proc.scripting_end_frame if fs_proc.scripting_range_active else -1
                 self.app.processor.start_processing(start_frame=start_f, end_frame=end_f)
                 self.logger.info("Video playing.", extra={'status_message': True})
+
         elif action_name == "stop":
             self.app.processor.reset()
             target_seek_frame = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else 0
@@ -45,19 +55,16 @@ class AppEventHandlers:
         elif action_name == "next_frame":
             self.app.processor.seek_video(min(total_frames - 1 if total_frames > 0 else 0, current_frame + 1))
         elif action_name == "jump_end":
-            # Jump to end of scripting range if active, else video end
             target_end_frame = total_frames - 1 if total_frames > 0 else 0
             if fs_proc.scripting_range_active and fs_proc.scripting_end_frame != -1:
                 target_end_frame = fs_proc.scripting_end_frame
             self.app.processor.seek_video(target_end_frame)
 
-        # If not playing, ensure the current frame is displayed
         if action_name != "play_pause" or (action_name == "play_pause" and not self.app.processor.is_processing):
-            if self.app.processor.is_processing:  # Should be paused by now if play_pause was pressed
+            if self.app.processor.is_processing:
                 self.app.processor.pause_processing()
-            self.app.processor.display_current_frame()  # Explicitly update display after seek/stop
+            self.app.processor.display_current_frame()
 
-        # Force timeline pan for seeking actions (except during active play/pause toggle)
         if action_name in ["jump_start", "prev_frame", "stop", "next_frame", "jump_end"]:
             app_state_ui.force_timeline_pan_to_current_frame = True
 
