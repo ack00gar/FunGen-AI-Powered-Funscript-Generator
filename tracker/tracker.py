@@ -54,7 +54,7 @@ class ROITracker:
         self.user_roi_current_flow_vector: Tuple[float, float] = (0.0, 0.0)
 
         self.enable_user_roi_sub_tracking: bool = True  # Master switch for this new feature
-        self.user_roi_tracking_box_size: Tuple[int, int] = (10, 10)  # (Width, Height) of the sub-region tracking box
+        self.user_roi_tracking_box_size: Tuple[int, int] = (5, 5)  # (Width, Height) of the sub-region tracking box
 
         # Object Detection Model (YOLO)
         # For Stage 3, this might not be strictly needed if ROI comes from ATR,
