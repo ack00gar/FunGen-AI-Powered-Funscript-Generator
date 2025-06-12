@@ -818,8 +818,7 @@ class ControlPanelUI:
         if imgui.is_item_hovered(): imgui.set_tooltip("Unchecks all classes, enabling all classes for tracking/analysis.")
 
     def _render_user_roi_tracking_panel(self):
-        is_live_user_roi_running = self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and self.app.processor and self.app.processor.is_processing
-        set_roi_button_disabled = self.app.stage_processor.full_analysis_active or is_live_user_roi_running or not self.app.file_manager.video_path
+        set_roi_button_disabled = self.app.stage_processor.full_analysis_active or not (self.app.processor and self.app.processor.is_video_open())
         if set_roi_button_disabled:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
         set_roi_text = "Set ROI & Point##UserSetROI"
