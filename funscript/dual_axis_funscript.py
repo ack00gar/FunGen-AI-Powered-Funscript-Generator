@@ -467,7 +467,7 @@ class DualAxisFunscript:
 
             self.logger.info(
                 f"RDP applied to {axis} (indices {s_idx_orig}-{e_idx_orig}). "
-                f"Points: {len(segment_to_simplify)} → {len(new_segment_actions)} (e={epsilon})")
+                f"Points: {len(segment_to_simplify)} -> {len(new_segment_actions)} (e={epsilon})")
 
         except Exception as e:
             self.logger.error(f"RDP failed: {str(e)}")
