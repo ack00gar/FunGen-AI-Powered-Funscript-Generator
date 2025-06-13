@@ -58,7 +58,7 @@ class ProjectManager:
         self.project_dirty = False  # A new project starts clean
         self.last_autosave_time = time.time()
 
-    def get_suggested_save_path_and_dir(self, save_as: bool) -> tuple[str, Optional[str]]:
+    def get_suggested_save_path_and_dir(self, save_as: bool) -> Optional[Tuple[str, str]]:
         if self.app.file_manager.video_path:
             # Suggest saving the project inside the video's dedicated output folder
             suggested_path = self.app.file_manager.get_output_path_for_file(
@@ -66,6 +66,7 @@ class ProjectManager:
                 PROJECT_FILE_EXTENSION
             )
             return os.path.basename(suggested_path), os.path.dirname(suggested_path)
+        return None
 
     def open_project_dialog(self):  # Called by MainMenu/AppLogic
         if hasattr(self.app, 'show_file_dialog_for_project_open'):
@@ -74,8 +75,12 @@ class ProjectManager:
             self.app.file_dialog_bridge.show_open_project_dialog(self.load_project)
         elif hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance,
                                                            'file_dialog'):  # If GUI instance is on app
-            #suggested_filename, initial_dir = self.get_suggested_save_path_and_dir(save_as=False) if self.get_suggested_save_path_and_dir(save_as=False) else ("", None)
-            _, initial_dir = self.get_suggested_save_path_and_dir(save_as=False)
+
+            suggested_path_info = self.get_suggested_save_path_and_dir(save_as=False)
+            initial_dir = None
+            if suggested_path_info:
+                _, initial_dir = suggested_path_info
+
             self.app.gui_instance.file_dialog.show(
                 title="Open Project",
                 is_save=False,
@@ -132,7 +137,8 @@ class ProjectManager:
 
     def save_project_dialog(self, save_as: bool = False):
         if not self.project_file_path or save_as:
-            suggested_filename, initial_dir_save = self.get_suggested_save_path_and_dir(save_as) if self.get_suggested_save_path_and_dir(save_as) else ("", None)
+            suggested_filename, initial_dir_save = self.get_suggested_save_path_and_dir(
+                save_as) if self.get_suggested_save_path_and_dir(save_as) else ("", None)
 
             if hasattr(self.app, 'show_file_dialog_for_project_save'):
                 self.app.show_file_dialog_for_project_save(self.save_project, suggested_filename, initial_dir_save)
@@ -195,9 +201,9 @@ class ProjectManager:
 
         # Ensure there is data to save before writing the file
         if not autosave_data.get("video_path") and not autosave_data.get("funscript_actions_timeline1"):
-             self.app.logger.info("Autosave skipped: No content to save.")
-             self.last_autosave_time = time.time()
-             return
+            self.app.logger.info("Autosave skipped: No content to save.")
+            self.last_autosave_time = time.time()
+            return
 
         try:
             with open(AUTOSAVE_FILE, 'wb') as f:
