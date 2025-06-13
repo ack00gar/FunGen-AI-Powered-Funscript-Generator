@@ -281,6 +281,22 @@ class MainMenu:
                 imgui.unindent()
                 imgui.end_menu()
 
+            # --- TOOLS MENU ---
+            if imgui.begin_menu("Tools", True):
+                # The menu item is enabled only when a video is loaded.
+                can_calibrate = file_mgr.video_path is not None
+                if imgui.menu_item("Start Latency Calibration...", enabled=can_calibrate)[0]:
+                    # Call the robust start method which includes its own checks
+                    if hasattr(self.app, 'calibration'):
+                        self.app.calibration.start_latency_calibration()
+                if imgui.is_item_hovered():
+                    tooltip = "Calibrate latency. Requires a video to be loaded and points on Timeline 1."
+                    if not can_calibrate:
+                        tooltip = "Please load a video to enable calibration."
+                    imgui.set_tooltip(tooltip)
+
+                imgui.end_menu()
+
             # --- STATUS MESSAGE ---
             if app_state.status_message and time.time() < app_state.status_message_time:
                 text_size_status = imgui.calc_text_size(app_state.status_message)
