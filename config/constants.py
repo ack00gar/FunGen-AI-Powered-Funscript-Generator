@@ -54,36 +54,36 @@ DEFAULT_FALLBACK_CPU_CORES = 4
 ####################################################################################################
 # KEYBOARD SHORTCUTS
 ####################################################################################################
-# Default keybindings for Windows/Linux
-DEFAULT_SHORTCUTS_WINDOWS = {
-    "seek_next_frame": "RIGHT_ARROW",
-    "seek_prev_frame": "LEFT_ARROW",
-    "delete_selected_point": "DELETE",
-    "delete_selected_point_alt": "BACKSPACE",
-    "select_all_points": "CTRL+A",
-    "undo_timeline1": "CTRL+Z",
-    "redo_timeline1": "CTRL+Y",
-    "undo_timeline2": "CTRL+ALT+Z",
-    "redo_timeline2": "CTRL+ALT+Y",
-    "copy_selection": "CTRL+C",
-    "paste_selection": "CTRL+V",
-    "toggle_playback": "SPACE"
-}
+MOD_KEY = "SUPER" if platform.system() == "Darwin" else "CTRL"
 
-# Default keybindings for macOS (uses SUPER key instead of CTRL)
-DEFAULT_SHORTCUTS_MACOS = {
+DEFAULT_SHORTCUTS = {
     "seek_next_frame": "RIGHT_ARROW",
     "seek_prev_frame": "LEFT_ARROW",
+    "jump_to_next_point": ".",
+    "jump_to_prev_point": ",",
+    "pan_timeline_left": "ALT+LEFT_ARROW",
+    "pan_timeline_right": "ALT+RIGHT_ARROW",
     "delete_selected_point": "DELETE",
     "delete_selected_point_alt": "BACKSPACE",
-    "select_all_points": "SUPER+A",
-    "undo_timeline1": "SUPER+Z",
-    "redo_timeline1": "SUPER+SHIFT+Z",
-    "undo_timeline2": "SUPER+ALT+Z",
-    "redo_timeline2": "SUPER+ALT+SHIFT+Z",
-    "copy_selection": "SUPER+C",
-    "paste_selection": "SUPER+V",
-    "toggle_playback": "SPACE"
+    "select_all_points": f"{MOD_KEY}+A",
+    "undo_timeline1": f"{MOD_KEY}+Z",
+    "redo_timeline1": f"{MOD_KEY}+Y",
+    "undo_timeline2": f"{MOD_KEY}+ALT+Z",
+    "redo_timeline2": f"{MOD_KEY}+ALT+Y",
+    "copy_selection": f"{MOD_KEY}+C",
+    "paste_selection": f"{MOD_KEY}+V",
+    "toggle_playback": "SPACE",
+    "add_point_0" : "0",
+    "add_point_10" : "1",
+    "add_point_20" : "2",
+    "add_point_30" : "3",
+    "add_point_40" : "4",
+    "add_point_50" : "5",
+    "add_point_60" : "6",
+    "add_point_70" : "7",
+    "add_point_80" : "8",
+    "add_point_90" : "9",
+    "add_point_100" : "°",
 }
 
 

@@ -665,6 +665,10 @@ class ApplicationLogic:
         self.audio_waveform_data = None
         self.app_state_ui.show_audio_waveform = False
 
+        # Reset waveform data
+        self.audio_waveform_data = None
+        self.app_state_ui.show_audio_waveform = False
+
         # Reset UI states to defaults (or app settings defaults)
         app_settings_defaults = self.app_settings.get_default_settings()
         self.app_state_ui.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms",

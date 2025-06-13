@@ -682,3 +682,38 @@ class DualAxisFunscript:
             self.last_timestamp_secondary = last_ts
 
         self.logger.info(f"Shifted {len(actions_list_ref)} points on {axis} axis by {actual_delta_ms}ms.")
+
+    def add_actions_batch(self, actions_data: List[Dict], is_from_live_tracker: bool = False):
+        """
+        Adds a batch of actions efficiently. It temporarily disables min_interval checks
+        during addition and re-applies it once at the end.
+        """
+        original_min_interval = self.min_interval_ms
+        self.min_interval_ms = 0  # Temporarily disable for batch insertion
+
+        for action in actions_data:
+            self.add_action(
+                timestamp_ms=action['timestamp_ms'],
+                primary_pos=action.get('primary_pos'),
+                secondary_pos=action.get('secondary_pos'),
+                is_from_live_tracker=is_from_live_tracker
+            )
+
+        self.min_interval_ms = original_min_interval
+
+        # Re-apply min_interval filtering to the entire list after batch addition
+        if self.min_interval_ms > 0:
+            for actions_list in [self.primary_actions, self.secondary_actions]:
+                if len(actions_list) > 1:
+                    valid_idx = 0
+                    for i in range(1, len(actions_list)):
+                        if actions_list[i]['at'] - actions_list[valid_idx]['at'] >= self.min_interval_ms:
+                            valid_idx += 1
+                            if i != valid_idx:
+                                actions_list[valid_idx] = actions_list[i]
+                    if valid_idx + 1 < len(actions_list):
+                        del actions_list[valid_idx + 1:]
+
+        # Update last timestamps
+        self.last_timestamp_primary = self.primary_actions[-1]['at'] if self.primary_actions else 0
+        self.last_timestamp_secondary = self.secondary_actions[-1]['at'] if self.secondary_actions else 0

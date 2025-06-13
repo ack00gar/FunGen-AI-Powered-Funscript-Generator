@@ -382,6 +382,10 @@ class AppFileManager:
         self.app.funscript_processor.video_chapters.clear()
         self.clear_stage2_overlay_data()
 
+        # Clear audio waveform data
+        self.app.audio_waveform_data = None
+        self.app.app_state_ui.show_audio_waveform = False
+
         # If funscript was loaded from a file (not generated) and we are not clearing unconditionally, keep T1.
         # Otherwise, clear T1. Always clear T2.
         if clear_funscript_unconditionally or not self.loaded_funscript_path:  # loaded_funscript_path is for T1
