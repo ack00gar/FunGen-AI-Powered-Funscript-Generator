@@ -23,7 +23,6 @@ class DualAxisFunscript:
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.primary_actions: List[Dict] = []
         self.secondary_actions: List[Dict] = []
-        self.max_history: int = 1000
         self.min_interval_ms: int = 20
         self.last_timestamp_primary: int = 0
         self.last_timestamp_secondary: int = 0
@@ -40,7 +39,6 @@ class DualAxisFunscript:
                                  timestamp_ms: int,
                                  pos: int,
                                  min_interval_ms: int,
-                                 max_history_len: int,
                                  is_from_live_tracker: bool
                                  ) -> int:
         """
@@ -99,11 +97,6 @@ class DualAxisFunscript:
             if current_valid_idx + 1 < len(actions_target_list):
                 del actions_target_list[current_valid_idx + 1:]
 
-        # Enforce max_history
-        if len(actions_target_list) > max_history_len:
-            if is_from_live_tracker and original_length_before_add <= max_history_len:
-                actions_target_list[:] = actions_target_list[-max_history_len:]
-
         return actions_target_list[-1]["at"] if actions_target_list else 0
 
     def add_action(self, timestamp_ms: int, primary_pos: Optional[int], secondary_pos: Optional[int] = None,
@@ -125,7 +118,6 @@ class DualAxisFunscript:
                 timestamp_ms=timestamp_ms,
                 pos=primary_pos, # primary_pos is guaranteed not None here
                 min_interval_ms=self.min_interval_ms,
-                max_history_len=self.max_history,
                 is_from_live_tracker=is_from_live_tracker
             )
         # Update last_timestamp_primary only if actions were actually processed or if list became empty
@@ -139,7 +131,6 @@ class DualAxisFunscript:
                 timestamp_ms=timestamp_ms,
                 pos=secondary_pos, # secondary_pos is guaranteed not None here
                 min_interval_ms=self.min_interval_ms,
-                max_history_len=self.max_history,
                 is_from_live_tracker=is_from_live_tracker
             )
             self.last_timestamp_secondary = new_last_ts_secondary if self.secondary_actions else 0
