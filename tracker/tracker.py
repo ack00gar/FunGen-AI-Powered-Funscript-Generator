@@ -1079,16 +1079,31 @@ class ROITracker:
         self.logger.info(f"Tracking stopped (mode: {self.tracking_mode}).")
 
     def reset(self, reason: Optional[str] = None):
+        self.stop_tracking()  # Explicitly set tracking_active to False.
         self.clear_user_defined_roi_and_point()
-        self.set_tracking_mode("YOLO_ROI") # Default mode on full reset
+        self.set_tracking_mode("YOLO_ROI")  # Default mode on full reset
 
-        # self.roi is cleared by start_tracking if mode is YOLO_ROI
-        self.start_tracking() # Re-initializes states based on the current mode (now YOLO_ROI)
+        # Clear all relevant state variables to ensure a clean slate
+        self.internal_frame_counter = 0
+        self.frames_since_target_lost = 0
+        self.roi = None
+        self.prev_gray_main_roi = None
+        self.prev_features_main_roi = None
+        self.penis_last_known_box = None
+        self.main_interaction_class = None
+        self.penis_max_size_history.clear()
+        self.primary_flow_history_smooth.clear()
+        self.secondary_flow_history_smooth.clear()
+        self.class_history.clear()
+        self.last_interaction_time = 0
+        self.motion_mode_history.clear()
+        self.motion_mode = 'undetermined'
 
-        if self.funscript: # This funscript is for live tracking
+        if self.funscript:  # This funscript is for live tracking
             if reason != "seek" and reason != "project_load_preserve_actions":
                 self.funscript.clear()
                 self.logger.info(f"Live tracker Funscript cleared (reason: {reason}).")
             else:
                 self.logger.info(f"Live tracker Funscript preserved (reason: {reason}).")
-        self.logger.info(f"Tracker reset complete (reason: {reason}). Tracking is now {self.tracking_active}.")
+
+        self.logger.info(f"Tracker reset complete (reason: {reason}). Tracking is now inactive.")
