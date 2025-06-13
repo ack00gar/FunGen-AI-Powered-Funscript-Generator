@@ -74,7 +74,8 @@ class ProjectManager:
             self.app.file_dialog_bridge.show_open_project_dialog(self.load_project)
         elif hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance,
                                                            'file_dialog'):  # If GUI instance is on app
-            suggested_filename, initial_dir = self.get_suggested_save_path_and_dir(save_as=False) if self.get_suggested_save_path_and_dir(save_as=False) else ("", None)
+            #suggested_filename, initial_dir = self.get_suggested_save_path_and_dir(save_as=False) if self.get_suggested_save_path_and_dir(save_as=False) else ("", None)
+            _, initial_dir = self.get_suggested_save_path_and_dir(save_as=False)
             self.app.gui_instance.file_dialog.show(
                 title="Open Project",
                 is_save=False,
@@ -248,6 +249,7 @@ class ProjectManager:
             "show_heatmap": self.app.app_state_ui.show_heatmap,
             "show_gauge_window": self.app.app_state_ui.show_gauge_window,
             "show_stage2_overlay": self.app.app_state_ui.show_stage2_overlay,
+            "show_audio_waveform": self.app.app_state_ui.show_audio_waveform,
             # Note: Window positions/sizes are saved in app_settings, not project file.
 
             # ApplicationLogic direct settings (or could be AppSettings if purely user preference)
@@ -259,6 +261,8 @@ class ProjectManager:
             # StageProcessor Data (mostly status, as progress is transient)
             "stage2_status_text": stage_proc_data.get("stage2_status_text", "Not run."),
         }
+        if self.app.audio_waveform_data is not None:
+            project_data["audio_waveform_data"] = self.app.audio_waveform_data
         return project_data
 
     def _apply_project_state_from_dict(self, project_data: Dict):
@@ -318,6 +322,17 @@ class ProjectManager:
                                                        self.app.app_settings.get("show_gauge_window", True))
         app_state.show_stage2_overlay = project_data.get("show_stage2_overlay",
                                                          self.app.app_settings.get("show_stage2_overlay", True))
+        app_state.show_audio_waveform = project_data.get("show_audio_waveform",
+                                                         self.app.app_settings.get("show_audio_waveform", True))
+        # Data for Audio Waveform
+        loaded_waveform_list = project_data.get("audio_waveform_data")
+        if loaded_waveform_list is not None and isinstance(loaded_waveform_list, list):
+            # Waveform data is saved as a list, convert back to NumPy array on load
+            self.app.audio_waveform_data = np.array(loaded_waveform_list, dtype=np.float32)
+            self.app.logger.info(
+                f"Loaded audio waveform data ({len(self.app.audio_waveform_data)} samples) from project.")
+        else:
+            self.app.audio_waveform_data = None
 
         # Data for StageProcessor
         stage_proc = self.app.stage_processor

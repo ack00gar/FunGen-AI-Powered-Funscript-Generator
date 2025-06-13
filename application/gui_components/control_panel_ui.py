@@ -314,6 +314,17 @@ class ControlPanelUI:
         imgui.pop_item_width()
         if imgui.is_item_hovered(): imgui.set_tooltip("Adjust the global UI font size. Applied instantly.")
 
+        # Timeline Pan Speed Setting
+        imgui.text("Timeline Pan Speed")
+        imgui.same_line()
+        imgui.push_item_width(120)
+        current_pan_speed = self.app.app_settings.get("timeline_pan_speed_multiplier", 5)  #
+        changed_pan_speed, new_pan_speed = imgui.slider_int("##TimelinePanSpeed", current_pan_speed, 1, 50)
+        if changed_pan_speed:
+            self.app.app_settings.set("timeline_pan_speed_multiplier", new_pan_speed)  #
+        imgui.pop_item_width()
+        if imgui.is_item_hovered(): imgui.set_tooltip("Multiplier for keyboard-based timeline panning speed.")
+
         # HW Accel
         imgui.text("Video Decoding")
         imgui.same_line();

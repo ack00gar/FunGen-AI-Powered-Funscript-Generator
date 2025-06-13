@@ -32,7 +32,8 @@ class AppSettings:
         import platform
 
         # Select the correct shortcut dictionary based on the operating system
-        shortcuts = constants.DEFAULT_SHORTCUTS_MACOS if platform.system() == "Darwin" else constants.DEFAULT_SHORTCUTS_WINDOWS
+        #shortcuts = constants.DEFAULT_SHORTCUTS_MACOS if platform.system() == "Darwin" else constants.DEFAULT_SHORTCUTS_WINDOWS
+        shortcuts = constants.DEFAULT_SHORTCUTS
 
         defaults = {
             # General
@@ -46,6 +47,7 @@ class AppSettings:
             "window_height": constants.DEFAULT_WINDOW_HEIGHT,
             "ui_layout_mode": constants.DEFAULT_UI_LAYOUT,
             "global_font_scale": 1.0,
+            "timeline_pan_speed_multiplier": 20,
             "show_funscript_interactive_timeline": True,
             "show_funscript_interactive_timeline2": False,
             "show_funscript_timeline": True,
@@ -93,10 +95,6 @@ class AppSettings:
             # Shortcuts
             "funscript_editor_shortcuts": shortcuts,
         }
-
-        defaults["funscript_editor_shortcuts"]["jump_to_next_point"] = "."
-        defaults["funscript_editor_shortcuts"]["jump_to_prev_point"] = ","
-        defaults["funscript_editor_shortcuts"]["toggle_playback"] = "SPACE"
 
         return defaults
 

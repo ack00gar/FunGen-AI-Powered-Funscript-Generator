@@ -259,7 +259,14 @@ class MainMenu:
                 can_show_s2 = stage_proc.stage2_overlay_data is not None
                 clicked, current_val = imgui.menu_item("Show Stage 2 Overlay", selected=app_state.show_stage2_overlay,
                                                        enabled=can_show_s2)
-                if clicked: app_state.show_stage2_overlay = current_val; self.app.project_manager.project_dirty = True
+                if clicked:
+                    app_state.show_stage2_overlay = current_val
+                    self.app.project_manager.project_dirty = True
+
+                clicked, _ = imgui.menu_item("Audio Waveform", selected=app_state.show_audio_waveform)
+                if clicked:
+                    self.app.toggle_waveform_visibility()
+                    self.app.project_manager.project_dirty = True
                 imgui.unindent()
                 imgui.end_menu()
 
