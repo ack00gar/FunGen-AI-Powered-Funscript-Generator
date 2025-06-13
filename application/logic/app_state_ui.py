@@ -345,6 +345,8 @@ class AppStateUI:
         self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay",
                                                          defaults.get("show_stage2_overlay", self.show_stage2_overlay))
 
+        self.show_audio_waveform = False
+
         self.ui_layout_mode = self.app_settings.get("ui_layout_mode", defaults.get("ui_layout_mode", self.ui_layout_mode))
         self.show_control_panel_window = self.app_settings.get("show_control_panel_window", self.show_control_panel_window)
         self.show_video_display_window = self.app_settings.get("show_video_display_window", self.show_video_display_window)
