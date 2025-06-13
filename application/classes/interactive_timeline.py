@@ -981,6 +981,30 @@ class InteractiveFunscriptTimeline:
                 # Point Click / Marquee Start
                 if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and not io.key_shift:
                     if hovered_action_idx_current_timeline != -1:
+                        # ============================ START: CALIBRATION HOOK ============================
+                        if self.app.calibration and self.app.calibration.is_calibration_mode_active:
+                            # 1. Notify the calibration manager with the timestamp
+                            clicked_action_time_ms = actions_list[hovered_action_idx_current_timeline]['at']
+                            self.app.calibration.handle_calibration_point_selection(clicked_action_time_ms)
+
+                            # 2. Update this timeline's UI to select the point
+                            self.selected_action_idx = hovered_action_idx_current_timeline
+                            self.multi_selected_action_indices = {hovered_action_idx_current_timeline}
+
+                            # 3. Seek the video and focus the timeline on the selected point
+                            if video_loaded and not self.app.processor.is_processing and video_fps_for_calc > 0:
+                                target_frame_on_click = int(
+                                    round((clicked_action_time_ms / 1000.0) * video_fps_for_calc))
+                                self.app.processor.seek_video(
+                                    np.clip(target_frame_on_click, 0, self.app.processor.total_frames - 1))
+                                app_state.force_timeline_pan_to_current_frame = True
+
+                            # Prevent any other click logic from running for this event
+                            imgui.end()
+                            if is_floating: imgui.end()
+                            return
+                        # ============================= END: CALIBRATION HOOK =============================
+
                         self.is_marqueeing = False
                         if not io.key_ctrl: self.multi_selected_action_indices.clear()
                         if hovered_action_idx_current_timeline in self.multi_selected_action_indices and io.key_ctrl:

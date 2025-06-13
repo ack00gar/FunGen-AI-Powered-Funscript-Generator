@@ -503,16 +503,6 @@ class ControlPanelUI:
         else:
             imgui.text_disabled("No execution monitoring for this mode.")
 
-    def _render_post_processing_tab(self):
-        """Renders Tab 3: All Funscript post-processing tools."""
-        app_state = self.app.app_state_ui
-        if imgui.collapsing_header("Manual Adjustments##PostProcManual", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_funscript_processing_tools(self.app.funscript_processor, self.app.event_handlers)
-        imgui.separator()
-
-        if imgui.collapsing_header("Automated Post-Processing##PostProcAuto", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_automatic_post_processing_new(self.app.funscript_processor)
-
     # --- Helper & Content Renderer Methods ---
 
     def _render_live_tracker_settings(self):
