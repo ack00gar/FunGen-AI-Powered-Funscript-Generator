@@ -363,8 +363,7 @@ class AppStateUI:
                                                        defaults.get("show_gauge_window", self.show_gauge_window))
         default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
         default_gauge_h = self.app_settings.get("gauge_window_size_h", defaults.get("gauge_window_size_h", 220))
-        menu_bar_h_for_default = self.app_settings.get("main_menu_bar_height_for_gauge_default_y",
-                                                       25)  # Get this from app_settings or a more reliable source
+        menu_bar_h_for_default = self.app_settings.get("main_menu_bar_height_for_gauge_default_y", 25)
 
         # Calculate default_gauge_x based on potentially updated self.window_width
         calc_default_gauge_x = self.window_width - default_gauge_w - 20

@@ -98,6 +98,23 @@ class ControlPanelUI:
         self._render_tracking_axes_mode(stage_proc)
         imgui.separator()
 
+        # --- Analysis Range and Rerun Options ---
+        if app_state.selected_tracker_type_idx in [0, 1]:
+            if imgui.collapsing_header("Analysis Options##RunControlAnalysisOptions", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                # --- Range Selection ---
+                imgui.text("Analysis Range")
+                self._render_range_selection(self.app.stage_processor, self.app.funscript_processor, self.app.event_handlers)
+                imgui.separator()
+
+                # --- Force Rerun ---
+                imgui.text("Stage Reruns:")
+                _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
+                if app_state.selected_tracker_type_idx == 0:
+                    imgui.same_line()
+                    _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Segmentation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
+            imgui.separator()
+
+
         # --- Execution Buttons ---
         self._render_start_stop_buttons(stage_proc, fs_proc, event_handlers)
         imgui.separator()
@@ -135,25 +152,8 @@ class ControlPanelUI:
 
         selected_mode_idx = app_state.selected_tracker_type_idx
 
-        # --- Offline Analysis Configuration (Modes 0 and 1) ---
-        if selected_mode_idx in [0, 1]:
-            if imgui.collapsing_header("Analysis Range##ConfigRangeHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                self._render_range_selection(self.app.stage_processor, self.app.funscript_processor,
-                                             self.app.event_handlers)
-            imgui.separator()
-            if imgui.collapsing_header("Offline Analysis Settings##ConfigOfflineHeader",
-                                       flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                imgui.text("Stage Reruns:")
-                _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1",
-                                                                  stage_proc.force_rerun_stage1)
-                if app_state.selected_tracker_type_idx == 0:
-                    imgui.same_line()
-                    _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
-                        "Force Re-run S2 Segmentation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
-            imgui.separator()
-
         # --- Live Tracking Configuration ---
-        elif selected_mode_idx in [2, 3]:
+        if selected_mode_idx in [2, 3]:
             if selected_mode_idx == 3:  # User ROI specific panel
                 if imgui.collapsing_header("ROI Selection##ConfigUserROIHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                     self._render_user_roi_tracking_panel()
