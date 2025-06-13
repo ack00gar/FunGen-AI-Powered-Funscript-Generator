@@ -196,6 +196,17 @@ class MainMenu:
                 imgui.unindent()
                 imgui.separator()
 
+                imgui.text("Layout Options")
+                imgui.indent()
+                if not hasattr(app_state, 'full_width_nav'):
+                    app_state.full_width_nav = False
+                clicked, app_state.full_width_nav = imgui.menu_item("Full-Width Navigation Bar", selected=app_state.full_width_nav, enabled=is_fixed_mode)
+                if clicked: self.app.project_manager.project_dirty = True
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Only available in 'Fixed Panels' layout mode.")
+                imgui.unindent()
+                imgui.separator()
+
                 # --- Main Window Toggles (for Floating Mode) ---
                 imgui.text("Main Panels")
                 imgui.indent()
