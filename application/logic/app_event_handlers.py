@@ -30,18 +30,16 @@ class AppEventHandlers:
         elif action_name == "play_pause":
             if self.app.processor.is_processing:
                 # This is a PAUSE action on an active session.
-                # The state of `enable_tracker_processing` is preserved.
                 self.app.processor.pause_processing()
                 self.logger.info("Video paused.", extra={'status_message': True})
             else:
                 # This is a PLAY/RESUME action.
-                # If starting from a fully stopped state (not paused), it's a playback-only request.
+                # If starting from a fully stopped state, ensure tracker is explicitly off.
                 if not self.app.processor.is_paused:
-                    self.app.processor.set_tracker_processing_enabled(False)
+                    if self.app.tracker and self.app.tracker.tracking_active:
+                        self.app.tracker.stop_tracking()
 
-                # Now start processing. If it was a paused tracking session,
-                # enable_tracker_processing is still True. If it was a fresh start,
-                # it has just been set to False.
+                # Now start processing. If resuming a paused tracking session, its state is preserved.
                 start_f = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else current_frame
                 end_f = fs_proc.scripting_end_frame if fs_proc.scripting_range_active else -1
                 self.app.processor.start_processing(start_frame=start_f, end_frame=end_f)
@@ -155,7 +153,10 @@ class AppEventHandlers:
             self.logger.error(f"Unknown tracker mode for live start: {current_tracker_mode}");
             return
 
+        # Explicitly start the tracker before starting video processing
+        self.app.tracker.start_tracking()
         self.app.processor.set_tracker_processing_enabled(True)
+
         fs_proc = self.app.funscript_processor
         start_frame = self.app.processor.current_frame_index
         end_frame = -1

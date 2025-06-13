@@ -100,11 +100,13 @@ class VideoProcessor:
         # --- State for context-aware tracking ---
         self.last_processed_chapter_id: Optional[str] = None
 
-        self.enable_tracker_processing = True
+        self.enable_tracker_processing = False
         if self.tracker is None:
-            self.enable_tracker_processing = False
+            # This is now redundant but keeps the original log message
             if self.logger:
                 self.logger.info("No tracker provided. Tracker processing will be disabled.")
+        else:
+            self.logger.info("Tracker is available, but processing is DISABLED by default. An explicit call is needed to enable it.")
 
         # Frame Caching
         self.frame_cache = OrderedDict()
@@ -1092,10 +1094,6 @@ class VideoProcessor:
         self.processing_thread.daemon = True
         self.processing_thread.start()
 
-        # Only start the tracker if it's not already active. This preserves state on resume.
-        if self.tracker and self.enable_tracker_processing and not self.tracker.tracking_active:
-            self.tracker.start_tracking()
-
         self.logger.info(
             f"Started GUI processing. Range: {self.processing_start_frame_limit} to "
             f"{self.processing_end_frame_limit if self.processing_end_frame_limit != -1 else 'EOS'}")
@@ -1105,7 +1103,7 @@ class VideoProcessor:
             return
 
         self.logger.info("Pausing video processing...")
-        was_scripting_session = self.enable_tracker_processing and self.tracker and self.tracker.tracking_active
+        was_scripting_session = self.tracker and self.tracker.tracking_active
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
 
         self.is_processing = False
@@ -1120,11 +1118,6 @@ class VideoProcessor:
                 if thread_to_join.is_alive():
                     self.logger.warning("Processing thread did not join cleanly after pause signal.")
         self.processing_thread = None
-
-        # Do not stop the tracker on a simple pause. This preserves the tracking state.
-        # if self.tracker and self.enable_tracker_processing:
-        #     self.logger.info("Signaling tracker to stop/pause.")
-        #     self.tracker.stop_tracking()
 
         if self.app:
             self.app.on_processing_stopped(was_scripting_session=was_scripting_session,
@@ -1141,7 +1134,7 @@ class VideoProcessor:
             return
 
         self.logger.info("Stopping GUI processing...")
-        was_scripting_session = self.enable_tracker_processing and self.tracker and self.tracker.tracking_active
+        was_scripting_session = self.tracker and self.tracker.tracking_active
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
 
         self.is_processing = False
@@ -1163,6 +1156,8 @@ class VideoProcessor:
         if self.tracker:
             self.logger.info("Signaling tracker to stop.")
             self.tracker.stop_tracking()
+
+        self.enable_tracker_processing = False
 
         if self.app:
             self.app.on_processing_stopped(was_scripting_session=was_scripting_session,
@@ -1215,7 +1210,7 @@ class VideoProcessor:
         with self.frame_lock:
             raw_frame_to_process = self.current_frame
         if raw_frame_to_process is None: return
-        if self.tracker and self.enable_tracker_processing:
+        if self.tracker and self.tracker.tracking_active:
             fps_for_timestamp = self.fps if self.fps > 0 else 30.0
             timestamp_ms = int(self.current_frame_index * (1000.0 / fps_for_timestamp))
             try:
@@ -1255,7 +1250,16 @@ class VideoProcessor:
                         if current_chapter and current_chapter.user_roi_fixed:
                             self.tracker.reconfigure_for_chapter(current_chapter)
                         else:  # In a gap or a chapter without a configured ROI
-                            self.tracker.set_tracking_mode("YOLO_ROI")  # Fallback mode
+                            # Only reset to YOLO_ROI if not in a user-initiated User ROI session.
+                            # This prevents the loop from overriding the user's explicit choice.
+                            if self.tracker.tracking_mode != "USER_FIXED_ROI":
+                                self.tracker.set_tracking_mode("YOLO_ROI")
+
+                                # Stop tracking in gaps, unless it's a persistent User ROI session
+                                # which should continue across gaps. A global user_roi_fixed indicates persistence.
+                                if self.tracker.user_roi_fixed is None and self.tracker.tracking_active:
+                                    self.tracker.stop_tracking()
+
                             #self.tracker.roi = None  # Invalidate ROI
                             #self.tracker.stop_tracking()  # Stop generating actions
                     self.last_processed_chapter_id = current_chapter_id
@@ -1297,7 +1301,7 @@ class VideoProcessor:
                     self.is_processing = False
 
                     if self.app:  # Check if app exists before calling
-                        was_scripting_at_end = self.enable_tracker_processing
+                        was_scripting_at_end = self.tracker and self.tracker.tracking_active
                         end_range = (self.processing_start_frame_limit, self.current_frame_index)
                         self.app.on_processing_stopped(was_scripting_session=was_scripting_at_end,
                                                        scripted_frame_range=end_range)
@@ -1311,7 +1315,7 @@ class VideoProcessor:
                     self.logger.info(f"Reached GUI end_frame_limit ({self.processing_end_frame_limit}). Stopping.")
                     self.is_processing = False
                     if self.app:
-                        was_scripting_at_end_limit = self.enable_tracker_processing
+                        was_scripting_at_end_limit = self.tracker and self.tracker.tracking_active
                         end_range_limit = (self.processing_start_frame_limit, self.processing_end_frame_limit)
                         self.app.on_processing_stopped(was_scripting_session=was_scripting_at_end_limit,
                                                        scripted_frame_range=end_range_limit)
@@ -1320,7 +1324,7 @@ class VideoProcessor:
                     self.logger.info("Reached end of video. Stopping GUI processing.")
                     self.is_processing = False
                     if self.app:
-                        was_scripting_at_eos = self.enable_tracker_processing
+                        was_scripting_at_eos = self.tracker and self.tracker.tracking_active
                         end_range_eos = (self.processing_start_frame_limit, self.current_frame_index)
                         self.app.on_processing_stopped(was_scripting_session=was_scripting_at_eos,
                                                        scripted_frame_range=end_range_eos)
@@ -1329,7 +1333,7 @@ class VideoProcessor:
                 frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size,
                                                                                   self.yolo_input_size, 3)
                 processed_frame_for_gui = frame_np
-                if self.tracker and self.enable_tracker_processing:
+                if self.tracker and self.tracker.tracking_active:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
                         time.time() * 1000)
                     try:
