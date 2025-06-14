@@ -194,6 +194,34 @@ class ControlPanelUI:
             self._render_settings_hotkeys()
         imgui.separator()
 
+        imgui.spacing()
+
+        # --- "Reset to Default" Button and Confirmation Popup ---
+        if imgui.button("Reset All Settings to Default##ResetAllSettingsButton", width=-1):
+            # This line opens the popup when the button is clicked
+            imgui.open_popup("Confirm Reset##ResetSettingsPopup")
+
+        # Define the modal popup
+        if imgui.begin_popup_modal("Confirm Reset##ResetSettingsPopup", True, imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+            imgui.text("This will reset all application settings to their defaults.")
+            imgui.text("Your projects will not be affected.")
+            imgui.text("This action cannot be undone.")
+            imgui.separator()
+
+            popup_button_width = (imgui.get_content_region_available_width() - imgui.get_style().item_spacing[0]) / 2
+
+            if imgui.button("Confirm Reset", width=popup_button_width):
+                # Call the reset method if the user confirms
+                self.app.app_settings.reset_to_defaults()
+                self.app.logger.info("All settings have been reset to default.", extra={'status_message': True})
+                imgui.close_current_popup()
+
+            imgui.same_line()
+            if imgui.button("Cancel", width=popup_button_width):
+                imgui.close_current_popup()
+
+            imgui.end_popup()
+
     def _render_post_processing_tab(self):
         if imgui.collapsing_header("Manual Adjustments##PostProcManual", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
             self._render_funscript_processing_tools(self.app.funscript_processor, self.app.event_handlers)
@@ -506,138 +534,163 @@ class ControlPanelUI:
     # --- Helper & Content Renderer Methods ---
 
     def _render_live_tracker_settings(self):
-        """Renders the live tracker configuration, moved from the main menu."""
+        """Renders the live tracker configuration as global, persistent settings."""
         if not self.app.tracker:
             imgui.text_disabled("Tracker not initialized.")
             return
 
         tracker_instance = self.app.tracker
-        self.app.project_manager.project_dirty = True  # Any change here should dirty the project
+        settings = self.app.app_settings
+        # This section no longer dirties the project file.
+        # self.app.project_manager.project_dirty = True
 
         if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu",
                                    flags=imgui.TREE_NODE_DEFAULT_OPEN):
-            changed_conf, new_conf_val = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu",
-                                                            tracker_instance.confidence_threshold, 0.1, 0.95, "%.2f")
-            if changed_conf: tracker_instance.confidence_threshold = new_conf_val
-            if imgui.is_item_hovered(): imgui.set_tooltip(
-                "Minimum confidence score for an object detection to be considered valid.")
+            # Confidence Threshold
+            current_conf = settings.get("live_tracker_confidence_threshold")
+            changed, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", current_conf, 0.1, 0.95, "%.2f")
+            if changed:
+                settings.set("live_tracker_confidence_threshold", new_conf)
+                tracker_instance.confidence_threshold = new_conf
 
-            changed_pad_val_int, new_pad_val_int_input = imgui.input_int("ROI Padding##ROIPadTrackerMenu",
-                                                                         tracker_instance.roi_padding)
-            if changed_pad_val_int: tracker_instance.roi_padding = max(0, new_pad_val_int_input)
-            if imgui.is_item_hovered(): imgui.set_tooltip(
-                "Padding (in pixels) to add around the detected object to define the Region of Interest (ROI).")
+            # ROI Padding
+            current_padding = settings.get("live_tracker_roi_padding")
+            changed, new_padding = imgui.input_int("ROI Padding##ROIPadTrackerMenu", current_padding)
+            if changed:
+                new_padding = max(0, new_padding)
+                settings.set("live_tracker_roi_padding", new_padding)
+                tracker_instance.roi_padding = new_padding
 
-            changed_interval_val_int, new_interval_int_input = imgui.input_int(
-                "ROI Update Interval (frames)##ROIIntervalTrackerMenu", tracker_instance.roi_update_interval)
-            if changed_interval_val_int: tracker_instance.roi_update_interval = max(1, new_interval_int_input)
-            if imgui.is_item_hovered(): imgui.set_tooltip(
-                "How often (in frames) to re-run object detection to update the ROI.")
+            # ROI Update Interval
+            current_interval = settings.get("live_tracker_roi_update_interval")
+            changed, new_interval = imgui.input_int("ROI Update Interval (frames)##ROIIntervalTrackerMenu",
+                                                    current_interval)
+            if changed:
+                new_interval = max(1, new_interval)
+                settings.set("live_tracker_roi_update_interval", new_interval)
+                tracker_instance.roi_update_interval = new_interval
 
-            changed_rsf_val_float, new_rsf_float_input = imgui.slider_float(
-                "ROI Smoothing Factor##ROISmoothTrackerMenu", tracker_instance.roi_smoothing_factor, 0.0, 1.0, "%.2f")
-            if changed_rsf_val_float: tracker_instance.roi_smoothing_factor = new_rsf_float_input
-            if imgui.is_item_hovered(): imgui.set_tooltip(
-                "Smoothing factor for ROI position. Higher = more stable, slower to react.")
+            # ROI Smoothing Factor
+            current_smoothing = settings.get("live_tracker_roi_smoothing_factor")
+            changed, new_smoothing = imgui.slider_float("ROI Smoothing Factor##ROISmoothTrackerMenu", current_smoothing,
+                                                        0.0, 1.0, "%.2f")
+            if changed:
+                settings.set("live_tracker_roi_smoothing_factor", new_smoothing)
+                tracker_instance.roi_smoothing_factor = new_smoothing
 
-            changed_mfp_val_int, new_mfp_int_input = imgui.input_int("ROI Persistence (frames)##ROIPersistTrackerMenu",
-                                                                     tracker_instance.max_frames_for_roi_persistence)
-            if changed_mfp_val_int: tracker_instance.max_frames_for_roi_persistence = max(0, new_mfp_int_input)
-            if imgui.is_item_hovered(): imgui.set_tooltip("How many frames ROI stays if primary target lost.")
+            # ROI Persistence
+            current_persistence = settings.get("live_tracker_roi_persistence_frames")
+            changed, new_persistence = imgui.input_int("ROI Persistence (frames)##ROIPersistTrackerMenu",
+                                                       current_persistence)
+            if changed:
+                new_persistence = max(0, new_persistence)
+                settings.set("live_tracker_roi_persistence_frames", new_persistence)
+                tracker_instance.max_frames_for_roi_persistence = new_persistence
 
         if imgui.collapsing_header("Optical Flow##ROIFlowTrackerMenu", flags=imgui.TREE_NODE_DEFAULT_OPEN):
-            changed_usf_val_bool, new_usf_bool_val = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu",
-                                                                    tracker_instance.use_sparse_flow)
-            if changed_usf_val_bool: tracker_instance.use_sparse_flow = new_usf_bool_val
-            if imgui.is_item_hovered(): imgui.set_tooltip("Uses Lucas-Kanade (sparse) instead of DIS (dense).")
+            # Use Sparse Flow
+            current_sparse_flow = settings.get("live_tracker_use_sparse_flow")
+            changed, new_sparse_flow = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu",
+                                                      current_sparse_flow)
+            if changed:
+                settings.set("live_tracker_use_sparse_flow", new_sparse_flow)
+                tracker_instance.use_sparse_flow = new_sparse_flow
 
-            imgui.text("DIS Dense Flow Settings:")
-            dis_controls_disabled_menu = tracker_instance.use_sparse_flow
-            if dis_controls_disabled_menu: imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED,
-                                                                         True); imgui.push_style_var(imgui.STYLE_ALPHA,
-                                                                                                     imgui.get_style().alpha * 0.5)
+                # DIS Dense Flow Settings
+                imgui.text("DIS Dense Flow Settings:")
+                if current_sparse_flow:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-            dis_presets_list_menu = ["ULTRAFAST", "FAST", "MEDIUM"]
-            current_dis_preset_idx_menu = dis_presets_list_menu.index(
-                tracker_instance.dis_flow_preset.upper()) if tracker_instance.dis_flow_preset.upper() in dis_presets_list_menu else 0
-            changed_dis_preset_menu, new_dis_preset_idx_menu = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu",
-                                                                           current_dis_preset_idx_menu,
-                                                                           dis_presets_list_menu)
-            if changed_dis_preset_menu: tracker_instance.update_dis_flow_config(
-                preset=dis_presets_list_menu[new_dis_preset_idx_menu])
-            if imgui.is_item_hovered(): imgui.set_tooltip(
-                "Preset for DIS optical flow algorithm. Disabled if Sparse Optical Flow is active.")
+                dis_presets = ["ULTRAFAST", "FAST", "MEDIUM"]
+                current_preset = settings.get("live_tracker_dis_flow_preset").upper()
+                try:
+                    preset_idx = dis_presets.index(current_preset)
+                except ValueError:
+                    preset_idx = 0
+                changed, new_idx = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu", preset_idx, dis_presets)
+                if changed:
+                    new_preset = dis_presets[new_idx]
+                    settings.set("live_tracker_dis_flow_preset", new_preset)
+                    tracker_instance.update_dis_flow_config(preset=new_preset)
 
-            current_dis_finest_scale_menu = tracker_instance.dis_finest_scale if tracker_instance.dis_finest_scale is not None else 0
-            changed_dis_fs_menu, new_dis_fs_val_int = imgui.input_int(
-                "DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu", current_dis_finest_scale_menu)
-            if changed_dis_fs_menu: tracker_instance.update_dis_flow_config(finest_scale=new_dis_fs_val_int)
-            if imgui.is_item_hovered(): imgui.set_tooltip(
-                "Finest scale for DIS optical flow (0 for auto). Disabled if Sparse Optical Flow is active.")
+                    current_scale = settings.get("live_tracker_dis_finest_scale")
+                    changed, new_scale = imgui.input_int("DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu",
+                                                         current_scale)
+                    if changed:
+                        settings.set("live_tracker_dis_finest_scale", new_scale)
+                        tracker_instance.update_dis_flow_config(finest_scale=new_scale)
 
-            if dis_controls_disabled_menu: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                    if current_sparse_flow:
+                        imgui.pop_style_var()
+                        imgui.internal.pop_item_flag()
 
-        if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu",
-                                   flags=imgui.TREE_NODE_DEFAULT_OPEN):
-            changed_sens_val_float, new_sens_float_val = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu",
-                                                                            tracker_instance.sensitivity, 0.0, 100.0,
-                                                                            "%.1f")
-            if changed_sens_val_float: tracker_instance.sensitivity = new_sens_float_val
-            if imgui.is_item_hovered(): imgui.set_tooltip("Overall output signal sensitivity (0-100).")
+                if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu",
+                                           flags=imgui.TREE_NODE_DEFAULT_OPEN):
+                    # Output Sensitivity
+                    current_sensitivity = settings.get("live_tracker_sensitivity")
+                    changed, new_sensitivity = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu",
+                                                                  current_sensitivity,
+                                                                  0.0, 100.0, "%.1f")
+                    if changed:
+                        settings.set("live_tracker_sensitivity", new_sensitivity)
+                        tracker_instance.sensitivity = new_sensitivity
 
-            changed_baf_val_float, new_baf_float_val = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu",
-                                                                          tracker_instance.base_amplification_factor,
-                                                                          0.1, 5.0, "%.2f")
-            if changed_baf_val_float: tracker_instance.base_amplification_factor = max(0.1, new_baf_float_val)
-            if imgui.is_item_hovered(): imgui.set_tooltip("General multiplier for output signal.")
+                    # Base Amplification
+                current_amp = settings.get("live_tracker_base_amplification")
+                changed, new_amp = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu", current_amp, 0.1, 5.0,
+                                                      "%.2f")
+                if changed:
+                    new_amp = max(0.1, new_amp)
+                    settings.set("live_tracker_base_amplification", new_amp)
+                    tracker_instance.base_amplification_factor = new_amp
 
-            imgui.text("Class-Specific Amplification Multipliers:")
-            if tracker_instance.class_specific_amplification_multipliers is None: tracker_instance.class_specific_amplification_multipliers = {}
-            curr_face_amp_val_menu = tracker_instance.class_specific_amplification_multipliers.get("face", 1.0)
-            ch_face_amp_menu, new_face_amp_val_menu = imgui.slider_float("Face Amp. Mult.##ROIFaceAmpTrackerMenu",
-                                                                         curr_face_amp_val_menu, 0.1, 5.0, "%.2f")
-            if ch_face_amp_menu: tracker_instance.class_specific_amplification_multipliers["face"] = max(0.1,
-                                                                                                         new_face_amp_val_menu)
-            if imgui.is_item_hovered(): imgui.set_tooltip("Amplification multiplier for 'face' detections.")
+                # Class-Specific Amplification Multipliers
+                imgui.text("Class-Specific Amplification Multipliers:")
+                current_class_amps = settings.get("live_tracker_class_amp_multipliers", {})
+                class_amp_changed = False
 
-            curr_hand_amp_val_menu = tracker_instance.class_specific_amplification_multipliers.get("hand", 1.0)
-            ch_hand_amp_menu, new_hand_amp_val_menu = imgui.slider_float("Hand Amp. Mult.##ROIHandAmpTrackerMenu",
-                                                                         curr_hand_amp_val_menu, 0.1, 5.0, "%.2f")
-            if ch_hand_amp_menu: tracker_instance.class_specific_amplification_multipliers["hand"] = max(0.1,
-                                                                                                         new_hand_amp_val_menu)
-            if imgui.is_item_hovered(): imgui.set_tooltip("Amplification multiplier for 'hand' detections.")
+                face_amp = current_class_amps.get("face", 1.0)
+                ch_face, new_face_amp = imgui.slider_float("Face Amp. Mult.##ROIFaceAmpTrackerMenu", face_amp, 0.1, 5.0,
+                                                           "%.2f")
+                if ch_face:
+                    current_class_amps["face"] = max(0.1, new_face_amp)
+                    class_amp_changed = True
+
+                hand_amp = current_class_amps.get("hand", 1.0)
+                ch_hand, new_hand_amp = imgui.slider_float("Hand Amp. Mult.##ROIHandAmpTrackerMenu", hand_amp, 0.1, 5.0,
+                                                           "%.2f")
+                if ch_hand:
+                    current_class_amps["hand"] = max(0.1, new_hand_amp)
+                    class_amp_changed = True
+
+                if class_amp_changed:
+                    settings.set("live_tracker_class_amp_multipliers", current_class_amps)
+                    tracker_instance.class_specific_amplification_multipliers = current_class_amps
+
+                imgui.separator()
+
+            # Flow Smoothing Window
+            current_flow_smooth = settings.get("live_tracker_flow_smoothing_window")
+            changed, new_flow_smooth = imgui.input_int("Flow Smoothing Window##ROIFlowSmoothWinTrackerMenu",
+                                                       current_flow_smooth)
+            if changed:
+                new_flow_smooth = max(1, new_flow_smooth)
+                settings.set("live_tracker_flow_smoothing_window", new_flow_smooth)
+                tracker_instance.flow_history_window_smooth = new_flow_smooth
+
             imgui.separator()
 
-            ch_fhs_val_int, new_fhs_int_val = imgui.input_int("Flow Smoothing Window##ROIFlowSmoothWinTrackerMenu",
-                                                              tracker_instance.flow_history_window_smooth)
-            if ch_fhs_val_int: tracker_instance.flow_history_window_smooth = max(1, new_fhs_int_val)
-            if imgui.is_item_hovered(): imgui.set_tooltip(
-                "Frames to average flow (median). Higher = smoother, more lag.")
-
-            imgui.separator()
-
+            # Output Delay (This was already a global setting, just confirming the pattern)
             imgui.text("Output Delay (frames):")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Manual override for latency compensation. "
-                    "Delays the funscript output by a set number of frames.\n"
-                    "Use the 'Tools -> Start Latency Calibration' for automatic detection."
-                )
-
-            imgui.push_item_width(-1)
-            delay_val = self.app.calibration.funscript_output_delay_frames
-            changed_delay, new_delay = imgui.slider_int("##OutputDelayFrames", delay_val, 0, 20)
-            imgui.pop_item_width()
-
-            if changed_delay:
-                # Update the value in the calibration manager
+            current_delay = settings.get("funscript_output_delay_frames")
+            changed, new_delay = imgui.slider_int("##OutputDelayFrames", current_delay, 0, 20)
+            if changed:
+                settings.set("funscript_output_delay_frames", new_delay)
                 self.app.calibration.funscript_output_delay_frames = new_delay
-                # Apply the change immediately to the tracker
                 self.app.calibration.update_tracker_delay_params()
-                # Save the setting to persist across sessions
-                self.app.app_settings.set("funscript_output_delay_frames", new_delay)
-                # Mark project as dirty since this affects output
-                self.app.project_manager.project_dirty = True
+
+
 
     def _render_calibration_window(self, calibration_mgr, app_state):
         """Renders the dedicated latency calibration window."""
