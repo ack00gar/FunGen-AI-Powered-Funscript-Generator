@@ -185,56 +185,195 @@ class ROITracker:
         self.logger.info(
             f"Tracker fully initialized (ROI Persistence: {self.max_frames_for_roi_persistence} frames, ROI Smoothing: {self.roi_smoothing_factor}). App instance {'provided' if self.app else 'not provided (e.g. S3 mode)'}.")
 
-    def _calculate_flow_in_sub_regions(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray]) \
+    def histogram_calculate_flow_in_sub_regions(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray]) \
             -> Tuple[float, float, float, float, Optional[np.ndarray]]:
         """
-        Calculates optical flow for the entire patch. It returns the overall
-        median flow and the motion magnitude in the lower nth of the patch (for thrusting)
-        versus the upper rest of the patch (for riding). The split is controlled by
-        `self.inversion_detection_split_ratio`.
-
-        Returns:
-            A tuple of (overall_dy, overall_dx, lower_region_magnitude, upper_region_magnitude, flow_field)
+        Calculates optical flow. For VR, it first identifies a dominant motion
+        region (upper for riding, lower for thrusting) and then runs a robust
+        Histogram of Flow calculation only on that sub-region.
         """
-        # 1. Handle edge cases where flow cannot be calculated
+        # 1. Handle edge cases
         if self.flow_dense is None or prev_patch_gray is None or prev_patch_gray.shape != patch_gray.shape:
             return 0.0, 0.0, 0.0, 0.0, None
 
-        # Ensure arrays are C-continuous before passing to OpenCV
         prev_patch_cont = np.ascontiguousarray(prev_patch_gray)
         patch_cont = np.ascontiguousarray(patch_gray)
 
-        # 2. Calculate optical flow for the entire patch ONCE
+        # 2. Calculate optical flow for the entire patch once
         flow = self.flow_dense.calc(prev_patch_cont, patch_cont, None)
         if flow is None:
             return 0.0, 0.0, 0.0, 0.0, None
 
-        # 3. Get the overall median flow vector (this is our main signal)
-        overall_dy = np.median(flow[..., 1])
-        overall_dx = np.median(flow[..., 0])
+        h, w, _ = flow.shape
+        is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
 
-        # 4. Analyze the lower nth vs the upper rest of the flow field for motion magnitude
-        h, _, _ = flow.shape
+        # 3. For VR, determine the dominant motion region BEFORE main calculation
+        dominant_flow_region = flow  # Default to the full ROI
         lower_magnitude = 0.0
         upper_magnitude = 0.0
 
-        # Ensure the ratio is valid to prevent division by zero or illogical splits.
-        if self.inversion_detection_split_ratio > 1.0:
-            # Calculate the height of the lower region based on the ratio.
-            # e.g., if ratio is 3, lower_region_h is one-third of the total height.
+        if is_vr_video and self.inversion_detection_split_ratio > 1.0:
             lower_region_h = int(h / self.inversion_detection_split_ratio)
-
-            # Check if the calculated height is a meaningful split of the patch
             if lower_region_h > 0 and lower_region_h < h:
-                # The upper region is the "rest" of the patch, from the top to the start of the lower region.
+                # Calculate magnitudes to decide the dominant region
                 upper_region_flow_vertical = flow[0:h - lower_region_h, :, 1]
-                # The lower region is the bottom 'nth' of the patch.
                 lower_region_flow_vertical = flow[h - lower_region_h:h, :, 1]
-
-                # Calculate magnitude as the median of the absolute vertical movements in each region.
                 upper_magnitude = np.median(np.abs(upper_region_flow_vertical))
                 lower_magnitude = np.median(np.abs(lower_region_flow_vertical))
 
+                # Select the dominant part of the 'flow' array for the main calculation
+                if lower_magnitude > upper_magnitude * self.motion_inversion_threshold:
+                    dominant_flow_region = flow[h - lower_region_h:h, :, :]
+                    self.logger.debug("Thrusting pattern dominant. Using lower ROI for flow calculation.")
+                elif upper_magnitude > lower_magnitude * self.motion_inversion_threshold:
+                    dominant_flow_region = flow[0:h - lower_region_h, :, :]
+                    self.logger.debug("Riding pattern dominant. Using upper ROI for flow calculation.")
+
+        # 4. Perform robust calculation on the selected dominant region
+        region_h, region_w, _ = dominant_flow_region.shape
+        overall_dx, overall_dy = 0.0, 0.0
+
+        if is_vr_video:
+            # --- VR-SPECIFIC: Histogram of Flow on the DOMINANT region ---
+            block_size = 8
+            weighted_flows = []
+
+            # Create a weight map based on the width of the dominant region
+            center_x = region_w / 2
+            sigma = region_w / 4.0
+            x_indices = np.arange(region_w)
+            weights_x = np.exp(-((x_indices - center_x) ** 2) / (2 * sigma ** 2))
+
+            for y_start in range(0, region_h, block_size):
+                for x_start in range(0, region_w, block_size):
+                    block_flow = dominant_flow_region[y_start:y_start + block_size, x_start:x_start + block_size]
+                    if block_flow.size < 2:
+                        continue
+
+                    dx_vals, dy_vals = block_flow[..., 0].flatten(), block_flow[..., 1].flatten()
+
+                    # Histogram calculation to find the most common motion in the block
+                    flow_range = [[-15, 15], [-15, 15]]
+                    bins = 30
+                    hist, x_edges, y_edges = np.histogram2d(dx_vals, dy_vals, bins=bins, range=flow_range)
+                    max_idx = np.unravel_index(np.argmax(hist), hist.shape)
+
+                    mode_dx = (x_edges[max_idx[0]] + x_edges[max_idx[0] + 1]) / 2
+                    mode_dy = (y_edges[max_idx[1]] + y_edges[max_idx[1] + 1]) / 2
+
+                    block_weight = np.mean(weights_x[x_start:x_start + block_size])
+                    weighted_flows.append({'dx': mode_dx, 'dy': mode_dy, 'weight': block_weight})
+
+            if weighted_flows:
+                total_weight = sum(f['weight'] for f in weighted_flows)
+                if total_weight > 0:
+                    overall_dx = sum(f['dx'] * f['weight'] for f in weighted_flows) / total_weight
+                    overall_dy = sum(f['dy'] * f['weight'] for f in weighted_flows) / total_weight
+        else:
+            # --- 2D VIDEO: Use the simple median on the full ROI (dominant_flow_region is 'flow') ---
+            overall_dy = np.median(dominant_flow_region[..., 1])
+            overall_dx = np.median(dominant_flow_region[..., 0])
+
+        # 5. Return the calculated values. Magnitudes are returned for context/logging.
+        return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
+
+    def _calculate_flow_in_sub_regions(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray]) \
+            -> Tuple[float, float, float, float, Optional[np.ndarray]]:
+        """
+        Calculates optical flow. For VR, it identifies a dominant motion
+        region (upper/lower), then applies a 2D Gaussian weighted Histogram of Flow
+        calculation on that sub-region to find the most common motion vector.
+        """
+        # 1. Handle edge cases
+        if self.flow_dense is None or prev_patch_gray is None or prev_patch_gray.shape != patch_gray.shape:
+            return 0.0, 0.0, 0.0, 0.0, None
+
+        prev_patch_cont = np.ascontiguousarray(prev_patch_gray)
+        patch_cont = np.ascontiguousarray(patch_gray)
+
+        # 2. Calculate optical flow for the entire patch once
+        flow = self.flow_dense.calc(prev_patch_cont, patch_cont, None)
+        if flow is None:
+            return 0.0, 0.0, 0.0, 0.0, None
+
+        h, w, _ = flow.shape
+        is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+
+        # 3. For VR, determine the dominant motion region BEFORE main calculation
+        dominant_flow_region = flow
+        lower_magnitude = 0.0
+        upper_magnitude = 0.0
+
+        if is_vr_video and self.inversion_detection_split_ratio > 1.0:
+            lower_region_h = int(h / self.inversion_detection_split_ratio)
+            if lower_region_h > 0 and lower_region_h < h:
+                upper_region_flow_vertical = flow[0:h - lower_region_h, :, 1]
+                lower_region_flow_vertical = flow[h - lower_region_h:h, :, 1]
+                upper_magnitude = np.median(np.abs(upper_region_flow_vertical))
+                lower_magnitude = np.median(np.abs(lower_region_flow_vertical))
+
+                if lower_magnitude > upper_magnitude * self.motion_inversion_threshold:
+                    dominant_flow_region = flow[h - lower_region_h:h, :, :]
+                    self.logger.debug("Thrusting pattern dominant. Using lower ROI for flow calculation.")
+                elif upper_magnitude > lower_magnitude * self.motion_inversion_threshold:
+                    dominant_flow_region = flow[0:h - lower_region_h, :, :]
+                    self.logger.debug("Riding pattern dominant. Using upper ROI for flow calculation.")
+
+        # 4. Perform robust calculation on the selected dominant region
+        region_h, region_w, _ = dominant_flow_region.shape
+        overall_dx, overall_dy = 0.0, 0.0
+
+        if is_vr_video:
+            # --- VR-SPECIFIC: 2D Weighted Histogram of Flow on the DOMINANT region ---
+            block_size = 8
+            weighted_flows = []
+
+            center_x, sigma_x = region_w / 2, region_w / 4.0
+            weights_x = np.exp(-((np.arange(region_w) - center_x) ** 2) / (2 * sigma_x ** 2))
+
+            center_y, sigma_y = region_h / 2, region_h / 4.0
+            weights_y = np.exp(-((np.arange(region_h) - center_y) ** 2) / (2 * sigma_y ** 2))
+
+            for y in range(0, region_h, block_size):
+                for x in range(0, region_w, block_size):
+                    block_flow = dominant_flow_region[y:y + block_size, x:x + block_size]
+                    if block_flow.size < 2:
+                        continue
+
+                    # --- Histogram Calculation to find the Mode (most common motion) ---
+                    dx_vals, dy_vals = block_flow[..., 0].flatten(), block_flow[..., 1].flatten()
+
+                    flow_range = [[-20, 20], [-20, 20]]  # Range of expected pixel movements per frame
+                    bins = 40  # Discretization level (higher is more precise but needs more data)
+
+                    hist, x_edges, y_edges = np.histogram2d(dx_vals, dy_vals, bins=bins, range=flow_range)
+
+                    # Find the bin with the highest count
+                    max_idx = np.unravel_index(np.argmax(hist), hist.shape)
+
+                    # Get the center of that bin as the representative motion vector for the block
+                    mode_dx = (x_edges[max_idx[0]] + x_edges[max_idx[0] + 1]) / 2
+                    mode_dy = (y_edges[max_idx[1]] + y_edges[max_idx[1] + 1]) / 2
+
+                    # Get the combined 2D weight for this block
+                    mean_x_weight = np.mean(weights_x[x:x + block_size])
+                    mean_y_weight = np.mean(weights_y[y:y + block_size])
+                    block_weight = mean_x_weight * mean_y_weight
+
+                    weighted_flows.append({'dx': mode_dx, 'dy': mode_dy, 'weight': block_weight})
+
+            if weighted_flows:
+                # The mode-finding is robust, so we can proceed directly to the final weighted average
+                total_weight = sum(f['weight'] for f in weighted_flows)
+                if total_weight > 0:
+                    overall_dx = sum(f['dx'] * f['weight'] for f in weighted_flows) / total_weight
+                    overall_dy = sum(f['dy'] * f['weight'] for f in weighted_flows) / total_weight
+        else:
+            # --- 2D VIDEO: Use simple median on the full ROI for performance ---
+            overall_dy = np.median(dominant_flow_region[..., 1])
+            overall_dx = np.median(dominant_flow_region[..., 0])
+
+        # 5. Return the calculated values
         return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
 
     def set_tracking_mode(self, mode: str):
@@ -923,10 +1062,24 @@ class ROITracker:
 
         if self.app and self.tracking_active and \
                 (min_write_frame_id is None or (frame_index is not None and frame_index >= min_write_frame_id)):
+
+            # --- Automatic Lag Compensation ---
+            # Calculate the inherent delay from the smoothing window. A window of size N has a lag of (N-1)/2 frames.
+            # A window size of 1 means no smoothing and no delay.
+            automatic_smoothing_delay_frames = (
+                                                           self.flow_history_window_smooth - 1) / 2.0 if self.flow_history_window_smooth > 1 else 0.0
+
+            # Combine the automatic compensation with the user's manual delay setting.
+            total_delay_frames = self.output_delay_frames + automatic_smoothing_delay_frames
+
+            # Convert the total frame delay to milliseconds.
             delay_ms = (
-                                   self.output_delay_frames / self.current_video_fps_for_delay) * 1000.0 if self.current_video_fps_for_delay > 0 else 0.0
+                                   total_delay_frames / self.current_video_fps_for_delay) * 1000.0 if self.current_video_fps_for_delay > 0 else 0.0
+
+            # Adjust the timestamp to compensate for the total delay.
             adjusted_frame_time_ms = frame_time_ms - delay_ms
             current_tracking_axis_mode = self.app.tracking_axis_mode
+
             current_single_axis_output = self.app.single_axis_output_target
             primary_to_write, secondary_to_write = None, None
 
