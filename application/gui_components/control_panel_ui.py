@@ -614,6 +614,31 @@ class ControlPanelUI:
             if imgui.is_item_hovered(): imgui.set_tooltip(
                 "Frames to average flow (median). Higher = smoother, more lag.")
 
+            imgui.separator()
+
+            imgui.text("Output Delay (frames):")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Manual override for latency compensation. "
+                    "Delays the funscript output by a set number of frames.\n"
+                    "Use the 'Tools -> Start Latency Calibration' for automatic detection."
+                )
+
+            imgui.push_item_width(-1)
+            delay_val = self.app.calibration.funscript_output_delay_frames
+            changed_delay, new_delay = imgui.slider_int("##OutputDelayFrames", delay_val, 0, 20)
+            imgui.pop_item_width()
+
+            if changed_delay:
+                # Update the value in the calibration manager
+                self.app.calibration.funscript_output_delay_frames = new_delay
+                # Apply the change immediately to the tracker
+                self.app.calibration.update_tracker_delay_params()
+                # Save the setting to persist across sessions
+                self.app.app_settings.set("funscript_output_delay_frames", new_delay)
+                # Mark project as dirty since this affects output
+                self.app.project_manager.project_dirty = True
+
     def _render_calibration_window(self, calibration_mgr, app_state):
         """Renders the dedicated latency calibration window."""
         window_title = "Latency Calibration"
@@ -703,9 +728,12 @@ class ControlPanelUI:
             frame_q_max = constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
             suggestion_message, bar_color = "", (0.2, 0.8, 0.2)
-            if frame_q_fraction > 0.9: bar_color, suggestion_message = (0.9, 0.3, 0.3), "Suggestion: Add consumer if resources allow"
-            elif frame_q_fraction > 0.2: bar_color, suggestion_message = (1.0, 0.5, 0.0), "Balanced"
-            else: bar_color, suggestion_message = (0.2, 0.8, 0.2), "Suggestion: Lessen consumers or add producer"
+            if frame_q_fraction > 0.9:
+                bar_color, suggestion_message = (0.9, 0.3, 0.3), "Suggestion: Add consumer if resources allow"
+            elif frame_q_fraction > 0.2:
+                bar_color, suggestion_message = (1.0, 0.5, 0.0), "Balanced"
+            else:
+                bar_color, suggestion_message = (0.2, 0.8, 0.2), "Suggestion: Lessen consumers or add producer"
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *bar_color)
             imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
             imgui.pop_style_color()
@@ -863,7 +891,9 @@ class ControlPanelUI:
             imgui.push_item_width(-1)
             amp_scale = profile_params.get("scale_factor", 1.0)
             changed, new_val = imgui.slider_float("##scale", amp_scale, 0.1, 5.0, "%.2f")
-            if changed: profile_params["scale_factor"] = new_val; config_changed = True
+            if changed:
+                profile_params["scale_factor"] = new_val
+                config_changed = True
             imgui.pop_item_width()
             imgui.next_column()
 
@@ -872,7 +902,9 @@ class ControlPanelUI:
             imgui.push_item_width(-1)
             amp_center = profile_params.get("center_value", 50)
             changed, new_val = imgui.slider_int("##amp_center", amp_center, 0, 100)
-            if changed: profile_params["center_value"] = new_val; config_changed = True
+            if changed:
+                profile_params["center_value"] = new_val
+                config_changed = True
             imgui.pop_item_width()
             imgui.next_column()
 
@@ -927,7 +959,9 @@ class ControlPanelUI:
             max_poly = max(1, profile_params.get("sg_window", 7) - 1)
             current_poly = min(sg_poly, max_poly)
             changed, new_val = imgui.slider_int("##sg_poly", current_poly, 1, max_poly)
-            if changed: profile_params["sg_polyorder"] = new_val; config_changed = True
+            if changed:
+                profile_params["sg_polyorder"] = new_val
+                config_changed = True
             imgui.pop_item_width()
             imgui.next_column()
 
@@ -939,7 +973,9 @@ class ControlPanelUI:
             imgui.push_item_width(-1)
             rdp_eps = profile_params.get("rdp_epsilon", 1.0)
             changed, new_val = imgui.slider_float("##rdp_eps", rdp_eps, 0.1, 20.0, "%.2f")
-            if changed: profile_params["rdp_epsilon"] = new_val; config_changed = True
+            if changed:
+                profile_params["rdp_epsilon"] = new_val
+                config_changed = True
             imgui.pop_item_width()
             imgui.next_column()
 
@@ -1164,7 +1200,8 @@ class ControlPanelUI:
         if c_ch:
             fs_proc.amplify_center_input = c_new
         if imgui.button("Apply Amplify##ApplyAmplify"):
-            prep_op(); fs_proc.handle_funscript_operation('amplify')
+            prep_op()
+            fs_proc.handle_funscript_operation('amplify')
         imgui.separator()
         imgui.text("Savitzky-Golay Filter")
         wl_ch, wl_new = imgui.slider_int("Window Length##SGWin", fs_proc.sg_window_length_input, 3, 99)
