@@ -194,12 +194,6 @@ class ControlPanelUI:
             self._render_settings_hotkeys()
         imgui.separator()
 
-        if imgui.button("Apply & Save All Application Settings##MenuSettingsSaveAll", width=-1):
-            self.app._check_model_paths()
-            self.app.save_app_settings()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Saves all settings in this tab to settings.json, persisting them across sessions.")
-
     def _render_post_processing_tab(self):
         if imgui.collapsing_header("Manual Adjustments##PostProcManual", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
             self._render_funscript_processing_tools(self.app.funscript_processor, self.app.event_handlers)
@@ -217,16 +211,18 @@ class ControlPanelUI:
         # Callback functions to update the model paths
         def update_detection_model_path(path: str):
             self.app.yolo_detection_model_path_setting = path
+            self.app.app_settings.set("yolo_det_model_path", path)  # Auto-save setting
             # Mark project as dirty to prompt user to save changes
             self.app.project_manager.project_dirty = True
             self.app.logger.info(
-                f"Detection model path selected: {path}. Please Apply & Save settings to load and persist.")
+                f"Detection model path selected: {path}. Setting has been saved.")
 
         def update_pose_model_path(path: str):
             self.app.yolo_pose_model_path_setting = path
+            self.app.app_settings.set("yolo_pose_model_path", path)  # Auto-save setting
             # Mark project as dirty to prompt user to save changes
             self.app.project_manager.project_dirty = True
-            self.app.logger.info(f"Pose model path selected: {path}. Please Apply & Save settings to load and persist.")
+            self.app.logger.info(f"Pose model path selected: {path}. Setting has been saved.")
 
         # YOLO Detection Model
         current_yolo_path_display = self.app.yolo_detection_model_path_setting or "Not set"
@@ -273,12 +269,16 @@ class ControlPanelUI:
         imgui.text("Stage 1 Inference Workers:")
         imgui.push_item_width(100)
         changed_prod, new_prod_s1_val = imgui.input_int("Producers##S1Producers", stage_proc.num_producers_stage1)
-        if changed_prod: stage_proc.num_producers_stage1 = max(1, new_prod_s1_val)
+        if changed_prod:
+            stage_proc.num_producers_stage1 = max(1, new_prod_s1_val)
+            self.app.app_settings.set("num_producers_stage1", stage_proc.num_producers_stage1)
         if imgui.is_item_hovered(): imgui.set_tooltip("Number of threads for video decoding & preprocessing.")
 
         imgui.same_line()
         changed_cons, new_cons_s1_val = imgui.input_int("Consumers##S1Consumers", stage_proc.num_consumers_stage1)
-        if changed_cons: stage_proc.num_consumers_stage1 = max(1, new_cons_s1_val)
+        if changed_cons:
+            stage_proc.num_consumers_stage1 = max(1, new_cons_s1_val)
+            self.app.app_settings.set("num_consumers_stage1", stage_proc.num_consumers_stage1)
         if imgui.is_item_hovered(): imgui.set_tooltip(
             "Number of threads for AI model inference. Match to available cores for best performance.")
         imgui.pop_item_width()
@@ -791,6 +791,7 @@ class ControlPanelUI:
             if old_mode != self.app.tracking_axis_mode:
                 self.app.project_manager.project_dirty = True
                 self.app.logger.info(f"Tracking axis mode set to: {self.app.tracking_axis_mode}", extra={'status_message': True})
+                self.app.app_settings.set("tracking_axis_mode", self.app.tracking_axis_mode) # Auto-save
                 self.app.energy_saver.reset_activity_timer()
 
         if self.app.tracking_axis_mode != "both":
@@ -806,6 +807,7 @@ class ControlPanelUI:
                 if old_target != self.app.single_axis_output_target:
                     self.app.project_manager.project_dirty = True
                     self.app.logger.info(f"Single axis output target set to: {self.app.single_axis_output_target}", extra={'status_message': True})
+                    self.app.app_settings.set("single_axis_output_target", self.app.single_axis_output_target) # Auto-save
                     self.app.energy_saver.reset_activity_timer()
         if disable_axis_controls:
             imgui.pop_style_var()
@@ -840,6 +842,7 @@ class ControlPanelUI:
             imgui.end_table()
         if changed_any_class:
             self.app.discarded_tracking_classes = sorted(list(discarded_classes_set))
+            self.app.app_settings.set("discarded_tracking_classes", self.app.discarded_tracking_classes) # Auto-save
             self.app.project_manager.project_dirty = True
             self.app.logger.info(f"Discarded classes updated: {self.app.discarded_tracking_classes}", extra={'status_message': True})
             self.app.energy_saver.reset_activity_timer()
@@ -847,6 +850,7 @@ class ControlPanelUI:
         if imgui.button("Clear All Discards##ClearDiscardFilters", width=imgui.get_content_region_available_width()):
             if self.app.discarded_tracking_classes:
                 self.app.discarded_tracking_classes.clear()
+                self.app.app_settings.set("discarded_tracking_classes", self.app.discarded_tracking_classes) # Auto-save
                 self.app.project_manager.project_dirty = True
                 self.app.logger.info("All class discard filters cleared.", extra={'status_message': True})
                 self.app.energy_saver.reset_activity_timer()
