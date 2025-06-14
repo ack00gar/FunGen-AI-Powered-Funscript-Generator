@@ -3,11 +3,11 @@ import os
 import logging
 from typing import Optional
 
-SETTINGS_FILE = "settings.json"
+from config import constants
 
 
 class AppSettings:
-    def __init__(self, settings_file_path=SETTINGS_FILE, logger: Optional[logging.Logger] = None):
+    def __init__(self, settings_file_path=constants.SETTINGS_FILE, logger: Optional[logging.Logger] = None):
         self.settings_file = settings_file_path
         self.data = {}
         # Logger setup
@@ -26,13 +26,6 @@ class AppSettings:
         self.load_settings()
 
     def get_default_settings(self):
-        # The new constants file is now the source of truth.
-        # This method now assembles the default dictionary from those constants.
-        from config import constants  # Import the refactored constants module
-        import platform
-
-        # Select the correct shortcut dictionary based on the operating system
-        #shortcuts = constants.DEFAULT_SHORTCUTS_MACOS if platform.system() == "Darwin" else constants.DEFAULT_SHORTCUTS_WINDOWS
         shortcuts = constants.DEFAULT_SHORTCUTS
 
         defaults = {
@@ -83,19 +76,39 @@ class AppSettings:
             "tracking_axis_mode": "both",
             "single_axis_output_target": "primary",
 
+            # --- Live Tracker Settings ---
+            "live_tracker_confidence_threshold": constants.DEFAULT_TRACKER_CONFIDENCE_THRESHOLD,
+            "live_tracker_roi_padding": constants.DEFAULT_TRACKER_ROI_PADDING,
+            "live_tracker_roi_update_interval": constants.DEFAULT_ROI_UPDATE_INTERVAL,
+            "live_tracker_roi_smoothing_factor": constants.DEFAULT_ROI_SMOOTHING_FACTOR,
+            "live_tracker_roi_persistence_frames": constants.DEFAULT_ROI_PERSISTENCE_FRAMES,
+            "live_tracker_use_sparse_flow": False, # Assuming False is the default for a boolean
+            "live_tracker_dis_flow_preset": constants.DEFAULT_DIS_FLOW_PRESET,
+            "live_tracker_dis_finest_scale": constants.DEFAULT_DIS_FINEST_SCALE,
+            "live_tracker_sensitivity": constants.DEFAULT_LIVE_TRACKER_SENSITIVITY,
+            "live_tracker_base_amplification": constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION,
+            "live_tracker_class_amp_multipliers": constants.DEFAULT_CLASS_AMP_MULTIPLIERS,
+            "live_tracker_flow_smoothing_window": constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW,
+
             # Auto Post-Processing
             "enable_auto_post_processing": False,
-            "auto_post_processing_sg_window": constants.DEFAULT_AUTO_POST_SG_WINDOW,
-            "auto_post_processing_sg_polyorder": constants.DEFAULT_AUTO_POST_SG_POLYORDER,
-            "auto_post_processing_rdp_epsilon": constants.DEFAULT_AUTO_POST_RDP_EPSILON,
-            "auto_post_processing_clamp_lower_threshold_primary": constants.DEFAULT_AUTO_POST_CLAMP_LOW,
-            "auto_post_processing_clamp_upper_threshold_primary": constants.DEFAULT_AUTO_POST_CLAMP_HIGH,
+            "auto_processing_use_chapter_profiles": True,
+            "auto_post_proc_final_rdp_enabled": False,
+            "auto_post_proc_final_rdp_epsilon": 10.0,
             "auto_post_processing_amplification_config": constants.DEFAULT_AUTO_POST_AMP_CONFIG,
 
             # Shortcuts
             "funscript_editor_shortcuts": shortcuts,
         }
-
+        # The following settings are not configurable via UI but are still managed here
+        # Note: These were previously in the main dict, but it's cleaner to separate them.
+        # However, for this example, we will keep them as is. Let's ensure the previous auto_post_proc settings are removed to avoid duplication
+        # The following are now derived from the amp_config dict, so they are not needed as separate settings.
+        # "auto_post_processing_sg_window": constants.DEFAULT_AUTO_POST_SG_WINDOW,
+        # "auto_post_processing_sg_polyorder": constants.DEFAULT_AUTO_POST_SG_POLYORDER,
+        # "auto_post_processing_rdp_epsilon": constants.DEFAULT_AUTO_POST_RDP_EPSILON,
+        # "auto_post_processing_clamp_lower_threshold_primary": constants.DEFAULT_AUTO_POST_CLAMP_LOW,
+        # "auto_post_processing_clamp_upper_threshold_primary": constants.DEFAULT_AUTO_POST_CLAMP_HIGH,
         return defaults
 
     def load_settings(self):
@@ -140,9 +153,18 @@ class AppSettings:
         # it falls back to the hardcoded default from get_default_settings()
         # then to the 'default' parameter of this get method.
         if key not in self.data:
-            return default  # Fallback to the 'default' arg of this function
+            defaults = self.get_default_settings()
+            if key in defaults:
+                self.data[key] = defaults[key]
+                return defaults[key]
+            return default
         return self.data.get(key, default)
 
     def set(self, key, value):
         self.data[key] = value
         self.save_settings()  # here for immediate saving
+
+    def reset_to_defaults(self):
+        self.data = self.get_default_settings()
+        self.save_settings()
+        self.logger.info("All application settings have been reset to their default values.")
