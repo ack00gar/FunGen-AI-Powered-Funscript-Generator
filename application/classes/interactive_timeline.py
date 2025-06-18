@@ -536,14 +536,22 @@ class InteractiveFunscriptTimeline:
             was_interacting = app_state.timeline_interaction_active
             is_interacting_this_frame = False
 
+            # Original strict hover check for general timeline interaction
             is_timeline_hovered = imgui.is_window_hovered() and \
                                   canvas_abs_pos[0] <= mouse_pos[0] < canvas_abs_pos[0] + canvas_size[0] and \
                                   canvas_abs_pos[1] <= mouse_pos[1] < canvas_abs_pos[1] + canvas_size[1]
 
+            # Relaxed hover check specifically for starting a marquee selection
+            # This allows starting a marquee a few pixels outside the strict canvas bounds
+            marquee_hover_padding = 5.0 * self.app.app_settings.get("global_font_scale", 1.0) # Adjust padding as needed
+            is_timeline_hovered_for_marquee_start = imgui.is_window_hovered() and \
+                                                    canvas_abs_pos[0] - marquee_hover_padding <= mouse_pos[0] < canvas_abs_pos[0] + canvas_size[0] + marquee_hover_padding and \
+                                                    canvas_abs_pos[1] - marquee_hover_padding <= mouse_pos[1] < canvas_abs_pos[1] + canvas_size[1] + marquee_hover_padding
+
             can_manual_pan_zoom = (video_loaded and not self.app.processor.is_processing) or not video_loaded
 
             # Check all inputs that count as interaction
-            if is_timeline_hovered and can_manual_pan_zoom:
+            if is_timeline_hovered and can_manual_pan_zoom: # Only allow pan/zoom if strictly hovered over canvas
                 # Mouse Pan/Zoom
                 is_mouse_panning = (imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_MIDDLE) or (
                             io.key_shift and imgui.is_mouse_dragging(
@@ -961,77 +969,78 @@ class InteractiveFunscriptTimeline:
 
             # --- Mouse Interactions ---
             # region Mouse
-            if is_timeline_hovered:
-                # Context Menu
-                if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
-                    self.context_mouse_pos_screen = mouse_pos
-                    time_at_click = x_to_time(mouse_pos[0])
-                    pos_at_click = y_to_pos(mouse_pos[1])
-                    snap_time = app_state.snap_to_grid_time_ms if app_state.snap_to_grid_time_ms > 0 else 1
-                    snap_pos = app_state.snap_to_grid_pos if app_state.snap_to_grid_pos > 0 else 1
-                    self.new_point_candidate_at = max(0, int(round(time_at_click / snap_time)) * snap_time)
-                    self.new_point_candidate_pos = min(100, max(0, int(round(pos_at_click / snap_pos)) * snap_pos))
-                    if hovered_action_idx_current_timeline != -1 and not (
-                            hovered_action_idx_current_timeline in self.multi_selected_action_indices):
-                        if not io.key_ctrl: self.multi_selected_action_indices.clear()
-                        self.multi_selected_action_indices.add(hovered_action_idx_current_timeline)
+            # Use the relaxed hover check for starting the marquee
+            if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and not io.key_shift:
+                if hovered_action_idx_current_timeline != -1:
+                    # ============================ START: CALIBRATION HOOK ============================
+                    if self.app.calibration and self.app.calibration.is_calibration_mode_active:
+                        # 1. Notify the calibration manager with the timestamp
+                        clicked_action_time_ms = actions_list[hovered_action_idx_current_timeline]['at']
+                        self.app.calibration.handle_calibration_point_selection(clicked_action_time_ms)
+
+                        # 2. Update this timeline's UI to select the point
                         self.selected_action_idx = hovered_action_idx_current_timeline
-                    imgui.open_popup(context_popup_id)
+                        self.multi_selected_action_indices = {hovered_action_idx_current_timeline}
 
-                # Point Click / Marquee Start
-                if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and not io.key_shift:
-                    if hovered_action_idx_current_timeline != -1:
-                        # ============================ START: CALIBRATION HOOK ============================
-                        if self.app.calibration and self.app.calibration.is_calibration_mode_active:
-                            # 1. Notify the calibration manager with the timestamp
-                            clicked_action_time_ms = actions_list[hovered_action_idx_current_timeline]['at']
-                            self.app.calibration.handle_calibration_point_selection(clicked_action_time_ms)
-
-                            # 2. Update this timeline's UI to select the point
-                            self.selected_action_idx = hovered_action_idx_current_timeline
-                            self.multi_selected_action_indices = {hovered_action_idx_current_timeline}
-
-                            # 3. Seek the video and focus the timeline on the selected point
-                            if video_loaded and not self.app.processor.is_processing and video_fps_for_calc > 0:
-                                target_frame_on_click = int(
-                                    round((clicked_action_time_ms / 1000.0) * video_fps_for_calc))
-                                self.app.processor.seek_video(
-                                    np.clip(target_frame_on_click, 0, self.app.processor.total_frames - 1))
-                                app_state.force_timeline_pan_to_current_frame = True
-
-                            # Prevent any other click logic from running for this event
-                            imgui.end()
-                            if is_floating: imgui.end()
-                            return
-                        # ============================= END: CALIBRATION HOOK =============================
-
-                        self.is_marqueeing = False
-                        if not io.key_ctrl: self.multi_selected_action_indices.clear()
-                        if hovered_action_idx_current_timeline in self.multi_selected_action_indices and io.key_ctrl:
-                            self.multi_selected_action_indices.remove(hovered_action_idx_current_timeline)
-                        else:
-                            self.multi_selected_action_indices.add(hovered_action_idx_current_timeline)
-                        self.selected_action_idx = min(
-                            self.multi_selected_action_indices) if self.multi_selected_action_indices else -1
-
-                        self.dragging_action_idx = hovered_action_idx_current_timeline
-                        if not self.drag_undo_recorded and allow_editing_timeline:
-                            fs_proc._record_timeline_action(self.timeline_num, "Start Point Drag")
-                            self.drag_undo_recorded = True
-
+                        # 3. Seek the video and focus the timeline on the selected point
                         if video_loaded and not self.app.processor.is_processing and video_fps_for_calc > 0:
-                            target_frame_on_click = int(round((actions_list[hovered_action_idx_current_timeline][
-                                                                   "at"] / 1000.0) * video_fps_for_calc))
+                            target_frame_on_click = int(
+                                round((clicked_action_time_ms / 1000.0) * video_fps_for_calc))
                             self.app.processor.seek_video(
                                 np.clip(target_frame_on_click, 0, self.app.processor.total_frames - 1))
                             app_state.force_timeline_pan_to_current_frame = True
-                    else:  # Start marquee
-                        self.is_marqueeing = True
-                        self.marquee_start_screen_pos = mouse_pos
-                        self.marquee_end_screen_pos = mouse_pos
-                        if not io.key_ctrl:
-                            self.multi_selected_action_indices.clear()
-                            self.selected_action_idx = -1
+
+                        # Prevent any other click logic from running for this event
+                        imgui.end()
+                        if is_floating: imgui.end()
+                        return
+                    # ============================= END: CALIBRATION HOOK =============================
+
+                    self.is_marqueeing = False
+                    if not io.key_ctrl: self.multi_selected_action_indices.clear()
+                    if hovered_action_idx_current_timeline in self.multi_selected_action_indices and io.key_ctrl:
+                        self.multi_selected_action_indices.remove(hovered_action_idx_current_timeline)
+                    else:
+                        self.multi_selected_action_indices.add(hovered_action_idx_current_timeline)
+                    self.selected_action_idx = min(
+                        self.multi_selected_action_indices) if self.multi_selected_action_indices else -1
+
+                    self.dragging_action_idx = hovered_action_idx_current_timeline
+                    if not self.drag_undo_recorded and allow_editing_timeline:
+                        fs_proc._record_timeline_action(self.timeline_num, "Start Point Drag")
+                        self.drag_undo_recorded = True
+
+                    if video_loaded and not self.app.processor.is_processing and video_fps_for_calc > 0:
+                        target_frame_on_click = int(round((actions_list[hovered_action_idx_current_timeline][
+                                                               "at"] / 1000.0) * video_fps_for_calc))
+                        self.app.processor.seek_video(
+                            np.clip(target_frame_on_click, 0, self.app.processor.total_frames - 1))
+                        app_state.force_timeline_pan_to_current_frame = True
+                elif is_timeline_hovered_for_marquee_start:  # Use the relaxed hover check here for marquee
+                    # Start marquee
+                    self.is_marqueeing = True
+                    self.marquee_start_screen_pos = mouse_pos
+                    self.marquee_end_screen_pos = mouse_pos
+                    if not io.key_ctrl:
+                        self.multi_selected_action_indices.clear()
+                        self.selected_action_idx = -1
+
+            # Context Menu (only when strictly hovered over the canvas, not the padding)
+            if is_timeline_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
+                self.context_mouse_pos_screen = mouse_pos
+                time_at_click = x_to_time(mouse_pos[0])
+                pos_at_click = y_to_pos(mouse_pos[1])
+                snap_time = app_state.snap_to_grid_time_ms if app_state.snap_to_grid_time_ms > 0 else 1
+                snap_pos = app_state.snap_to_grid_pos if app_state.snap_to_grid_pos > 0 else 1
+                self.new_point_candidate_at = max(0, int(round(time_at_click / snap_time)) * snap_time)
+                self.new_point_candidate_pos = min(100, max(0, int(round(pos_at_click / snap_pos)) * snap_pos))
+                if hovered_action_idx_current_timeline != -1 and not (
+                        hovered_action_idx_current_timeline in self.multi_selected_action_indices):
+                    if not io.key_ctrl: self.multi_selected_action_indices.clear()
+                    self.multi_selected_action_indices.add(hovered_action_idx_current_timeline)
+                    self.selected_action_idx = hovered_action_idx_current_timeline
+                imgui.open_popup(context_popup_id)
+
 
             # Point Drag
             if self.dragging_action_idx != -1 and imgui.is_mouse_dragging(
