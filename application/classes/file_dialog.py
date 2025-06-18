@@ -127,56 +127,37 @@ class ImGuiFileDialog:
         if not self.open:
             return
 
-        # Adjust window size to accommodate buttons better
         imgui.set_next_window_size(750, 400)
+        is_open_current_frame, self.open = imgui.begin(self.title, self.open)
 
-        # Store window state
-        expanded, self.open = imgui.begin(self.title, True)
-
-        if expanded:  # Only proceed if window is expanded
+        if is_open_current_frame:  # This means the window is visible and ready for drawing content
             try:
-                # Create a two-column layout with proper sizing
                 imgui.columns(2, 'main_columns', border=False)
-                imgui.set_column_width(0, 150)  # Set fixed width for sidebar
-
-                # Store the current column count
-                initial_columns = imgui.get_columns_count()
-
-                # Left column: sidebar with common directories
+                imgui.set_column_width(0, 150)
                 self._draw_common_dirs_sidebar()
-
-                # Right column: directory content and file selection
                 imgui.next_column()
-
-                # Navigation bar
                 self._draw_directory_navigation()
-
-                # File type filter
                 self._draw_filter_selector()
 
-                # Create a child window for the file listing that takes most of the space
                 if imgui.begin_child("Files", width=0, height=-75, border=True):
                     self._draw_file_list()
-                    imgui.end_child()
+                    imgui.end_child()  # Ensure end_child is called here
 
-                # Bottom bar with cancel/open buttons
                 should_close = self._draw_bottom_bar()
                 if should_close:
-                    return
+                    self.open = False  # Set self.open to False to close the dialog
 
-                # Draw overwrite confirmation if needed
                 self._draw_overwrite_confirm()
 
-                # Only reset columns if we actually created them
-                if initial_columns == 1:
-                    imgui.columns(1)
             finally:
-                # Always end the window if it was expanded
+                # Ensure columns are reset before ending the window
+                imgui.columns(1)
                 imgui.end()
+
         else:
-            # If window wasn't expanded, just end it
             imgui.end()
-            return  # Return immediately if window wasn't expanded
+            if not self.open:
+                return
 
     def _draw_directory_navigation(self) -> None:
         # Current directory path display
