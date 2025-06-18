@@ -473,6 +473,7 @@ class AppStageProcessor:
             result_path = stage1_module.perform_yolo_analysis(
                 video_path_arg=fm.video_path,
                 yolo_model_path_arg=self.app.yolo_det_model_path,
+                yolo_pose_model_path_arg=self.app.yolo_pose_model_path,
                 confidence_threshold=self.app.tracker.confidence_threshold,
                 progress_callback=self._stage1_progress_callback,
                 stop_event_external=self.stop_stage_event,
@@ -552,7 +553,6 @@ class AppStageProcessor:
                 scripting_range_active_arg=range_is_active,
                 scripting_range_start_frame_arg=range_start_frame,
                 scripting_range_end_frame_arg=range_end_frame,
-                generate_funscript_actions_arg=generate_funscript_actions,
                 is_ranged_data_source=is_ranged_data_source  # Pass the new flag
             )
             if self.stop_stage_event.is_set():

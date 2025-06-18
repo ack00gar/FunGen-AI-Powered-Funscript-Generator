@@ -541,14 +541,13 @@ class ControlPanelUI:
 
         tracker_instance = self.app.tracker
         settings = self.app.app_settings
-        # This section no longer dirties the project file.
-        # self.app.project_manager.project_dirty = True
 
         if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu",
                                    flags=imgui.TREE_NODE_DEFAULT_OPEN):
             # Confidence Threshold
             current_conf = settings.get("live_tracker_confidence_threshold")
-            changed, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", current_conf, 0.1, 0.95, "%.2f")
+            changed, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", current_conf, 0.1, 0.95,
+                                                   "%.2f")
             if changed:
                 settings.set("live_tracker_confidence_threshold", new_conf)
                 tracker_instance.confidence_threshold = new_conf
@@ -596,49 +595,52 @@ class ControlPanelUI:
                 settings.set("live_tracker_use_sparse_flow", new_sparse_flow)
                 tracker_instance.use_sparse_flow = new_sparse_flow
 
-                # DIS Dense Flow Settings
-                imgui.text("DIS Dense Flow Settings:")
-                if current_sparse_flow:
-                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+            # DIS Dense Flow Settings
+            imgui.text("DIS Dense Flow Settings:")
+            # Apply disable styling only if sparse flow is currently enabled
+            if current_sparse_flow:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-                dis_presets = ["ULTRAFAST", "FAST", "MEDIUM"]
-                current_preset = settings.get("live_tracker_dis_flow_preset").upper()
-                try:
-                    preset_idx = dis_presets.index(current_preset)
-                except ValueError:
-                    preset_idx = 0
-                changed, new_idx = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu", preset_idx, dis_presets)
+            dis_presets = ["ULTRAFAST", "FAST", "MEDIUM"]
+            current_preset = settings.get("live_tracker_dis_flow_preset").upper()
+            try:
+                preset_idx = dis_presets.index(current_preset)
+            except ValueError:
+                preset_idx = 0
+            changed, new_idx = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu", preset_idx, dis_presets)
+            if changed:
+                new_preset = dis_presets[new_idx]
+                settings.set("live_tracker_dis_flow_preset", new_preset)
+                tracker_instance.update_dis_flow_config(preset=new_preset)
+
+            current_scale = settings.get("live_tracker_dis_finest_scale")
+            changed, new_scale = imgui.input_int("DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu",
+                                                 current_scale)
+            if changed:
+                settings.set("live_tracker_dis_finest_scale", new_scale)
+                tracker_instance.update_dis_flow_config(finest_scale=new_scale)
+
+            # Ensure pop is called when push was called
+            if current_sparse_flow:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+
+            if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu",
+                                       flags=imgui.TREE_NODE_DEFAULT_OPEN):
+                # Output Sensitivity
+                current_sensitivity = settings.get("live_tracker_sensitivity")
+                changed, new_sensitivity = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu",
+                                                              current_sensitivity,
+                                                              0.0, 100.0, "%.1f")
                 if changed:
-                    new_preset = dis_presets[new_idx]
-                    settings.set("live_tracker_dis_flow_preset", new_preset)
-                    tracker_instance.update_dis_flow_config(preset=new_preset)
+                    settings.set("live_tracker_sensitivity", new_sensitivity)
+                    tracker_instance.sensitivity = new_sensitivity
 
-                    current_scale = settings.get("live_tracker_dis_finest_scale")
-                    changed, new_scale = imgui.input_int("DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu",
-                                                         current_scale)
-                    if changed:
-                        settings.set("live_tracker_dis_finest_scale", new_scale)
-                        tracker_instance.update_dis_flow_config(finest_scale=new_scale)
-
-                    if current_sparse_flow:
-                        imgui.pop_style_var()
-                        imgui.internal.pop_item_flag()
-
-                if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu",
-                                           flags=imgui.TREE_NODE_DEFAULT_OPEN):
-                    # Output Sensitivity
-                    current_sensitivity = settings.get("live_tracker_sensitivity")
-                    changed, new_sensitivity = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu",
-                                                                  current_sensitivity,
-                                                                  0.0, 100.0, "%.1f")
-                    if changed:
-                        settings.set("live_tracker_sensitivity", new_sensitivity)
-                        tracker_instance.sensitivity = new_sensitivity
-
-                    # Base Amplification
+                # Base Amplification
                 current_amp = settings.get("live_tracker_base_amplification")
-                changed, new_amp = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu", current_amp, 0.1, 5.0,
+                changed, new_amp = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu", current_amp, 0.1,
+                                                      5.0,
                                                       "%.2f")
                 if changed:
                     new_amp = max(0.1, new_amp)
@@ -1036,6 +1038,28 @@ class ControlPanelUI:
             imgui.pop_item_width()
             imgui.next_column()
 
+            # --- Output Range ---
+            output_min = profile_params.get("output_min", 0)
+            output_max = profile_params.get("output_max", 100)
+
+            imgui.text("Output Min")
+            imgui.next_column()
+            imgui.push_item_width(-1)
+            changed_out_min, new_out_min = imgui.slider_int("##out_min", output_min, 0, 100)
+            if changed_out_min:
+                output_min = min(new_out_min, output_max); profile_params["output_min"] = output_min; config_changed = True
+            imgui.pop_item_width()
+            imgui.next_column()
+
+            imgui.text("Output Max")
+            imgui.next_column()
+            imgui.push_item_width(-1)
+            changed_out_max, new_out_max = imgui.slider_int("##out_max", output_max, 0, 100)
+            if changed_out_max:
+                output_max = max(new_out_max, output_min); profile_params["output_max"] = output_max; config_changed = True
+            imgui.pop_item_width()
+            imgui.next_column()
+
             imgui.columns(1)
             imgui.tree_pop()
 
@@ -1280,6 +1304,24 @@ class ControlPanelUI:
         if imgui.button("Apply RDP##ApplyRDP"):
             prep_op()
             fs_proc.handle_funscript_operation('apply_rdp')
+
+        imgui.separator()
+        imgui.text("Dynamic Amplification")
+
+        # Add a new parameter to AppFunscriptProcessor for this
+        if not hasattr(fs_proc, 'dynamic_amp_window_ms_input'):
+            fs_proc.dynamic_amp_window_ms_input = 4000  # Default to 4 seconds
+
+        win_ch, win_new = imgui.slider_int("Window (ms)##DynAmpWin", fs_proc.dynamic_amp_window_ms_input, 500, 10000)
+        if win_ch:
+            fs_proc.dynamic_amp_window_ms_input = win_new
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("The size of the 'before/after' window in milliseconds to consider for amplification.")
+
+        if imgui.button("Apply Dynamic Amplify##ApplyDynAmp"):
+            prep_op()  # This is the existing helper function
+            fs_proc.handle_funscript_operation('apply_dynamic_amp')
+
         if proc_tools_disabled:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()

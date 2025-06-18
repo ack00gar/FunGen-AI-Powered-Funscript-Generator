@@ -1,4 +1,8 @@
 import imgui
+from typing import Optional
+
+
+import config.constants as constants
 
 
 class VideoDisplayUI:
@@ -238,6 +242,41 @@ class VideoDisplayUI:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
 
+    def _render_pose_skeleton(self, draw_list, pose_data: dict, is_dominant: bool):
+        """Draws the skeleton, highlighting the dominant pose."""
+        keypoints = pose_data.get("keypoints", [])
+        if not isinstance(keypoints, list) or len(keypoints) < 17: return
+
+        # --- Color based on whether this is the dominant pose ---
+        if is_dominant:
+            limb_color = imgui.get_color_u32_rgba(0.1, 1.0, 0.1, 0.95)  # Bright Green
+            kpt_color = imgui.get_color_u32_rgba(1.0, 0.5, 0.1, 1.0)  # Bright Orange
+            thickness = 2
+        else:
+            limb_color = imgui.get_color_u32_rgba(0.2, 0.6, 1, 0.4)  # Muted Cyan
+            kpt_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.5)  # Muted Red
+            thickness = 1
+
+        skeleton = [[0, 1], [0, 2], [1, 3], [2, 4], [5, 6], [5, 11], [6, 12], [11, 12], [5, 7], [7, 9], [6, 8], [8, 10],
+                    [11, 13], [13, 15], [12, 14], [14, 16]]
+
+        for conn in skeleton:
+            idx1, idx2 = conn
+            if not (idx1 < len(keypoints) and idx2 < len(keypoints)): continue
+            kp1, kp2 = keypoints[idx1], keypoints[idx2]
+            if kp1[2] > 0.5 and kp2[2] > 0.5:
+                p1_screen = self._video_to_screen_coords(int(kp1[0]), int(kp1[1]))
+                p2_screen = self._video_to_screen_coords(int(kp2[0]), int(kp2[1]))
+                if p1_screen and p2_screen:
+                    draw_list.add_line(p1_screen[0], p1_screen[1], p2_screen[0], p2_screen[1], limb_color,
+                                       thickness=thickness)
+
+        for kp in keypoints:
+            if kp[2] > 0.5:
+                p_screen = self._video_to_screen_coords(int(kp[0]), int(kp[1]))
+                if p_screen:
+                    draw_list.add_circle_filled(p_screen[0], p_screen[1], 3.0, kpt_color)
+
     def render(self):
         app_state = self.app.app_state_ui
         is_floating = app_state.ui_layout_mode == 'floating'
@@ -475,44 +514,60 @@ class VideoDisplayUI:
 
     def _render_stage2_overlay(self, stage_proc, app_state):
         frame_overlay_data = stage_proc.stage2_overlay_data_map.get(self.app.processor.current_frame_index)
-        if frame_overlay_data:
-            draw_list = imgui.get_window_draw_list()
+        if not frame_overlay_data: return
 
-            img_rect = self._actual_video_image_rect_on_screen
-            draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'],
-                                     True)
+        draw_list = imgui.get_window_draw_list()
+        img_rect = self._actual_video_image_rect_on_screen
+        draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
 
-            yolo_img_size_w, yolo_img_size_h = self.app.yolo_input_size, self.app.yolo_input_size
-            # If tracker works on different aspect ratio source, this needs to be source dimensions
-            if self.app.processor and self.app.processor.current_frame is not None:
-                h, w = self.app.processor.current_frame.shape[:2]
-                yolo_img_size_w, yolo_img_size_h = w, h
+        dominant_pose_id = frame_overlay_data.get("dominant_pose_id")
+        active_track_id = frame_overlay_data.get("active_interaction_track_id")
+        is_occluded = frame_overlay_data.get("is_occluded", False)
 
-            for box_data in frame_overlay_data.get("yolo_boxes", []):
-                if not box_data or "bbox" not in box_data: continue
-                yolo_bbox = box_data["bbox"]
+        for pose in frame_overlay_data.get("poses", []):
+            is_dominant = (pose.get("id") == dominant_pose_id)
+            self._render_pose_skeleton(draw_list, pose, is_dominant)
 
-                # box coordinates are x1,y1,x2,y2 in original yolo_input_size space
-                vid_x1, vid_y1 = yolo_bbox[0], yolo_bbox[1]
-                vid_x2, vid_y2 = yolo_bbox[2], yolo_bbox[3]
+        for box in frame_overlay_data.get("yolo_boxes", []):
+            if not box or "bbox" not in box: continue
 
-                screen_p1 = self._video_to_screen_coords(vid_x1, vid_y1)
-                screen_p2 = self._video_to_screen_coords(vid_x2, vid_y2)
+            p1 = self._video_to_screen_coords(box["bbox"][0], box["bbox"][1])
+            p2 = self._video_to_screen_coords(box["bbox"][2], box["bbox"][3])
 
-                if screen_p1 and screen_p2:
-                    color_t, thick, dashed = self.app.utility.get_box_style(box_data)
-                    color_u32 = imgui.get_color_u32_rgba(color_t[0], color_t[1], color_t[2], color_t[3])
-                    draw_list.add_rect(screen_p1[0], screen_p1[1], screen_p2[0], screen_p2[1], color_u32,
-                                       thickness=thick, rounding=2.0)
-                    label = f'{box_data.get("class_name", "N/A")} ({box_data.get("status", "N/A")[0:3]})'
-                    text_col = imgui.get_color_u32_rgba(color_t[0] * 0.8, color_t[1] * 0.8, color_t[2] * 0.8, 1.0)
-                    draw_list.add_text(screen_p1[0] + 2, screen_p1[1] + 2, text_col, label)
+            if p1 and p2:
+                is_active_interactor = (box.get("track_id") is not None and box.get("track_id") == active_track_id)
+                is_locked_penis = (box.get("class_name") == "locked_penis")
 
-            pen_level = frame_overlay_data.get("penetration_level")
-            if pen_level is not None:
-                draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 20,
-                                   imgui.get_color_u32_rgba(1, 1, 1, 0.8), f"Penetration: {pen_level}")
-            draw_list.pop_clip_rect()
+                is_inferred_relative = (box.get("status") == constants.STATUS_INFERRED_RELATIVE)
+
+                # --- NEW HIERARCHICAL HIGHLIGHTING LOGIC ---
+                if is_active_interactor:
+                    color = (1.0, 1.0, 0.0, 1.0)  # Bright Yellow for ACTIVE interactor
+                    thickness = 3.0
+                elif is_locked_penis:
+                    color = (0.1, 1.0, 0.1, 0.95)  # Bright Green for LOCKED PENIS
+                    thickness = 2.0
+                elif is_inferred_relative:
+                    color = (0.8, 0.4, 1.0, 0.85) # A distinct purple for inferred boxes
+                    thickness = 1.0 # Thinner to indicate lower certainty
+                else:
+                    color, thickness, _ = self.app.utility.get_box_style(box)
+
+                color_u32 = imgui.get_color_u32_rgba(*color)
+                draw_list.add_rect(p1[0], p1[1], p2[0], p2[1], color_u32, thickness=thickness, rounding=2.0)
+
+                label = f'{box.get("class_name", "?")}'
+                if is_active_interactor:
+                    label += " (ACTIVE)"
+                elif is_inferred_relative:
+                    label += " (Inferred)"
+                draw_list.add_text(p1[0] + 3, p1[1] + 3, imgui.get_color_u32_rgba(1, 1, 1, 1), label)
+
+        if is_occluded:
+            draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 20, imgui.get_color_u32_rgba(1, 0.6, 0, 0.9),
+                               "OCCLUSION (FALLBACK)")
+
+        draw_list.pop_clip_rect()
 
     def _render_video_zoom_pan_controls(self, app_state):
         style = imgui.get_style()

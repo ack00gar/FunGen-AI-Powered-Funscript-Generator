@@ -63,7 +63,7 @@ class AppSettings:
 
             # Autosave & Energy Saver
             "autosave_enabled": True,
-            "autosave_interval_seconds": 60,
+            "autosave_interval_seconds": 120,
             "autosave_on_exit": True,
             "energy_saver_enabled": True,
             "energy_saver_threshold_seconds": 30.0,

@@ -708,3 +708,61 @@ class DualAxisFunscript:
         # Update last timestamps
         self.last_timestamp_primary = self.primary_actions[-1]['at'] if self.primary_actions else 0
         self.last_timestamp_secondary = self.secondary_actions[-1]['at'] if self.secondary_actions else 0
+
+    def scale_points_to_range(self, axis: str, output_min: int, output_max: int,
+                              start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
+                              selected_indices: Optional[List[int]] = None):
+        """
+        Scales the position of points within a selection to a new output range,
+        disregarding outliers when determining the signal's current range.
+        """
+        actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list_ref or len(actions_list_ref) < 2:
+            return
+
+        # Determine which indices to process
+        indices_to_process: List[int] = []
+        if selected_indices is not None:
+            indices_to_process = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
+        elif start_time_ms is not None and end_time_ms is not None:
+            s_idx, e_idx = self._get_action_indices_in_time_range(actions_list_ref, start_time_ms, end_time_ms)
+            if s_idx is not None and e_idx is not None:
+                indices_to_process = list(range(s_idx, e_idx + 1))
+        else:
+            indices_to_process = list(range(len(actions_list_ref)))
+
+        if len(indices_to_process) < 2:
+            self.logger.info(f"Not enough points in selection for range scaling on {axis} axis.")
+            return
+
+        # --- Use percentiles to ignore outliers ---
+        positions_in_segment = np.array([actions_list_ref[i]['pos'] for i in indices_to_process])
+
+        # Use percentiles to find the effective min/max, ignoring the top and bottom 5% as outliers
+        effective_min = np.percentile(positions_in_segment, 10)
+        effective_max = np.percentile(positions_in_segment, 90)
+
+        current_effective_range = effective_max - effective_min
+        target_range = output_max - output_min
+
+        if current_effective_range <= 0:  # If there's no variation in the main signal body
+            # Set all points to the middle of the target range
+            new_pos = int(round(output_min + target_range / 2.0))
+            for idx in indices_to_process:
+                actions_list_ref[idx]['pos'] = new_pos
+            self.logger.info(f"Scaled {len(indices_to_process)} flat points on {axis} axis to {new_pos}.")
+            return
+
+        # Apply the scaling based on the effective range
+        for idx in indices_to_process:
+            original_pos = actions_list_ref[idx]['pos']
+            # Normalize the position from 0-1 based on the effective range
+            normalized_pos = (original_pos - effective_min) / current_effective_range
+            # Clip the normalized value to handle outliers (points outside the 5-95 percentile range)
+            clipped_normalized_pos = np.clip(normalized_pos, 0.0, 1.0)
+            # Scale to the new target range
+            new_pos = int(round(output_min + clipped_normalized_pos * target_range))
+            actions_list_ref[idx]['pos'] = np.clip(new_pos, 0, 100)  # Final safety clip
+
+        self.logger.info(
+            f"Scaled {len(indices_to_process)} points on {axis} axis to new range [{output_min}-{output_max}].")
