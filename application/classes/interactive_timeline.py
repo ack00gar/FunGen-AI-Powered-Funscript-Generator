@@ -42,6 +42,8 @@ class InteractiveFunscriptTimeline:
 
         # Unified interaction flag, replacing is_interacting_with_pan_zoom and app_state.timeline_interaction_active
         self.is_interacting: bool = False
+        self.is_panning_active: bool = False
+        self.is_zooming_active: bool = False
 
         # For range selection
         self.selection_anchor_idx: int = -1
@@ -541,6 +543,12 @@ class InteractiveFunscriptTimeline:
             # region StateMachine
             was_interacting = app_state.timeline_interaction_active
             is_interacting_this_frame = False
+            # Reset pan and zoom flags at the start of each frame
+            was_panning_active = self.is_panning_active
+            was_zooming_active = self.is_zooming_active
+            self.is_panning_active = False
+            self.is_zooming_active = False
+
 
             # Original strict hover check for general timeline interaction
             is_timeline_hovered = imgui.is_window_hovered() and \
@@ -565,16 +573,21 @@ class InteractiveFunscriptTimeline:
                 if is_mouse_panning:
                     app_state.timeline_pan_offset_ms -= io.mouse_delta[0] * app_state.timeline_zoom_factor_ms_per_px
                     is_interacting_this_frame = True
+                    self.is_panning_active = True
 
                 if io.mouse_wheel != 0.0:
-                    mouse_x_relative_to_canvas = mouse_pos[0] - canvas_abs_pos[0]
-                    time_at_mouse_before_zoom = x_to_time(mouse_x_relative_to_canvas)
+                    # Capture the time at the current center of the visible timeline BEFORE zoom
+                    time_at_current_center_ms = x_to_time(center_x_marker) # Using the center_x_marker defined earlier
+
                     scale_factor = 0.85 if io.mouse_wheel > 0 else 1.15
                     app_state.timeline_zoom_factor_ms_per_px = max(0.01,
                                                                    min(app_state.timeline_zoom_factor_ms_per_px * scale_factor,
                                                                        2000.0))
-                    app_state.timeline_pan_offset_ms = time_at_mouse_before_zoom - mouse_x_relative_to_canvas * app_state.timeline_zoom_factor_ms_per_px
+                    # Calculate new pan offset to keep the *original center time* at the *new center of the screen*
+                    app_state.timeline_pan_offset_ms = time_at_current_center_ms - (canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
+
                     is_interacting_this_frame = True
+                    self.is_zooming_active = True
 
             # Also count point dragging and marqueeing as interaction
             if self.dragging_action_idx != -1 and imgui.is_mouse_dragging(
@@ -597,6 +610,7 @@ class InteractiveFunscriptTimeline:
                     pan_left_tuple[0]):
                     app_state.timeline_pan_offset_ms -= pan_key_speed_ms
                     is_interacting_this_frame = True
+                    self.is_panning_active = True
 
                 pan_right_tuple = self.app._map_shortcut_to_glfw_key(
                     shortcuts.get("pan_timeline_right", "ALT+RIGHT_ARROW"))
@@ -607,6 +621,7 @@ class InteractiveFunscriptTimeline:
                     pan_right_tuple[0]):
                     app_state.timeline_pan_offset_ms += pan_key_speed_ms
                     is_interacting_this_frame = True
+                    self.is_panning_active = True
 
                 # Select All
                 select_all_tuple = self.app._map_shortcut_to_glfw_key(shortcuts.get("select_all_points", "CTRL+A"))
@@ -760,25 +775,29 @@ class InteractiveFunscriptTimeline:
                 app_state.timeline_pan_offset_ms = np.clip(app_state.timeline_pan_offset_ms, min_pan_allowed,
                                                            max_pan_allowed)
 
-            # Detect end of interaction to seek video
-            if was_interacting and not app_state.timeline_interaction_active:
+            # Detect end of *panning* interaction to seek video
+            # Only seek if a pan was active and it just ended, OR if a non-panning interaction just ended
+            # AND there's no continuous interaction active right now (like auto-pan for playback)
+            # This specifically prevents video seeking on zoom ending.
+            if (was_panning_active or was_zooming_active) and not self.is_panning_active and not self.is_zooming_active:
                 if video_loaded and not self.app.processor.is_processing:
                     center_x_marker = canvas_abs_pos[0] + canvas_size[0] / 2.0
                     time_at_center_ms = x_to_time(center_x_marker)
                     clamped_time_ms = np.clip(time_at_center_ms, 0, effective_total_duration_ms)
                     target_frame = int(round((clamped_time_ms / 1000.0) * video_fps_for_calc))
                     clamped_frame = np.clip(target_frame, 0, self.app.processor.total_frames - 1)
+                    # Only seek if the target frame is different from current
                     if abs(clamped_frame - self.app.processor.current_frame_index) > 0:
                         self.app.processor.seek_video(clamped_frame)
                         self.app.project_manager.project_dirty = True
-                        app_state.force_timeline_pan_to_current_frame = True
+                        app_state.force_timeline_pan_to_current_frame = True # This will cause it to pan to the frame if needed
 
             # Auto-pan logic (for playback or forced sync)
             is_playing = video_loaded and self.app.processor.is_processing
             pan_to_current_frame = video_loaded and not is_playing and app_state.force_timeline_pan_to_current_frame
-            if (is_playing or pan_to_current_frame) and not app_state.timeline_interaction_active:
+            if (is_playing or pan_to_current_frame) and not app_state.timeline_interaction_active: # No manual interaction right now
                 current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
-                target_pan_offset = current_video_time_ms - center_marker_offset_ms
+                target_pan_offset = current_video_time_ms - center_marker_offset_ms # Using effective center of screen
                 app_state.timeline_pan_offset_ms = np.clip(target_pan_offset, min_pan_allowed, max_pan_allowed)
                 if pan_to_current_frame:
                     app_state.force_timeline_pan_to_current_frame = False
