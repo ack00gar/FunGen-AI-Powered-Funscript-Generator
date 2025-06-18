@@ -43,6 +43,12 @@ class InteractiveFunscriptTimeline:
         # Unified interaction flag, replacing is_interacting_with_pan_zoom and app_state.timeline_interaction_active
         self.is_interacting: bool = False
 
+        # For range selection
+        self.selection_anchor_idx: int = -1
+
+        # Stores the index of the point that was right-clicked to open the context menu
+        self.context_menu_point_idx: int = -1
+
     def _get_target_funscript_details(self) -> Tuple[Optional[object], Optional[str]]:
         if self.app.funscript_processor:
             return self.app.funscript_processor._get_target_funscript_object_and_axis(self.timeline_num)
@@ -951,7 +957,8 @@ class InteractiveFunscriptTimeline:
                             if is_in_multi_selection and not is_primary_selected: point_radius_draw += 0.5
                         elif is_hovered_pt and imgui.is_window_hovered() and not self.is_marqueeing:
                             pt_color_tuple = (0.5, 1.0, 0.5, 1.0)
-                            if self.dragging_action_idx == -1: hovered_action_idx_current_timeline = original_list_idx
+                            if self.dragging_action_idx == -1:
+                                hovered_action_idx_current_timeline = original_list_idx
 
                         draw_list.add_circle_filled(px, py, point_radius_draw, imgui.get_color_u32_rgba(*pt_color_tuple))
                         if is_primary_selected and not is_being_dragged:
@@ -1026,7 +1033,7 @@ class InteractiveFunscriptTimeline:
                         self.selected_action_idx = -1
 
             # Context Menu (only when strictly hovered over the canvas, not the padding)
-            if is_timeline_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
+            if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
                 self.context_mouse_pos_screen = mouse_pos
                 time_at_click = x_to_time(mouse_pos[0])
                 pos_at_click = y_to_pos(mouse_pos[1])
@@ -1034,11 +1041,16 @@ class InteractiveFunscriptTimeline:
                 snap_pos = app_state.snap_to_grid_pos if app_state.snap_to_grid_pos > 0 else 1
                 self.new_point_candidate_at = max(0, int(round(time_at_click / snap_time)) * snap_time)
                 self.new_point_candidate_pos = min(100, max(0, int(round(pos_at_click / snap_pos)) * snap_pos))
-                if hovered_action_idx_current_timeline != -1 and not (
-                        hovered_action_idx_current_timeline in self.multi_selected_action_indices):
+
+                # Store the hovered_action_idx_current_timeline value
+                # because it might reset before the popup renders its contents.
+                self.context_menu_point_idx = hovered_action_idx_current_timeline
+
+                if self.context_menu_point_idx != -1 and not (
+                        self.context_menu_point_idx in self.multi_selected_action_indices):
                     if not io.key_ctrl: self.multi_selected_action_indices.clear()
-                    self.multi_selected_action_indices.add(hovered_action_idx_current_timeline)
-                    self.selected_action_idx = hovered_action_idx_current_timeline
+                    self.multi_selected_action_indices.add(self.context_menu_point_idx)
+                    self.selected_action_idx = self.context_menu_point_idx
                 imgui.open_popup(context_popup_id)
 
 
@@ -1140,6 +1152,37 @@ class InteractiveFunscriptTimeline:
                 else:
                     imgui.menu_item("Add Point Here", enabled=False)
                 imgui.separator()
+
+                # --- New "Start Selection" / "End Selection" Context Menu Items ---
+                # Use self.context_menu_point_idx here
+                if self.context_menu_point_idx != -1:
+                    # Only show "Start selection" if no anchor is set or if clicking the same anchor point again
+                    if self.selection_anchor_idx == -1 or self.selection_anchor_idx == self.context_menu_point_idx:
+                        if imgui.menu_item(f"Start Selection Here##CTXMenuStartSel{window_id_suffix}")[0]:
+                            self.selection_anchor_idx = self.context_menu_point_idx
+                            self.selected_action_idx = self.selection_anchor_idx
+                            self.multi_selected_action_indices.clear()
+                            self.multi_selected_action_indices.add(self.selection_anchor_idx)
+                            self.app.logger.info(f"T{self.timeline_num}: Selection start point set at index {self.selection_anchor_idx}.")
+                            imgui.close_current_popup()
+                    # Only show "End selection" if an anchor is set AND it's a different point
+                    elif self.selection_anchor_idx != -1 and self.selection_anchor_idx != self.context_menu_point_idx:
+                        if imgui.menu_item(f"End Selection Here##CTXMenuEndSel{window_id_suffix}")[0]:
+                            start_idx = min(self.selection_anchor_idx, self.context_menu_point_idx)
+                            end_idx = max(self.selection_anchor_idx, self.context_menu_point_idx)
+
+                            new_selection = set(range(start_idx, end_idx + 1))
+                            self.multi_selected_action_indices.update(new_selection)
+                            self.selected_action_idx = self.context_menu_point_idx # Set the last clicked as primary
+                            self.selection_anchor_idx = -1 # Reset anchor
+                            self.app.logger.info(f"T{self.timeline_num}: Selected points from {start_idx} to {end_idx}.")
+                            imgui.close_current_popup()
+                else: # If not hovering over a point when the context menu was opened
+                    imgui.menu_item(f"Start Selection Here", enabled=False)
+                    imgui.menu_item(f"End Selection Here", enabled=False)
+                # --- End new items ---
+                imgui.separator()
+
                 can_copy = allow_editing_timeline and (
                             bool(self.multi_selected_action_indices) or self.selected_action_idx != -1)
                 if imgui.menu_item(f"Copy Selected##CTXMenuCopy", shortcut=shortcuts.get("copy_selection", "Ctrl+C"),
@@ -1183,8 +1226,4 @@ class InteractiveFunscriptTimeline:
         # --- Window End ---
         imgui.end()
         if is_floating:
-            # The begin() call for floating windows is paired with an end() here
-            # But the one for fixed windows is not, as it's just a child region.
-            # Let's check the original code again...
-            # The original code has imgui.end() at the very end. Let's stick with that.
-            pass
+            pass # Keep original logic for floating windows
