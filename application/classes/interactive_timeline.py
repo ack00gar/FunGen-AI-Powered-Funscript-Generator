@@ -1052,7 +1052,7 @@ class InteractiveFunscriptTimeline:
                         self.selected_action_idx = -1
 
             # Context Menu (only when strictly hovered over the canvas, not the padding)
-            if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
+            if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT) and is_timeline_hovered:
                 self.context_mouse_pos_screen = mouse_pos
                 time_at_click = x_to_time(mouse_pos[0])
                 pos_at_click = y_to_pos(mouse_pos[1])
