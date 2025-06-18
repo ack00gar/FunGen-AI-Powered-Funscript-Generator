@@ -197,11 +197,17 @@ PENIS_CLASS_NAME = "penis"
 GLANS_CLASS_NAME = "glans"
 CLASS_PRIORITY_ANALYSIS = {"pussy": 8, "butt": 7, "face": 6, "hand": 5, "breast": 4, "foot": 3}
 LEAD_BODY_PARTS = ["pussy", "butt", "face", "hand"]
-DEFAULT_S2_ATR_PASS_COUNT = 6
+CLASS_INTERACTION_PRIORITY = ["pussy", "butt", "face", "hand", "breast", "foot"]
+DEFAULT_S2_ATR_PASS_COUNT = 10
 STATUS_DETECTED = "Detected"
 STATUS_INTERPOLATED = "Interpolated"
 STATUS_OPTICAL_FLOW = "OpticalFlow"
 STATUS_SMOOTHED = "Smoothed"
+STATUS_POSE_INFERRED = "Pose_Inferred"
+STATUS_INFERRED_RELATIVE = "Inferred_Relative"
+
+S2_LOCKED_PENIS_DEACTIVATION_SECONDS = 3.0
+
 S2_PENIS_INTERPOLATION_MAX_GAP_FRAMES = 30
 S2_LOCKED_PENIS_EXTENDED_INTERPOLATION_MAX_FRAMES = 180
 S2_CONTACT_EXTENDED_INTERPOLATION_MAX_FRAMES = 5
@@ -210,6 +216,11 @@ S2_PENIS_LENGTH_SMOOTHING_WINDOW = 15
 S2_PENIS_ABSENCE_THRESHOLD_FOR_HEIGHT_RESET = 180
 S2_RTS_WINDOW_PADDING = 20
 S2_SMOOTH_MAX_FLICKER_DURATION = 60
+
+S2_LEADER_INERTIA_FACTOR = 2  # 1.3  # Challenger must be 30% faster than the incumbent leader.
+S2_LEADER_COOLDOWN_SECONDS = 3  # 1.5  # 0.8  # Cooldown period (in seconds) after a leader change.
+S2_VELOCITY_SMOOTHING_WINDOW = 7  # 5 # Number of frames to average velocity over.
+S2_LEADER_MIN_VELOCITY_THRESHOLD = 5  #0.8 # Pixels/frame. A challenger must move faster than this to be considered a new leader.
 
 
 ####################################################################################################
@@ -224,39 +235,39 @@ DEFAULT_S3_WARMUP_FRAMES = 10
 DEFAULT_AUTO_POST_AMP_CONFIG = {
     "Default": {
         "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.0, "center_value": 50,
-        "clamp_lower": 10, "clamp_upper": 90
+        "clamp_lower": 10, "clamp_upper": 90, "output_min": 0, "output_max": 100
     },
     "Cowgirl / Missionary": {
         "sg_window": 11, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.1, "center_value": 50,
-        "clamp_lower": 10, "clamp_upper": 90
+        "clamp_lower": 10, "clamp_upper": 90, "output_min": 0, "output_max": 100
     },
     "Rev. Cowgirl / Doggy": {
         "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.1, "center_value": 50,
-        "clamp_lower": 10, "clamp_upper": 90
+        "clamp_lower": 10, "clamp_upper": 90, "output_min": 0, "output_max": 100
     },
     "Blowjob": {
         "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.3, "center_value": 60,
-        "clamp_lower": 10, "clamp_upper": 90
+        "clamp_lower": 10, "clamp_upper": 90, "output_min": 30, "output_max": 100
     },
     "Handjob": {
         "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.3, "center_value": 60,
-        "clamp_lower": 10, "clamp_upper": 90
+        "clamp_lower": 10, "clamp_upper": 90, "output_min": 30, "output_max": 100
     },
     "Boobjob": {
         "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.2, "center_value": 55,
-        "clamp_lower": 10, "clamp_upper": 90
+        "clamp_lower": 10, "clamp_upper": 90, "output_min": 30, "output_max": 100
     },
     "Footjob": {
         "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.2, "center_value": 50,
-        "clamp_lower": 10, "clamp_upper": 90
+        "clamp_lower": 10, "clamp_upper": 90, "output_min": 30, "output_max": 100
     },
     "Close Up": {
         "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.0, "center_value": 100,
-        "clamp_lower": 100, "clamp_upper": 100  # Less aggressive clamping for close-ups
+        "clamp_lower": 100, "clamp_upper": 100, "output_min": 100, "output_max": 100
     },
     "Not Relevant": {
         "sg_window": 7, "sg_polyorder": 3, "rdp_epsilon": 15.0, "scale_factor": 1.0, "center_value": 100,
-        "clamp_lower": 100, "clamp_upper": 100
+        "clamp_lower": 100, "clamp_upper": 100, "output_min": 100, "output_max": 100
     }
 }
 

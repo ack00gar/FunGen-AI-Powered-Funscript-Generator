@@ -2,6 +2,8 @@ import os
 import copy
 import logging
 from typing import List, Dict, Optional, Tuple
+import bisect
+import numpy as np
 
 from application.utils.video_segment import VideoSegment
 from funscript.dual_axis_funscript import DualAxisFunscript
@@ -588,7 +590,9 @@ class AppFunscriptProcessor:
             'invert': f"Invert values ({axis})", 'clear': f"Clear points ({axis})",
             'amplify': f"Amplify (F:{self.amplify_factor_input:.2f}, C:{self.amplify_center_input}) ({axis})",
             'apply_sg': f"Apply SG (W:{self.sg_window_length_input}, P:{self.sg_polyorder_input}) ({axis})",
-            'apply_rdp': f"Apply RDP (Eps:{self.rdp_epsilon_input:.2f}) ({axis})"
+            'apply_rdp': f"Apply RDP (Eps:{self.rdp_epsilon_input:.2f}) ({axis})",
+            'apply_dynamic_amp': f"Apply Dyn. Amplify (Win:{self.dynamic_amp_window_ms_input}ms) ({axis})"
+
         }
         action_desc = action_desc_map.get(operation_name)
         if not action_desc:
@@ -618,7 +622,10 @@ class AppFunscriptProcessor:
                                                                    self.amplify_center_input, s_time, e_time, sel_idx),
             'apply_sg': lambda: target_fs_obj.apply_savitzky_golay(axis, self.sg_window_length_input,
                                                                    self.sg_polyorder_input, s_time, e_time, sel_idx),
-            'apply_rdp': lambda: target_fs_obj.simplify_rdp(axis, self.rdp_epsilon_input, s_time, e_time, sel_idx)
+            'apply_rdp': lambda: target_fs_obj.simplify_rdp(axis, self.rdp_epsilon_input, s_time, e_time, sel_idx),
+            'apply_dynamic_amp': lambda: self.apply_dynamic_amplification(axis, self.dynamic_amp_window_ms_input,
+                                                                          s_time, e_time, sel_idx)
+
         }
         op_func = op_dispatch.get(operation_name)
         if op_func:
@@ -1144,6 +1151,9 @@ class AppFunscriptProcessor:
                     amp_center = params.get("center_value", default_params.get("center_value"))
                     clamp_low = params.get("clamp_lower", default_params.get("clamp_lower"))
                     clamp_high = params.get("clamp_upper", default_params.get("clamp_upper"))
+                    # output_min = params.get("output_min", default_params.get("output_min"))
+                    # output_max = params.get("output_max", default_params.get("output_max"))
+
 
                     self.logger.debug(
                         f"Processing {axis} in '{chapter.position_long_name}' ({effective_start_ms}-{effective_end_ms}ms) with params: {params}")
@@ -1155,6 +1165,9 @@ class AppFunscriptProcessor:
                                                                effective_end_ms)
                     funscript_obj.amplify_points_values(axis, amp_scale, amp_center, effective_start_ms,
                                                         effective_end_ms)
+                    # if output_min != 0 or output_max != 100: # Only apply if it's not the default 0-100
+                    #     funscript_obj.scale_points_to_range(axis, output_min, output_max, effective_start_ms, effective_end_ms)
+
             else:
                 self.logger.info(f"No chapters found. Applying default settings to {axis} axis for the full range.")
                 params = default_params  # Use the robust defaults
@@ -1167,6 +1180,11 @@ class AppFunscriptProcessor:
                                                            range_start_ms, range_end_ms)
                 funscript_obj.amplify_points_values(axis, params["scale_factor"], params["center_value"],
                                                     range_start_ms, range_end_ms)
+                # output_min = params.get("output_min", 0)
+                # output_max = params.get("output_max", 100)
+                # if output_min != 0 or output_max != 100:
+                #     funscript_obj.scale_points_to_range(axis, output_min, output_max, range_start_ms, range_end_ms)
+
 
             timeline_num = 1 if axis == 'primary' else 2
             self._finalize_action_and_update_ui(timeline_num, op_desc)
@@ -1190,3 +1208,81 @@ class AppFunscriptProcessor:
         self.logger.info("--- Context-Aware Post-Processing Finished ---")
         self.app.set_status_message("Post-processing applied.", duration=5.0)
         self.app.energy_saver.reset_activity_timer()
+
+    def apply_dynamic_amplification(self, axis: str, window_ms: int,
+                                    start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
+                                    selected_indices: Optional[List[int]] = None):
+        """
+        Dynamically amplifies the signal by normalizing each point based on the
+        min/max position within a sliding time window around it.
+        """
+        # --- CORRECTED LOGIC ---
+        # Get the action list from the DualAxisFunscript object instead of self
+        actions_list_ref = self.get_actions(axis)
+        if not actions_list_ref or len(actions_list_ref) < 3:
+            self.logger.info("Not enough points for dynamic amplification.")
+            return
+
+        # Make a copy to read from while modifying the original
+        actions_copy = list(actions_list_ref)
+
+        # Determine the full set of indices to process
+        # Since _get_indices_for_operation is not defined, we'll implement its logic here directly
+        indices_to_process: List[int] = []
+        if selected_indices is not None:
+            indices_to_process = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
+        elif start_time_ms is not None and end_time_ms is not None:
+            funscript_obj = self.get_funscript_obj()
+            if funscript_obj:
+                s_idx, e_idx = funscript_obj._get_action_indices_in_time_range(actions_list_ref, start_time_ms,
+                                                                               end_time_ms)
+                if s_idx is not None and e_idx is not None:
+                    indices_to_process = list(range(s_idx, e_idx + 1))
+        else:
+            indices_to_process = list(range(len(actions_list_ref)))
+        # --- END OF INLINED LOGIC ---
+
+        if not indices_to_process:
+            self.logger.warning("No points in specified range/selection for dynamic amplification.")
+            return
+
+        # Create a list of timestamps for efficient searching
+        action_timestamps = [a['at'] for a in actions_copy]
+
+        for i in indices_to_process:
+            current_action = actions_copy[i]
+            current_time = current_action['at']
+
+            # Define the local window for analysis
+            start_window = current_time - (window_ms // 2)
+            end_window = current_time + (window_ms // 2)
+
+            # Find the indices of the actions within this window
+            start_idx = bisect.bisect_left(action_timestamps, start_window)
+            end_idx = bisect.bisect_right(action_timestamps, end_window)
+
+            local_actions = actions_copy[start_idx:end_idx]
+            if not local_actions:
+                continue
+
+            # Find the min/max position within the local window
+            local_positions = [a['pos'] for a in local_actions]
+            local_min = min(local_positions)
+            local_max = max(local_positions)
+            local_range = local_max - local_min
+
+            if local_range < 5:  # Don't amplify if local motion is negligible
+                continue
+
+            # Normalize the current point's position within its local range
+            normalized_pos = (current_action['pos'] - local_min) / local_range
+
+            # Scale the normalized position to the full 0-100 range
+            new_pos = int(round(np.clip(normalized_pos * 100, 0, 100)))
+
+            # Update the original list
+            actions_list_ref[i]['pos'] = new_pos
+
+        self.logger.info(f"Applied dynamic amplification to {len(indices_to_process)} points on {axis} axis.")
+
+
