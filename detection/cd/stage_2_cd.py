@@ -997,8 +997,7 @@ def atr_pass_5_determine_distance(state: AppStateContainer, logger: Optional[log
             dominant_pose = _get_dominant_pose(frame_obj, is_vr, state.yolo_input_size)
             if dominant_pose:
                 secondary_contacts = [b for b in contacting_boxes if
-                                      b.class_name in secondary_classes and _atr_calculate_iou(dominant_pose.bbox,
-                                                                                               b.bbox) > 0]
+                                      b.class_name in secondary_classes and _atr_calculate_iou(dominant_pose.bbox, b.bbox) > 0]
 
                 if secondary_contacts:
                     active_box = max(secondary_contacts, key=lambda b: b.confidence)
