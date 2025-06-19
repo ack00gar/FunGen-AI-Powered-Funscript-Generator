@@ -757,6 +757,9 @@ class AppFunscriptProcessor:
             self.app.app_state_ui.heatmap_dirty = True
             self.app.app_state_ui.funscript_preview_dirty = True
             # TODO: Add Undo/Redo record
+            self.reset_scripting_range()
+            self.logger.info("Scripting range was reset after chapter deletion to prevent stale state.")
+
             self.app.set_status_message(f"Deleted {deleted_count} chapter(s).")
         else:
             self.logger.info(f"No chapters found matching IDs for deletion: {chapter_ids}")
@@ -874,6 +877,9 @@ class AppFunscriptProcessor:
         self.app.app_state_ui.funscript_preview_dirty = True
         # TODO: Add Undo/Redo record
         self.app.set_status_message("Chapters merged successfully.")
+        self.reset_scripting_range()
+        self.app.set_status_message("Chapters merged. Scripting range cleared.")
+
         return merged_chapter if return_chapter_object else None
 
     def finalize_merge_after_gap_tracking(self, chapter1_id: str, chapter2_id: str):
@@ -971,6 +977,10 @@ class AppFunscriptProcessor:
 
         self.logger.info(
             f"Successfully finalized tracking of gap and merged into new chapter '{merged_chapter.unique_id}'.")
+
+        self.reset_scripting_range()
+        self.logger.info("Scripting range was reset after finalizing gap merge.")
+
         self.app.set_status_message("Gap tracked and chapters merged successfully.")
         self.app.energy_saver.reset_activity_timer()
 
