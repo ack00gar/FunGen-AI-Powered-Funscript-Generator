@@ -28,6 +28,13 @@ class InteractiveFunscriptTimeline:
         self.show_rdp_settings_popup = False
         self.rdp_apply_to_selection = False
 
+        # --- AMP STATE ---
+        self.show_amp_settings_popup = False
+        self.amp_apply_to_selection = False
+        self.amp_scale_factor = self.app.app_settings.get(f"timeline{self.timeline_num}_amp_default_scale", 1.5)
+        self.amp_center_value = self.app.app_settings.get(f"timeline{self.timeline_num}_amp_default_center", 50)
+
+
         # Get initial defaults from app_settings (AppLogic holds app_settings directly)
         self.sg_window_length = self.app.app_settings.get(f"timeline{self.timeline_num}_sg_default_window", 5)
         self.sg_poly_order = self.app.app_settings.get(f"timeline{self.timeline_num}_sg_default_polyorder", 2)
@@ -183,6 +190,11 @@ class InteractiveFunscriptTimeline:
         return self._call_funscript_method('clamp_points_values', f'clamp to {clamp_value}',
                                            clamp_value=clamp_value, selected_indices=selected_indices)
 
+    def _perform_amplify(self, scale_factor: float, center_value: int, selected_indices: Optional[List[int]]):
+        return self._call_funscript_method('amplify_points_values', 'Amplify',
+                                           scale_factor=scale_factor, center_value=center_value,
+                                           selected_indices=selected_indices)
+
     def set_preview_actions(self, preview_actions: Optional[List[Dict]]):
         self.preview_actions = preview_actions
         self.is_previewing = preview_actions is not None
@@ -199,7 +211,14 @@ class InteractiveFunscriptTimeline:
             self.clear_preview()
             return
 
-        apply_to_selection = self.sg_apply_to_selection if filter_type == 'sg' else self.rdp_apply_to_selection
+        apply_to_selection = False
+        if filter_type == 'sg':
+            apply_to_selection = self.sg_apply_to_selection
+        elif filter_type == 'rdp':
+            apply_to_selection = self.rdp_apply_to_selection
+        elif filter_type == 'amp':
+            apply_to_selection = self.amp_apply_to_selection
+
         indices_to_process = list(self.multi_selected_action_indices) if apply_to_selection else None
 
         params = {}
@@ -207,6 +226,9 @@ class InteractiveFunscriptTimeline:
             params = {'window_length': self.sg_window_length, 'polyorder': self.sg_poly_order}
         elif filter_type == 'rdp':
             params = {'epsilon': self.rdp_epsilon}
+        elif filter_type == 'amp': # NEW
+            params = {'scale_factor': self.amp_scale_factor, 'center_value': self.amp_center_value}
+
 
         # This now calls the non-destructive method we added to DualAxisFunscript
         generated_preview_actions = funscript_instance.calculate_filter_preview(
@@ -342,7 +364,24 @@ class InteractiveFunscriptTimeline:
                     self.show_rdp_settings_popup = True
                     self.rdp_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
-            if rdp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if rdp_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+            imgui.same_line()
+
+            # --- Amplify Button ---
+            amp_disabled_bool = not allow_editing_timeline or not has_actions
+            if amp_disabled_bool:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+            if imgui.button(f"Amplify##AmpFilter{window_id_suffix}"):
+                if not amp_disabled_bool:
+                    self.show_amp_settings_popup = True
+                    self.amp_apply_to_selection = bool(
+                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
+
+            if amp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # Invert Button
@@ -551,7 +590,77 @@ class InteractiveFunscriptTimeline:
                 imgui.end()
             # endregion
 
-            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup:
+            # --- Amplify Settings Window ---
+            amp_window_title = f"Amplify Settings (Timeline {self.timeline_num})##AmpSettingsWindow{window_id_suffix}"
+            if self.show_amp_settings_popup:
+                if not self.is_previewing:
+                    self._update_preview('amp')
+
+                main_viewport = imgui.get_main_viewport()
+                popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 350) * 0.5
+                popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 200) * 0.5
+                imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
+                imgui.set_next_window_size(350, 0, condition=imgui.APPEARING)
+
+                window_expanded, self.show_amp_settings_popup = imgui.begin(
+                    amp_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+
+                if window_expanded:
+                    imgui.text(f"Amplify Values (Timeline {self.timeline_num})")
+                    imgui.separator()
+
+                    sf_changed, self.amp_scale_factor = imgui.slider_float(
+                        "Scale Factor##AmpScalePopup", self.amp_scale_factor, 0.1, 5.0, "%.2f")
+                    if sf_changed:
+                        self._update_preview('amp')
+
+                    cv_changed, self.amp_center_value = imgui.slider_int(
+                        "Center Value##AmpCenterPopup", self.amp_center_value, 0, 100)
+                    if cv_changed:
+                        self._update_preview('amp')
+
+                    if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2:
+                        sel_changed, self.amp_apply_to_selection = imgui.checkbox(
+                            f"Apply to {len(self.multi_selected_action_indices)} selected##AmpApplyToSel",
+                            self.amp_apply_to_selection)
+                        if sel_changed:
+                            self._update_preview('amp')
+                    else:
+                        imgui.text_disabled("Apply to: Full Script")
+                        self.amp_apply_to_selection = False
+
+                    if imgui.button(f"Apply##AmpApplyPop{window_id_suffix}"):
+                        indices_to_use = list(
+                            self.multi_selected_action_indices) if self.amp_apply_to_selection else None
+                        op_desc = (f"Amplified (S:{self.amp_scale_factor:.2f}, C:{self.amp_center_value})" +
+                                   (" to selection" if indices_to_use else ""))
+
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        if self._perform_amplify(self.amp_scale_factor, self.amp_center_value,
+                                                 selected_indices=indices_to_use):
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_amp_default_scale",
+                                                      self.amp_scale_factor)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_amp_default_center",
+                                                      self.amp_center_value)
+                            self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+
+                        self.clear_preview()
+                        self.show_amp_settings_popup = False
+
+                    imgui.same_line()
+                    if imgui.button(f"Cancel##AmpCancelPop{window_id_suffix}"):
+                        self.clear_preview()
+                        self.show_amp_settings_popup = False
+
+                if not self.show_amp_settings_popup:
+                    self.clear_preview()
+
+                if window_expanded:
+                    imgui.end()
+
+            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_amp_settings_popup:
+
                 self.clear_preview()
 
             imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)

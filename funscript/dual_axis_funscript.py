@@ -849,6 +849,20 @@ class DualAxisFunscript:
             if len(new_segment_actions) >= 2 and new_segment_actions[0] == new_segment_actions[-1]:
                 new_segment_actions = new_segment_actions[:-1]
 
+        elif filter_type == 'amp':
+            scale_factor = filter_params.get('scale_factor', 1.0)
+            center_value = filter_params.get('center_value', 50)
+
+            def operation_func(pos):
+                deviation = pos - center_value
+                new_pos = center_value + deviation * scale_factor
+                return int(round(np.clip(new_pos, 0, 100)))
+
+            # Modify the copied segment
+            new_segment_actions = segment_to_process
+            for action in new_segment_actions:
+                action['pos'] = operation_func(action['pos'])
+
         else:
             return None
 
