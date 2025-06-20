@@ -313,13 +313,13 @@ def logger_proc(result_queue, output_file_local, expected_frames,
 
                 # Calculate and send main progress
                 time_elapsed = current_time - s1_start_time_param
-                fps, eta = 0.0, 0.0
-                if first_result_received_time and written_count > 0 and time_elapsed > 0:
-                    fps = written_count / (current_time - first_result_received_time)
-                    if expected_frames > 0 and fps > 0:
-                        eta = (expected_frames - written_count) / fps
+                # Guard to prevent division by zero
+                if time_elapsed > 0:
+                    fps = written_count / time_elapsed
                 else:
-                    fps, eta = 0.0, 0.0
+                    fps = 0.0  # Default to 0 FPS if no time has passed
+
+                eta = (expected_frames - written_count) / fps if fps > 0 else 0
                 progress_callback_local(written_count, expected_frames, "Detecting objects & poses...", time_elapsed,
                                         fps, eta)
                 last_progress_update_time = current_time
