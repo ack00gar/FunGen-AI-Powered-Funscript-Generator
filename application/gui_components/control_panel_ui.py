@@ -232,66 +232,85 @@ class ControlPanelUI:
 
     def _render_ai_model_settings(self):
         stage_proc = self.app.stage_processor
+        style = imgui.get_style()
 
-        # The 'file_mgr' variable is no longer needed here for Browse.
-        # We will access the file dialog directly via the gui_instance.
-
-        # Callback functions to update the model paths
+        # --- MODIFIED: Callback functions to update the model paths ---
         def update_detection_model_path(path: str):
             self.app.yolo_detection_model_path_setting = path
-            self.app.app_settings.set("yolo_det_model_path", path)  # Auto-save setting
-            # Mark project as dirty to prompt user to save changes
+            self.app.app_settings.set("yolo_det_model_path", path)
             self.app.project_manager.project_dirty = True
-            self.app.logger.info(
-                f"Detection model path selected: {path}. Setting has been saved.")
+            self.app.logger.info(f"Detection model path selected: {path}. Setting has been saved.")
+            if self.app.tracker:
+                # Add this line to update the tracker's internal path
+                self.app.tracker.det_model_path = path
+                self.app.tracker._load_models()
 
         def update_pose_model_path(path: str):
             self.app.yolo_pose_model_path_setting = path
-            self.app.app_settings.set("yolo_pose_model_path", path)  # Auto-save setting
-            # Mark project as dirty to prompt user to save changes
+            self.app.app_settings.set("yolo_pose_model_path", path)
             self.app.project_manager.project_dirty = True
             self.app.logger.info(f"Pose model path selected: {path}. Setting has been saved.")
+            if self.app.tracker:
+                # Add this line to update the tracker's internal path
+                self.app.tracker.pose_model_path = path
+                self.app.tracker._load_models()
 
-        # YOLO Detection Model
+        # --- Define fixed widths for buttons for consistent layout ---
+        browse_button_width = imgui.calc_text_size("Browse").x + style.frame_padding.x * 2
+        unload_button_width = imgui.calc_text_size("Unload").x + style.frame_padding.x * 2
+        total_button_width = browse_button_width + unload_button_width + style.item_spacing.x
+
+        # --- Calculate available width for the input text ---
+        available_width = imgui.get_content_region_available_width()
+        input_text_width = available_width - total_button_width - style.item_spacing.x
+
+        # --- YOLO Detection Model ---
+        imgui.text("Detection Model")
+        imgui.push_item_width(input_text_width)
         current_yolo_path_display = self.app.yolo_detection_model_path_setting or "Not set"
-        imgui.input_text("Detection Model##S1YOLOPath", current_yolo_path_display, 256,
-                         flags=imgui.INPUT_TEXT_READ_ONLY)
+        imgui.input_text("##S1YOLOPath", current_yolo_path_display, 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+        imgui.pop_item_width()
+
         imgui.same_line()
         if imgui.button("Browse##S1YOLOBrowse"):
-            # Corrected implementation using the file dialog
             if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
                 initial_dir = os.path.dirname(
                     self.app.yolo_detection_model_path_setting) if self.app.yolo_detection_model_path_setting else None
                 self.app.gui_instance.file_dialog.show(
-                    title="Select YOLO Detection Model",
-                    is_save=False,
-                    callback=update_detection_model_path,
+                    title="Select YOLO Detection Model", is_save=False, callback=update_detection_model_path,
                     extension_filter="AI Models (*.pt *.onnx *.mlpackage),*.pt;*.onnx;*.mlpackage|All Files,*.*",
                     initial_path=initial_dir
                 )
+        imgui.same_line()
+        if imgui.button("Unload##S1YOLOUnload"):
+            self.app.unload_model('detection')
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
             "Path to the YOLO object detection model file (.pt, .onnx, .mlpackage).")
 
-        # YOLO Pose Model
+        # --- YOLO Pose Model ---
+        imgui.text("Pose Model")
+        imgui.push_item_width(input_text_width)
         current_pose_path_display = self.app.yolo_pose_model_path_setting or "Not set"
-        imgui.input_text("Pose Model##PoseYOLOPath", current_pose_path_display, 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+        imgui.input_text("##PoseYOLOPath", current_pose_path_display, 256, flags=imgui.INPUT_TEXT_READ_ONLY)
+        imgui.pop_item_width()
+
         imgui.same_line()
         if imgui.button("Browse##PoseYOLOBrowse"):
-            # Corrected implementation using the file dialog
             if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
                 initial_dir = os.path.dirname(
                     self.app.yolo_pose_model_path_setting) if self.app.yolo_pose_model_path_setting else None
                 self.app.gui_instance.file_dialog.show(
-                    title="Select YOLO Pose Model",
-                    is_save=False,
-                    callback=update_pose_model_path,
+                    title="Select YOLO Pose Model", is_save=False, callback=update_pose_model_path,
                     extension_filter="AI Models (*.pt *.onnx *.mlpackage),*.pt;*.onnx;*.mlpackage|All Files,*.*",
                     initial_path=initial_dir
                 )
+        imgui.same_line()
+        if imgui.button("Unload##PoseYOLOUnload"):
+            self.app.unload_model('pose')
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
-            "Path to the YOLO pose estimation model file (.pt, .onnx, .mlpackage).")
+            "Path to the YOLO pose estimation model file (.pt, .onnx, .mlpackage). This model is optional.")
 
         imgui.separator()
         imgui.text("Stage 1 Inference Workers:")
