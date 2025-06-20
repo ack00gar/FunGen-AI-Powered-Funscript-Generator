@@ -1393,14 +1393,14 @@ def perform_contact_analysis(
                 secondary_actions_final = sorted(temp_secondary_actions.values(), key=lambda x: x["at"])
 
     # Build the final return dictionary with the filtered results
+    # The calling orchestrator is responsible for picking what it needs based on the mode.
     return_dict = {
         "video_segments": final_video_segments,
         "primary_actions": primary_actions_final,
         "secondary_actions": secondary_actions_final,
+        "atr_segments_objects": state.atr_segments,
+        "all_s2_frame_objects_list": state.frames
     }
-    if not generate_funscript_actions_arg:
-        return_dict["atr_segments_objects"] = state.atr_segments
-        return_dict["all_s2_frame_objects_list"] = state.frames
 
     if output_overlay_msgpack_path:
         logger.info(f"Preparing to save ATR Stage 2 overlay data to: {output_overlay_msgpack_path}")
@@ -1408,7 +1408,6 @@ def perform_contact_analysis(
             all_frames_overlay_data = [frame.to_overlay_dict() for frame in state.frames if not stop_event.is_set()]
             if stop_event.is_set(): return {"error": "Processing stopped during overlay data prep (ATR S2)."}
 
-            # Add a handler for NumPy types
             def numpy_default_handler(obj):
                 if isinstance(obj, np.integer):
                     return int(obj)
@@ -1419,7 +1418,6 @@ def perform_contact_analysis(
                 raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable for msgpack")
 
             with open(output_overlay_msgpack_path, 'wb') as f:
-                # Use the numpy_default_handler in packb
                 f.write(msgpack.packb(all_frames_overlay_data, use_bin_type=True, default=numpy_default_handler))
             logger.info(f"Successfully saved ATR overlay data for {len(all_frames_overlay_data)} frames to {output_overlay_msgpack_path}.")
             if os.path.exists(output_overlay_msgpack_path):
@@ -1427,6 +1425,6 @@ def perform_contact_analysis(
         except Exception as e:
             logger.error(f"Error saving ATR Stage 2 overlay msgpack to {output_overlay_msgpack_path}: {e}", exc_info=True)
 
-    logger.info(f"--- ATR-based Stage 2 Analysis Finished. Segments: {len(video_segments_for_gui)} ---")
+    logger.info(f"--- ATR-based Stage 2 Analysis Finished. Segments: {len(final_video_segments)} ---")
     return return_dict
 
