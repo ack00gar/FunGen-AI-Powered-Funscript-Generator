@@ -45,6 +45,9 @@ class InteractiveFunscriptTimeline:
         self.is_panning_active: bool = False
         self.is_zooming_active: bool = False
 
+        self.is_previewing: bool = False
+        self.preview_actions: Optional[List[Dict]] = None
+
         # For range selection
         self.selection_anchor_idx: int = -1
 
@@ -179,6 +182,40 @@ class InteractiveFunscriptTimeline:
     def _perform_clamp(self, clamp_value: int, selected_indices: Optional[List[int]]):
         return self._call_funscript_method('clamp_points_values', f'clamp to {clamp_value}',
                                            clamp_value=clamp_value, selected_indices=selected_indices)
+
+    def set_preview_actions(self, preview_actions: Optional[List[Dict]]):
+        self.preview_actions = preview_actions
+        self.is_previewing = preview_actions is not None
+
+    def clear_preview(self):
+        if self.is_previewing:
+            self.is_previewing = False
+            self.preview_actions = None
+
+    def _update_preview(self, filter_type: str):
+        """Generates and sets the preview data for the active filter."""
+        funscript_instance, axis_name = self._get_target_funscript_details()
+        if not funscript_instance:
+            self.clear_preview()
+            return
+
+        apply_to_selection = self.sg_apply_to_selection if filter_type == 'sg' else self.rdp_apply_to_selection
+        indices_to_process = list(self.multi_selected_action_indices) if apply_to_selection else None
+
+        params = {}
+        if filter_type == 'sg':
+            params = {'window_length': self.sg_window_length, 'polyorder': self.sg_poly_order}
+        elif filter_type == 'rdp':
+            params = {'epsilon': self.rdp_epsilon}
+
+        # This now calls the non-destructive method we added to DualAxisFunscript
+        generated_preview_actions = funscript_instance.calculate_filter_preview(
+            axis=axis_name,
+            filter_type=filter_type,
+            filter_params=params,
+            selected_indices=indices_to_process
+        )
+        self.set_preview_actions(generated_preview_actions)
 
     def render(self, timeline_y_start_coord: float = None, timeline_render_height: float = None):
         app_state = self.app.app_state_ui
@@ -384,38 +421,60 @@ class InteractiveFunscriptTimeline:
             # --- SG Settings Window ---
             sg_window_title = f"Savitzky-Golay Filter Settings (Timeline {self.timeline_num})##SGSettingsWindow{window_id_suffix}"
             if self.show_sg_settings_popup:
+                # On first open, generate an initial preview
+                if not self.is_previewing:
+                    self._update_preview('sg')
+
                 main_viewport = imgui.get_main_viewport()
                 popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 350) * 0.5
                 popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 200) * 0.5
                 imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
                 imgui.set_next_window_size(350, 0, condition=imgui.APPEARING)
                 window_expanded, self.show_sg_settings_popup = imgui.begin(
-                    sg_window_title, closable=self.show_sg_settings_popup, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+                    sg_window_title, closable=True,
+                    flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)  # Use True for closable to handle 'X'
+
                 if window_expanded:
-                    imgui.text(f"Savitzky-Golay Filter (Timeline {self.timeline_num})");
+                    imgui.text(f"Savitzky-Golay Filter (Timeline {self.timeline_num})")
                     imgui.separator()
+
+                    # --- Window Length Slider ---
                     wl_changed, current_wl = imgui.slider_int("Window Length##SGWinPopup", self.sg_window_length, 3, 99)
                     if wl_changed:
                         self.sg_window_length = current_wl if current_wl % 2 != 0 else current_wl + 1
                         if self.sg_window_length < 3: self.sg_window_length = 3
+                        self._update_preview('sg')  # CORRECT: Only update preview
+
+                    # --- Polyorder Slider ---
                     max_po = max(1, self.sg_window_length - 1)
                     po_val = min(self.sg_poly_order, max_po)
                     if po_val < 1: po_val = 1
                     po_changed, current_po = imgui.slider_int("Polyorder##SGPolyPopup", po_val, 1, max_po)
-                    if po_changed: self.sg_poly_order = current_po
+                    if po_changed:
+                        self.sg_poly_order = current_po
+                        self._update_preview('sg')  # CORRECT: Only update preview
+
+                    # --- Apply to Selection Checkbox ---
                     if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2:
-                        _, self.sg_apply_to_selection = imgui.checkbox(
+                        sel_changed, self.sg_apply_to_selection = imgui.checkbox(
                             f"Apply to {len(self.multi_selected_action_indices)} selected##SGApplyToSel",
                             self.sg_apply_to_selection)
+                        if sel_changed:
+                            self._update_preview('sg')  # CORRECT: Only update preview
                     else:
-                        imgui.text_disabled("Apply to: Full Script");
+                        imgui.text_disabled("Apply to: Full Script")
                         self.sg_apply_to_selection = False
+
+                    # --- Buttons ---
                     if imgui.button(f"Apply##SGApplyPop{window_id_suffix}"):
                         indices_to_use = list(
                             self.multi_selected_action_indices) if self.sg_apply_to_selection else None
                         op_desc = f"Applied SG (W:{self.sg_window_length}, P:{self.sg_poly_order})" + (
                             " to selection" if indices_to_use else "")
-                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)  # Record for Undo
+
+                        # This calls the original, DESTRUCTIVE method
                         if self._perform_sg_filter(self.sg_window_length, self.sg_poly_order,
                                                    selected_indices=indices_to_use):
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
@@ -424,14 +483,30 @@ class InteractiveFunscriptTimeline:
                             self.app.app_settings.set(f"timeline{self.timeline_num}_sg_default_polyorder",
                                                       self.sg_poly_order)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+
+                        self.clear_preview()
                         self.show_sg_settings_popup = False
+
                     imgui.same_line()
-                    if imgui.button(f"Cancel##SGCancelPop{window_id_suffix}"): self.show_sg_settings_popup = False
-                imgui.end()
+                    if imgui.button(f"Cancel##SGCancelPop{window_id_suffix}"):
+                        self.clear_preview()
+                        self.show_sg_settings_popup = False
+
+                # This handles closing the popup with the 'X' button
+                if not self.show_sg_settings_popup:
+                    self.clear_preview()
+
+                if window_expanded:
+                    imgui.end()
 
             # --- RDP Settings Window ---
             rdp_window_title = f"RDP Simplification Settings (Timeline {self.timeline_num})##RDPSettingsWindow{window_id_suffix}"
             if self.show_rdp_settings_popup:
+                # --- RDP Settings Window ---
+                if self.show_rdp_settings_popup:
+                    if not self.is_previewing:
+                        self._update_preview('rdp')
+
                 main_viewport = imgui.get_main_viewport()
                 popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 350) * 0.5
                 popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 180) * 0.5
@@ -442,12 +517,17 @@ class InteractiveFunscriptTimeline:
                 if window_expanded:
                     imgui.text(f"RDP Simplification (Timeline {self.timeline_num})");
                     imgui.separator()
-                    _, self.rdp_epsilon = imgui.slider_float("Epsilon##RDPEpsPopup", self.rdp_epsilon, 0.1, 20.0,
+                    epsilon_changed, self.rdp_epsilon = imgui.slider_float("Epsilon##RDPEpsPopup", self.rdp_epsilon, 0.1, 20.0,
                                                              "%.1f")
+                    if epsilon_changed:
+                        self._update_preview('rdp')
+
                     if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2:
-                        _, self.rdp_apply_to_selection = imgui.checkbox(
+                        sel_changed, self.rdp_apply_to_selection = imgui.checkbox(
                             f"Apply to {len(self.multi_selected_action_indices)} selected##RDPApplyToSel",
                             self.rdp_apply_to_selection)
+                        if sel_changed:
+                            self._update_preview('rdp')
                     else:
                         imgui.text_disabled("Apply to: Full Script");
                         self.rdp_apply_to_selection = False
@@ -462,11 +542,17 @@ class InteractiveFunscriptTimeline:
                             self.app.app_settings.set(f"timeline{self.timeline_num}_rdp_default_epsilon",
                                                       self.rdp_epsilon)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                        self.clear_preview()
                         self.show_rdp_settings_popup = False
                     imgui.same_line()
-                    if imgui.button(f"Cancel##RDPCancelPop{window_id_suffix}"): self.show_rdp_settings_popup = False
+                    if imgui.button(f"Cancel##RDPCancelPop{window_id_suffix}"):
+                        self.clear_preview()
+                        self.show_rdp_settings_popup = False
                 imgui.end()
             # endregion
+
+            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup:
+                self.clear_preview()
 
             imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)
             # --- (Drag and drop target for T2 remains the same) ---
@@ -943,7 +1029,12 @@ class InteractiveFunscriptTimeline:
                         if not ((x1 < canvas_abs_pos[0] and x2 < canvas_abs_pos[0]) or (
                                 x1 > canvas_abs_pos[0] + canvas_size[0] and x2 > canvas_abs_pos[0] + canvas_size[0])):
                             color_tuple = self.app.utility.get_speed_color_from_map(speeds_vec[i_line])
-                            draw_list.add_line(x1, y1, x2, y2, imgui.get_color_u32_rgba(*color_tuple), 2.0)
+                            line_alpha = 0.2 if self.is_previewing else 1.0
+                            line_thickness = 1.0 if self.is_previewing else 2.0
+                            final_color = imgui.get_color_u32_rgba(color_tuple[0], color_tuple[1], color_tuple[2],
+                                                                   color_tuple[3] * line_alpha)
+
+                            draw_list.add_line(x1, y1, x2, y2, final_color, line_thickness)
 
             # --- Draw Points ---
             if actions_list and visible_actions_indices_range:
@@ -979,10 +1070,35 @@ class InteractiveFunscriptTimeline:
                             if self.dragging_action_idx == -1:
                                 hovered_action_idx_current_timeline = original_list_idx
 
-                        draw_list.add_circle_filled(px, py, point_radius_draw, imgui.get_color_u32_rgba(*pt_color_tuple))
+                        point_alpha = 0.3 if self.is_previewing else 1.0
+                        final_pt_color = imgui.get_color_u32_rgba(pt_color_tuple[0], pt_color_tuple[1],
+                                                                  pt_color_tuple[2], pt_color_tuple[3] * point_alpha)
+
+                        draw_list.add_circle_filled(px, py, point_radius_draw, final_pt_color)
+
                         if is_primary_selected and not is_being_dragged:
                             draw_list.add_circle(px, py, point_radius_draw + 1,
                                                  imgui.get_color_u32_rgba(0.6, 0.0, 0.0, 1.0), thickness=1.0)
+
+            # --- Draw Preview Actions on Top ---
+            if self.is_previewing and self.preview_actions:
+                preview_line_color = imgui.get_color_u32_rgba(1.0, 0.5, 0.0, 0.9)  # Bright Orange
+                preview_point_color = imgui.get_color_u32_rgba(1.0, 0.5, 0.0, 1.0)
+                preview_point_radius = app_state.timeline_point_radius
+
+                # Draw preview lines and points using the self.preview_actions list
+                if len(self.preview_actions) > 1:
+                    p_ats = np.array([a['at'] for a in self.preview_actions])
+                    p_poss = np.array([a['pos'] for a in self.preview_actions])
+                    pxs = time_to_x_vec(p_ats)
+                    pys = pos_to_y_vec(p_poss)
+                    for i in range(len(pxs) - 1):
+                        draw_list.add_line(pxs[i], pys[i], pxs[i + 1], pys[i + 1], preview_line_color, 2.0)
+
+                for action in self.preview_actions:
+                    px = time_to_x(action['at'])
+                    py = pos_to_y(action['pos'])
+                    draw_list.add_circle_filled(px, py, preview_point_radius, preview_point_color)
 
             # --- Draw Marquee Selection ---
             if self.is_marqueeing and self.marquee_start_screen_pos and self.marquee_end_screen_pos:

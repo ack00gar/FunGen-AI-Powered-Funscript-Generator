@@ -766,3 +766,91 @@ class DualAxisFunscript:
 
         self.logger.info(
             f"Scaled {len(indices_to_process)} points on {axis} axis to new range [{output_min}-{output_max}].")
+
+    # In dual_axis_funscript.py
+
+    def calculate_filter_preview(self, axis: str, filter_type: str, filter_params: Dict,
+                                 selected_indices: Optional[List[int]] = None) -> Optional[List[Dict]]:
+        """
+        Calculates the result of a filter without modifying the instance's data.
+        Returns a new list of actions representing the full script with the filter applied
+        to the specified segment, or None if the operation is not possible.
+        """
+        actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list_ref or len(actions_list_ref) < 2:
+            return None
+
+        # --- 1. Determine the segment of actions to process ---
+        s_idx_orig, e_idx_orig = -1, -1
+        if selected_indices is not None and len(selected_indices) > 0:
+            valid_indices = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
+            if len(valid_indices) < 2: return None
+            s_idx_orig, e_idx_orig = valid_indices[0], valid_indices[-1]
+        else:
+            s_idx_orig, e_idx_orig = 0, len(actions_list_ref) - 1
+
+        # --- Create DEEP copies of the action dictionaries ---
+        prefix_actions = [dict(a) for a in actions_list_ref[:s_idx_orig]]
+        segment_to_process = [dict(a) for a in actions_list_ref[s_idx_orig:e_idx_orig + 1]]
+        suffix_actions = [dict(a) for a in actions_list_ref[e_idx_orig + 1:]]
+
+
+        if len(segment_to_process) < 2:
+            return None
+
+        # --- 2. Apply the selected filter logic ---
+        new_segment_actions = []
+        if filter_type == 'sg':
+            if not SCIPY_AVAILABLE: return None
+
+            window = filter_params.get('window_length', 7)
+            poly = filter_params.get('polyorder', 3)
+
+            if window % 2 == 0: window += 1
+            if poly >= window: poly = window - 1
+            if poly < 0: poly = 0
+            if len(segment_to_process) < window: return None
+
+            positions = np.array([a['pos'] for a in segment_to_process])
+            smoothed_pos = savgol_filter(positions, window, poly)
+
+            # Now, this modification only affects the copied segment_to_process
+            new_segment_actions = segment_to_process
+            for i, action in enumerate(new_segment_actions):
+                action['pos'] = int(round(np.clip(smoothed_pos[i], 0, 100)))
+
+        elif filter_type == 'rdp':
+            # This part was already correct because it built new dicts from scratch.
+            # No changes are needed here, but the deep copy above makes it safer.
+            epsilon = filter_params.get('epsilon', 1.0)
+            points = np.array([[a['at'], a['pos']] for a in segment_to_process], dtype=np.float64)
+
+            def rdp_numpy(points, epsilon):
+                if len(points) < 3: return points
+                d = np.abs(np.cross(points[-1] - points[0], points[0:-1] - points[0])) / np.linalg.norm(
+                    points[-1] - points[0])
+                max_index = np.argmax(d)
+                if d[max_index] > epsilon:
+                    left = rdp_numpy(points[:max_index + 1], epsilon)
+                    right = rdp_numpy(points[max_index:], epsilon)
+                    return np.vstack((left[:-1], right))
+                else:
+                    return np.vstack((points[0], points[-1]))
+
+            simplified_points = rdp_numpy(points, epsilon)
+
+            for i, p in enumerate(simplified_points):
+                if i == 0:
+                    new_segment_actions.append(segment_to_process[0])
+                elif i == len(simplified_points) - 1:
+                    new_segment_actions.append(segment_to_process[-1])
+                else:
+                    new_segment_actions.append({'at': int(p[0]), 'pos': int(np.clip(round(p[1]), 0, 100))})
+            if len(new_segment_actions) >= 2 and new_segment_actions[0] == new_segment_actions[-1]:
+                new_segment_actions = new_segment_actions[:-1]
+
+        else:
+            return None
+
+        # --- 3. Return the full, reconstructed list of actions ---
+        return prefix_actions + new_segment_actions + suffix_actions
