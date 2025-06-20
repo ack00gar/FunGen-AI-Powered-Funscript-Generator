@@ -153,6 +153,28 @@ class ApplicationLogic:
         self._check_for_autosave_restore()
         self.energy_saver.reset_activity_timer()
 
+    def unload_model(self, model_type: str):
+        """
+        Clears the path for a given model type and releases it from the tracker.
+        """
+        if model_type == 'detection':
+            self.yolo_detection_model_path_setting = ""
+            self.app_settings.set("yolo_det_model_path", "")
+            if self.tracker:
+                self.tracker.unload_detection_model()
+            self.logger.info("YOLO Detection Model unloaded.", extra={'status_message': True})
+        elif model_type == 'pose':
+            self.yolo_pose_model_path_setting = ""
+            self.app_settings.set("yolo_pose_model_path", "")
+            if self.tracker:
+                self.tracker.unload_pose_model()
+            self.logger.info("YOLO Pose Model unloaded.", extra={'status_message': True})
+        else:
+            self.logger.warning(f"Unknown model type '{model_type}' for unload.")
+
+        self.project_manager.project_dirty = True
+        self.energy_saver.reset_activity_timer()
+
     def generate_waveform(self):
         if not self.processor or not self.processor.is_video_open():
             self.logger.info("Cannot generate waveform: No video loaded.", extra={'status_message': True})
@@ -536,18 +558,20 @@ class ApplicationLogic:
 
     def _check_model_paths(self):
         """Checks essential model paths and logs errors if not found."""
-        models_to_check = {
-            "YOLO Detection Model": self.yolo_det_model_path,
-            "YOLO Pose Model": self.yolo_pose_model_path,
-        }
-        all_clear = True
-        for name, path in models_to_check.items():
-            if not path or not os.path.exists(path):
-                self.logger.error(
-                    f"CRITICAL ERROR: {name} file not found or path not set: '{path}'. Please check settings. Some features will be disabled.",
-                    extra={'status_message': True, 'duration': 15.0})
-                all_clear = False
-        return all_clear
+        # Detection model remains essential
+        if not self.yolo_det_model_path or not os.path.exists(self.yolo_det_model_path):
+            self.logger.error(
+                f"CRITICAL ERROR: YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Please check settings.",
+                extra={'status_message': True, 'duration': 15.0})
+            return False
+
+        # Pose model is now optional
+        if not self.yolo_pose_model_path or not os.path.exists(self.yolo_pose_model_path):
+            self.logger.warning(
+                f"Warning: YOLO Pose Model not found or path not set. Pose-dependent features will be disabled.",
+                extra={'status_message': True, 'duration': 8.0})
+
+        return True
 
     def set_application_logging_level(self, level_name: str):
         """Sets the application-wide logging level."""

@@ -204,9 +204,6 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                   logger_config_for_consumer: Optional[dict] = None):
     # --- Logger setup (unchanged) ---
     consumer_logger = logging.getLogger(f"S1_Consumer_{consumer_idx}_{os.getpid()}")
-    if not consumer_logger.hasHandlers():
-        # ... (full logger setup logic)
-        pass
 
     det_model, pose_model = None, None
     try:
@@ -214,11 +211,16 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
         consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Loading models...")
         det_model = YOLO(yolo_det_model_path, task='detect')
 
-        # Force CPU for pose model on Apple MPS to avoid known bugs ?
-        pose_device = constants.DEVICE  # 'cpu' if 'mps' in str(constants.DEVICE) else constants.DEVICE
-        pose_model = YOLO(yolo_pose_model_path, task='pose')
-        consumer_logger.info(
-            f"[S1 Consumer-{consumer_idx}] Models loaded. Detection on '{constants.DEVICE}', Pose on '{pose_device}'.")
+        if yolo_pose_model_path and os.path.exists(yolo_pose_model_path):
+            consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Loading pose model...")
+            pose_device = constants.DEVICE
+            pose_model = YOLO(yolo_pose_model_path, task='pose')
+            consumer_logger.info(
+                f"[S1 Consumer-{consumer_idx}] Models loaded. Detection on '{constants.DEVICE}', Pose on '{pose_device}'.")
+        else:
+            consumer_logger.warning(f"[S1 Consumer-{consumer_idx}] Pose model path not provided or not found. Skipping pose estimation.")
+            pose_model = None
+
 
         while not stop_event_local.is_set():
             try:
@@ -243,24 +245,26 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                                 'name': det_model.names[int(box_data.cls[0])]
                             })
 
-                # --- Step 2: Perform Pose Estimation on the same frame ---
-                pose_results = pose_model(frame, device=pose_device, verbose=False, imgsz=yolo_input_size_consumer,
-                                          conf=confidence_threshold)
+                # --- Step 2: Conditionally Perform Pose Estimation ---
                 poses = []
-                for r in pose_results:
-                    if r.keypoints and r.boxes:
-                        for i in range(len(r.boxes)):
-                            poses.append({
-                                'bbox': r.boxes.xyxy[i].tolist(),
-                                'keypoints': r.keypoints.data[i].tolist()
-                            })
+                if pose_model:
+                    pose_results = pose_model(frame, device=constants.DEVICE, verbose=False, imgsz=yolo_input_size_consumer,
+                                              conf=confidence_threshold)
+                    for r in pose_results:
+                        if r.keypoints and r.boxes:
+                            for i in range(len(r.boxes)):
+                                poses.append({
+                                    'bbox': r.boxes.xyxy[i].tolist(),
+                                    'keypoints': r.keypoints.data[i].tolist()
+                                })
 
-                # --- Step 3: Package results together and put on a SINGLE queue ---
+                # --- Step 3: Package results ---
                 result_payload = {
                     "detections": detections,
-                    "poses": poses
+                    "poses": poses  # This will be an empty list if pose_model is None
                 }
                 queue_monitor_local.result_queue_put(result_queue, (frame_id, result_payload))
+
 
             except Empty:
                 continue
@@ -407,12 +411,6 @@ def perform_yolo_analysis(
         fallback_config_for_subprocesses = {'log_file': None, 'log_level': logging.INFO}
 
     process_logger.info(f"Stage 1 YOLO Analysis started with orchestrator logger: {process_logger.name}")
-
-    if not os.path.exists(yolo_pose_model_path_arg):
-        msg = "Error: YOLO Pose model not found"
-        process_logger.error(msg)
-        if progress_callback: progress_callback(0, 0, msg, 0, 0, 0)
-        return None
 
     s1_start_time = time.time()
     stop_event_internal = Event()

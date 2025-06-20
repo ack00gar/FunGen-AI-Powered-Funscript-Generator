@@ -591,7 +591,8 @@ def _atr_normalize_funscript_sparse_per_segment(state: AppStateContainer, logger
             fo.atr_funscript_distance = int(np.clip(round(val), 0, 100))
 
 def _get_dominant_pose(frame_obj: FrameObject, is_vr: bool, frame_width: int) -> Optional[PoseRecord]:
-    if not frame_obj.poses: return None
+    if not frame_obj.poses:
+        return None
     if is_vr:
         frame_center_x = frame_width / 2
         return min(frame_obj.poses, key=lambda p: abs(((p.bbox[0] + p.bbox[2]) / 2) - frame_center_x))
@@ -840,17 +841,16 @@ def atr_pass_3_build_locked_penis(state: AppStateContainer, logger: Optional[log
             current_lp_consecutive_detections = 0
             pose_is_stable_in_interaction_zone = False
 
-            # --- NEW CONTEXT-AWARE LOGIC ---
             # If the lock was active, check if the person's pelvis is still where the penis was
-            if current_lp_active and dominant_pose_this_frame and last_frame_dominant_pose and current_lp_last_raw_box_coords:
-                # Check 1: Does the dominant person's box still overlap with where the penis was?
-                person_iou_with_last_penis = _atr_calculate_iou(dominant_pose_this_frame.bbox,
-                                                                current_lp_last_raw_box_coords)
-                if person_iou_with_last_penis > 0.1:  # Low threshold: just check for presence
+            # Check if pose data is available before using it
+            if frame_obj.poses and current_lp_active and dominant_pose_this_frame and last_frame_dominant_pose and current_lp_last_raw_box_coords:
+                person_iou_with_last_penis = _atr_calculate_iou(dominant_pose_this_frame.bbox, current_lp_last_raw_box_coords)
+                if person_iou_with_last_penis > 0.1:
                     pelvis_dissimilarity = dominant_pose_this_frame.calculate_zone_dissimilarity(
                         last_frame_dominant_pose, pelvis_zone_indices)
-                    if pelvis_dissimilarity < 2.0:  # Pelvis is stable
+                    if pelvis_dissimilarity < 2.0:
                         pose_is_stable_in_interaction_zone = True
+
                         _debug_log(logger,
                                    f"Frame {frame_obj.frame_id}: Penis lock held by stable pelvis (IoU: {person_iou_with_last_penis:.2f}, Dissim: {pelvis_dissimilarity:.2f}).")
 

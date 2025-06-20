@@ -6,6 +6,7 @@ import platform
 from typing import List, Dict, Tuple, Optional, Any
 from ultralytics import YOLO
 import logging
+import os
 
 from funscript.dual_axis_funscript import DualAxisFunscript
 from config import constants
@@ -53,34 +54,19 @@ class ROITracker:
         self.prev_gray_user_roi_patch: Optional[np.ndarray] = None
         self.user_roi_current_flow_vector: Tuple[float, float] = (0.0, 0.0)
 
-        self.enable_user_roi_sub_tracking: bool = True  # Master switch for this new feature
-        self.user_roi_tracking_box_size: Tuple[int, int] = (5, 5)  # (Width, Height) of the sub-region tracking box
+        self.enable_user_roi_sub_tracking: bool = True
+        self.user_roi_tracking_box_size: Tuple[int, int] = (5, 5)
 
-        # Object Detection Model (YOLO)
-        # For Stage 3, this might not be strictly needed if ROI comes from ATR,
-        # but ROITracker init expects it. Can be a path to a dummy/small model if not used.
-        self.det_model_path = tracker_model_path # Store path
-        try:
-            self.yolo = YOLO(tracker_model_path, task='detect')
-            self.classes = self.yolo.names
-            self.logger.info(f"Object detection model loaded from {tracker_model_path}")
-            self.logger.info(f"Available classes: {self.classes}")
-        except Exception as e:
-            self.logger.error(f"Could not load YOLO object model from {tracker_model_path}: {e}")
-            self.yolo = None
-            self.classes = []
+        # Store paths
+        self.det_model_path = tracker_model_path
+        self.pose_model_path = pose_model_path
 
-        # Pose Estimation Model (YOLO Pose)
-        self.pose_model_path = pose_model_path # Store path
-        if pose_model_path:
-            try:
-                self.yolo_pose = YOLO(pose_model_path)
-                self.logger.info(f"Pose estimation model loaded from {pose_model_path}")
-            except Exception as e:
-                self.logger.warning(f"Could not load YOLO pose model from {pose_model_path}: {e}")
-                self.yolo_pose = None
-        else:
-            self.yolo_pose = None
+        # Initialize model holders
+        self.yolo: Optional[YOLO] = None
+        self.yolo_pose: Optional[YOLO] = None
+        self.classes = []
+
+        self._load_models()
 
         self.confidence_threshold = confidence_threshold
         self.roi: Optional[Tuple[int, int, int, int]] = None
@@ -124,7 +110,7 @@ class ROITracker:
             self.flow_dense = None
 
         self.prev_gray_main_roi: Optional[np.ndarray] = None
-        self.funscript = DualAxisFunscript(logger=self.logger) # For live tracking
+        self.funscript = DualAxisFunscript(logger=self.logger)
         self.tracking_active: bool = False
         self.start_time_tracking: float = 0
         self.target_size_preprocess = target_size_preprocess
@@ -144,7 +130,7 @@ class ROITracker:
         self.lk_params = dict(winSize=(15, 15), maxLevel=2,
                               criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
         self.prev_features_main_roi: Optional[np.ndarray] = None
-        self.main_interaction_class: Optional[str] = None # This will be set by Stage 3 processor per segment
+        self.main_interaction_class: Optional[str] = None
         self.CLASS_PRIORITY = {"pussy": 0, "anus": 0, "butt": 1, "face": 2, "hand": 3, "breast": 4, "foot": 5}
         self.CLASS_COLORS = {
             "pussy": (255, 0, 255), "anus": (255, 0, 255), "butt": (255, 165, 0), "face": (0, 255, 255),
@@ -180,10 +166,55 @@ class ROITracker:
 
         self.last_frame_time_sec_fps: Optional[float] = None
         self.current_fps: float = 0.0
-        self.current_effective_amp_factor: float = self.base_amplification_factor # Initial value
+        self.current_effective_amp_factor: float = self.base_amplification_factor
         self.stats_display: List[str] = []
         self.logger.info(
             f"Tracker fully initialized (ROI Persistence: {self.max_frames_for_roi_persistence} frames, ROI Smoothing: {self.roi_smoothing_factor}). App instance {'provided' if self.app else 'not provided (e.g. S3 mode)'}.")
+
+    def _load_models(self):
+        """Loads or reloads the detection and pose models based on stored paths."""
+        self.unload_detection_model()
+        self.unload_pose_model()
+
+        if self.det_model_path and os.path.exists(self.det_model_path):
+            try:
+                self.yolo = YOLO(self.det_model_path, task='detect')
+                self.classes = self.yolo.names
+                self.logger.info(f"Object detection model loaded from {self.det_model_path}")
+            except Exception as e:
+                self.logger.error(f"Could not load YOLO object model from {self.det_model_path}: {e}")
+                self.yolo = None
+                self.classes = []
+        else:
+            self.logger.warning("Detection model path not set or file does not exist.")
+            self.yolo = None
+            self.classes = []
+
+        if self.pose_model_path and os.path.exists(self.pose_model_path):
+            try:
+                self.yolo_pose = YOLO(self.pose_model_path)
+                self.logger.info(f"Pose estimation model loaded from {self.pose_model_path}")
+            except Exception as e:
+                self.logger.warning(f"Could not load YOLO pose model from {self.pose_model_path}: {e}")
+                self.yolo_pose = None
+        else:
+            self.logger.info("Pose model path not set or file does not exist. Pose features will be unavailable.")
+            self.yolo_pose = None
+
+    def unload_detection_model(self):
+        """Unloads the detection model to free up memory."""
+        if self.yolo:
+            del self.yolo
+            self.yolo = None
+            self.classes = []
+            self.logger.info("Tracker: Detection model released.")
+
+    def unload_pose_model(self):
+        """Unloads the pose model to free up memory."""
+        if self.yolo_pose:
+            del self.yolo_pose
+            self.yolo_pose = None
+            self.logger.info("Tracker: Pose model released.")
 
     def histogram_calculate_flow_in_sub_regions(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray]) \
             -> Tuple[float, float, float, float, Optional[np.ndarray]]:
