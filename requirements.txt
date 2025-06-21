@@ -10,4 +10,3 @@ rdp
 simplification
 orjson
 scenedetect[opencv]
-orjson
