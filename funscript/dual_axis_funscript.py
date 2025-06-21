@@ -1036,77 +1036,77 @@ class DualAxisFunscript:
         # Add this method to your DualAxisFunscript class in dual_axis_funscript.py
 
 
-def simplify_to_keyframes(self, axis: str, position_tolerance: int = 10, time_tolerance_ms: int = 50,
-                          selected_indices: Optional[List[int]] = None):
-    """
-    FINAL CORRECTED ALGORITHM: Uses iterative global refinement to simplify the
-    script to only the most significant peaks and valleys. This version contains
-    the corrected significance calculation.
-    """
-    target_list_attr = 'primary_actions' if axis == 'primary' else 'secondary_actions'
-    actions_list_ref = getattr(self, target_list_attr)
+    def simplify_to_keyframes(self, axis: str, position_tolerance: int = 10, time_tolerance_ms: int = 50,
+                              selected_indices: Optional[List[int]] = None):
+        """
+        FINAL CORRECTED ALGORITHM: Uses iterative global refinement to simplify the
+        script to only the most significant peaks and valleys. This version contains
+        the corrected significance calculation.
+        """
+        target_list_attr = 'primary_actions' if axis == 'primary' else 'secondary_actions'
+        actions_list_ref = getattr(self, target_list_attr)
 
-    if not actions_list_ref or len(actions_list_ref) < 3: return
+        if not actions_list_ref or len(actions_list_ref) < 3: return
 
-    s_idx, e_idx = 0, len(actions_list_ref) - 1
-    if selected_indices:
-        valid_indices = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
-        if len(valid_indices) < 3: return
-        s_idx, e_idx = valid_indices[0], valid_indices[-1]
+        s_idx, e_idx = 0, len(actions_list_ref) - 1
+        if selected_indices:
+            valid_indices = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
+            if len(valid_indices) < 3: return
+            s_idx, e_idx = valid_indices[0], valid_indices[-1]
 
-    prefix_actions = actions_list_ref[:s_idx]
-    segment_to_process = actions_list_ref[s_idx:e_idx + 1]
-    suffix_actions = actions_list_ref[e_idx + 1:]
+        prefix_actions = actions_list_ref[:s_idx]
+        segment_to_process = actions_list_ref[s_idx:e_idx + 1]
+        suffix_actions = actions_list_ref[e_idx + 1:]
 
-    if len(segment_to_process) < 3:
-        actions_list_ref[:] = prefix_actions + segment_to_process + suffix_actions
-        return
+        if len(segment_to_process) < 3:
+            actions_list_ref[:] = prefix_actions + segment_to_process + suffix_actions
+            return
 
-    # Pass 1: Find all local extrema (peaks and valleys)
-    extrema = [segment_to_process[0]]
-    for i in range(1, len(segment_to_process) - 1):
-        p_prev, p_curr, p_next = segment_to_process[i - 1]['pos'], segment_to_process[i]['pos'], \
-        segment_to_process[i + 1]['pos']
-        if (p_curr > p_prev and p_curr >= p_next) or (p_curr < p_prev and p_curr <= p_next):
-            extrema.append(segment_to_process[i])
-    extrema.append(segment_to_process[-1])
+        # Pass 1: Find all local extrema (peaks and valleys)
+        extrema = [segment_to_process[0]]
+        for i in range(1, len(segment_to_process) - 1):
+            p_prev, p_curr, p_next = segment_to_process[i - 1]['pos'], segment_to_process[i]['pos'], \
+            segment_to_process[i + 1]['pos']
+            if (p_curr > p_prev and p_curr >= p_next) or (p_curr < p_prev and p_curr <= p_next):
+                extrema.append(segment_to_process[i])
+        extrema.append(segment_to_process[-1])
 
-    # Pass 2: Iteratively remove the least significant extremum
-    while len(extrema) > 2:
-        min_significance = float('inf')
-        weakest_link_idx = -1
+        # Pass 2: Iteratively remove the least significant extremum
+        while len(extrema) > 2:
+            min_significance = float('inf')
+            weakest_link_idx = -1
 
-        for i in range(1, len(extrema) - 1):
-            p_prev, p_curr, p_next = extrema[i - 1], extrema[i], extrema[i + 1]
-            duration = float(p_next['at'] - p_prev['at'])
+            for i in range(1, len(extrema) - 1):
+                p_prev, p_curr, p_next = extrema[i - 1], extrema[i], extrema[i + 1]
+                duration = float(p_next['at'] - p_prev['at'])
 
-            if duration > 0:
-                progress = (p_curr['at'] - p_prev['at']) / duration
-                # CORRECTED a bug in the projection formula
-                projected_pos = p_prev['pos'] + progress * (p_next['pos'] - p_prev['pos'])
-                significance = abs(p_curr['pos'] - projected_pos)
+                if duration > 0:
+                    progress = (p_curr['at'] - p_prev['at']) / duration
+                    # CORRECTED a bug in the projection formula
+                    projected_pos = p_prev['pos'] + progress * (p_next['pos'] - p_prev['pos'])
+                    significance = abs(p_curr['pos'] - projected_pos)
+                else:
+                    significance = float('inf')
+
+                if significance < min_significance:
+                    min_significance = significance
+                    weakest_link_idx = i
+
+            if weakest_link_idx != -1 and min_significance < position_tolerance:
+                extrema.pop(weakest_link_idx)
             else:
-                significance = float('inf')
+                break
 
-            if significance < min_significance:
-                min_significance = significance
-                weakest_link_idx = i
-
-        if weakest_link_idx != -1 and min_significance < position_tolerance:
-            extrema.pop(weakest_link_idx)
+        # Pass 3: Enforce time tolerance
+        if time_tolerance_ms > 0 and len(extrema) > 1:
+            final_keyframes = [extrema[0]]
+            for i in range(1, len(extrema)):
+                if (extrema[i]['at'] - final_keyframes[-1]['at']) >= time_tolerance_ms:
+                    final_keyframes.append(extrema[i])
+                else:
+                    if abs(extrema[i]['pos'] - 50) > abs(final_keyframes[-1]['pos'] - 50):
+                        final_keyframes[-1] = extrema[i]
         else:
-            break
+            final_keyframes = extrema
 
-    # Pass 3: Enforce time tolerance
-    if time_tolerance_ms > 0 and len(extrema) > 1:
-        final_keyframes = [extrema[0]]
-        for i in range(1, len(extrema)):
-            if (extrema[i]['at'] - final_keyframes[-1]['at']) >= time_tolerance_ms:
-                final_keyframes.append(extrema[i])
-            else:
-                if abs(extrema[i]['pos'] - 50) > abs(final_keyframes[-1]['pos'] - 50):
-                    final_keyframes[-1] = extrema[i]
-    else:
-        final_keyframes = extrema
-
-    actions_list_ref[:] = prefix_actions + final_keyframes + suffix_actions
+        actions_list_ref[:] = prefix_actions + final_keyframes + suffix_actions
