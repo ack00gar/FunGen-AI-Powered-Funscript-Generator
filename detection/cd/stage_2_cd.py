@@ -955,6 +955,9 @@ def atr_pass_5_determine_distance(state: AppStateContainer, logger: Optional[log
     _debug_log(logger, "Starting ATR Pass 5: Determine Frame Distances (Corrected Logic)")
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
 
+    # Initialize previous distance tracker
+    prev_valid_distance = 100  # Default starting value
+
     for frame_obj in state.frames:
         frame_obj.is_occluded = False
         frame_obj.active_interaction_track_id = None
@@ -1012,10 +1015,15 @@ def atr_pass_5_determine_distance(state: AppStateContainer, logger: Optional[log
 
             comp_dist_for_frame = _atr_calculate_normalized_distance_to_base(lp_box_coords, active_box.class_name,
                                                                              active_box.bbox, max_dist_ref)
+            prev_valid_distance = comp_dist_for_frame  # Update the previous valid distance
 
         elif frame_obj.is_occluded and is_penetration_pos:
             # Fallback to penis visibility only if occluded and in a penetration scene with no secondary motion
             comp_dist_for_frame = lp_state.visible_part
+            prev_valid_distance = comp_dist_for_frame  # Update the previous valid distance
+        else:
+            # No active box found and not occluded - use previous valid distance
+            comp_dist_for_frame = prev_valid_distance
 
         frame_obj.atr_funscript_distance = int(np.clip(round(comp_dist_for_frame), 0, 100))
 
