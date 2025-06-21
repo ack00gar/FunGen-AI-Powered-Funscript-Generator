@@ -34,6 +34,12 @@ class InteractiveFunscriptTimeline:
         self.amp_scale_factor = self.app.app_settings.get(f"timeline{self.timeline_num}_amp_default_scale", 1.5)
         self.amp_center_value = self.app.app_settings.get(f"timeline{self.timeline_num}_amp_default_center", 50)
 
+        # --- KEYFRAME STATE ---
+        self.show_keyframe_settings_popup = False
+        self.keyframe_apply_to_selection = False
+        self.keyframe_position_tolerance = self.app.app_settings.get(f"timeline{self.timeline_num}_keyframe_default_pos_tol", 10)
+        self.keyframe_time_tolerance = self.app.app_settings.get(f"timeline{self.timeline_num}_keyframe_default_time_tol", 50)
+
 
         # Get initial defaults from app_settings (AppLogic holds app_settings directly)
         self.sg_window_length = self.app.app_settings.get(f"timeline{self.timeline_num}_sg_default_window", 5)
@@ -195,6 +201,23 @@ class InteractiveFunscriptTimeline:
                                            scale_factor=scale_factor, center_value=center_value,
                                            selected_indices=selected_indices)
 
+    def _perform_resample(self, selected_indices: Optional[List[int]]):
+        # We can hardcode the resample rate for now, or add a popup later.
+        # 50ms is a good starting point.
+        resample_rate = 50
+        return self._call_funscript_method('apply_peak_preserving_resample', 'Resample',
+                                           resample_rate_ms=resample_rate,
+                                           selected_indices=selected_indices)
+
+    def _perform_keyframe_simplification(self, position_tolerance: int, time_tolerance_ms: int, selected_indices: Optional[List[int]]):
+        return self._call_funscript_method('simplify_to_keyframes', 'Keyframe Extraction',
+                                           position_tolerance=position_tolerance,
+                                           time_tolerance_ms=time_tolerance_ms,
+                                           selected_indices=selected_indices)
+
+
+
+
     def set_preview_actions(self, preview_actions: Optional[List[Dict]]):
         self.preview_actions = preview_actions
         self.is_previewing = preview_actions is not None
@@ -218,6 +241,8 @@ class InteractiveFunscriptTimeline:
             apply_to_selection = self.rdp_apply_to_selection
         elif filter_type == 'amp':
             apply_to_selection = self.amp_apply_to_selection
+        elif filter_type == 'keyframe':
+            apply_to_selection = self.keyframe_apply_to_selection
 
         indices_to_process = list(self.multi_selected_action_indices) if apply_to_selection else None
 
@@ -226,8 +251,13 @@ class InteractiveFunscriptTimeline:
             params = {'window_length': self.sg_window_length, 'polyorder': self.sg_poly_order}
         elif filter_type == 'rdp':
             params = {'epsilon': self.rdp_epsilon}
-        elif filter_type == 'amp': # NEW
+        elif filter_type == 'amp':
             params = {'scale_factor': self.amp_scale_factor, 'center_value': self.amp_center_value}
+        elif filter_type == 'keyframe':
+            params = {
+                'position_tolerance': self.keyframe_position_tolerance,
+                'time_tolerance_ms': self.keyframe_time_tolerance
+            }
 
 
         # This now calls the non-destructive method we added to DualAxisFunscript
@@ -382,6 +412,44 @@ class InteractiveFunscriptTimeline:
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
 
             if amp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.same_line()
+
+            # --- Resample Button ---
+            resample_disabled_bool = not allow_editing_timeline or not has_actions
+            if resample_disabled_bool:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+            if imgui.button(f"Resample##ResampleFilter{window_id_suffix}"):
+                if not resample_disabled_bool:
+                    indices_to_use = list(self.multi_selected_action_indices) if (
+                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3
+                    ) else None
+
+                    op_desc = "Applied Peak-Preserving Resample" + (" to selection" if indices_to_use else "")
+
+                    fs_proc._record_timeline_action(self.timeline_num, op_desc)  # For Undo
+                    if self._perform_resample(selected_indices=indices_to_use):
+                        fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                        self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+
+            if resample_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.same_line()
+
+            # --- Keyframe Extraction Button ---
+            keyframe_disabled_bool = not allow_editing_timeline or not has_actions
+            if keyframe_disabled_bool:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+            if imgui.button(f"Keyframes##KeyframeFilter{window_id_suffix}"):
+                # This now opens the popup instead of applying directly
+                if not keyframe_disabled_bool:
+                    self.show_keyframe_settings_popup = True
+                    self.keyframe_apply_to_selection = bool(
+                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
+
+            if keyframe_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # Invert Button
@@ -659,8 +727,80 @@ class InteractiveFunscriptTimeline:
                 if window_expanded:
                     imgui.end()
 
-            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_amp_settings_popup:
+            # --- Keyframe Extraction Settings Window ---
+            keyframe_window_title = f"Keyframe Extraction Settings (Timeline {self.timeline_num})##KeyframeSettingsWindow{window_id_suffix}"
+            if self.show_keyframe_settings_popup:
+                if not self.is_previewing:
+                    self._update_preview('keyframe')
 
+                main_viewport = imgui.get_main_viewport()
+                popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 350) * 0.5
+                popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 220) * 0.5  # Increased height slightly
+                imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
+                imgui.set_next_window_size(350, 0, condition=imgui.APPEARING)
+
+                window_expanded, self.show_keyframe_settings_popup = imgui.begin(
+                    keyframe_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+
+                if window_expanded:
+                    imgui.text(f"Dominant Keyframe Extraction")
+                    imgui.separator()
+
+                    imgui.text_wrapped("Filters out minor peaks/valleys based on position and time.")
+
+                    # Slider 1: Position Tolerance
+                    pos_tol_changed, self.keyframe_position_tolerance = imgui.slider_int("Position Tolerance##KeyframePosTol", self.keyframe_position_tolerance, 0, 15)
+                    if pos_tol_changed: self._update_preview('keyframe')
+                    if imgui.is_item_hovered(): imgui.set_tooltip("Minimum change in position to create a new keyframe.")
+
+                    # Slider 2: Time Tolerance
+                    time_tol_changed, self.keyframe_time_tolerance = imgui.slider_int("Time Tolerance (ms)##KeyframeTimeTol", self.keyframe_time_tolerance, 0, 100)
+                    if time_tol_changed: self._update_preview('keyframe')
+                    if imgui.is_item_hovered(): imgui.set_tooltip("Minimum time between two keyframes.")
+
+                    # ... (The rest of the popup: selection checkbox and Apply/Cancel buttons) ...
+                    if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3:
+                        sel_changed, self.keyframe_apply_to_selection = imgui.checkbox(
+                            f"Apply to {len(self.multi_selected_action_indices)} selected##KeyframeApplyToSel",
+                            self.keyframe_apply_to_selection)
+                        if sel_changed:
+                            self._update_preview('keyframe')
+                    else:
+                        imgui.text_disabled("Apply to: Full Script")
+                        self.keyframe_apply_to_selection = False
+
+                    if imgui.button(f"Apply##KeyframeApplyPop{window_id_suffix}"):
+                        indices_to_use = list(
+                            self.multi_selected_action_indices) if self.keyframe_apply_to_selection else None
+                        op_desc = (
+                            f"Simplified to Keyframes (P-Tol:{self.keyframe_position_tolerance}, T-Tol:{self.keyframe_time_tolerance}")
+
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        if self._perform_keyframe_simplification(self.keyframe_position_tolerance,
+                                                                 self.keyframe_time_tolerance,
+                                                                 selected_indices=indices_to_use):
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_keyframe_default_pos_tol",
+                                                      self.keyframe_position_tolerance)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_keyframe_default_time_tol",
+                                                      self.keyframe_time_tolerance)
+                            self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+
+                        self.clear_preview()
+                        self.show_keyframe_settings_popup = False
+
+                    imgui.same_line()
+                    if imgui.button(f"Cancel##KeyframeCancelPop{window_id_suffix}"):
+                        self.clear_preview()
+                        self.show_keyframe_settings_popup = False
+
+                if not self.show_keyframe_settings_popup:
+                    self.clear_preview()
+
+                if window_expanded:
+                    imgui.end()
+
+            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup:
                 self.clear_preview()
 
             imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)

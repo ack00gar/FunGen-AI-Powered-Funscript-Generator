@@ -863,8 +863,250 @@ class DualAxisFunscript:
             for action in new_segment_actions:
                 action['pos'] = operation_func(action['pos'])
 
+        elif filter_type == 'keyframe':
+            position_tolerance = filter_params.get('position_tolerance', 10)
+            time_tolerance_ms = filter_params.get('time_tolerance_ms', 50)
+
+            if len(segment_to_process) < 3:
+                new_segment_actions = segment_to_process
+            else:
+                extrema = [segment_to_process[0]]
+                for i in range(1, len(segment_to_process) - 1):
+                    p_prev, p_curr, p_next = segment_to_process[i - 1]['pos'], segment_to_process[i]['pos'], \
+                    segment_to_process[i + 1]['pos']
+                    if (p_curr > p_prev and p_curr >= p_next) or (p_curr < p_prev and p_curr <= p_next):
+                        extrema.append(segment_to_process[i])
+                extrema.append(segment_to_process[-1])
+
+                while len(extrema) > 2:
+                    min_significance = float('inf')
+                    weakest_link_idx = -1
+                    for i in range(1, len(extrema) - 1):
+                        p_prev, p_curr, p_next = extrema[i - 1], extrema[i], extrema[i + 1]
+                        duration = float(p_next['at'] - p_prev['at'])
+                        if duration > 0:
+                            progress = (p_curr['at'] - p_prev['at']) / duration
+                            # CORRECTED a bug in the projection formula
+                            projected_pos = p_prev['pos'] + progress * (p_next['pos'] - p_prev['pos'])
+                            significance = abs(p_curr['pos'] - projected_pos)
+                        else:
+                            significance = float('inf')
+                        if significance < min_significance:
+                            min_significance = significance
+                            weakest_link_idx = i
+
+                    if weakest_link_idx != -1 and min_significance < position_tolerance:
+                        extrema.pop(weakest_link_idx)
+                    else:
+                        break
+
+                if time_tolerance_ms > 0 and len(extrema) > 1:
+                    final_keyframes = [extrema[0]]
+                    for i in range(1, len(extrema)):
+                        if (extrema[i]['at'] - final_keyframes[-1]['at']) >= time_tolerance_ms:
+                            final_keyframes.append(extrema[i])
+                        else:
+                            if abs(extrema[i]['pos'] - 50) > abs(final_keyframes[-1]['pos'] - 50):
+                                final_keyframes[-1] = extrema[i]
+                else:
+                    final_keyframes = extrema
+
+                new_segment_actions = final_keyframes
+
         else:
             return None
 
         # --- 3. Return the full, reconstructed list of actions ---
         return prefix_actions + new_segment_actions + suffix_actions
+
+    # Add this method to your DualAxisFunscript class in dual_axis_funscript.py
+
+    def apply_peak_preserving_resample(self, axis: str, resample_rate_ms: int = 50,
+                                       selected_indices: Optional[List[int]] = None):
+        """
+        Applies a custom resampling algorithm that preserves the timing of peaks and
+        valleys while creating smooth, sinusoidal transitions between them.
+
+        :param axis: The axis to process ('primary' or 'secondary').
+        :param resample_rate_ms: The time interval for the newly generated points.
+        :param selected_indices: Optional list of indices to apply the filter to.
+        """
+        target_list_attr = 'primary_actions' if axis == 'primary' else 'secondary_actions'
+        actions_list_ref = getattr(self, target_list_attr)
+
+        if not actions_list_ref or len(actions_list_ref) < 3:
+            self.logger.info("Not enough points for Peak-Preserving Resampling.")
+            return
+
+        # --- 1. Determine the segment to process ---
+        s_idx, e_idx = 0, len(actions_list_ref) - 1
+        if selected_indices:
+            valid_indices = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
+            if len(valid_indices) < 3:
+                self.logger.info("Not enough selected points for resampling.")
+                return
+            s_idx, e_idx = valid_indices[0], valid_indices[-1]
+
+        prefix_actions = actions_list_ref[:s_idx]
+        segment_to_process = actions_list_ref[s_idx:e_idx + 1]
+        suffix_actions = actions_list_ref[e_idx + 1:]
+
+        # --- 2. Identify Peaks and Valleys (the Anchors) ---
+        anchors = []
+        if not segment_to_process: return
+
+        # Always include the very first and last points of the segment as anchors
+        anchors.append(segment_to_process[0])
+
+        for i in range(1, len(segment_to_process) - 1):
+            p_prev = segment_to_process[i - 1]['pos']
+            p_curr = segment_to_process[i]['pos']
+            p_next = segment_to_process[i + 1]['pos']
+
+            # Check for local peak
+            if p_curr > p_prev and p_curr > p_next:
+                anchors.append(segment_to_process[i])
+            # Check for local valley
+            elif p_curr < p_prev and p_curr < p_next:
+                anchors.append(segment_to_process[i])
+            # Check for flat peak/valley (e.g., 80, 90, 90, 80)
+            elif p_curr == p_next and p_curr != p_prev:
+                # Look ahead to find the end of the flat section
+                j = i
+                while j < len(segment_to_process) - 1 and segment_to_process[j]['pos'] == p_curr:
+                    j += 1
+                p_after_flat = segment_to_process[j]['pos']
+
+                # If it's a peak or valley, add the middle point of the flat section
+                if (p_curr > p_prev and p_curr > p_after_flat) or \
+                        (p_curr < p_prev and p_curr < p_after_flat):
+                    anchor_candidate = segment_to_process[(i + j - 1) // 2]
+                    if not anchors or anchors[-1] != anchor_candidate:
+                        anchors.append(anchor_candidate)
+
+        # Always include the last point, ensuring no duplicates
+        if not anchors or anchors[-1] != segment_to_process[-1]:
+            anchors.append(segment_to_process[-1])
+
+        # --- 3. Generate new points with Cosine Easing between anchors ---
+        new_actions = []
+        if not anchors: return  # Should not happen
+
+        new_actions.append(anchors[0])  # Start with the first anchor
+
+        for i in range(len(anchors) - 1):
+            p1 = anchors[i]
+            p2 = anchors[i + 1]
+
+            t1, pos1 = p1['at'], p1['pos']
+            t2, pos2 = p2['at'], p2['pos']
+
+            duration = float(t2 - t1)
+            pos_delta = float(pos2 - pos1)
+
+            if duration <= 0:
+                continue
+
+            # Start generating new points from the next time step after p1
+            current_time = t1 + resample_rate_ms
+            while current_time < t2:
+                # Calculate progress and apply cosine easing
+                progress = (current_time - t1) / duration
+                eased_progress = (1 - np.cos(progress * np.pi)) / 2.0
+
+                new_pos = pos1 + eased_progress * pos_delta
+
+                new_actions.append({
+                    'at': int(current_time),
+                    'pos': int(round(np.clip(new_pos, 0, 100)))
+                })
+                current_time += resample_rate_ms
+
+            # Add the next anchor, ensuring no duplicates
+            if not new_actions or new_actions[-1]['at'] < p2['at']:
+                new_actions.append(p2)
+
+        # --- 4. Replace the old segment with the new resampled actions ---
+        actions_list_ref[:] = prefix_actions + new_actions + suffix_actions
+
+        self.logger.info(
+            f"Applied Peak-Preserving Resample to {axis}. "
+            f"Points: {len(segment_to_process)} -> {len(new_actions)}")
+
+        # Add this method to your DualAxisFunscript class in dual_axis_funscript.py
+
+
+def simplify_to_keyframes(self, axis: str, position_tolerance: int = 10, time_tolerance_ms: int = 50,
+                          selected_indices: Optional[List[int]] = None):
+    """
+    FINAL CORRECTED ALGORITHM: Uses iterative global refinement to simplify the
+    script to only the most significant peaks and valleys. This version contains
+    the corrected significance calculation.
+    """
+    target_list_attr = 'primary_actions' if axis == 'primary' else 'secondary_actions'
+    actions_list_ref = getattr(self, target_list_attr)
+
+    if not actions_list_ref or len(actions_list_ref) < 3: return
+
+    s_idx, e_idx = 0, len(actions_list_ref) - 1
+    if selected_indices:
+        valid_indices = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
+        if len(valid_indices) < 3: return
+        s_idx, e_idx = valid_indices[0], valid_indices[-1]
+
+    prefix_actions = actions_list_ref[:s_idx]
+    segment_to_process = actions_list_ref[s_idx:e_idx + 1]
+    suffix_actions = actions_list_ref[e_idx + 1:]
+
+    if len(segment_to_process) < 3:
+        actions_list_ref[:] = prefix_actions + segment_to_process + suffix_actions
+        return
+
+    # Pass 1: Find all local extrema (peaks and valleys)
+    extrema = [segment_to_process[0]]
+    for i in range(1, len(segment_to_process) - 1):
+        p_prev, p_curr, p_next = segment_to_process[i - 1]['pos'], segment_to_process[i]['pos'], \
+        segment_to_process[i + 1]['pos']
+        if (p_curr > p_prev and p_curr >= p_next) or (p_curr < p_prev and p_curr <= p_next):
+            extrema.append(segment_to_process[i])
+    extrema.append(segment_to_process[-1])
+
+    # Pass 2: Iteratively remove the least significant extremum
+    while len(extrema) > 2:
+        min_significance = float('inf')
+        weakest_link_idx = -1
+
+        for i in range(1, len(extrema) - 1):
+            p_prev, p_curr, p_next = extrema[i - 1], extrema[i], extrema[i + 1]
+            duration = float(p_next['at'] - p_prev['at'])
+
+            if duration > 0:
+                progress = (p_curr['at'] - p_prev['at']) / duration
+                # CORRECTED a bug in the projection formula
+                projected_pos = p_prev['pos'] + progress * (p_next['pos'] - p_prev['pos'])
+                significance = abs(p_curr['pos'] - projected_pos)
+            else:
+                significance = float('inf')
+
+            if significance < min_significance:
+                min_significance = significance
+                weakest_link_idx = i
+
+        if weakest_link_idx != -1 and min_significance < position_tolerance:
+            extrema.pop(weakest_link_idx)
+        else:
+            break
+
+    # Pass 3: Enforce time tolerance
+    if time_tolerance_ms > 0 and len(extrema) > 1:
+        final_keyframes = [extrema[0]]
+        for i in range(1, len(extrema)):
+            if (extrema[i]['at'] - final_keyframes[-1]['at']) >= time_tolerance_ms:
+                final_keyframes.append(extrema[i])
+            else:
+                if abs(extrema[i]['pos'] - 50) > abs(final_keyframes[-1]['pos'] - 50):
+                    final_keyframes[-1] = extrema[i]
+    else:
+        final_keyframes = extrema
+
+    actions_list_ref[:] = prefix_actions + final_keyframes + suffix_actions
