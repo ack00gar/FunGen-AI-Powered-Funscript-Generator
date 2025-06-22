@@ -793,10 +793,7 @@ class ROITracker:
             base_primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
             secondary_pos = int(np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
 
-        # With transition logic removed, the primary position is determined directly.
-        # The mode ('riding' vs 'thrusting') affects which part of the ROI is analyzed for flow,
-        # but the final mapping from flow to position is currently identical for both.
-        primary_pos = base_primary_pos
+        primary_pos = base_primary_pos if self.motion_mode == "riding" else 100 - base_primary_pos
 
         # Visualization logic (only if self.app is present, for live mode)
         if self.app and self.roi and self.show_flow:
