@@ -157,13 +157,6 @@ class ROITracker:
         self.motion_mode_history_window: int = 30  # Buffer size, e.g., 1s at 30fps
         self.motion_inversion_threshold: float = 1.2  # Motion in one region must be 20% greater than the other to trigger a change
 
-        # Properties for smoothing the transition between Riding and Thrusting modes
-        self.is_transitioning: bool = False
-        self.transition_progress: float = 0.0
-        self.transition_duration_frames: int = 15  # Approx. 0.5s at 30fps, can be adjusted
-        self.transition_from_mode: str = 'undetermined'
-        self.transition_to_mode: str = 'undetermined'
-
         self.last_frame_time_sec_fps: Optional[float] = None
         self.current_fps: float = 0.0
         self.current_effective_amp_factor: float = self.base_amplification_factor
@@ -747,12 +740,9 @@ class ROITracker:
             )
         else:
             # Use our sub-region analysis method for dense flow
-            # Ensure _calculate_flow_in_sub_regions returns flow_field_for_vis if you intend to use it
             dy_raw, dx_raw, lower_mag, upper_mag, flow_field_for_vis = self._calculate_flow_in_sub_regions(
                 current_roi_patch_gray, prev_roi_patch_gray
             )
-
-        # Check if the feature is enabled AND if the video processor has identified the video as VR.
 
         is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
 
@@ -768,17 +758,12 @@ class ROITracker:
             if len(self.motion_mode_history) > self.motion_mode_history_window:
                 self.motion_mode_history.pop(0)
 
-            if self.motion_mode_history:  # Check if history is not empty before processing
+            if self.motion_mode_history:
                 most_common_mode, count = Counter(self.motion_mode_history).most_common(1)[0]
-                # A new stable mode is detected, we are not already transitioning, and the mode is actually different.
-                if count > self.motion_mode_history_window // 2 and self.motion_mode != most_common_mode and not self.is_transitioning:
-                    if most_common_mode != 'undetermined':
-                        self.logger.info(
-                            f"Motion mode transition triggered: from '{self.motion_mode}' to '{most_common_mode}'")
-                        self.is_transitioning = True
-                        self.transition_progress = 0.0
-                        self.transition_from_mode = self.motion_mode
-                        self.transition_to_mode = most_common_mode
+                # Solidly switch mode if a new one is dominant in the history window.
+                if count > self.motion_mode_history_window // 2 and self.motion_mode != most_common_mode:
+                    self.logger.info(f"Motion mode switched: from '{self.motion_mode}' to '{most_common_mode}'.")
+                    self.motion_mode = most_common_mode
         else:
             # If the feature is disabled or the video is 2D, ensure we are in the default, non-inverting state.
             self.motion_mode = 'thrusting'  # Default non-inverting mode
@@ -808,35 +793,10 @@ class ROITracker:
             base_primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
             secondary_pos = int(np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
 
-        # Define the signal for each mode based on physical interpretation.
-        # Riding (inverted): Upward motion in frame -> device moves up.
-        # Thrusting (direct): Downward motion in frame -> device moves up.
-        riding_signal = base_primary_pos  # 100 - base_primary_pos
-        thrusting_signal = 100 - base_primary_pos
-
-        if self.is_transitioning:
-            # Determine the source and target signals for the blend.
-            old_signal = riding_signal if self.transition_from_mode in ['riding', 'undetermined'] else thrusting_signal
-            new_signal = riding_signal if self.transition_to_mode == 'riding' else thrusting_signal
-
-            # Calculate the blend weight (from 0.0 to 1.0)
-            weight = self.transition_progress / self.transition_duration_frames
-
-            # Linearly interpolate between the old and new signal to create a smooth blend
-            primary_pos = int(old_signal * (1.0 - weight) + new_signal * weight)
-
-            # Advance the transition
-            self.transition_progress += 1
-            if self.transition_progress >= self.transition_duration_frames:
-                self.logger.info(f"Motion mode transition to '{self.transition_to_mode}' complete.")
-                self.motion_mode = self.transition_to_mode  # Solidify the new mode
-                self.is_transitioning = False
-        else:
-            # Standard operation: apply the signal for the current stable mode.
-            if self.motion_mode in ['riding', 'undetermined']:
-                primary_pos = riding_signal
-            else:  # Thrusting
-                primary_pos = thrusting_signal
+        # With transition logic removed, the primary position is determined directly.
+        # The mode ('riding' vs 'thrusting') affects which part of the ROI is analyzed for flow,
+        # but the final mapping from flow to position is currently identical for both.
+        primary_pos = base_primary_pos
 
         # Visualization logic (only if self.app is present, for live mode)
         if self.app and self.roi and self.show_flow:
@@ -1161,12 +1121,21 @@ class ROITracker:
             is_vr_video = self.app and hasattr(self.app,
                                                'processor') and self.app.processor.determined_video_type == 'VR'
             if self.enable_inversion_detection and is_vr_video:
-                mode_text = self.motion_mode.capitalize()
-                mode_color = (0, 255, 0) if self.motion_mode == 'thrusting' else (255, 100,
-                                                                                  255) if self.motion_mode == 'riding' else (
-                    255, 255, 0)
-                cv2.putText(processed_frame, mode_text, (rx + 5, ry + rh - 5), cv2.FONT_HERSHEY_PLAIN, 0.8, mode_color,
-                            1)
+                mode_color = (255, 255, 0)  # Default for undetermined
+                mode_text = "Undetermined"
+                if self.motion_mode == 'thrusting':
+                    mode_text = "Thrusting"
+                    mode_color = (0, 255, 0)
+                elif self.motion_mode == 'riding':
+                    mode_color = (255, 100, 255)
+                    if self.main_interaction_class == 'face':
+                        mode_text = "Blowing"
+                    elif self.main_interaction_class == 'hand':
+                        mode_text = "Stroking"
+                    else:
+                        mode_text = "Riding"
+                cv2.putText(processed_frame, mode_text, (rx + 5, ry + rh - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
+                            mode_color, 1)
 
         elif self.tracking_mode == "USER_FIXED_ROI" and self.show_roi and self.user_roi_fixed:
             urx, ury, urw, urh = self.user_roi_fixed
@@ -1182,10 +1151,21 @@ class ROITracker:
             is_vr_video = self.app and hasattr(self.app,
                                                'processor') and self.app.processor.determined_video_type == 'VR'
             if self.enable_inversion_detection and is_vr_video:
-                mode_text = self.motion_mode.capitalize()
-                mode_color = (0, 255, 0) if self.motion_mode == 'thrusting' else (255, 100,
-                                                                                  255) if self.motion_mode == 'riding' else (
-                    255, 255, 0)
+                mode_color = (255, 255, 0)  # Default for undetermined
+                mode_text = "Undetermined"
+                if self.motion_mode == 'thrusting':
+                    mode_text = "Thrusting"
+                    mode_color = (0, 255, 0)
+                elif self.motion_mode == 'riding':
+                    mode_color = (255, 100, 255)
+                    # Note: main_interaction_class is primarily driven by YOLO_ROI mode.
+                    # In User ROI, this relies on a class being set externally (e.g., via UI or project file).
+                    if self.main_interaction_class == 'face':
+                        mode_text = "Blowing"
+                    elif self.main_interaction_class == 'hand':
+                        mode_text = "Stroking"
+                    else:
+                        mode_text = "Riding"
                 cv2.putText(processed_frame, mode_text, (urx_c + 5, ury_c + urh_c - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
                             mode_color, 1)
 
@@ -1254,9 +1234,14 @@ class ROITracker:
 
     def stop_tracking(self):
         self.tracking_active = False
-        if self.tracking_mode == "YOLO_ROI": # Also for S3-like
+        if self.tracking_mode == "YOLO_ROI":  # Also for S3-like
             self.prev_gray_main_roi, self.prev_features_main_roi = None, None
-        self.logger.info(f"Tracking stopped (mode: {self.tracking_mode}).")
+
+        # Reset motion mode to undetermined when stopping.
+        self.motion_mode = 'undetermined'
+        self.motion_mode_history.clear()
+
+        self.logger.info(f"Tracking stopped (mode: {self.tracking_mode}). Motion state reset to 'undetermined'.")
 
     def reset(self, reason: Optional[str] = None):
         self.stop_tracking()  # Explicitly set tracking_active to False.
