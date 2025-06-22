@@ -812,11 +812,7 @@ class ROITracker:
         # Riding (inverted): Upward motion in frame -> device moves up.
         # Thrusting (direct): Downward motion in frame -> device moves up.
         riding_signal = base_primary_pos  # 100 - base_primary_pos
-        thrusting_signal = base_primary_pos
-
-        # If you want to override this to match your original request (both modes behaving identically),
-        # simply change the `thrusting_signal` line above to:
-        # thrusting_signal = 100 - base_primary_pos
+        thrusting_signal = 100 - base_primary_pos
 
         if self.is_transitioning:
             # Determine the source and target signals for the blend.
