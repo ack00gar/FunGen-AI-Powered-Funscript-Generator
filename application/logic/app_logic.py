@@ -251,7 +251,7 @@ class ApplicationLogic:
             self._cancel_batch_processing_from_confirmation()
             return
 
-        # --- MODIFIED: Store all user choices from the dialog ---
+        # --- Store all user choices from the dialog ---
         self.batch_processing_method_idx = selected_method_idx
         self.batch_apply_post_processing = apply_post_processing
         self.batch_copy_funscript_to_video_location = copy_to_video_location

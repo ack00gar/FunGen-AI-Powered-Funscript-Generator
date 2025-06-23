@@ -682,7 +682,7 @@ def simple_iou_tracker_step0(state: AppStateContainer, logger: Optional[logging.
     _debug_log(logger, f"Step 0: Tracking complete. Assigned up to global_track_id {next_global_track_id - 1}.")
 
 
-# --- ATR Analysis Steps (modified to use FrameObject and BoxRecord) ---
+# --- ATR Analysis Steps ---
 def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logging.Logger]):
     _debug_log(logger, "Starting ATR Pass 1: Interpolate Boxes (using S2 Tracker IDs)")
     track_history: Dict[int, Dict[str, Any]] = {}
@@ -823,9 +823,6 @@ def atr_pass_3_build_locked_penis(state: AppStateContainer, logger: Optional[log
                     current_lp_max_penetration_height = current_raw_height * 0.65  # Penetration depth based on current visible glans
 
                     break  # Found a glans associated with this penis
-
-            # ATR: Navel check to limit "giant penis" error
-            # This can be added if navel detection is reliable.
 
             if not current_lp_active and current_lp_consecutive_detections >= fps / 5:  # Activate lock
                 current_lp_active = True

@@ -131,7 +131,7 @@ class AppEventHandlers:
         current_tracker_mode = self.app.tracker.tracking_mode
 
         if current_tracker_mode == "USER_FIXED_ROI":
-            # FIX: Check for a global ROI OR a chapter-specific ROI at the current frame
+            # Check for a global ROI OR a chapter-specific ROI at the current frame
             has_global_roi = bool(self.app.tracker.user_roi_fixed and self.app.tracker.user_roi_initial_point_relative)
 
             has_chapter_roi_at_current_frame = False
