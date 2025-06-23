@@ -1056,13 +1056,24 @@ class VideoProcessor:
 
                 if current_chapter_id != self.last_processed_chapter_id:
                     if self.tracker:
+                        # Case 1: A new chapter is entered AND it has a specific user-defined ROI.
+                        # Reconfigure the tracker for this specific ROI.
                         if current_chapter and current_chapter.user_roi_fixed:
                             self.tracker.reconfigure_for_chapter(current_chapter)
-                        else:
+                            # If we reconfigured for a new chapter, ensure tracking is active.
+                            if not self.tracker.tracking_active:
+                                self.tracker.start_tracking()
+
+                        # Case 2: We have entered a gap BETWEEN chapters (current_chapter is None).
+                        # Stop the tracker unless it's in a persistent User ROI mode that should span gaps.
+                        elif current_chapter is None and self.tracker.tracking_active:
                             if self.tracker.tracking_mode != "USER_FIXED_ROI":
-                                self.tracker.set_tracking_mode("YOLO_ROI")
-                                if self.tracker.user_roi_fixed is None and self.tracker.tracking_active:
-                                    self.tracker.stop_tracking()
+                                self.tracker.stop_tracking()
+                                self.logger.info("Tracker stopped due to entering a gap between chapters.")
+
+                        # Case 3 (Implicit): A chapter without a user_roi_fixed is entered.
+                        # DO NOTHING. Allow the YOLO tracker to continue its operation seamlessly.
+
                     self.last_processed_chapter_id = current_chapter_id
 
                 if current_chapter and self.tracker and not self.tracker.tracking_active and current_chapter.user_roi_fixed:
