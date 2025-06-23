@@ -74,7 +74,11 @@ class InfoGraphsUI:
         if (1920, 1080) == (width, height): return " (Full HD)"
         if (2560, 1440) == (width, height): return " (QHD/2.5K)"
         if (3840, 2160) == (width, height): return " (4K UHD)"
-        if width >= 7000: return " (8K)"
+        # Next, apply general checks for VR resolutions based on width, from highest to lowest
+        if width >= 7600: return " (8K)"
+        if width >= 6600: return " (7K)"
+        if width >= 5600: return " (6K)"
+        if width >= 5000: return " (5K)"
         if width >= 3800: return " (4K)"
         return ""
 
