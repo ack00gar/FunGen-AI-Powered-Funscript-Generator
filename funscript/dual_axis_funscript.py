@@ -2,6 +2,7 @@ import numpy as np
 from typing import Optional, Callable, List, Tuple, Dict
 import logging
 import bisect
+import copy
 
 # Attempt to import optional libraries for processing
 try:
@@ -782,7 +783,10 @@ class DualAxisFunscript:
 
         # --- 1. Determine the segment of actions to process ---
         s_idx_orig, e_idx_orig = -1, -1
-        if selected_indices is not None and len(selected_indices) > 0:
+
+        # Note: The Speed Limiter is designed to work on the full script, not a selection.
+        # For other filters, we honor the selection.
+        if selected_indices is not None and len(selected_indices) > 0 and filter_type != 'speed_limiter':
             valid_indices = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
             if len(valid_indices) < 2: return None
             s_idx_orig, e_idx_orig = valid_indices[0], valid_indices[-1]
@@ -793,7 +797,6 @@ class DualAxisFunscript:
         prefix_actions = [dict(a) for a in actions_list_ref[:s_idx_orig]]
         segment_to_process = [dict(a) for a in actions_list_ref[s_idx_orig:e_idx_orig + 1]]
         suffix_actions = [dict(a) for a in actions_list_ref[e_idx_orig + 1:]]
-
 
         if len(segment_to_process) < 2:
             return None
@@ -814,14 +817,11 @@ class DualAxisFunscript:
             positions = np.array([a['pos'] for a in segment_to_process])
             smoothed_pos = savgol_filter(positions, window, poly)
 
-            # Now, this modification only affects the copied segment_to_process
             new_segment_actions = segment_to_process
             for i, action in enumerate(new_segment_actions):
                 action['pos'] = int(round(np.clip(smoothed_pos[i], 0, 100)))
 
         elif filter_type == 'rdp':
-            # This part was already correct because it built new dicts from scratch.
-            # No changes are needed here, but the deep copy above makes it safer.
             epsilon = filter_params.get('epsilon', 1.0)
             points = np.array([[a['at'], a['pos']] for a in segment_to_process], dtype=np.float64)
 
@@ -858,7 +858,6 @@ class DualAxisFunscript:
                 new_pos = center_value + deviation * scale_factor
                 return int(round(np.clip(new_pos, 0, 100)))
 
-            # Modify the copied segment
             new_segment_actions = segment_to_process
             for action in new_segment_actions:
                 action['pos'] = operation_func(action['pos'])
@@ -873,7 +872,7 @@ class DualAxisFunscript:
                 extrema = [segment_to_process[0]]
                 for i in range(1, len(segment_to_process) - 1):
                     p_prev, p_curr, p_next = segment_to_process[i - 1]['pos'], segment_to_process[i]['pos'], \
-                    segment_to_process[i + 1]['pos']
+                        segment_to_process[i + 1]['pos']
                     if (p_curr > p_prev and p_curr >= p_next) or (p_curr < p_prev and p_curr <= p_next):
                         extrema.append(segment_to_process[i])
                 extrema.append(segment_to_process[-1])
@@ -886,7 +885,6 @@ class DualAxisFunscript:
                         duration = float(p_next['at'] - p_prev['at'])
                         if duration > 0:
                             progress = (p_curr['at'] - p_prev['at']) / duration
-                            # CORRECTED a bug in the projection formula
                             projected_pos = p_prev['pos'] + progress * (p_next['pos'] - p_prev['pos'])
                             significance = abs(p_curr['pos'] - projected_pos)
                         else:
@@ -912,6 +910,90 @@ class DualAxisFunscript:
                     final_keyframes = extrema
 
                 new_segment_actions = final_keyframes
+
+        elif filter_type == 'speed_limiter':
+            min_interval = filter_params.get('min_interval', 60)
+            vibe_amount = filter_params.get('vibe_amount', 10)
+            speed_threshold = filter_params.get('speed_threshold', 500.0)
+
+            # Since this filter works on the whole script, we use the full reference
+            actions = copy.deepcopy(actions_list_ref)
+
+            # 1. Remove actions with short intervals
+            if len(actions) > 1:
+                reversed_actions = list(reversed(actions))
+                last_action_at = reversed_actions[0]['at']
+                actions_to_keep = [reversed_actions[0]]
+                for i in range(1, len(reversed_actions)):
+                    interval = abs(reversed_actions[i]['at'] - last_action_at)
+                    if interval >= min_interval:
+                        actions_to_keep.append(reversed_actions[i])
+                        last_action_at = reversed_actions[i]['at']
+                actions = sorted(actions_to_keep, key=lambda x: x['at'])
+
+            # 2. Replace flat sections with vibrations
+            if len(actions) > 2:
+                last_action_at_vibe = actions[0]['at']
+                last_vibe = ''
+                unmod_last_action_height = 0
+                for i in range(1, len(actions)):
+                    current = actions[i]
+                    last = actions[i - 1]
+                    next_pos = actions[i + 1] if (i + 1) < len(actions) else None
+                    travel = abs(current['pos'] - unmod_last_action_height)
+                    unmod_last_direction = 'up' if current['pos'] > unmod_last_action_height else (
+                        'down' if current['pos'] < unmod_last_action_height else '')
+                    last_direction = 'up' if current['pos'] > last['pos'] else (
+                        'down' if current['pos'] < last['pos'] else '')
+                    next_direction = 'up' if next_pos and current['pos'] < next_pos['pos'] else (
+                        'down' if next_pos and current['pos'] > next_pos['pos'] else '')
+                    already_vibing = 1 if next_pos and not (unmod_last_direction == next_direction) and (
+                                (abs(current['pos'] - unmod_last_action_height) > 8) or (
+                                    abs(current['pos'] - next_pos['pos']) > 8)) else 0
+                    next_travel = abs(next_pos['pos'] - current['pos']) if next_pos else float('inf')
+                    interval = current['at'] - last_action_at_vibe
+                    unmod_last_action_height = current['pos']
+
+                    if (travel < 16) and (next_travel < 16) and (interval < 135) and (already_vibing == 0) and (
+                            min_interval <= 134):
+                        if not last_vibe:
+                            if (last_direction == 'up') or (current['pos'] < 6):
+                                last_vibe = 'down'
+                            elif (last_direction == 'down') or (current['pos'] > 94):
+                                last_vibe = 'up'
+                            elif current['pos'] < 50:
+                                last_vibe = 'down'
+                            else:
+                                last_vibe = 'up'
+
+                        if last_vibe == 'down':
+                            current['pos'] += vibe_amount
+                            last_vibe = 'up'
+                        elif last_vibe == 'up':
+                            current['pos'] -= vibe_amount
+                            last_vibe = 'down'
+                    else:
+                        last_vibe = ''
+                    last_action_at_vibe = current['at']
+                    current['pos'] = int(round(np.clip(current['pos'], 0, 100)))
+
+            # 3. Limit speed
+            if len(actions) > 1:
+                for i in range(1, len(actions)):
+                    current_action = actions[i]
+                    prev_action = actions[i - 1]
+                    time_diff_s = (current_action['at'] - prev_action['at']) / 1000.0
+                    if time_diff_s == 0: continue
+                    pos_diff = abs(current_action['pos'] - prev_action['pos'])
+                    speed = pos_diff / time_diff_s
+                    if speed > speed_threshold:
+                        new_pos_diff = speed_threshold * time_diff_s
+                        current_action['pos'] = int(prev_action['pos'] + new_pos_diff) if current_action['pos'] > \
+                                                                                          prev_action['pos'] else int(
+                            prev_action['pos'] - new_pos_diff)
+                        current_action['pos'] = int(round(np.clip(current_action['pos'], 0, 100)))
+
+            return actions
 
         else:
             return None
@@ -1107,3 +1189,168 @@ class DualAxisFunscript:
             final_keyframes = extrema
 
         actions_list_ref[:] = prefix_actions + final_keyframes + suffix_actions
+
+    def apply_speed_limiter(self, axis: str, min_interval: int, vibe_amount: int, speed_threshold: float):
+        """
+        Applies a series of filters to make a script more compatible with Handy in Bluetooth mode.
+        This process involves removing rapid actions, replacing small movements with vibrations,
+        and limiting the maximum speed.
+        """
+        target_list_attr = 'primary_actions' if axis == 'primary' else 'secondary_actions'
+        actions_list_ref = getattr(self, target_list_attr)
+
+        if not actions_list_ref or len(actions_list_ref) < 2:
+            self.logger.info(f"Not enough points on {axis} axis for Speed Limiter.")
+            return
+
+        # Operate on a deep copy of the actions
+        actions = copy.deepcopy(actions_list_ref)
+
+        # --- 1. Remove actions with short intervals ---
+        action_points_removed = 0
+        if len(actions) > 1:
+            reversed_actions = list(reversed(actions))
+            last_action_at = reversed_actions[0]['at']
+
+            # Build a new list of actions to keep, avoiding modification during iteration
+            actions_to_keep_after_interval_check = [reversed_actions[0]]
+
+            for i in range(1, len(reversed_actions)):
+                interval = abs(reversed_actions[i]['at'] - last_action_at)
+                if interval < min_interval:
+                    action_points_removed += 1
+                else:
+                    actions_to_keep_after_interval_check.append(reversed_actions[i])
+                    last_action_at = reversed_actions[i]['at']
+
+            # Restore the original order
+            actions = sorted(actions_to_keep_after_interval_check, key=lambda x: x['at'])
+
+        if action_points_removed > 0:
+            self.logger.info(
+                f"Speed Limiter: {action_points_removed} action points removed due to min interval ({min_interval}ms).")
+
+        # --- 2. Replace flat sections with vibrations ---
+        action_points_modified = 0
+        if len(actions) > 2:
+            last_action_at = actions[0]['at']
+            already_vibing = 0
+            last_vibe = ''
+            unmod_last_action_height = 0
+
+            # This loop modifies the 'actions' list in place
+            for i in range(1, len(actions)):
+                current = actions[i]
+                last = actions[i - 1]
+                next_pos = actions[i + 1] if (i + 1) < len(actions) else None
+
+                travel = abs(current['pos'] - unmod_last_action_height)
+
+                # Determine directions
+                unmod_last_direction = 'up' if current['pos'] > unmod_last_action_height else (
+                    'down' if current['pos'] < unmod_last_action_height else '')
+                last_direction = 'up' if current['pos'] > last['pos'] else (
+                    'down' if current['pos'] < last['pos'] else '')
+                if next_pos:
+                    next_direction = 'up' if current['pos'] < next_pos['pos'] else (
+                        'down' if current['pos'] > next_pos['pos'] else '')
+                else:
+                    next_direction = ''
+
+                # Detect if undulating movement is already happening
+                if next_pos and not (unmod_last_direction == next_direction) and (
+                        (abs(current['pos'] - unmod_last_action_height) > 8) or (
+                        abs(current['pos'] - next_pos['pos']) > 8)):
+                    already_vibing = 1
+                else:
+                    already_vibing = 0
+
+                if next_pos:
+                    next_travel = abs(next_pos['pos'] - current['pos'])
+                else:
+                    next_travel = float('inf')
+
+                interval = current['at'] - last_action_at
+
+                unmod_last_action_height = current['pos']
+
+                # Main condition to insert a vibe
+                # The original script disables vibe mods if min_interval is > 134
+                if (travel < 16) and (next_travel < 16) and (interval < 135) and (already_vibing == 0) and (
+                        min_interval <= 134):
+                    # Determine starting direction of the vibration
+                    if not last_vibe:
+                        if (last_direction == 'up') or (current['pos'] < 6):
+                            last_vibe = 'down'
+                        elif (last_direction == 'down') or (current['pos'] > 94):
+                            last_vibe = 'up'
+                        # Default fallback
+                        elif current['pos'] < 50:
+                            last_vibe = 'down'
+                        else:
+                            last_vibe = 'up'
+
+                    # Apply the vibration
+                    if last_vibe == 'down':
+                        current['pos'] += vibe_amount
+                        last_vibe = 'up'
+                    elif last_vibe == 'up':
+                        current['pos'] -= vibe_amount
+                        last_vibe = 'down'
+
+                    action_points_modified += 1
+                else:
+                    last_vibe = ''
+
+                last_action_at = current['at']
+
+                # Sanity check position
+                current['pos'] = int(round(np.clip(current['pos'], 0, 100)))
+
+        if action_points_modified > 0:
+            self.logger.info(f"Speed Limiter: {action_points_modified} action points modified to vibrate.")
+
+        # --- 3. Limit speed ---
+        speed_modified = 0
+        if len(actions) > 1:
+            for i in range(1, len(actions)):
+                current_action = actions[i]
+                prev_action = actions[i - 1]
+
+                time_diff_s = (current_action['at'] - prev_action['at']) / 1000.0
+                if time_diff_s == 0:
+                    continue
+
+                pos_diff = abs(current_action['pos'] - prev_action['pos'])
+                speed = pos_diff / time_diff_s
+
+                if speed > speed_threshold:
+                    speed_modified += 1
+                    new_pos_diff = speed_threshold * time_diff_s
+
+                    if current_action['pos'] > prev_action['pos']:
+                        current_action['pos'] = int(prev_action['pos'] + new_pos_diff)
+                    else:
+                        current_action['pos'] = int(prev_action['pos'] - new_pos_diff)
+
+                    current_action['pos'] = int(round(np.clip(current_action['pos'], 0, 100)))
+
+        if speed_modified > 0:
+            self.logger.info(f"Speed Limiter: {speed_modified} action points modified to reduce speed.")
+
+        # --- Finalize ---
+        if action_points_removed > 0 or action_points_modified > 0 or speed_modified > 0:
+            # Replace the original actions list with the modified one
+            actions_list_ref[:] = actions
+
+            # Update last timestamp for the axis
+            last_ts = actions_list_ref[-1]['at'] if actions_list_ref else 0
+            if axis == 'primary':
+                self.last_timestamp_primary = last_ts
+            else:
+                self.last_timestamp_secondary = last_ts
+
+            self.logger.info(f"Speed Limiter applied successfully to {axis} axis.")
+        else:
+            self.logger.info(f"Speed Limiter: No changes were necessary for {axis} axis.")
+
