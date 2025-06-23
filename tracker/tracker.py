@@ -434,15 +434,15 @@ class ROITracker:
             self.user_roi_tracked_point_relative = chapter.user_roi_initial_point_relative
             self.primary_flow_history_smooth.clear()
             self.secondary_flow_history_smooth.clear()
-            self.prev_gray_user_roi_patch = None  # CRITICAL: This forces recapture on the first frame of the chapter
+            self.prev_gray_user_roi_patch = None
             self.logger.info(f"Tracker reconfigured for chapter {chapter.unique_id[:8]}.")
-        else:
-            # If the chapter has no ROI, switch to a safe, inactive state
-            self.set_tracking_mode("YOLO_ROI")  # A mode that does nothing without a target
-            self.roi = None
-            if self.tracking_active:
-                self.stop_tracking()  # Stop generating actions in gaps/unconfigured chapters
-            self.logger.info(f"Chapter {chapter.unique_id[:8]} has no ROI. Tracker is inactive.")
+        # else:
+        #     # If the chapter has no ROI, switch to a safe, inactive state
+        #     self.set_tracking_mode("YOLO_ROI")  # A mode that does nothing without a target
+        #     self.roi = None
+        #     if self.tracking_active:
+        #         self.stop_tracking()  # Stop generating actions in gaps/unconfigured chapters
+        #     self.logger.info(f"Chapter {chapter.unique_id[:8]} has no ROI. Tracker is inactive.")
 
     def set_user_defined_roi_and_point(self,
                                        roi_abs_coords: Tuple[int, int, int, int],
