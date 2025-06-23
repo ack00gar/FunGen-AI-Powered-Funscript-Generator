@@ -234,24 +234,24 @@ class ControlPanelUI:
         stage_proc = self.app.stage_processor
         style = imgui.get_style()
 
-        # --- MODIFIED: Callback functions to update the model paths ---
+        # --- Callback functions to update the model paths ---
         def update_detection_model_path(path: str):
             self.app.yolo_detection_model_path_setting = path
             self.app.app_settings.set("yolo_det_model_path", path)
+            self.app.yolo_det_model_path = path
             self.app.project_manager.project_dirty = True
             self.app.logger.info(f"Detection model path selected: {path}. Setting has been saved.")
             if self.app.tracker:
-                # Add this line to update the tracker's internal path
                 self.app.tracker.det_model_path = path
                 self.app.tracker._load_models()
 
         def update_pose_model_path(path: str):
             self.app.yolo_pose_model_path_setting = path
             self.app.app_settings.set("yolo_pose_model_path", path)
+            self.app.yolo_pose_model_path = path
             self.app.project_manager.project_dirty = True
             self.app.logger.info(f"Pose model path selected: {path}. Setting has been saved.")
             if self.app.tracker:
-                # Add this line to update the tracker's internal path
                 self.app.tracker.pose_model_path = path
                 self.app.tracker._load_models()
 

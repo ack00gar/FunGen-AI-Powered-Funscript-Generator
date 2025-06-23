@@ -137,7 +137,10 @@ class InfoGraphsUI:
         changed, new_idx = imgui.combo("Method##HWAccel", current_hw_idx, hw_accel_display)
         if changed:
             self.app.hardware_acceleration_method = hw_accel_options[new_idx]
-            if processor.is_video_open(): processor.reapply_video_settings()
+            self.app.app_settings.set("hardware_acceleration_method", self.app.hardware_acceleration_method)
+
+            if processor.is_video_open():
+                processor.reapply_video_settings()
 
         imgui.separator()
         video_types = ["auto", "2D", "VR"]

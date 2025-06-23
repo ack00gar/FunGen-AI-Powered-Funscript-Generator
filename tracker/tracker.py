@@ -770,7 +770,7 @@ class ROITracker:
 
         # Smooth the raw dx/dy values from the overall flow
         self.primary_flow_history_smooth.append(dy_raw)
-        self.secondary_flow_history_smooth.append(dx_raw)  # FIX: Append dx_raw here
+        self.secondary_flow_history_smooth.append(dx_raw)
 
         if len(self.primary_flow_history_smooth) > self.flow_history_window_smooth:
             self.primary_flow_history_smooth.pop(0)

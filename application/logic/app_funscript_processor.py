@@ -901,9 +901,6 @@ class AppFunscriptProcessor:
             self.logger.error("Funscript object not available for finalizing merge.")
             return
 
-        # The funscript (e.g., funscript_obj.primary_actions) has ALREADY been modified by the live tracker
-        # for the gap range. We just need to ensure it's clean and then update chapters.
-
         actions_list_ref = funscript_obj.primary_actions
 
         if actions_list_ref:
@@ -933,7 +930,7 @@ class AppFunscriptProcessor:
         new_start_frame = chapter1.start_frame_id
         new_end_frame = chapter2.end_frame_id
 
-        # --- FIX: Instead of aborting on overlap, collect all chapters to be replaced ---
+        # --- Instead of aborting on overlap, collect all chapters to be replaced ---
         ids_to_delete = {chapter1_id, chapter2_id}
         chapters_to_keep = []
 

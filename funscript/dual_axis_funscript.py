@@ -919,7 +919,6 @@ class DualAxisFunscript:
         # --- 3. Return the full, reconstructed list of actions ---
         return prefix_actions + new_segment_actions + suffix_actions
 
-    # Add this method to your DualAxisFunscript class in dual_axis_funscript.py
 
     def apply_peak_preserving_resample(self, axis: str, resample_rate_ms: int = 50,
                                        selected_indices: Optional[List[int]] = None):
@@ -1032,8 +1031,6 @@ class DualAxisFunscript:
         self.logger.info(
             f"Applied Peak-Preserving Resample to {axis}. "
             f"Points: {len(segment_to_process)} -> {len(new_actions)}")
-
-        # Add this method to your DualAxisFunscript class in dual_axis_funscript.py
 
 
     def simplify_to_keyframes(self, axis: str, position_tolerance: int = 10, time_tolerance_ms: int = 50,

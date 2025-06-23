@@ -224,14 +224,14 @@ class GUI:
                 speed_pps = delta_pos / (delta_time_ms / 1000.0) if delta_time_ms > 0 else 0.0
 
                 segment_color_float_rgba = self.app.utility.get_speed_color_from_map(speed_pps)
-                # --- MODIFIED COLOR CONVERSION ---
+                # --- COLOR CONVERSION ---
                 segment_color_cv_bgra = (
                     int(segment_color_float_rgba[2] * 255),  # Blue
                     int(segment_color_float_rgba[1] * 255),  # Green
                     int(segment_color_float_rgba[0] * 255),  # Red
                     int(segment_color_float_rgba[3] * 255)  # Alpha
                 )
-                # --- END MODIFIED COLOR CONVERSION ---
+                # --- END COLOR CONVERSION ---
                 cv2.line(preview_image_data_bgra, (px1, py1), (px2, py2), segment_color_cv_bgra, thickness=1)
         elif len(actions) == 1:
             action = actions[0]
@@ -241,14 +241,14 @@ class GUI:
             px, py = np.clip(px, 0, target_width - 1), np.clip(py, 0, target_height - 1)
 
             default_color_tuple_rgba = self.app.utility.get_speed_color_from_map(constants.TIMELINE_COLOR_SPEED_STEP * 2.5)
-            # --- MODIFIED COLOR CONVERSION ---
+            # --- COLOR CONVERSION ---
             point_color_cv_bgra = (
                 int(default_color_tuple_rgba[2] * 255),  # Blue
                 int(default_color_tuple_rgba[1] * 255),  # Green
                 int(default_color_tuple_rgba[0] * 255),  # Red
                 int(default_color_tuple_rgba[3] * 255)  # Alpha
             )
-            # --- END MODIFIED COLOR CONVERSION ---
+            # --- END COLOR CONVERSION ---
             cv2.circle(preview_image_data_bgra, (px, py), 2, point_color_cv_bgra, -1)
 
         preview_image_data_rgba = cv2.cvtColor(preview_image_data_bgra, cv2.COLOR_BGRA2RGBA)

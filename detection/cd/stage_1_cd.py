@@ -22,10 +22,10 @@ class Stage1QueueMonitor:
         self.result_queue_puts = Value('i', 0)
         self.result_queue_gets = Value('i', 0)
 
-    def frame_queue_put(self, queue, item):
+    def frame_queue_put(self, queue, item, block=True, timeout=None):
         with self.frame_queue_puts.get_lock():
             self.frame_queue_puts.value += 1
-            queue.put(item)
+            queue.put(item, block=block, timeout=timeout)
 
     def frame_queue_get(self, queue, block=True, timeout=None):
         with self.frame_queue_gets.get_lock():
@@ -44,9 +44,15 @@ class Stage1QueueMonitor:
             self.result_queue_gets.value += 1
             return item
 
-    def get_frame_queue_size(self):
-        with self.frame_queue_puts.get_lock(), self.frame_queue_gets.get_lock():
-            return self.frame_queue_puts.value - self.frame_queue_gets.value
+    def get_frame_queue_size(self, queue: Queue):
+        """Returns the approximate size of the queue."""
+        try:
+            return queue.qsize()
+        except NotImplementedError: # Some platforms might not implement qsize()
+            # Fallback to the original, less accurate method if qsize() is not available
+            with self.frame_queue_puts.get_lock(), self.frame_queue_gets.get_lock():
+                return self.frame_queue_puts.value - self.frame_queue_gets.value
+
 
     def get_result_queue_size(self):
         with self.result_queue_puts.get_lock(), self.result_queue_gets.get_lock():
@@ -82,7 +88,7 @@ def video_processor_producer_proc(
         vp_app_proxy.hardware_acceleration_method = hwaccel_method_producer
         vp_app_proxy.available_ffmpeg_hwaccels = hwaccel_avail_list_producer if hwaccel_avail_list_producer is not None else []
 
-
+        # Instantiate the VideoProcessor using the proxy object.
         vp_instance = VideoProcessor(
             app_instance=vp_app_proxy,
             tracker=None,
@@ -112,27 +118,22 @@ def video_processor_producer_proc(
         producer_logger.info(
             f"[S1 VP Producer-{producer_idx}] Streaming segment: Video='{os.path.basename(vp_instance.video_path)}', StartFrameAbs={start_frame_abs_num}, NumFrames={num_frames_in_segment}, YOLOSize={vp_instance.yolo_input_size}")
 
-        for frame_id, frame in vp_instance.stream_frames_for_segment(start_frame_abs_num, num_frames_in_segment):
+        for frame_id, frame in vp_instance.stream_frames_for_segment(start_frame_abs_num, num_frames_in_segment, stop_event=stop_event_local):
             if stop_event_local.is_set():
                 producer_logger.info(
                     f"[S1 VP Producer-{producer_idx}] Stop event detected. Processed {frames_put_to_queue_this_producer} frames.")
                 break
 
-            put_success = False
-            while not put_success and not stop_event_local.is_set():
-                try:
-                    queue_monitor_local.frame_queue_put(frame_queue, (frame_id, np.copy(frame)))
-                    put_success = True
-                except Full:
-                    if stop_event_local.is_set(): # Check stop event again if queue is full
-                        producer_logger.info(f"[S1 VP Producer-{producer_idx}] Stop event detected while frame queue full. Frame {frame_id} not added.")
-                        break
-                    time.sleep(0.01) # Brief pause if queue is full
-                except Exception as e_put: # Catch other potential errors during put
-                    producer_logger.error(f"[S1 VP Producer-{producer_idx}] Error putting frame {frame_id} to queue: {e_put}", exc_info=True)
-                    # Decide if this is a fatal error for the producer
-                    stop_event_local.set() # Signal a problem
+            try:
+                # Attempt to put the frame on the queue with a 0.5 second timeout
+                queue_monitor_local.frame_queue_put(frame_queue, (frame_id, np.copy(frame)), block=True, timeout=0.5)
+            except Full:
+                # If the queue is full, check the stop event and continue the loop to check again.
+                if stop_event_local.is_set():
+                    producer_logger.info(f"[S1 VP Producer-{producer_idx}] Stop event detected while frame queue was full. Frame {frame_id} not added.")
                     break
+                continue # Go to the next iteration of the main for loop to re-check stop event
+
 
 
             if stop_event_local.is_set(): # Check if stop was set during the put_success loop
@@ -201,8 +202,8 @@ def video_processor_producer_proc(
 
 def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, yolo_pose_model_path,
                   confidence_threshold, yolo_input_size_consumer, queue_monitor_local, stop_event_local,
-                  logger_config_for_consumer: Optional[dict] = None):
-    # --- Logger setup (unchanged) ---
+                  logger_config_for_consumer: Optional[dict] = None, video_fps: float = 30.0):
+    # --- Logger setup ---
     consumer_logger = logging.getLogger(f"S1_Consumer_{consumer_idx}_{os.getpid()}")
 
     det_model, pose_model = None, None
@@ -211,16 +212,11 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
         consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Loading models...")
         det_model = YOLO(yolo_det_model_path, task='detect')
 
-        if yolo_pose_model_path and os.path.exists(yolo_pose_model_path):
-            consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Loading pose model...")
-            pose_device = constants.DEVICE
-            pose_model = YOLO(yolo_pose_model_path, task='pose')
-            consumer_logger.info(
-                f"[S1 Consumer-{consumer_idx}] Models loaded. Detection on '{constants.DEVICE}', Pose on '{pose_device}'.")
-        else:
-            consumer_logger.warning(f"[S1 Consumer-{consumer_idx}] Pose model path not provided or not found. Skipping pose estimation.")
-            pose_model = None
-
+        # Force CPU for pose model on Apple MPS to avoid known bugs ?
+        pose_device = constants.DEVICE
+        pose_model = YOLO(yolo_pose_model_path, task='pose')
+        consumer_logger.info(
+            f"[S1 Consumer-{consumer_idx}] Models loaded. Detection on '{constants.DEVICE}', Pose on '{pose_device}'.")
 
         while not stop_event_local.is_set():
             try:
@@ -230,7 +226,7 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                     break
                 frame_id, frame = item
 
-                # --- Step 1: Perform Detection ---
+                # --- Step 1: Perform Detection (on every frame) ---
                 det_results = det_model(frame, device=constants.DEVICE, verbose=False, imgsz=yolo_input_size_consumer,
                                         conf=confidence_threshold)
                 detections = []
@@ -245,11 +241,11 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                                 'name': det_model.names[int(box_data.cls[0])]
                             })
 
-                # --- Step 2: Conditionally Perform Pose Estimation ---
-                poses = []
-                if pose_model:
-                    pose_results = pose_model(frame, device=constants.DEVICE, verbose=False, imgsz=yolo_input_size_consumer,
-                                              conf=confidence_threshold)
+                # --- Step 2: Conditionally perform Pose Estimation ---
+                # Run only on the first frame of every second (approximately)
+                poses = []  # Default to empty
+                if frame_id % int(video_fps) == 0:
+                    pose_results = pose_model(frame, ...)
                     for r in pose_results:
                         if r.keypoints and r.boxes:
                             for i in range(len(r.boxes)):
@@ -259,12 +255,12 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                                 })
 
                 # --- Step 3: Package results ---
+                # The 'poses' list will either have data or be empty.
                 result_payload = {
                     "detections": detections,
-                    "poses": poses  # This will be an empty list if pose_model is None
+                    "poses": poses
                 }
                 queue_monitor_local.result_queue_put(result_queue, (frame_id, result_payload))
-
 
             except Empty:
                 continue
@@ -279,7 +275,7 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
         consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Exiting.")
 
 
-def logger_proc(result_queue, output_file_local, expected_frames,
+def logger_proc(frame_processing_queue, result_queue, output_file_local, expected_frames,
                 progress_callback_local, queue_monitor_local, stop_event_local,
                 s1_start_time_param, parent_logger: logging.Logger,
                 gui_event_queue_arg: Optional[StdLibQueue] = None):
@@ -294,8 +290,15 @@ def logger_proc(result_queue, output_file_local, expected_frames,
 
     while (written_count < expected_frames if expected_frames > 0 else True) and not stop_event_local.is_set():
         try:
+            item = queue_monitor_local.result_queue_get(result_queue, block=True, timeout=0.5)
+
+            # Check for the sentinel value (None) to signal the end of results.
+            if item is None or item[0] is None:
+                parent_logger.info("[S1 Logger] Received end-of-stream sentinel. Finalizing results.")
+                break
+
             # Simple get from the single result queue
-            frame_id, payload = queue_monitor_local.result_queue_get(result_queue, block=True, timeout=0.5)
+            frame_id, payload = item
             if frame_id not in results_dict:
                 results_dict[frame_id] = payload
                 written_count += 1
@@ -308,15 +311,20 @@ def logger_proc(result_queue, output_file_local, expected_frames,
                 # Send queue updates to GUI
                 if gui_event_queue_arg:
                     try:
+                        frame_q_size = queue_monitor_local.get_frame_queue_size(frame_processing_queue)
                         gui_event_queue_arg.put(("stage1_queue_update",
-                                                 {"frame_q_size": queue_monitor_local.get_frame_queue_size(),
+                                                 {"frame_q_size": frame_q_size,
                                                   "result_q_size": queue_monitor_local.get_result_queue_size(),
                                                   "pose_q_size": 0}, None))
+
                     except Exception:
                         pass
 
                 # Calculate and send main progress
-                time_elapsed = current_time - s1_start_time_param
+                time_elapsed = 0.0
+                if first_result_received_time is not None:
+                    time_elapsed = current_time - first_result_received_time
+
                 # Guard to prevent division by zero
                 if time_elapsed > 0:
                     fps = written_count / time_elapsed
@@ -334,8 +342,34 @@ def logger_proc(result_queue, output_file_local, expected_frames,
 
     parent_logger.info(f"[S1 Logger] Result gathering loop ended. Written count: {written_count}.")
 
+    if stop_event_local.is_set():
+        parent_logger.warning(f"[S1 Logger] Abort signal received. Skipping save of partial file: {output_file_local}")
+        return
+
     # Save the results
     ordered_results = [results_dict.get(i, {"detections": [], "poses": []}) for i in range(expected_frames)]
+
+    # --- POSE MEMORIZATION LOGIC ---
+    parent_logger.info("[S1 Logger] Assembling final results and filling pose gaps...")
+    ordered_results = [results_dict.get(i) for i in range(expected_frames)]
+
+    last_known_poses = []
+    for i in range(expected_frames):
+        # The result for the current frame might be None if it was missed
+        frame_result = ordered_results[i]
+        if frame_result is None:
+            # If a frame is missing entirely, create a default structure
+            ordered_results[i] = {"detections": [], "poses": last_known_poses}
+            continue
+
+        # Check if this frame has newly calculated poses
+        if frame_result.get("poses"):
+            # If yes, update our cache
+            last_known_poses = frame_result["poses"]
+        else:
+            # If no, fill it with the last known poses from the cache
+            frame_result["poses"] = last_known_poses
+
     try:
         with open(output_file_local, 'wb') as f:
             f.write(msgpack.packb(ordered_results, use_bin_type=True))
@@ -412,6 +446,12 @@ def perform_yolo_analysis(
 
     process_logger.info(f"Stage 1 YOLO Analysis started with orchestrator logger: {process_logger.name}")
 
+    if not os.path.exists(yolo_pose_model_path_arg):
+        msg = "Error: YOLO Pose model not found"
+        process_logger.error(msg)
+        if progress_callback: progress_callback(0, 0, msg, 0, 0, 0)
+        return None
+
     s1_start_time = time.time()
     stop_event_internal = Event()
 
@@ -426,10 +466,20 @@ def perform_yolo_analysis(
 
     queue_monitor = Stage1QueueMonitor()
 
-    main_vp_for_info = VideoProcessor(app_instance=None, fallback_logger_config={'logger_instance': process_logger})
+    class VPAppProxy:
+        pass
+
+    vp_app_proxy = VPAppProxy()
+    vp_app_proxy.hardware_acceleration_method = hwaccel_method_arg
+    vp_app_proxy.available_ffmpeg_hwaccels = hwaccel_avail_list_arg if hwaccel_avail_list_arg is not None else []
+
+    main_vp_for_info = VideoProcessor(app_instance=vp_app_proxy,
+                                      fallback_logger_config={'logger_instance': process_logger})
+
     if not main_vp_for_info.open_video(video_path_arg):
         return None
     full_video_total_frames = main_vp_for_info.video_info.get('total_frames', 0)
+    video_fps = main_vp_for_info.video_info.get('fps', 30.0)
     main_vp_for_info.reset(close_video=True)
     del main_vp_for_info
 
@@ -466,32 +516,48 @@ def perform_yolo_analysis(
         for i in range(num_consumers_arg):
             c_args = (frame_processing_queue, yolo_result_queue, i, yolo_model_path_arg, yolo_pose_model_path_arg,
                       confidence_threshold, yolo_input_size_arg, queue_monitor, stop_event_internal,
-                      fallback_config_for_subprocesses)
+                      fallback_config_for_subprocesses, video_fps)
             consumers_list.append(Process(target=consumer_proc, args=c_args, daemon=True))
 
-        logger_thread_args = (yolo_result_queue, result_file_local, total_frames_to_process,
+        logger_thread_args = (frame_processing_queue, yolo_result_queue, result_file_local, total_frames_to_process,
                               progress_callback, queue_monitor, stop_event_internal,
                               s1_start_time, process_logger, gui_event_queue_arg)
+
         logger_p_thread = PyThread(target=logger_proc, args=logger_thread_args, daemon=True)
 
         # --- PROCESS STARTUP ---
-        for p in producers_list: p.start()
-        for p in consumers_list: p.start()
+        for p in producers_list:
+            p.start()
+        for p in consumers_list:
+            p.start()
         logger_p_thread.start()
 
         # --- PROCESS JOINING AND SENTINEL LOGIC ---
-        for p in producers_list: p.join()
+        for p in producers_list:
+            p.join()
 
         if not stop_event_internal.is_set():
-            process_logger.info("[S1 Lib] Sending sentinels to all consumers.")
+            process_logger.info("[S1 Lib] All producers finished. Sending sentinels to consumers.")
             for _ in range(len(consumers_list)):
                 queue_monitor.frame_queue_put(frame_processing_queue, None)
 
-        for p in consumers_list: p.join()
+        for p in consumers_list:
+            p.join()
+
+        # After all consumers are finished, send a final sentinel to the logger queue.
+        if not stop_event_internal.is_set():
+            process_logger.info("[S1 Lib] All consumers finished. Sending end-of-stream sentinel to logger.")
+            try:
+                # Use a tuple to match the expected format (frame_id, payload)
+                yolo_result_queue.put((None, None), timeout=1.0)
+            except Full:
+                process_logger.warning("[S1 Lib] Timed out sending sentinel to logger queue.")
+
         logger_p_thread.join()
 
         if stop_event_external.is_set(): return None
         return result_file_local if os.path.exists(result_file_local) else None
+
 
     except Exception as e:
         process_logger.critical(f"[S1 Lib] CRITICAL EXCEPTION in perform_yolo_analysis: {e}", exc_info=True)
@@ -499,11 +565,17 @@ def perform_yolo_analysis(
             stop_event_internal.set()
         return None
     finally:
-        # --- CLEANUP ---
+        # This 'finally' block ensures cleanup happens no matter what.
+        process_logger.info("[S1 Lib] Entering cleanup block.")
         all_processes = producers_list + consumers_list
         for p in all_processes:
             if p.is_alive():
-                p.terminate()
-                p.join(0.1)
+                process_logger.info(f"[S1 Lib] Terminating hanging process: {p.pid}")
+                p.terminate()  # Forcefully terminate
+                p.join(timeout=1.0)  # Wait for OS to clean up
+
+        # Also ensure the logger thread is joined.
         if logger_p_thread and logger_p_thread.is_alive():
-            logger_p_thread.join(0.1)
+            logger_p_thread.join(timeout=1.0)
+        process_logger.info("[S1 Lib] Cleanup complete.")
+
