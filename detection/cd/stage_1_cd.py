@@ -245,7 +245,8 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                 # Run only on the first frame of every second (approximately)
                 poses = []  # Default to empty
                 if frame_id % int(video_fps) == 0:
-                    pose_results = pose_model(frame, ...)
+                    pose_results = pose_model(frame, device=pose_device, verbose=False, imgsz=yolo_input_size_consumer,
+                                        conf=confidence_threshold)
                     for r in pose_results:
                         if r.keypoints and r.boxes:
                             for i in range(len(r.boxes)):
