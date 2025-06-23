@@ -534,29 +534,37 @@ def perform_yolo_analysis(
         logger_p_thread.start()
 
         # --- PROCESS JOINING AND SENTINEL LOGIC ---
-        for p in producers_list:
-            p.join()
+        producers_finished = False
+        all_procs = producers_list + consumers_list
+        while any(p.is_alive() for p in all_procs):
+            # If an abort is requested, break the loop immediately to trigger cleanup.
+            if stop_event_internal.is_set():
+                process_logger.warning("[S1 Lib] Abort detected in main monitoring loop.")
+                break
 
-        if not stop_event_internal.is_set():
-            process_logger.info("[S1 Lib] All producers finished. Sending sentinels to consumers.")
-            for _ in range(len(consumers_list)):
-                queue_monitor.frame_queue_put(frame_processing_queue, None)
+            # Check if all producers are finished.
+            if not producers_finished and not any(p.is_alive() for p in producers_list):
+                process_logger.info("[S1 Lib] All producers finished. Sending sentinels to consumers.")
+                for _ in range(len(consumers_list)):
+                    queue_monitor.frame_queue_put(frame_processing_queue, None)
+                producers_finished = True
 
-        for p in consumers_list:
-            p.join()
+            time.sleep(0.5)  # Wait between checks to avoid busy-waiting.
 
-        # After all consumers are finished, send a final sentinel to the logger queue.
+        # After the main loop, check if it was a natural finish (not an abort).
         if not stop_event_internal.is_set():
             process_logger.info("[S1 Lib] All consumers finished. Sending end-of-stream sentinel to logger.")
             try:
-                # Use a tuple to match the expected format (frame_id, payload)
                 yolo_result_queue.put((None, None), timeout=1.0)
             except Full:
                 process_logger.warning("[S1 Lib] Timed out sending sentinel to logger queue.")
 
-        logger_p_thread.join()
+        # Final wait for the logger thread to finish writing the file.
+        if logger_p_thread.is_alive():
+            logger_p_thread.join()
 
-        if stop_event_external.is_set(): return None
+        if stop_event_external.is_set():
+            return None
         return result_file_local if os.path.exists(result_file_local) else None
 
 
