@@ -153,6 +153,13 @@ class ControlPanelUI:
         imgui.text("Configure settings for the selected mode.")
         imgui.spacing()
 
+        # AI Models & Inference settings are shown for any mode that uses them.
+        if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+            if imgui.collapsing_header("AI Models & Inference##ConfigAIModels", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_ai_model_settings()
+            imgui.separator()
+
+        # Live-specific settings are shown for live modes.
         if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
             if selected_mode == TrackerMode.LIVE_USER_ROI:
                 if imgui.collapsing_header("ROI Selection##ConfigUserROIHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
@@ -161,15 +168,18 @@ class ControlPanelUI:
             self._render_live_tracker_settings()
             imgui.separator()
 
-        elif selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
-             if imgui.collapsing_header("AI Models & Inference##ConfigAIModels", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                self._render_ai_model_settings()
-        else:
-            imgui.text_disabled("No configuration available for this mode.")
-
+        # Class filtering is available for all YOLO-based modes.
         if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 self._render_class_filtering_content()
+
+        # Fallback message for any mode that has no configuration options.
+        modes_with_config = {
+            TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI,
+            TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE
+        }
+        if selected_mode not in modes_with_config:
+            imgui.text_disabled("No configuration available for this mode.")
 
 
 
@@ -313,23 +323,25 @@ class ControlPanelUI:
         if imgui.is_item_hovered(): imgui.set_tooltip(
             "Path to the YOLO pose estimation model file (.pt, .onnx, .mlpackage). This model is optional.")
 
-        imgui.separator()
-        imgui.text("Stage 1 Inference Workers:")
-        imgui.push_item_width(100)
-        changed_prod, new_prod_s1_val = imgui.input_int("Producers##S1Producers", stage_proc.num_producers_stage1)
-        if changed_prod:
-            stage_proc.num_producers_stage1 = max(1, new_prod_s1_val)
-            self.app.app_settings.set("num_producers_stage1", stage_proc.num_producers_stage1)
-        if imgui.is_item_hovered(): imgui.set_tooltip("Number of threads for video decoding & preprocessing.")
+        # Conditionally render worker settings only for offline analysis modes
+        if self.app.app_state_ui.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+            imgui.separator()
+            imgui.text("Stage 1 Inference Workers:")
+            imgui.push_item_width(100)
+            changed_prod, new_prod_s1_val = imgui.input_int("Producers##S1Producers", stage_proc.num_producers_stage1)
+            if changed_prod:
+                stage_proc.num_producers_stage1 = max(1, new_prod_s1_val)
+                self.app.app_settings.set("num_producers_stage1", stage_proc.num_producers_stage1)
+            if imgui.is_item_hovered(): imgui.set_tooltip("Number of threads for video decoding & preprocessing.")
 
-        imgui.same_line()
-        changed_cons, new_cons_s1_val = imgui.input_int("Consumers##S1Consumers", stage_proc.num_consumers_stage1)
-        if changed_cons:
-            stage_proc.num_consumers_stage1 = max(1, new_cons_s1_val)
-            self.app.app_settings.set("num_consumers_stage1", stage_proc.num_consumers_stage1)
-        if imgui.is_item_hovered(): imgui.set_tooltip(
-            "Number of threads for AI model inference. Match to available cores for best performance.")
-        imgui.pop_item_width()
+            imgui.same_line()
+            changed_cons, new_cons_s1_val = imgui.input_int("Consumers##S1Consumers", stage_proc.num_consumers_stage1)
+            if changed_cons:
+                stage_proc.num_consumers_stage1 = max(1, new_cons_s1_val)
+                self.app.app_settings.set("num_consumers_stage1", stage_proc.num_consumers_stage1)
+            if imgui.is_item_hovered(): imgui.set_tooltip(
+                "Number of threads for AI model inference. Match to available cores for best performance.")
+            imgui.pop_item_width()
 
     def _render_offline_analysis_settings(self, stage_proc, app_state):
         imgui.text("Stage Reruns:")
