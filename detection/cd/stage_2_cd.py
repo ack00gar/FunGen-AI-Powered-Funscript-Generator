@@ -301,7 +301,7 @@ class FrameObject:
 class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with a single type from ATR
     def __init__(self, start_frame_id: int, end_frame_id: int, major_position: str):
         super().__init__(start_frame_id, end_frame_id)
-        self.major_position = major_position  # From ATR's _aggregate_segments
+        self.major_position = major_position
         # Store frame objects belonging to this segment for easy access
         self.segment_frame_objects: List[FrameObject] = []
 
@@ -408,115 +408,187 @@ def _atr_assign_frame_position(contacts: List[Dict]) -> str:
     if not contacts:
         return "Not Relevant"
 
-    detected_class_names = {contact["class_name"] for contact in contacts} # Use a set for faster lookups
+    # Use a set for faster 'in' checks
+    detected_class_names = {contact["class_name"] for contact in contacts}
 
-    # Explicit prioritization
+    # --- NEW Explicit Prioritization Logic ---
+
+    # Highest priority sexual acts
     if 'pussy' in detected_class_names:
-        return 'Cowgirl / Missionary' # Highest priority if pussy is involved
+        return 'Cowgirl / Missionary'
     if 'butt' in detected_class_names:
-        return 'Rev. Cowgirl / Doggy' # Next highest
+        return 'Rev. Cowgirl / Doggy'
 
-    # Check for face and hand for more specific acts
+    # Check for face and hand presence
     has_face = 'face' in detected_class_names
     has_hand = 'hand' in detected_class_names
 
-    # If face is involved, it's a Blowjob, regardless of hand presence.
+    # If a face is involved, it is ALWAYS a Blowjob, regardless of hand presence.
+    # This correctly merges "Handjob" into "Blowjob" when a face is also detected.
     if has_face:
         return 'Blowjob'
 
-    # If no face, but hand is present, it's a Handjob.
+    # Only if a face is NOT present can it be classified as a Handjob.
     if has_hand:
         return 'Handjob'
 
-    # Check for other positions if the above are not met
+    # Other non-penetrative acts
     if 'breast' in detected_class_names:
         return 'Boobjob'
     if 'foot' in detected_class_names:
         return 'Footjob'
 
+    # Default if no priority classes are found
     return "Not Relevant"
 
 
 def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_segment_duration_frames: int,
                             logger: logging.Logger) -> List[ATRSegment]:
-    segments_internal = []  # list of dicts: {"start_frame":int, "end_frame":int, "positions_in_segment":List[str]}
-    current_segment_internal = None
+    """
+    Aggregates frame data into a final, stable list of segments using
+    a master iterative loop to ensure all merging rules are exhaustively applied.
+    """
+    if not frame_objects:
+        return []
 
-    for fo in frame_objects:
-        position = fo.atr_assigned_position  # Assumes this is pre-filled
-        if current_segment_internal is None:
-            current_segment_internal = {"start_frame": fo.frame_id, "end_frame": fo.frame_id,
-                                        "positions_in_segment": [position]}
-        else:
-            # Determine major position of current_segment_internal
-            if not current_segment_internal["positions_in_segment"]:  # Should not happen if segment exists
-                # Fallback: treat current frame's position as the segment's major
-                segment_major_position = position
-            else:
-                segment_major_position = max(set(current_segment_internal["positions_in_segment"]),
-                                             key=current_segment_internal["positions_in_segment"].count)
+    # --- Pass 1: Create an initial, granular list of segments. ---
+    # We create a segment for every single change in position. This list will be messy
+    # but provides the raw material for our robust merging loop.
+    segments: List[ATRSegment] = []
+    if frame_objects:
+        current_pos = frame_objects[0].atr_assigned_position
+        start_frame = frame_objects[0].frame_id
+        for i in range(1, len(frame_objects)):
+            if frame_objects[i].atr_assigned_position != current_pos:
+                segments.append(ATRSegment(start_frame, frame_objects[i - 1].frame_id, current_pos))
+                current_pos = frame_objects[i].atr_assigned_position
+                start_frame = frame_objects[i].frame_id
+        segments.append(ATRSegment(start_frame, frame_objects[-1].frame_id, current_pos))
 
-            if position == segment_major_position:
-                current_segment_internal["end_frame"] = fo.frame_id
-                current_segment_internal["positions_in_segment"].append(position)
-            else:
-                # Check for consistent change (ATR's 1-second rule)
-                consistent_change_frames = int(fps)
-                consistent_change = True
-                for i in range(1, consistent_change_frames + 1):
-                    next_frame_idx = fo.frame_id + i
-                    if next_frame_idx >= len(frame_objects) or frame_objects[
-                        next_frame_idx].atr_assigned_position != position:
-                        consistent_change = False
-                        break
+    _debug_log(logger, f"Pass 1 (Initial Creation) generated {len(segments)} granular segments.")
 
-                if consistent_change:
-                    if current_segment_internal["end_frame"] - current_segment_internal[
-                        "start_frame"] + 1 >= min_segment_duration_frames:
-                        segments_internal.append(deepcopy(current_segment_internal))
-                    current_segment_internal = {"start_frame": fo.frame_id, "end_frame": fo.frame_id,
-                                                "positions_in_segment": [position]}
-                else:
-                    current_segment_internal["end_frame"] = fo.frame_id
-                    current_segment_internal["positions_in_segment"].append(position)
+    # --- Pass 2: The Master Iterative Merging Loop ---
+    # This loop continues until a full pass over all rules results in zero merges.
+    # This guarantees that the list is fully stabilized.
+    while True:
+        merges_made_in_pass = 0
 
-    if current_segment_internal and current_segment_internal["end_frame"] - current_segment_internal[
-        "start_frame"] + 1 >= min_segment_duration_frames:
-        segments_internal.append(deepcopy(current_segment_internal))
+        # --- Rule A: Merge short "Not Relevant" segments between identical neighbors ---
+        i = 0
+        while i < len(segments) - 2:
+            seg1, seg_gap, seg2 = segments[i], segments[i + 1], segments[i + 2]
+            is_short_gap = seg_gap.major_position == "Not Relevant" and seg_gap.duration < (fps * 10)
+            if seg1.major_position == seg2.major_position and seg1.major_position != "Not Relevant" and is_short_gap:
+                _debug_log(logger, f"Rule A: Merging {seg1.major_position} across short NR gap.")
+                seg1.end_frame_id = seg2.end_frame_id
+                seg1.update_duration()
+                segments.pop(i + 2)
+                segments.pop(i + 1)
+                merges_made_in_pass += 1
+                i = 0  # Restart scan after a modification
+                continue
+            i += 1
 
-    # Convert to ATRSegment objects and merge
-    atr_segments_final: List[ATRSegment] = []
-    if not segments_internal: return []
+        # --- Rule B: Merge adjacent "Handjob" and "Blowjob" segments into "Blowjob" ---
+        i = 0
+        while i < len(segments) - 1:
+            pos1, pos2 = segments[i].major_position, segments[i + 1].major_position
+            if {pos1, pos2} <= {'Handjob', 'Blowjob'}:  # Use set for commutative check
+                _debug_log(logger, f"Rule B: Merging adjacent '{pos1}' and '{pos2}' into 'Blowjob'.")
+                segments[i].major_position = 'Blowjob'
+                segments[i].end_frame_id = segments[i + 1].end_frame_id
+                segments[i].update_duration()
+                segments.pop(i + 1)
+                merges_made_in_pass += 1
+                i = 0  # Restart scan
+                continue
+            i += 1
 
-    for seg_dict in segments_internal:
-        major_pos = max(set(seg_dict["positions_in_segment"]), key=seg_dict["positions_in_segment"].count) if seg_dict[
-            "positions_in_segment"] else "Not Relevant"
-        new_atr_seg = ATRSegment(seg_dict["start_frame"], seg_dict["end_frame"], major_pos)
-        new_atr_seg.segment_frame_objects = [fobj for fobj in frame_objects if
-                                             new_atr_seg.start_frame_id <= fobj.frame_id <= new_atr_seg.end_frame_id]
+        # --- Rule C: Merge any remaining identical adjacent segments ---
+        i = 0
+        while i < len(segments) - 1:
+            if segments[i].major_position == segments[i + 1].major_position:
+                _debug_log(logger, f"Rule C: Merging adjacent identicals: {segments[i].major_position}")
+                segments[i].end_frame_id = segments[i + 1].end_frame_id
+                segments[i].update_duration()
+                segments.pop(i + 1)
+                merges_made_in_pass += 1
+                i = 0  # Restart scan
+                continue
+            i += 1
 
-        if atr_segments_final and new_atr_seg.major_position == atr_segments_final[-1].major_position:
-            atr_segments_final[-1].end_frame_id = new_atr_seg.end_frame_id
-            atr_segments_final[-1].segment_frame_objects.extend(new_atr_seg.segment_frame_objects)  # Append frames
-            atr_segments_final[-1].update_duration()
-        else:
-            atr_segments_final.append(new_atr_seg)
+        # If a full pass of all rules resulted in no changes, the list is stable.
+        if merges_made_in_pass == 0:
+            _debug_log(logger, "Pass 2 (Iterative Merging) stabilized.")
+            break
 
-    # ATR's final filter for short segments (merge with previous)
-    final_filtered_segments: List[ATRSegment] = []
-    for atr_seg in atr_segments_final:
-        if atr_seg.duration >= min_segment_duration_frames:
-            final_filtered_segments.append(atr_seg)
-        elif final_filtered_segments:  # If short and there's a previous one
-            final_filtered_segments[-1].end_frame_id = atr_seg.end_frame_id
-            final_filtered_segments[-1].segment_frame_objects.extend(atr_seg.segment_frame_objects)
-            final_filtered_segments[-1].update_duration()
-        # else: short segment is the first one, gets discarded if below threshold
+    # --- Pass 3: Final Cleanup & Gap Filling ---
 
-    _debug_log(logger,
-               f"ATR Segments: initial={len(segments_internal)}, merged={len(atr_segments_final)}, final_filtered={len(final_filtered_segments)}")
-    return final_filtered_segments
+    # First, cleanup any remaining short segments (<10s) by merging them into their longest neighbor.
+    min_duration_10s = int(fps * 10)
+    i = 0
+    while i < len(segments):
+        if segments[i].duration < min_duration_10s:
+            prev_dur = segments[i - 1].duration if i > 0 else -1
+            next_dur = segments[i + 1].duration if i < len(segments) - 1 else -1
 
+            if prev_dur == -1 and next_dur == -1:  # It's the only segment
+                break
+
+            if prev_dur >= next_dur:  # Merge into previous neighbor
+                _debug_log(logger,
+                           f"Pass 3: Cleaning up short segment ({segments[i].major_position}) by merging into previous.")
+                segments[i - 1].end_frame_id = segments[i].end_frame_id
+                segments[i - 1].update_duration()
+                segments.pop(i)
+                i = 0  # Restart scan from the beginning after a merge
+                continue
+            else:  # Merge into next neighbor
+                _debug_log(logger,
+                           f"Pass 3: Cleaning up short segment ({segments[i].major_position}) by merging into next.")
+                segments[i + 1].start_frame_id = segments[i].start_frame_id
+                segments[i + 1].update_duration()
+                segments.pop(i)
+                i = 0  # Restart scan
+                continue
+        i += 1
+
+    # Second, fill any remaining gaps with "Not Relevant" segments for a gapless timeline.
+    final_segments: List[ATRSegment] = []
+    last_end_frame = -1
+    for seg in segments:
+        if seg.start_frame_id > last_end_frame + 1:
+            final_segments.append(ATRSegment(last_end_frame + 1, seg.start_frame_id - 1, "Not Relevant"))
+        final_segments.append(seg)
+        last_end_frame = seg.end_frame_id
+
+    # --- Pass 4: Final merging of adjacent segments of same type or HJ/BJ ---
+    while True:
+        merges_made = 0
+        i = 0
+        while i < len(final_segments) - 1:
+            pos1, pos2 = final_segments[i].major_position, final_segments[i + 1].major_position
+
+            # Check if segments are same type or HJ/BJ combination
+            if pos1 == pos2 or {pos1, pos2} <= {'Handjob', 'Blowjob'}:
+                _debug_log(logger, f"Pass 4: Merging adjacent '{pos1}' and '{pos2}' segments.")
+                # For HJ/BJ combination, use 'Blowjob' as the merged type
+                if {pos1, pos2} <= {'Handjob', 'Blowjob'}:
+                    final_segments[i].major_position = 'Blowjob'
+                final_segments[i].end_frame_id = final_segments[i + 1].end_frame_id
+                final_segments[i].update_duration()
+                final_segments.pop(i + 1)
+                merges_made += 1
+                i = 0  # Restart scan after modification
+                continue
+            i += 1
+
+        if merges_made == 0:
+            _debug_log(logger, "Pass 4 (Final Merging) stabilized.")
+            break
+
+    _debug_log(logger, f"Final, clean segment count: {len(final_segments)}")
+    return final_segments
 
 def _atr_calculate_normalized_distance_to_base(locked_penis_box_coords: Tuple[float, float, float, float],
                                                class_name: str,
@@ -888,62 +960,65 @@ def atr_pass_3_build_locked_penis(state: AppStateContainer, logger: Optional[log
 
         last_frame_dominant_pose = dominant_pose_this_frame
 
+
 def atr_pass_4_assign_positions_and_segments(state: AppStateContainer, logger: Optional[logging.Logger]):
-    """ ATR Pass 4: Assign frame positions and aggregate into segments.
-        Modifies frame_obj.atr_assigned_position and populates state.atr_segments.
-    """
-    _debug_log(logger, "Starting ATR Pass 4: Assign Positions & Segments")
-    fps, yolo_size, frame_area = state.video_info.get('fps', 30.0), state.yolo_input_size, state.yolo_input_size ** 2
-    last_frame_position = "Not Relevant"
-    last_frame_dominant_pose: Optional[PoseRecord] = None
+    """ ATR Pass 4: Assign frame positions and aggregate into segments (with Sparse Pose Persistence). """
+    _debug_log(logger, "Starting ATR Pass 4: Assign Positions & Segments (with Sparse Pose Persistence)")
+    fps = state.video_info.get('fps', 30.0)
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
+    yolo_size = state.yolo_input_size
+
+    # --- State variables for persistence with sparse data ---
+    last_known_good_position: str = "Not Relevant"
+    last_known_good_pose: Optional[PoseRecord] = None
+    most_recent_dominant_pose: Optional[PoseRecord] = None
+    # ---
 
     for frame_obj in state.frames:
-        dominant_pose_this_frame = _get_dominant_pose(frame_obj, is_vr, yolo_size)
-        frame_obj.atr_detected_contact_boxes.clear()  # Clear any previous data
+        # 1. ALWAYS check for new pose data to carry forward
+        if frame_obj.poses:
+            most_recent_dominant_pose = _get_dominant_pose(frame_obj, is_vr, yolo_size)
+
+        # 2. Run original logic based on YOLO contact boxes
+        frame_obj.atr_detected_contact_boxes.clear()
         assigned_pos_for_frame = "Not Relevant"
         if frame_obj.atr_locked_penis_state.active and frame_obj.atr_locked_penis_state.box:
             lp_box_coords = frame_obj.atr_locked_penis_state.box
-
-            # This list is now correctly populated on the frame object itself.
             for box_rec in frame_obj.boxes:
                 if box_rec.is_excluded or box_rec.class_name in [constants.PENIS_CLASS_NAME,
                                                                  constants.GLANS_CLASS_NAME]:
                     continue
                 if _atr_calculate_iou(lp_box_coords, box_rec.bbox) > 0.05:
                     frame_obj.atr_detected_contact_boxes.append({"class_name": box_rec.class_name, "box_rec": box_rec})
-
             assigned_pos_for_frame = _atr_assign_frame_position(frame_obj.atr_detected_contact_boxes)
 
-        # --- NEW CONTEXT-AWARE LOGIC ---
-        if assigned_pos_for_frame == "Not Relevant" and last_frame_position != "Not Relevant":
-            pose_is_stable_in_interaction_zone = False
-            if dominant_pose_this_frame and last_frame_dominant_pose:
-                # Define the interaction zone based on the LAST known position
-                interaction_zone_indices = []
-                if "Cowgirl" in last_frame_position or "Doggy" in last_frame_position:
-                    interaction_zone_indices = [11, 12, 13, 14]
-                elif "Blowjob" in last_frame_position:
-                    interaction_zone_indices = [0, 1, 2, 5, 6]
-                elif "Handjob" in last_frame_position:
-                    interaction_zone_indices = [5, 6, 7, 8, 9, 10]
-                elif "Boobjob" in last_frame_position:
-                    interaction_zone_indices = [5, 6]
-                elif "Footjob" in last_frame_position:
-                    interaction_zone_indices = [13, 14, 15, 16]
+        # 3. Apply pose persistence logic
+        if assigned_pos_for_frame != "Not Relevant":
+            # Confident detection from YOLO. Update our memory.
+            last_known_good_position = assigned_pos_for_frame
+            # Anchor the "good" pose to the most recent one we've seen.
+            last_known_good_pose = most_recent_dominant_pose
 
-                if interaction_zone_indices:
-                    if dominant_pose_this_frame.calculate_zone_dissimilarity(last_frame_dominant_pose,
-                                                                             interaction_zone_indices) < 2.5:
-                        pose_is_stable_in_interaction_zone = True
+        elif last_known_good_position != "Not Relevant" and most_recent_dominant_pose and last_known_good_pose:
+            # YOLO detection failed. Try to use pose memory to fill the gap.
+            zone_indices = constants.INTERACTION_ZONES.get(last_known_good_position, [])
 
-            if pose_is_stable_in_interaction_zone:
-                assigned_pos_for_frame = last_frame_position  # Carry over the previous classification
+            if zone_indices:
+                # Compare the most recent pose we have against our "anchor" pose for this action.
+                dissimilarity = most_recent_dominant_pose.calculate_zone_dissimilarity(
+                    last_known_good_pose, zone_indices
+                )
 
+                if dissimilarity < constants.POSE_STABILITY_THRESHOLD:
+                    # The overall posture hasn't changed. Maintain the classification.
+                    assigned_pos_for_frame = last_known_good_position
+                    _debug_log(logger,
+                               f"Frame {frame_obj.frame_id}: Sparse Pose persistence applied. Position '{last_known_good_position}' maintained.")
+
+        # 4. Finalize the frame's position
         frame_obj.atr_assigned_position = assigned_pos_for_frame
-        last_frame_position = assigned_pos_for_frame
-        last_frame_dominant_pose = dominant_pose_this_frame
 
+    # 5. Aggregate segments (this part of the function is unchanged)
     BaseSegment._id_counter = 0
     state.atr_segments = _atr_aggregate_segments(state.frames, fps, int(1.0 * fps), logger)
 
