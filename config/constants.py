@@ -148,6 +148,16 @@ CLASS_COLORS = {
 }
 CLASSES_TO_DISCARD_BY_DEFAULT = ["anus"]
 
+INTERACTION_ZONES = {
+    "Cowgirl / Missionary": [6, 7, 12, 13],          # Left/Right Shoulder, Left/Right Hip
+    "Rev. Cowgirl / Doggy": [6, 7, 12, 13, 14, 15],   # Shoulders, Hips, Knees
+    "Blowjob":              [1, 2, 3, 4, 5, 6, 7],   # Nose, Eyes, Ears, Shoulders (Head region)
+    "Handjob":              [8, 9, 10, 11],           # Left/Right Elbow, Left/Right Wrist
+    "Boobjob":              [6, 7, 12, 13],          # Shoulders and Hips (Torso area)
+    "Footjob":              [14, 15, 16, 17]         # Left/Right Knee, Left/Right Ankle
+}
+
+POSE_STABILITY_THRESHOLD = 2.5
 
 ####################################################################################################
 # FUNSCRIPT & CHAPTERS
@@ -173,8 +183,8 @@ DEFAULT_TRACKER_ROI_PADDING = 20
 DEFAULT_LIVE_TRACKER_SENSITIVITY = 70.0
 DEFAULT_LIVE_TRACKER_Y_OFFSET = 0.0
 DEFAULT_LIVE_TRACKER_X_OFFSET = 0.0
-DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION = 1.5
-DEFAULT_CLASS_AMP_MULTIPLIERS = {"face": 2.5, "hand": 2.0}
+DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION = 1.4
+DEFAULT_CLASS_AMP_MULTIPLIERS = {"face": 1.25, "hand": 1.5}
 DEFAULT_ROI_PERSISTENCE_FRAMES = 180
 DEFAULT_ROI_SMOOTHING_FACTOR = 0.6
 DEFAULT_ROI_UPDATE_INTERVAL = 100
