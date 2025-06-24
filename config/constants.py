@@ -1,6 +1,6 @@
-# constants.py
 import platform
 import os
+from enum import Enum, auto
 
 # Attempt to import torch for device detection, but fail gracefully if it's not available.
 try:
@@ -49,6 +49,12 @@ if torch:
 YOLO_INPUT_SIZE = 640
 # Fallback for determining producer/consumer counts if os.cpu_count() fails.
 DEFAULT_FALLBACK_CPU_CORES = 4
+
+class TrackerMode(Enum):
+    LIVE_YOLO_ROI = "Live Optical Flow (YOLO ROI)"
+    LIVE_USER_ROI = "Live Optical Flow (User ROI)"
+    OFFLINE_2_STAGE = "YOLO AI (2 Stages, legacy)"
+    OFFLINE_3_STAGE = "YOLO AI + Opt. Flow (3 Stages, broken)"
 
 
 ####################################################################################################

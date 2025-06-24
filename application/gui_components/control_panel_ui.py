@@ -1,6 +1,7 @@
 import imgui
 import os
 from config import constants
+from config.constants import TrackerMode
 
 class ControlPanelUI:
     def __init__(self, app):
@@ -68,38 +69,40 @@ class ControlPanelUI:
         imgui.spacing()
 
         # --- Tracker Type Selection ---
-        tracking_modes = ["YOLO AI + Opt. Flow (3 Stages)", "YOLO AI (2 Stages)", "Live Optical Flow (YOLO ROI)", "Live Optical Flow (User ROI)"]
+        tracking_modes_enums = [
+            TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI,
+            TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE
+        ]
+        tracking_modes_display = [mode.value for mode in tracking_modes_enums]
+
         disable_combo = stage_proc.full_analysis_active or (self.app.processor and self.app.processor.is_processing) or self.app.is_setting_user_roi_mode
         if disable_combo:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-        clicked, new_idx = imgui.combo("Tracker Type##TrackerModeCombo", app_state.selected_tracker_type_idx, tracking_modes)
+        current_mode_idx = tracking_modes_enums.index(app_state.selected_tracker_mode)
+        clicked, new_idx = imgui.combo("Tracker Type##TrackerModeCombo", current_mode_idx, tracking_modes_display)
 
         if disable_combo:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
 
-        if clicked and new_idx != app_state.selected_tracker_type_idx:
-            app_state.selected_tracker_type_idx = new_idx
+        if clicked and new_idx != current_mode_idx:
+            new_mode = tracking_modes_enums[new_idx]
+            app_state.selected_tracker_mode = new_mode
 
-            # The index for "Live Optical Flow (User ROI)" is 3
-            if new_idx == 3:
-                # First, immediately set the tracker's mode to be consistent with the UI.
+            if new_mode == TrackerMode.LIVE_USER_ROI:
                 self.app.tracker.set_tracking_mode("USER_FIXED_ROI")
-                # Second, enter the special mode to wait for the user to draw the ROI.
                 self.app.enter_set_user_roi_mode()
             else:
-                # For all other modes, the original behavior is correct.
-                mode_map = {0: "YOLO_ROI", 1: "YOLO_ROI", 2: "YOLO_ROI"}
-                self.app.tracker.set_tracking_mode(mode_map.get(new_idx, "YOLO_ROI"))
+                self.app.tracker.set_tracking_mode("YOLO_ROI")
 
         # --- Tracking Axes ---
         self._render_tracking_axes_mode(stage_proc)
         imgui.separator()
 
         # --- Analysis Range and Rerun Options ---
-        if app_state.selected_tracker_type_idx in [0, 1]:
+        if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
             if imgui.collapsing_header("Analysis Options##RunControlAnalysisOptions", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 # --- Range Selection ---
                 imgui.text("Analysis Range")
@@ -109,7 +112,7 @@ class ControlPanelUI:
                 # --- Force Rerun ---
                 imgui.text("Stage Reruns:")
                 _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
-                if app_state.selected_tracker_type_idx == 0:
+                if app_state.selected_tracker_mode == TrackerMode.OFFLINE_3_STAGE:
                     imgui.same_line()
                     _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Segmentation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
             imgui.separator()
@@ -145,32 +148,30 @@ class ControlPanelUI:
     def _render_configuration_tab(self):
         """Renders Tab 2: All mode-specific configurations."""
         app_state = self.app.app_state_ui
-        stage_proc = self.app.stage_processor
+        selected_mode = app_state.selected_tracker_mode
 
         imgui.text("Configure settings for the selected mode.")
         imgui.spacing()
 
-        selected_mode_idx = app_state.selected_tracker_type_idx
-
-        # --- Live Tracking Configuration ---
-        if selected_mode_idx in [2, 3]:
-            if selected_mode_idx == 3:  # User ROI specific panel
+        if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
+            if selected_mode == TrackerMode.LIVE_USER_ROI:
                 if imgui.collapsing_header("ROI Selection##ConfigUserROIHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                     self._render_user_roi_tracking_panel()
                 imgui.separator()
             self._render_live_tracker_settings()
             imgui.separator()
 
+        elif selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+             if imgui.collapsing_header("AI Models & Inference##ConfigAIModels", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_ai_model_settings()
         else:
             imgui.text_disabled("No configuration available for this mode.")
 
-        # --- Class Filtering (Common for modes 0, 1, 2) ---
-        if selected_mode_idx in [0, 1, 2]:
+        if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 self._render_class_filtering_content()
 
-        if imgui.collapsing_header("AI Models & Inference##ConfigAIModels", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_ai_model_settings()
+
 
     def _render_settings_tab(self):
         """Renders the new global Application Settings tab."""
@@ -334,7 +335,7 @@ class ControlPanelUI:
         imgui.text("Stage Reruns:")
         _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1",
                                                           stage_proc.force_rerun_stage1)
-        if app_state.selected_tracker_type_idx == 0:
+        if app_state.selected_tracker_mode == TrackerMode.OFFLINE_3_STAGE:
             imgui.same_line()
             _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Segmentation##ForceRerunS2",
                                                                            stage_proc.force_rerun_stage2_segmentation)
@@ -344,7 +345,7 @@ class ControlPanelUI:
 
         # Font Scale
         imgui.text("Font Scale")
-        imgui.same_line();
+        imgui.same_line()
         imgui.push_item_width(120)
         font_scale_options_display = ["70%", "80%", "90%", "100%", "110%", "125%", "150%", "175%", "200%"]
         font_scale_options_values = [0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
@@ -356,7 +357,7 @@ class ControlPanelUI:
             current_scale_idx = 3
         changed_font_scale, new_idx = imgui.combo("##GlobalFontScale", current_scale_idx, font_scale_options_display)
         if changed_font_scale:
-            self.app.app_settings.set("global_font_scale", font_scale_options_values[new_idx])  # No immediate save
+            self.app.app_settings.set("global_font_scale", font_scale_options_values[new_idx])
             energy_saver_mgr.reset_activity_timer()
         imgui.pop_item_width()
         if imgui.is_item_hovered(): imgui.set_tooltip("Adjust the global UI font size. Applied instantly.")
@@ -365,10 +366,10 @@ class ControlPanelUI:
         imgui.text("Timeline Pan Speed")
         imgui.same_line()
         imgui.push_item_width(120)
-        current_pan_speed = self.app.app_settings.get("timeline_pan_speed_multiplier", 5)  #
+        current_pan_speed = self.app.app_settings.get("timeline_pan_speed_multiplier", 5)
         changed_pan_speed, new_pan_speed = imgui.slider_int("##TimelinePanSpeed", current_pan_speed, 1, 50)
         if changed_pan_speed:
-            self.app.app_settings.set("timeline_pan_speed_multiplier", new_pan_speed)  #
+            self.app.app_settings.set("timeline_pan_speed_multiplier", new_pan_speed)
         imgui.pop_item_width()
         if imgui.is_item_hovered(): imgui.set_tooltip("Multiplier for keyboard-based timeline panning speed.")
 
@@ -518,11 +519,9 @@ class ControlPanelUI:
         """Renders the progress UI."""
         stage_proc = self.app.stage_processor
         app_state = self.app.app_state_ui
+        selected_mode = app_state.selected_tracker_mode
 
-        selected_mode_idx = app_state.selected_tracker_type_idx
-
-        if selected_mode_idx in [0, 1]:
-            # Show progress if ANY offline analysis is running
+        if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
             if stage_proc.full_analysis_active or self.app.is_batch_processing_active or stage_proc.scene_detection_active:
                 # Decide WHICH progress to show
                 if stage_proc.scene_detection_active:
@@ -535,16 +534,16 @@ class ControlPanelUI:
                 else: # Fallback to the main multi-stage analysis progress
                     self._render_stage_progress_ui(stage_proc)
             else:
-                imgui.text_wrapped("Start an offline analysis to see progress here.")
+                self._render_stage_progress_ui(stage_proc) # Also render persisted stats here
 
-        elif selected_mode_idx in [2, 3]:
+        elif selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
             imgui.text("Live Tracker Status:")
             imgui.text(f"  - Actual FPS: {self.app.tracker.current_fps if self.app.tracker else 'N/A':.1f}")
             roi_status = "Not Set"
             if self.app.tracker:
-                if selected_mode_idx == 2:
+                if selected_mode == TrackerMode.LIVE_YOLO_ROI:
                     roi_status = f"Tracking '{self.app.tracker.main_interaction_class}'" if self.app.tracker.main_interaction_class else "Searching..."
-                elif selected_mode_idx == 3:
+                elif selected_mode == TrackerMode.LIVE_USER_ROI:
                     roi_status = "Set" if self.app.tracker.user_roi_fixed else "Not Set"
             imgui.text(f"  - ROI Status: {roi_status}")
         else:
@@ -747,7 +746,7 @@ class ControlPanelUI:
                 self.app.abort_batch_processing()
             return
 
-        selected_mode_idx = self.app.app_state_ui.selected_tracker_type_idx
+        selected_mode = self.app.app_state_ui.selected_tracker_mode
         button_width = (imgui.get_content_region_available()[0] - imgui.get_style().item_spacing[0]) / 2
 
         if is_any_process_active:
@@ -766,13 +765,10 @@ class ControlPanelUI:
         else:
             start_text = "Start"
             handler = None
-            if selected_mode_idx == 0:
-                start_text = "Start AI CV + OF (Range)" if fs_proc.scripting_range_active else "Start AI CV + Opt.Flow"
+            if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_2_STAGE]:
+                start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
-            elif selected_mode_idx == 1:
-                start_text = "Start AI CV (Range)" if fs_proc.scripting_range_active else "Start AI CV Analysis"
-                handler = event_handlers.handle_start_ai_cv_analysis
-            elif selected_mode_idx in [2, 3]:
+            elif selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
                 start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
                 handler = event_handlers.handle_start_live_tracker_click
             if imgui.button(start_text, width=button_width):
@@ -789,10 +785,11 @@ class ControlPanelUI:
             imgui.internal.pop_item_flag()
 
     def _render_stage_progress_ui(self, stage_proc):
-        selected_mode_idx = self.app.app_state_ui.selected_tracker_type_idx
         is_analysis_running = stage_proc.full_analysis_active
+        selected_mode = self.app.app_state_ui.selected_tracker_mode
+
+        # Stage 1
         imgui.text("Stage 1: YOLO Object Detection")
-        imgui.text_wrapped(f"Status: {stage_proc.stage1_status_text}")
         if is_analysis_running and stage_proc.current_analysis_stage == 1:
             imgui.text(f"Time: {stage_proc.stage1_time_elapsed_str} | ETA: {stage_proc.stage1_eta_str} | Speed: {stage_proc.stage1_processing_fps_str}")
             imgui.text_wrapped(f"Progress: {stage_proc.stage1_progress_label}")
@@ -813,26 +810,39 @@ class ControlPanelUI:
             imgui.pop_style_color()
             if suggestion_message: imgui.text(suggestion_message)
             imgui.text(f"Result Queue Size: ~{stage_proc.stage1_result_queue_size}")
+        elif stage_proc.stage1_final_elapsed_time_str:
+            imgui.text_wrapped(
+                f"Last Run: {stage_proc.stage1_final_elapsed_time_str} | Avg Speed: {stage_proc.stage1_final_fps_str or 'N/A'}")
+            imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+        else:
+            imgui.text_wrapped(f"Status: {stage_proc.stage1_status_text}")
         imgui.separator()
-        s2_title = "Stage 2: Contact Analysis & Funscript" if selected_mode_idx == 1 else "Stage 2: Segmentation"
+
+        # Stage 2
+        s2_title = "Stage 2: Contact Analysis & Funscript" if selected_mode == TrackerMode.OFFLINE_2_STAGE else "Stage 2: Segmentation"
         imgui.text(s2_title)
-        imgui.text_wrapped(f"Status: {stage_proc.stage2_status_text}")
         if is_analysis_running and stage_proc.current_analysis_stage == 2:
             imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
             imgui.progress_bar(stage_proc.stage2_main_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage2_main_progress_value * 100:.0f}%" if stage_proc.stage2_main_progress_value >= 0 else "")
-            if selected_mode_idx == 1:
-                imgui.text_wrapped(f"Sub: {stage_proc.stage2_sub_progress_label}")
-                imgui.progress_bar(stage_proc.stage2_sub_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage2_sub_progress_value * 100:.0f}%" if stage_proc.stage2_sub_progress_value >= 0 else "")
+        elif stage_proc.stage2_final_elapsed_time_str:
+            imgui.text_wrapped(f"Status: Completed in {stage_proc.stage2_final_elapsed_time_str}")
+            imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+        else:
+            imgui.text_wrapped(f"Status: {stage_proc.stage2_status_text}")
         imgui.separator()
-        if selected_mode_idx == 0:
+
+        # Stage 3
+        if selected_mode == TrackerMode.OFFLINE_3_STAGE:
             imgui.text("Stage 3: Per-Segment Optical Flow")
-            imgui.text_wrapped(f"Status: {stage_proc.stage3_status_text}")
             if is_analysis_running and stage_proc.current_analysis_stage == 3:
                 imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
                 imgui.text_wrapped(f"Segment: {stage_proc.stage3_current_segment_label}")
                 imgui.progress_bar(stage_proc.stage3_segment_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage3_segment_progress_value * 100:.0f}%")
-                imgui.text_wrapped(f"Overall: {stage_proc.stage3_overall_progress_label}")
-                imgui.progress_bar(stage_proc.stage3_overall_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage3_overall_progress_value * 100:.0f}%")
+            elif stage_proc.stage3_final_elapsed_time_str:
+                 imgui.text_wrapped(f"Last Run: {stage_proc.stage3_final_elapsed_time_str} | Avg Speed: {stage_proc.stage3_final_fps_str or 'N/A'}")
+                 imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+            else:
+                imgui.text_wrapped(f"Status: {stage_proc.stage3_status_text}")
         imgui.spacing()
 
     def _render_tracking_axes_mode(self, stage_proc):

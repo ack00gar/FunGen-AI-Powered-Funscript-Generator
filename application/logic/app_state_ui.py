@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Tuple, Optional
+from config.constants import TrackerMode
 
 
 class AppStateUI:
@@ -28,7 +29,7 @@ class AppStateUI:
         self.status_message: str = ""
         self.status_message_time: float = 0.0
 
-        self.selected_tracker_type_idx: int = 0
+        self.selected_tracker_mode: TrackerMode = TrackerMode.LIVE_YOLO_ROI
 
         # UI visibility states
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
