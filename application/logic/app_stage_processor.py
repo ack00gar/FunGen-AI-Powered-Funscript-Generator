@@ -10,6 +10,7 @@ import detection.cd.stage_2_cd as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
 
 from config import constants
+from config.constants import TrackerMode
 from application.utils.video_segment import VideoSegment
 
 
@@ -43,6 +44,8 @@ class AppStageProcessor:
         self.stage1_time_elapsed_str: str = "00:00:00"
         self.stage1_processing_fps_str: str = "0 FPS"
         self.stage1_eta_str: str = "N/A"
+        self.stage1_final_elapsed_time_str: Optional[str] = None
+        self.stage1_final_fps_str: Optional[str] = None
 
         self.stage2_status_text: str = "Not run."
         self.stage2_progress_value: float = 0.0
@@ -51,6 +54,7 @@ class AppStageProcessor:
         self.stage2_sub_progress_value: float = 0.0
         self.stage2_sub_progress_label: str = ""
         self.stage2_progress_label: str = ""  # Combined optional
+        self.stage2_final_elapsed_time_str: Optional[str] = None
 
         self.stage3_status_text: str = "Not run."
         self.stage3_current_segment_label: str = ""
@@ -60,6 +64,8 @@ class AppStageProcessor:
         self.stage3_time_elapsed_str: str = "00:00:00"
         self.stage3_processing_fps_str: str = "0 FPS"
         self.stage3_eta_str: str = "N/A"
+        self.stage3_final_elapsed_time_str: Optional[str] = None
+        self.stage3_final_fps_str: Optional[str] = None
 
         # --- State for Scene Detection ---
         self.scene_detection_active: bool = False
@@ -148,6 +154,8 @@ class AppStageProcessor:
         self.stage1_eta_str = "N/A"
         self.stage1_frame_queue_size = 0
         self.stage1_result_queue_size = 0
+        self.stage1_final_elapsed_time_str = None
+        self.stage1_final_fps_str = None
 
     def reset_stage2_status(self):  # Also resets S3
         self.stage2_status_text = "Not run."
@@ -157,6 +165,7 @@ class AppStageProcessor:
         self.stage2_main_progress_label = ""
         self.stage2_sub_progress_value = 0.0
         self.stage2_sub_progress_label = ""
+        self.stage2_final_elapsed_time_str = None
 
         self.stage3_status_text = "Not run."
         self.stage3_current_segment_label = ""
@@ -166,6 +175,8 @@ class AppStageProcessor:
         self.stage3_time_elapsed_str = "00:00:00"
         self.stage3_processing_fps_str = "0 FPS"
         self.stage3_eta_str = "N/A"
+        self.stage3_final_elapsed_time_str = None
+        self.stage3_final_fps_str = None
 
     def _stage1_progress_callback(self, current, total, message="Processing...",
                                   time_elapsed=0.0, processing_fps=0.0, eta_seconds=0.0):
@@ -199,8 +210,8 @@ class AppStageProcessor:
                 f"Malformed sub_info_from_module in _stage2_progress_callback: {sub_info_from_module}. Using placeholder.")
             actual_sub_step_tuple_for_queue = (0, 0, "Error: Invalid Sub Step Data")
 
-        current_mode_idx = self.app.app_state_ui.selected_tracker_type_idx
-        if current_mode_idx == 0:
+        current_mode = self.app.app_state_ui.selected_tracker_mode
+        if current_mode == TrackerMode.OFFLINE_3_STAGE:
             num_segmentation_main_steps = 3
             if actual_main_step_tuple_for_queue[1] > 0:
                 original_current, original_total, name = actual_main_step_tuple_for_queue
@@ -258,7 +269,7 @@ class AppStageProcessor:
         self.full_analysis_active = True
         self.current_analysis_stage = 0
         self.stop_stage_event.clear()
-        selected_mode_idx = self.app.app_state_ui.selected_tracker_type_idx
+        selected_mode = self.app.app_state_ui.selected_tracker_mode
 
         range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
 
@@ -286,11 +297,12 @@ class AppStageProcessor:
             self.stage1_status_text = f"Using existing: {os.path.basename(fm.stage1_output_msgpack_path or '')}"
             self.stage1_progress_value = 1.0
         else:
+            self.reset_stage1_status() # Reset all S1 state including final time
             self.stage1_status_text = "Queued..."
 
         self.reset_stage2_status()
         self.stage2_status_text = "Queued..."
-        if selected_mode_idx == 0:
+        if selected_mode == TrackerMode.OFFLINE_3_STAGE:
             self.stage3_status_text = "Queued..."
 
         if not range_is_active:
@@ -309,10 +321,15 @@ class AppStageProcessor:
         stage1_success = False
 
         if self.app.is_batch_processing_active:
-            selected_mode_idx = self.app.batch_processing_method_idx
-            self.logger.info(f"[Thread] Using batch processing method index: {selected_mode_idx}")
+            # Batch processing uses an index, so we map it back to our enum key
+            batch_mode_map = {
+                0: TrackerMode.LIVE_YOLO_ROI, 1: TrackerMode.LIVE_USER_ROI,
+                2: TrackerMode.OFFLINE_2_STAGE, 3: TrackerMode.OFFLINE_3_STAGE
+            }
+            selected_mode = batch_mode_map.get(self.app.batch_processing_method_idx, TrackerMode.OFFLINE_2_STAGE)
+            self.logger.info(f"[Thread] Using batch processing mode: {selected_mode.name}")
         else:
-            selected_mode_idx = self.app.app_state_ui.selected_tracker_type_idx
+            selected_mode = self.app.app_state_ui.selected_tracker_mode
 
 
         try:
@@ -329,13 +346,15 @@ class AppStageProcessor:
             if should_skip_stage1:
                 stage1_success = True
                 self.logger.info(f"[Thread] Stage 1 skipped, using: {target_s1_path}")
+                self.gui_event_queue.put(("stage1_completed", "00:00:00 (Cached)", "Cached"))
             else:
                 frame_range_for_s1 = (range_start_frame, range_end_frame) if is_s1_data_source_ranged else None
                 stage1_success = self._execute_stage1_logic(frame_range=frame_range_for_s1, output_path=target_s1_path)
+                if stage1_success:
+                    self.gui_event_queue.put(("stage1_completed", self.stage1_time_elapsed_str, self.stage1_processing_fps_str))
 
             if self.stop_stage_event.is_set() or not stage1_success:
                 self.logger.info("[Thread] Exiting after Stage 1 due to stop event or failure.")
-                # If S1 fails, ensure any downstream stages are not left as 'Queued...'
                 if "Queued" in self.stage2_status_text:
                     self.gui_event_queue.put(("stage2_status_update", "Skipped", "S1 Failed/Aborted"))
                 if "Queued" in self.stage3_status_text:
@@ -346,39 +365,43 @@ class AppStageProcessor:
             self.current_analysis_stage = 2
 
             s2_overlay_path = None
-            if fm.video_path:  # Always check for video path
+            if fm.video_path:
                 try:
-                    # Define the overlay path using the centralized helper
                     s2_overlay_path = fm.get_output_path_for_file(fm.video_path, "_stage2_overlay.msgpack")
                 except Exception as e:
                     self.logger.error(f"Error determining S2 overlay path: {e}")
 
-            generate_s2_funscript_actions = selected_mode_idx == 1
+            generate_s2_funscript_actions = selected_mode == TrackerMode.OFFLINE_2_STAGE
 
+            s2_start_time = time.time()
             stage2_run_results = self._execute_stage2_logic(
                 s2_overlay_output_path=s2_overlay_path,
                 generate_funscript_actions=generate_s2_funscript_actions,
                 is_ranged_data_source=is_s1_data_source_ranged
             )
+            s2_end_time = time.time()
             stage2_success = stage2_run_results.get("success", False)
+
+            if stage2_success:
+                s2_elapsed_s = s2_end_time - s2_start_time
+                s2_elapsed_str = f"{int(s2_elapsed_s // 3600):02d}:{int((s2_elapsed_s % 3600) // 60):02d}:{int(s2_elapsed_s % 60):02d}"
+                self.gui_event_queue.put(("stage2_completed", s2_elapsed_str, None))
 
             if stage2_success and s2_overlay_path and os.path.exists(s2_overlay_path):
                 self.gui_event_queue.put(("load_s2_overlay", s2_overlay_path, None))
 
             if stage2_success:
-                # --- Capture the generated chapters locally ---
                 video_segments_for_funscript = stage2_run_results["data"].get("video_segments", [])
                 s2_output_data = stage2_run_results.get("data", {})
 
             if self.stop_stage_event.is_set() or not stage2_success:
                 self.logger.info("[Thread] Exiting after Stage 2 due to stop event or failure.")
-                # If S2 fails, ensure S3 is not left as 'Queued...'
-                if selected_mode_idx == 0 and "Queued" in self.stage3_status_text:
+                if selected_mode == TrackerMode.OFFLINE_3_STAGE and "Queued" in self.stage3_status_text:
                      self.gui_event_queue.put(("stage3_status_update", "Skipped", "S2 Failed/Aborted"))
                 return
 
             # --- Stage 3 (or Finish) ---
-            if selected_mode_idx == 1: # For 2-Stage analysis
+            if selected_mode == TrackerMode.OFFLINE_2_STAGE:
                 if stage2_success:
                     packaged_data = {
                         "results_dict": s2_output_data,
@@ -394,7 +417,7 @@ class AppStageProcessor:
                     "video_segments": video_segments_for_funscript
                 }
                 self.gui_event_queue.put(("analysis_message", completion_payload, None))
-            elif selected_mode_idx == 0: # For 3-Stage analysis
+            elif selected_mode == TrackerMode.OFFLINE_3_STAGE:
                 self.current_analysis_stage = 3
                 atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
@@ -412,11 +435,14 @@ class AppStageProcessor:
                 self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in
                                                         s2_output_data.get("all_s2_frame_objects_list", [])}
                 stage3_success = self._execute_stage3_optical_flow_module(segments_for_s3)
-                if self.stop_stage_event.is_set():
-                    return # Exit if aborted during S3
 
                 if stage3_success:
-                    # Create the self-contained completion message
+                    self.gui_event_queue.put(("stage3_completed", self.stage3_time_elapsed_str, self.stage3_processing_fps_str))
+
+                if self.stop_stage_event.is_set():
+                    return
+
+                if stage3_success:
                     completion_payload = {
                         "message": "AI CV (3-Stage) analysis completed successfully.",
                         "status": "Completed",
@@ -553,7 +579,8 @@ class AppStageProcessor:
                 scripting_range_active_arg=range_is_active,
                 scripting_range_start_frame_arg=range_start_frame,
                 scripting_range_end_frame_arg=range_end_frame,
-                is_ranged_data_source=is_ranged_data_source  # Pass the new flag
+                is_ranged_data_source=is_ranged_data_source,
+                generate_funscript_actions_arg=generate_funscript_actions
             )
             if self.stop_stage_event.is_set():
                 msg = "S2 Aborted by user."
@@ -771,6 +798,11 @@ class AppStageProcessor:
                 elif event_type == "stage1_status_update":
                     self.stage1_status_text = str(data1)
                     if data2 is not None: self.stage1_progress_label = str(data2)
+                elif event_type == "stage1_completed":
+                    self.stage1_final_elapsed_time_str = str(data1)
+                    self.stage1_final_fps_str = str(data2)
+                    self.stage1_status_text = "Completed"
+                    self.stage1_progress_value = 1.0
                 elif event_type == "stage1_queue_update":
                     queue_data = data1
                     if isinstance(queue_data, dict):
@@ -790,6 +822,11 @@ class AppStageProcessor:
                     self.stage2_status_text = str(data1)
                     if data2 is not None:
                         self.stage2_progress_label = str(data2)
+                elif event_type == "stage2_completed":
+                    self.stage2_final_elapsed_time_str = str(data1)
+                    self.stage2_status_text = "Completed"
+                    self.stage2_main_progress_value = 1.0
+                    self.stage2_sub_progress_value = 1.0
                 elif event_type == "stage2_results_success":
                     packaged_data, s2_overlay_path_written = data1, data2
                     results_dict = packaged_data.get("results_dict", {})
@@ -860,6 +897,11 @@ class AppStageProcessor:
                 elif event_type == "stage3_status_update":
                     self.stage3_status_text = str(data1)
                     if data2 is not None: self.stage3_overall_progress_label = str(data2)
+                elif event_type == "stage3_completed":
+                    self.stage3_final_elapsed_time_str = str(data1)
+                    self.stage3_final_fps_str = str(data2)
+                    self.stage3_status_text = "Completed"
+                    self.stage3_overall_progress_value = 1.0
                 elif event_type == "analysis_message":
                     payload = data1 if isinstance(data1, dict) else {}
                     log_msg = payload.get("message", str(data1))
