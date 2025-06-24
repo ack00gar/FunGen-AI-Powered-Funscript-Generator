@@ -73,7 +73,7 @@ class Stage3OpticalFlowProcessor:
             self.logger.error(f"S3 OF: VideoProcessor could not open video: {self.video_path}")
             return False
 
-        determined_video_type = self.video_processor.determined_video_type
+        self.determined_video_type = self.video_processor.determined_video_type
 
         # Initialize ROITracker instance for S3 processing
         # ROITracker's __init__ will need to handle app_logic_instance=None
@@ -100,7 +100,7 @@ class Stage3OpticalFlowProcessor:
                 max_frames_for_roi_persistence=self.tracker_config.get('max_frames_for_roi_persistence', constants.DEFAULT_ROI_PERSISTENCE_FRAMES), # Not really used in S3 like in live
                 class_specific_amplification_multipliers=self.tracker_config.get('class_specific_amplification_multipliers', None),
                 logger=self.logger.getChild("ROITracker_S3"),
-                video_type_override=determined_video_type
+                video_type_override=self.determined_video_type
             )
             # Set parameters that might not be in __init__ or need override for S3
             self.roi_tracker_instance.y_offset = self.tracker_config.get('y_offset',
@@ -263,19 +263,30 @@ class Stage3OpticalFlowProcessor:
                                 current_penis_box_for_roi_calc,
                                 interacting_objects_for_roi_calc
                             )
-                            if segment_obj.major_position == "Handjob / Blowjob" and candidate_roi_xywh:
-                                narrow_factor = self.common_app_config.get("roi_narrow_factor_hjbj",
-                                                                           constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ)
-                                min_roi_dim = self.common_app_config.get("min_roi_dim_hjbj",
-                                                                         constants.DEFAULT_MIN_ROI_DIM_HJBJ)
+                            if self.determined_video_type == 'VR' and candidate_roi_xywh:
+                                penis_w = current_penis_box_for_roi_calc[2]
                                 rx, ry, rw, rh = candidate_roi_xywh
-                                rw_new = max(min_roi_dim, int(rw * narrow_factor))
-                                rh_new = max(min_roi_dim, int(rh * narrow_factor))
-                                rx_new = rx + (rw - rw_new) // 2
-                                ry_new = ry + (rh - rh_new) // 2
-                                rx_new = max(0, min(rx_new, processed_frame_for_tracker.shape[1] - rw_new))
-                                ry_new = max(0, min(ry_new, processed_frame_for_tracker.shape[0] - rh_new))
-                                candidate_roi_xywh = (rx_new, ry_new, rw_new, rh_new)
+                                new_rw = 0
+
+                                if segment_obj.major_position in ["Handjob", "Blowjob", "Handjob / Blowjob"]:
+                                    # For HJ/BJ, lock width to the penis box width
+                                    new_rw = penis_w
+                                else:
+                                    # For other positions, limit to 2x penis box width
+                                    new_rw = min(rw, penis_w * 2)
+
+                                if new_rw > 0:
+                                    # Recenter the new, narrower ROI
+                                    original_center_x = rx + rw / 2
+                                    new_rx = int(original_center_x - new_rw / 2)
+
+                                    # Ensure the new ROI stays within frame boundaries
+                                    frame_width = processed_frame_for_tracker.shape[1]
+                                    final_rw = int(min(new_rw, frame_width))
+                                    final_rx = max(0, min(new_rx, frame_width - final_rw))
+
+                                    candidate_roi_xywh = (final_rx, ry, final_rw, rh)
+
                     if candidate_roi_xywh:
                         self.roi_tracker_instance.roi = self.roi_tracker_instance._smooth_roi_transition(
                             candidate_roi_xywh)
@@ -309,9 +320,18 @@ class Stage3OpticalFlowProcessor:
                 # --- Funscript Writing ---
                 can_write_action_s3 = (segment_obj.start_frame_id <= frame_id_to_process <= segment_obj.end_frame_id)
                 if can_write_action_s3:
-                    delay_ms = (
-                                           self.roi_tracker_instance.output_delay_frames / self.roi_tracker_instance.current_video_fps_for_delay) * 1000.0 \
+                    # --- Lag Compensation (manual + automatic) ---
+                    # Calculate inherent delay from the smoothing window. A window of N has a lag of (N-1)/2 frames.
+                    smoothing_window = self.roi_tracker_instance.flow_history_window_smooth
+                    automatic_smoothing_delay_frames = (smoothing_window - 1) / 2.0 if smoothing_window > 1 else 0.0
+
+                    # Combine automatic compensation with the user's manual delay setting.
+                    total_delay_frames = self.roi_tracker_instance.output_delay_frames + automatic_smoothing_delay_frames
+
+                    # Convert the total frame delay to milliseconds.
+                    delay_ms = (total_delay_frames / self.roi_tracker_instance.current_video_fps_for_delay) * 1000.0 \
                         if self.roi_tracker_instance.current_video_fps_for_delay > 0 else 0.0
+
                     adjusted_frame_time_ms = frame_time_ms - delay_ms
                     final_adjusted_time_ms = max(0, int(round(adjusted_frame_time_ms)))
                     tracking_axis_mode = self.common_app_config.get("tracking_axis_mode", "both")

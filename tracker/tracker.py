@@ -578,7 +578,7 @@ class ROITracker:
                 ox, oy, ow, oh = obj["box"]
                 ocx, ocy = ox + ow // 2, oy + oh // 2
                 dist = np.sqrt((ocx - pcx) ** 2 + (ocy - pcy) ** 2)
-                max_dist = (np.sqrt(pw ** 2 + ph ** 2) / 2 + np.sqrt(ow ** 2 + oh ** 2) / 2) * 0.85
+                max_dist = (np.sqrt(pw ** 2 + ph ** 2) / 2 + np.sqrt(ow ** 2 + oh ** 2) / 2)  * 0.85
                 if dist < max_dist: interacting.append(obj)
         return interacting
 
@@ -883,6 +883,30 @@ class ROITracker:
                     self.update_main_interaction_class(current_best_interaction_name)
                     combined_roi_candidate = self._calculate_combined_roi(processed_frame.shape[:2],
                                                                           self.penis_last_known_box, interacting_objs)
+
+                    # Apply new VR-specific ROI width limits
+                    if self._is_vr_video() and self.penis_last_known_box:
+                        penis_w = self.penis_last_known_box[2]
+                        rx, ry, rw, rh = combined_roi_candidate
+                        new_rw = 0
+
+                        # Check main_interaction_class which is more stable than the instantaneous best name
+                        self.logger.info(f"Main interaction class: {self.main_interaction_class}")
+                        if self.main_interaction_class in ["face", "hand"]:
+                            new_rw = penis_w
+                        else:
+                            new_rw = min(rw, penis_w * 2)
+
+                        if new_rw > 0:
+                            original_center_x = rx + rw / 2
+                            new_rx = int(original_center_x - new_rw / 2)
+
+                            frame_width = processed_frame.shape[1]
+                            final_rw = int(min(new_rw, frame_width))
+                            final_rx = max(0, min(new_rx, frame_width - final_rw))
+
+                            combined_roi_candidate = (final_rx, ry, final_rw, rh)
+
                     self.roi = self._smooth_roi_transition(combined_roi_candidate)
                 else:
                     if self.penis_last_known_box: self.logger.info("Primary target (penis) lost in detection cycle.")
