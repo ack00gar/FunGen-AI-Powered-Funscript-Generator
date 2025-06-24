@@ -32,9 +32,10 @@ class ROITracker:
                  class_specific_amplification_multipliers: Optional[Dict[str, float]] = None,
                  logger: Optional[logging.Logger] = None,
                  inversion_detection_split_ratio: float = constants.INVERSION_DETECTION_SPLIT_RATIO,
-
+                 video_type_override: Optional[str] = None
                  ):
         self.app = app_logic_instance # Can be None if instantiated by Stage 3
+        self.video_type_override = video_type_override
 
         if logger:
             self.logger = logger
@@ -164,6 +165,14 @@ class ROITracker:
         self.logger.info(
             f"Tracker fully initialized (ROI Persistence: {self.max_frames_for_roi_persistence} frames, ROI Smoothing: {self.roi_smoothing_factor}). App instance {'provided' if self.app else 'not provided (e.g. S3 mode)'}.")
 
+    def _is_vr_video(self) -> bool:
+        """Determines if the video is VR, using the override if available."""
+        if self.video_type_override:
+            return self.video_type_override == 'VR'
+        if self.app and hasattr(self.app, 'processor') and self.app.processor:
+            return self.app.processor.determined_video_type == 'VR'
+        return False
+
     def _load_models(self):
         """Loads or reloads the detection and pose models based on stored paths."""
         self.unload_detection_model()
@@ -229,7 +238,8 @@ class ROITracker:
             return 0.0, 0.0, 0.0, 0.0, None
 
         h, w, _ = flow.shape
-        is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+        # is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+        is_vr_video = self._is_vr_video()
 
         # 3. For VR, determine the dominant motion region BEFORE main calculation
         dominant_flow_region = flow  # Default to the full ROI
@@ -321,7 +331,8 @@ class ROITracker:
             return 0.0, 0.0, 0.0, 0.0, None
 
         h, w, _ = flow.shape
-        is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+        # is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+        is_vr_video = self._is_vr_video()
 
         # 3. For VR, determine the dominant motion region BEFORE main calculation
         dominant_flow_region = flow
@@ -744,7 +755,8 @@ class ROITracker:
                 current_roi_patch_gray, prev_roi_patch_gray
             )
 
-        is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+        # is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
+        is_vr_video = self._is_vr_video()
 
         if self.enable_inversion_detection and is_vr_video:
             # This logic now ONLY runs for VR videos.
@@ -1115,8 +1127,9 @@ class ROITracker:
                             f"Lost: {self.frames_since_target_lost}/{self.max_frames_for_roi_persistence}",
                             (rx, ry + rh + 10), cv2.FONT_HERSHEY_PLAIN, 0.6, (0, 0, 255), 1)
 
-            is_vr_video = self.app and hasattr(self.app,
-                                               'processor') and self.app.processor.determined_video_type == 'VR'
+            # is_vr_video = self.app and hasattr(self.app,
+            #                                    'processor') and self.app.processor.determined_video_type == 'VR'
+            is_vr_video = self._is_vr_video()
             if self.enable_inversion_detection and is_vr_video:
                 mode_color = (255, 255, 0)  # Default for undetermined
                 mode_text = "Undetermined"
@@ -1145,8 +1158,9 @@ class ROITracker:
                 point_y_abs = ury_c + int(self.user_roi_tracked_point_relative[1])
                 cv2.circle(processed_frame, (point_x_abs, point_y_abs), 3, (0, 255, 0), -1)
 
-            is_vr_video = self.app and hasattr(self.app,
-                                               'processor') and self.app.processor.determined_video_type == 'VR'
+            # is_vr_video = self.app and hasattr(self.app,
+            #                                    'processor') and self.app.processor.determined_video_type == 'VR'
+            is_vr_video = self._is_vr_video()
             if self.enable_inversion_detection and is_vr_video:
                 mode_color = (255, 255, 0)  # Default for undetermined
                 mode_text = "Undetermined"
