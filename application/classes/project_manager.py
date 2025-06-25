@@ -234,8 +234,8 @@ class ProjectManager:
             "video_path": self.app.file_manager.video_path,
             "funscript_path": self.app.file_manager.funscript_path,  # Project-associated funscript
             "loaded_funscript_path_timeline1": self.app.file_manager.loaded_funscript_path,  # T1 specific
-            "stage1_output_msgpack_path": self.app.file_manager.stage1_output_msgpack_path,
-            "stage2_overlay_msgpack_path": self.app.file_manager.stage2_output_msgpack_path,  # From Stage 2 run or load
+            "stage1_output_msgpack_path": stage_proc_data.get("stage1_output_msgpack_path"),
+            "stage2_overlay_msgpack_path": stage_proc_data.get("stage2_overlay_msgpack_path"),
 
             # Funscript Data
             "funscript_actions_timeline1": primary_actions,
@@ -295,7 +295,7 @@ class ProjectManager:
         fm.funscript_path = project_data.get("funscript_path", "")
         fm.loaded_funscript_path = project_data.get("loaded_funscript_path_timeline1", fm.funscript_path)
         fm.stage1_output_msgpack_path = project_data.get("stage1_output_msgpack_path")
-        fm.stage2_output_msgpack_path = project_data.get("stage2_output_msgpack_path")  # Path to overlay
+        fm.stage2_output_msgpack_path = project_data.get("stage2_overlay_msgpack_path")  # Path to overlay
 
         # Data for FunscriptProcessor
         fs_proc = self.app.funscript_processor
@@ -351,7 +351,6 @@ class ProjectManager:
             stage_proc.reset_stage1_status()
 
         # Load S2 overlay data if path exists from project
-        fm.clear_stage2_overlay_data()  # Clear any existing before loading from project
         if fm.stage2_output_msgpack_path and os.path.exists(fm.stage2_output_msgpack_path):
             fm.load_stage2_overlay_data(fm.stage2_output_msgpack_path)
 
