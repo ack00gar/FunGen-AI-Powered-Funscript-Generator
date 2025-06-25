@@ -186,6 +186,12 @@ class InteractiveFunscriptTimeline:
             return
 
         actions_to_copy = [source_actions_ref[idx] for idx in sorted(list(self.multi_selected_action_indices))]
+        if not actions_to_copy:
+            return
+
+        # Determine the time range of the actions being copied
+        min_timestamp = min(action['at'] for action in actions_to_copy)
+        max_timestamp = max(action['at'] for action in actions_to_copy)
 
         actions_to_add = []
         for action in actions_to_copy:
@@ -201,16 +207,29 @@ class InteractiveFunscriptTimeline:
         if not actions_to_add:
             return
 
-        op_desc = f"Copied {len(actions_to_add)} points from T{self.timeline_num}"
-        # Record the undo action on the DESTINATION timeline
+        op_desc = f"Pasted {len(actions_to_add)} points from T{self.timeline_num} (overwrite)"
+        # Record a single undo action for the entire operation on the DESTINATION timeline
         self.app.funscript_processor._record_timeline_action(destination_timeline_num, op_desc)
 
-        # Use the batch add method for efficiency
+        # --- Delete existing points in the target range ---
+        dest_actions_ref = getattr(dest_funscript_instance, f"{dest_axis_name}_actions", [])
+        if dest_actions_ref:
+            indices_to_delete = [
+                i for i, action in enumerate(dest_actions_ref)
+                if min_timestamp <= action['at'] <= max_timestamp
+            ]
+            if indices_to_delete:
+                # This call is now part of the recorded undo action
+                dest_funscript_instance.clear_points(axis=dest_axis_name, selected_indices=indices_to_delete)
+
+        # Add the new points
         dest_funscript_instance.add_actions_batch(actions_to_add, is_from_live_tracker=False)
 
-        # Finalize the action on the DESTINATION timeline
+        # Finalize the single undoable action on the DESTINATION timeline
         self.app.funscript_processor._finalize_action_and_update_ui(destination_timeline_num, op_desc)
-        self.app.logger.info(f"{op_desc} to T{destination_timeline_num}.", extra={'status_message': True})
+        self.app.logger.info(
+            f"Pasted to T{destination_timeline_num}, overwriting points in range [{min_timestamp}, {max_timestamp}].",
+            extra={'status_message': True})
 
     # --- Bulk Operations Direct Calls to Funscript Object ---
     def _call_funscript_method(self, method_name: str, error_context: str, **kwargs) -> bool:
