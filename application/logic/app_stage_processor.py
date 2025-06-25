@@ -305,10 +305,10 @@ class AppStageProcessor:
         if selected_mode == TrackerMode.OFFLINE_3_STAGE:
             self.stage3_status_text = "Queued..."
 
-        if not range_is_active:
-            fs_proc.video_chapters.clear()
-            fs_proc.clear_timeline_history_and_set_new_baseline(1, [], "New Full Analysis")
-            fs_proc.clear_timeline_history_and_set_new_baseline(2, [], "New Full Analysis")
+        # if not range_is_active:
+        #     fs_proc.video_chapters.clear()
+        #     fs_proc.clear_timeline_history_and_set_new_baseline(1, [], "New Full Analysis")
+        #     fs_proc.clear_timeline_history_and_set_new_baseline(2, [], "New Full Analysis")
 
         self.logger.info("Starting Full Analysis sequence...", extra={'status_message': True})
         self.stage_thread = threading.Thread(target=self._run_full_analysis_thread_target, daemon=True)
@@ -831,26 +831,65 @@ class AppStageProcessor:
                     packaged_data, s2_overlay_path_written = data1, data2
                     results_dict = packaged_data.get("results_dict", {})
                     video_segments_data = results_dict.get("video_segments", [])
-                    fs_proc.video_chapters.clear()
-                    if isinstance(video_segments_data, list):
-                        for seg_data in video_segments_data:
-                            if isinstance(seg_data, dict):
-                                fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
+                    # Use the same flag to protect chapters during a 2-Stage run.
+                    if self.force_rerun_stage2_segmentation:
+                        self.logger.info("Overwriting chapters with new 2-Stage analysis results as requested.")
+                        fs_proc.video_chapters.clear()
+                        if isinstance(video_segments_data, list):
+                            for seg_data in video_segments_data:
+                                if isinstance(seg_data, dict):
+                                    fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
+                    else:
+                        self.app.logger.info(
+                            "Preserving existing chapters. Stage 2 funscript generated without altering chapters.")
+
+                    # Get the generated actions from Stage 2
                     primary_actions = results_dict.get("primary_actions", [])
-                    fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(2,
-                                                                        results_dict.get("secondary_actions", []),
-                                                                        "Stage 2")
+                    secondary_actions = results_dict.get("secondary_actions", [])
+
+                    # Get the application's current axis settings
+                    axis_mode = self.app.tracking_axis_mode
+                    target_timeline = self.app.single_axis_output_target
+
+                    self.app.logger.info(
+                        f"Applying 2-Stage results with axis mode: '{axis_mode}' and target: '{target_timeline}'.")
+
+                    if axis_mode == "both":
+                        # Overwrite both timelines with the new results.
+                        fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+
+                    elif axis_mode == "vertical":
+                        # Overwrite ONLY the target timeline, leaving the other one completely untouched.
+                        if target_timeline == "primary":
+                            self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
+                            fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
+                        else:  # Target is secondary
+                            self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
+                            fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+
+                    elif axis_mode == "horizontal":
+                        # Do nothing, as Stage 2 does not produce horizontal data. Both timelines remain untouched.
+                        self.app.logger.info("Horizontal axis mode selected, but 2-Stage analysis only produces vertical data. No timelines were modified.")
+
                     self.stage2_status_text = "S2 Completed. Results Processed."
                     self.app.project_manager.project_dirty = True
                     self.logger.info("Processed Stage 2 results.")
+
                 elif event_type == "stage2_results_success_segments_only":
                     video_segments_data = data1
-                    fs_proc.video_chapters.clear()
-                    if isinstance(video_segments_data, list):
-                        for seg_data in video_segments_data:
-                            if isinstance(seg_data, dict):
-                                fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
+
+                    # Only modify chapters if the user forced a re-run of segmentation.
+                    if self.force_rerun_stage2_segmentation:
+                        self.logger.info("Overwriting chapters with new segmentation results as requested.")
+                        fs_proc.video_chapters.clear()  # Now safe inside the check
+                        if isinstance(video_segments_data, list):
+                            for seg_data in video_segments_data:
+                                if isinstance(seg_data, dict):
+                                    fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
+                    else:
+                        self.logger.info("Preserving existing chapters. S2 segmentation was not re-run.")
+
                     self.stage2_status_text = "S2 Segmentation Processed."
                     self.app.project_manager.project_dirty = True
                 elif event_type == "load_s2_overlay":
