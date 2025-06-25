@@ -112,9 +112,8 @@ class ControlPanelUI:
                 # --- Force Rerun ---
                 imgui.text("Stage Reruns:")
                 _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
-                if app_state.selected_tracker_mode == TrackerMode.OFFLINE_3_STAGE:
-                    imgui.same_line()
-                    _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Segmentation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
+                imgui.same_line()
+                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
             imgui.separator()
 
 
@@ -347,10 +346,10 @@ class ControlPanelUI:
         imgui.text("Stage Reruns:")
         _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1",
                                                           stage_proc.force_rerun_stage1)
-        if app_state.selected_tracker_mode == TrackerMode.OFFLINE_3_STAGE:
-            imgui.same_line()
-            _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Segmentation##ForceRerunS2",
-                                                                           stage_proc.force_rerun_stage2_segmentation)
+
+        imgui.same_line()
+        _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2",
+                                                                       stage_proc.force_rerun_stage2_segmentation)
 
     def _render_settings_interface_perf(self):
         energy_saver_mgr = self.app.energy_saver

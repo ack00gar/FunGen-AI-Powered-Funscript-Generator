@@ -480,18 +480,37 @@ class ApplicationLogic:
             else:
                 self.logger.warning(f"Unknown pending action type: {action_type}")
 
-        # Now, handle auto post-processing if it was a scripting session
-        if was_scripting_session and self.app_settings.get("enable_auto_post_processing", False):
-            self.logger.info(
-                f"Triggering auto post-processing for live tracking session range: {scripted_frame_range}.")
-            if hasattr(self, 'funscript_processor') and hasattr(self.funscript_processor,
-                                                                'apply_automatic_post_processing'):
-                try:
-                    # Pass the specific frame range to the post-processing function
-                    self.funscript_processor.apply_automatic_post_processing(frame_range=scripted_frame_range)
-                except Exception as e_post:
-                    self.logger.error(f"Error during automatic post-processing after live tracking: {e_post}",
-                                      exc_info=True)
+        # If this was a live scripting session, save the raw script first.
+        if was_scripting_session:
+            video_path = self.file_manager.video_path
+            if video_path:
+                # 1. SAVE THE RAW FUNSCRIPT
+                self.logger.info("Live session ended. Saving raw funscript before post-processing.")
+                self.file_manager.save_raw_funscripts_after_generation(video_path)
+
+                # 2. PROCEED WITH POST-PROCESSING (if enabled)
+                if self.app_settings.get("enable_auto_post_processing", False):
+                    self.logger.info(
+                        f"Triggering auto post-processing for live tracking session range: {scripted_frame_range}.")
+                    if hasattr(self, 'funscript_processor') and hasattr(self.funscript_processor,
+                                                                        'apply_automatic_post_processing'):
+                        try:
+                            # Pass the specific frame range to the post-processing function
+                            self.funscript_processor.apply_automatic_post_processing(frame_range=scripted_frame_range)
+
+                            # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
+                            self.logger.info("Saving final (post-processed) funscript.")
+                            # The chapter list from the funscript processor is the most current after post-processing
+                            chapters_for_save = self.funscript_processor.video_chapters
+                            self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
+
+                        except Exception as e_post:
+                            self.logger.error(f"Error during automatic post-processing after live tracking: {e_post}",
+                                              exc_info=True)
+                else:
+                    self.logger.info("Auto post-processing disabled, skipping.")
+            else:
+                self.logger.warning("Live session ended, but no video path is available to save the raw funscript.")
 
     def get_available_tracking_classes(self) -> List[str]:
         """Gets the list of class names from the loaded YOLO detection model."""
