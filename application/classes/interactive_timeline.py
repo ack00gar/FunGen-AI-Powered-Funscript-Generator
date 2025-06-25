@@ -169,6 +169,49 @@ class InteractiveFunscriptTimeline:
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, op_desc)
         self.app.logger.info(f"Pasted {len(actions_to_add)} point(s).", extra={'status_message': True})
 
+    def _handle_copy_to_other_timeline(self):
+        source_actions_ref = self._get_actions_list_ref()
+        if not source_actions_ref or not self.multi_selected_action_indices:
+            self.app.logger.warning(f"T{self.timeline_num}: No points selected to copy.",
+                                    extra={'status_message': True})
+            return
+
+        destination_timeline_num = 2 if self.timeline_num == 1 else 1
+        dest_funscript_instance, dest_axis_name = self.app.funscript_processor._get_target_funscript_object_and_axis(
+            destination_timeline_num)
+
+        if not dest_funscript_instance or not dest_axis_name:
+            self.app.logger.error(f"T{self.timeline_num}: Could not find destination timeline to copy points.",
+                                  extra={'status_message': True})
+            return
+
+        actions_to_copy = [source_actions_ref[idx] for idx in sorted(list(self.multi_selected_action_indices))]
+
+        actions_to_add = []
+        for action in actions_to_copy:
+            new_action = {'timestamp_ms': action['at']}
+            if dest_axis_name == 'primary':
+                new_action['primary_pos'] = action['pos']
+                new_action['secondary_pos'] = None
+            else:  # secondary
+                new_action['primary_pos'] = None
+                new_action['secondary_pos'] = action['pos']
+            actions_to_add.append(new_action)
+
+        if not actions_to_add:
+            return
+
+        op_desc = f"Copied {len(actions_to_add)} points from T{self.timeline_num}"
+        # Record the undo action on the DESTINATION timeline
+        self.app.funscript_processor._record_timeline_action(destination_timeline_num, op_desc)
+
+        # Use the batch add method for efficiency
+        dest_funscript_instance.add_actions_batch(actions_to_add, is_from_live_tracker=False)
+
+        # Finalize the action on the DESTINATION timeline
+        self.app.funscript_processor._finalize_action_and_update_ui(destination_timeline_num, op_desc)
+        self.app.logger.info(f"{op_desc} to T{destination_timeline_num}.", extra={'status_message': True})
+
     # --- Bulk Operations Direct Calls to Funscript Object ---
     def _call_funscript_method(self, method_name: str, error_context: str, **kwargs) -> bool:
         funscript_instance, axis_name = self._get_target_funscript_details()
@@ -1639,6 +1682,16 @@ class InteractiveFunscriptTimeline:
                         imgui.close_current_popup()
                 else:
                     imgui.menu_item("Add Point Here", enabled=False)
+
+                imgui.separator()
+                can_copy_to_other = allow_editing_timeline and bool(self.multi_selected_action_indices)
+                copy_dest_t_num = 2 if self.timeline_num == 1 else 1
+
+                if imgui.menu_item(f"Copy Selected to Timeline {copy_dest_t_num}", enabled=can_copy_to_other)[0]:
+                    if can_copy_to_other:
+                        self._handle_copy_to_other_timeline()
+                    imgui.close_current_popup()
+
                 imgui.separator()
 
                 # --- New "Start Selection" / "End Selection" Context Menu Items ---
