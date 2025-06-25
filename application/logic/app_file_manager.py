@@ -73,7 +73,8 @@ class AppFileManager:
             os.makedirs(video_specific_output_dir, exist_ok=True)
 
         final_filename = video_basename + file_suffix
-        return os.path.join(video_specific_output_dir, final_filename)
+        # Ensure the returned path is always absolute
+        return os.path.abspath(os.path.join(video_specific_output_dir, final_filename))
 
     def _parse_funscript_file(self, funscript_file_path: str) -> Tuple[Optional[List[Dict]], Optional[str], Optional[List[Dict]], Optional[float]]:
         """ Parses a funscript file using the high-performance orjson library. """
@@ -332,6 +333,8 @@ class AppFileManager:
         stage_processor = self.app.stage_processor
 
         if not is_project_load:
+            # This block is for when a user opens a video file directly.
+            # It should be entirely skipped during a project load.
             self.funscript_path = ""
             self.loaded_funscript_path = ""
             stage_processor.reset_stage1_status()
@@ -356,8 +359,10 @@ class AppFileManager:
                 funscript_processor.clear_timeline_history_and_set_new_baseline(1, [], "New Video (T1 Cleared)")
                 funscript_processor.clear_timeline_history_and_set_new_baseline(2, [], "New Video (T2 Cleared)")
 
+        # This part runs for both direct video load and project video load.
         if self.app.processor:
             if self.app.processor.open_video(file_path, from_project_load=is_project_load):
+                # This funscript loading logic should ONLY run for direct video loads.
                 if not is_project_load:
                     path_in_output = self.get_output_path_for_file(file_path, ".funscript")
                     path_next_to_video = os.path.splitext(file_path)[0] + ".funscript"
