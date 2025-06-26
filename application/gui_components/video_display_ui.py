@@ -1,5 +1,5 @@
 import imgui
-from typing import Optional
+from typing import Optional, Tuple
 
 
 import config.constants as constants
@@ -276,6 +276,49 @@ class VideoDisplayUI:
                 p_screen = self._video_to_screen_coords(int(kp[0]), int(kp[1]))
                 if p_screen:
                     draw_list.add_circle_filled(p_screen[0], p_screen[1], 3.0, kpt_color)
+
+    def _render_motion_mode_overlay(self, draw_list, motion_mode: Optional[str], interaction_class: Optional[str],
+                                    roi_video_coords: Tuple[int, int, int, int]):
+        """Renders the motion mode text (Thrusting, Riding, etc.) as an ImGui overlay."""
+        if not motion_mode or motion_mode == 'undetermined':
+            return
+
+        mode_color = imgui.get_color_u32_rgba(1, 1, 0, 0.9)
+        mode_text = "Undetermined"
+
+        if motion_mode == 'thrusting':
+            mode_text = "Thrusting"
+            mode_color = imgui.get_color_u32_rgba(0.1, 1.0, 0.1, 0.95)
+        elif motion_mode == 'riding':
+            mode_color = imgui.get_color_u32_rgba(1.0, 0.4, 1.0, 0.95)
+            if interaction_class == 'face':
+                mode_text = "Blowing"
+            elif interaction_class == 'hand':
+                mode_text = "Stroking"
+            else:
+                mode_text = "Riding"
+
+        if mode_text == "Undetermined":
+            return
+
+        # Position text under the anchor box instead of the corner of the ROI
+        box_x, box_y, box_w, box_h = roi_video_coords
+        # Anchor point in video coordinates: bottom-center of the box
+        anchor_vid_x = box_x + box_w / 2
+        anchor_vid_y = box_y + box_h
+
+        anchor_screen_pos = self._video_to_screen_coords(int(anchor_vid_x), int(anchor_vid_y))
+
+        if anchor_screen_pos:
+            text_size = imgui.calc_text_size(mode_text)
+            # Center the text horizontally under the anchor point
+            text_pos_x = anchor_screen_pos[0] - (text_size[0] / 2)
+            # Position it vertically below the anchor point, with padding
+            text_pos_y = anchor_screen_pos[1] + 5  # 5 pixels of padding below the box
+
+            img_rect = self._actual_video_image_rect_on_screen
+            if (text_pos_x + text_size[0]) < img_rect['max_x'] and text_pos_y < img_rect['max_y']:
+                draw_list.add_text(text_pos_x, text_pos_y, mode_color, mode_text)
 
     def render(self):
         app_state = self.app.app_state_ui
@@ -566,6 +609,33 @@ class VideoDisplayUI:
         if is_occluded:
             draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 20, imgui.get_color_u32_rgba(1, 0.6, 0, 0.9),
                                "OCCLUSION (FALLBACK)")
+
+        motion_mode = frame_overlay_data.get("motion_mode")
+        is_vr_video = self.app.processor and self.app.processor.determined_video_type == 'VR'
+
+        if motion_mode and is_vr_video:
+            roi_to_use = None
+            locked_penis_box = next(
+                (b for b in frame_overlay_data.get("yolo_boxes", []) if b.get("class_name") == "locked_penis"), None)
+            if locked_penis_box and "bbox" in locked_penis_box:
+                x1, y1, x2, y2 = locked_penis_box["bbox"]
+                roi_to_use = (x1, y1, x2 - x1, y2 - y1)
+
+            if roi_to_use:
+                interaction_class_proxy = None
+                position = frame_overlay_data.get("atr_assigned_position")
+                if position:
+                    if "Blowjob" in position:
+                        interaction_class_proxy = "face"
+                    elif "Handjob" in position:
+                        interaction_class_proxy = "hand"
+
+                self._render_motion_mode_overlay(
+                    draw_list=draw_list,
+                    motion_mode=motion_mode,
+                    interaction_class=interaction_class_proxy,
+                    roi_video_coords=roi_to_use
+                )
 
         draw_list.pop_clip_rect()
 

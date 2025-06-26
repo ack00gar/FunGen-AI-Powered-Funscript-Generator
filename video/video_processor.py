@@ -309,11 +309,18 @@ class VideoProcessor:
                 self.logger.info("Filename keyword confirms 'Side-by-Side' layout.")
 
             final_suggested_vr_input_format = f"{suggested_base}{suggested_layout}"
-            if self.vr_input_format != final_suggested_vr_input_format:
-                self.logger.info(
-                    f"For new video '{os.path.basename(self.video_path)}', auto-detection suggests VR format: "
-                    f"{final_suggested_vr_input_format}. Updating from '{self.vr_input_format}'.")
-                self.vr_input_format = final_suggested_vr_input_format
+
+            self.logger.info(
+                f"Auto-detection suggests VR format: {final_suggested_vr_input_format} for '{os.path.basename(self.video_path)}'. Setting it."
+            )
+            # Always set the format for the current video, ensuring each file is evaluated freshly.
+            self.vr_input_format = final_suggested_vr_input_format
+
+            # if self.vr_input_format != final_suggested_vr_input_format:
+            #     self.logger.info(
+            #         f"For new video '{os.path.basename(self.video_path)}', auto-detection suggests VR format: "
+            #         f"{final_suggested_vr_input_format}. Updating from '{self.vr_input_format}'.")
+            #     self.vr_input_format = final_suggested_vr_input_format
 
             if 'MKX' in upper_video_path and 'fisheye' in self.vr_input_format and self.vr_fov != 200:
                 self.logger.info(

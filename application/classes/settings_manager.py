@@ -32,6 +32,7 @@ class AppSettings:
             # General
             "yolo_det_model_path": "",
             "yolo_pose_model_path": "",
+            "pose_model_artifacts_dir": "",
             "output_folder_path": constants.DEFAULT_OUTPUT_FOLDER,
             "logging_level": "INFO",
 

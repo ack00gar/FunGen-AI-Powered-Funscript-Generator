@@ -2,7 +2,7 @@ import os
 import copy
 import logging
 from typing import List, Dict, Optional, Tuple
-import bisect
+from bisect import bisect_left, bisect_right
 import numpy as np
 
 from application.utils.video_segment import VideoSegment
@@ -775,6 +775,15 @@ class AppFunscriptProcessor:
             self.logger.error("Funscript object not found. Cannot clear points.")
             return
 
+        op_desc = f"Delete Points in {len(selected_chapters)} Chapter(s)"
+
+        # Record the state for each timeline that has actions, as 'axis=both' affects both.
+        if funscript_obj.primary_actions:
+            self._record_timeline_action(1, op_desc)
+
+        if funscript_obj.secondary_actions:
+            self._record_timeline_action(2, op_desc)
+
         fps = self._get_current_fps()
         if fps == 30.0 and not (
                 self.app.processor and hasattr(self.app.processor, 'video_info') and self.app.processor.video_info):
@@ -794,15 +803,7 @@ class AppFunscriptProcessor:
             self.logger.info(
                 f"Clearing script points in chapter '{chapter.unique_id}' (Frames: {chapter.start_frame_id}-{chapter.end_frame_id}, Time: {start_ms}ms-{end_ms}ms)")
             funscript_obj.clear_actions_in_time_range(start_ms, end_ms, axis='both')
-            cleared_any_points = True  # Assume it might have cleared something if called
-
-            # TODO: Add Undo/Redo record for point deletion
-            # Example:
-            # self.app.undo_manager_t1.add_action(
-            #     lambda: setattr(funscript_obj, 'primary_actions', [a.copy() for a in actions_before_primary]), # redo
-            #     lambda: funscript_obj.clear_actions_in_time_range(start_ms, end_ms, axis='primary') # undo (problematic if multiple calls)
-            # )
-            # A better undo for point clearing would restore the exact points deleted.
+            cleared_any_points = True
 
         if cleared_any_points:
             self.app.project_manager.project_dirty = True
@@ -1293,3 +1294,91 @@ class AppFunscriptProcessor:
         self.logger.info(f"Applied dynamic amplification to {len(indices_to_process)} points on {axis} axis.")
 
 
+    def select_points_in_chapters(self, chapters_to_select_in: List[VideoSegment], target_timeline: str = 'both'):
+        """
+        Selects all funscript points within the time range of the given chapters
+        for the specified timeline(s). This will clear any previous selection on the affected timelines.
+        :param chapters_to_select_in: A list of VideoSegment objects.
+        :param target_timeline: 'primary', 'secondary', or 'both'.
+        """
+        if not chapters_to_select_in:
+            self.logger.warning("No chapters provided to select points from.")
+            return
+
+        if not self.app.gui_instance:
+            self.logger.error("Cannot select points, GUI instance not available.")
+            return
+
+        # Determine which timeline numbers to process based on the target_timeline parameter
+        timelines_to_process_nums = []
+        if target_timeline == 'primary':
+            timelines_to_process_nums.append(1)
+        elif target_timeline == 'secondary':
+            timelines_to_process_nums.append(2)
+        elif target_timeline == 'both':
+            timelines_to_process_nums.extend([1, 2])
+
+        # Create a list of timeline UI instances to process, ensuring they are visible
+        timelines_to_process = []
+        for timeline_num in timelines_to_process_nums:
+            is_visible_flag_name = f"show_funscript_interactive_timeline{'' if timeline_num == 1 else '2'}"
+            is_visible = getattr(self.app.app_state_ui, is_visible_flag_name, False)
+            ui_instance = getattr(self.app.gui_instance, f"timeline_editor{timeline_num}", None)
+            if is_visible and ui_instance:
+                timelines_to_process.append({"num": timeline_num, "ui_instance": ui_instance})
+
+        if not timelines_to_process:
+            self.logger.info("No relevant interactive timelines are visible to select points on.")
+            return
+
+        fps = self._get_current_fps()
+        if fps <= 0:
+            self.app.set_status_message("Cannot select points: Invalid video FPS.", level=logging.ERROR)
+            return
+
+        total_points_selected_overall = 0
+
+        for timeline_info in timelines_to_process:
+            timeline_num = timeline_info["num"]
+            timeline_ui = timeline_info["ui_instance"]
+
+            funscript_obj, axis_name = self._get_target_funscript_object_and_axis(timeline_num)
+            if not funscript_obj or not axis_name:
+                continue
+
+            actions_list = getattr(funscript_obj, f"{axis_name}_actions", [])
+
+            # Clear previous selection on this timeline
+            timeline_ui.multi_selected_action_indices.clear()
+
+            if not actions_list:
+                continue
+
+            action_timestamps = [a['at'] for a in actions_list]
+            newly_selected_indices_for_timeline = set()
+
+            for chapter in chapters_to_select_in:
+                start_ms = int(round((chapter.start_frame_id / fps) * 1000.0))
+                end_ms = int(round((chapter.end_frame_id / fps) * 1000.0))
+
+                start_idx = bisect_left(action_timestamps, start_ms)
+                end_idx = bisect_right(action_timestamps, end_ms)
+
+                if start_idx < end_idx:
+                    indices_in_range = set(range(start_idx, end_idx))
+                    newly_selected_indices_for_timeline.update(indices_in_range)
+
+            # Update the timeline UI with the new selection
+            if newly_selected_indices_for_timeline:
+                timeline_ui.multi_selected_action_indices = newly_selected_indices_for_timeline
+                timeline_ui.selected_action_idx = min(newly_selected_indices_for_timeline)
+                total_points_selected_overall += len(newly_selected_indices_for_timeline)
+            else:
+                timeline_ui.selected_action_idx = -1
+
+        if total_points_selected_overall > 0:
+            self.app.set_status_message(f"Selected {total_points_selected_overall} points across targeted timelines.")
+        else:
+            self.app.set_status_message("No points found in the selected chapter(s).")
+
+        self.app.energy_saver.reset_activity_timer()

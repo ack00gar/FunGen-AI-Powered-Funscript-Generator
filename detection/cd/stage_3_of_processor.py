@@ -309,6 +309,10 @@ class Stage3OpticalFlowProcessor:
                                     self.roi_tracker_instance.prev_gray_main_roi,
                                     self.roi_tracker_instance.prev_features_main_roi
                                 )
+                            # Update the FrameObject with the determined motion mode
+                            if frame_obj_s2:
+                                frame_obj_s2.motion_mode = self.roi_tracker_instance.motion_mode
+
                             self.roi_tracker_instance.prev_gray_main_roi = main_roi_patch_gray.copy()
                         else:
                             self.roi_tracker_instance.prev_gray_main_roi = None
@@ -361,6 +365,7 @@ class Stage3OpticalFlowProcessor:
                         self.progress_callback(
                             processed_relevant_count, relevant_seg_count, segment_name_for_progress,
                             processed_in_seg_for_progress, num_frames_in_actual_segment_for_progress,
+                            total_frames_processed_s3, estimated_total_frames_s3,
                             self.current_fps, time_elapsed_s3, eta_s3,
                             original_idx + 1
                         )
@@ -369,6 +374,7 @@ class Stage3OpticalFlowProcessor:
             self.progress_callback(
                 processed_relevant_count, relevant_seg_count, segment_name_for_progress,
                 num_frames_in_actual_segment_for_progress, num_frames_in_actual_segment_for_progress,
+                total_frames_processed_s3, estimated_total_frames_s3,
                 self.current_fps, time_elapsed_s3, eta_s3,
                 original_idx + 1
             )

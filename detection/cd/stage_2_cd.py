@@ -245,6 +245,7 @@ class FrameObject:
         self.dominant_pose_id: Optional[int] = None
         self.is_occluded: bool = False
         self.active_interaction_track_id: Optional[int] = None
+        self.motion_mode: Optional[str] = None
 
     def parse_raw_frame_data(self, raw_frame_data: dict):
         if not isinstance(raw_frame_data, dict): return
@@ -280,6 +281,7 @@ class FrameObject:
             "dominant_pose_id": self.dominant_pose_id,
             "active_interaction_track_id": self.active_interaction_track_id,  # <-- Add this for highlighting
             "is_occluded": self.is_occluded,
+            "motion_mode": self.motion_mode,
             "yolo_boxes": [b.to_dict() for b in self.boxes if not b.is_excluded],
             "poses": [p.to_dict() for p in self.poses]
         }
@@ -1260,6 +1262,7 @@ def perform_contact_analysis(
         video_path_arg: str, msgpack_file_path_arg: str,
         progress_callback: callable, stop_event: threading.Event,
         app_logic_instance=None,  # To access AppStateContainer-like features
+        ml_model_dir_path_arg: Optional[str] = None,
         parent_logger_arg: Optional[logging.Logger] = None,
         output_overlay_msgpack_path: Optional[str] = None,
         yolo_input_size_arg: int = 640,
