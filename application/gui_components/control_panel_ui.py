@@ -265,6 +265,13 @@ class ControlPanelUI:
                 self.app.tracker.pose_model_path = path
                 self.app.tracker._load_models()
 
+        def update_artifacts_dir_path(path: str):
+            self.app.pose_model_artifacts_dir_setting = path
+            self.app.app_settings.set("pose_model_artifacts_dir", path)
+            self.app.project_manager.project_dirty = True
+            self.app.logger.info(f"Pose Model Artifacts directory selected: {path}. Setting has been saved.")
+
+
         # --- Define fixed widths for buttons for consistent layout ---
         browse_button_width = imgui.calc_text_size("Browse").x + style.frame_padding.x * 2
         unload_button_width = imgui.calc_text_size("Unload").x + style.frame_padding.x * 2
@@ -321,6 +328,31 @@ class ControlPanelUI:
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
             "Path to the YOLO pose estimation model file (.pt, .onnx, .mlpackage). This model is optional.")
+
+        # UI for selecting the Pose Model Artifacts Directory
+        imgui.separator()
+        imgui.text("Pose Model Artifacts Dir")
+        # For this one, the unload button doesn't make sense, so we give more space to the input text
+        dir_input_width = available_width - browse_button_width - style.item_spacing.x if available_width > browse_button_width else -1
+        imgui.push_item_width(dir_input_width)
+        current_artifacts_path_display = self.app.pose_model_artifacts_dir or "Not set"
+        imgui.input_text("##PoseArtifactsDirPath", current_artifacts_path_display, 256,
+                         flags=imgui.INPUT_TEXT_READ_ONLY)
+        imgui.pop_item_width()
+
+        imgui.same_line()
+        if imgui.button("Browse##PoseArtifactsDirBrowse"):
+            if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                self.app.gui_instance.file_dialog.show(
+                    title="Select Pose Model Artifacts Directory",
+                    callback=update_artifacts_dir_path,
+                    is_folder_dialog=True,  # This tells the dialog to act as a folder picker
+                    initial_path=self.app.pose_model_artifacts_dir
+                )
+        if imgui.is_item_hovered(): imgui.set_tooltip(
+            "Path to the folder containing your trained classifier,\n"
+            "imputer, and other .joblib model artifacts.")
+        imgui.separator()
 
         # Conditionally render worker settings only for offline analysis modes
         if self.app.app_state_ui.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
@@ -846,12 +878,24 @@ class ControlPanelUI:
         if selected_mode == TrackerMode.OFFLINE_3_STAGE:
             imgui.text("Stage 3: Per-Segment Optical Flow")
             if is_analysis_running and stage_proc.current_analysis_stage == 3:
-                imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
+                imgui.text(
+                    f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
+
+                # --- Overall Progress ---
+                imgui.text(stage_proc.stage3_overall_progress_label)
+                overlay_text = f"{stage_proc.stage3_overall_progress_value * 100:.0f}%"
+                imgui.progress_bar(stage_proc.stage3_overall_progress_value, size=(-1, 0), overlay=overlay_text)
+
+
+                # --- Per-Segment Progress ---
                 imgui.text_wrapped(f"Segment: {stage_proc.stage3_current_segment_label}")
-                imgui.progress_bar(stage_proc.stage3_segment_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage3_segment_progress_value * 100:.0f}%")
+                imgui.progress_bar(stage_proc.stage3_segment_progress_value, size=(-1, 0),
+                                   overlay=f"{stage_proc.stage3_segment_progress_value * 100:.0f}%")
+
             elif stage_proc.stage3_final_elapsed_time_str:
-                 imgui.text_wrapped(f"Last Run: {stage_proc.stage3_final_elapsed_time_str} | Avg Speed: {stage_proc.stage3_final_fps_str or 'N/A'}")
-                 imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+                imgui.text_wrapped(
+                    f"Last Run: {stage_proc.stage3_final_elapsed_time_str} | Avg Speed: {stage_proc.stage3_final_fps_str or 'N/A'}")
+                imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
             else:
                 imgui.text_wrapped(f"Status: {stage_proc.stage3_status_text}")
         imgui.spacing()

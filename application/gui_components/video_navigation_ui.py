@@ -426,6 +426,28 @@ class VideoNavigationUI:
             if imgui.menu_item(delete_points_label, enabled=can_delete_points)[0]:
                 if can_delete_points and self.context_selected_chapters:
                     fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
+
+            imgui.separator()
+
+            can_select_points = num_selected > 0
+            if imgui.begin_menu("Select Points in Chapter(s)", enabled=can_select_points):
+                if imgui.menu_item("On Timeline 1")[0]:
+                    if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
+                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters,
+                                                                               target_timeline='primary')
+                # Disable Timeline 2 option if it's not visible
+                timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
+                if imgui.menu_item("On Timeline 2", enabled=timeline2_visible)[0]:
+                    if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
+                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters,
+                                                                               target_timeline='secondary')
+
+                if imgui.menu_item("On Both Timelines")[0]:
+                    if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
+                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters,
+                                                                               target_timeline='both')
+                imgui.end_menu()
+
             imgui.separator()
 
             can_standard_merge = num_selected == 2

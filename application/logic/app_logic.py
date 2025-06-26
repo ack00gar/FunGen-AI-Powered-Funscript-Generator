@@ -81,6 +81,8 @@ class ApplicationLogic:
         # --- Models ---
         self.yolo_detection_model_path_setting = self.app_settings.get("yolo_det_model_path")
         self.yolo_pose_model_path_setting = self.app_settings.get("yolo_pose_model_path")
+        self.pose_model_artifacts_dir = self.app_settings.get("pose_model_artifacts_dir")
+        self.pose_model_artifacts_dir = self.app_settings.get("pose_model_artifacts_dir")
         self.yolo_det_model_path = self.yolo_detection_model_path_setting
         self.yolo_pose_model_path = self.yolo_pose_model_path_setting
         self.yolo_input_size = 640
@@ -100,7 +102,7 @@ class ApplicationLogic:
             self.tracker.show_funscript_preview = False
 
         # --- NOW Sync Tracker UI Flags as tracker and app_state_ui exist ---
-        self.app_state_ui.sync_tracker_ui_flags()  # MOVED CALL HERE
+        self.app_state_ui.sync_tracker_ui_flags()
 
         # --- Initialize Processor (after tracker and logger/app_state_ui are ready) ---
         # _check_model_paths can be called now before processor if it's critical for processor init

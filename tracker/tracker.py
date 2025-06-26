@@ -1154,22 +1154,22 @@ class ROITracker:
             # is_vr_video = self.app and hasattr(self.app,
             #                                    'processor') and self.app.processor.determined_video_type == 'VR'
             is_vr_video = self._is_vr_video()
-            if self.enable_inversion_detection and is_vr_video:
-                mode_color = (255, 255, 0)  # Default for undetermined
-                mode_text = "Undetermined"
-                if self.motion_mode == 'thrusting':
-                    mode_text = "Thrusting"
-                    mode_color = (0, 255, 0)
-                elif self.motion_mode == 'riding':
-                    mode_color = (255, 100, 255)
-                    if self.main_interaction_class == 'face':
-                        mode_text = "Blowing"
-                    elif self.main_interaction_class == 'hand':
-                        mode_text = "Stroking"
-                    else:
-                        mode_text = "Riding"
-                cv2.putText(processed_frame, mode_text, (rx + 5, ry + rh - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
-                            mode_color, 1)
+            # if self.enable_inversion_detection and is_vr_video:
+            #     mode_color = (255, 255, 0)  # Default for undetermined
+            #     mode_text = "Undetermined"
+            #     if self.motion_mode == 'thrusting':
+            #         mode_text = "Thrusting"
+            #         mode_color = (0, 255, 0)
+            #     elif self.motion_mode == 'riding':
+            #         mode_color = (255, 100, 255)
+            #         if self.main_interaction_class == 'face':
+            #             mode_text = "Blowing"
+            #         elif self.main_interaction_class == 'hand':
+            #             mode_text = "Stroking"
+            #         else:
+            #             mode_text = "Riding"
+            #     cv2.putText(processed_frame, mode_text, (rx + 5, ry + rh - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
+            #                 mode_color, 1)
 
         elif self.tracking_mode == "USER_FIXED_ROI" and self.show_roi and self.user_roi_fixed:
             urx, ury, urw, urh = self.user_roi_fixed
@@ -1185,24 +1185,24 @@ class ROITracker:
             # is_vr_video = self.app and hasattr(self.app,
             #                                    'processor') and self.app.processor.determined_video_type == 'VR'
             is_vr_video = self._is_vr_video()
-            if self.enable_inversion_detection and is_vr_video:
-                mode_color = (255, 255, 0)  # Default for undetermined
-                mode_text = "Undetermined"
-                if self.motion_mode == 'thrusting':
-                    mode_text = "Thrusting"
-                    mode_color = (0, 255, 0)
-                elif self.motion_mode == 'riding':
-                    mode_color = (255, 100, 255)
-                    # Note: main_interaction_class is primarily driven by YOLO_ROI mode.
-                    # In User ROI, this relies on a class being set externally (e.g., via UI or project file).
-                    if self.main_interaction_class == 'face':
-                        mode_text = "Blowing"
-                    elif self.main_interaction_class == 'hand':
-                        mode_text = "Stroking"
-                    else:
-                        mode_text = "Riding"
-                cv2.putText(processed_frame, mode_text, (urx_c + 5, ury_c + urh_c - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
-                            mode_color, 1)
+            # if self.enable_inversion_detection and is_vr_video:
+            #     mode_color = (255, 255, 0)  # Default for undetermined
+            #     mode_text = "Undetermined"
+            #     if self.motion_mode == 'thrusting':
+            #         mode_text = "Thrusting"
+            #         mode_color = (0, 255, 0)
+            #     elif self.motion_mode == 'riding':
+            #         mode_color = (255, 100, 255)
+            #         # Note: main_interaction_class is primarily driven by YOLO_ROI mode.
+            #         # In User ROI, this relies on a class being set externally (e.g., via UI or project file).
+            #         if self.main_interaction_class == 'face':
+            #             mode_text = "Blowing"
+            #         elif self.main_interaction_class == 'hand':
+            #             mode_text = "Stroking"
+            #         else:
+            #             mode_text = "Riding"
+            #     cv2.putText(processed_frame, mode_text, (urx_c + 5, ury_c + urh_c - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
+            #                 mode_color, 1)
 
         if self.show_stats:
             for i, stat_text in enumerate(self.stats_display):

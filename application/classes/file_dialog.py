@@ -45,6 +45,7 @@ class ImGuiFileDialog:
         self.callback: Optional[Callable[[str], None]] = None
         self.title: str = ""
         self.is_save_dialog: bool = False
+        self.is_folder_dialog: bool = False
         self.extension_filter: str = ""
         self.scroll_to_selected: bool = False
         self.common_dirs = get_common_dirs()
@@ -63,11 +64,13 @@ class ImGuiFileDialog:
             callback: Optional[Callable[[str], None]] = None,
             extension_filter: str = "",
             initial_path: Optional[str] = None,
-            initial_filename: str = ""
+            initial_filename: str = "",
+            is_folder_dialog: bool = False
     ) -> None:
         self.open = True
         self.title = title
         self.is_save_dialog = is_save
+        self.is_folder_dialog = is_folder_dialog
         self.callback = callback
         self.extension_filter = extension_filter
         self.extension_groups = self._parse_extension_filter(extension_filter)
@@ -95,7 +98,7 @@ class ImGuiFileDialog:
         imgui.end_child()
 
     def _draw_filter_selector(self):
-        if not self.extension_groups:
+        if not self.extension_groups or self.is_folder_dialog:
             return
         filter_names = [name for name, _ in self.extension_groups]
         clicked, self.active_extension_index = imgui.combo("File Type", self.active_extension_index, filter_names)
@@ -106,7 +109,7 @@ class ImGuiFileDialog:
             self._navigate_up()
 
     def _parse_extension_filter(self, filter_string: str) -> list[tuple[str, list[str]]]:
-        if not filter_string:
+        if not filter_string or self.is_folder_dialog:
             return [("All Files", [""])]
 
         groups = filter_string.split("|")
@@ -137,7 +140,8 @@ class ImGuiFileDialog:
                 self._draw_common_dirs_sidebar()
                 imgui.next_column()
                 self._draw_directory_navigation()
-                self._draw_filter_selector()
+                if not self.is_folder_dialog:
+                    self._draw_filter_selector()
 
                 if imgui.begin_child("Files", width=0, height=-75, border=True):
                     self._draw_file_list()
@@ -163,11 +167,6 @@ class ImGuiFileDialog:
         # Current directory path display
         current_dir_text = f"{self.current_dir}\n"
         imgui.text(current_dir_text)
-
-        # # Up button to navigate to parent directory
-        # imgui.same_line(imgui.get_content_region_available_width() - 50)  # Position at right
-        # if imgui.button("^ Up", width=50):
-        #     self._navigate_up()
 
     def _navigate_up(self) -> None:
         try:
@@ -202,7 +201,7 @@ class ImGuiFileDialog:
                 selectable_files = files + special_packages
 
                 # Filter files based on selected extension group
-                if self.extension_groups and self.active_extension_index < len(self.extension_groups):
+                if not self.is_folder_dialog and self.extension_groups and self.active_extension_index < len(self.extension_groups):
                     _, active_exts = self.extension_groups[self.active_extension_index]
                     # Keep .mlpackage files if "mlpackage" is in the active extensions
                     selectable_files = [
@@ -215,7 +214,8 @@ class ImGuiFileDialog:
                 self._draw_directories(directories)
 
                 # Then display selectable files (including .mlpackage folders)
-                self._draw_files(selectable_files)
+                if not self.is_folder_dialog:
+                    self._draw_files(selectable_files)
 
                 if self.scroll_to_selected:
                     imgui.set_scroll_here_y()
@@ -234,16 +234,20 @@ class ImGuiFileDialog:
             if imgui.selectable(label, False,
                                 flags=imgui.SELECTABLE_DONT_CLOSE_POPUPS | imgui.SELECTABLE_ALLOW_DOUBLE_CLICK):
                 if imgui.is_item_clicked():
-                    self.current_dir = os.path.join(self.current_dir, d)
-                    # self.selected_file = ""
-                    self.scroll_to_selected = True
+                    if self.is_folder_dialog and imgui.is_mouse_double_clicked(0):
+                        # For folder dialog, double-click selects the directory
+                        self.path = os.path.join(self.current_dir, d)
+                        if self.callback:
+                            self.callback(self.path)
+                        self.open = False
+                    else:
+                        self.current_dir = os.path.join(self.current_dir, d)
+                        self.scroll_to_selected = True
             imgui.pop_id()
 
     def _draw_files(self, files: list[str]) -> None:
         for i, f in enumerate(sorted(files)):
             is_selected = self.selected_file == f
-            # Don't allow selection in save dialog
-            # is_selected = self.selected_file == f and not self.is_save_dialog
 
             # Special styling for .mlpackage files
             full_path = os.path.join(self.current_dir, f)
@@ -323,7 +327,7 @@ class ImGuiFileDialog:
         should_close = False
 
         # Add filename input for save dialogs
-        if self.is_save_dialog:
+        if self.is_save_dialog and not self.is_folder_dialog:
             # Calculate width for filename input
             window_width = imgui.get_window_width()
             input_width = int(window_width - 170)
@@ -355,10 +359,13 @@ class ImGuiFileDialog:
         imgui.same_line(0, spacing)
 
         button_text = "Save" if self.is_save_dialog else "Open"
-        enabled = bool(self.selected_file) or self.is_save_dialog
+        if self.is_folder_dialog:
+            button_text = "Select"
+
+        enabled = bool(self.selected_file) or self.is_save_dialog or self.is_folder_dialog
 
         if imgui.button(button_text, width=action_button_width) and enabled:
-            if self.is_save_dialog:
+            if self.is_save_dialog and not self.is_folder_dialog:
                 if self.selected_file:
                     file_path = os.path.join(self.current_dir, self.selected_file)
                     if os.path.exists(file_path):
@@ -367,6 +374,12 @@ class ImGuiFileDialog:
                     else:
                         # For save dialog, we use the entered filename
                         self._handle_file_selection(self.selected_file)
+            elif self.is_folder_dialog:
+                # For folder dialog, we use the current directory
+                self.path = self.current_dir
+                if self.callback:
+                    self.callback(self.path)
+                self.open = False
             else:
                 if self.selected_file:
                     # For open dialog, we use the selected file

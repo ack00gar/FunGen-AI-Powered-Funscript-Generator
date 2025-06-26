@@ -4,6 +4,8 @@ import math
 import time
 from queue import Queue as ThreadQueue, Empty
 from typing import Optional, List, Dict, Any, Tuple
+import msgpack
+import numpy as np
 
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
@@ -224,11 +226,11 @@ class AppStageProcessor:
 
     def _stage3_progress_callback(self, current_segment_idx, total_segments, current_segment_name,
                                   frame_in_segment, total_frames_in_segment,
+                                  total_frames_processed_overall, total_frames_to_process_overall,
                                   processing_fps=0.0, time_elapsed=0.0, eta_seconds=0.0,
                                   original_segment_idx=None):
         segment_progress = float(frame_in_segment) / total_frames_in_segment if total_frames_in_segment > 0 else 0.0
-        overall_progress = (float(
-            current_segment_idx - 1) + segment_progress) / total_segments if total_segments > 0 else 0.0
+        overall_progress = float(total_frames_processed_overall) / total_frames_to_process_overall if total_frames_to_process_overall > 0 else 0.0
 
         progress_data = {
             "current_segment_idx": current_segment_idx,
@@ -236,6 +238,8 @@ class AppStageProcessor:
             "current_segment_name": current_segment_name,
             "segment_progress": segment_progress,
             "overall_progress": overall_progress,
+            "total_frames_processed_overall": total_frames_processed_overall,
+            "total_frames_to_process_overall": total_frames_to_process_overall,
             "fps": processing_fps,
             "time_elapsed": time_elapsed,
             "eta": eta_seconds,
@@ -243,6 +247,7 @@ class AppStageProcessor:
         }
 
         self.gui_event_queue.put(("stage3_progress_update", progress_data, None))
+
 
 
     def start_full_analysis(self):
@@ -442,6 +447,38 @@ class AppStageProcessor:
                 if self.stop_stage_event.is_set():
                     return
 
+                if stage3_success and self.app.s2_frame_objects_map_for_s3:
+                    if s2_overlay_path:
+                        self.logger.info(
+                            f"Stage 3 complete. Rewriting augmented overlay data to {os.path.basename(s2_overlay_path)}")
+                        try:
+                            # The map was modified in-place by Stage 3
+                            all_frames_data = [fo.to_overlay_dict() for fo in
+                                               self.app.s2_frame_objects_map_for_s3.values()]
+
+                            def numpy_default_handler(obj):
+                                if isinstance(obj, np.integer):
+                                    return int(obj)
+                                elif isinstance(obj, np.floating):
+                                    return float(obj)
+                                elif isinstance(obj, np.ndarray):
+                                    return obj.tolist()
+                                raise TypeError(
+                                    f"Object of type {obj.__class__.__name__} is not serializable for msgpack")
+
+                            with open(s2_overlay_path, 'wb') as f:
+                                f.write(
+                                    msgpack.packb(all_frames_data, use_bin_type=True, default=numpy_default_handler))
+
+                            self.logger.info("Successfully rewrote Stage 2 overlay file with Stage 3 data.")
+                            # Send event to GUI to (re)load the updated data
+                            self.gui_event_queue.put(("load_s2_overlay", s2_overlay_path, None))
+
+                        except Exception as e:
+                            self.logger.error(f"Failed to save augmented Stage 3 overlay data: {e}", exc_info=True)
+                    else:
+                        self.logger.warning("Stage 3 completed, but no S2 overlay path was available to overwrite.")
+
                 if stage3_success:
                     completion_payload = {
                         "message": "AI CV (3-Stage) analysis completed successfully.",
@@ -566,6 +603,7 @@ class AppStageProcessor:
                 msgpack_file_path_arg=fm.stage1_output_msgpack_path,
                 progress_callback=self._stage2_progress_callback,
                 stop_event=self.stop_stage_event,
+                ml_model_dir_path_arg=self.app.pose_model_artifacts_dir,
                 output_overlay_msgpack_path=s2_overlay_output_path,
                 parent_logger_arg=self.logger,
                 yolo_input_size_arg=self.app.yolo_input_size,
@@ -912,7 +950,12 @@ class AppStageProcessor:
 
                         self.stage3_segment_progress_value = prog_data.get('segment_progress', 0.0)
                         self.stage3_overall_progress_value = prog_data.get('overall_progress', 0.0)
-                        self.stage3_overall_progress_label = f"Overall S3: {self.stage3_overall_progress_value * 100:.0f}%"
+                        processed_overall = prog_data.get('total_frames_processed_overall', 0)
+                        to_process_overall = prog_data.get('total_frames_to_process_overall', 0)
+                        if to_process_overall > 0:
+                            self.stage3_overall_progress_label = f"Overall S3: {processed_overall}/{to_process_overall}"
+                        else:
+                            self.stage3_overall_progress_label = f"Overall S3: {self.stage3_overall_progress_value * 100:.0f}%"
                         self.stage3_status_text = "Running Stage 3 (Optical Flow)..."
                         t_el_s3, fps_s3, eta_s3 = prog_data.get("time_elapsed", 0.0), prog_data.get("fps",
                                                                                                     0.0), prog_data.get(
