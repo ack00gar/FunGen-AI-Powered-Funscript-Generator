@@ -212,6 +212,7 @@ class VideoProcessor:
             valid_formats = ["he", "fisheye", "he_sbs", "fisheye_sbs", "he_tb", "fisheye_tb"]
             if input_format in valid_formats:
                 self.vr_input_format = input_format
+                self.video_type_setting = 'VR'
                 changed = True
                 self.logger.info(f"VR Input Format changed by UI to: {self.vr_input_format}.")
             else:
@@ -287,45 +288,42 @@ class VideoProcessor:
             self.logger.info(f"Using configured video type: {self.determined_video_type}")
 
         if self.determined_video_type == 'VR':
-            suggested_base = 'he'
-            suggested_layout = '_sbs'
-            upper_video_path = self.video_path.upper()
-
-            if is_tb_resolution:
-                suggested_layout = '_tb'
-                self.logger.info("Resolution (H > 1.8*W) suggests Top-Bottom (TB) layout.")
-
-            fisheye_keywords = ['FISHEYE', 'MKX', 'RF52']
-            if any(kw in upper_video_path for kw in fisheye_keywords):
-                suggested_base = 'fisheye'
-                self.logger.info("Filename keyword suggests 'fisheye' base format.")
-
-            tb_keywords = ['_TB', 'TB_', 'TOPBOTTOM', 'OVERUNDER', '_OU', 'OU_']
-            if any(kw in upper_video_path for kw in tb_keywords):
-                suggested_layout = '_tb'
-                self.logger.info("Filename keyword confirms 'Top-Bottom' layout.")
-            elif 'SBS' in upper_video_path:
+            # Only perform auto-detection of the specific VR format if the main setting is 'auto'.
+            # If the user has explicitly set the type to 'VR', this block is skipped,
+            # thereby preserving the manually selected format.
+            if self.video_type_setting == 'auto':
+                suggested_base = 'he'
                 suggested_layout = '_sbs'
-                self.logger.info("Filename keyword confirms 'Side-by-Side' layout.")
+                upper_video_path = self.video_path.upper()
 
-            final_suggested_vr_input_format = f"{suggested_base}{suggested_layout}"
+                if is_tb_resolution:
+                    suggested_layout = '_tb'
+                    self.logger.info("Resolution (H > 1.8*W) suggests Top-Bottom (TB) layout.")
 
-            self.logger.info(
-                f"Auto-detection suggests VR format: {final_suggested_vr_input_format} for '{os.path.basename(self.video_path)}'. Setting it."
-            )
-            # Always set the format for the current video, ensuring each file is evaluated freshly.
-            self.vr_input_format = final_suggested_vr_input_format
+                fisheye_keywords = ['FISHEYE', 'MKX', 'RF52']
+                if any(kw in upper_video_path for kw in fisheye_keywords):
+                    suggested_base = 'fisheye'
+                    self.logger.info("Filename keyword suggests 'fisheye' base format.")
 
-            # if self.vr_input_format != final_suggested_vr_input_format:
-            #     self.logger.info(
-            #         f"For new video '{os.path.basename(self.video_path)}', auto-detection suggests VR format: "
-            #         f"{final_suggested_vr_input_format}. Updating from '{self.vr_input_format}'.")
-            #     self.vr_input_format = final_suggested_vr_input_format
+                tb_keywords = ['_TB', 'TB_', 'TOPBOTTOM', 'OVERUNDER', '_OU', 'OU_']
+                if any(kw in upper_video_path for kw in tb_keywords):
+                    suggested_layout = '_tb'
+                    self.logger.info("Filename keyword confirms 'Top-Bottom' layout.")
+                elif 'SBS' in upper_video_path:
+                    suggested_layout = '_sbs'
+                    self.logger.info("Filename keyword confirms 'Side-by-Side' layout.")
 
-            if 'MKX' in upper_video_path and 'fisheye' in self.vr_input_format and self.vr_fov != 200:
+                final_suggested_vr_input_format = f"{suggested_base}{suggested_layout}"
+
                 self.logger.info(
-                    f"Filename suggests VR FOV: 200 (MKX) for fisheye. Overriding current: {self.vr_fov}")
-                self.vr_fov = 200
+                    f"Auto-detection suggests VR format: {final_suggested_vr_input_format} for '{os.path.basename(self.video_path)}'. Setting it."
+                )
+                self.vr_input_format = final_suggested_vr_input_format
+
+                if 'MKX' in upper_video_path and 'fisheye' in self.vr_input_format and self.vr_fov != 200:
+                    self.logger.info(
+                        f"Filename suggests VR FOV: 200 (MKX) for fisheye. Overriding current: {self.vr_fov}")
+                    self.vr_fov = 200
 
         self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
         self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
