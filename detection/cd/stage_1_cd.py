@@ -238,7 +238,7 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                                 'bbox': box_data.xyxy[0].tolist(),
                                 'confidence': float(box_data.conf[0]),
                                 'class': int(box_data.cls[0]),
-                                'name': det_model.names[int(box_data.cls[0])]
+                                'class_name': det_model.names[int(box_data.cls[0])]
                             })
 
                 # --- Step 2: Conditionally perform Pose Estimation ---
