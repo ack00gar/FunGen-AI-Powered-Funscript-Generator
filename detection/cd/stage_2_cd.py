@@ -249,13 +249,13 @@ class FrameObject:
 
     def parse_raw_frame_data(self, raw_frame_data: dict):
         if not isinstance(raw_frame_data, dict): return
-        raw_detections = raw_frame_data.get("detections", []);
+        raw_detections = raw_frame_data.get("detections", [])
         raw_poses = raw_frame_data.get("poses", [])
         for det_data in raw_detections:
-            if det_data.get('name') in self._effective_discard_classes: continue
+            if det_data.get('class_name') in self._effective_discard_classes: continue
             self.boxes.append(
                 BoxRecord(self.frame_id, det_data.get('bbox'), det_data.get('confidence'), det_data.get('class'),
-                          det_data.get('name'), yolo_input_size=self.yolo_input_size))
+                          det_data.get('class_name'), yolo_input_size=self.yolo_input_size))
         for pose_data in raw_poses:
             self.poses.append(PoseRecord(self.frame_id, pose_data.get('bbox'), pose_data.get('keypoints')))
 

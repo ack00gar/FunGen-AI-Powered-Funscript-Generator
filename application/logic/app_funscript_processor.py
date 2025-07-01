@@ -1224,7 +1224,6 @@ class AppFunscriptProcessor:
         Dynamically amplifies the signal by normalizing each point based on the
         min/max position within a sliding time window around it.
         """
-        # --- CORRECTED LOGIC ---
         # Get the action list from the DualAxisFunscript object instead of self
         actions_list_ref = self.get_actions(axis)
         if not actions_list_ref or len(actions_list_ref) < 3:
@@ -1248,7 +1247,6 @@ class AppFunscriptProcessor:
                     indices_to_process = list(range(s_idx, e_idx + 1))
         else:
             indices_to_process = list(range(len(actions_list_ref)))
-        # --- END OF INLINED LOGIC ---
 
         if not indices_to_process:
             self.logger.warning("No points in specified range/selection for dynamic amplification.")
@@ -1266,8 +1264,8 @@ class AppFunscriptProcessor:
             end_window = current_time + (window_ms // 2)
 
             # Find the indices of the actions within this window
-            start_idx = bisect.bisect_left(action_timestamps, start_window)
-            end_idx = bisect.bisect_right(action_timestamps, end_window)
+            start_idx = bisect_left(action_timestamps, start_window)
+            end_idx = bisect_right(action_timestamps, end_window)
 
             local_actions = actions_copy[start_idx:end_idx]
             if not local_actions:
