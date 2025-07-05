@@ -110,12 +110,11 @@ class ControlPanelUI:
                 imgui.separator()
 
                 # --- Force Rerun ---
-                if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
-                    imgui.text("Stage Reruns:")
-                    _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
-                    imgui.same_line()
-                    _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
-                imgui.separator()
+                imgui.text("Stage Reruns:")
+                _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
+                imgui.same_line()
+                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
+            imgui.separator()
 
         # --- Execution Buttons ---
         self._render_start_stop_buttons(stage_proc, fs_proc, event_handlers)
