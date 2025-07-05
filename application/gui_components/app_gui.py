@@ -5,6 +5,7 @@ from imgui.integrations.glfw import GlfwRenderer
 import numpy as np
 import cv2
 import time
+from typing import Optional
 
 
 from application.classes.gauge import GaugeWindow
@@ -35,6 +36,12 @@ class GUI:
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
         self.funscript_preview_texture_id = 0
+
+        # --- State for incremental texture generation ---
+        self.funscript_preview_image_data: Optional[np.ndarray] = None
+        self.heatmap_image_data: Optional[np.ndarray] = None
+        self.last_processed_action_count_timeline: int = 0
+        self.last_processed_action_count_heatmap: int = 0
 
         # Performance monitoring
         self.component_render_times = {}
@@ -184,86 +191,63 @@ class GUI:
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
     def _update_funscript_preview_texture(self, target_width: int, target_height: int,
-                                          total_duration_s: float):
+                                          total_duration_s: float, full_redraw: bool):
         app_state = self.app.app_state_ui
-        if target_width <= 0 or target_height <= 0 or total_duration_s <= 0.001:
-            gl.glBindTexture(gl.GL_TEXTURE_2D, self.funscript_preview_texture_id)
-            w_gl, h_gl = max(1, target_width), max(1, target_height)
-            clear_color_gl = np.array([0, 0, 0, 0], dtype=np.uint8)
-            clear_data_gl = np.tile(clear_color_gl, (h_gl, w_gl, 1))
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, w_gl, h_gl, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
-                            clear_data_gl)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-            app_state.last_funscript_preview_bar_width = target_width
-            app_state.last_funscript_preview_duration_s = total_duration_s
-            app_state.last_funscript_preview_action_count = 0
-            app_state.funscript_preview_dirty = False
-            return
+        actions = self.app.funscript_processor.get_actions('primary')
 
-        actions = self.app.funscript_processor.get_actions('primary')  # This is now a direct reference
-        bg_color_cv_bgra = (int(0.15 * 255), int(0.12 * 255), int(0.12 * 255), 255)
-        preview_image_data_bgra = np.full((target_height, target_width, 4), bg_color_cv_bgra, dtype=np.uint8)
-        center_y_px = target_height // 2
-        cv2.line(preview_image_data_bgra, (0, center_y_px), (target_width - 1, center_y_px),
-                 (int(0.3 * 255), int(0.3 * 255), int(0.3 * 255), int(0.7 * 255)), 1)
+        # --- Handle empty/invalid states and reset image data if needed ---
+        if full_redraw or self.funscript_preview_image_data is None or \
+           self.funscript_preview_image_data.shape[:2] != (target_height, target_width):
+            bg_color_cv_bgra = (int(0.15 * 255), int(0.12 * 255), int(0.12 * 255), 255)
+            self.funscript_preview_image_data = np.full((target_height, target_width, 4), bg_color_cv_bgra, dtype=np.uint8)
+            center_y_px = target_height // 2
+            cv2.line(self.funscript_preview_image_data, (0, center_y_px), (target_width - 1, center_y_px),
+                     (int(0.3 * 255), int(0.3 * 255), int(0.3 * 255), int(0.7 * 255)), 1)
+            self.last_processed_action_count_timeline = 0
 
-        if len(actions) >= 2:
-            for i in range(len(actions) - 1):
+        # Determine the starting point for drawing
+        # If we have processed points, we start from the one before last to connect the line segment correctly.
+        start_idx = max(0, self.last_processed_action_count_timeline - 1) if not full_redraw else 0
+
+        if len(actions) > start_idx and total_duration_s > 0.001:
+            # --- Loop only over new or all segments as needed ---
+            for i in range(start_idx, len(actions) - 1):
                 p1_action, p2_action = actions[i], actions[i + 1]
                 time1_s, pos1_norm = p1_action["at"] / 1000.0, p1_action["pos"] / 100.0
-                px1, py1 = int(round((time1_s / total_duration_s) * target_width)), int(
-                    round((1.0 - pos1_norm) * target_height))
+                px1, py1 = int(round((time1_s / total_duration_s) * target_width)), int(round((1.0 - pos1_norm) * target_height))
                 time2_s, pos2_norm = p2_action["at"] / 1000.0, p2_action["pos"] / 100.0
-                px2, py2 = int(round((time2_s / total_duration_s) * target_width)), int(
-                    round((1.0 - pos2_norm) * target_height))
+                px2, py2 = int(round((time2_s / total_duration_s) * target_width)), int(round((1.0 - pos2_norm) * target_height))
+
                 px1, py1 = np.clip(px1, 0, target_width - 1), np.clip(py1, 0, target_height - 1)
                 px2, py2 = np.clip(px2, 0, target_width - 1), np.clip(py2, 0, target_height - 1)
                 if px1 == px2 and py1 == py2: continue
+
                 delta_pos = abs(p2_action["pos"] - p1_action["pos"])
                 delta_time_ms = p2_action["at"] - p1_action["at"]
                 speed_pps = delta_pos / (delta_time_ms / 1000.0) if delta_time_ms > 0 else 0.0
-
                 segment_color_float_rgba = self.app.utility.get_speed_color_from_map(speed_pps)
-                # --- COLOR CONVERSION ---
                 segment_color_cv_bgra = (
-                    int(segment_color_float_rgba[2] * 255),  # Blue
-                    int(segment_color_float_rgba[1] * 255),  # Green
-                    int(segment_color_float_rgba[0] * 255),  # Red
-                    int(segment_color_float_rgba[3] * 255)  # Alpha
+                    int(segment_color_float_rgba[2] * 255), int(segment_color_float_rgba[1] * 255),
+                    int(segment_color_float_rgba[0] * 255), int(segment_color_float_rgba[3] * 255)
                 )
-                # --- END COLOR CONVERSION ---
-                cv2.line(preview_image_data_bgra, (px1, py1), (px2, py2), segment_color_cv_bgra, thickness=1)
-        elif len(actions) == 1:
-            action = actions[0]
-            time_s, pos_norm = action["at"] / 1000.0, action["pos"] / 100.0
-            px, py = int(round((time_s / total_duration_s) * target_width)), int(
-                round((1.0 - pos_norm) * target_height))
-            px, py = np.clip(px, 0, target_width - 1), np.clip(py, 0, target_height - 1)
+                cv2.line(self.funscript_preview_image_data, (px1, py1), (px2, py2), segment_color_cv_bgra, thickness=1)
 
-            default_color_tuple_rgba = self.app.utility.get_speed_color_from_map(constants.TIMELINE_COLOR_SPEED_STEP * 2.5)
-            # --- COLOR CONVERSION ---
-            point_color_cv_bgra = (
-                int(default_color_tuple_rgba[2] * 255),  # Blue
-                int(default_color_tuple_rgba[1] * 255),  # Green
-                int(default_color_tuple_rgba[0] * 255),  # Red
-                int(default_color_tuple_rgba[3] * 255)  # Alpha
-            )
-            # --- END COLOR CONVERSION ---
-            cv2.circle(preview_image_data_bgra, (px, py), 2, point_color_cv_bgra, -1)
-
-        preview_image_data_rgba = cv2.cvtColor(preview_image_data_bgra, cv2.COLOR_BGRA2RGBA)
+        # Upload the (potentially modified) image data to the GPU
+        preview_image_data_rgba = cv2.cvtColor(self.funscript_preview_image_data, cv2.COLOR_BGRA2RGBA)
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.funscript_preview_texture_id)
-        if app_state.last_funscript_preview_bar_width != target_width or \
-                app_state.funscript_preview_texture_fixed_height != target_height:
+        if full_redraw:
             gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, target_width, target_height, 0, gl.GL_RGBA,
                             gl.GL_UNSIGNED_BYTE, preview_image_data_rgba)
         else:
             gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, target_width, target_height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
                                preview_image_data_rgba)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+
+        # --- Update state after processing ---
         app_state.funscript_preview_dirty = False
         app_state.last_funscript_preview_bar_width = target_width
         app_state.last_funscript_preview_duration_s = total_duration_s
+        self.last_processed_action_count_timeline = len(actions)
         app_state.last_funscript_preview_action_count = len(actions)
 
     def _render_energy_saver_indicator(self):
@@ -292,174 +276,147 @@ class GUI:
 
     def render_funscript_timeline_preview(self, total_duration_s: float, graph_height: int):
         app_state = self.app.app_state_ui
-        style = imgui.get_style()  # Get style for frame_padding
+        style = imgui.get_style()
 
         current_bar_width_float = imgui.get_content_region_available()[0]
         current_bar_width_int = int(round(current_bar_width_float))
 
         if current_bar_width_int <= 0 or graph_height <= 0 or not self.funscript_preview_texture_id:
-            # Ensure dummy takes the full intended width to maintain layout consistency
-            imgui.dummy(current_bar_width_float if current_bar_width_float > 0 else 1,
-                        graph_height + 5)  # Use current_bar_width_float
+            imgui.dummy(current_bar_width_float if current_bar_width_float > 0 else 1, graph_height + 5)
             return
 
         current_action_count = len(self.app.funscript_processor.get_actions('primary'))
         is_live_tracking = self.app.processor and self.app.processor.tracker and self.app.processor.tracker.tracking_active
-        force_update = app_state.funscript_preview_dirty or \
-                       current_bar_width_int != app_state.last_funscript_preview_bar_width or \
-                       abs(total_duration_s - app_state.last_funscript_preview_duration_s) > 0.01
-        action_count_changed = current_action_count != app_state.last_funscript_preview_action_count
-        needs_regen = force_update or (action_count_changed and (not is_live_tracking or (
+
+        # --- Determine if a full redraw or any draw is needed ---
+        full_redraw_needed = app_state.funscript_preview_dirty or \
+                             current_bar_width_int != app_state.last_funscript_preview_bar_width or \
+                             abs(total_duration_s - app_state.last_funscript_preview_duration_s) > 0.01
+
+        incremental_update_needed = current_action_count != self.last_processed_action_count_timeline
+
+        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (
                 time.time() - self.last_preview_update_time_timeline >= self.preview_update_interval_seconds)))
 
         if needs_regen:
-            if current_bar_width_int > 0 and graph_height > 0 and total_duration_s > 0.001:
-                self._update_funscript_preview_texture(current_bar_width_int, graph_height, total_duration_s)
-                if is_live_tracking and action_count_changed and (
-                        not force_update or app_state.funscript_preview_dirty):
+            if total_duration_s > 0.001:
+                self._update_funscript_preview_texture(current_bar_width_int, graph_height, total_duration_s, full_redraw=full_redraw_needed)
+                if is_live_tracking and incremental_update_needed:
                     self.last_preview_update_time_timeline = time.time()
-            elif app_state.funscript_preview_dirty:  # Ensure dirty flag alone can trigger regen
-                self._update_funscript_preview_texture(current_bar_width_int, graph_height, total_duration_s)
-                if is_live_tracking: self.last_preview_update_time_timeline = time.time()
 
         imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 5)
-        canvas_p1_x = imgui.get_cursor_screen_pos()[0]  # This is the start of the full width element
+        canvas_p1_x = imgui.get_cursor_screen_pos()[0]
         canvas_p1_y_offset = imgui.get_cursor_screen_pos()[1]
 
-        if app_state.last_funscript_preview_bar_width > 0:  # Check if texture has valid dimensions from last update
-            imgui.image(self.funscript_preview_texture_id, current_bar_width_float, graph_height, uv0=(0, 0),
-                        uv1=(1, 1))
-        else:  # Fallback if texture somehow not ready/valid but we need to occupy space
+        if self.funscript_preview_image_data is not None and app_state.last_funscript_preview_bar_width > 0:
+            imgui.image(self.funscript_preview_texture_id, current_bar_width_float, graph_height, uv0=(0, 0), uv1=(1, 1))
+        else:
             draw_list_fallback = imgui.get_window_draw_list()
             p_min_fallback = (canvas_p1_x, canvas_p1_y_offset)
             p_max_fallback = (canvas_p1_x + current_bar_width_float, canvas_p1_y_offset + graph_height)
             bg_col_fallback = imgui.get_color_u32_rgba(0.12, 0.12, 0.15, 1.0)
             draw_list_fallback.add_rect_filled(p_min_fallback[0], p_min_fallback[1], p_max_fallback[0],
                                                p_max_fallback[1], bg_col_fallback)
-            imgui.dummy(current_bar_width_float, graph_height)  # Ensure space is occupied
+            imgui.dummy(current_bar_width_float, graph_height)
 
-        # Marker Drawing Logic
         if self.app.file_manager.video_path and self.app.processor and \
                 self.app.processor.video_info and self.app.processor.current_frame_index >= 0:
-
             total_frames = self.app.processor.video_info.get('total_frames', 0)
             current_frame_idx = self.app.processor.current_frame_index
-
-            if total_frames > 0:  # Proceed only if we have total_frames
+            if total_frames > 0:
                 normalized_pos = 0.0
                 if total_frames > 1:
                     normalized_pos = current_frame_idx / (total_frames - 1.0)
-                # If total_frames == 1, current_frame_idx must be 0, so normalized_pos remains 0.0
-
-                normalized_pos = max(0.0, min(1.0, normalized_pos))  # Clamp
-
-                # Calculate effective drawing area for the marker to align with other padded elements
+                normalized_pos = max(0.0, min(1.0, normalized_pos))
                 effective_timeline_start_x = canvas_p1_x + style.frame_padding[0]
                 effective_timeline_width = current_bar_width_float - (style.frame_padding[0] * 2)
-
-                if effective_timeline_width > 0:  # Ensure drawable width is positive
+                if effective_timeline_width > 0:
                     marker_x = effective_timeline_start_x + normalized_pos * effective_timeline_width
                     marker_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.85)
                     draw_list_marker = imgui.get_window_draw_list()
                     draw_list_marker.add_line(marker_x, canvas_p1_y_offset, marker_x, canvas_p1_y_offset + graph_height,
-                                              marker_color, 1.0)  # Thickness 1.0, you can make it 2.0 if preferred
+                                              marker_color, 1.0)
 
-        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 5)  # Consistent spacing after the element
+        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 5)
 
     def _update_heatmap_texture(self, target_width: int, target_height: int,
-                                total_video_duration_s: float):
+                                total_video_duration_s: float, full_redraw: bool):
         app_state = self.app.app_state_ui
-        if target_width <= 0 or target_height <= 0 or total_video_duration_s <= 0.001:
-            # ... (Clear texture logic) ...
-            gl.glBindTexture(gl.GL_TEXTURE_2D, self.heatmap_texture_id);
-            w_gl, h_gl = max(1, target_width), max(1, target_height);
-            clear_color = np.array([0, 0, 0, 0], dtype=np.uint8);
-            clear_data = np.tile(clear_color, (h_gl, w_gl, 1))
-            if app_state.last_heatmap_bar_width != target_width or app_state.heatmap_texture_fixed_height != target_height:
-                gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, w_gl, h_gl, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
-                                clear_data)
-            else:
-                gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, w_gl, h_gl, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, clear_data)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-            app_state.last_heatmap_bar_width = target_width
-            app_state.last_heatmap_video_duration_s = total_video_duration_s
-            app_state.last_heatmap_action_count = 0
-            app_state.heatmap_dirty = False
-            return
-
-        # Use get_actions
         actions = self.app.funscript_processor.get_actions('primary')
-        actions_to_render = actions  # Potentially simplified later
 
-        bg_color_heatmap_texture_rgba255 = (int(0.08 * 255), int(0.08 * 255), int(0.10 * 255), 255)
-        heatmap_image_data = np.full((target_height, target_width, 4), bg_color_heatmap_texture_rgba255, dtype=np.uint8)
-
-        if len(actions_to_render) >= 1:
+        if full_redraw or self.heatmap_image_data is None or \
+           self.heatmap_image_data.shape[:2] != (target_height, target_width):
+            bg_color_heatmap_texture_rgba255 = (int(0.08 * 255), int(0.08 * 255), int(0.10 * 255), 255)
+            self.heatmap_image_data = np.full((target_height, target_width, 4), bg_color_heatmap_texture_rgba255, dtype=np.uint8)
             center_y_px = target_height // 2
-            cv2.line(heatmap_image_data, (0, center_y_px), (target_width - 1, center_y_px), (70, 70, 70, 180), 1)
+            cv2.line(self.heatmap_image_data, (0, center_y_px), (target_width - 1, center_y_px), (70, 70, 70, 180), 1)
+            self.last_processed_action_count_heatmap = 0
 
-        if len(actions_to_render) >= 2:
-            for i in range(len(actions_to_render) - 1):
-                p1, p2 = actions_to_render[i], actions_to_render[i + 1]
+        start_idx = max(0, self.last_processed_action_count_heatmap -1) if not full_redraw else 0
+
+        if len(actions) > start_idx and total_video_duration_s > 0.001:
+            for i in range(start_idx, len(actions) - 1):
+                p1, p2 = actions[i], actions[i + 1]
                 start_time_s, end_time_s = p1["at"] / 1000.0, p2["at"] / 1000.0
                 if end_time_s <= start_time_s: continue
                 seg_start_x_px = int(round((start_time_s / total_video_duration_s) * target_width))
                 seg_end_x_px = int(round((end_time_s / total_video_duration_s) * target_width))
-                seg_start_x_px = max(0, seg_start_x_px)
-                seg_end_x_px = min(target_width, seg_end_x_px)
+                seg_start_x_px, seg_end_x_px = max(0, seg_start_x_px), min(target_width, seg_end_x_px)
+
                 if seg_end_x_px <= seg_start_x_px:
-                    if seg_start_x_px < target_width:
-                        seg_end_x_px = seg_start_x_px + 1
-                    else:
-                        continue
-                seg_end_x_px = min(target_width, seg_end_x_px)
+                    if seg_start_x_px < target_width: seg_end_x_px = seg_start_x_px + 1
+                    else: continue
+
                 delta_pos = abs(p2["pos"] - p1["pos"])
                 delta_time_s_seg = (p2["at"] - p1["at"]) / 1000.0
                 speed_pps = delta_pos / delta_time_s_seg if delta_time_s_seg > 0.001 else 0.0
                 segment_color_float_rgba = self.app.utility.get_speed_color_from_map(speed_pps)
                 segment_color_byte_rgba = np.array([int(c * 255) for c in segment_color_float_rgba], dtype=np.uint8)
-                heatmap_image_data[:, seg_start_x_px:seg_end_x_px] = segment_color_byte_rgba
+                self.heatmap_image_data[:, seg_start_x_px:seg_end_x_px] = segment_color_byte_rgba
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, self.heatmap_texture_id)
-        if app_state.last_heatmap_bar_width != target_width or app_state.heatmap_texture_fixed_height != target_height:
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, target_width, target_height, 0, gl.GL_RGBA,
-                            gl.GL_UNSIGNED_BYTE, heatmap_image_data)
+        if full_redraw:
+             gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, target_width, target_height, 0, gl.GL_RGBA,
+                            gl.GL_UNSIGNED_BYTE, self.heatmap_image_data)
         else:
             gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, target_width, target_height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
-                               heatmap_image_data)
+                               self.heatmap_image_data)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+
         app_state.heatmap_dirty = False
         app_state.last_heatmap_bar_width = target_width
         app_state.last_heatmap_video_duration_s = total_video_duration_s
-        app_state.last_heatmap_action_count = len(actions_to_render)
+        self.last_processed_action_count_heatmap = len(actions)
+        app_state.last_heatmap_action_count = len(actions)
 
     def render_funscript_heatmap_preview(self, total_video_duration_s: float, bar_width_float: float,
-                                         bar_height_float: float):  # Identical
+                                         bar_height_float: float):
         app_state = self.app.app_state_ui
         current_bar_width_int = int(round(bar_width_float))
-        if current_bar_width_int <= 0 or app_state.heatmap_texture_fixed_height <= 0 or not self.heatmap_texture_id: imgui.dummy(
-            bar_width_float, bar_height_float); return
-        current_action_count = len(self.app.funscript_processor.get_actions('primary'))  # Use for_read
+        if current_bar_width_int <= 0 or app_state.heatmap_texture_fixed_height <= 0 or not self.heatmap_texture_id:
+            imgui.dummy(bar_width_float, bar_height_float)
+            return
+
+        current_action_count = len(self.app.funscript_processor.get_actions('primary'))
         is_live_tracking = self.app.processor and self.app.processor.tracker and self.app.processor.tracker.tracking_active
-        force_update = app_state.heatmap_dirty or \
-                       current_bar_width_int != app_state.last_heatmap_bar_width or \
-                       abs(total_video_duration_s - app_state.last_heatmap_video_duration_s) > 0.01
-        action_count_changed = current_action_count != app_state.last_heatmap_action_count
-        needs_regen = force_update or (action_count_changed and (not is_live_tracking or (
+
+        full_redraw_needed = app_state.heatmap_dirty or \
+                             current_bar_width_int != app_state.last_heatmap_bar_width or \
+                             abs(total_video_duration_s - app_state.last_heatmap_video_duration_s) > 0.01
+
+        incremental_update_needed = current_action_count != self.last_processed_action_count_heatmap
+
+        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (
                     time.time() - self.last_preview_update_time_heatmap >= self.preview_update_interval_seconds)))
 
         if needs_regen:
-            if current_bar_width_int > 0 and app_state.heatmap_texture_fixed_height > 0 and total_video_duration_s > 0.001:
+            if total_video_duration_s > 0.001:
                 self._update_heatmap_texture(current_bar_width_int, app_state.heatmap_texture_fixed_height,
-                                             total_video_duration_s)
-                if is_live_tracking and action_count_changed and (not force_update or app_state.heatmap_dirty):
+                                             total_video_duration_s, full_redraw=full_redraw_needed)
+                if is_live_tracking and incremental_update_needed:
                     self.last_preview_update_time_heatmap = time.time()
-            elif app_state.heatmap_dirty:
-                self._update_heatmap_texture(current_bar_width_int, app_state.heatmap_texture_fixed_height,
-                                             total_video_duration_s)
-                if is_live_tracking: self.last_preview_update_time_heatmap = time.time()
 
-        if app_state.last_heatmap_bar_width > 0:
+        if self.heatmap_image_data is not None and app_state.last_heatmap_bar_width > 0:
             imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
         else:
             draw_list = imgui.get_window_draw_list()
@@ -692,7 +649,7 @@ class GUI:
             imgui.text("Detecting Video Scenes...")
             imgui.text_wrapped(f"Status: {stage_proc.scene_detection_status}")
 
-            # FIXED: Display an animated spinner if progress is not updating,
+            # Display an animated spinner if progress is not updating,
             # otherwise show the actual progress bar.
             progress = stage_proc.scene_detection_progress
             if progress > 0.001:
