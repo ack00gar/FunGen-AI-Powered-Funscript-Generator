@@ -12,7 +12,7 @@ import detection.cd.stage_2_cd as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
 
 from config import constants
-from config.constants import TrackerMode
+from config.constants import TrackerMode, SCENE_DETECTION_DEFAULT_THRESHOLD
 from application.utils.video_segment import VideoSegment
 
 
@@ -87,11 +87,11 @@ class AppStageProcessor:
         self.scene_detection_eta_str: str = "N/A"
 
     # --- Thread target for running scene detection ---
-    def _run_scene_detection_thread(self):
+    def _run_scene_detection_thread(self, threshold=SCENE_DETECTION_DEFAULT_THRESHOLD):
         try:
             # 1. Run detection in the background
             scene_list = self.app.processor.detect_scenes(
-                threshold=27.0,  # This could be exposed in the UI
+                threshold=threshold,  # Use the threshold from the UI
                 stop_event=self.stop_stage_event
             )
 
@@ -111,7 +111,7 @@ class AppStageProcessor:
             self.scene_detection_active = False
 
     # --- Public method to start the process from the UI ---
-    def start_scene_detection_analysis(self):
+    def start_scene_detection_analysis(self, threshold=SCENE_DETECTION_DEFAULT_THRESHOLD):
         if self.full_analysis_active or self.scene_detection_active:
             self.logger.warning("Another analysis is already running.", extra={'status_message': True})
             return
@@ -123,7 +123,7 @@ class AppStageProcessor:
         self.scene_detection_status = "Starting..."
         self.stop_stage_event.clear()
 
-        self.scene_detection_thread = threading.Thread(target=self._run_scene_detection_thread, daemon=True)
+        self.scene_detection_thread = threading.Thread(target=self._run_scene_detection_thread, args=(threshold,), daemon=True)
         self.scene_detection_thread.start()
 
     def reset_stage1_status(self):
