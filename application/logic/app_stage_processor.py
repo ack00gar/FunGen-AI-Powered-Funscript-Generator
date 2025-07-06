@@ -737,6 +737,14 @@ class AppStageProcessor:
 
             self.gui_event_queue.put(("stage3_status_update", "Stage 3 Completed.", "Done"))
             self.app.project_manager.project_dirty = True
+
+            # Update chapters for GUI if video_segments are present (3-stage fix)
+            if "video_segments" in s3_results:
+                fs_proc.video_chapters.clear()
+                for seg_data in s3_results["video_segments"]:
+                    fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
+                self.app.app_state_ui.heatmap_dirty = True
+                self.app.app_state_ui.funscript_preview_dirty = True
             return True
         else:
             error_msg = s3_results.get("error", "Unknown S3 failure") if s3_results else "S3 returned None."
