@@ -9,22 +9,20 @@ import platform
 from typing import Optional, Iterator, Tuple, List, Dict
 import logging
 import os
-import io
 
+from collections import OrderedDict
 from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
 
 
 try:
     from scipy.io import wavfile
-
     SCIPY_AVAILABLE_FOR_AUDIO = True
 except ImportError:
     SCIPY_AVAILABLE_FOR_AUDIO = False
-from collections import OrderedDict
 
 class VideoProcessor:
-    def __init__(self, app_instance, tracker: Optional = None, yolo_input_size=640,
+    def __init__(self, app_instance, tracker: Optional[type] = None, yolo_input_size=640,
                  video_type='auto', vr_input_format='he_sbs',  # Default VR to SBS Equirectangular
                  vr_fov=190, vr_pitch=-21,
                  fallback_logger_config: Optional[dict] = None,
@@ -130,38 +128,21 @@ class VideoProcessor:
 
         try:
             video = open_video(self.video_path)
-            total_frames = video.duration.get_frames()
 
             scene_manager = SceneManager()
             scene_manager.add_detector(ContentDetector(threshold=threshold))
 
-            if progress_callback:
-                progress_callback(0, total_frames, 0, 0, 0)
+            scene_manager.detect_scenes(frame_source=video)
 
-            while True:
-                frame_image = video.read()
-                if frame_image is False:
-                    break
-
-                if stop_event and stop_event.is_set():
-                    raise InterruptedError("Scene detection cancelled by user.")
-
-                scene_manager._process_frame(frame_image, video.frame_number)
-
-                if progress_callback:
-                    progress_callback(video.frame_number, total_frames)
+            if stop_event and stop_event.is_set():
+                raise InterruptedError("Scene detection cancelled by user.")
 
             scene_list_raw = scene_manager.get_scene_list()
 
-            if scene_list_raw and self.total_frames > 0:
-                last_scene_end_frame = scene_list_raw[-1][1].get_frames()
-                if last_scene_end_frame < self.total_frames:
-                    end_timecode = video.get_duration()
-                    last_scene_start_timecode = scene_list_raw[-1][0]
-                    scene_list_raw[-1] = (last_scene_start_timecode, end_timecode)
+            if not scene_list_raw:
+                self.logger.warning("No scenes detected by PySceneDetect.")
 
             scene_list_frames = [(s[0].get_frames(), s[1].get_frames()) for s in scene_list_raw]
-
             self.logger.info(f"Scene detection complete. Found {len(scene_list_frames)} scenes.")
             return scene_list_frames
 
@@ -267,17 +248,14 @@ class VideoProcessor:
         if not self.video_info:
             return
 
-        info = self.video_info
-        is_sbs_resolution = (info.get('width', 0) >= 1.8 * info.get('height', 0) and
-                             info.get('width', 0) <= 2.2 * info.get('height', 0) and
-                             info.get('width', 0) > 1000)
-        is_tb_resolution = (info.get('height', 0) >= 1.8 * info.get('width', 0) and
-                            info.get('height', 0) <= 2.2 * info.get('width', 0) and
-                            info.get('height', 0) > 1000)
+        width = self.video_info.get('width', 0)
+        height = self.video_info.get('height', 0)
+        is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
+        is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
 
         if self.video_type_setting == 'auto':
             upper_video_path = self.video_path.upper()
-            vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH']
+            vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
             has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
 
             self.determined_video_type = 'VR' if is_sbs_resolution or is_tb_resolution or has_vr_keyword else '2D'
@@ -1098,8 +1076,10 @@ class VideoProcessor:
                     self.is_processing = False
                     break
 
-                raw_frame_bytes = loop_ffmpeg_process.stdout.read(self.frame_size_bytes)
-                if len(raw_frame_bytes) < self.frame_size_bytes:
+                raw_frame_bytes = None # Force clear the buffer to prevent false positives
+                if loop_ffmpeg_process.stdout is not None:
+                    raw_frame_bytes = loop_ffmpeg_process.stdout.read(self.frame_size_bytes)
+                if not raw_frame_bytes or len(raw_frame_bytes) < self.frame_size_bytes:
                     self.logger.info(
                         f"End of FFmpeg GUI stream or incomplete frame (read {len(raw_frame_bytes)}/{self.frame_size_bytes}).")
                     self.is_processing = False

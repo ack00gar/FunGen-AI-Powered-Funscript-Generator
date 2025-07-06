@@ -2,6 +2,7 @@ import imgui
 import os
 from config import constants
 from config.constants import TrackerMode
+import time
 
 class ControlPanelUI:
     def __init__(self, app):
@@ -129,9 +130,15 @@ class ControlPanelUI:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-        #if imgui.button("Detect Scenes & Create Chapters", width=-1):
-        #    if not button_should_be_disabled:
-        #        stage_proc.start_scene_detection_analysis()
+        # Blinking button text when scene detection is active
+        if stage_proc.scene_detection_active:
+            blink_on = int(time.time()) % 2 == 0
+            detect_scenes_text = "Detecting Scenes..." if blink_on else ""
+        else:
+            detect_scenes_text = "Detect Scenes & Create Chapters"
+        if imgui.button(detect_scenes_text, width=-1):
+            if not button_should_be_disabled:
+                stage_proc.start_scene_detection_analysis()
 
         if button_should_be_disabled:
             if imgui.is_item_hovered():
