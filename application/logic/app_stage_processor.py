@@ -2,7 +2,7 @@ import os
 import threading
 import math
 import time
-from queue import Queue as ThreadQueue, Empty
+from queue import Queue
 from typing import Optional, List, Dict, Any, Tuple
 import msgpack
 import numpy as np
@@ -34,7 +34,7 @@ class AppStageProcessor:
         self.current_analysis_stage: int = 0
         self.stage_thread: Optional[threading.Thread] = None
         self.stop_stage_event = threading.Event()
-        self.gui_event_queue = ThreadQueue()
+        self.gui_event_queue = Queue()
 
         # Status and Progress Attributes
         self.stage1_frame_queue_size: int = 0
@@ -91,15 +91,11 @@ class AppStageProcessor:
         try:
             # 1. Run detection in the background
             scene_list = self.app.processor.detect_scenes(
-                threshold=threshold,  # Use the threshold from the UI
-                stop_event=self.stop_stage_event
+                threshold=threshold  # Use the threshold from the UI
             )
 
             # 2. Check if the task was aborted
-            if self.stop_stage_event.is_set():
-                return
-
-            if not scene_list:
+            if self.stop_stage_event.is_set() or not scene_list:
                 return
 
             # 3. Create chapters from the results on the main thread via the queue
@@ -446,11 +442,17 @@ class AppStageProcessor:
                                 raise TypeError(
                                     f"Object of type {obj.__class__.__name__} is not serializable for msgpack")
 
-                            with open(s2_overlay_path, 'wb') as f:
-                                f.write(
-                                    msgpack.packb(all_frames_data, use_bin_type=True, default=numpy_default_handler))
+                            if all_frames_data is not None:
+                                packed_data = msgpack.packb(all_frames_data, use_bin_type=True, default=numpy_default_handler)
+                                if packed_data is not None:
+                                    with open(s2_overlay_path, 'wb') as f:
+                                        f.write(packed_data)
+                                    self.logger.info("Successfully rewrote Stage 2 overlay file with Stage 3 data.")
+                                else:
+                                    self.logger.warning("msgpack.packb returned None, not writing overlay file.")
+                            else:
+                                self.logger.warning("all_frames_data is None, not writing overlay file.")
 
-                            self.logger.info("Successfully rewrote Stage 2 overlay file with Stage 3 data.")
                             # Send event to GUI to (re)load the updated data
                             self.gui_event_queue.put(("load_s2_overlay", s2_overlay_path, None))
 
@@ -760,6 +762,13 @@ class AppStageProcessor:
         elif self.scene_detection_active and self.scene_detection_thread and self.scene_detection_thread.is_alive():
             self.logger.info("Aborting scene detection...", extra={'status_message': True})
             self.stop_stage_event.set()
+            # Call scene_manager.stop() if available for fast abort
+            if hasattr(self.app.processor, '_active_scene_manager') and self.app.processor._active_scene_manager is not None:
+                try:
+                    self.app.processor._active_scene_manager.stop()
+                    self.logger.info("Called scene_manager.stop() to abort scene detection.")
+                except Exception as e:
+                    self.logger.warning(f"Failed to call scene_manager.stop(): {e}")
         else:
             self.logger.info("No analysis pipeline running to abort.", extra={'status_message': False})
         self.app.energy_saver.reset_activity_timer()
