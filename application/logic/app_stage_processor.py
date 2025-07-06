@@ -333,7 +333,7 @@ class AppStageProcessor:
                 self.logger.info(f"[Thread] Stage 1 skipped, using: {target_s1_path}")
                 self.gui_event_queue.put(("stage1_completed", "00:00:00 (Cached)", "Cached"))
             else:
-                frame_range_for_s1 = (range_start_frame, range_end_frame) if is_s1_data_source_ranged else None
+                frame_range_for_s1 = (range_start_frame, range_end_frame) if range_is_active else None # If frame range is too short or not enough actions are present, the process will still run but not output any data. This is not a bug.
                 stage1_success = self._execute_stage1_logic(frame_range=frame_range_for_s1, output_path=target_s1_path)
                 if stage1_success:
                     self.gui_event_queue.put(("stage1_completed", self.stage1_time_elapsed_str, self.stage1_processing_fps_str))

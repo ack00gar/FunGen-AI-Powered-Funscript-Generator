@@ -103,7 +103,7 @@ class ControlPanelUI:
         imgui.separator()
 
         # --- Analysis Range and Rerun Options ---
-        if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+        if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE, TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
             if imgui.collapsing_header("Analysis Options##RunControlAnalysisOptions", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 # --- Range Selection ---
                 imgui.text("Analysis Range")
@@ -116,7 +116,6 @@ class ControlPanelUI:
                 imgui.same_line()
                 _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
             imgui.separator()
-
 
         # --- Execution Buttons ---
         self._render_start_stop_buttons(stage_proc, fs_proc, event_handlers)
