@@ -1,6 +1,7 @@
 import uuid
 import math
 from typing import Optional, Tuple
+import random
 
 from config import constants
 
@@ -207,4 +208,32 @@ class VideoSegment:
     def __repr__(self):  #
         return (f"<VideoSegment id:{self.unique_id} frames:{self.start_frame_id}-{self.end_frame_id} "  #
                 f"name:'{self.class_name}' type:'{self.segment_type}' pos:'{self.position_short_name}'>")
+
+
+    ###########################################################################################
+    # TEMPORARY: This method assigns random colors to chapters for visual distinction when all chapters have the same position_short_name (e.g., 'NR').
+    # Remove this logic once position detection is implemented and chapters have meaningful short names.
+    ###########################################################################################
+    @staticmethod
+    def assign_colors_to_segments(segments):
+        """
+        Assigns colors to a list of VideoSegment objects based on their position_short_name.
+        Should be called whenever chapters are created, imported, or edited.
+        """
+        for seg in segments:
+            seg.color = constants.DEFAULT_CHAPTER_COLORS.get(seg.position_short_name, constants.DEFAULT_CHAPTER_COLORS["default"])
+
+    @staticmethod
+    def assign_random_colors_to_segments(segments):
+        """
+        Assigns random colors to chapters from the DEFAULT_CHAPTER_COLORS palette (excluding 'default'),
+        ensuring no chapter gets the same color as the previous two.
+        """
+        palette = [c for k, c in constants.DEFAULT_CHAPTER_COLORS.items() if k != "default"]
+        last_colors = []
+        for seg in segments:
+            available_colors = [c for c in palette if c not in last_colors[-2:]] if len(palette) > 2 else palette
+            color = random.choice(available_colors)
+            seg.color = color
+            last_colors.append(color)
 
