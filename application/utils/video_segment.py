@@ -211,8 +211,11 @@ class VideoSegment:
 
 
     ###########################################################################################
-    # TEMPORARY: This method assigns random colors to chapters for visual distinction when all chapters have the same position_short_name (e.g., 'NR').
-    # Remove this logic once position detection is implemented and chapters have meaningful short names.
+    # TEMPORARY: This method assigns random colors to chapters for visual distinction when all chapters have the same position_short_name 'NR'.
+    # Remove this logic once position detection is implemented for "Scene Detection without AI analysis"
+    
+    # AI Analysis = fixed colors per position
+    # Scene Detection without AI analysis = returns all 'NR', will then assign random colors
     ###########################################################################################
     @staticmethod
     def assign_colors_to_segments(segments):
@@ -236,4 +239,7 @@ class VideoSegment:
             color = random.choice(available_colors)
             seg.color = color
             last_colors.append(color)
+
+    # END OF TEMPORARY COLOR SELECTION LOGIC
+    ###########################################################################################
 

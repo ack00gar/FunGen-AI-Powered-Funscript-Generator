@@ -154,7 +154,10 @@ class VideoNavigationUI:
     def _render_chapter_bar(self, fs_proc, total_video_frames: int, bar_width: float, bar_height: float):
         ###########################################################################################
         # TEMPORARY: Assign random colors to chapters for visual distinction when all chapters have the same position_short_name (e.g., 'NR').
-        # Remove this logic once position detection is implemented and chapters have meaningful short names.
+        # Remove this logic once position detection is implemented for "Scene Detection without AI analysis"
+        
+        # AI Analysis = fixed colors per position
+        # Scene Detection without AI analysis = returns all 'NR', will then assign random colors
         ###########################################################################################
 
         if hasattr(self, '_last_chapter_count'):
