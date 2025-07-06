@@ -1,7 +1,7 @@
 import imgui
 import os
 from config import constants
-from config.constants import TrackerMode
+from config.constants import TrackerMode, SCENE_DETECTION_DEFAULT_THRESHOLD
 import time
 
 class ControlPanelUI:
@@ -140,7 +140,18 @@ class ControlPanelUI:
             detect_scenes_text = "Detect Scenes & Create Chapters"
         if imgui.button(detect_scenes_text, width=-1):
             if not button_should_be_disabled:
-                stage_proc.start_scene_detection_analysis()
+                threshold = getattr(self, '_scene_detection_threshold', SCENE_DETECTION_DEFAULT_THRESHOLD)
+                stage_proc.start_scene_detection_analysis(threshold=threshold)
+
+        # --- Scene Detection Threshold Input ---
+        if not hasattr(self, '_scene_detection_threshold'):
+            self._scene_detection_threshold = self.app.app_settings.get('scene_detection_threshold', SCENE_DETECTION_DEFAULT_THRESHOLD)
+        imgui.push_item_width(100)
+        changed, new_threshold = imgui.input_float("Scene & Chapter Detection Threshold", self._scene_detection_threshold, 0.5, 1.0, "%.2f")
+        imgui.pop_item_width()
+        if changed:
+            self._scene_detection_threshold = new_threshold
+            self.app.app_settings.set('scene_detection_threshold', new_threshold)
 
         # --- Clear Chapters Button (only if chapters exist) ---
         chapters = getattr(self.app.funscript_processor, 'video_chapters', [])
