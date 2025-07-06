@@ -71,7 +71,6 @@ class AppStageProcessor:
 
         # --- State for Scene Detection ---
         self.scene_detection_active: bool = False
-        self.scene_detection_progress: float = 0.0
         self.scene_detection_status: str = "Idle"
         self.scene_detection_thread: Optional[threading.Thread] = None
 
@@ -87,37 +86,20 @@ class AppStageProcessor:
         self.scene_detection_processing_fps_str: str = "0 FPS"
         self.scene_detection_eta_str: str = "N/A"
 
-    # --- Progress callback for scene detection ---
-    def _scene_detection_progress_callback(self, current_frame: int, total_frames: int, time_elapsed: float,
-                                           processing_fps: float, eta_seconds: float):
-        progress = float(current_frame) / total_frames if total_frames > 0 else 0.0
-        progress_data = {
-            "message": f"Processing frame {current_frame} of {total_frames}",
-            "time_elapsed": time_elapsed,
-            "fps": processing_fps,
-            "eta": eta_seconds
-        }
-        self.gui_event_queue.put(("scene_detection_progress", progress, progress_data))
-
     # --- Thread target for running scene detection ---
     def _run_scene_detection_thread(self):
         try:
-            self.gui_event_queue.put(("scene_detection_progress", 0.0, "Initializing..."))
-
             # 1. Run detection in the background
             scene_list = self.app.processor.detect_scenes(
                 threshold=27.0,  # This could be exposed in the UI
-                progress_callback=self._scene_detection_progress_callback,
                 stop_event=self.stop_stage_event
             )
 
             # 2. Check if the task was aborted
             if self.stop_stage_event.is_set():
-                self.gui_event_queue.put(("scene_detection_progress", -1.0, "Cancelled"))
                 return
 
             if not scene_list:
-                self.gui_event_queue.put(("scene_detection_progress", -1.0, "No scenes found or error."))
                 return
 
             # 3. Create chapters from the results on the main thread via the queue
@@ -125,7 +107,6 @@ class AppStageProcessor:
 
         except Exception as e:
             self.logger.error(f"Scene detection thread failed: {e}", exc_info=True)
-            self.gui_event_queue.put(("scene_detection_progress", -1.0, f"Error: {e}"))
         finally:
             self.scene_detection_active = False
 
@@ -140,7 +121,6 @@ class AppStageProcessor:
 
         self.scene_detection_active = True
         self.scene_detection_status = "Starting..."
-        self.scene_detection_progress = 0.0
         self.stop_stage_event.clear()
 
         self.scene_detection_thread = threading.Thread(target=self._run_scene_detection_thread, daemon=True)
@@ -787,21 +767,10 @@ class AppStageProcessor:
 
                 event_type, data1, data2 = queue_item[0], queue_item[1], queue_item[2] if len(queue_item) > 2 else None
 
-                if event_type == "scene_detection_progress":
-                    progress_val, data = data1, data2
-                    if progress_val >= 0:
-                        self.scene_detection_progress = progress_val
-                    if isinstance(data, dict):
-                        self.scene_detection_status = data.get("message", "Processing...")
-                        t_el, fps, eta = data.get("time_elapsed", 0.0), data.get("fps", 0.0), data.get("eta", 0.0)
-                        self.scene_detection_time_elapsed_str = f"{int(t_el // 3600):02d}:{int((t_el % 3600) // 60):02d}:{int(t_el % 60):02d}"
-                        self.scene_detection_processing_fps_str = f"{int(fps)} FPS"
-                        if math.isnan(eta) or math.isinf(eta):
-                            self.scene_detection_eta_str = "Calculating..."
-                        else:
-                            self.scene_detection_eta_str = f"{int(eta // 3600):02d}:{int((eta % 3600) // 60):02d}:{int(eta % 60):02d}"
-                elif event_type == "scene_detection_finished":
+                if event_type == "scene_detection_finished":
                     scene_list, status_text = data1, data2
+                    if status_text is None:
+                        status_text = "Chapters created."
                     self.scene_detection_status = status_text
                     fs_proc.video_chapters.clear()
                     default_pos_key = next(iter(constants.POSITION_INFO_MAPPING), "Default")

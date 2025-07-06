@@ -130,7 +130,9 @@ class ControlPanelUI:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-        # Blinking button text when scene detection is active
+        # Blinking button text when scene detection is active.
+        # This is not part of the analysis pipeline so it doesn't affect the detection speed.
+        # It's just a visual indicator that the scene detection is running for the user.
         if stage_proc.scene_detection_active:
             blink_on = int(time.time()) % 2 == 0
             detect_scenes_text = "Detecting Scenes..." if blink_on else ""
@@ -139,6 +141,34 @@ class ControlPanelUI:
         if imgui.button(detect_scenes_text, width=-1):
             if not button_should_be_disabled:
                 stage_proc.start_scene_detection_analysis()
+
+        # --- Clear Chapters Button (only if chapters exist) ---
+        chapters = getattr(self.app.funscript_processor, 'video_chapters', [])
+        if chapters:
+            if imgui.button("Clear All Chapters", width=-1):
+                imgui.open_popup("ConfirmClearChapters")
+            opened, _ = imgui.begin_popup_modal("ConfirmClearChapters")
+            if opened:
+                window_width = imgui.get_window_width()
+                # Center the text
+                text = "Are you sure you want to clear all chapters? This cannot be undone."
+                text_width = imgui.calc_text_size(text)[0]
+                imgui.set_cursor_pos_x((window_width - text_width) * 0.5)
+                imgui.text(text)
+                imgui.spacing()
+                # Center the buttons
+                button_width = 150
+                cancel_width = 100
+                total_width = button_width + cancel_width + imgui.get_style().item_spacing[0]
+                imgui.set_cursor_pos_x((window_width - total_width) * 0.5)
+                if imgui.button("Yes, clear all", width=button_width):
+                    self.app.funscript_processor.video_chapters.clear()
+                    self.app.project_manager.project_dirty = True
+                    imgui.close_current_popup()
+                imgui.same_line()
+                if imgui.button("Cancel", width=cancel_width):
+                    imgui.close_current_popup()
+                imgui.end_popup()
 
         if button_should_be_disabled:
             if imgui.is_item_hovered():
@@ -572,20 +602,7 @@ class ControlPanelUI:
         selected_mode = app_state.selected_tracker_mode
 
         if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
-            if stage_proc.full_analysis_active or self.app.is_batch_processing_active or stage_proc.scene_detection_active:
-                # Decide WHICH progress to show
-                if stage_proc.scene_detection_active:
-                    imgui.text("Scene Detection")
-                    imgui.text(
-                        f"Time: {stage_proc.scene_detection_time_elapsed_str} | ETA: {stage_proc.scene_detection_eta_str} | Speed: {stage_proc.scene_detection_processing_fps_str}")
-                    imgui.text_wrapped(f"Status: {stage_proc.scene_detection_status}")
-                    overlay_text = f"{stage_proc.scene_detection_progress * 100:.0f}%"
-                    imgui.progress_bar(stage_proc.scene_detection_progress, size=(-1, 0), overlay=overlay_text)
-                else: # Fallback to the main multi-stage analysis progress
-                    self._render_stage_progress_ui(stage_proc)
-            else:
-                self._render_stage_progress_ui(stage_proc) # Also render persisted stats here
-
+            self._render_stage_progress_ui(stage_proc)
         elif selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
             imgui.text("Live Tracker Status:")
             imgui.text(f"  - Actual FPS: {self.app.tracker.current_fps if self.app.tracker else 'N/A':.1f}")
@@ -843,8 +860,6 @@ class ControlPanelUI:
         if is_analysis_running and stage_proc.current_analysis_stage == 1:
             imgui.text(f"Time: {stage_proc.stage1_time_elapsed_str} | ETA: {stage_proc.stage1_eta_str} | Speed: {stage_proc.stage1_processing_fps_str}")
             imgui.text_wrapped(f"Progress: {stage_proc.stage1_progress_label}")
-            imgui.progress_bar(stage_proc.stage1_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage1_progress_value * 100:.0f}%" if stage_proc.stage1_progress_value > 0 else "")
-            imgui.spacing()
             frame_q_size = stage_proc.stage1_frame_queue_size
             frame_q_max = constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
