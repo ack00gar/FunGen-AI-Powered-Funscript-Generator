@@ -279,21 +279,21 @@ class AppEventHandlers:
             fs_proc.selected_chapter_for_scripting = None
             self.logger.info(f"Chapter range deselected: {segment.position_long_name}", extra={'status_message': True})
         else:
-            fs_proc.scripting_range_active = True
-            fs_proc.scripting_start_frame = segment.start_frame_id
-            fs_proc.scripting_end_frame = segment.end_frame_id
-            fs_proc.selected_chapter_for_scripting = segment
+            if fs_proc.scripting_range_active:
+                fs_proc.scripting_start_frame = segment.start_frame_id
+                fs_proc.scripting_end_frame = segment.end_frame_id
+                fs_proc.selected_chapter_for_scripting = segment
 
-            start_t_str = _format_time(fs_proc.app, segment.start_frame_id / current_fps if current_fps > 0 else 0)
-            end_t_str = _format_time(fs_proc.app, segment.end_frame_id / current_fps if current_fps > 0 else 0)
-            self.logger.info(
-                f"Scripting range set to chapter: {segment.position_long_name} [{start_t_str} - {end_t_str}]",
-                extra={'status_message': True})
+                start_t_str = _format_time(fs_proc.app, segment.start_frame_id / current_fps if current_fps > 0 else 0)
+                end_t_str = _format_time(fs_proc.app, segment.end_frame_id / current_fps if current_fps > 0 else 0)
+                self.logger.info(
+                    f"Scripting range updated to chapter: {segment.position_long_name} [{start_t_str} - {end_t_str}]",
+                    extra={'status_message': True})
 
-            # Seek video to start of chapter if video is loaded
-            if self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0:
-                self.app.processor.seek_video(segment.start_frame_id)
-                app_state_ui.force_timeline_pan_to_current_frame = True
+                # Seek video to start of chapter if video is loaded
+                if self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0:
+                    self.app.processor.seek_video(segment.start_frame_id)
+                    app_state_ui.force_timeline_pan_to_current_frame = True
         self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
 
