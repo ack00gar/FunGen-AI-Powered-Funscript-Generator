@@ -13,6 +13,7 @@ import os
 from collections import OrderedDict
 from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
+from config.constants import SCENE_DETECTION_DEFAULT_THRESHOLD
 
 
 try:
@@ -111,33 +112,28 @@ class VideoProcessor:
         self.batch_fetch_size = 50
 
     # --- Scene Detection Method ---
-    def detect_scenes(self, threshold: float = 27.0, progress_callback=None,
-                      stop_event: Optional[threading.Event] = None) -> List[Tuple[int, int]]:
+    def detect_scenes(self, threshold: float = SCENE_DETECTION_DEFAULT_THRESHOLD) -> List[Tuple[int, int]]:
         """
-        Uses PySceneDetect's modern API to find scene cuts with a manual processing loop
-        to ensure progress reporting.
+        Uses PySceneDetect's built-in detect_scenes for fast scene cut detection with support for responsive aborts via scene_manager.stop().
         Returns a list of (start_frame, end_frame) tuples for each scene.
         """
         if not self.video_path:
             self.logger.error("Cannot detect scenes: No video loaded.")
             return []
 
-        self.logger.info("Starting scene detection with corrected manual frame processing loop...")
+        self.logger.info("Starting scene detection with PySceneDetect's built-in method...")
         if hasattr(self.app, 'set_status_message'):
             self.app.set_status_message("Detecting scenes...")
 
         try:
             video = open_video(self.video_path)
 
-            scene_manager = SceneManager()
-            scene_manager.add_detector(ContentDetector(threshold=threshold))
+            self._active_scene_manager = SceneManager()
+            self._active_scene_manager.add_detector(ContentDetector(threshold=threshold))
 
-            scene_manager.detect_scenes(frame_source=video)
+            self._active_scene_manager.detect_scenes(frame_source=video)
 
-            if stop_event and stop_event.is_set():
-                raise InterruptedError("Scene detection cancelled by user.")
-
-            scene_list_raw = scene_manager.get_scene_list()
+            scene_list_raw = self._active_scene_manager.get_scene_list()
 
             if not scene_list_raw:
                 self.logger.warning("No scenes detected by PySceneDetect.")
@@ -146,20 +142,27 @@ class VideoProcessor:
             self.logger.info(f"Scene detection complete. Found {len(scene_list_frames)} scenes.")
             return scene_list_frames
 
-        except InterruptedError:
-            self.logger.info("Scene detection was successfully aborted by the user.")
-            return []
         except Exception as e:
             self.logger.error(f"An error occurred during scene detection: {e}", exc_info=True)
             if hasattr(self.app, 'set_status_message'):
                 self.app.set_status_message("Error during scene detection.", level=logging.ERROR)
             return []
+        finally:
+            self._active_scene_manager = None
 
     def _clear_cache(self):
         with self.frame_cache_lock:
-            if self.frame_cache:
-                self.logger.debug(f"Clearing frame cache (had {len(self.frame_cache)} items).")
-                self.frame_cache.clear()
+            if self.frame_cache is not None:
+                try:
+                    if self.frame_cache is not None:
+                        cache_len = len(self.frame_cache)
+                    else:
+                        cache_len = 0
+                except Exception:
+                    cache_len = 0
+                if cache_len > 0:
+                    self.logger.debug(f"Clearing frame cache (had {cache_len} items).")
+                    self.frame_cache.clear()
 
     def set_active_video_type_setting(self, video_type: str):
         if video_type not in ['auto', '2D', 'VR']:
@@ -774,20 +777,17 @@ class VideoProcessor:
             self.logger.debug("Hardware acceleration explicitly disabled (CPU decoding).")
         return hwaccel_args
 
-    def _terminate_process(self, process: subprocess.Popen, process_name: str):
-        """[NEW HELPER] Safely terminates a single subprocess."""
-        if process and process.poll() is None:
-            self.logger.info(f"Terminating FFmpeg process: {process_name} (PID: {process.pid})")
-            # Close pipes to prevent deadlocks
-            if process.stdout: process.stdout.close()
-            if process.stderr: process.stderr.close()
+    def _terminate_process(self, process: Optional[subprocess.Popen], process_name: str):
+        """
+        Terminate a process safely.
+        """
+        if process is not None and process.poll() is None:
             process.terminate()
             try:
-                process.wait(timeout=0.5)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.logger.warning(f"FFmpeg process '{process_name}' did not terminate gracefully. Killing.")
                 process.kill()
-                process.wait()
+            self.logger.info(f"{process_name} process terminated.")
 
     def _terminate_ffmpeg_processes(self):
         """Safely terminates all active FFmpeg processes using the helper."""
@@ -816,12 +816,14 @@ class VideoProcessor:
                 return False
 
             pipe1_vf = f"crop={int(video_height_for_crop)}:{int(video_height_for_crop)}:0:0,scale_cuda=1000:1000"
-            cmd1 = common_ffmpeg_prefix + ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
+            cmd1 = common_ffmpeg_prefix[:]
+            cmd1.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
             if start_time_seconds > 0.001: cmd1.extend(['-ss', str(start_time_seconds)])
             cmd1.extend(['-i', self.video_path, '-an', '-sn', '-vf', pipe1_vf])
             cmd1.extend(['-c:v', 'hevc_nvenc', '-preset', 'fast', '-qp', '0', '-f', 'matroska', 'pipe:1'])
 
-            cmd2 = common_ffmpeg_prefix + ['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn']
+            cmd2 = common_ffmpeg_prefix[:]
+            cmd2.extend(['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn'])
             effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
             cmd2.extend(['-vf', effective_vf_pipe2])
             if num_frames_to_output_ffmpeg and num_frames_to_output_ffmpeg > 0:
