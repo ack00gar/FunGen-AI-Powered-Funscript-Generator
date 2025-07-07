@@ -9,22 +9,21 @@ import platform
 from typing import Optional, Iterator, Tuple, List, Dict
 import logging
 import os
-import io
 
+from collections import OrderedDict
 from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
+from config.constants import SCENE_DETECTION_DEFAULT_THRESHOLD
 
 
 try:
     from scipy.io import wavfile
-
     SCIPY_AVAILABLE_FOR_AUDIO = True
 except ImportError:
     SCIPY_AVAILABLE_FOR_AUDIO = False
-from collections import OrderedDict
 
 class VideoProcessor:
-    def __init__(self, app_instance, tracker: Optional = None, yolo_input_size=640,
+    def __init__(self, app_instance, tracker: Optional[type] = None, yolo_input_size=640,
                  video_type='auto', vr_input_format='he_sbs',  # Default VR to SBS Equirectangular
                  vr_fov=190, vr_pitch=-21,
                  fallback_logger_config: Optional[dict] = None,
@@ -113,72 +112,57 @@ class VideoProcessor:
         self.batch_fetch_size = 50
 
     # --- Scene Detection Method ---
-    def detect_scenes(self, threshold: float = 27.0, progress_callback=None,
-                      stop_event: Optional[threading.Event] = None) -> List[Tuple[int, int]]:
+    def detect_scenes(self, threshold: float = SCENE_DETECTION_DEFAULT_THRESHOLD) -> List[Tuple[int, int]]:
         """
-        Uses PySceneDetect's modern API to find scene cuts with a manual processing loop
-        to ensure progress reporting.
+        Uses PySceneDetect's built-in detect_scenes for fast scene cut detection with support for responsive aborts via scene_manager.stop().
         Returns a list of (start_frame, end_frame) tuples for each scene.
         """
         if not self.video_path:
             self.logger.error("Cannot detect scenes: No video loaded.")
             return []
 
-        self.logger.info("Starting scene detection with corrected manual frame processing loop...")
+        self.logger.info("Starting scene detection with PySceneDetect's built-in method...")
         if hasattr(self.app, 'set_status_message'):
             self.app.set_status_message("Detecting scenes...")
 
         try:
             video = open_video(self.video_path)
-            total_frames = video.duration.get_frames()
 
-            scene_manager = SceneManager()
-            scene_manager.add_detector(ContentDetector(threshold=threshold))
+            self._active_scene_manager = SceneManager()
+            self._active_scene_manager.add_detector(ContentDetector(threshold=threshold))
 
-            if progress_callback:
-                progress_callback(0, total_frames, 0, 0, 0)
+            self._active_scene_manager.detect_scenes(frame_source=video)
 
-            while True:
-                frame_image = video.read()
-                if frame_image is False:
-                    break
+            scene_list_raw = self._active_scene_manager.get_scene_list()
 
-                if stop_event and stop_event.is_set():
-                    raise InterruptedError("Scene detection cancelled by user.")
-
-                scene_manager._process_frame(frame_image, video.frame_number)
-
-                if progress_callback:
-                    progress_callback(video.frame_number, total_frames)
-
-            scene_list_raw = scene_manager.get_scene_list()
-
-            if scene_list_raw and self.total_frames > 0:
-                last_scene_end_frame = scene_list_raw[-1][1].get_frames()
-                if last_scene_end_frame < self.total_frames:
-                    end_timecode = video.get_duration()
-                    last_scene_start_timecode = scene_list_raw[-1][0]
-                    scene_list_raw[-1] = (last_scene_start_timecode, end_timecode)
+            if not scene_list_raw:
+                self.logger.warning("No scenes detected by PySceneDetect.")
 
             scene_list_frames = [(s[0].get_frames(), s[1].get_frames()) for s in scene_list_raw]
-
             self.logger.info(f"Scene detection complete. Found {len(scene_list_frames)} scenes.")
             return scene_list_frames
 
-        except InterruptedError:
-            self.logger.info("Scene detection was successfully aborted by the user.")
-            return []
         except Exception as e:
             self.logger.error(f"An error occurred during scene detection: {e}", exc_info=True)
             if hasattr(self.app, 'set_status_message'):
                 self.app.set_status_message("Error during scene detection.", level=logging.ERROR)
             return []
+        finally:
+            self._active_scene_manager = None
 
     def _clear_cache(self):
         with self.frame_cache_lock:
-            if self.frame_cache:
-                self.logger.debug(f"Clearing frame cache (had {len(self.frame_cache)} items).")
-                self.frame_cache.clear()
+            if self.frame_cache is not None:
+                try:
+                    if self.frame_cache is not None:
+                        cache_len = len(self.frame_cache)
+                    else:
+                        cache_len = 0
+                except Exception:
+                    cache_len = 0
+                if cache_len > 0:
+                    self.logger.debug(f"Clearing frame cache (had {cache_len} items).")
+                    self.frame_cache.clear()
 
     def set_active_video_type_setting(self, video_type: str):
         if video_type not in ['auto', '2D', 'VR']:
@@ -267,17 +251,14 @@ class VideoProcessor:
         if not self.video_info:
             return
 
-        info = self.video_info
-        is_sbs_resolution = (info.get('width', 0) >= 1.8 * info.get('height', 0) and
-                             info.get('width', 0) <= 2.2 * info.get('height', 0) and
-                             info.get('width', 0) > 1000)
-        is_tb_resolution = (info.get('height', 0) >= 1.8 * info.get('width', 0) and
-                            info.get('height', 0) <= 2.2 * info.get('width', 0) and
-                            info.get('height', 0) > 1000)
+        width = self.video_info.get('width', 0)
+        height = self.video_info.get('height', 0)
+        is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
+        is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
 
         if self.video_type_setting == 'auto':
             upper_video_path = self.video_path.upper()
-            vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH']
+            vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
             has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
 
             self.determined_video_type = 'VR' if is_sbs_resolution or is_tb_resolution or has_vr_keyword else '2D'
@@ -796,20 +777,17 @@ class VideoProcessor:
             self.logger.debug("Hardware acceleration explicitly disabled (CPU decoding).")
         return hwaccel_args
 
-    def _terminate_process(self, process: subprocess.Popen, process_name: str):
-        """[NEW HELPER] Safely terminates a single subprocess."""
-        if process and process.poll() is None:
-            self.logger.info(f"Terminating FFmpeg process: {process_name} (PID: {process.pid})")
-            # Close pipes to prevent deadlocks
-            if process.stdout: process.stdout.close()
-            if process.stderr: process.stderr.close()
+    def _terminate_process(self, process: Optional[subprocess.Popen], process_name: str):
+        """
+        Terminate a process safely.
+        """
+        if process is not None and process.poll() is None:
             process.terminate()
             try:
-                process.wait(timeout=0.5)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.logger.warning(f"FFmpeg process '{process_name}' did not terminate gracefully. Killing.")
                 process.kill()
-                process.wait()
+            self.logger.info(f"{process_name} process terminated.")
 
     def _terminate_ffmpeg_processes(self):
         """Safely terminates all active FFmpeg processes using the helper."""
@@ -838,12 +816,14 @@ class VideoProcessor:
                 return False
 
             pipe1_vf = f"crop={int(video_height_for_crop)}:{int(video_height_for_crop)}:0:0,scale_cuda=1000:1000"
-            cmd1 = common_ffmpeg_prefix + ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
+            cmd1 = common_ffmpeg_prefix[:]
+            cmd1.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
             if start_time_seconds > 0.001: cmd1.extend(['-ss', str(start_time_seconds)])
             cmd1.extend(['-i', self.video_path, '-an', '-sn', '-vf', pipe1_vf])
             cmd1.extend(['-c:v', 'hevc_nvenc', '-preset', 'fast', '-qp', '0', '-f', 'matroska', 'pipe:1'])
 
-            cmd2 = common_ffmpeg_prefix + ['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn']
+            cmd2 = common_ffmpeg_prefix[:]
+            cmd2.extend(['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn'])
             effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
             cmd2.extend(['-vf', effective_vf_pipe2])
             if num_frames_to_output_ffmpeg and num_frames_to_output_ffmpeg > 0:
@@ -1098,8 +1078,10 @@ class VideoProcessor:
                     self.is_processing = False
                     break
 
-                raw_frame_bytes = loop_ffmpeg_process.stdout.read(self.frame_size_bytes)
-                if len(raw_frame_bytes) < self.frame_size_bytes:
+                raw_frame_bytes = None # Force clear the buffer to prevent false positives
+                if loop_ffmpeg_process.stdout is not None:
+                    raw_frame_bytes = loop_ffmpeg_process.stdout.read(self.frame_size_bytes)
+                if not raw_frame_bytes or len(raw_frame_bytes) < self.frame_size_bytes:
                     self.logger.info(
                         f"End of FFmpeg GUI stream or incomplete frame (read {len(raw_frame_bytes)}/{self.frame_size_bytes}).")
                     self.is_processing = False

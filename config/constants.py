@@ -162,6 +162,7 @@ POSE_STABILITY_THRESHOLD = 2.5
 ####################################################################################################
 # FUNSCRIPT & CHAPTERS
 ####################################################################################################
+SCENE_DETECTION_DEFAULT_THRESHOLD = 27.0
 DEFAULT_CHAPTER_FPS = 30.0
 POSITION_INFO_MAPPING = {
     "NR": {"long_name": "Not Relevant", "short_name": "NR"},
@@ -296,4 +297,3 @@ DEFAULT_AUTO_POST_RDP_EPSILON = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["rdp_eps
 # It's better to derive them from the new dictionary as well to maintain a single source of truth.
 DEFAULT_AUTO_POST_CLAMP_LOW = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_lower"]
 DEFAULT_AUTO_POST_CLAMP_HIGH = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_upper"]
-

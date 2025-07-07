@@ -152,6 +152,31 @@ class VideoNavigationUI:
             imgui.internal.pop_item_flag()
 
     def _render_chapter_bar(self, fs_proc, total_video_frames: int, bar_width: float, bar_height: float):
+        ###########################################################################################
+        # TEMPORARY: Assign random colors to chapters for visual distinction when all chapters have the same position_short_name (e.g., 'NR').
+        # Remove this logic once position detection is implemented for "Scene Detection without AI analysis"
+        
+        # AI Analysis = fixed colors per position
+        # Scene Detection without AI analysis = returns all 'NR', will then assign random colors
+        ###########################################################################################
+
+        if hasattr(self, '_last_chapter_count'):
+            last_count = self._last_chapter_count
+        else:
+            last_count = -1
+        current_count = len(fs_proc.video_chapters)
+        if current_count > 0 and current_count != last_count:
+            # If all chapters have the same position_short_name, assign random colors for visual distinction
+            unique_short_names = set(seg.position_short_name for seg in fs_proc.video_chapters)
+            if len(unique_short_names) == 1:
+                VideoSegment.assign_random_colors_to_segments(fs_proc.video_chapters)
+            else:
+                VideoSegment.assign_colors_to_segments(fs_proc.video_chapters)
+        self._last_chapter_count = current_count
+
+        # END OF TEMPORARY COLOR SELECTION LOGIC
+        ###########################################################################################
+
         style = imgui.get_style()  # Get style for frame_padding
         draw_list = imgui.get_window_draw_list()
         cursor_screen_pos = imgui.get_cursor_screen_pos()
