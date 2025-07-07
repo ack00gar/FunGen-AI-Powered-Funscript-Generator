@@ -37,17 +37,6 @@ class ApplicationLogic:
             logging.INFO: 3.0, logging.WARNING: 6.0, logging.ERROR: 10.0, logging.CRITICAL: 15.0,
         }
         self.app_log_file_path = 'fungen.log'  # Define app_log_file_path
-
-        # --- Start of Log Purge ---
-        try:
-            # Purge the log file if it's older than 7 days. This runs before the logger is attached to it.
-            if os.path.exists(self.app_log_file_path):
-                if (time.time() - os.path.getmtime(self.app_log_file_path)) > (7 * 24 * 60 * 60):
-                    os.remove(self.app_log_file_path)
-        except Exception:
-            # If purging fails, it's not a critical error. The app can continue.
-            pass
-
         self._logger_instance = AppLogger(
             app_logic_instance=self,
             status_level_durations=status_log_config,
@@ -273,19 +262,6 @@ class ApplicationLogic:
 
         self.logger.info(
             f"User confirmed. Starting batch processing with method: {selected_method_idx}, post-proc: {apply_post_processing}, copy: {copy_to_video_location}, overwrite: {overwrite_mode}, gen_roll: {generate_roll}")
-
-        # Update the main UI state to reflect the chosen batch mode, so the correct progress UI is displayed.
-        batch_mode_map = {
-            0: TrackerMode.OFFLINE_3_STAGE,
-            1: TrackerMode.OFFLINE_2_STAGE
-        }
-        chosen_mode = batch_mode_map.get(selected_method_idx)
-        if chosen_mode:
-            self.app_state_ui.selected_tracker_mode = chosen_mode
-            self.logger.info(f"Control panel UI mode updated to: {chosen_mode.name} for batch processing.")
-        else:
-            self.logger.warning(f"Could not map batch method index {selected_method_idx} to a valid tracker mode.")
-
 
         # Set up batch processing state from the confirmed data
         self.batch_video_paths = list(self.batch_confirmation_videos)
