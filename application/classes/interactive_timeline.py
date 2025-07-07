@@ -65,6 +65,8 @@ class InteractiveFunscriptTimeline:
         self.is_panning_active: bool = False
         self.is_zooming_active: bool = False
 
+        self.zoom_action_request: Optional[float] = None
+
         self.is_previewing: bool = False
         self.preview_actions: Optional[List[Dict]] = None
 
@@ -432,7 +434,9 @@ class InteractiveFunscriptTimeline:
                     self.dragging_action_idx = -1
                     fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                     self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
-            if clear_op_disabled: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if clear_op_disabled:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             if imgui.button(f"Unload##Unload{window_id_suffix}"):
@@ -457,7 +461,9 @@ class InteractiveFunscriptTimeline:
                     self.show_sg_settings_popup = True
                     self.sg_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
-            if sg_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if sg_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- RDP Button ---
@@ -487,7 +493,9 @@ class InteractiveFunscriptTimeline:
                     self.amp_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
 
-            if amp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if amp_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- Resample Button ---
@@ -509,7 +517,9 @@ class InteractiveFunscriptTimeline:
                         fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                         self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
 
-            if resample_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if resample_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- Keyframe Extraction Button ---
@@ -525,7 +535,9 @@ class InteractiveFunscriptTimeline:
                     self.keyframe_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
 
-            if keyframe_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if keyframe_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- Speed Limiter Button ---
@@ -556,7 +568,9 @@ class InteractiveFunscriptTimeline:
                     if self._perform_inversion(selected_indices=indices_to_op):
                         fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                         self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
-            if invert_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if invert_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # Clamp Buttons
@@ -584,7 +598,9 @@ class InteractiveFunscriptTimeline:
                     if self._perform_clamp(100, selected_indices=indices_to_op):
                         fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                         self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
-            if clamp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if clamp_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- Time Shift controls ---
@@ -608,7 +624,31 @@ class InteractiveFunscriptTimeline:
             if imgui.button(f">>##ShiftRight{window_id_suffix}"):
                 if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(
                     self.shift_frames_amount)
-            if time_shift_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            if time_shift_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+            imgui.same_line()
+
+            # --- Zoom Buttons ---
+            video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
+            # can_manual_pan_zoom = (video_loaded and not self.app.processor.is_processing) or not video_loaded
+            zoom_disabled_bool = False  # not allow_editing_timeline or not can_manual_pan_zoom
+
+            if zoom_disabled_bool:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+            imgui.text("Zoom:")
+            imgui.same_line()
+            if imgui.button(f"+##ZoomIn{window_id_suffix}"):
+                self.zoom_action_request = 0.85  # Set zoom-in request
+            imgui.same_line()
+            if imgui.button(f"-##ZoomOut{window_id_suffix}"):
+                self.zoom_action_request = 1.15  # Set zoom-out request
+
+            if zoom_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
             # endregion
 
@@ -778,7 +818,7 @@ class InteractiveFunscriptTimeline:
                 window_expanded, self.show_rdp_settings_popup = imgui.begin(
                     rdp_window_title, closable=self.show_rdp_settings_popup, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
                 if window_expanded:
-                    imgui.text(f"RDP Simplification (Timeline {self.timeline_num})");
+                    imgui.text(f"RDP Simplification (Timeline {self.timeline_num})")
                     imgui.separator()
                     epsilon_changed, self.rdp_epsilon = imgui.slider_float("Epsilon##RDPEpsPopup", self.rdp_epsilon,
                                                                            0.1, 20.0,
@@ -793,7 +833,7 @@ class InteractiveFunscriptTimeline:
                         if sel_changed:
                             self._update_preview('rdp')
                     else:
-                        imgui.text_disabled("Apply to: Full Script");
+                        imgui.text_disabled("Apply to: Full Script")
                         self.rdp_apply_to_selection = False
                     if imgui.button(f"Apply##RDPApplyPop{window_id_suffix}"):
                         indices_to_use = list(
@@ -1028,6 +1068,21 @@ class InteractiveFunscriptTimeline:
 
             # endregion
 
+            # --- Deferred Zoom Logic Execution ---
+            if self.zoom_action_request is not None:
+                # if can_manual_pan_zoom:
+                time_at_current_center_ms = x_to_time(center_x_marker)
+                scale_factor = self.zoom_action_request
+                app_state.timeline_zoom_factor_ms_per_px = max(0.01,
+                                                               min(app_state.timeline_zoom_factor_ms_per_px * scale_factor,
+                                                                   2000.0))
+                app_state.timeline_pan_offset_ms = time_at_current_center_ms - (
+                            canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
+                app_state.timeline_interaction_active = True
+                self.is_zooming_active = True
+
+                self.zoom_action_request = None  # Reset request
+
             # Pan/Zoom boundaries
             center_marker_offset_ms = (canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
             min_pan_allowed = -center_marker_offset_ms
@@ -1183,13 +1238,17 @@ class InteractiveFunscriptTimeline:
                         prev_at_limit = -1
                         # Find true previous point NOT in the current selection being moved
                         for k in range(current_idx_in_list - 1, -1, -1):
-                            if actions_list[k] not in objects_to_move: prev_at_limit = actions_list[k]["at"] + 1; break
+                            if actions_list[k] not in objects_to_move:
+                                prev_at_limit = actions_list[k]["at"] + 1
+                                break
                         if prev_at_limit == -1: prev_at_limit = 0
 
                         next_at_limit = float('inf')
                         # Find true next point NOT in the current selection being moved
                         for k in range(current_idx_in_list + 1, len(actions_list)):
-                            if actions_list[k] not in objects_to_move: next_at_limit = actions_list[k]["at"] - 1; break
+                            if actions_list[k] not in objects_to_move:
+                                next_at_limit = actions_list[k]["at"] - 1
+                                break
                         if video_loaded: next_at_limit = min(next_at_limit, effective_total_duration_ms)
 
                         action_obj["at"] = int(
