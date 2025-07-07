@@ -403,12 +403,6 @@ def perform_yolo_analysis(
     process_logger = None
     fallback_config_for_subprocesses = None
 
-    if output_filename_override:
-        result_file_local = output_filename_override
-        os.makedirs(os.path.dirname(result_file_local), exist_ok=True)
-    else:
-        result_file_local = os.path.splitext(video_path_arg)[0] + '.msgpack'
-
     if app_logger_config_arg and app_logger_config_arg.get('main_logger'):
         process_logger = app_logger_config_arg['main_logger']
     else:
@@ -427,6 +421,20 @@ def perform_yolo_analysis(
             handler.setFormatter(formatter)
             process_logger.addHandler(handler)
             process_logger.setLevel(log_level_orch)
+
+    # Now, validate the output path.
+    if output_filename_override:
+        result_file_local = output_filename_override
+        # Ensure the directory exists.
+        output_dir = os.path.dirname(result_file_local)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+    else:
+        # If no output path is provided, abort the process.
+        process_logger.critical("Stage 1 Critical Error: No output file path was specified for the msgpack file. Aborting analysis.")
+        if progress_callback:
+            progress_callback(0, 0, "Stage 1 Error: No output path specified.", 0, 0, 0)
+        return None
 
     if app_logger_config_arg and app_logger_config_arg.get('log_file') and app_logger_config_arg.get(
             'log_level') is not None:
