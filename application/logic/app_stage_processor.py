@@ -2,7 +2,7 @@ import os
 import threading
 import math
 import time
-from queue import Queue as ThreadQueue, Empty
+from queue import Queue
 from typing import Optional, List, Dict, Any, Tuple
 import msgpack
 import numpy as np
@@ -12,7 +12,7 @@ import detection.cd.stage_2_cd as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
 
 from config import constants
-from config.constants import TrackerMode
+from config.constants import TrackerMode, SCENE_DETECTION_DEFAULT_THRESHOLD
 from application.utils.video_segment import VideoSegment
 
 
@@ -34,7 +34,7 @@ class AppStageProcessor:
         self.current_analysis_stage: int = 0
         self.stage_thread: Optional[threading.Thread] = None
         self.stop_stage_event = threading.Event()
-        self.gui_event_queue = ThreadQueue()
+        self.gui_event_queue = Queue()
 
         # Status and Progress Attributes
         self.stage1_frame_queue_size: int = 0
@@ -71,7 +71,6 @@ class AppStageProcessor:
 
         # --- State for Scene Detection ---
         self.scene_detection_active: bool = False
-        self.scene_detection_progress: float = 0.0
         self.scene_detection_status: str = "Idle"
         self.scene_detection_thread: Optional[threading.Thread] = None
 
@@ -87,37 +86,16 @@ class AppStageProcessor:
         self.scene_detection_processing_fps_str: str = "0 FPS"
         self.scene_detection_eta_str: str = "N/A"
 
-    # --- Progress callback for scene detection ---
-    def _scene_detection_progress_callback(self, current_frame: int, total_frames: int, time_elapsed: float,
-                                           processing_fps: float, eta_seconds: float):
-        progress = float(current_frame) / total_frames if total_frames > 0 else 0.0
-        progress_data = {
-            "message": f"Processing frame {current_frame} of {total_frames}",
-            "time_elapsed": time_elapsed,
-            "fps": processing_fps,
-            "eta": eta_seconds
-        }
-        self.gui_event_queue.put(("scene_detection_progress", progress, progress_data))
-
     # --- Thread target for running scene detection ---
-    def _run_scene_detection_thread(self):
+    def _run_scene_detection_thread(self, threshold=SCENE_DETECTION_DEFAULT_THRESHOLD):
         try:
-            self.gui_event_queue.put(("scene_detection_progress", 0.0, "Initializing..."))
-
             # 1. Run detection in the background
             scene_list = self.app.processor.detect_scenes(
-                threshold=27.0,  # This could be exposed in the UI
-                progress_callback=self._scene_detection_progress_callback,
-                stop_event=self.stop_stage_event
+                threshold=threshold  # Use the threshold from the UI
             )
 
             # 2. Check if the task was aborted
-            if self.stop_stage_event.is_set():
-                self.gui_event_queue.put(("scene_detection_progress", -1.0, "Cancelled"))
-                return
-
-            if not scene_list:
-                self.gui_event_queue.put(("scene_detection_progress", -1.0, "No scenes found or error."))
+            if self.stop_stage_event.is_set() or not scene_list:
                 return
 
             # 3. Create chapters from the results on the main thread via the queue
@@ -125,12 +103,11 @@ class AppStageProcessor:
 
         except Exception as e:
             self.logger.error(f"Scene detection thread failed: {e}", exc_info=True)
-            self.gui_event_queue.put(("scene_detection_progress", -1.0, f"Error: {e}"))
         finally:
             self.scene_detection_active = False
 
     # --- Public method to start the process from the UI ---
-    def start_scene_detection_analysis(self):
+    def start_scene_detection_analysis(self, threshold=SCENE_DETECTION_DEFAULT_THRESHOLD):
         if self.full_analysis_active or self.scene_detection_active:
             self.logger.warning("Another analysis is already running.", extra={'status_message': True})
             return
@@ -140,10 +117,9 @@ class AppStageProcessor:
 
         self.scene_detection_active = True
         self.scene_detection_status = "Starting..."
-        self.scene_detection_progress = 0.0
         self.stop_stage_event.clear()
 
-        self.scene_detection_thread = threading.Thread(target=self._run_scene_detection_thread, daemon=True)
+        self.scene_detection_thread = threading.Thread(target=self._run_scene_detection_thread, args=(threshold,), daemon=True)
         self.scene_detection_thread.start()
 
     def reset_stage1_status(self):
@@ -466,11 +442,17 @@ class AppStageProcessor:
                                 raise TypeError(
                                     f"Object of type {obj.__class__.__name__} is not serializable for msgpack")
 
-                            with open(s2_overlay_path, 'wb') as f:
-                                f.write(
-                                    msgpack.packb(all_frames_data, use_bin_type=True, default=numpy_default_handler))
+                            if all_frames_data is not None:
+                                packed_data = msgpack.packb(all_frames_data, use_bin_type=True, default=numpy_default_handler)
+                                if packed_data is not None:
+                                    with open(s2_overlay_path, 'wb') as f:
+                                        f.write(packed_data)
+                                    self.logger.info("Successfully rewrote Stage 2 overlay file with Stage 3 data.")
+                                else:
+                                    self.logger.warning("msgpack.packb returned None, not writing overlay file.")
+                            else:
+                                self.logger.warning("all_frames_data is None, not writing overlay file.")
 
-                            self.logger.info("Successfully rewrote Stage 2 overlay file with Stage 3 data.")
                             # Send event to GUI to (re)load the updated data
                             self.gui_event_queue.put(("load_s2_overlay", s2_overlay_path, None))
 
@@ -757,6 +739,14 @@ class AppStageProcessor:
 
             self.gui_event_queue.put(("stage3_status_update", "Stage 3 Completed.", "Done"))
             self.app.project_manager.project_dirty = True
+
+            # Update chapters for GUI if video_segments are present (3-stage fix)
+            if "video_segments" in s3_results:
+                fs_proc.video_chapters.clear()
+                for seg_data in s3_results["video_segments"]:
+                    fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
+                self.app.app_state_ui.heatmap_dirty = True
+                self.app.app_state_ui.funscript_preview_dirty = True
             return True
         else:
             error_msg = s3_results.get("error", "Unknown S3 failure") if s3_results else "S3 returned None."
@@ -772,6 +762,13 @@ class AppStageProcessor:
         elif self.scene_detection_active and self.scene_detection_thread and self.scene_detection_thread.is_alive():
             self.logger.info("Aborting scene detection...", extra={'status_message': True})
             self.stop_stage_event.set()
+            # Call scene_manager.stop() if available for fast abort
+            if hasattr(self.app.processor, '_active_scene_manager') and self.app.processor._active_scene_manager is not None:
+                try:
+                    self.app.processor._active_scene_manager.stop()
+                    self.logger.info("Called scene_manager.stop() to abort scene detection.")
+                except Exception as e:
+                    self.logger.warning(f"Failed to call scene_manager.stop(): {e}")
         else:
             self.logger.info("No analysis pipeline running to abort.", extra={'status_message': False})
         self.app.energy_saver.reset_activity_timer()
@@ -787,21 +784,10 @@ class AppStageProcessor:
 
                 event_type, data1, data2 = queue_item[0], queue_item[1], queue_item[2] if len(queue_item) > 2 else None
 
-                if event_type == "scene_detection_progress":
-                    progress_val, data = data1, data2
-                    if progress_val >= 0:
-                        self.scene_detection_progress = progress_val
-                    if isinstance(data, dict):
-                        self.scene_detection_status = data.get("message", "Processing...")
-                        t_el, fps, eta = data.get("time_elapsed", 0.0), data.get("fps", 0.0), data.get("eta", 0.0)
-                        self.scene_detection_time_elapsed_str = f"{int(t_el // 3600):02d}:{int((t_el % 3600) // 60):02d}:{int(t_el % 60):02d}"
-                        self.scene_detection_processing_fps_str = f"{int(fps)} FPS"
-                        if math.isnan(eta) or math.isinf(eta):
-                            self.scene_detection_eta_str = "Calculating..."
-                        else:
-                            self.scene_detection_eta_str = f"{int(eta // 3600):02d}:{int((eta % 3600) // 60):02d}:{int(eta % 60):02d}"
-                elif event_type == "scene_detection_finished":
+                if event_type == "scene_detection_finished":
                     scene_list, status_text = data1, data2
+                    if status_text is None:
+                        status_text = "Chapters created."
                     self.scene_detection_status = status_text
                     fs_proc.video_chapters.clear()
                     default_pos_key = next(iter(constants.POSITION_INFO_MAPPING), "Default")

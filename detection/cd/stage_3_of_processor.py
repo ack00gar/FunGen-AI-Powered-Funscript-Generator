@@ -119,7 +119,7 @@ class Stage3OpticalFlowProcessor:
             return False
         return True
 
-    def process_segments(self) -> Dict[str, List[Dict[str, Any]]]:
+    def process_segments(self) -> Dict[str, Any]:
         if not self._initialize_dependencies():
             return {"error": "Failed to initialize S3 OF dependencies."}
 
@@ -135,7 +135,7 @@ class Stage3OpticalFlowProcessor:
             self.logger.info("S3 OF: No relevant segments to process.")
             if self.video_processor:
                 self.video_processor.reset(close_video=True)
-            return {"primary_actions": [], "secondary_actions": []}
+            return {"primary_actions": [], "secondary_actions": [], "video_segments": []}
 
         estimated_total_frames_s3 = sum(
             (seg.end_frame_id - max(0, seg.start_frame_id - self.common_app_config.get('num_warmup_frames_s3', 10)) + 1)
@@ -385,9 +385,12 @@ class Stage3OpticalFlowProcessor:
 
         self.logger.info(
             f"S3 OF: Processing complete. Generated {len(self.funscript.primary_actions)} primary actions.")
+        from detection.cd.stage_2_cd import ATRSegment
+        video_segments = [seg.to_dict() for seg in self.atr_segments]
         return {
             "primary_actions": list(self.funscript.primary_actions),
-            "secondary_actions": list(self.funscript.secondary_actions)
+            "secondary_actions": list(self.funscript.secondary_actions),
+            "video_segments": video_segments
         }
 
 
