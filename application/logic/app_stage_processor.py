@@ -123,7 +123,6 @@ class AppStageProcessor:
         self.scene_detection_thread.start()
 
     def reset_stage1_status(self):
-        self.app.file_manager.stage1_output_msgpack_path = None
         self.stage1_status_text = "Not run."
         self.stage1_progress_value = 0.0
         self.stage1_progress_label = ""
@@ -254,8 +253,28 @@ class AppStageProcessor:
 
         range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
 
-        # Determine the target msgpack path using the centralized file manager
+        # Attempt to get the path from the file manager as usual.
         full_msgpack_path = fm.get_output_path_for_file(fm.video_path, ".msgpack")
+
+        # If the file manager fails to return a path (e.g., in a stateless batch context),
+        # construct a default path manually.
+        if not full_msgpack_path:
+            self.logger.warning(
+                "get_output_path_for_file returned None. Manually constructing a fallback path for msgpack.")
+            # Get the base output folder from settings.
+            base_output_dir = self.app.app_settings.get("output_folder_path", constants.DEFAULT_OUTPUT_FOLDER)
+
+            # Create a subdirectory for the video to keep files organized.
+            video_filename_no_ext = os.path.splitext(os.path.basename(fm.video_path))[0]
+            video_specific_output_dir = os.path.join(base_output_dir, video_filename_no_ext)
+
+            # Create the directory if it doesn't exist.
+            os.makedirs(video_specific_output_dir, exist_ok=True)
+
+            # Construct the full path for the msgpack file.
+            full_msgpack_path = os.path.join(video_specific_output_dir, video_filename_no_ext + ".msgpack")
+            self.logger.info(f"Fallback msgpack path set to: {full_msgpack_path}")
+
         full_msgpack_exists = os.path.exists(full_msgpack_path)
 
         should_run_s1 = True
@@ -302,10 +321,9 @@ class AppStageProcessor:
         stage1_success = False
 
         if self.app.is_batch_processing_active:
-            # Batch processing uses an index, so we map it back to our enum key
             batch_mode_map = {
-                0: TrackerMode.LIVE_YOLO_ROI, 1: TrackerMode.LIVE_USER_ROI,
-                2: TrackerMode.OFFLINE_2_STAGE, 3: TrackerMode.OFFLINE_3_STAGE
+                0: TrackerMode.OFFLINE_3_STAGE,
+                1: TrackerMode.OFFLINE_2_STAGE
             }
             selected_mode = batch_mode_map.get(self.app.batch_processing_method_idx, TrackerMode.OFFLINE_2_STAGE)
             self.logger.info(f"[Thread] Using batch processing mode: {selected_mode.name}")
@@ -653,20 +671,20 @@ class AppStageProcessor:
             return False
 
         tracker_config_s3 = {
-            "confidence_threshold": self.app_settings.get('tracker_confidence_threshold', 0.4),  # Example name
-            "roi_padding": self.app_settings.get('tracker_roi_padding', 20),
-            "roi_update_interval": self.app_settings.get('s3_roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
-            "roi_smoothing_factor": self.app_settings.get('tracker_roi_smoothing_factor', constants.DEFAULT_ROI_SMOOTHING_FACTOR),
-            "dis_flow_preset": self.app_settings.get('tracker_dis_flow_preset', "ULTRAFAST"),
+            "confidence_threshold": self.app_settings.get('live_tracker_confidence_threshold', constants.DEFAULT_TRACKER_CONFIDENCE_THRESHOLD),
+            "roi_padding": self.app_settings.get('live_tracker_roi_padding', constants.DEFAULT_TRACKER_ROI_PADDING),
+            "roi_update_interval": self.app_settings.get('live_tracker_roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
+            "roi_smoothing_factor": self.app_settings.get('live_tracker_roi_smoothing_factor', constants.DEFAULT_ROI_SMOOTHING_FACTOR),
+            "dis_flow_preset": self.app_settings.get('live_tracker_dis_flow_preset', constants.DEFAULT_DIS_FLOW_PRESET),
             "target_size_preprocess": self.app.tracker.target_size_preprocess if self.app.tracker else (640, 640),
-            "flow_history_window_smooth": self.app_settings.get('tracker_flow_history_window_smooth', 3),
+            "flow_history_window_smooth": self.app_settings.get('live_tracker_flow_smoothing_window', constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW),
             "adaptive_flow_scale": self.app_settings.get('tracker_adaptive_flow_scale', True),
-            "use_sparse_flow": self.app_settings.get('tracker_use_sparse_flow', False),
-            "base_amplification_factor": self.app_settings.get('tracker_base_amplification', constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
-            "class_specific_amplification_multipliers": self.app_settings.get('tracker_class_specific_multipliers', constants.DEFAULT_CLASS_AMP_MULTIPLIERS),
+            "use_sparse_flow": self.app_settings.get('live_tracker_use_sparse_flow', False),
+            "base_amplification_factor": self.app_settings.get('live_tracker_base_amplification', constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
+            "class_specific_amplification_multipliers": self.app_settings.get('live_tracker_class_amp_multipliers', constants.DEFAULT_CLASS_AMP_MULTIPLIERS),
             "y_offset": self.app_settings.get('tracker_y_offset', constants.DEFAULT_LIVE_TRACKER_Y_OFFSET),
             "x_offset": self.app_settings.get('tracker_x_offset', constants.DEFAULT_LIVE_TRACKER_X_OFFSET),
-            "sensitivity": self.app_settings.get('tracker_sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY),
+            "sensitivity": self.app_settings.get('live_tracker_sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY),
         }
 
         video_fps_s3 = 30.0
@@ -1008,8 +1026,31 @@ class AppStageProcessor:
                                 self.logger.info("Auto post-processing disabled for this run, skipping.")
 
                             self.logger.info("Saving final funscripts...")
-                            self.app.file_manager.save_final_funscripts(video_path_from_event,
-                                                                        chapters=chapters_for_save)
+
+                            saved_funscript_paths = self.app.file_manager.save_final_funscripts(video_path_from_event,
+                                                                                                chapters=chapters_for_save)
+
+                            # Check if we are in batch mode and if the user requested a copy
+                            if self.app.is_batch_processing_active and self.app.batch_copy_funscript_to_video_location:
+                                if saved_funscript_paths and isinstance(saved_funscript_paths, list):
+                                    video_dir = os.path.dirname(video_path_from_event)
+                                    for source_path in saved_funscript_paths:
+                                        if not source_path or not os.path.exists(source_path):
+                                            continue
+                                        try:
+                                            file_basename = os.path.basename(source_path)
+                                            destination_path = os.path.join(video_dir, file_basename)
+                                            # Manually copy the file
+                                            with open(source_path, 'rb') as src_file:
+                                                content = src_file.read()
+                                            with open(destination_path, 'wb') as dest_file:
+                                                dest_file.write(content)
+                                            self.logger.info(f"Saved copy of {file_basename} next to video.")
+                                        except Exception as e:
+                                            self.logger.error(f"Failed to save copy of {os.path.basename(source_path)} next to video: {e}")
+                                else:
+                                    self.logger.warning("save_final_funscripts did not return file paths. Cannot save copy next to video.")
+
 
                             # --- Save the project file for the completed video ---
                             self.logger.info("Saving project file for completed video...")
