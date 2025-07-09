@@ -301,24 +301,23 @@ class VideoDisplayUI:
         if mode_text == "Undetermined":
             return
 
-        # Position text under the anchor box instead of the corner of the ROI
-        box_x, box_y, box_w, box_h = roi_video_coords
-        # Anchor point in video coordinates: bottom-center of the box
-        anchor_vid_x = box_x + box_w / 2
-        anchor_vid_y = box_y + box_h
+        # Anchor point in video coordinates: top-left of the box
+        box_x, box_y, _, _ = roi_video_coords
+        anchor_vid_x = box_x
+        anchor_vid_y = box_y
 
         anchor_screen_pos = self._video_to_screen_coords(int(anchor_vid_x), int(anchor_vid_y))
 
         if anchor_screen_pos:
-            text_size = imgui.calc_text_size(mode_text)
-            # Center the text horizontally under the anchor point
-            text_pos_x = anchor_screen_pos[0] - (text_size[0] / 2)
-            # Position it vertically below the anchor point, with padding
-            text_pos_y = anchor_screen_pos[1] + 5  # 5 pixels of padding below the box
+            # Position text inside the top-left corner with padding
+            text_pos_x = anchor_screen_pos[0] + 5  # 5 pixels of padding from the left
+            text_pos_y = anchor_screen_pos[1] + 5  # 5 pixels of padding from the top
 
             img_rect = self._actual_video_image_rect_on_screen
-            if (text_pos_x + text_size[0]) < img_rect['max_x'] and text_pos_y < img_rect['max_y']:
+            text_size = imgui.calc_text_size(mode_text) # Calculate text size to check bounds
+            if (text_pos_x + text_size[0]) < img_rect['max_x'] and (text_pos_y + text_size[1]) < img_rect['max_y']:
                 draw_list.add_text(text_pos_x, text_pos_y, mode_color, mode_text)
+
 
     def render(self):
         app_state = self.app.app_state_ui
@@ -502,6 +501,15 @@ class VideoDisplayUI:
                                 self.app.processor.current_frame_index >= 0:
                             self._render_stage2_overlay(stage_proc, app_state)
 
+                        # Only show live tracker info if the Stage 2 overlay isn't active
+                        if self.app.tracker and self.app.tracker.tracking_active and not (app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map):
+                            draw_list = imgui.get_window_draw_list()
+                            img_rect = self._actual_video_image_rect_on_screen
+                            # Clip rendering to the video display area
+                            draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
+                            self._render_live_tracker_overlay(draw_list)
+                            draw_list.pop_clip_rect()
+
                         self._render_playback_controls_overlay()
                         self._render_fps_controls_overlay()
                         self._render_video_zoom_pan_controls(app_state)
@@ -554,6 +562,31 @@ class VideoDisplayUI:
                 pan_dy_norm_view = -delta_y_screen / view_height_on_screen
                 app_state.pan_video_normalized_delta(pan_dx_norm_view, pan_dy_norm_view)
                 self.app.energy_saver.reset_activity_timer()
+
+    def _render_live_tracker_overlay(self, draw_list):
+        """Renders overlays specific to the live tracker, like motion mode."""
+        tracker = self.app.tracker
+
+        # Ensure the tracker is active and has a defined ROI to anchor the text
+        if not tracker or not tracker.tracking_active or not tracker.roi:
+            return
+
+        # Check if the video is VR, as this feature is VR-specific
+        is_vr_video = tracker._is_vr_video()
+
+        if tracker.enable_inversion_detection and is_vr_video:
+            # Get the necessary data from the live tracker instance
+            interaction_class = tracker.main_interaction_class
+            roi_video_coords = tracker.roi
+            motion_mode = tracker.motion_mode
+
+            # Call the existing motion mode rendering function with live data
+            self._render_motion_mode_overlay(
+                draw_list=draw_list,
+                motion_mode=motion_mode,
+                interaction_class=interaction_class,
+                roi_video_coords=roi_video_coords
+            )
 
     def _render_stage2_overlay(self, stage_proc, app_state):
         frame_overlay_data = stage_proc.stage2_overlay_data_map.get(self.app.processor.current_frame_index)
