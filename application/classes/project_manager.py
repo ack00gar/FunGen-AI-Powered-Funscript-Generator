@@ -84,7 +84,7 @@ class ProjectManager:
                 title="Open Project",
                 is_save=False,
                 callback=self.load_project,
-                extension_filter=f"FunGen Projects (*{PROJECT_FILE_EXTENSION}),*{PROJECT_FILE_EXTENSION}|Autosave States (*{AUTOSAVE_FILE.split('.')[-1]}),*{AUTOSAVE_FILE.split('.')[-1]}|All files (*.*),*.*" initial_path=initial_dir)
+                extension_filter=f"FunGen Projects (*{PROJECT_FILE_EXTENSION}),*{PROJECT_FILE_EXTENSION}|Autosave States (*{AUTOSAVE_FILE.split('.')[-1]}),*{AUTOSAVE_FILE.split('.')[-1]}|All files (*.*),*.*", initial_path=initial_dir)
         else:
             self.app.logger.error("File dialog cannot be shown from ProjectManager. GUI bridge missing.")
 

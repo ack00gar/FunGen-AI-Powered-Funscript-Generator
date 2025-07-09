@@ -71,7 +71,7 @@ class AppStageProcessor:
             self.stage1_result_queue_size = 0
             self.stage1_final_elapsed_time_str = ""
             self.stage1_final_fps_str = ""
-            self.app.file_manager.stage1_output_msgpack_path = None
+            # self.app.file_manager.stage1_output_msgpack_path = None
         if "stage2" in stages:
             self.stage2_status_text = "Not run."
             self.stage2_progress_value = 0.0
