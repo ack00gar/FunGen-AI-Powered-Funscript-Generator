@@ -24,7 +24,6 @@ from .app_calibration import AppCalibration
 from .app_energy_saver import AppEnergySaver
 from .app_utility import AppUtility
 
-
 class ApplicationLogic:
     def __init__(self):
         self.gui_instance = None
@@ -57,7 +56,11 @@ class ApplicationLogic:
         self.logger = self._logger_instance.get_logger()
         self.app_settings.logger = self.logger  # Now provide the logger to AppSettings
 
-        self.discarded_tracking_classes: List[str] = self.app_settings.get("discarded_tracking_classes", [])
+        # REFACTORED Defensive programming. Always make sure the type is a list of strings.
+        discarded_tracking_classes = self.app_settings.get("discarded_tracking_classes", [])
+        if discarded_tracking_classes is None:
+            discarded_tracking_classes = []
+        self.discarded_tracking_classes: List[str] = discarded_tracking_classes
         self.pending_action_after_tracking: Optional[Dict] = None
 
         self.app_state_ui = AppStateUI(self)
@@ -65,7 +68,7 @@ class ApplicationLogic:
 
         # --- Hardware Acceleration
         # Query ffmpeg for available hardware accelerations
-        self.available_ffmpeg_hwaccels = self._get_available_ffmpeg_hwaccels()  #
+        self.available_ffmpeg_hwaccels = self._get_available_ffmpeg_hwaccels()
 
         # Get the hardware acceleration method from settings and validate it
         default_hw_accel = "auto"
@@ -104,10 +107,10 @@ class ApplicationLogic:
 
         # --- Initialize Tracker ---
         self.tracker = Tracker(
-            app_logic_instance=self,  # Pass the app_logic instance
-            tracker_model_path=self.yolo_detection_model_path_setting,  # Use the setting path
-            pose_model_path=self.yolo_pose_model_path_setting,  # Use the setting path
-            logger=self.logger)
+            app_logic_instance = self,
+            tracker_model_path = self.yolo_detection_model_path_setting,
+            pose_model_path = self.yolo_pose_model_path_setting,
+            logger = self.logger)
         if self.tracker:
             self.tracker.show_stats = False  # Default internal tracker states
             self.tracker.show_funscript_preview = False

@@ -334,8 +334,7 @@ class VideoDisplayUI:
                 return
 
             # Begin the window. The second return value `new_visibility` will be False if the user clicks the 'x'.
-            is_expanded, new_visibility = imgui.begin("Video Display", closable=True,
-                                                      flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_COLLAPSE)
+            is_expanded, new_visibility = imgui.begin("Video Display", closable=True, flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_COLLAPSE)
 
             # Update our state based on the window's visibility (i.e., if the user closed it).
             if new_visibility != app_state.show_video_display_window:
@@ -347,8 +346,7 @@ class VideoDisplayUI:
                 should_render_content = True
         else:
             # For fixed mode, it's a static panel that's always present.
-            imgui.begin("Video Display##CenterVideo",
-                        flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
+            imgui.begin("Video Display##CenterVideo", flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
             should_render_content = True
 
         if should_render_content:
@@ -437,11 +435,9 @@ class VideoDisplayUI:
                                             if roi_w > 5 and roi_h > 5: # Minimum ROI size
                                                 self.drawn_user_roi_video_coords = (roi_x, roi_y, roi_w, roi_h)
                                                 self.waiting_for_point_click = True
-                                                self.app.logger.info("ROI drawn. Click a point inside the ROI.",
-                                                                     extra={'status_message': True, 'duration': 5.0})
+                                                self.app.logger.info("ROI drawn. Click a point inside the ROI.", extra={'status_message': True, 'duration': 5.0})
                                             else:
-                                                self.app.logger.info("Drawn ROI is too small. Please redraw.",
-                                                                     extra={'status_message': True})
+                                                self.app.logger.info("Drawn ROI is too small. Please redraw.", extra={'status_message': True})
                                                 self.drawn_user_roi_video_coords = None
                                         else:
                                             self.app.logger.warning(
@@ -456,8 +452,7 @@ class VideoDisplayUI:
                                             roi_x, roi_y, roi_w, roi_h = self.drawn_user_roi_video_coords
                                             pt_x, pt_y = point_vid_coords
                                             if roi_x <= pt_x < roi_x + roi_w and roi_y <= pt_y < roi_y + roi_h:
-                                                self.app.user_roi_and_point_set(self.drawn_user_roi_video_coords,
-                                                                                point_vid_coords)
+                                                self.app.user_roi_and_point_set(self.drawn_user_roi_video_coords, point_vid_coords)
                                                 self.waiting_for_point_click = False
                                                 self.drawn_user_roi_video_coords = None
                                             else:
@@ -465,12 +460,10 @@ class VideoDisplayUI:
                                                     "Clicked point is outside the drawn ROI. Please click inside.",
                                                     extra={'status_message': True})
                                         else:
-                                            self.app.logger.info("Point click was outside the video content area.",
-                                                                 extra={'status_message': True})
+                                            self.app.logger.info("Point click was outside the video content area.", extra={'status_message': True})
                             elif self.is_drawing_user_roi and not io.mouse_down[0]: # Mouse released outside hovered area while drawing
                                 self.is_drawing_user_roi = False
-                                self.app.logger.info("ROI drawing cancelled (mouse released outside video).",
-                                                     extra={'status_message': True})
+                                self.app.logger.info("ROI drawing cancelled (mouse released outside video).", extra={'status_message': True})
 
                         # Visualization of active User Fixed ROI (even when not setting)
                         if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
@@ -721,7 +714,7 @@ class VideoDisplayUI:
     def _render_drop_video_prompt(self):
         cursor_start_pos = imgui.get_cursor_pos()
         win_size = imgui.get_window_size()
-        text_to_display = "Drag and drop a video file here."
+        text_to_display = "Drag and drop one or more video files here."
         text_size = imgui.calc_text_size(text_to_display)
         if win_size[0] > text_size[0] and win_size[1] > text_size[1]:  # Check if window is large enough for text
             imgui.set_cursor_pos(((win_size[0] - text_size[0]) * 0.5 + cursor_start_pos[0],
