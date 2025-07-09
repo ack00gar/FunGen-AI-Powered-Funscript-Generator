@@ -337,8 +337,7 @@ class AppFileManager:
             # It should be entirely skipped during a project load.
             self.funscript_path = ""
             self.loaded_funscript_path = ""
-            stage_processor.reset_stage1_status()
-            stage_processor.reset_stage2_status()
+            stage_processor.reset_stage_status(stages=("stage1", "stage2", "stage3")) # REFACTORED for maintainability. Create as many stages you want without having to make a new function. Simply pass in a tuple of stage names you want to reset.
             self.clear_stage2_overlay_data()
             funscript_processor.video_chapters.clear()
             self.app.app_state_ui.heatmap_dirty = True
@@ -382,8 +381,7 @@ class AppFileManager:
             self.app.processor.reset(close_video=True)  # Resets video info in processor
 
         self.video_path = ""
-        self.app.stage_processor.reset_stage1_status()
-        self.app.stage_processor.reset_stage2_status()
+        self.app.stage_processor.reset_stage_status(stages=("stage1", "stage2", "stage3"))
         self.app.funscript_processor.video_chapters.clear()
         self.clear_stage2_overlay_data()
 
