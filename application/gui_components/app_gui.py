@@ -600,6 +600,8 @@ class GUI:
                     self.batch_overwrite_mode_ui = 0
                 if imgui.radio_button("Process Only if Funscript is Missing", self.batch_overwrite_mode_ui == 1):
                     self.batch_overwrite_mode_ui = 1
+                if imgui.radio_button("Process All Videos (including own matching version)", self.batch_overwrite_mode_ui == 2):
+                    self.batch_overwrite_mode_ui = 2
 
                 imgui.separator()
                 imgui.text("Output Options:")

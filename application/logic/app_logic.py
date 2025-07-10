@@ -8,12 +8,10 @@ from typing import Optional, Dict, Tuple, List, Any
 from video.video_processor import VideoProcessor
 from tracker.tracker import ROITracker as Tracker
 
-from application.classes.settings_manager import AppSettings
-from application.classes.project_manager import ProjectManager
-from application.classes.shortcut_manager import ShortcutManager
-from application.classes.undo_redo_manager import UndoRedoManager
+from application.classes import settings_manager, project_manager, shortcut_manager, undo_redo_manager
 from application.utils.logger import AppLogger
 from config.constants import *
+from application.utils.write_access import check_write_access
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -27,7 +25,7 @@ from .app_utility import AppUtility
 class ApplicationLogic:
     def __init__(self):
         self.gui_instance = None
-        self.app_settings = AppSettings(logger=None)
+        self.app_settings = settings_manager.AppSettings(logger=None)
 
         # Initialize logging_level_setting before AppLogger uses it indirectly via AppSettings
         self.logging_level_setting = self.app_settings.get("logging_level", "INFO")
@@ -102,8 +100,8 @@ class ApplicationLogic:
         self.yolo_input_size = 640
 
         # --- Undo/Redo Managers ---
-        self.undo_manager_t1: Optional[UndoRedoManager] = None
-        self.undo_manager_t2: Optional[UndoRedoManager] = None
+        self.undo_manager_t1: Optional[undo_redo_manager.UndoRedoManager] = None
+        self.undo_manager_t2: Optional[undo_redo_manager.UndoRedoManager] = None
 
         # --- Initialize Tracker ---
         self.tracker = Tracker(
@@ -132,8 +130,8 @@ class ApplicationLogic:
         self.energy_saver = AppEnergySaver(self)
 
         # --- Other Managers ---
-        self.project_manager = ProjectManager(self)
-        self.shortcut_manager = ShortcutManager(self)
+        self.project_manager = project_manager.ProjectManager(self)
+        self.shortcut_manager = shortcut_manager.ShortcutManager(self)
 
         self.project_data_on_load: Optional[Dict] = None
         self.s2_frame_objects_map_for_s3: Optional[Dict[int, Any]] = None
@@ -326,6 +324,80 @@ class ApplicationLogic:
         self.single_video_analysis_complete_event.set()  # Release the wait lock
 
     def _run_batch_processing_thread(self):
+        # --- Pre-flight: Check write access and make backups for all videos before processing ---
+        batch_funscript_paths = []
+        for video_path in self.batch_video_paths:
+            base, _ = os.path.splitext(video_path)
+            funscript_path = f"{base}.funscript"
+            batch_funscript_paths.append(funscript_path)
+        check_write_access(batch_funscript_paths)
+
+        # Attempt to back up all existing funscript files
+        backup_attempts = 0
+        max_attempts = 3
+        backoff = 1.0
+        backups_to_check = [p for p in batch_funscript_paths if os.path.exists(p)]
+        backup_success = {p: False for p in backups_to_check}
+        while backup_attempts < max_attempts and backups_to_check:
+            for funscript_path in backups_to_check:
+                backup_path = f"{funscript_path}.{int(time.time())}.bak"
+                try:
+                    # Use OS-level exclusive creation to avoid overwriting backups
+                    fd = os.open(backup_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+                    with open(funscript_path, 'rb') as src, os.fdopen(fd, 'wb') as dst:
+                        dst.write(src.read())
+                    backup_success[funscript_path] = True
+                    self.logger.info(f"Created backup of existing file: {os.path.basename(backup_path)}")
+                except FileExistsError:
+                    self.logger.error(f"Backup file already exists and will not be overwritten: {os.path.basename(backup_path)}")
+                except Exception as e:
+                    self.logger.error(f"Failed to create backup for {os.path.basename(funscript_path)}: {e}")
+                    backup_failures[funscript_path] = str(e)
+            # Wait and check if all backups succeeded
+            time.sleep(backoff)
+            backups_to_check = [p for p, ok in backup_success.items() if not ok]
+            backup_attempts += 1
+            backoff += 0.5
+        if backups_to_check:
+            for failed_path in backups_to_check:
+                err = backup_failures.get(failed_path, 'Unknown error')
+                self.logger.error(f"Final backup failure for {os.path.basename(failed_path)}: {err}")
+                # Prompt user for alternative save location/filename if GUI is available
+                new_backup_path = None
+                if self.gui_instance and hasattr(self.gui_instance, 'file_dialog'):
+                    # Synchronous dialog: block until user selects or cancels
+                    event = threading.Event()
+                    result = {'path': None}
+                    def on_save(fp):
+                        result['path'] = fp
+                        event.set()
+                    self.gui_instance.file_dialog.show(
+                        title=f"Backup failed for {os.path.basename(failed_path)}. Choose alternative location:",
+                        is_save=True,
+                        callback=on_save,
+                        extension_filter="All files (*.*),*.*",
+                        initial_filename=os.path.basename(failed_path) + f".{int(time.time())}.bak",
+                        initial_path=os.path.dirname(failed_path)
+                    )
+                    event.wait()
+                    new_backup_path = result['path']
+                if new_backup_path:
+                    try:
+                        fd = os.open(new_backup_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+                        with open(failed_path, 'rb') as src, os.fdopen(fd, 'wb') as dst:
+                            dst.write(src.read())
+                        self.logger.info(f"Created backup of existing file at user-specified location: {os.path.basename(new_backup_path)}")
+                        continue  # Success, skip abort for this file
+                    except Exception as e:
+                        self.logger.error(f"User-specified backup also failed for {os.path.basename(failed_path)}: {e}")
+                else:
+                    self.logger.critical(f"User cancelled alternative backup for {os.path.basename(failed_path)}.")
+            # After all prompts, check if any files still failed
+            still_failed = [p for p in backups_to_check if not (self.gui_instance and hasattr(self.gui_instance, 'file_dialog') and new_backup_path)]
+            if still_failed:
+                self.logger.critical(f"Batch aborted: Failed to create backups for: {', '.join(os.path.basename(p) for p in still_failed)}")
+                return
+
         try:
             for i, video_path in enumerate(self.batch_video_paths):
                 if self.stop_batch_event.is_set():
@@ -346,22 +418,28 @@ class ApplicationLogic:
 
                 if funscript_to_check:
                     if self.batch_overwrite_mode == 1:
+                        # Mode 1: Process only if funscript is missing (skip any existing funscript)
                         self.logger.info(
-                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'.")
+                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'. (Mode: Only if Missing)")
                         continue
 
                     if self.batch_overwrite_mode == 0:
+                        # Mode 0: Process all except own matching version (skip if up-to-date FunGen funscript exists)
                         funscript_data = self.file_manager._get_funscript_data(funscript_to_check)
                         if funscript_data:
                             author = funscript_data.get('author', '')
                             metadata = funscript_data.get('metadata', {})
                             # Ensure metadata is a dict before calling .get() on it
                             version = metadata.get('version', '') if isinstance(metadata, dict) else ''
-
                             if author.startswith("FunGen") and version == FUNSCRIPT_METADATA_VERSION:
                                 self.logger.info(
-                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists.")
+                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists. (Mode: All except own matching version)")
                                 continue
+
+                    if self.batch_overwrite_mode == 2:
+                        # Mode 2: Process ALL videos, including own matching versions. Do not skip for any reason.
+                        self.logger.info(
+                            f"Processing '{video_basename}': Mode 2 selected, will process regardless of funscript existence or version.")
                 # --- End of pre-flight checks ---
 
                 open_success = self.file_manager.open_video_from_path(video_path)
