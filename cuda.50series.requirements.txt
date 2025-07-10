@@ -1,0 +1,3 @@
+-i https://download.pytorch.org/whl/cu128
+torch
+torchvision
