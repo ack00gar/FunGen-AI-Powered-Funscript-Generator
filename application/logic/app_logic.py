@@ -222,6 +222,8 @@ class ApplicationLogic:
         """
         Prepares for batch processing by creating a confirmation message and showing a dialog.
         """
+        if not self._check_model_paths():
+            return
         if self.is_batch_processing_active or self.stage_processor.full_analysis_active:
             self.logger.warning("Cannot start batch processing: A process is already active.",
                                 extra={'status_message': True})
@@ -259,6 +261,8 @@ class ApplicationLogic:
         [Private] Called from the GUI when the user clicks 'Yes' in the confirmation dialog.
         This method starts the actual batch processing thread.
         """
+        if not self._check_model_paths():
+            return
         if self.is_batch_processing_active: return
         if not self.batch_confirmation_videos:
             self.logger.error("Batch confirmation accepted, but no videos were found in the list.")
@@ -324,80 +328,6 @@ class ApplicationLogic:
         self.single_video_analysis_complete_event.set()  # Release the wait lock
 
     def _run_batch_processing_thread(self):
-        # --- Pre-flight: Check write access and make backups for all videos before processing ---
-        batch_funscript_paths = []
-        for video_path in self.batch_video_paths:
-            base, _ = os.path.splitext(video_path)
-            funscript_path = f"{base}.funscript"
-            batch_funscript_paths.append(funscript_path)
-        check_write_access(batch_funscript_paths)
-
-        # Attempt to back up all existing funscript files
-        backup_attempts = 0
-        max_attempts = 3
-        backoff = 1.0
-        backups_to_check = [p for p in batch_funscript_paths if os.path.exists(p)]
-        backup_success = {p: False for p in backups_to_check}
-        while backup_attempts < max_attempts and backups_to_check:
-            for funscript_path in backups_to_check:
-                backup_path = f"{funscript_path}.{int(time.time())}.bak"
-                try:
-                    # Use OS-level exclusive creation to avoid overwriting backups
-                    fd = os.open(backup_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-                    with open(funscript_path, 'rb') as src, os.fdopen(fd, 'wb') as dst:
-                        dst.write(src.read())
-                    backup_success[funscript_path] = True
-                    self.logger.info(f"Created backup of existing file: {os.path.basename(backup_path)}")
-                except FileExistsError:
-                    self.logger.error(f"Backup file already exists and will not be overwritten: {os.path.basename(backup_path)}")
-                except Exception as e:
-                    self.logger.error(f"Failed to create backup for {os.path.basename(funscript_path)}: {e}")
-                    backup_failures[funscript_path] = str(e)
-            # Wait and check if all backups succeeded
-            time.sleep(backoff)
-            backups_to_check = [p for p, ok in backup_success.items() if not ok]
-            backup_attempts += 1
-            backoff += 0.5
-        if backups_to_check:
-            for failed_path in backups_to_check:
-                err = backup_failures.get(failed_path, 'Unknown error')
-                self.logger.error(f"Final backup failure for {os.path.basename(failed_path)}: {err}")
-                # Prompt user for alternative save location/filename if GUI is available
-                new_backup_path = None
-                if self.gui_instance and hasattr(self.gui_instance, 'file_dialog'):
-                    # Synchronous dialog: block until user selects or cancels
-                    event = threading.Event()
-                    result = {'path': None}
-                    def on_save(fp):
-                        result['path'] = fp
-                        event.set()
-                    self.gui_instance.file_dialog.show(
-                        title=f"Backup failed for {os.path.basename(failed_path)}. Choose alternative location:",
-                        is_save=True,
-                        callback=on_save,
-                        extension_filter="All files (*.*),*.*",
-                        initial_filename=os.path.basename(failed_path) + f".{int(time.time())}.bak",
-                        initial_path=os.path.dirname(failed_path)
-                    )
-                    event.wait()
-                    new_backup_path = result['path']
-                if new_backup_path:
-                    try:
-                        fd = os.open(new_backup_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-                        with open(failed_path, 'rb') as src, os.fdopen(fd, 'wb') as dst:
-                            dst.write(src.read())
-                        self.logger.info(f"Created backup of existing file at user-specified location: {os.path.basename(new_backup_path)}")
-                        continue  # Success, skip abort for this file
-                    except Exception as e:
-                        self.logger.error(f"User-specified backup also failed for {os.path.basename(failed_path)}: {e}")
-                else:
-                    self.logger.critical(f"User cancelled alternative backup for {os.path.basename(failed_path)}.")
-            # After all prompts, check if any files still failed
-            still_failed = [p for p in backups_to_check if not (self.gui_instance and hasattr(self.gui_instance, 'file_dialog') and new_backup_path)]
-            if still_failed:
-                self.logger.critical(f"Batch aborted: Failed to create backups for: {', '.join(os.path.basename(p) for p in still_failed)}")
-                return
-
         try:
             for i, video_path in enumerate(self.batch_video_paths):
                 if self.stop_batch_event.is_set():
@@ -420,7 +350,7 @@ class ApplicationLogic:
                     if self.batch_overwrite_mode == 1:
                         # Mode 1: Process only if funscript is missing (skip any existing funscript)
                         self.logger.info(
-                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'. (Mode: Only if Missing)")
+                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'.")
                         continue
 
                     if self.batch_overwrite_mode == 0:
@@ -433,11 +363,11 @@ class ApplicationLogic:
                             version = metadata.get('version', '') if isinstance(metadata, dict) else ''
                             if author.startswith("FunGen") and version == FUNSCRIPT_METADATA_VERSION:
                                 self.logger.info(
-                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists. (Mode: All except own matching version)")
+                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists.")
                                 continue
 
                     if self.batch_overwrite_mode == 2:
-                        # Mode 2: Process ALL videos, including own matching versions. Do not skip for any reason.
+                        # Mode 2: Process ALL videos, including up-to-date FunGen funscript. Do not skip for any reason.
                         self.logger.info(
                             f"Processing '{video_basename}': Mode 2 selected, will process regardless of funscript existence or version.")
                 # --- End of pre-flight checks ---
@@ -677,6 +607,14 @@ class ApplicationLogic:
             self.logger.error(
                 f"CRITICAL ERROR: YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Please check settings.",
                 extra={'status_message': True, 'duration': 15.0})
+            # Show GUI popup if available
+            if self.gui_instance and hasattr(self.gui_instance, 'show_error_popup'):
+                self.gui_instance.show_error_popup(
+                    "Detection Model Missing",
+                    "No valid Detection Model is set.\nPlease select a YOLO model file in the UI Configuration tab.",
+                    action_label="Select Model",
+                    action_callback=getattr(self.gui_instance, 'open_detection_model_dialog', None)
+                )
             return False
 
         # Pose model is now optional

@@ -115,12 +115,16 @@ class AppEventHandlers:
         self.app.energy_saver.reset_activity_timer()
 
     def handle_start_ai_cv_analysis(self):  # New specific handler for AI CV
+        if not self.app._check_model_paths():
+            return
         if not self.app.tracker: self.logger.error("Tracker not initialized."); return
         self.app.tracker.set_tracking_mode("YOLO_ROI")  # Ensure correct mode
         self.app.stage_processor.start_full_analysis()
         self.app.energy_saver.reset_activity_timer()
 
     def handle_start_live_tracker_click(self):
+        if not self.app._check_model_paths():
+            return
         if not self.app.processor or not self.app.file_manager.video_path:
             self.logger.info("No video loaded for live tracking.", extra={'status_message': False})
             return

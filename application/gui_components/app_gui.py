@@ -86,6 +86,12 @@ class GUI:
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
 
+        self.error_popup_active = False
+        self.error_popup_title = ""
+        self.error_popup_message = ""
+        self.error_popup_action_label = None
+        self.error_popup_action_callback = None
+
     # --- Worker thread for generating preview images ---
     def _preview_generation_worker(self):
         """
@@ -466,6 +472,19 @@ class GUI:
         # Render the existing texture
         imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
 
+    def show_error_popup(self, title, message, action_label=None, action_callback=None):
+        self.error_popup_active = True
+        self.error_popup_title = title
+        self.error_popup_message = message
+        self.error_popup_action_label = action_label
+        self.error_popup_action_callback = action_callback
+
+    def open_detection_model_dialog(self):
+        # This should open the file dialog for selecting a detection model
+        # You may want to call self.control_panel_ui.open_detection_model_dialog() or similar
+        if hasattr(self.control_panel_ui, 'open_detection_model_dialog'):
+            self.control_panel_ui.open_detection_model_dialog()
+
     # All other methods from the original file from this point are included below without modification
     # for completeness, except for the `run` method's `finally` block which now handles thread shutdown.
 
@@ -827,6 +846,44 @@ class GUI:
             self._render_status_message(app_state)
         ))
         self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
+
+        if self.error_popup_active:
+            imgui.open_popup("ErrorPopup")
+        # Center the popup and set a normal size (compatibility for imgui versions)
+        if hasattr(imgui, 'get_main_viewport'):
+            main_viewport = imgui.get_main_viewport()
+            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
+                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
+            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+        else:
+            # Fallback: center on window size if viewport not available
+            popup_pos = (self.window_width * 0.5, self.window_height * 0.5)
+            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+        popup_width = 480  # Increased by ~15% from 420
+        imgui.set_next_window_size(popup_width, 0)  # Normal width, auto height
+        if imgui.begin_popup_modal("ErrorPopup")[0]:
+            # Center title
+            window_width = imgui.get_window_width()
+            title_width = imgui.calc_text_size(self.error_popup_title)[0]
+            imgui.set_cursor_pos_x((window_width - title_width) * 0.5)
+            imgui.text(self.error_popup_title)
+            imgui.separator()
+            # Center message
+            message_lines = self.error_popup_message.split('\n')
+            for line in message_lines:
+                line_width = imgui.calc_text_size(line)[0]
+                imgui.set_cursor_pos_x((window_width - line_width) * 0.5)
+                imgui.text(line)
+            imgui.spacing()
+            # Center button
+            button_width = 120
+            imgui.set_cursor_pos_x((window_width - button_width) * 0.5)
+            if imgui.button("Close", width=button_width):
+                self.error_popup_active = False
+                imgui.close_current_popup()
+                if self.error_popup_action_callback:
+                    self.error_popup_action_callback()
+            imgui.end_popup()
 
         self.perf_frame_count += 1
         if time.time() - self.last_perf_log_time > self.perf_log_interval:
