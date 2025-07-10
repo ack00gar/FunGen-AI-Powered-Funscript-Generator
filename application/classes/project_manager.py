@@ -73,8 +73,7 @@ class ProjectManager:
             self.app.show_file_dialog_for_project_open(self.load_project)
         elif hasattr(self.app, 'file_dialog_bridge'):  # Example of a bridge
             self.app.file_dialog_bridge.show_open_project_dialog(self.load_project)
-        elif hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance,
-                                                           'file_dialog'):  # If GUI instance is on app
+        elif hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance, 'file_dialog'):  # If GUI instance is on app
 
             suggested_path_info = self.get_suggested_save_path_and_dir(save_as=False)
             initial_dir = None
@@ -85,16 +84,13 @@ class ProjectManager:
                 title="Open Project",
                 is_save=False,
                 callback=self.load_project,
-                extension_filter=f"FunGen Projects (*{PROJECT_FILE_EXTENSION}),*{PROJECT_FILE_EXTENSION}|Autosave States (*{AUTOSAVE_FILE.split('.')[-1]}),*{AUTOSAVE_FILE.split('.')[-1]}|All files (*.*),*.*",
-                initial_path=initial_dir
-            )
+                extension_filter=f"FunGen Projects (*{PROJECT_FILE_EXTENSION}),*{PROJECT_FILE_EXTENSION}|Autosave States (*{AUTOSAVE_FILE.split('.')[-1]}),*{AUTOSAVE_FILE.split('.')[-1]}|All files (*.*),*.*", initial_path=initial_dir)
         else:
             self.app.logger.error("File dialog cannot be shown from ProjectManager. GUI bridge missing.")
 
     def load_project(self, filepath: str, is_autosave: bool = False):  # Added is_autosave
         if not is_autosave and self.project_dirty:
-            self.app.logger.warning(
-                "WARNING: Unsaved changes in current project. Loading new project will discard them.")
+            self.app.logger.warning("WARNING: Unsaved changes in current project. Loading new project will discard them.")
             # self.app.energy_saver.reset_activity_timer() # Activity related to user interaction
 
         try:
@@ -124,21 +120,19 @@ class ProjectManager:
             self.app.app_state_ui.force_timeline_pan_to_current_frame = True
 
             if is_autosave:
-                self.app.logger.info(f"State restored from autosave: {os.path.basename(filepath)}",
-                                     extra={'status_message': True})
+                self.app.logger.info(f"State restored from autosave: {os.path.basename(filepath)}", extra={'status_message': True})
             else:
                 self.app.logger.info(f"Project '{os.path.basename(filepath)}' loaded.", extra={'status_message': True})
 
         except Exception as e:
-            self.app.logger.error(f"Error loading project '{os.path.basename(filepath)}': {e}", exc_info=True,
-                                  extra={'status_message': True})
+            self.app.logger.error(f"Error loading project '{os.path.basename(filepath)}': {e}", exc_info=True, extra={'status_message': True})
             if is_autosave:
                 self.app.logger.error(f"Autosave restoration from '{os.path.basename(filepath)}' failed critically.")
 
     def save_project_dialog(self, save_as: bool = False):
         if not self.project_file_path or save_as:
-            suggested_filename, initial_dir_save = self.get_suggested_save_path_and_dir(
-                save_as) if self.get_suggested_save_path_and_dir(save_as) else ("", None)
+            suggested = self.get_suggested_save_path_and_dir(save_as) # No need to call the function twice
+            suggested_filename, initial_dir_save = suggested if suggested else ("", None)
 
             if hasattr(self.app, 'show_file_dialog_for_project_save'):
                 self.app.show_file_dialog_for_project_save(self.save_project, suggested_filename, initial_dir_save)
@@ -274,19 +268,15 @@ class ProjectManager:
     def _apply_project_state_from_dict(self, project_data: Dict):
         """Applies loaded project data to the relevant app logic sub-modules."""
         # Data for AppLogic itself (or to be passed to AppSettings if they become project-specific)
-        self.app.yolo_detection_model_path_setting = project_data.get("yolo_detection_model_path_setting",
-                                                                      self.app.app_settings.get("yolo_det_model_path"))
+        self.app.yolo_detection_model_path_setting = project_data.get("yolo_detection_model_path_setting", self.app.app_settings.get("yolo_det_model_path"))
         self.app.yolo_det_model_path = self.app.yolo_detection_model_path_setting
-        self.app.yolo_pose_model_path_setting = project_data.get("yolo_pose_model_path_setting",
-                                                                 self.app.app_settings.get("yolo_pose_model_path"))
+        self.app.yolo_pose_model_path_setting = project_data.get("yolo_pose_model_path_setting", self.app.app_settings.get("yolo_pose_model_path"))
         self.app.yolo_pose_model_path = self.app.yolo_pose_model_path_setting
         if self.app.tracker:  # Update tracker if it exists
             self.app.tracker.det_model_path = self.app.yolo_det_model_path
             self.app.tracker.pose_model_path = self.app.yolo_pose_model_path
 
-        self.app.calibration.funscript_output_delay_frames = project_data.get("funscript_output_delay_frames",
-                                                                              self.app.app_settings.get(
-                                                                                  "funscript_output_delay_frames", 0))
+        self.app.calibration.funscript_output_delay_frames = project_data.get("funscript_output_delay_frames", self.app.app_settings.get("funscript_output_delay_frames", 0))
         self.app.calibration.update_tracker_delay_params()  # Apply to tracker
 
         # Data for FileManager
@@ -309,27 +299,15 @@ class ProjectManager:
         # Data for AppStateUI
         app_state = self.app.app_state_ui
         app_state.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms",
-                                                            self.app.app_settings.get("timeline_pan_offset_ms", 0.0))
-        app_state.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px",
-                                                                    self.app.app_settings.get(
-                                                                        "timeline_zoom_factor_ms_per_px", 20.0))
-        app_state.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline",
-                                                                         self.app.app_settings.get(
-                                                                             "show_funscript_interactive_timeline",
-                                                                             True))
-        app_state.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2",
-                                                                          self.app.app_settings.get(
-                                                                              "show_funscript_interactive_timeline2",
-                                                                              False))
-        app_state.show_lr_dial_graph = project_data.get("show_lr_dial_graph",
-                                                        self.app.app_settings.get("show_lr_dial_graph", True))
+    self.app.app_settings.get("timeline_pan_offset_ms", 0.0))
+        app_state.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px", self.app.app_settings.get("timeline_zoom_factor_ms_per_px", 20.0))
+        app_state.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline", self.app.app_settings.get("show_funscript_interactive_timeline",True))
+        app_state.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2", self.app.app_settings.get("show_funscript_interactive_timeline2", False))
+        app_state.show_lr_dial_graph = project_data.get("show_lr_dial_graph", self.app.app_settings.get("show_lr_dial_graph", True))
         app_state.show_heatmap = project_data.get("show_heatmap", self.app.app_settings.get("show_heatmap", True))
-        app_state.show_gauge_window = project_data.get("show_gauge_window",
-                                                       self.app.app_settings.get("show_gauge_window", True))
-        app_state.show_stage2_overlay = project_data.get("show_stage2_overlay",
-                                                         self.app.app_settings.get("show_stage2_overlay", True))
-        app_state.show_audio_waveform = project_data.get("show_audio_waveform",
-                                                         self.app.app_settings.get("show_audio_waveform", True))
+        app_state.show_gauge_window = project_data.get("show_gauge_window", self.app.app_settings.get("show_gauge_window", True))
+        app_state.show_stage2_overlay = project_data.get("show_stage2_overlay", self.app.app_settings.get("show_stage2_overlay", True))
+        app_state.show_audio_waveform = project_data.get("show_audio_waveform", self.app.app_settings.get("show_audio_waveform", True))
         # Data for Audio Waveform
         loaded_waveform_list = project_data.get("audio_waveform_data")
         if loaded_waveform_list is not None and isinstance(loaded_waveform_list, list):
@@ -348,7 +326,7 @@ class ProjectManager:
             stage_proc.stage1_progress_value = 1.0
             stage_proc.stage1_progress_label = "Loaded from project"
         else:  # No valid S1 path in project or file missing
-            stage_proc.reset_stage1_status()
+            stage_proc.reset_stage_status(stages=("stage1",))
 
         # Load S2 overlay data if path exists from project
         if fm.stage2_output_msgpack_path and os.path.exists(fm.stage2_output_msgpack_path):
