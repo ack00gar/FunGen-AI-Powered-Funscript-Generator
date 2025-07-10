@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Tuple
 
 from application.utils.video_segment import VideoSegment
 from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, FUNSCRIPT_METADATA_VERSION
+from application.utils.write_access import check_write_access
 
 
 class AppFileManager:
@@ -232,6 +233,8 @@ class AppFileManager:
         if not actions:
             self.logger.info(f"No actions to save to {os.path.basename(filepath)}.", extra={'status_message': True})
             return
+
+        check_write_access(filepath)
 
         # --- Backup logic before saving ---
         if os.path.exists(filepath):
