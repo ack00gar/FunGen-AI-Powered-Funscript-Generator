@@ -1205,24 +1205,28 @@ class InteractiveFunscriptTimeline:
                     glfw_key_num_tuple = self.app._map_shortcut_to_glfw_key(bound_key_str_num)
                     if (glfw_key_num_tuple and imgui.is_key_pressed(glfw_key_num_tuple[0]) and all(m == io_m for m, io_m in  zip(glfw_key_num_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))):
                         target_pos_val = i * 10
-                        if self.selected_action_idx != -1 and 0 <= self.selected_action_idx < len(actions_list):  # Modify selected
-                            op_desc = f"Set Point Pos to {target_pos_val} (Key)"
-                            fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                            actions_list[self.selected_action_idx]["pos"] = target_pos_val
-                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                        else:  # Add new point
-                            op_desc = "Added Point (Key)"
-                            fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                            target_funscript_instance_for_render.add_actio(
-                                timestamp_ms=snapped_time_add_key,
-                                primary_pos=target_pos_val if axis_name_for_render == 'primary' else None,
-                                secondary_pos=target_pos_val if axis_name_for_render == 'secondary' else None, is_from_live_tracker=False)
+                        op_desc = "Added Point (Key)"
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
 
-                            # Re-fetch actions and select the new point
-                            actions_list = getattr(target_funscript_instance_for_render, f"{axis_name_for_render}_actions", [])
-                            new_idx = next((idx for idx, act in enumerate(actions_list) if act['at'] == snapped_time_add_key and act['pos'] == target_pos_val), -1)
-                            if new_idx != -1: self.selected_action_idx, self.multi_selected_action_indices = new_idx, {new_idx}
-                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                        # FIX: Corrected typo from `add_actio` to `add_action`.
+                        target_funscript_instance_for_render.add_action(
+                            timestamp_ms=snapped_time_add_key,
+                            primary_pos=target_pos_val if axis_name_for_render == 'primary' else None,
+                            secondary_pos=target_pos_val if axis_name_for_render == 'secondary' else None,
+                            is_from_live_tracker=False
+                        )
+
+                        # Re-fetch actions and select the new point
+                        actions_list = getattr(target_funscript_instance_for_render, f"{axis_name_for_render}_actions",
+                                               [])
+                        new_idx = next((idx for idx, act in enumerate(actions_list) if
+                                        act['at'] == snapped_time_add_key and act['pos'] == target_pos_val), -1)
+                        if new_idx != -1:
+                            # Set the new point as the only selected point
+                            self.selected_action_idx = new_idx
+                            self.multi_selected_action_indices = {new_idx}
+
+                        fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                         break
             # endregion
 
