@@ -5,7 +5,6 @@ from imgui.integrations.glfw import GlfwRenderer
 import numpy as np
 import cv2
 import time
-from typing import Optional
 import threading
 import queue
 
@@ -238,6 +237,7 @@ class GUI:
     def _log_performance(self):
         """Logs the average performance of components."""
         if self.perf_frame_count == 0:
+            self.app.logger.debug("No frames rendered (yet).")
             return
 
         log_message = "Avg Render Times (ms) over {} frames:".format(self.perf_frame_count)
@@ -301,8 +301,7 @@ class GUI:
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
         dummy_pixel_fs_preview = np.array([0, 0, 0, 0], dtype=np.uint8).tobytes()
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, 1, 1, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
-                        dummy_pixel_fs_preview)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, 1, 1, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, dummy_pixel_fs_preview)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         return True
 
@@ -374,16 +373,18 @@ class GUI:
         is_live_tracking = self.app.processor and self.app.processor.tracker and self.app.processor.tracker.tracking_active
 
         # Determine if a redraw is needed
-        full_redraw_needed = app_state.funscript_preview_dirty or \
-                             current_bar_width_int != app_state.last_funscript_preview_bar_width or \
-                             abs(total_duration_s - app_state.last_funscript_preview_duration_s) > 0.01
+        full_redraw_needed = (app_state.funscript_preview_dirty
+            or current_bar_width_int != app_state.last_funscript_preview_bar_width
+            or abs(total_duration_s - app_state.last_funscript_preview_duration_s) > 0.01)
 
         incremental_update_needed = current_action_count != self.last_submitted_action_count_timeline
 
         # For this async model, we always do a full redraw. Incremental drawing is complex with threading.
         # The performance gain from async outweighs the loss of incremental drawing.
-        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (
-                time.time() - self.last_preview_update_time_timeline >= self.preview_update_interval_seconds)))
+        needs_regen = (full_redraw_needed
+            or (incremental_update_needed
+            and (not is_live_tracking
+            or (time.time() - self.last_preview_update_time_timeline >= self.preview_update_interval_seconds))))
 
         if needs_regen and total_duration_s > 0.001 and self.preview_task_queue.empty():
             actions_copy = self.app.funscript_processor.get_actions('primary').copy()
@@ -412,23 +413,19 @@ class GUI:
         imgui.image(self.funscript_preview_texture_id, current_bar_width_float, graph_height, uv0=(0, 0), uv1=(1, 1))
 
         # Draw playback marker over the image
-        if self.app.file_manager.video_path and self.app.processor and \
-                self.app.processor.video_info and self.app.processor.current_frame_index >= 0:
+        if self.app.file_manager.video_path and self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0:
             total_frames = self.app.processor.video_info.get('total_frames', 0)
             if total_frames > 0:
                 normalized_pos = self.app.processor.current_frame_index / (total_frames - 1.0)
-                marker_x = (canvas_p1_x + style.frame_padding[0]) + (
-                            normalized_pos * (current_bar_width_float - style.frame_padding[0] * 2))
+                marker_x = (canvas_p1_x + style.frame_padding[0]) + (normalized_pos * (current_bar_width_float - style.frame_padding[0] * 2))
                 marker_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.85)
                 draw_list_marker = imgui.get_window_draw_list()
-                draw_list_marker.add_line(marker_x, canvas_p1_y_offset, marker_x, canvas_p1_y_offset + graph_height,
-                                          marker_color, 1.0)
+                draw_list_marker.add_line(marker_x, canvas_p1_y_offset, marker_x, canvas_p1_y_offset + graph_height, marker_color, 1.0)
 
         imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 5)
 
     # --- This function now submits a task to the worker thread ---
-    def render_funscript_heatmap_preview(self, total_video_duration_s: float, bar_width_float: float,
-                                         bar_height_float: float):
+    def render_funscript_heatmap_preview(self, total_video_duration_s: float, bar_width_float: float, bar_height_float: float):
         app_state = self.app.app_state_ui
         current_bar_width_int = int(round(bar_width_float))
         if current_bar_width_int <= 0 or app_state.heatmap_texture_fixed_height <= 0 or not self.heatmap_texture_id:
@@ -438,14 +435,14 @@ class GUI:
         current_action_count = len(self.app.funscript_processor.get_actions('primary'))
         is_live_tracking = self.app.processor and self.app.processor.tracker and self.app.processor.tracker.tracking_active
 
-        full_redraw_needed = app_state.heatmap_dirty or \
-                             current_bar_width_int != app_state.last_heatmap_bar_width or \
-                             abs(total_video_duration_s - app_state.last_heatmap_video_duration_s) > 0.01
+        full_redraw_needed = (
+            app_state.heatmap_dirty
+            or current_bar_width_int != app_state.last_heatmap_bar_width
+            or abs(total_video_duration_s - app_state.last_heatmap_video_duration_s) > 0.01)
 
         incremental_update_needed = current_action_count != self.last_submitted_action_count_heatmap
 
-        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (
-                time.time() - self.last_preview_update_time_heatmap >= self.preview_update_interval_seconds)))
+        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (time.time() - self.last_preview_update_time_heatmap >= self.preview_update_interval_seconds)))
 
         if needs_regen and total_video_duration_s > 0.001 and self.preview_task_queue.empty():
             actions_copy = self.app.funscript_processor.get_actions('primary').copy()
@@ -472,12 +469,11 @@ class GUI:
     # All other methods from the original file from this point are included below without modification
     # for completeness, except for the `run` method's `finally` block which now handles thread shutdown.
 
-    def _draw_fps_marks_on_slider(self, draw_list, min_rect, max_rect, current_target_fps, tracker_fps,
-                                  processor_fps):
+    def _draw_fps_marks_on_slider(self, draw_list, min_rect, max_rect, current_target_fps, tracker_fps, processor_fps):
         app_state = self.app.app_state_ui
-        if not imgui.is_item_visible(): return
-        marks = [(current_target_fps, (255, 255, 0), "Target"), (tracker_fps, (0, 255, 0), "Tracker"),
-                 (processor_fps, (255, 0, 0), "Processor")]
+        if not imgui.is_item_visible():
+            return
+        marks = [(current_target_fps, (255, 255, 0), "Target"), (tracker_fps, (0, 255, 0), "Tracker"), (processor_fps, (255, 0, 0), "Processor")]
         slider_x_start, slider_x_end = min_rect.x, max_rect.x
         slider_width = slider_x_end - slider_x_start
         slider_y = (min_rect.y + max_rect.y) / 2
@@ -509,22 +505,22 @@ class GUI:
             mapped_key, mapped_mods_from_string = map_result
 
             if imgui.is_key_pressed(mapped_key):
-                if (mapped_mods_from_string['ctrl'] == io.key_ctrl and
-                        mapped_mods_from_string['alt'] == io.key_alt and
-                        mapped_mods_from_string['shift'] == io.key_shift and
-                        mapped_mods_from_string['super'] == io.key_super):
-                    action_func(*action_args)
-                    return True
+                if (mapped_mods_from_string['ctrl'] == io.key_ctrl
+                    and mapped_mods_from_string['alt'] == io.key_alt
+                    and mapped_mods_from_string['shift'] == io.key_shift
+                    and mapped_mods_from_string['super'] == io.key_super):
+                        action_func(*action_args)
+                        return True
             return False
 
         if check_and_run_shortcut("undo_timeline1", fs_proc.perform_undo_redo, 1, 'undo'):
             pass
         elif check_and_run_shortcut("redo_timeline1", fs_proc.perform_undo_redo, 1, 'redo'):
             pass
-        elif self.app.app_state_ui.show_funscript_interactive_timeline2 and \
-                (check_and_run_shortcut("undo_timeline2", fs_proc.perform_undo_redo, 2, 'undo') or \
-                 check_and_run_shortcut("redo_timeline2", fs_proc.perform_undo_redo, 2, 'redo')):
-            pass
+        elif self.app.app_state_ui.show_funscript_interactive_timeline2 and (
+            check_and_run_shortcut("undo_timeline2", fs_proc.perform_undo_redo, 2, 'undo')
+            or check_and_run_shortcut("redo_timeline2", fs_proc.perform_undo_redo, 2, 'redo')
+        ): pass
         elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control, "play_pause"):
             pass
         elif video_loaded:
@@ -557,17 +553,20 @@ class GUI:
         io = imgui.get_io()
         interaction_detected_this_frame = False
         current_mouse_pos = io.mouse_pos
-        if current_mouse_pos[0] != self.last_mouse_pos_for_energy_saver[0] or \
-                current_mouse_pos[1] != self.last_mouse_pos_for_energy_saver[1]:
+        if current_mouse_pos[0] != self.last_mouse_pos_for_energy_saver[0] or current_mouse_pos[1] != self.last_mouse_pos_for_energy_saver[1]:
             interaction_detected_this_frame = True
             self.last_mouse_pos_for_energy_saver = current_mouse_pos
-        if imgui.is_mouse_clicked(0) or imgui.is_mouse_clicked(1) or imgui.is_mouse_clicked(2) or \
-                imgui.is_mouse_double_clicked(0) or imgui.is_mouse_double_clicked(1) or imgui.is_mouse_double_clicked(
-            2) or \
-                io.mouse_wheel != 0.0 or io.want_text_input or \
-                imgui.is_mouse_dragging(0) or imgui.is_any_item_active() or imgui.is_any_item_focused() or \
-                (self.file_dialog and self.file_dialog.open):
-            interaction_detected_this_frame = True
+
+        # REFACTORED for readability and maintainability
+        buttons = (0, 1, 2)
+        if (any(imgui.is_mouse_clicked(b) or imgui.is_mouse_double_clicked(b) for b in buttons)
+            or io.mouse_wheel != 0.0
+            or io.want_text_input
+            or imgui.is_mouse_dragging(0)
+            or imgui.is_any_item_active()
+            or imgui.is_any_item_focused()
+            or (self.file_dialog and self.file_dialog.open)):
+                interaction_detected_this_frame = True
         if hasattr(io, 'keys_down'):
             for i in range(len(io.keys_down)):
                 if imgui.is_key_pressed(i): interaction_detected_this_frame = True; break
@@ -596,38 +595,34 @@ class GUI:
 
                 imgui.separator()
                 imgui.text("File Handling:")
-                if imgui.radio_button("Process All Videos (Skips own matching version)",
-                                      self.batch_overwrite_mode_ui == 0):
+
+                if imgui.radio_button("Process All Videos (Skips own matching version)", self.batch_overwrite_mode_ui == 0):
                     self.batch_overwrite_mode_ui = 0
                 if imgui.radio_button("Process Only if Funscript is Missing", self.batch_overwrite_mode_ui == 1):
                     self.batch_overwrite_mode_ui = 1
 
                 imgui.separator()
                 imgui.text("Output Options:")
-                _, self.batch_apply_post_processing_ui = imgui.checkbox("Apply Auto Post-Processing",
-                                                                        self.batch_apply_post_processing_ui)
+
+                _, self.batch_apply_post_processing_ui = imgui.checkbox("Apply Auto Post-Processing", self.batch_apply_post_processing_ui)
+
                 imgui.same_line()
 
                 is_3_stage = self.selected_batch_method_idx_ui == 0
                 if not is_3_stage:
                     imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                     imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-                _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file (Timeline 2)",
-                                                                     self.batch_generate_roll_file_ui if is_3_stage else False)
+                _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file (Timeline 2)", self.batch_generate_roll_file_ui if is_3_stage else False)
                 if not is_3_stage:
                     imgui.pop_style_var()
                     imgui.internal.pop_item_flag()
                 imgui.same_line()
-                _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video",
-                                                                                   self.batch_copy_funscript_to_video_location_ui)
+
+                _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video", self.batch_copy_funscript_to_video_location_ui)
 
                 imgui.separator()
                 if imgui.button("Yes", width=100):
-                    app._initiate_batch_processing_from_confirmation(self.selected_batch_method_idx_ui,
-                                                                     self.batch_apply_post_processing_ui,
-                                                                     self.batch_copy_funscript_to_video_location_ui,
-                                                                     self.batch_overwrite_mode_ui,
-                                                                     self.batch_generate_roll_file_ui)
+                    app._initiate_batch_processing_from_confirmation(self.selected_batch_method_idx_ui, self.batch_apply_post_processing_ui, self.batch_copy_funscript_to_video_location_ui, self.batch_overwrite_mode_ui,self.batch_generate_roll_file_ui)
                     imgui.close_current_popup()
                 imgui.same_line()
                 if imgui.button("No", width=100):
@@ -669,8 +664,7 @@ class GUI:
 
         self._time_render("EnergySaver+Shortcuts", lambda: (
             self._handle_energy_saver_interaction_detection(),
-            self._handle_global_shortcuts()
-        ))
+            self._handle_global_shortcuts()))
 
         if self.app.shortcut_manager.is_recording_shortcut_for:
             self._time_render("ShortcutRecordingInput", self.app.shortcut_manager.handle_shortcut_recording_input)
@@ -708,8 +702,7 @@ class GUI:
             timeline1_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline else 0
             timeline2_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline2 else 0
             interactive_timelines_total_height = timeline1_render_h + timeline2_render_h
-            available_height_for_main_panels = max(100,
-                                                   self.window_height - panel_y_start - interactive_timelines_total_height)
+            available_height_for_main_panels = max(100, self.window_height - panel_y_start - interactive_timelines_total_height)
             app_state.fixed_layout_geometry = {}
             is_full_width_nav = getattr(app_state, 'full_width_nav', False)
             control_panel_w = 450 * font_scale
@@ -726,18 +719,15 @@ class GUI:
                         graphs_panel_w = max(100, self.window_width - control_panel_w - video_panel_w)
                     video_area_x_start = control_panel_w
                     graphs_area_x_start = control_panel_w + video_panel_w
-                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start),
-                                                                       'size': (control_panel_w, top_panels_h)}
+                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w, top_panels_h)}
                     imgui.set_next_window_position(0, panel_y_start)
                     imgui.set_next_window_size(control_panel_w, top_panels_h)
                     self._time_render("ControlPanelUI", self.control_panel_ui.render)
-                    app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start),
-                                                                       'size': (video_panel_w, top_panels_h)}
+                    app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start), 'size': (video_panel_w, top_panels_h)}
                     imgui.set_next_window_position(video_area_x_start, panel_y_start)
                     imgui.set_next_window_size(video_panel_w, top_panels_h)
                     self._time_render("VideoDisplayUI", self.video_display_ui.render)
-                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start),
-                                                                     'size': (graphs_panel_w, top_panels_h)}
+                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start), 'size': (graphs_panel_w, top_panels_h)}
                     imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
                     imgui.set_next_window_size(graphs_panel_w, top_panels_h)
                     self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
@@ -745,18 +735,15 @@ class GUI:
                     control_panel_w_no_vid = self.window_width / 2
                     graphs_panel_w_no_vid = self.window_width - control_panel_w_no_vid
                     graphs_area_x_start_no_vid = control_panel_w_no_vid
-                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start),
-                                                                       'size': (control_panel_w_no_vid, top_panels_h)}
+                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w_no_vid, top_panels_h)}
                     imgui.set_next_window_position(0, panel_y_start)
                     imgui.set_next_window_size(control_panel_w_no_vid, top_panels_h)
                     self._time_render("ControlPanelUI", self.control_panel_ui.render)
-                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start_no_vid, panel_y_start),
-                                                                     'size': (graphs_panel_w_no_vid, top_panels_h)}
+                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start_no_vid, panel_y_start), 'size': (graphs_panel_w_no_vid, top_panels_h)}
                     imgui.set_next_window_position(graphs_area_x_start_no_vid, panel_y_start)
                     imgui.set_next_window_size(graphs_panel_w_no_vid, top_panels_h)
                     self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
-                app_state.fixed_layout_geometry['VideoNavigation'] = {'pos': (0, nav_y_start),
-                                                                      'size': (self.window_width, video_nav_bar_h)}
+                app_state.fixed_layout_geometry['VideoNavigation'] = {'pos': (0, nav_y_start), 'size': (self.window_width, video_nav_bar_h)}
                 imgui.set_next_window_position(0, nav_y_start)
                 imgui.set_next_window_size(self.window_width, video_nav_bar_h)
                 self._time_render("VideoNavigationUI", self.video_navigation_ui.render, self.window_width)
@@ -769,14 +756,11 @@ class GUI:
                     video_render_h = max(50, available_height_for_main_panels - video_nav_bar_h)
                     video_area_x_start = control_panel_w
                     graphs_area_x_start = control_panel_w + video_panel_w
-                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start),
-                                                                       'size': (control_panel_w,
-                                                                                available_height_for_main_panels)}
+                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w, available_height_for_main_panels)}
                     imgui.set_next_window_position(0, panel_y_start)
                     imgui.set_next_window_size(control_panel_w, available_height_for_main_panels)
                     self._time_render("ControlPanelUI", self.control_panel_ui.render)
-                    app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start),
-                                                                       'size': (video_panel_w, video_render_h)}
+                    app_state.fixed_layout_geometry['VideoDisplay'] = {'pos': (video_area_x_start, panel_y_start), 'size': (video_panel_w, video_render_h)}
                     imgui.set_next_window_position(video_area_x_start, panel_y_start)
                     imgui.set_next_window_size(video_panel_w, video_render_h)
                     self._time_render("VideoDisplayUI", self.video_display_ui.render)
@@ -786,9 +770,7 @@ class GUI:
                     imgui.set_next_window_position(video_area_x_start, panel_y_start + video_render_h)
                     imgui.set_next_window_size(video_panel_w, video_nav_bar_h)
                     self._time_render("VideoNavigationUI", self.video_navigation_ui.render, video_panel_w)
-                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start),
-                                                                     'size': (graphs_panel_w,
-                                                                              available_height_for_main_panels)}
+                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start, panel_y_start), 'size': (graphs_panel_w, available_height_for_main_panels)}
                     imgui.set_next_window_position(graphs_area_x_start, panel_y_start)
                     imgui.set_next_window_size(graphs_panel_w, available_height_for_main_panels)
                     self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
@@ -796,31 +778,23 @@ class GUI:
                     control_panel_w_no_vid = self.window_width / 2
                     graphs_panel_w_no_vid = self.window_width - control_panel_w_no_vid
                     graphs_area_x_start_no_vid = control_panel_w_no_vid
-                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start),
-                                                                       'size': (control_panel_w_no_vid,
-                                                                                available_height_for_main_panels)}
+                    app_state.fixed_layout_geometry['ControlPanel'] = {'pos': (0, panel_y_start), 'size': (control_panel_w_no_vid, available_height_for_main_panels)}
                     imgui.set_next_window_position(0, panel_y_start)
                     imgui.set_next_window_size(control_panel_w_no_vid, available_height_for_main_panels)
                     self._time_render("ControlPanelUI", self.control_panel_ui.render)
-                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start_no_vid, panel_y_start),
-                                                                     'size': (graphs_panel_w_no_vid,
-                                                                              available_height_for_main_panels)}
+                    app_state.fixed_layout_geometry['InfoGraphs'] = {'pos': (graphs_area_x_start_no_vid, panel_y_start), 'size': (graphs_panel_w_no_vid, available_height_for_main_panels)}
                     imgui.set_next_window_position(graphs_area_x_start_no_vid, panel_y_start)
                     imgui.set_next_window_size(graphs_panel_w_no_vid, available_height_for_main_panels)
                     self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
 
             timeline_current_y_start = panel_y_start + available_height_for_main_panels
             if app_state.show_funscript_interactive_timeline:
-                app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start),
-                                                                'size': (self.window_width, timeline1_render_h)}
-                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start,
-                                  timeline1_render_h)
+                app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
+                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h)
                 timeline_current_y_start += timeline1_render_h
             if app_state.show_funscript_interactive_timeline2:
-                app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start),
-                                                                'size': (self.window_width, timeline2_render_h)}
-                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start,
-                                  timeline2_render_h)
+                app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline2_render_h)}
+                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h)
         else:
             if app_state.just_switched_to_floating:
                 if 'ControlPanel' in app_state.fixed_layout_geometry:
@@ -863,8 +837,13 @@ class GUI:
     def _render_status_message(self, app_state):
         if app_state.status_message and time.time() < app_state.status_message_time:
             imgui.set_next_window_position(self.window_width - 310, self.window_height - 40)
-            imgui.begin("StatusMessage",
-                        flags=imgui.WINDOW_NO_DECORATION | imgui.WINDOW_NO_MOVE | imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_INPUTS | imgui.WINDOW_NO_FOCUS_ON_APPEARING | imgui.WINDOW_NO_NAV)
+            imgui.begin("StatusMessage", flags=(
+                imgui.WINDOW_NO_DECORATION |
+                imgui.WINDOW_NO_MOVE |
+                imgui.WINDOW_ALWAYS_AUTO_RESIZE |
+                imgui.WINDOW_NO_INPUTS |
+                imgui.WINDOW_NO_FOCUS_ON_APPEARING |
+                imgui.WINDOW_NO_NAV))
             imgui.text(app_state.status_message)
             imgui.end()
         elif app_state.status_message:
@@ -889,9 +868,7 @@ class GUI:
                 gl.glClearColor(0.06, 0.06, 0.06, 1)
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
                 self.render_gui()
-                if self.app.app_settings.get("autosave_enabled",
-                                             True) and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get(
-                        "autosave_interval_seconds", 300):
+                if self.app.app_settings.get("autosave_enabled", True) and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get("autosave_interval_seconds", 300):
                     self.app.project_manager.perform_autosave()
                 self.app.energy_saver.check_and_update_energy_saver()
                 glfw.swap_buffers(self.window)

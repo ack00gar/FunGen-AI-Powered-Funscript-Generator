@@ -24,7 +24,6 @@ from .app_calibration import AppCalibration
 from .app_energy_saver import AppEnergySaver
 from .app_utility import AppUtility
 
-
 class ApplicationLogic:
     def __init__(self):
         self.gui_instance = None
@@ -57,7 +56,11 @@ class ApplicationLogic:
         self.logger = self._logger_instance.get_logger()
         self.app_settings.logger = self.logger  # Now provide the logger to AppSettings
 
-        self.discarded_tracking_classes: List[str] = self.app_settings.get("discarded_tracking_classes", [])
+        # REFACTORED Defensive programming. Always make sure the type is a list of strings.
+        discarded_tracking_classes = self.app_settings.get("discarded_tracking_classes", [])
+        if discarded_tracking_classes is None:
+            discarded_tracking_classes = []
+        self.discarded_tracking_classes: List[str] = discarded_tracking_classes
         self.pending_action_after_tracking: Optional[Dict] = None
 
         self.app_state_ui = AppStateUI(self)
@@ -65,7 +68,7 @@ class ApplicationLogic:
 
         # --- Hardware Acceleration
         # Query ffmpeg for available hardware accelerations
-        self.available_ffmpeg_hwaccels = self._get_available_ffmpeg_hwaccels()  #
+        self.available_ffmpeg_hwaccels = self._get_available_ffmpeg_hwaccels()
 
         # Get the hardware acceleration method from settings and validate it
         default_hw_accel = "auto"
@@ -104,10 +107,10 @@ class ApplicationLogic:
 
         # --- Initialize Tracker ---
         self.tracker = Tracker(
-            app_logic_instance=self,  # Pass the app_logic instance
-            tracker_model_path=self.yolo_detection_model_path_setting,  # Use the setting path
-            pose_model_path=self.yolo_pose_model_path_setting,  # Use the setting path
-            logger=self.logger)
+            app_logic_instance = self,
+            tracker_model_path = self.yolo_detection_model_path_setting,
+            pose_model_path = self.yolo_pose_model_path_setting,
+            logger = self.logger)
         if self.tracker:
             self.tracker.show_stats = False  # Default internal tracker states
             self.tracker.show_funscript_preview = False
@@ -355,11 +358,10 @@ class ApplicationLogic:
                             # Ensure metadata is a dict before calling .get() on it
                             version = metadata.get('version', '') if isinstance(metadata, dict) else ''
 
-                            if author.startswith("FunGen") and version == FUNSCRIPT_VERSION:
+                            if author.startswith("FunGen") and version == FUNSCRIPT_METADATA_VERSION:
                                 self.logger.info(
                                     f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists.")
                                 continue
-
                 # --- End of pre-flight checks ---
 
                 open_success = self.file_manager.open_video_from_path(video_path)
@@ -402,8 +404,7 @@ class ApplicationLogic:
             self.gui_instance.video_display_ui.drawn_user_roi_video_coords = None
             self.gui_instance.video_display_ui.waiting_for_point_click = False
 
-        self.logger.info("Setting User Defined ROI: Draw rectangle on video, then click point inside.",
-                         extra={'status_message': True, 'duration': 5.0})
+        self.logger.info("Setting User Defined ROI: Draw rectangle on video, then click point inside.", extra={'status_message': True, 'duration': 5.0})
         self.energy_saver.reset_activity_timer()
 
     def exit_set_user_roi_mode(self):
@@ -413,12 +414,10 @@ class ApplicationLogic:
             self.gui_instance.video_display_ui.drawn_user_roi_video_coords = None
             self.gui_instance.video_display_ui.waiting_for_point_click = False
 
-    def user_roi_and_point_set(self, roi_rect_video_coords: Tuple[int, int, int, int],
-                               point_video_coords: Tuple[int, int]):
+    def user_roi_and_point_set(self, roi_rect_video_coords: Tuple[int, int, int, int], point_video_coords: Tuple[int, int]):
         if self.chapter_id_for_roi_setting:
             # --- Logic for setting chapter-specific ROI ---
-            target_chapter = next((ch for ch in self.funscript_processor.video_chapters
-                                   if ch.unique_id == self.chapter_id_for_roi_setting), None)
+            target_chapter = next((ch for ch in self.funscript_processor.video_chapters if ch.unique_id == self.chapter_id_for_roi_setting), None)
             if target_chapter:
                 target_chapter.user_roi_fixed = roi_rect_video_coords
 
@@ -429,12 +428,10 @@ class ApplicationLogic:
                 target_chapter.user_roi_initial_point_relative = (px_rel, py_rel)
 
                 self.logger.info(
-                    f"ROI and point set for chapter: {target_chapter.position_short_name} ({target_chapter.unique_id[:8]})",
-                    extra={'status_message': True})
+                    f"ROI and point set for chapter: {target_chapter.position_short_name} ({target_chapter.unique_id[:8]})", extra={'status_message': True})
                 self.project_manager.project_dirty = True
             else:
-                self.logger.error(f"Could not find the target chapter ({self.chapter_id_for_roi_setting}) to set ROI.",
-                                  extra={'status_message': True})
+                self.logger.error(f"Could not find the target chapter ({self.chapter_id_for_roi_setting}) to set ROI.", extra={'status_message': True})
 
             # Reset the state variable
             self.chapter_id_for_roi_setting = None
@@ -449,16 +446,13 @@ class ApplicationLogic:
                         current_display_frame = self.processor.current_frame.copy()
 
                 if current_display_frame is not None:
-                    self.tracker.set_user_defined_roi_and_point(roi_rect_video_coords, point_video_coords,
-                                                                current_display_frame)
+                    self.tracker.set_user_defined_roi_and_point(roi_rect_video_coords, point_video_coords, current_display_frame)
                     # Tracker mode is usually set via UI combo, but ensure it if not already.
                     if self.tracker.tracking_mode != "USER_FIXED_ROI":
                         self.tracker.set_tracking_mode("USER_FIXED_ROI")
-                    self.logger.info("User defined ROI and point have been set in the tracker.",
-                                     extra={'status_message': True})
+                    self.logger.info("User defined ROI and point have been set in the tracker.", extra={'status_message': True})
                 else:
-                    self.logger.error("Could not get current frame to set user ROI patch. ROI not set.",
-                                      extra={'status_message': True})
+                    self.logger.error("Could not get current frame to set user ROI patch. ROI not set.", extra={'status_message': True})
             else:
                 self.logger.error("Tracker or Processor not available to set user ROI.", extra={'status_message': True})
 
@@ -476,8 +470,7 @@ class ApplicationLogic:
             self.logger.info(f"Cleared pending action: {self.pending_action_after_tracking.get('type')}")
         self.pending_action_after_tracking = None
 
-    def on_processing_stopped(self, was_scripting_session: bool = False,
-                              scripted_frame_range: Optional[Tuple[int, int]] = None):
+    def on_processing_stopped(self, was_scripting_session: bool = False, scripted_frame_range: Optional[Tuple[int, int]] = None):
         """
         Called when video processing (tracking, playback) stops or completes.
         This now handles post-processing for live tracking sessions.
@@ -518,8 +511,7 @@ class ApplicationLogic:
                 if self.app_settings.get("enable_auto_post_processing", False):
                     self.logger.info(
                         f"Triggering auto post-processing for live tracking session range: {scripted_frame_range}.")
-                    if hasattr(self, 'funscript_processor') and hasattr(self.funscript_processor,
-                                                                        'apply_automatic_post_processing'):
+                    if hasattr(self, 'funscript_processor') and hasattr(self.funscript_processor, 'apply_automatic_post_processing'):
                         try:
                             # Pass the specific frame range to the post-processing function
                             self.funscript_processor.apply_automatic_post_processing(frame_range=scripted_frame_range)
@@ -531,8 +523,7 @@ class ApplicationLogic:
                             self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
 
                         except Exception as e_post:
-                            self.logger.error(f"Error during automatic post-processing after live tracking: {e_post}",
-                                              exc_info=True)
+                            self.logger.error(f"Error during automatic post-processing after live tracking: {e_post}", exc_info=True)
                 else:
                     self.logger.info("Auto post-processing disabled, skipping.")
             else:
@@ -574,7 +565,7 @@ class ApplicationLogic:
         """Queries FFmpeg for available hardware acceleration methods."""
         try:
             # Consider making ffmpeg_path configurable via app_settings
-            ffmpeg_path = self.app_settings.get("ffmpeg_path", "ffmpeg")
+            ffmpeg_path = self.app_settings.get("ffmpeg_path") or "ffmpeg" # Without 'or' it would accept "" or None as valid values (Is what Cluade told me)
             result = subprocess.run(
                 [ffmpeg_path, '-hide_banner', '-hwaccels'],
                 capture_output=True, text=True, check=True, timeout=5
@@ -633,15 +624,11 @@ class ApplicationLogic:
         self.logger.debug("Applying loaded settings...")
         defaults = self.app_settings.get_default_settings()
 
-        self.discarded_tracking_classes = self.app_settings.get("discarded_tracking_classes",
-                                                                defaults.get("discarded_tracking_classes", []))
+        self.discarded_tracking_classes = self.app_settings.get("discarded_tracking_classes", defaults.get("discarded_tracking_classes")) or []
 
         # Logging Level
-        new_logging_level = self.app_settings.get("logging_level", defaults.get("logging_level", "INFO"))
+        new_logging_level = self.app_settings.get("logging_level", defaults.get("logging_level")) or "INFO"
         if self.logging_level_setting != new_logging_level:
-            # self.logging_level_setting is already initialized from settings or default in __init__
-            # The actual application of level also happens in __init__ for the first time.
-            # This call ensures that if settings are re-applied, the logger level updates.
             self.set_application_logging_level(new_logging_level)
 
         # Hardware Acceleration
@@ -649,9 +636,7 @@ class ApplicationLogic:
         if "auto" not in self.available_ffmpeg_hwaccels:
             default_hw_accel_in_apply = "none" if "none" in self.available_ffmpeg_hwaccels else \
                 (self.available_ffmpeg_hwaccels[0] if self.available_ffmpeg_hwaccels else "none")
-        loaded_hw_method = self.app_settings.get("hardware_acceleration_method",
-                                                 defaults.get("hardware_acceleration_method",
-                                                              default_hw_accel_in_apply))
+        loaded_hw_method = self.app_settings.get("hardware_acceleration_method", defaults.get("hardware_acceleration_method")) or default_hw_accel_in_apply
         if loaded_hw_method not in self.available_ffmpeg_hwaccels:
             self.logger.warning(
                 f"Hardware acceleration method '{loaded_hw_method}' from settings is not currently available "
@@ -661,24 +646,23 @@ class ApplicationLogic:
             self.hardware_acceleration_method = loaded_hw_method
 
         # Models
-        self.yolo_detection_model_path_setting = self.app_settings.get("yolo_det_model_path",
-                                                                       defaults.get("yolo_det_model_path"))
-        self.yolo_pose_model_path_setting = self.app_settings.get("yolo_pose_model_path",
-                                                                  defaults.get("yolo_pose_model_path"))
+        self.yolo_detection_model_path_setting = self.app_settings.get("yolo_det_model_path", defaults.get("yolo_det_model_path"))
+        self.yolo_pose_model_path_setting = self.app_settings.get("yolo_pose_model_path", defaults.get("yolo_pose_model_path"))
 
         # Update actual model paths used by tracker/processor if they changed
         if self.yolo_det_model_path != self.yolo_detection_model_path_setting:
-            self.yolo_det_model_path = self.yolo_detection_model_path_setting
+            self.yolo_det_model_path = self.yolo_detection_model_path_setting or ""
             if self.tracker: self.tracker.det_model_path = self.yolo_det_model_path
             self.logger.info(
                 f"Detection model path updated from settings: {os.path.basename(self.yolo_det_model_path or '')}")
         if self.yolo_pose_model_path != self.yolo_pose_model_path_setting:
-            self.yolo_pose_model_path = self.yolo_pose_model_path_setting
+            self.yolo_pose_model_path = self.yolo_pose_model_path_setting or ""
             if self.tracker: self.tracker.pose_model_path = self.yolo_pose_model_path
             self.logger.info(
                 f"Pose model path updated from settings: {os.path.basename(self.yolo_pose_model_path or '')}")
 
         # Inform sub-modules to update their settings
+        # TODO: Refactor this to use tuple unpacking
         self.app_state_ui.update_settings_from_app()
         self.file_manager.update_settings_from_app()
         self.stage_processor.update_settings_from_app()
@@ -698,6 +682,7 @@ class ApplicationLogic:
         self.app_settings.set("discarded_tracking_classes", self.discarded_tracking_classes)
 
         # Call save methods on sub-modules
+        # TODO: Refactor this to use tuple unpacking
         self.app_state_ui.save_settings_to_app()
         self.file_manager.save_settings_to_app()
         self.stage_processor.save_settings_to_app()
@@ -714,8 +699,7 @@ class ApplicationLogic:
                 self.project_manager.project_dirty = True
                 self.logger.info(f"State restored from autosave: {AUTOSAVE_FILE}.", extra={'status_message': True})
             except Exception as e:
-                self.logger.error(f"Failed to auto-restore from {AUTOSAVE_FILE}: {e}", exc_info=True,
-                                  extra={'status_message': False})
+                self.logger.error(f"Failed to auto-restore from {AUTOSAVE_FILE}: {e}", exc_info=True, extra={'status_message': False})
 
     def reset_project_state(self, for_new_project: bool = True):
         """Resets the application to a clean state for a new or loaded project."""
@@ -740,13 +724,8 @@ class ApplicationLogic:
 
         # Reset UI states to defaults (or app settings defaults)
         app_settings_defaults = self.app_settings.get_default_settings()
-        self.app_state_ui.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms",
-                                                                         app_settings_defaults.get(
-                                                                             "timeline_pan_offset_ms", 0.0))
-        self.app_state_ui.timeline_zoom_factor_ms_per_px = self.app_settings.get("timeline_zoom_factor_ms_per_px",
-                                                                                 app_settings_defaults.get(
-                                                                                     "timeline_zoom_factor_ms_per_px",
-                                                                                     20.0))
+        self.app_state_ui.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms", app_settings_defaults.get("timeline_pan_offset_ms", 0.0))
+        self.app_state_ui.timeline_zoom_factor_ms_per_px = self.app_settings.get("timeline_zoom_factor_ms_per_px", app_settings_defaults.get("timeline_zoom_factor_ms_per_px", 20.0))
 
         self.app_state_ui.show_funscript_interactive_timeline = self.app_settings.get(
             "show_funscript_interactive_timeline",
@@ -754,17 +733,10 @@ class ApplicationLogic:
         self.app_state_ui.show_funscript_interactive_timeline2 = self.app_settings.get(
             "show_funscript_interactive_timeline2",
             app_settings_defaults.get("show_funscript_interactive_timeline2", False))
-        self.app_state_ui.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph",
-                                                                     app_settings_defaults.get("show_lr_dial_graph",
-                                                                                               True))
-        self.app_state_ui.show_heatmap = self.app_settings.get("show_heatmap",
-                                                               app_settings_defaults.get("show_heatmap", True))
-        self.app_state_ui.show_gauge_window = self.app_settings.get("show_gauge_window",
-                                                                    app_settings_defaults.get("show_gauge_window",
-                                                                                              True))
-        self.app_state_ui.show_stage2_overlay = self.app_settings.get("show_stage2_overlay",
-                                                                      app_settings_defaults.get("show_stage2_overlay",
-                                                                                                True))
+        self.app_state_ui.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", app_settings_defaults.get("show_lr_dial_graph", True))
+        self.app_state_ui.show_heatmap = self.app_settings.get("show_heatmap", app_settings_defaults.get("show_heatmap", True))
+        self.app_state_ui.show_gauge_window = self.app_settings.get("show_gauge_window", app_settings_defaults.get("show_gauge_window", True))
+        self.app_state_ui.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", app_settings_defaults.get("show_stage2_overlay", True))
         self.app_state_ui.reset_video_zoom_pan()
 
         # Reset model paths to current app_settings (in case project had different ones)
