@@ -9,12 +9,10 @@ from datetime import datetime, timedelta
 from video.video_processor import VideoProcessor
 from tracker.tracker import ROITracker as Tracker
 
-from application.classes.settings_manager import AppSettings
-from application.classes.project_manager import ProjectManager
-from application.classes.shortcut_manager import ShortcutManager
-from application.classes.undo_redo_manager import UndoRedoManager
+from application.classes import settings_manager, project_manager, shortcut_manager, undo_redo_manager
 from application.utils.logger import AppLogger
 from config.constants import *
+from application.utils.write_access import check_write_access
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -28,7 +26,7 @@ from .app_utility import AppUtility
 class ApplicationLogic:
     def __init__(self):
         self.gui_instance = None
-        self.app_settings = AppSettings(logger=None)
+        self.app_settings = settings_manager.AppSettings(logger=None)
 
         # Initialize logging_level_setting before AppLogger uses it indirectly via AppSettings
         self.logging_level_setting = self.app_settings.get("logging_level", "INFO")
@@ -133,8 +131,8 @@ class ApplicationLogic:
         self.yolo_input_size = 640
 
         # --- Undo/Redo Managers ---
-        self.undo_manager_t1: Optional[UndoRedoManager] = None
-        self.undo_manager_t2: Optional[UndoRedoManager] = None
+        self.undo_manager_t1: Optional[undo_redo_manager.UndoRedoManager] = None
+        self.undo_manager_t2: Optional[undo_redo_manager.UndoRedoManager] = None
 
         # --- Initialize Tracker ---
         self.tracker = Tracker(
@@ -163,8 +161,8 @@ class ApplicationLogic:
         self.energy_saver = AppEnergySaver(self)
 
         # --- Other Managers ---
-        self.project_manager = ProjectManager(self)
-        self.shortcut_manager = ShortcutManager(self)
+        self.project_manager = project_manager.ProjectManager(self)
+        self.shortcut_manager = shortcut_manager.ShortcutManager(self)
 
         self.project_data_on_load: Optional[Dict] = None
         self.s2_frame_objects_map_for_s3: Optional[Dict[int, Any]] = None
@@ -258,6 +256,8 @@ class ApplicationLogic:
         """
         Prepares for batch processing by creating a confirmation message and showing a dialog.
         """
+        if not self._check_model_paths():
+            return
         if self.is_batch_processing_active or self.stage_processor.full_analysis_active:
             self.logger.warning("Cannot start batch processing: A process is already active.",
                                 extra={'status_message': True})
@@ -295,6 +295,8 @@ class ApplicationLogic:
         [Private] Called from the GUI when the user clicks 'Yes' in the confirmation dialog.
         This method starts the actual batch processing thread.
         """
+        if not self._check_model_paths():
+            return
         if self.is_batch_processing_active: return
         if not self.batch_confirmation_videos:
             self.logger.error("Batch confirmation accepted, but no videos were found in the list.")
@@ -380,22 +382,28 @@ class ApplicationLogic:
 
                 if funscript_to_check:
                     if self.batch_overwrite_mode == 1:
+                        # Mode 1: Process only if funscript is missing (skip any existing funscript)
                         self.logger.info(
-                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'.")
+                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'. (Mode: Only if Missing)")
                         continue
 
                     if self.batch_overwrite_mode == 0:
+                        # Mode 0: Process all except own matching version (skip if up-to-date FunGen funscript exists)
                         funscript_data = self.file_manager._get_funscript_data(funscript_to_check)
                         if funscript_data:
                             author = funscript_data.get('author', '')
                             metadata = funscript_data.get('metadata', {})
                             # Ensure metadata is a dict before calling .get() on it
                             version = metadata.get('version', '') if isinstance(metadata, dict) else ''
-
                             if author.startswith("FunGen") and version == FUNSCRIPT_METADATA_VERSION:
                                 self.logger.info(
-                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists.")
+                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists. (Mode: All except own matching version)")
                                 continue
+
+                    if self.batch_overwrite_mode == 2:
+                        # Mode 2: Process ALL videos, including up-to-date FunGen funscript. Do not skip for any reason.
+                        self.logger.info(
+                            f"Processing '{video_basename}': Mode 2 selected, will process regardless of funscript existence or version.")
                 # --- End of pre-flight checks ---
 
                 open_success = self.file_manager.open_video_from_path(video_path)
@@ -633,6 +641,9 @@ class ApplicationLogic:
             self.logger.error(
                 f"CRITICAL ERROR: YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Please check settings.",
                 extra={'status_message': True, 'duration': 15.0})
+            # GUI popup: Inform user no detection model is set
+            if getattr(self, "gui_instance", None):
+                self.gui_instance.show_error_popup("Detection Model Missing", "No valid Detection Model is set.\nPlease select a YOLO model file in the UI Configuration tab.")
             return False
 
         # Pose model is now optional
@@ -640,7 +651,6 @@ class ApplicationLogic:
             self.logger.warning(
                 f"Warning: YOLO Pose Model not found or path not set. Pose-dependent features will be disabled.",
                 extra={'status_message': True, 'duration': 8.0})
-
         return True
 
     def set_application_logging_level(self, level_name: str):

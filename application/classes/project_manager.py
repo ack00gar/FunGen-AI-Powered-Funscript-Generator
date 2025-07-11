@@ -6,6 +6,7 @@ import numpy as np
 from typing import TYPE_CHECKING, Optional, Dict, Tuple
 
 from config.constants import AUTOSAVE_FILE, PROJECT_FILE_EXTENSION, APP_VERSION
+from application.utils.write_access import check_write_access
 
 if TYPE_CHECKING:
     from application.logic.app_logic import ApplicationLogic
@@ -151,6 +152,7 @@ class ProjectManager:
             self.save_project(self.project_file_path)
 
     def save_project(self, filepath: str):
+        check_write_access(filepath)
         project_data = self._get_project_state_as_dict()  # Gets data from all app sub-modules
         project_data["version"] = APP_VERSION
 
@@ -200,6 +202,7 @@ class ProjectManager:
             return
 
         try:
+            check_write_access(AUTOSAVE_FILE)
             with open(AUTOSAVE_FILE, 'wb') as f:
                 f.write(orjson.dumps(autosave_data, default=numpy_default_handler))
             if not is_exit_save:

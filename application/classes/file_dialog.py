@@ -98,15 +98,17 @@ class ImGuiFileDialog:
         imgui.end_child()
 
     def _draw_filter_selector(self):
-        if not self.extension_groups or self.is_folder_dialog:
-            return
-        filter_names = [name for name, _ in self.extension_groups]
-        clicked, self.active_extension_index = imgui.combo("File Type", self.active_extension_index, filter_names)
-
-        # Up button to navigate to parent directory
-        imgui.same_line(imgui.get_content_region_available_width() - 50)  # Position at right
-        if imgui.button("^ Up", width=50):
-            self._navigate_up()
+        # For file dialogs: show extension dropdown and up button
+        # For folder dialogs: show only up button
+        if not self.is_folder_dialog:
+            filter_names = [name for name, _ in self.extension_groups]
+            clicked, self.active_extension_index = imgui.combo("File Type", self.active_extension_index, filter_names)
+            imgui.same_line()
+            if imgui.button("^ Up", width=50):
+                self._navigate_up()
+        else:
+            if imgui.button("^ Up", width=50):
+                self._navigate_up()
 
     def _parse_extension_filter(self, filter_string: str) -> list[tuple[str, list[str]]]:
         if not filter_string or self.is_folder_dialog:
@@ -114,17 +116,27 @@ class ImGuiFileDialog:
 
         groups = filter_string.split("|")
         result = []
+        all_exts = set()
         for group in groups:
             if "," in group:
                 label, ext = group.split(",", 1)
                 ext_list = [e.strip().lstrip("*.") for e in ext.split(";")]
                 result.append((label.strip(), ext_list))
+                all_exts.update(ext_list)
 
-        # If no valid filters were parsed, add an "All Files" filter
-        if not result:
-            result = [("All Files", [""])]
+        # Add individual extension filters
+        indiv_exts = sorted([e for e in all_exts if e and e.lower() != 'all files'])
+        indiv_ext_groups = [(f"*.{ext}", [ext]) for ext in indiv_exts]
 
-        return result
+        # Compose final list: all extensions (first), individual extensions, all files (last)
+        final = []
+        if result:
+            # Use the first group as 'all extensions' ('AI Models')
+            final.append(result[0])
+        final.extend(indiv_ext_groups)
+        # Add 'All Files' at the end
+        final.append(("All Files", [""]))
+        return final
 
     def draw(self) -> None:
         if not self.open:
@@ -133,35 +145,30 @@ class ImGuiFileDialog:
         imgui.set_next_window_size(750, 400)
         is_open_current_frame, self.open = imgui.begin(self.title, self.open)
 
-        if is_open_current_frame:  # This means the window is visible and ready for drawing content
+        # If the user closed the window with the X button, just return (do not call callback)
+        if not self.open:
+            imgui.end()
+            return
+
+        if is_open_current_frame: # This means the window is visible and ready for drawing content
             try:
                 imgui.columns(2, 'main_columns', border=False)
                 imgui.set_column_width(0, 150)
                 self._draw_common_dirs_sidebar()
                 imgui.next_column()
                 self._draw_directory_navigation()
-                if not self.is_folder_dialog:
-                    self._draw_filter_selector()
-
+                self._draw_filter_selector()
                 if imgui.begin_child("Files", width=0, height=-75, border=True):
                     self._draw_file_list()
-                    imgui.end_child()  # Ensure end_child is called here
-
+                    imgui.end_child() # Ensure end_child is called here
                 should_close = self._draw_bottom_bar()
                 if should_close:
-                    self.open = False  # Set self.open to False to close the dialog
-
+                    self.open = False # Set self.open to False to close the dialog
                 self._draw_overwrite_confirm()
-
             finally:
                 # Ensure columns are reset before ending the window
                 imgui.columns(1)
                 imgui.end()
-
-        else:
-            imgui.end()
-            if not self.open:
-                return
 
     def _draw_directory_navigation(self) -> None:
         # Current directory path display
@@ -185,14 +192,10 @@ class ImGuiFileDialog:
                 items = os.listdir(self.current_dir)
 
                 # Handle .mlpackage as special case - treat as files even though they're directories
-                special_packages = [d for d in items if
-                                    os.path.isdir(os.path.join(self.current_dir, d)) and d.lower().endswith(
-                                        '.mlpackage')]
+                special_packages = [d for d in items if os.path.isdir(os.path.join(self.current_dir, d)) and d.lower().endswith('.mlpackage')]
 
                 # Other directories
-                directories = [d for d in items if
-                               os.path.isdir(os.path.join(self.current_dir, d)) and not d.lower().endswith(
-                                   '.mlpackage')]
+                directories = [d for d in items if os.path.isdir(os.path.join(self.current_dir, d)) and not d.lower().endswith('.mlpackage')]
 
                 # Regular files
                 files = [f for f in items if os.path.isfile(os.path.join(self.current_dir, f))]
@@ -231,18 +234,14 @@ class ImGuiFileDialog:
             # Use platform-neutral directory label
             label = f"[DIR] {d}"
             imgui.push_id(f"dir_{i}")
-            if imgui.selectable(label, False,
-                                flags=imgui.SELECTABLE_DONT_CLOSE_POPUPS | imgui.SELECTABLE_ALLOW_DOUBLE_CLICK):
-                if imgui.is_item_clicked():
-                    if self.is_folder_dialog and imgui.is_mouse_double_clicked(0):
-                        # For folder dialog, double-click selects the directory
-                        self.path = os.path.join(self.current_dir, d)
-                        if self.callback:
-                            self.callback(self.path)
-                        self.open = False
-                    else:
-                        self.current_dir = os.path.join(self.current_dir, d)
-                        self.scroll_to_selected = True
+            is_selected = self.selected_file == d and self.is_folder_dialog
+            if imgui.selectable(label, is_selected, flags=imgui.SELECTABLE_DONT_CLOSE_POPUPS | imgui.SELECTABLE_ALLOW_DOUBLE_CLICK):
+                if imgui.is_item_hovered() and imgui.is_mouse_clicked(0):
+                    self.selected_file = d
+                if imgui.is_item_hovered() and imgui.is_mouse_double_clicked(0):
+                    self.current_dir = os.path.join(self.current_dir, d)
+                    self.selected_file = ""
+                    self.scroll_to_selected = True
             imgui.pop_id()
 
     def _draw_files(self, files: list[str]) -> None:
@@ -295,6 +294,16 @@ class ImGuiFileDialog:
                 return
 
         self.path = file_path
+        if self.callback:
+            self.callback(self.path)
+        self.open = False
+
+    def _confirm_folder_selection(self):
+        # Only called for folder selection dialog
+        if self.selected_file:
+            self.path = os.path.join(self.current_dir, self.selected_file)
+        else:
+            self.path = self.current_dir
         if self.callback:
             self.callback(self.path)
         self.open = False
@@ -362,8 +371,11 @@ class ImGuiFileDialog:
         if self.is_folder_dialog:
             button_text = "Select"
 
+        # Enable the action button only if a file/folder is selected
         enabled = bool(self.selected_file) or self.is_save_dialog or self.is_folder_dialog
-
+        if not enabled:
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
         if imgui.button(button_text, width=action_button_width) and enabled:
             if self.is_save_dialog and not self.is_folder_dialog:
                 if self.selected_file:
@@ -375,12 +387,13 @@ class ImGuiFileDialog:
                         # For save dialog, we use the entered filename
                         self._handle_file_selection(self.selected_file)
             elif self.is_folder_dialog:
-                # For folder dialog, we use the current directory
-                self.path = self.current_dir
-                if self.callback:
-                    self.callback(self.path)
-                self.open = False
+                self._confirm_folder_selection()
             else:
                 if self.selected_file:
                     # For open dialog, we use the selected file
                     self._handle_file_selection(self.selected_file)
+        if not enabled:
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
+
+        return should_close
