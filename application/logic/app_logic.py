@@ -4,6 +4,7 @@ import subprocess
 import os
 import threading
 from typing import Optional, Dict, Tuple, List, Any
+from datetime import datetime, timedelta
 
 from video.video_processor import VideoProcessor
 from tracker.tracker import ROITracker as Tracker
@@ -39,12 +40,42 @@ class ApplicationLogic:
 
         # --- Start of Log Purge ---
         try:
-            # Purge the log file if it's older than 7 days. This runs before the logger is attached to it.
+            # Purge log entries older than 7 days, correctly handling multi-line entries.
             if os.path.exists(self.app_log_file_path):
-                if (time.time() - os.path.getmtime(self.app_log_file_path)) > (7 * 24 * 60 * 60):
-                    os.remove(self.app_log_file_path)
+                cutoff_date = datetime.now() - timedelta(days=7)
+
+                with open(self.app_log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    all_lines = f.readlines()
+
+                first_line_to_keep_index = -1
+                for i, line in enumerate(all_lines):
+                    try:
+                        # Log format: "YYYY-MM-DD HH:MM:SS - ..."
+                        line_timestamp_str = line[:19]
+                        line_date = datetime.strptime(line_timestamp_str, "%Y-%m-%d %H:%M:%S")
+
+                        if line_date >= cutoff_date:
+                            # This is the first entry we want to keep.
+                            # All previous lines will be discarded.
+                            first_line_to_keep_index = i
+                            break
+                    except (ValueError, IndexError):
+                        # This line is part of a multi-line entry.
+                        # Continue searching for the next valid timestamp.
+                        continue
+
+                lines_to_keep = []
+                if first_line_to_keep_index != -1:
+                    # We found a recent entry, so we keep everything from that point on.
+                    lines_to_keep = all_lines[first_line_to_keep_index:]
+
+                # Rewrite the log file with only the recent content.
+                # If no recent entries were found, this will clear the file.
+                with open(self.app_log_file_path, 'w', encoding='utf-8') as f:
+                    if lines_to_keep:
+                        f.writelines(lines_to_keep)
         except Exception:
-            # If purging fails, it's not a critical error. The app can continue.
+            # If purging fails, it's a non-critical error, so we allow the app to continue.
             pass
 
         self._logger_instance = AppLogger(
