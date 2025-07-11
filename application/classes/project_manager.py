@@ -201,8 +201,8 @@ class ProjectManager:
             self.last_autosave_time = time.time()
             return
 
-        check_write_access(AUTOSAVE_FILE)
         try:
+            check_write_access(AUTOSAVE_FILE)
             with open(AUTOSAVE_FILE, 'wb') as f:
                 f.write(orjson.dumps(autosave_data, default=numpy_default_handler))
             if not is_exit_save:

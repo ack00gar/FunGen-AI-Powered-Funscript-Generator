@@ -10,7 +10,7 @@ model_to_convert_list = [
     "FunGen-12s-pov-1.1.0.pt",
     # Add more model filenames here
 ]
-batch_size = 2  # Set your desired batch size here
+batch_size = 1  # Set your desired batch size here (FunGen supports only 1 frame batch max currently)
 
 # Conversion Code
 for model_to_convert in model_to_convert_list:

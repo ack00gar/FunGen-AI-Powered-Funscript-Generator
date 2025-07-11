@@ -122,17 +122,17 @@ class ImGuiFileDialog:
                 result.append((label.strip(), ext_list))
                 all_exts.update(ext_list)
 
-        # Add individual extension filters (skip empty and 'All Files')
+        # Add individual extension filters
         indiv_exts = sorted([e for e in all_exts if e and e.lower() != 'all files'])
         indiv_ext_groups = [(f"*.{ext}", [ext]) for ext in indiv_exts]
 
         # Compose final list: all extensions (first), individual extensions, all files (last)
         final = []
         if result:
-            # Use the first group as 'all extensions' (e.g. 'AI Models')
+            # Use the first group as 'all extensions' ('AI Models')
             final.append(result[0])
         final.extend(indiv_ext_groups)
-        # Always add 'All Files' at the end
+        # Add 'All Files' at the end
         final.append(("All Files", [""]))
         return final
 
@@ -195,14 +195,10 @@ class ImGuiFileDialog:
                 items = os.listdir(self.current_dir)
 
                 # Handle .mlpackage as special case - treat as files even though they're directories
-                special_packages = [d for d in items if
-                                    os.path.isdir(os.path.join(self.current_dir, d)) and d.lower().endswith(
-                                        '.mlpackage')]
+                special_packages = [d for d in items if os.path.isdir(os.path.join(self.current_dir, d)) and d.lower().endswith( '.mlpackage')]
 
                 # Other directories
-                directories = [d for d in items if
-                               os.path.isdir(os.path.join(self.current_dir, d)) and not d.lower().endswith(
-                                   '.mlpackage')]
+                directories = [d for d in items if os.path.isdir(os.path.join(self.current_dir, d)) and not d.lower().endswith( '.mlpackage')]
 
                 # Regular files
                 files = [f for f in items if os.path.isfile(os.path.join(self.current_dir, f))]

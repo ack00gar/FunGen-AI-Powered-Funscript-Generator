@@ -233,11 +233,11 @@ class AppFileManager:
             self.logger.info(f"No actions to save to {os.path.basename(filepath)}.", extra={'status_message': True})
             return
 
-        check_write_access(filepath)
 
         # --- Backup logic before saving ---
         if os.path.exists(filepath):
             try:
+                check_write_access(filepath)
                 # Create a unique backup filename with a Unix timestamp
                 backup_path = f"{filepath}.{int(time.time())}.bak"
                 os.rename(filepath, backup_path)
