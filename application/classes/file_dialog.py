@@ -114,17 +114,27 @@ class ImGuiFileDialog:
 
         groups = filter_string.split("|")
         result = []
+        all_exts = set()
         for group in groups:
             if "," in group:
                 label, ext = group.split(",", 1)
                 ext_list = [e.strip().lstrip("*.") for e in ext.split(";")]
                 result.append((label.strip(), ext_list))
+                all_exts.update(ext_list)
 
-        # If no valid filters were parsed, add an "All Files" filter
-        if not result:
-            result = [("All Files", [""])]
+        # Add individual extension filters (skip empty and 'All Files')
+        indiv_exts = sorted([e for e in all_exts if e and e.lower() != 'all files'])
+        indiv_ext_groups = [(f"*.{ext}", [ext]) for ext in indiv_exts]
 
-        return result
+        # Compose final list: all extensions (first), individual extensions, all files (last)
+        final = []
+        if result:
+            # Use the first group as 'all extensions' (e.g. 'AI Models')
+            final.append(result[0])
+        final.extend(indiv_ext_groups)
+        # Always add 'All Files' at the end
+        final.append(("All Files", [""]))
+        return final
 
     def draw(self) -> None:
         if not self.open:
