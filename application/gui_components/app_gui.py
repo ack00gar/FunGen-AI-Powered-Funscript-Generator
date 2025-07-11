@@ -882,6 +882,10 @@ class GUI:
                     self.error_popup_action_callback()
             imgui.end_popup()
 
+        # Render TensorRT Compiler Window if open
+        if hasattr(self.app, 'tensorrt_compiler_window') and self.app.tensorrt_compiler_window:
+            self.app.tensorrt_compiler_window.render()
+
         self.perf_frame_count += 1
         if time.time() - self.last_perf_log_time > self.perf_log_interval:
             self._log_performance()
