@@ -279,7 +279,11 @@ class VideoNavigationUI:
             if imgui.is_item_hovered():
                 self.chapter_tooltip_segment = segment
 
-                if imgui.is_item_clicked(0):
+                if imgui.is_mouse_double_clicked(0):
+                    action_on_segment_this_frame = True
+                    if self.app.processor:
+                        self.app.processor.seek_video(segment.start_frame_id)
+                elif imgui.is_item_clicked(0):
                     action_on_segment_this_frame = True
                     io = imgui.get_io()
                     is_shift_held = io.key_shift
@@ -406,6 +410,19 @@ class VideoNavigationUI:
 
         if imgui.begin_popup(self.chapter_bar_popup_id):
             num_selected = len(self.context_selected_chapters)
+            can_select_one = num_selected == 1
+
+            if imgui.menu_item("Seek to Beginning of Chapter", enabled=can_select_one)[0]:
+                if can_select_one:
+                    selected_chapter = self.context_selected_chapters[0]
+                    if self.app.processor:
+                        self.app.processor.seek_video(selected_chapter.start_frame_id)
+
+            if imgui.menu_item("Seek to End of Chapter", enabled=can_select_one)[0]:
+                if can_select_one:
+                    selected_chapter = self.context_selected_chapters[0]
+                    if self.app.processor:
+                        self.app.processor.seek_video(selected_chapter.end_frame_id)
 
             can_edit = num_selected == 1
             if imgui.menu_item("Edit Chapter", enabled=can_edit)[0]:
