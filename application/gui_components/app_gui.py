@@ -611,11 +611,11 @@ class GUI:
                 imgui.separator()
                 imgui.text("File Handling:")
 
-                if imgui.radio_button("Process All Videos (Skips FunGenown matching version)", self.batch_overwrite_mode_ui == 0):
+                if imgui.radio_button("Process All Videos (Skips FunGen own matching version)", self.batch_overwrite_mode_ui == 0):
                     self.batch_overwrite_mode_ui = 0
                 if imgui.radio_button("Process Only if a Funscript is Missing", self.batch_overwrite_mode_ui == 1):
                     self.batch_overwrite_mode_ui = 1
-                if imgui.radio_button("Process All Videos (including FunGen own matching version)", self.batch_overwrite_mode_ui == 2):
+                if imgui.radio_button("Process All Videos (Including FunGen own matching version)", self.batch_overwrite_mode_ui == 2):
                     self.batch_overwrite_mode_ui = 2
 
                 imgui.separator()
