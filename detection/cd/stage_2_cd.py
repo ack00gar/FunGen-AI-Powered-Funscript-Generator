@@ -717,43 +717,109 @@ def _infer_interaction_box_from_pose(pose: PoseRecord, class_name: str) -> Optio
     return None
 
 
-# --- Step 0: Global Object Tracking (Simple IoU Tracker) ---
-def simple_iou_tracker_step0(state: AppStateContainer, logger: Optional[logging.Logger]):
-    _debug_log(logger, "Starting Step 0: Simple IoU Object Tracking")
+# --- Step 0: Global Object Tracking (IoU Tracker) ---
+
+def resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.Logger]):
+    """
+    An improved IoU-based tracker with state persistence to handle occlusions.
+    This replaces the previous simple tracker.
+    """
+    if not logger:
+        logger = logging.getLogger("ResilientTracker")
+
+    _debug_log(logger, "Starting Step 0: Resilient Object Tracking")
+
+    # --- Configuration for the new tracker ---
+    fps = state.video_info.get('fps', 30.0)
+    IOU_THRESHOLD = 0.3  # Min overlap to be considered the same object in consecutive frames.
+    MAX_FRAMES_TO_BECOME_LOST = int(fps * 0.75)  # A track is "lost" if unseen for 0.75s.
+    MAX_FRAMES_IN_LOST_STATE = int(fps * 10)  # A "lost" track is permanently deleted after 10s.
+    REID_DISTANCE_THRESHOLD_FACTOR = 2.0  # Search radius for re-identification is 2x the object's size.
+
     next_global_track_id = 1
     active_tracks: Dict[int, Dict[str, Any]] = {}
-    iou_threshold = 0.3
-    max_frames_unseen = int(state.video_info.get('fps', 30) * 0.5)
+    lost_tracks: Dict[int, Dict[str, Any]] = {}
 
     for frame_obj in sorted(state.frames, key=lambda f: f.frame_id):
         current_detections = [b for b in frame_obj.boxes if not b.is_excluded]
-        matched_indices = [False] * len(current_detections)
-        track_ids_to_delete = []
+        unmatched_detections = list(range(len(current_detections)))
 
+        # --- 1. Update and Prune Tracks ---
+        tracks_to_move_to_lost = []
+        for track_id, track_data in active_tracks.items():
+            track_data["frames_unseen"] += 1
+            if track_data["frames_unseen"] > MAX_FRAMES_TO_BECOME_LOST:
+                tracks_to_move_to_lost.append(track_id)
+
+        for track_id in tracks_to_move_to_lost:
+            lost_tracks[track_id] = active_tracks.pop(track_id)
+            _debug_log(logger, f"Track {track_id} ({lost_tracks[track_id]['class_name']}) moved to 'lost' state.")
+
+        tracks_to_delete_permanently = []
+        for track_id, track_data in lost_tracks.items():
+            track_data["frames_unseen"] += 1
+            if track_data["frames_unseen"] > MAX_FRAMES_IN_LOST_STATE:
+                tracks_to_delete_permanently.append(track_id)
+
+        for track_id in tracks_to_delete_permanently:
+            del lost_tracks[track_id]
+            _debug_log(logger, f"Track {track_id} permanently deleted.")
+
+        # --- 2. Match Active Tracks ---
         for track_id, track_data in active_tracks.items():
             best_match_idx, max_iou = -1, -1
-            for i, det_box in enumerate(current_detections):
-                if matched_indices[i] or det_box.class_name != track_data["class_name"]: continue
-                iou = _atr_calculate_iou(track_data["box_rec"].bbox, det_box.bbox)
-                if iou > iou_threshold and iou > max_iou: max_iou, best_match_idx = iou, i
+            for i in unmatched_detections:
+                det_box = current_detections[i]
+                if det_box.class_name == track_data["class_name"]:
+                    iou = _atr_calculate_iou(track_data["box_rec"].bbox, det_box.bbox)
+                    if iou > IOU_THRESHOLD and iou > max_iou:
+                        max_iou = iou
+                        best_match_idx = i
+
             if best_match_idx != -1:
-                current_detections[best_match_idx].track_id = track_id
-                active_tracks[track_id].update({"box_rec": current_detections[best_match_idx], "frames_unseen": 0})
-                matched_indices[best_match_idx] = True
-            else:
-                active_tracks[track_id]["frames_unseen"] += 1
-                if active_tracks[track_id]["frames_unseen"] > max_frames_unseen: track_ids_to_delete.append(track_id)
+                det_box = current_detections[best_match_idx]
+                det_box.track_id = track_id
+                track_data["box_rec"] = det_box
+                track_data["frames_unseen"] = 0
+                unmatched_detections.remove(best_match_idx)
 
-        for track_id in track_ids_to_delete: del active_tracks[track_id]
+        # --- 3. Re-Identify and Match Lost Tracks ---
+        for i in list(unmatched_detections):  # Iterate over a copy
+            new_det = current_detections[i]
+            best_lost_match_id, min_dist = -1, float('inf')
 
-        for i, det_box in enumerate(current_detections):
-            if not matched_indices[i]:
-                det_box.track_id = next_global_track_id
-                active_tracks[next_global_track_id] = {"box_rec": det_box, "frames_unseen": 0,
-                                                       "class_name": det_box.class_name}
-                next_global_track_id += 1
+            for track_id, track_data in lost_tracks.items():
+                if new_det.class_name == track_data["class_name"]:
+                    dist = np.linalg.norm(np.array(new_det.bbox[:2]) - np.array(track_data["box_rec"].bbox[:2]))
+                    reid_threshold = REID_DISTANCE_THRESHOLD_FACTOR * max(track_data["box_rec"].width,
+                                                                          track_data["box_rec"].height)
 
-    _debug_log(logger, f"Step 0: Tracking complete. Assigned up to global_track_id {next_global_track_id - 1}.")
+                    if dist < reid_threshold and dist < min_dist:
+                        min_dist = dist
+                        best_lost_match_id = track_id
+
+            if best_lost_match_id != -1:
+                _debug_log(logger, f"Re-identified track {best_lost_match_id} with new detection.")
+                new_det.track_id = best_lost_match_id
+                # Reactivate the track
+                reactivated_track = lost_tracks.pop(best_lost_match_id)
+                reactivated_track["box_rec"] = new_det
+                reactivated_track["frames_unseen"] = 0
+                active_tracks[best_lost_match_id] = reactivated_track
+                unmatched_detections.remove(i)
+
+        # --- 4. Create New Tracks ---
+        for i in unmatched_detections:
+            det_box = current_detections[i]
+            det_box.track_id = next_global_track_id
+            active_tracks[next_global_track_id] = {
+                "box_rec": det_box,
+                "frames_unseen": 0,
+                "class_name": det_box.class_name
+            }
+            next_global_track_id += 1
+
+    _debug_log(logger, f"Resilient tracking complete. Assigned up to global_track_id {next_global_track_id - 1}.")
 
 
 # --- ATR Analysis Steps ---
@@ -1135,7 +1201,7 @@ def atr_pass_7_8_simplify_signal(state: AppStateContainer, logger: Optional[logg
         return
 
     # Skip simplification
-    skip_simplification = False
+    skip_simplification = True
 
     if skip_simplification:
         # Store the final simplified actions in state
@@ -1372,7 +1438,7 @@ def perform_contact_analysis(
     # Define main steps for progress reporting
     # Base steps for segmentation
     atr_main_steps_list_base = [
-        ("Step 1: Tracking Objects", simple_iou_tracker_step0),
+        ("Step 1: Tracking Objects", resilient_tracker_step0),
         ("Step 2: Interpolate Boxes", atr_pass_1_interpolate_boxes),
         ("Step 3: Build Locked Penis", atr_pass_3_build_locked_penis),
         ("Step 4: Assign Positions & Segments", atr_pass_4_assign_positions_and_segments),

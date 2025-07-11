@@ -308,3 +308,17 @@ class AppEventHandlers:
             native_fps = self.app.processor.video_info['fps']
             return f"({native_fps:.2f})", native_fps
         return "", 0.0
+
+    def handle_interactive_refinement_click(self, chapter: VideoSegment, track_id: int):
+        """
+        This method is called by the UI. It saves the user's choice to the chapter
+        object itself, making the highlight persistent.
+        """
+        if self.app.stage_processor:
+            # Set the persistent attribute on the chapter
+            chapter.refined_track_id = track_id
+            self.app.project_manager.project_dirty = True
+
+            # Start the backend analysis to update the funscript
+            self.app.stage_processor.start_interactive_refinement_analysis(chapter, track_id)
+

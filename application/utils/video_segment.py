@@ -10,7 +10,8 @@ class VideoSegment:
     def __init__(self, start_frame_id, end_frame_id, class_id, class_name, segment_type, position_short_name,
                  position_long_name, duration=0, occlusions=0, color=None, source="manual",
                  user_roi_fixed: Optional[Tuple[int, int, int, int]] = None,
-                 user_roi_initial_point_relative: Optional[Tuple[float, float]] = None):
+                 user_roi_initial_point_relative: Optional[Tuple[float, float]] = None,
+                 refined_track_id: Optional[int] = None):
         self.start_frame_id = int(start_frame_id)
         self.end_frame_id = int(end_frame_id)
         self.class_id = class_id  # Can be int or None
@@ -26,6 +27,8 @@ class VideoSegment:
 
         self.user_roi_fixed = user_roi_fixed
         self.user_roi_initial_point_relative = user_roi_initial_point_relative
+
+        self.refined_track_id = refined_track_id
 
         default_colors = {
             "BJ": (0.9, 0.4, 0.4, 0.8),
@@ -101,6 +104,7 @@ class VideoSegment:
             'unique_id': self.unique_id,
             'user_roi_fixed': self.user_roi_fixed,
             'user_roi_initial_point_relative': self.user_roi_initial_point_relative,
+            'refined_track_id': self.refined_track_id,
         }
 
     @classmethod
@@ -130,6 +134,8 @@ class VideoSegment:
 
         segment.user_roi_fixed = data.get('user_roi_fixed')
         segment.user_roi_initial_point_relative = data.get('user_roi_initial_point_relative')
+
+        segment.refined_track_id = data.get('refined_track_id')
 
         return segment
 

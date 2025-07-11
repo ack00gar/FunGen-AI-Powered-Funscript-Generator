@@ -146,6 +146,8 @@ class AppStateUI:
         self.last_synced_frame_index_timeline = -1  # Last video frame index timeline was auto-panned to
         self.force_timeline_pan_to_current_frame = False  # Flag to command timeline to pan to current video frame
 
+        self.interactive_refinement_mode_enabled: bool = False
+
     def sync_tracker_ui_flags(self):
         """Ensure AppStateUI flags match the actual tracker state."""
         if self.app.tracker:
@@ -408,6 +410,7 @@ class AppStateUI:
             self.show_heatmap = project_data.get("show_heatmap", self.show_heatmap)
             self.show_gauge_window = project_data.get("show_gauge_window", self.show_gauge_window)
             self.show_stage2_overlay = project_data.get("show_stage2_overlay", self.show_stage2_overlay)
+            self.interactive_refinement_mode_enabled = project_data.get("interactive_refinement_mode_enabled", False)
 
         self.sync_tracker_ui_flags()
 
@@ -442,3 +445,5 @@ class AppStateUI:
         self.app_settings.set("lr_dial_window_pos_y", int(self.lr_dial_window_pos[1]))
         self.app_settings.set("lr_dial_window_size_w", int(self.lr_dial_window_size[0]))
         self.app_settings.set("lr_dial_window_size_h", int(self.lr_dial_window_size[1]))
+
+        self.app_settings.set("interactive_refinement_mode_enabled", self.interactive_refinement_mode_enabled)

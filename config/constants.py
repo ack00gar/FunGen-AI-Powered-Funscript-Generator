@@ -54,7 +54,7 @@ class TrackerMode(Enum):
     LIVE_YOLO_ROI = "Live Optical Flow (YOLO ROI)"
     LIVE_USER_ROI = "Live Optical Flow (User ROI)"
     OFFLINE_2_STAGE = "YOLO AI (2 Stages, legacy)"
-    OFFLINE_3_STAGE = "YOLO AI + Opt. Flow (3 Stages, broken)"
+    OFFLINE_3_STAGE = "YOLO AI + Opt. Flow (3 Stages)"
 
 
 ####################################################################################################
