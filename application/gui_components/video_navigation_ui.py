@@ -424,6 +424,8 @@ class VideoNavigationUI:
                     if self.app.processor:
                         self.app.processor.seek_video(selected_chapter.end_frame_id)
 
+            imgui.separator()
+
             can_edit = num_selected == 1
             if imgui.menu_item("Edit Chapter", enabled=can_edit)[0]:
                 if can_edit and self.context_selected_chapters:
