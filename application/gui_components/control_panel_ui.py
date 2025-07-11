@@ -298,6 +298,7 @@ class ControlPanelUI:
                 title=title,
                 is_save=False,
                 callback=callback,
+                # TODO: Move extension list to constants.py
                 extension_filter="AI Models (.pt .onnx .engine .mlpackage),.pt;.onnx;.engine;.mlpackage|All Files,*.*",
                 initial_path=initial_dir
             )
@@ -359,6 +360,7 @@ class ControlPanelUI:
             self.app.unload_model('detection')
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
+            # TODO: Move extension list to constants.py
             "Path to the YOLO object detection model file (.pt, .onnx, .engine, .mlpackage).")
 
         # --- YOLO Pose Model ---
@@ -381,6 +383,7 @@ class ControlPanelUI:
             self.app.unload_model('pose')
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
+            # TODO: Move extension list to constants.py
             "Path to the YOLO pose estimation model file (.pt, .onnx, .engine, .mlpackage). This model is optional.")
 
         # UI for selecting the Pose Model Artifacts Directory

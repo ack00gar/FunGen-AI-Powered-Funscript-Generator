@@ -610,14 +610,9 @@ class ApplicationLogic:
             self.logger.error(
                 f"CRITICAL ERROR: YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Please check settings.",
                 extra={'status_message': True, 'duration': 15.0})
-            # Show GUI popup if available
-            if self.gui_instance and hasattr(self.gui_instance, 'show_error_popup'):
-                self.gui_instance.show_error_popup(
-                    "Detection Model Missing",
-                    "No valid Detection Model is set.\nPlease select a YOLO model file in the UI Configuration tab.",
-                    action_label="Select Model",
-                    action_callback=getattr(self.gui_instance, 'open_detection_model_dialog', None)
-                )
+            # GUI popup: Inform user no detection model is set
+            if getattr(self, "gui_instance", None):
+                self.gui_instance.show_error_popup("Detection Model Missing", "No valid Detection Model is set.\nPlease select a YOLO model file in the UI Configuration tab.")
             return False
 
         # Pose model is now optional
@@ -625,7 +620,6 @@ class ApplicationLogic:
             self.logger.warning(
                 f"Warning: YOLO Pose Model not found or path not set. Pose-dependent features will be disabled.",
                 extra={'status_message': True, 'duration': 8.0})
-
         return True
 
     def set_application_logging_level(self, level_name: str):

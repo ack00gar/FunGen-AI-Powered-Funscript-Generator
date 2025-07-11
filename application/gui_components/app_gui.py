@@ -86,6 +86,7 @@ class GUI:
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
 
+        # TODO: Move this to a separate class/error management module
         self.error_popup_active = False
         self.error_popup_title = ""
         self.error_popup_message = ""
@@ -472,18 +473,13 @@ class GUI:
         # Render the existing texture
         imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
 
+    # TODO: Move this to a separate class/error management module
     def show_error_popup(self, title, message, action_label=None, action_callback=None):
         self.error_popup_active = True
         self.error_popup_title = title
         self.error_popup_message = message
         self.error_popup_action_label = action_label
         self.error_popup_action_callback = action_callback
-
-    def open_detection_model_dialog(self):
-        # This should open the file dialog for selecting a detection model
-        # You may want to call self.control_panel_ui.open_detection_model_dialog() or similar
-        if hasattr(self.control_panel_ui, 'open_detection_model_dialog'):
-            self.control_panel_ui.open_detection_model_dialog()
 
     # All other methods from the original file from this point are included below without modification
     # for completeness, except for the `run` method's `finally` block which now handles thread shutdown.
@@ -615,11 +611,11 @@ class GUI:
                 imgui.separator()
                 imgui.text("File Handling:")
 
-                if imgui.radio_button("Process All Videos (Skips own matching version)", self.batch_overwrite_mode_ui == 0):
+                if imgui.radio_button("Process All Videos (Skips FunGenown matching version)", self.batch_overwrite_mode_ui == 0):
                     self.batch_overwrite_mode_ui = 0
-                if imgui.radio_button("Process Only if Funscript is Missing", self.batch_overwrite_mode_ui == 1):
+                if imgui.radio_button("Process Only if a Funscript is Missing", self.batch_overwrite_mode_ui == 1):
                     self.batch_overwrite_mode_ui = 1
-                if imgui.radio_button("Process All Videos (including own matching version)", self.batch_overwrite_mode_ui == 2):
+                if imgui.radio_button("Process All Videos (including FunGen own matching version)", self.batch_overwrite_mode_ui == 2):
                     self.batch_overwrite_mode_ui = 2
 
                 imgui.separator()
@@ -847,6 +843,7 @@ class GUI:
         ))
         self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
 
+        # TODO: Move this to a separate class/error management module
         if self.error_popup_active:
             imgui.open_popup("ErrorPopup")
         # Center the popup and set a normal size (compatibility for imgui versions)
@@ -859,7 +856,7 @@ class GUI:
             # Fallback: center on window size if viewport not available
             popup_pos = (self.window_width * 0.5, self.window_height * 0.5)
             imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-        popup_width = 480  # Increased by ~15% from 420
+        popup_width = 480 
         imgui.set_next_window_size(popup_width, 0)  # Normal width, auto height
         if imgui.begin_popup_modal("ErrorPopup")[0]:
             # Center title
