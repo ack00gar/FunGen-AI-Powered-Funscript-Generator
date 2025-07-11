@@ -353,7 +353,7 @@ class ApplicationLogic:
                     if self.batch_overwrite_mode == 1:
                         # Mode 1: Process only if funscript is missing (skip any existing funscript)
                         self.logger.info(
-                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'.")
+                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'. (Mode: Only if Missing)")
                         continue
 
                     if self.batch_overwrite_mode == 0:
@@ -366,7 +366,7 @@ class ApplicationLogic:
                             version = metadata.get('version', '') if isinstance(metadata, dict) else ''
                             if author.startswith("FunGen") and version == FUNSCRIPT_METADATA_VERSION:
                                 self.logger.info(
-                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists.")
+                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists. (Mode: All except own matching version)")
                                 continue
 
                     if self.batch_overwrite_mode == 2:
