@@ -507,6 +507,49 @@ class VideoDisplayUI:
                         self._render_fps_controls_overlay()
                         self._render_video_zoom_pan_controls(app_state)
 
+            # --- Interactive Refinement Overlay and Click Handling ---
+            if self.app.app_state_ui.interactive_refinement_mode_enabled:
+                # 1. Render the bounding boxes so the user can see what to click.
+                # We reuse the existing stage 2 overlay logic for this.
+                if self.app.stage_processor.stage2_overlay_data_map:
+                    self._render_stage2_overlay(self.app.stage_processor, self.app.app_state_ui)
+
+                # 2. Handle the mouse click for the "hint".
+                io = imgui.get_io()
+                is_hovering_video = imgui.is_mouse_hovering_rect(
+                    self._actual_video_image_rect_on_screen['min_x'], self._actual_video_image_rect_on_screen['min_y'],
+                    self._actual_video_image_rect_on_screen['max_x'], self._actual_video_image_rect_on_screen['max_y'])
+
+                if is_hovering_video and imgui.is_mouse_clicked(
+                        0) and not self.app.stage_processor.refinement_analysis_active:
+                    mouse_x, mouse_y = io.mouse_pos
+                    current_frame_idx = self.app.processor.current_frame_index
+
+                    # Find the chapter at the current frame
+                    chapter = self.app.funscript_processor.get_chapter_at_frame(current_frame_idx)
+                    if not chapter:
+                        self.app.logger.info("Cannot refine: Please click within a chapter boundary.",
+                                             extra={'status_message': True})
+                        return
+
+                    # Find which bounding box was clicked
+                    overlay_data = self.app.stage_processor.stage2_overlay_data_map.get(current_frame_idx)
+                    if overlay_data and "yolo_boxes" in overlay_data:
+                        for box in overlay_data["yolo_boxes"]:
+                            p1 = self._video_to_screen_coords(box["bbox"][0], box["bbox"][1])
+                            p2 = self._video_to_screen_coords(box["bbox"][2], box["bbox"][3])
+                            if p1 and p2 and p1[0] <= mouse_x <= p2[0] and p1[1] <= mouse_y <= p2[1]:
+                                clicked_track_id = box.get("track_id")
+                                if clicked_track_id is not None:
+                                    self.app.logger.info(
+                                        f"Hint received! Refining chapter '{chapter.position_short_name}' "
+                                        f"to follow object with track_id: {clicked_track_id}",
+                                        extra={'status_message': True})
+                                    # Trigger the backend process
+                                    self.app.event_handlers.handle_interactive_refinement_click(chapter,
+                                                                                                clicked_track_id)
+                                    break  # Stop after finding the first clicked box
+
             else:
                 self._render_drop_video_prompt()
 
@@ -585,6 +628,8 @@ class VideoDisplayUI:
         frame_overlay_data = stage_proc.stage2_overlay_data_map.get(self.app.processor.current_frame_index)
         if not frame_overlay_data: return
 
+        current_chapter = self.app.funscript_processor.get_chapter_at_frame(self.app.processor.current_frame_index)
+
         draw_list = imgui.get_window_draw_list()
         img_rect = self._actual_video_image_rect_on_screen
         draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
@@ -606,30 +651,41 @@ class VideoDisplayUI:
             if p1 and p2:
                 is_active_interactor = (box.get("track_id") is not None and box.get("track_id") == active_track_id)
                 is_locked_penis = (box.get("class_name") == "locked_penis")
-
                 is_inferred_relative = (box.get("status") == constants.STATUS_INFERRED_RELATIVE)
 
-                # --- NEW HIERARCHICAL HIGHLIGHTING LOGIC ---
-                if is_active_interactor:
-                    color = (1.0, 1.0, 0.0, 1.0)  # Bright Yellow for ACTIVE interactor
+                is_refined_track = False
+                if current_chapter and current_chapter.refined_track_id is not None:
+                    if box.get('track_id') == current_chapter.refined_track_id:
+                        is_refined_track = True
+
+                # --- HIERARCHICAL HIGHLIGHTING LOGIC ---
+                if is_refined_track:
+                    color = (0.0, 1.0, 1.0, 1.0)  # Bright Cyan for the persistent refined track
+                    thickness = 3.0
+                elif is_active_interactor:
+                    color = (1.0, 1.0, 0.0, 1.0)  # Bright Yellow for the ACTIVE interactor
                     thickness = 3.0
                 elif is_locked_penis:
                     color = (0.1, 1.0, 0.1, 0.95)  # Bright Green for LOCKED PENIS
                     thickness = 2.0
                 elif is_inferred_relative:
                     color = (0.8, 0.4, 1.0, 0.85) # A distinct purple for inferred boxes
-                    thickness = 1.0 # Thinner to indicate lower certainty
+                    thickness = 1.0
                 else:
                     color, thickness, _ = self.app.utility.get_box_style(box)
 
                 color_u32 = imgui.get_color_u32_rgba(*color)
                 draw_list.add_rect(p1[0], p1[1], p2[0], p2[1], color_u32, thickness=thickness, rounding=2.0)
 
-                label = f'{box.get("class_name", "?")}'
+
+                track_id_str = f" (TID: {box.get('track_id')})" if box.get('track_id') is not None else ""
+                label = f'{box.get("class_name", "?")}{track_id_str}'
+
                 if is_active_interactor:
                     label += " (ACTIVE)"
                 elif is_inferred_relative:
                     label += " (Inferred)"
+
                 draw_list.add_text(p1[0] + 3, p1[1] + 3, imgui.get_color_u32_rgba(1, 1, 1, 1), label)
 
         if is_occluded:

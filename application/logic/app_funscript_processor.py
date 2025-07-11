@@ -409,7 +409,33 @@ class AppFunscriptProcessor:
     def clipboard_has_actions(self) -> bool:
         return bool(self.clipboard_actions_data)
 
-        # In app_funscript_processor.py (AppFunscriptProcessor class)
+    def apply_interactive_refinement(self, chapter: VideoSegment, new_actions: List[Dict]):
+        """
+        Applies the results from an interactive refinement session to the funscript,
+        ensuring the action is recorded for undo/redo.
+        """
+        if not chapter or not new_actions:
+            self.logger.warning("Attempted to apply refinement with invalid chapter or actions.")
+            return
+
+        # Determine the time range of the chapter to be replaced.
+        start_ms = self.frame_to_ms(chapter.start_frame_id)
+        end_ms = self.frame_to_ms(chapter.end_frame_id)
+
+        # Define a clear description for the undo/redo history.
+        op_desc = f"Refine Chapter: {chapter.position_short_name}"
+
+        # The existing clear_actions_in_range_and_inject_new method already handles
+        # undo recording, replacing the data, and updating the UI. We can call it directly.
+        self.clear_actions_in_range_and_inject_new(
+            timeline_num=1,  # Refinement currently targets the primary timeline
+            new_actions_for_range=new_actions,
+            range_start_ms=start_ms,
+            range_end_ms=end_ms,
+            operation_description=op_desc
+        )
+
+        self.logger.info(f"Successfully applied and recorded refinement for chapter '{chapter.position_short_name}'.")
 
     def clear_actions_in_range_and_inject_new(self, timeline_num: int,
                                               new_actions_for_range: List[Dict],

@@ -6,6 +6,7 @@ from queue import Queue
 from typing import Optional, List, Dict, Any, Tuple
 import msgpack
 import numpy as np
+from bisect import bisect_left, bisect_right
 
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
@@ -55,6 +56,142 @@ class AppStageProcessor:
 
         # --- Fallback Constants ---
         self.S2_TOTAL_MAIN_STEPS_FALLBACK = getattr(stage2_module, 'ATR_PASS_COUNT', 6)
+
+        self.refinement_analysis_active: bool = False
+        self.refinement_thread: Optional[threading.Thread] = None
+
+    def start_interactive_refinement_analysis(self, chapter, track_id):
+        if self.full_analysis_active or self.refinement_analysis_active:
+            self.logger.warning("Another analysis is already running.", extra={'status_message': True})
+            return
+        # CORRECTED: Check for the correct data map that is always available after Stage 2.
+        if not self.stage2_overlay_data_map:
+            self.logger.error("Cannot start refinement: Stage 2 overlay data map is not available.",
+                              extra={'status_message': True})
+            return
+
+        self.refinement_analysis_active = True
+        self.stop_stage_event.clear()
+
+        self.refinement_thread = threading.Thread(
+            target=self._run_interactive_refinement_thread,
+            args=(chapter, track_id),
+            daemon=True
+        )
+        self.refinement_thread.start()
+
+    def _run_interactive_refinement_thread(self, chapter, track_id):
+        try:
+            # 1. PRE-SCAN: Use the corrected data source.
+            track_id_positions = {}
+            for frame_id in range(chapter.start_frame_id, chapter.end_frame_id + 1):
+                # Read from stage2_overlay_data_map.
+                frame_data = self.stage2_overlay_data_map.get(frame_id)
+                if not frame_data: continue
+                # The data is now a dictionary, not a FrameObject.
+                for box_dict in frame_data.get("yolo_boxes", []):
+                    if box_dict.get("track_id") == track_id:
+                        track_id_positions[frame_id] = box_dict
+                        break
+
+            if not track_id_positions:
+                self.logger.warning(f"Track ID {track_id} not found in chapter. Aborting refinement.")
+                return
+
+            # 2. BUILD REFINED TRACK (with interpolation).
+            refined_track = {}
+            sorted_known_frames = sorted(track_id_positions.keys())
+
+            for frame_id in range(chapter.start_frame_id, chapter.end_frame_id + 1):
+                if frame_id in track_id_positions:
+                    refined_track[frame_id] = track_id_positions[frame_id]
+                else:
+                    prev_frames = [f for f in sorted_known_frames if f < frame_id]
+                    next_frames = [f for f in sorted_known_frames if f > frame_id]
+                    prev_known = prev_frames[-1] if prev_frames else None
+                    next_known = next_frames[0] if next_frames else None
+
+                    if prev_known and next_known:
+                        t = (frame_id - prev_known) / float(next_known - prev_known)
+                        prev_box_dict = track_id_positions[prev_known]
+                        next_box_dict = track_id_positions[next_known]
+
+                        # Interpolate using numpy arrays for vectorization.
+                        interp_bbox = np.array(prev_box_dict['bbox']) + t * (
+                                    np.array(next_box_dict['bbox']) - np.array(prev_box_dict['bbox']))
+
+                        # Create a new dictionary for the interpolated box.
+                        refined_track[frame_id] = {
+                            "bbox": interp_bbox.tolist(),
+                            "track_id": track_id,
+                            "class_name": prev_box_dict.get('class_name'),
+                            "status": "Interpolated"
+                        }
+
+            # 3. RE-CALCULATE FUNSCRIPT
+            raw_actions = []
+            fps = self.app.processor.video_info.get('fps', 30.0)
+            if fps > 0:
+                for frame_id, box_dict in refined_track.items():
+                    if box := box_dict.get('bbox'):
+                        distance = 100 - (box[3] / self.app.yolo_input_size) * 100
+                        timestamp_ms = int(round((frame_id / fps) * 1000))
+                        raw_actions.append({"at": timestamp_ms, "pos": int(np.clip(distance, 0, 100))})
+
+            # --- 4. DYNAMIC AMPLIFICATION (Rolling Window with Percentiles) ---
+            if not raw_actions: return
+
+            amplified_actions = []
+            window_ms = 4000  # Analyze a 4-second window around each point.
+
+            # Create a sorted list of timestamps for efficient searching
+            action_timestamps = [a['at'] for a in raw_actions]
+
+            for i, action in enumerate(raw_actions):
+                current_time = action['at']
+
+                # Define the local window for analysis
+                start_window_time = current_time - (window_ms / 2)
+                end_window_time = current_time + (window_ms / 2)
+
+                # Efficiently find the indices of actions within this time window
+                start_idx = bisect_left(action_timestamps, start_window_time)
+                end_idx = bisect_right(action_timestamps, end_window_time)
+
+                local_actions = raw_actions[start_idx:end_idx]
+
+                if not local_actions:
+                    amplified_actions.append(action)  # Keep original if no neighbors
+                    continue
+
+                local_positions = [a['pos'] for a in local_actions]
+
+                # Use percentiles to find the effective min/max, ignoring outliers.
+                # This is similar to the robust logic in `scale_points_to_range`.
+                effective_min = np.percentile(local_positions, 10)
+                effective_max = np.percentile(local_positions, 90)
+                effective_range = effective_max - effective_min
+
+                if effective_range < 5:  # If local motion is negligible, don't amplify.
+                    new_pos = action['pos']
+                else:
+                    # Normalize the current point's position within its local effective range
+                    normalized_pos = (action['pos'] - effective_min) / effective_range
+                    # Clip the value to handle points outside the percentile range (the outliers)
+                    clipped_normalized_pos = np.clip(normalized_pos, 0.0, 1.0)
+                    # Scale the normalized position to the full 0-100 range
+                    new_pos = int(round(clipped_normalized_pos * 100))
+
+                amplified_actions.append({"at": action['at'], "pos": new_pos})
+
+            # 5. SEND AMPLIFIED RESULT TO MAIN THREAD
+            if amplified_actions:
+                payload = {"chapter": chapter, "new_actions": amplified_actions}
+                self.gui_event_queue.put(("refinement_completed", payload, None))
+
+
+        finally:
+            self.refinement_analysis_active = False
 
     # REFACTORED for maintainability
     # Create as many stages you want without having to make a new function
@@ -1014,6 +1151,17 @@ class AppStageProcessor:
                     if self.app.is_batch_processing_active and hasattr(self.app, 'save_and_reset_complete_event'):
                         self.logger.debug(f"Signaling batch loop to continue after handling '{status_override}' status.")
                         self.app.save_and_reset_complete_event.set()
+
+                elif event_type == "refinement_completed":
+                    payload = data1
+                    chapter = payload.get('chapter')
+                    new_actions = payload.get('new_actions')
+
+                    if chapter and new_actions:
+                        # Delegate the application of the refinement to the Funscript Processor.
+                        # This ensures the action is properly recorded for undo/redo.
+                        self.app.funscript_processor.apply_interactive_refinement(chapter, new_actions)
+
                 else:
                     self.logger.warning(f"Unknown GUI event type received: {event_type}")
             except Exception as e:

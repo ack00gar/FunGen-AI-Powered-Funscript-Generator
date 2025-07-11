@@ -189,6 +189,11 @@ class ControlPanelUI:
 
         # --- Execution & Progress Display ---
         self._render_execution_progress_display()
+        imgui.separator()
+
+        # --- Interactive Refinement (conditionally visible) ---
+        self._render_interactive_refinement_controls()
+
 
     def _render_configuration_tab(self):
         """Renders Tab 2: All mode-specific configurations."""
@@ -206,10 +211,6 @@ class ControlPanelUI:
 
         # Live-specific settings are shown for live modes.
         if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
-            if selected_mode == TrackerMode.LIVE_USER_ROI:
-                if imgui.collapsing_header("ROI Selection##ConfigUserROIHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                    self._render_user_roi_tracking_panel()
-                imgui.separator()
             self._render_live_tracker_settings()
             imgui.separator()
 
@@ -621,6 +622,10 @@ class ControlPanelUI:
                 elif selected_mode == TrackerMode.LIVE_USER_ROI:
                     roi_status = "Set" if self.app.tracker.user_roi_fixed else "Not Set"
             imgui.text(f"  - ROI Status: {roi_status}")
+
+            # Add ROI controls directly under the status if in LIVE_USER_ROI mode
+            if selected_mode == TrackerMode.LIVE_USER_ROI:
+                self._render_user_roi_controls_for_run_tab()
         else:
             imgui.text_disabled("No execution monitoring for this mode.")
 
@@ -1005,24 +1010,89 @@ class ControlPanelUI:
         if imgui.is_item_hovered():
             imgui.set_tooltip("Unchecks all classes, enabling all classes for tracking/analysis.")
 
-    def _render_user_roi_tracking_panel(self):
-        set_roi_button_disabled = self.app.stage_processor.full_analysis_active or not (self.app.processor and self.app.processor.is_video_open())
+    def _render_user_roi_controls_for_run_tab(self):
+        """Renders Set/Clear ROI buttons for the Run Control tab, under Live Tracker status."""
+        imgui.spacing()
+
+        set_roi_button_disabled = self.app.stage_processor.full_analysis_active or not (
+                    self.app.processor and self.app.processor.is_video_open())
+
         if set_roi_button_disabled:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-        set_roi_text = "Set ROI & Point##UserSetROI"
-        if self.app.is_setting_user_roi_mode: set_roi_text = "Cancel Set ROI##UserCancelSetROI"
-        if imgui.button(set_roi_text, width=-1):
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+        has_roi = self.app.tracker and self.app.tracker.user_roi_fixed
+        button_count = 2 if has_roi else 1
+        available_width = imgui.get_content_region_available_width()
+        button_width = (available_width - imgui.get_style().item_spacing.x * (button_count - 1)) / button_count if button_count > 1 else -1
+
+        set_roi_text = "Cancel Set ROI" if self.app.is_setting_user_roi_mode else "Set ROI & Point"
+        if imgui.button(f"{set_roi_text}##UserSetROI_RunTab", width=button_width):
             if self.app.is_setting_user_roi_mode:
                 self.app.exit_set_user_roi_mode()
             else:
                 self.app.enter_set_user_roi_mode()
+
+        if has_roi:
+            imgui.same_line()
+            if imgui.button("Clear ROI##UserClearROI_RunTab", width=button_width):
+                if self.app.tracker and hasattr(self.app.tracker, 'clear_user_roi'):
+                    self.app.tracker.clear_user_roi()
+                    self.app.logger.info("User ROI cleared.", extra={'status_message': True})
+
         if set_roi_button_disabled:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
+
         if self.app.is_setting_user_roi_mode:
             imgui.text_ansi_colored("Selection Active: Draw ROI then click point on video.", 1.0, 0.7, 0.2)
-        roi_status = "Set" if self.app.tracker and self.app.tracker.user_roi_fixed and self.app.tracker.user_roi_initial_point_relative else "Not Set"
-        imgui.text(f"Selected ROI & Point: {roi_status}")
+
+    def _render_interactive_refinement_controls(self):
+        """Renders the interactive refinement toggle and status, visible only when relevant."""
+        if not self.app.stage_processor.stage2_overlay_data_map:
+            return
+
+        imgui.text("Interactive Refinement")
+        refinement_disabled = (self.app.stage_processor.full_analysis_active or
+                               self.app.stage_processor.refinement_analysis_active)
+
+        is_enabled = self.app.app_state_ui.interactive_refinement_mode_enabled
+
+        if refinement_disabled:
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+        if is_enabled:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.9, 0.3, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 1.0, 0.2, 0.2, 1.0)
+            button_text = "Disable Refinement Mode"
+        else:
+            button_text = "Enable Refinement Mode"
+
+        if imgui.button(f"{button_text}##ToggleInteractiveRefinement", width=-1):
+            self.app.app_state_ui.interactive_refinement_mode_enabled = not is_enabled
+
+        if is_enabled:
+            imgui.pop_style_color(3)
+
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Enables clicking on object boxes in the video to refine the script for that chapter.")
+
+        if is_enabled:
+            if self.app.stage_processor.refinement_analysis_active:
+                imgui.text_ansi_colored("Refining chapter...", 1.0, 0.7, 0.2)
+            else:
+                imgui.text_ansi_colored("Click a box in the video to start.", 0.2, 1.0, 0.2)
+
+        if refinement_disabled:
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Refinement is disabled while another process is active.")
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
+
+        imgui.separator()
 
     def _render_post_processing_profile_row(self, long_name, profile_params, config_copy):
         """Helper to render a single, better-looking row for a post-processing profile."""
