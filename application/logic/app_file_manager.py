@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Tuple
 
 from application.utils.video_segment import VideoSegment
 from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, FUNSCRIPT_METADATA_VERSION
-
+from application.utils.write_access import check_write_access
 
 class AppFileManager:
     def __init__(self, app_logic_instance):
@@ -233,9 +233,11 @@ class AppFileManager:
             self.logger.info(f"No actions to save to {os.path.basename(filepath)}.", extra={'status_message': True})
             return
 
+
         # --- Backup logic before saving ---
         if os.path.exists(filepath):
             try:
+                check_write_access(filepath)
                 # Create a unique backup filename with a Unix timestamp
                 backup_path = f"{filepath}.{int(time.time())}.bak"
                 os.rename(filepath, backup_path)
@@ -393,8 +395,7 @@ class AppFileManager:
         # Otherwise, clear T1. Always clear T2.
         if clear_funscript_unconditionally or not self.loaded_funscript_path:  # loaded_funscript_path is for T1
             if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
-                self.app.funscript_processor.clear_timeline_history_and_set_new_baseline(1, [],
-                                                                                         "Video Closed (T1 Cleared)")
+                self.app.funscript_processor.clear_timeline_history_and_set_new_baseline(1, [], "Video Closed (T1 Cleared)")
             self.funscript_path = ""  # Project association
             self.loaded_funscript_path = ""  # T1 specific
 
@@ -439,21 +440,18 @@ class AppFileManager:
                 else:
                     stage_processor.stage2_status_text = f"Overlay file empty: {os.path.basename(filepath)}"
                     self.app.app_state_ui.show_stage2_overlay = False
-                    self.logger.warning(f"Stage 2 overlay file is empty: {os.path.basename(filepath)}",
-                                        extra={'status_message': True})
+                    self.logger.warning(f"Stage 2 overlay file is empty: {os.path.basename(filepath)}", extra={'status_message': True})
 
                 self.app.project_manager.project_dirty = True
                 self.app.energy_saver.reset_activity_timer()
             else:
                 stage_processor.stage2_status_text = "Error: Overlay not list format"
                 self.app.app_state_ui.show_stage2_overlay = False
-                self.logger.error("Stage 2 overlay data is not in expected list format.",
-                                  extra={'status_message': True})
+                self.logger.error("Stage 2 overlay data is not in expected list format.", extra={'status_message': True})
         except Exception as e:
             stage_processor.stage2_status_text = "Error loading overlay"
             self.app.app_state_ui.show_stage2_overlay = False
-            self.logger.error(f"Error loading Stage 2 overlay msgpack '{filepath}': {e}",
-                              extra={'status_message': True})
+            self.logger.error(f"Error loading Stage 2 overlay msgpack '{filepath}': {e}", extra={'status_message': True})
 
     def clear_stage2_overlay_data(self):
         stage_processor = self.app.stage_processor
@@ -488,8 +486,7 @@ class AppFileManager:
             self.app.funscript_processor.update_funscript_stats_for_timeline(2, "Video Loaded")
         else:
             self.video_path = ""
-            self.app.logger.error(f"Failed to open video file: {os.path.basename(file_path)}",
-                                  extra={'status_message': True})
+            self.app.logger.error(f"Failed to open video file: {os.path.basename(file_path)}", extra={'status_message': True})
 
         return success
 
@@ -552,8 +549,7 @@ class AppFileManager:
                 self.load_stage2_overlay_data(path)
             else:
                 self.last_dropped_files = other_files
-                self.app.logger.warning(f"Unrecognized file type dropped: {os.path.basename(path)}",
-                                        extra={'status_message': True})
+                self.app.logger.warning(f"Unrecognized file type dropped: {os.path.basename(path)}", extra={'status_message': True})
 
 
     def update_settings_from_app(self):
@@ -586,8 +582,7 @@ class AppFileManager:
 
         chapters_to_save = []
         if chapters is not None:
-            chapters_to_save = [VideoSegment.from_dict(chap_data) for chap_data in chapters if
-                                isinstance(chap_data, dict)]
+            chapters_to_save = [VideoSegment.from_dict(chap_data) for chap_data in chapters if isinstance(chap_data, dict)]
         else:
             chapters_to_save = self.app.funscript_processor.video_chapters
 

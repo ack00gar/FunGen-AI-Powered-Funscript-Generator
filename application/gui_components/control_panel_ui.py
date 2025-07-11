@@ -291,6 +291,18 @@ class ControlPanelUI:
         stage_proc = self.app.stage_processor
         style = imgui.get_style()
 
+        # --- Helper for model file selection ---
+        def show_model_file_dialog(title, current_path, callback):
+            initial_dir = os.path.dirname(current_path) if current_path else None
+            self.app.gui_instance.file_dialog.show(
+                title=title,
+                is_save=False,
+                callback=callback,
+                # TODO: Move extension list to constants.py
+                extension_filter="AI Models (.pt .onnx .engine .mlpackage),.pt;.onnx;.engine;.mlpackage|All Files,*.*",
+                initial_path=initial_dir
+            )
+
         # --- Callback functions to update the model paths ---
         def update_detection_model_path(path: str):
             self.app.yolo_detection_model_path_setting = path
@@ -338,19 +350,18 @@ class ControlPanelUI:
         imgui.same_line()
         if imgui.button("Browse##S1YOLOBrowse"):
             if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
-                initial_dir = os.path.dirname(
-                    self.app.yolo_detection_model_path_setting) if self.app.yolo_detection_model_path_setting else None
-                self.app.gui_instance.file_dialog.show(
-                    title="Select YOLO Detection Model", is_save=False, callback=update_detection_model_path,
-                    extension_filter="AI Models (*.pt *.onnx *.mlpackage),*.pt;*.onnx;*.mlpackage|All Files,*.*",
-                    initial_path=initial_dir
+                show_model_file_dialog(
+                    title="Select YOLO Detection Model",
+                    current_path=self.app.yolo_detection_model_path_setting,
+                    callback=update_detection_model_path
                 )
         imgui.same_line()
         if imgui.button("Unload##S1YOLOUnload"):
             self.app.unload_model('detection')
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
-            "Path to the YOLO object detection model file (.pt, .onnx, .mlpackage).")
+            # TODO: Move extension list to constants.py
+            "Path to the YOLO object detection model file (.pt, .onnx, .engine, .mlpackage).")
 
         # --- YOLO Pose Model ---
         imgui.text("Pose Model")
@@ -362,17 +373,18 @@ class ControlPanelUI:
         imgui.same_line()
         if imgui.button("Browse##PoseYOLOBrowse"):
             if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
-                initial_dir = os.path.dirname(
-                    self.app.yolo_pose_model_path_setting) if self.app.yolo_pose_model_path_setting else None
-                self.app.gui_instance.file_dialog.show(
-                    title="Select YOLO Pose Model", is_save=False, callback=update_pose_model_path, extension_filter="AI Models (*.pt *.onnx *.mlpackage),*.pt;*.onnx;*.mlpackage|All Files,*.*", initial_path=initial_dir
+                show_model_file_dialog(
+                    title="Select YOLO Pose Model",
+                    current_path=self.app.yolo_pose_model_path_setting,
+                    callback=update_pose_model_path
                 )
         imgui.same_line()
         if imgui.button("Unload##PoseYOLOUnload"):
             self.app.unload_model('pose')
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
-            "Path to the YOLO pose estimation model file (.pt, .onnx, .mlpackage). This model is optional.")
+            # TODO: Move extension list to constants.py
+            "Path to the YOLO pose estimation model file (.pt, .onnx, .engine, .mlpackage). This model is optional.")
 
         # UI for selecting the Pose Model Artifacts Directory
         imgui.separator()
