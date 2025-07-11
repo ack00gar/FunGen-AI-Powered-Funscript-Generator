@@ -18,7 +18,7 @@ This project is still at the early stages of development. It is not intended for
 
 Before using this project, ensure you have the following installed:
 
-- **Python 3.8 or higher (tested on 3.11 https://www.python.org/downloads/release/python-3118/)**
+- **Git** https://git-scm.com/downloads/ or 'winget install --id Git.Git -e --source winget' from a command prompt for Windows users as described below for easy install of Miniconda.
 - **FFmpeg** added to your PATH or specified under the settings menu (https://www.ffmpeg.org/download.html)
 - **Miniconda** (https://www.anaconda.com/docs/getting-started/miniconda/install)
 
@@ -27,53 +27,62 @@ Click Start, type "cmd", right click on Command Prompt, and select "Run as admin
 
 # Installation
 
-### Clone the repository
-
-```bash
-git clone https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGen
-cd FunGen
-```
-
 ### Start a miniconda command prompt
-After installing Miniconda look for a program called "Anaconda prompt (miniconda3)"
-Then navigate to the root folder of the project for example on windows (correct the path):
-```
-cd /d C:\path\to\fungenfolder
-```
+After installing Miniconda look for a program called "Anaconda prompt (miniconda3)" in the start menu (on Windows) and open it
 
-### If your GPU supports CUDA (NVIDIA)
-
+### Create the necessary miniconda environment and activate it
 ```bash
 conda create -n VRFunAIGen python=3.11
 conda activate VRFunAIGen
+```
+- Please note that any pip or python commands related to this project must be run from within the VRFunAIGen virtual environment.
+
+### Clone the repository
+Open a command prompt and navigate to the folder where you'd like FunGen to be located. For example, if you want it in C:\FunGen, navigate to C:\ ('cd C:\'). Then run
+```bash
+git clone --branch v0.5.0 https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGenBeta
+cd FunGenBeta
+```
+
+### Install the core python requirements
+```bash
 pip install -r core.requirements.txt
+```
+- If you have the original FunGen installed, skip to [Download the YOLO model](#download-the-yolo-model)
+
+### If your GPU supports CUDA (NVIDIA) and is NOT a 50 series
+```bash
 pip install -r cuda.requirements.txt
 pip install tensorrt
-python FSGenerator.py
 ```
 
-### If your GPU doesn't support cuda
-
+### If you have a 50 series Nvidia GPU
 ```bash
-conda create -n VRFunAIGen python=3.11
-conda activate VRFunAIGen
-pip install -r core.requirements.txt
+pip install -r cuda.50series.requirements.txt
+pip install tensorrt
+```
+- If you accidentally installed the non-50 series requirements file, you will need to run uninstallwrongpytorch.bat and then run the above commands.
+
+### If your GPU doesn't support cuda
+```bash
 pip install -r cpu.requirements.txt
-python FSGenerator.py
 ```
 
 ### If your GPU supports ROCm (AMD Linux Only)
-
 ```bash
-conda create -n VRFunAIGen python=3.11
-conda activate VRFunAIGen
-pip install -r core.requirements.txt
 pip install -r rocm.requirements.txt
-python FSGenerator.py
 ```
 
 ## Download the YOLO model
 Go to our discord to download the latest YOLO model for free. When downloaded place the YOLO model file(s) in the `models/` sub-directory. If you aren't sure you can add all the models and let the app decide the best option for you.
+
+## Download the pose model
+Download from https://docs.ultralytics.com/tasks/pose/ and place in the `models/` sub-directory.
+
+### Start the app
+```bash
+python3 main.py
+```
 
 We support multiple model formats across Windows, macOS, and Linux.
 
