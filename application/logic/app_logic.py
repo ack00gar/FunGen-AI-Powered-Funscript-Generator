@@ -161,6 +161,9 @@ class ApplicationLogic:
         self.batch_overwrite_mode: int = 0  # 0 for Process All, 1 for Skip Existing
         self.batch_generate_roll_file: bool = True
 
+        # --- Audio waveform data ---
+        self.audio_waveform_data = None
+
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
         self.funscript_processor._ensure_undo_managers_linked()
