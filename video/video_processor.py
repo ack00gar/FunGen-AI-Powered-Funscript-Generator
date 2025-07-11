@@ -505,6 +505,7 @@ class VideoProcessor:
             return None
 
     def _get_video_info(self, filename):
+        # TODO: Add ffprobe detection and metadata extraction for YUV videos. Pass metadata to cv2 so it can use the correct decoder. Use metadata + cv2.cvtColor to convert to RGB.
         cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                '-show_entries',
                'stream=width,height,r_frame_rate,nb_frames,avg_frame_rate,duration,codec_type,pix_fmt,bits_per_raw_sample',
@@ -631,6 +632,8 @@ class VideoProcessor:
             return None
 
     def _is_10bit_cuda_pipe_needed(self) -> bool:
+        # TODO: Add bitshift processing for 10-bit videos (fast 10-bit to 8-bit conversion).
+        # Optional: Scale to 640x640 on GPU using tensorrt. This will not use lanczos. So if Lanczos is absolutely necessary, you will have to use other solution.
         """Checks if the special 2-pipe FFmpeg command for 10-bit CUDA should be used."""
         if not self.video_info:
             return False
