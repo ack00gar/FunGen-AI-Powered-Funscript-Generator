@@ -295,6 +295,14 @@ class MainMenu:
                         tooltip = "Please load a video to enable calibration."
                     imgui.set_tooltip(tooltip)
 
+                # --- TensorRT Compiler Tool ---
+                if not hasattr(self.app, 'tensorrt_compiler_window'):
+                    self.app.tensorrt_compiler_window = None
+                if imgui.menu_item("Compile YOLO Model to TensorRT (.engine)...")[0]:
+                    from application.gui_components.tensorrt_compiler_window import TensorRTCompilerWindow
+                    def on_close():
+                        self.app.tensorrt_compiler_window = None
+                    self.app.tensorrt_compiler_window = TensorRTCompilerWindow(self.app, on_close_callback=on_close)
                 imgui.end_menu()
 
             # --- STATUS MESSAGE ---
