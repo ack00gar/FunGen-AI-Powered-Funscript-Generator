@@ -18,6 +18,7 @@ from application.gui_components.control_panel_ui import ControlPanelUI
 from application.gui_components.video_display_ui import VideoDisplayUI
 from application.gui_components.video_navigation_ui import VideoNavigationUI, ChapterListWindow
 from application.gui_components.info_graphs_ui import InfoGraphsUI
+from application.gui_components.generated_file_manager_window import GeneratedFileManagerWindow
 
 from config import constants
 
@@ -68,6 +69,7 @@ class GUI:
         self.video_navigation_ui = VideoNavigationUI(self.app, self)  # Pass self for texture methods
         self.info_graphs_ui = InfoGraphsUI(self.app)
         self.chapter_list_window_ui = ChapterListWindow(self.app, nav_ui=self.video_navigation_ui)
+        self.generated_file_manager_ui = GeneratedFileManagerWindow(self.app)
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -885,6 +887,10 @@ class GUI:
         # Render TensorRT Compiler Window if open
         if hasattr(self.app, 'tensorrt_compiler_window') and self.app.tensorrt_compiler_window:
             self.app.tensorrt_compiler_window.render()
+
+        # --- Render Generated File Manager window ---
+        if self.app.app_state_ui.show_generated_file_manager:
+            self.generated_file_manager_ui.render()
 
         self.perf_frame_count += 1
         if time.time() - self.last_perf_log_time > self.perf_log_interval:

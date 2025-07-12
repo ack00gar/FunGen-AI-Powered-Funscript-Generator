@@ -1,4 +1,3 @@
-# menu.py
 import imgui
 import os
 import time
@@ -294,6 +293,11 @@ class MainMenu:
                     if not can_calibrate:
                         tooltip = "Please load a video to enable calibration."
                     imgui.set_tooltip(tooltip)
+
+                # --- Generated File Manager ---
+                clicked, selected = imgui.menu_item("Manage Generated Files...", selected=app_state.show_generated_file_manager)
+                if clicked:
+                    self.app.toggle_file_manager_window()
 
                 # --- TensorRT Compiler Tool ---
                 if not hasattr(self.app, 'tensorrt_compiler_window'):

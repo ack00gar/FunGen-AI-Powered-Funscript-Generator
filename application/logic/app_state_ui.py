@@ -33,21 +33,14 @@ class AppStateUI:
 
         # UI visibility states
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
-        self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline",
-                                                             defaults.get("show_funscript_timeline",
-                                                                          True))  # Legacy preview
+        self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", True))  # Legacy preview
         self.show_gauge = self.app_settings.get("show_gauge_window", defaults.get("show_gauge_window", True))
         self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", False))
-        self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline",
-                                                                         defaults.get(
-                                                                             "show_funscript_interactive_timeline",
-                                                                             True))
-        self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2",
-                                                                          defaults.get(
-                                                                              "show_funscript_interactive_timeline2",
-                                                                              False))
-        self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay",
-                                                         defaults.get("show_stage2_overlay", True))
+        self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline", defaults.get("show_funscript_interactive_timeline", True))
+        self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2", defaults.get("show_funscript_interactive_timeline2", False))
+        self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", defaults.get("show_stage2_overlay", True))
+
+        self.show_generated_file_manager = False
 
         # Tracker UI visibility flags (app state that tracker reads via app_logic)
         # These will be updated by app_logic based on tracker's actual state if needed,

@@ -201,6 +201,12 @@ class ApplicationLogic:
         self._check_for_autosave_restore()
         self.energy_saver.reset_activity_timer()
 
+    def toggle_file_manager_window(self):
+        """Toggles the visibility of the Generated File Manager window."""
+        if hasattr(self, 'app_state_ui'):
+            self.app_state_ui.show_generated_file_manager = not self.app_state_ui.show_generated_file_manager
+
+
     def unload_model(self, model_type: str):
         """
         Clears the path for a given model type and releases it from the tracker.
