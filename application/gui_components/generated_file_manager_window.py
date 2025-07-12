@@ -2,6 +2,7 @@ import imgui
 import os
 import shutil
 import logging
+from send2trash import send2trash
 
 
 class GeneratedFileManagerWindow:
@@ -11,6 +12,7 @@ class GeneratedFileManagerWindow:
         self.file_tree = {}
         self.total_size_mb = 0
         self.sort_by = 'name'
+        self.delete_funscript_files = False  # Default: do NOT delete .funscript files
         self._scan_files()
 
     def _scan_files(self):
@@ -47,9 +49,8 @@ class GeneratedFileManagerWindow:
 
     def render(self):
         app_state = self.app.app_state_ui
-        imgui.set_next_window_focus()
-        imgui.set_next_window_size(700, 500, condition=imgui.FIRST_USE_EVER)
-        is_visible, is_open = imgui.begin("Generated File Manager", closable=True)
+        # Make this a regular, non-blocking window
+        is_visible, is_open = imgui.begin("Generated File Manager", True)
 
         if not is_open:
             app_state.show_generated_file_manager = False
@@ -69,8 +70,14 @@ class GeneratedFileManagerWindow:
 
             button_text = "[DANGER] Delete All Generated Files"
             button_width = imgui.calc_text_size(button_text)[0] + imgui.get_style().frame_padding[0] * 2
-            imgui.same_line(max(0, imgui.get_window_width() - button_width - 15))
-            if imgui.button(button_text): imgui.open_popup("ConfirmDeleteAll")  # This is the only popup left
+            # Place the checkbox and button on the same line, aligned right
+            window_width = imgui.get_window_width()
+            checkbox_label = "Include .funscript files"
+            checkbox_width = imgui.calc_text_size(checkbox_label)[0] + imgui.get_style().frame_padding[0] * 2 + 30
+            imgui.same_line(max(0, window_width - button_width - checkbox_width - 15))
+            _, self.delete_funscript_files = imgui.checkbox(checkbox_label, self.delete_funscript_files)
+            imgui.same_line(max(0, window_width - button_width - 15))
+            if imgui.button(button_text): imgui.open_popup("ConfirmDeleteAll")
             imgui.separator()
 
             # --- File Tree Display ---
@@ -95,17 +102,39 @@ class GeneratedFileManagerWindow:
                         path = dir_data['path']
                         if path and os.path.isdir(path):
                             try:
-                                shutil.rmtree(path)
-                                if not os.path.exists(path):
-                                    self.app.set_status_message(f"SUCCESS: Deleted folder {os.path.basename(path)}",
-                                                                level=logging.INFO)
+                                if self.delete_funscript_files:
+                                    send2trash(path)
                                 else:
+                                    # Delete all except .funscript files in the folder
+                                    for dirpath, dirnames, filenames in os.walk(path):
+                                        for filename in filenames:
+                                            if filename.endswith('.funscript'):
+                                                continue
+                                            file_path = os.path.join(dirpath, filename)
+                                            try:
+                                                send2trash(file_path)
+                                            except Exception as e:
+                                                self.app.set_status_message(f"ERROR deleting file: {file_path}: {e}", level=logging.ERROR)
+                                    # Remove empty folders (except those containing .funscript files)
+                                    for dirpath, dirnames, filenames in os.walk(path, topdown=False):
+                                        # If only .funscript files remain, skip
+                                        if all(f.endswith('.funscript') for f in filenames):
+                                            continue
+                                        try:
+                                            if not os.listdir(dirpath):
+                                                send2trash(dirpath)
+                                        except Exception:
+                                            pass
+                                if not os.path.exists(path):
+                                    self.app.set_status_message(f"SUCCESS: Deleted folder {os.path.basename(path)}", level=logging.INFO)
+                                elif self.delete_funscript_files:
                                     self.app.set_status_message(f"ERROR: Folder still exists.", level=logging.ERROR)
+                                else:
+                                    self.app.set_status_message(f"INFO: Folder not fully deleted (may contain .funscript files)", level=logging.INFO)
                             except Exception as e:
                                 self.app.set_status_message(f"ERROR deleting folder: {e}", level=logging.ERROR)
                         else:
-                            self.app.set_status_message("INFO: Folder not found or already deleted.",
-                                                        level=logging.INFO)
+                            self.app.set_status_message("INFO: Folder not found or already deleted.", level=logging.INFO)
                         self._scan_files()  # Refresh UI immediately
 
                     if is_node_open:
@@ -119,53 +148,85 @@ class GeneratedFileManagerWindow:
                             imgui.push_id(file_info['path'])
 
                             # --- IMMEDIATE FILE DELETION ---
+                            is_funscript = file_info['name'].endswith('.funscript')
+                            delete_enabled = self.delete_funscript_files or not is_funscript
+                            if not delete_enabled:
+                                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
                             if imgui.button("Delete"):
                                 path = file_info['path']
                                 if path and os.path.exists(path):
                                     try:
-                                        os.remove(path)
+                                        send2trash(path)
                                         if not os.path.exists(path):
                                             self.app.set_status_message(f"SUCCESS: Deleted {os.path.basename(path)}",
                                                                         level=logging.INFO)
                                         else:
-                                            self.app.set_status_message(f"ERROR: File still exists.",
-                                                                        level=logging.ERROR)
+                                            self.app.set_status_message(f"ERROR: File still exists.", level=logging.ERROR)
                                     except Exception as e:
                                         self.app.set_status_message(f"ERROR deleting file: {e}", level=logging.ERROR)
                                 else:
-                                    self.app.set_status_message("INFO: File not found or already deleted.",
-                                                                level=logging.INFO)
+                                    self.app.set_status_message("INFO: File not found or already deleted.", level=logging.INFO)
                                 self._scan_files()  # Refresh UI immediately
+                            if not delete_enabled:
+                                imgui.pop_style_var()
+                                imgui.internal.pop_item_flag()
                             imgui.pop_id()
                         imgui.tree_pop()
                     imgui.separator()
                     imgui.pop_id()
 
-        # --- "DELETE ALL" POPUP DEFINITION ---
-        # This is the only popup left, defined at the window's root level to ensure it works reliably.
-        if imgui.begin_popup_modal("ConfirmDeleteAll")[0]:
-            imgui.text_ansi_colored("WARNING: This will delete ALL subfolders and files in the output directory!", 1.0,
-                                    0.2, 0.2)
-            imgui.text(f"Directory: {os.path.abspath(self.output_folder)}")
-            imgui.text("This action cannot be undone.")
-            imgui.separator()
-            if imgui.button("YES, DELETE EVERYTHING", width=200):
-                try:
-                    root_folder = self.output_folder
-                    if os.path.isdir(root_folder):
-                        shutil.rmtree(root_folder)
-                        os.makedirs(root_folder, exist_ok=True)
-                        self.app.set_status_message("SUCCESS: All generated files have been deleted.",
-                                                    level=logging.INFO)
-                    else:
-                        self.app.set_status_message("INFO: Output folder did not exist.", level=logging.INFO)
-                    self._scan_files()
-                except Exception as e:
-                    self.app.set_status_message(f"ERROR deleting all files: {e}", level=logging.ERROR)
-                imgui.close_current_popup()
-            imgui.same_line()
-            if imgui.button("Cancel", width=120):
-                imgui.close_current_popup()
-            imgui.end_popup()
+            # --- "DELETE ALL" POPUP DEFINITION ---
+            # Move the popup definition here, inside is_visible, after all controls and file tree rendering
+            if imgui.begin_popup_modal("ConfirmDeleteAll")[0]:
+                imgui.text_ansi_colored("WARNING: This will delete ALL subfolders and files in the output directory!", 1.0, 0.2, 0.2)
+                imgui.text(f"Directory: {os.path.abspath(self.output_folder)}")
+                imgui.text("Contents will be moved to the recycle bin.")
+                imgui.separator()
+                if imgui.button("YES, DELETE EVERYTHING", width=200):
+                    try:
+                        root_folder = self.output_folder
+                        if os.path.isdir(root_folder):
+                            # Only delete contents, not the root folder itself
+                            for entry in os.listdir(root_folder):
+                                entry_path = os.path.join(root_folder, entry)
+                                if self.delete_funscript_files:
+                                    send2trash(entry_path)
+                                else:
+                                    if os.path.isdir(entry_path):
+                                        # Delete all except .funscript files in subfolders
+                                        for dirpath, dirnames, filenames in os.walk(entry_path):
+                                            for filename in filenames:
+                                                if filename.endswith('.funscript'):
+                                                    continue
+                                                file_path = os.path.join(dirpath, filename)
+                                                try:
+                                                    send2trash(file_path)
+                                                except Exception as e:
+                                                    self.app.set_status_message(f"ERROR deleting file: {file_path}: {e}", level=logging.ERROR)
+                                        # Remove empty folders (except those containing .funscript files)
+                                        for dirpath, dirnames, filenames in os.walk(entry_path, topdown=False):
+                                            if all(f.endswith('.funscript') for f in filenames):
+                                                continue
+                                            try:
+                                                if not os.listdir(dirpath):
+                                                    send2trash(dirpath)
+                                            except Exception:
+                                                pass
+                                    elif os.path.isfile(entry_path) and not entry_path.endswith('.funscript'):
+                                        try:
+                                            send2trash(entry_path)
+                                        except Exception as e:
+                                            self.app.set_status_message(f"ERROR deleting file: {entry_path}: {e}", level=logging.ERROR)
+                        self.app.set_status_message("SUCCESS: All generated files have been deleted.", level=logging.INFO)
+                    except Exception as e:
+                        self.app.set_status_message(f"ERROR deleting all files: {e}", level=logging.ERROR)
+                    finally:
+                        self._scan_files()
+                        imgui.close_current_popup()
+                imgui.same_line()
+                if imgui.button("Cancel", width=120):
+                    imgui.close_current_popup()
+                imgui.end_popup()
 
         imgui.end()
