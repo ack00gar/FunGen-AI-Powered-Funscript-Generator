@@ -45,7 +45,7 @@ def compile_yolo_to_tensorrt(
     except ImportError:
         raise TensorRTCompilerError("torch package is not installed.")
     try:
-        import tensorrt  # noqa: F401
+        import tensorrt
     except ImportError:
         raise TensorRTCompilerError("TensorRT Python package is not installed.")
     if not torch.cuda.is_available():
@@ -61,19 +61,7 @@ def compile_yolo_to_tensorrt(
         if progress_callback:
             progress_callback("Exporting to TensorRT .engine (this may take a while)...")
         # Export with fixed batch size 1, 640x640, half precision, no dynamic shapes
-        model.export(
-            format="engine",
-            half=True,
-            batch=1,
-            simplify=True,
-            imgsz=640,
-            device='cuda',
-            dynamic=False,
-            optimize=False,
-            workspace=4,
-            save_dir=output_dir,
-            name=model_basename + ".engine"
-        )
+        model.export(format="engine", half=True, batch=1, simplify=True )
         # Find the most recently created .engine file in the output dir
         import glob
         engine_files = glob.glob(os.path.join(output_dir, "*.engine"))
