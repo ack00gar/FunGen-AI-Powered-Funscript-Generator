@@ -13,55 +13,56 @@ class AppEventHandlers:
 
     def handle_playback_control(self, action_name: str):
         self.logger.debug(f"Playback control: {action_name}")
-        if not self.app.file_manager.video_path or not self.app.processor or not self.app.processor.video_info:
+        processor = self.app.processor
+        if not self.app.file_manager.video_path or not processor or not processor.video_info:
             self.logger.info("No video loaded for playback control.", extra={'status_message': True})
             return
 
-        total_frames = self.app.processor.video_info.get('total_frames', 0)
-        current_frame = self.app.processor.current_frame_index
+        total_frames = processor.video_info.get('total_frames', 0)
+        current_frame = processor.current_frame_index
         fs_proc = self.app.funscript_processor
         app_state_ui = self.app.app_state_ui
 
         if action_name == "jump_start":
-            self.app.processor.seek_video(0)
+            processor.seek_video(0)
         elif action_name == "prev_frame":
-            self.app.processor.seek_video(max(0, current_frame - 1))
+            processor.seek_video(max(0, current_frame - 1))
 
         elif action_name == "play_pause":
-            if self.app.processor.is_processing:
-                # This is a PAUSE action on an active session.
-                self.app.processor.pause_processing()
+            # Determine the current "playing" state using the new event system.
+            is_currently_playing = processor.is_processing and not processor.pause_event.is_set()
+
+            if is_currently_playing:
+                # If playing, the action is to PAUSE.
+                processor.pause_processing()
                 self.logger.info("Video paused.", extra={'status_message': True})
             else:
-                # This is a PLAY/RESUME action.
-                # If starting from a fully stopped state, ensure tracker is explicitly off.
-                if not self.app.processor.is_paused:
-                    if self.app.tracker and self.app.tracker.tracking_active:
-                        self.app.tracker.stop_tracking()
-
-                # Now start processing. If resuming a paused tracking session, its state is preserved.
+                # If not playing (i.e., paused or stopped), the action is to PLAY/RESUME.
                 start_f = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else current_frame
                 end_f = fs_proc.scripting_end_frame if fs_proc.scripting_range_active else -1
-                self.app.processor.start_processing(start_frame=start_f, end_frame=end_f)
+                processor.start_processing(start_frame=start_f, end_frame=end_f)
                 self.logger.info("Video playing.", extra={'status_message': True})
 
         elif action_name == "stop":
-            self.app.processor.reset()
-            target_seek_frame = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else 0
-            self.app.processor.seek_video(target_seek_frame)
+            processor.stop_processing()
             self.logger.info("Video stopped.", extra={'status_message': True})
+            #processor.reset()
+            #target_seek_frame = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else 0
+            #processor.seek_video(target_seek_frame)
+            #self.logger.info("Video stopped.", extra={'status_message': True})
         elif action_name == "next_frame":
-            self.app.processor.seek_video(min(total_frames - 1 if total_frames > 0 else 0, current_frame + 1))
+            processor.seek_video(min(total_frames - 1 if total_frames > 0 else 0, current_frame + 1))
         elif action_name == "jump_end":
             target_end_frame = total_frames - 1 if total_frames > 0 else 0
             if fs_proc.scripting_range_active and fs_proc.scripting_end_frame != -1:
                 target_end_frame = fs_proc.scripting_end_frame
-            self.app.processor.seek_video(target_end_frame)
+            processor.seek_video(target_end_frame)
 
-        if action_name != "play_pause" or (action_name == "play_pause" and not self.app.processor.is_processing):
-            if self.app.processor.is_processing:
-                self.app.processor.pause_processing()
-            self.app.processor.display_current_frame()
+        # After any action other than starting playback, update the displayed frame.
+        is_resuming_or_starting = action_name == "play_pause" and (
+                    processor.is_processing and not processor.pause_event.is_set())
+        if not is_resuming_or_starting:
+            processor.display_current_frame()
 
         if action_name in ["jump_start", "prev_frame", "stop", "next_frame", "jump_end"]:
             app_state_ui.force_timeline_pan_to_current_frame = True

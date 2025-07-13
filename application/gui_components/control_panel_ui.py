@@ -844,7 +844,13 @@ class ControlPanelUI:
     def _render_start_stop_buttons(self, stage_proc, fs_proc, event_handlers):
         is_batch_mode = self.app.is_batch_processing_active
         is_analysis_running = stage_proc.full_analysis_active
-        is_live_tracking_running = self.app.processor and self.app.processor.is_processing
+
+        # A "Live Tracking" session is only running if the processor is active
+        # AND tracker processing has been explicitly enabled.
+        is_live_tracking_running = (self.app.processor and
+                                    self.app.processor.is_processing and
+                                    self.app.processor.enable_tracker_processing)
+
         is_setting_roi = self.app.is_setting_user_roi_mode
         is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi or stage_proc.scene_detection_active
 
@@ -868,10 +874,14 @@ class ControlPanelUI:
             if is_analysis_running:
                 status_text = "Aborting..." if stage_proc.current_analysis_stage == -1 else f"Stage {stage_proc.current_analysis_stage} Running..."
             elif is_live_tracking_running:
-                if self.app.processor.is_paused:
-                    if imgui.button("Resume Tracking", width=button_width): self.app.processor.resume_processing()
+                # This logic is now correctly guarded by the new is_live_tracking_running flag
+                if self.app.processor.pause_event.is_set():
+                    if imgui.button("Resume Tracking", width=button_width):
+                        self.app.processor.start_processing()
                 else:
-                    if imgui.button("Pause Tracking", width=button_width): self.app.processor.pause_processing()
+                    if imgui.button("Pause Tracking", width=button_width):
+                        self.app.processor.pause_processing()
+
                 status_text = None
             elif is_setting_roi:
                 status_text = "Setting ROI..."

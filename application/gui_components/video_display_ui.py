@@ -142,31 +142,29 @@ class VideoDisplayUI:
             imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
 
         imgui.begin_group()
-        if imgui.button(ICON_JUMP_START + "##VidOverStart", width=pb_icon_w): event_handlers.handle_playback_control(
-            "jump_start")
+        if imgui.button(ICON_JUMP_START + "##VidOverStart", width=pb_icon_w): event_handlers.handle_playback_control("jump_start")
         imgui.same_line(spacing=pb_btn_spacing)
-        if imgui.button(ICON_PREV_FRAME + "##VidOverPrev", width=pb_icon_w): event_handlers.handle_playback_control(
-            "prev_frame")
+        if imgui.button(ICON_PREV_FRAME + "##VidOverPrev", width=pb_icon_w): event_handlers.handle_playback_control("prev_frame")
         imgui.same_line(spacing=pb_btn_spacing)
-        play_pause_icon = ICON_PAUSE if self.app.processor and self.app.processor.is_processing else ICON_PLAY
-        if imgui.button(play_pause_icon + "##VidOverPlayPause",
-                        width=pb_play_w): event_handlers.handle_playback_control("play_pause")
+        # The condition now checks for the "not paused" state to accurately reflect playing vs. paused.
+        is_playing = self.app.processor and self.app.processor.is_processing and not self.app.processor.pause_event.is_set()
+        play_pause_icon = ICON_PAUSE if is_playing else ICON_PLAY
+
+        #play_pause_icon = ICON_PAUSE if self.app.processor and self.app.processor.is_processing else ICON_PLAY
+        if imgui.button(play_pause_icon + "##VidOverPlayPause", width=pb_play_w): event_handlers.handle_playback_control("play_pause")
         imgui.same_line(spacing=2)
         if imgui.button(ICON_STOP + "##VidOverStop", width=pb_stop_w): event_handlers.handle_playback_control("stop")
         imgui.same_line(spacing=pb_btn_spacing)
-        if imgui.button(ICON_NEXT_FRAME + "##VidOverNext", width=pb_icon_w): event_handlers.handle_playback_control(
-            "next_frame")
+        if imgui.button(ICON_NEXT_FRAME + "##VidOverNext", width=pb_icon_w): event_handlers.handle_playback_control("next_frame")
         imgui.same_line(spacing=pb_btn_spacing)
-        if imgui.button(ICON_JUMP_END + "##VidOverEnd", width=pb_icon_w): event_handlers.handle_playback_control(
-            "jump_end")
+        if imgui.button(ICON_JUMP_END + "##VidOverEnd", width=pb_icon_w): event_handlers.handle_playback_control("jump_end")
         imgui.end_group()
 
         if controls_disabled:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
 
-    def _render_fps_slider_controls(self, app_state, button_h_ref, slider_w, reset_button_w, native_fps_val,
-                                    reset_button_text):
+    def _render_fps_slider_controls(self, app_state, button_h_ref, slider_w, reset_button_w, native_fps_val, reset_button_text):
         # This method is moved from VideoNavigationUI
         imgui.begin_group()
         imgui.set_next_item_width(slider_w)
@@ -175,8 +173,7 @@ class VideoDisplayUI:
         fps_value_for_slider_display = current_target_fps_setting
         if self.app.processor and self.app.processor.is_processing and self.app.processor.actual_fps > 0.1:
             fps_value_for_slider_display = self.app.processor.actual_fps
-        elif self.app.tracker and self.app.tracker.current_fps > 0.1 and not (
-                self.app.processor and self.app.processor.is_processing):
+        elif self.app.tracker and self.app.tracker.current_fps > 0.1 and not (self.app.processor and self.app.processor.is_processing):
             fps_value_for_slider_display = self.app.tracker.current_fps
 
         changed_fps, new_target_value_from_drag = imgui.slider_float(

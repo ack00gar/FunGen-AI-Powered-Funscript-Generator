@@ -67,7 +67,7 @@ class VideoProcessor:
         self.ffmpeg_process: Optional[subprocess.Popen] = None  # Main output process (pipe2 if active)
         self.ffmpeg_pipe1_process: Optional[subprocess.Popen] = None  # Pipe1 process, if active
         self.is_processing = False
-        self.is_paused = True
+        self.pause_event = threading.Event()
         self.processing_thread = None
         self.current_frame = None
         self.fps = 0.0
@@ -888,6 +888,15 @@ class VideoProcessor:
                 return False
 
     def start_processing(self, start_frame=None, end_frame=None):
+        # If we are already processing but are in a paused state, just un-pause.
+        if self.is_processing and self.pause_event.is_set():
+            self.logger.info("Resuming video processing...")
+            self.pause_event.clear()
+            # Optional: callback to notify the main app UI
+            if self.app and hasattr(self.app, 'on_processing_resumed'):
+                self.app.on_processing_resumed()
+            return
+
         if self.is_processing:
             self.logger.warning("Already processing.")
             return
@@ -896,14 +905,16 @@ class VideoProcessor:
             return
 
         effective_start_frame = self.current_frame_index
-        if not self.is_paused and start_frame is not None:
+        # The check for `is_paused` is removed here, as the new block above handles it.
+        if start_frame is not None:
             if 0 <= start_frame < self.total_frames:
                 effective_start_frame = start_frame
             else:
-                self.logger.warning(f"Start frame {start_frame} out of bounds ({self.total_frames} total). Not starting.")
+                self.logger.warning(
+                    f"Start frame {start_frame} out of bounds ({self.total_frames} total). Not starting.")
                 return
-        elif self.is_paused:
-             self.logger.info(f"Resuming processing from paused state at frame {self.current_frame_index}.")
+
+        self.logger.info(f"Starting processing from frame {effective_start_frame}.")
 
         self.processing_start_frame_limit = effective_start_frame
         self.processing_end_frame_limit = -1
@@ -915,7 +926,7 @@ class VideoProcessor:
             return
 
         self.is_processing = True
-        self.is_paused = False
+        self.pause_event.clear()
         self.stop_event.clear()
         self.processing_thread = threading.Thread(target=self._processing_loop)
         self.processing_thread.daemon = True
@@ -926,33 +937,15 @@ class VideoProcessor:
             f"{self.processing_end_frame_limit if self.processing_end_frame_limit != -1 else 'EOS'}")
 
     def pause_processing(self):
-        if not self.is_processing:
+        if not self.is_processing or self.pause_event.is_set():
             return
 
         self.logger.info("Pausing video processing...")
-        was_scripting_session = self.tracker and self.tracker.tracking_active
-        scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
+        self.pause_event.set()
 
-        self.is_processing = False
-        self.is_paused = True
-        self.stop_event.set()
-
-        self._terminate_ffmpeg_processes()
-
-        thread_to_join = self.processing_thread
-        if thread_to_join and thread_to_join.is_alive():
-            if threading.current_thread() is not thread_to_join:
-                self.logger.info(f"Joining processing thread: {thread_to_join.name}")
-                thread_to_join.join(timeout=1.0)
-                if thread_to_join.is_alive():
-                    self.logger.warning("Processing thread did not join cleanly after pause signal.")
-        self.processing_thread = None
-
-        if self.app:
-            self.app.on_processing_stopped(was_scripting_session=was_scripting_session,
-                                           scripted_frame_range=scripted_range)
-
-        self.logger.info(f"Video processing paused. Current frame index: {self.current_frame_index}")
+        # Optional callback to update UI elements, like a play/pause button icon.
+        if self.app and hasattr(self.app, 'on_processing_paused'):
+            self.app.on_processing_paused()
 
     def stop_processing(self, join_thread=True):
         is_currently_processing = self.is_processing
@@ -967,20 +960,20 @@ class VideoProcessor:
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
 
         self.is_processing = False
-        self.is_paused = False
+        self.pause_event.clear()
         self.stop_event.set()
+
+        self._terminate_ffmpeg_processes()
 
         if join_thread:
             thread_to_join = self.processing_thread
             if thread_to_join and thread_to_join.is_alive():
                 if threading.current_thread() is not thread_to_join:
                     self.logger.info(f"Joining processing thread: {thread_to_join.name} during stop.")
-                    thread_to_join.join(timeout=1.0)
+                    thread_to_join.join(timeout=2.0)
                     if thread_to_join.is_alive():
                         self.logger.warning("Processing thread did not join cleanly after stop signal.")
         self.processing_thread = None
-
-        self._terminate_ffmpeg_processes()
 
         if self.tracker:
             self.logger.info("Signaling tracker to stop.")
@@ -989,8 +982,8 @@ class VideoProcessor:
         self.enable_tracker_processing = False
 
         if self.app and hasattr(self.app, 'on_processing_stopped'):
-             self.app.on_processing_stopped(was_scripting_session=was_scripting_session,
-                                            scripted_frame_range=scripted_range)
+            self.app.on_processing_stopped(was_scripting_session=was_scripting_session,
+                                           scripted_frame_range=scripted_range)
 
         self.logger.info("GUI processing stopped.")
 
@@ -1046,7 +1039,6 @@ class VideoProcessor:
         if not self.ffmpeg_process or self.ffmpeg_process.stdout is None:
             self.logger.error("_processing_loop: FFmpeg process/stdout not available. Exiting.")
             self.is_processing = False
-            self._terminate_ffmpeg_processes()
             return
 
         loop_ffmpeg_process = self.ffmpeg_process
@@ -1054,7 +1046,18 @@ class VideoProcessor:
         self.last_processed_chapter_id = None
 
         try:
-            while not self.stop_event.is_set() and self.is_processing:
+            # The main processing loop
+            while not self.stop_event.is_set():
+                while self.pause_event.is_set():
+                    if self.stop_event.is_set():
+                        break
+                    time.sleep(0.01)
+
+                # If a stop was requested while we were paused, break the main loop.
+                if self.stop_event.is_set():
+                    break
+
+                # The original logic of the loop continues below
                 target_delay = 1.0 / self.target_fps if self.target_fps > 0 else (1.0 / 30.0)
 
                 current_chapter = self.app.funscript_processor.get_chapter_at_frame(self.current_frame_index)
@@ -1062,44 +1065,36 @@ class VideoProcessor:
 
                 if current_chapter_id != self.last_processed_chapter_id:
                     if self.tracker:
-                        # Case 1: A new chapter is entered AND it has a specific user-defined ROI.
-                        # Reconfigure the tracker for this specific ROI.
                         if current_chapter and current_chapter.user_roi_fixed:
                             self.tracker.reconfigure_for_chapter(current_chapter)
-                            # If we reconfigured for a new chapter, ensure tracking is active.
                             if not self.tracker.tracking_active:
                                 self.tracker.start_tracking()
-
-                        # Case 2: We have entered a gap BETWEEN chapters (current_chapter is None).
-                        # Stop the tracker unless it's in a persistent User ROI mode that should span gaps.
                         elif current_chapter is None and self.tracker.tracking_active:
                             if self.tracker.tracking_mode != "USER_FIXED_ROI":
                                 self.tracker.stop_tracking()
                                 self.logger.info("Tracker stopped due to entering a gap between chapters.")
-
-                        # Case 3 (Implicit): A chapter without a user_roi_fixed is entered.
-                        # DO NOTHING. Allow the YOLO tracker to continue its operation seamlessly.
-
                     self.last_processed_chapter_id = current_chapter_id
 
                 if current_chapter and self.tracker and not self.tracker.tracking_active and current_chapter.user_roi_fixed:
                     self.tracker.start_tracking()
 
                 if self.ffmpeg_pipe1_process and self.ffmpeg_pipe1_process.poll() is not None:
-                    pipe1_stderr = self.ffmpeg_pipe1_process.stderr.read(4096).decode(errors='ignore') if self.ffmpeg_pipe1_process.stderr else ""
+                    pipe1_stderr = self.ffmpeg_pipe1_process.stderr.read(4096).decode(
+                        errors='ignore') if self.ffmpeg_pipe1_process.stderr else ""
                     self.logger.warning(
                         f"FFmpeg Pipe 1 died. Exit: {self.ffmpeg_pipe1_process.returncode}. Stderr: {pipe1_stderr.strip()}. Stopping.")
                     self.is_processing = False
                     break
 
                 if loop_ffmpeg_process.poll() is not None:
-                    stderr_output = loop_ffmpeg_process.stderr.read(4096).decode(errors='ignore') if loop_ffmpeg_process.stderr else ""
+                    stderr_output = loop_ffmpeg_process.stderr.read(4096).decode(
+                        errors='ignore') if loop_ffmpeg_process.stderr else ""
                     self.logger.info(
                         f"FFmpeg output process died unexpectedly. Exit: {loop_ffmpeg_process.returncode}. Stderr: {stderr_output.strip()}. Stopping.")
                     self.is_processing = False
                     break
 
-                raw_frame_bytes = None # Force clear the buffer to prevent false positives
+                raw_frame_bytes = None
                 if loop_ffmpeg_process.stdout is not None:
                     raw_frame_bytes = loop_ffmpeg_process.stdout.read(self.frame_size_bytes)
                 if not raw_frame_bytes or len(raw_frame_bytes) < self.frame_size_bytes:
@@ -1135,10 +1130,12 @@ class VideoProcessor:
                                                        scripted_frame_range=end_range_eos)
                     break
 
-                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
+                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size,
+                                                                                  self.yolo_input_size, 3)
                 processed_frame_for_gui = frame_np
                 if self.tracker and self.tracker.tracking_active:
-                    timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(time.time() * 1000)
+                    timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
+                        time.time() * 1000)
                     try:
                         processed_frame_for_gui = self.tracker.process_frame(frame_np.copy(), timestamp_ms)[0]
                     except Exception as e:
@@ -1165,12 +1162,11 @@ class VideoProcessor:
                 else:
                     next_frame_target_time += target_delay
         finally:
-            self.logger.info(
-                f"_processing_loop ending. is_processing: {self.is_processing}, stop_event: {self.stop_event.is_set()}")
+            self.logger.info(f"_processing_loop ending. is_processing: {self.is_processing}, stop_event: {self.stop_event.is_set()}")
             self._terminate_ffmpeg_processes()
             self.is_processing = False
+            self.pause_event.set()
             self.last_processed_chapter_id = None
-            self.stop_event.clear()
 
     def _start_ffmpeg_for_segment_streaming(self, start_frame_abs_idx: int,
                                             num_frames_to_stream_hint: Optional[int] = None) -> bool:
