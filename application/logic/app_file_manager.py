@@ -20,6 +20,7 @@ class AppFileManager:
         self.loaded_funscript_path: str = ""
         self.stage1_output_msgpack_path: Optional[str] = None
         self.stage2_output_msgpack_path: Optional[str] = None
+        self.preprocessed_video_path: Optional[str] = None
         self.last_dropped_files: Optional[List[str]] = None
 
     def _set_yolo_model_path_callback(self, filepath: str, model_type: str):
@@ -79,8 +80,8 @@ class AppFileManager:
     def _parse_funscript_file(self, funscript_file_path: str) -> Tuple[Optional[List[Dict]], Optional[str], Optional[List[Dict]], Optional[float]]:
         """ Parses a funscript file using the high-performance orjson library. """
         try:
-            with open(funscript_file_path, 'rb') as f:  # <-- Read in binary mode 'rb'
-                data = orjson.loads(f.read())  # <-- Use orjson.loads
+            with open(funscript_file_path, 'rb') as f:
+                data = orjson.loads(f.read())
 
             actions_data = data.get("actions", [])
             if not isinstance(actions_data, list):
@@ -145,8 +146,6 @@ class AppFileManager:
         if secondary_actions:
             secondary_path = self.get_output_path_for_file(video_path, "_t2_raw.funscript")
             self._save_funscript_file(secondary_path, secondary_actions, None)
-
-
 
     def load_funscript_to_timeline(self, funscript_file_path: str, timeline_num: int = 1):
         actions, error_msg, chapters_as_dicts, chapters_fps_from_file = self._parse_funscript_file(funscript_file_path)
@@ -232,7 +231,6 @@ class AppFileManager:
         if not actions:
             self.logger.info(f"No actions to save to {os.path.basename(filepath)}.", extra={'status_message': True})
             return
-
 
         # --- Backup logic before saving ---
         if os.path.exists(filepath):
@@ -334,9 +332,16 @@ class AppFileManager:
         funscript_processor = self.app.funscript_processor
         stage_processor = self.app.stage_processor
 
+        # This check now runs for ALL video loads, ensuring the app is always aware of the preprocessed file.
+        potential_preprocessed_path = self.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
+        if os.path.exists(potential_preprocessed_path):
+            self.preprocessed_video_path = potential_preprocessed_path
+            self.logger.info(f"Found existing preprocessed video: {os.path.basename(potential_preprocessed_path)}")
+        else:
+            self.preprocessed_video_path = None
+
         if not is_project_load:
             # This block is for when a user opens a video file directly.
-            # It should be entirely skipped during a project load.
             self.funscript_path = ""
             self.loaded_funscript_path = ""
             stage_processor.reset_stage_status(stages=("stage1", "stage2", "stage3")) # REFACTORED for maintainability. Create as many stages you want without having to make a new function. Simply pass in a tuple of stage names you want to reset.
@@ -354,7 +359,6 @@ class AppFileManager:
             potential_s2_overlay = self.get_output_path_for_file(self.video_path, "_stage2_overlay.msgpack")
             if os.path.exists(potential_s2_overlay):
                 self.load_stage2_overlay_data(potential_s2_overlay)
-
 
             if not self.loaded_funscript_path:
                 funscript_processor.clear_timeline_history_and_set_new_baseline(1, [], "New Video (T1 Cleared)")
@@ -383,6 +387,7 @@ class AppFileManager:
             self.app.processor.reset(close_video=True)  # Resets video info in processor
 
         self.video_path = ""
+        self.preprocessed_video_path = None
         self.app.stage_processor.reset_stage_status(stages=("stage1", "stage2", "stage3"))
         self.app.funscript_processor.video_chapters.clear()
         self.clear_stage2_overlay_data()

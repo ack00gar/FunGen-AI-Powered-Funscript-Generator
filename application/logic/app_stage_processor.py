@@ -536,7 +536,9 @@ class AppStageProcessor:
                     return
 
                 self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in s2_output_data.get("all_s2_frame_objects_list", [])}
-                stage3_success = self._execute_stage3_optical_flow_module(segments_for_s3)
+                preprocessed_path_for_s3 = self.app.file_manager.preprocessed_video_path
+
+                stage3_success = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
 
                 if stage3_success:
                     self.gui_event_queue.put(("stage3_completed", self.stage3_time_elapsed_str, self.stage3_processing_fps_str))
@@ -753,7 +755,7 @@ class AppStageProcessor:
             self.gui_event_queue.put(("stage2_status_update", error_msg, "Error"))
             return {"success": False, "error": error_msg}
 
-    def _execute_stage3_optical_flow_module(self, atr_segments_objects: List[Any]) -> bool:
+    def _execute_stage3_optical_flow_module(self, atr_segments_objects: List[Any], preprocessed_video_path: Optional[str]) -> bool:
         """ Wrapper to call the new Stage 3 OF module. """
         fs_proc = self.app.funscript_processor
 
@@ -816,6 +818,7 @@ class AppStageProcessor:
 
         s3_results = stage3_module.perform_stage3_analysis(
             video_path=self.app.file_manager.video_path,
+            preprocessed_video_path_arg=preprocessed_video_path,
             atr_segments_list=atr_segments_objects,
             s2_frame_objects_map=self.app.s2_frame_objects_map_for_s3,
             tracker_config=tracker_config_s3,
