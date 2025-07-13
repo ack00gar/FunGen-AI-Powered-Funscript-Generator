@@ -284,10 +284,15 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
     written_count = 0
     last_progress_update_time = time.time()
     first_result_received_time = None
+    # --- Variables for instant FPS ---
+    last_instant_fps_update_time = time.time()
+    frames_since_last_instant_update = 0
+    instant_fps = 0.0
     parent_logger.info(f"[S1 Logger] Expecting {expected_frames} frames. Writing to {output_file_local}")
 
     if progress_callback_local:
-        progress_callback_local(0, expected_frames, "Logger starting...", 0.0, 0.0, -1)
+        # New signature: current, total, message, time_elapsed, avg_fps, instant_fps, eta_seconds
+        progress_callback_local(0, expected_frames, "Logger starting...", 0.0, 0.0, 0.0, -1)
 
     while (written_count < expected_frames if expected_frames > 0 else True) and not stop_event_local.is_set():
         try:
@@ -303,10 +308,20 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
             if frame_id not in results_dict:
                 results_dict[frame_id] = payload
                 written_count += 1
+                frames_since_last_instant_update += 1
                 if first_result_received_time is None:
                     first_result_received_time = time.time()
+                    last_instant_fps_update_time = first_result_received_time
 
             current_time = time.time()
+
+            # --- Instant FPS calculation every 5 seconds ---
+            time_since_last_instant_update = current_time - last_instant_fps_update_time
+            if time_since_last_instant_update >= 5.0:
+                instant_fps = frames_since_last_instant_update / time_since_last_instant_update
+                frames_since_last_instant_update = 0
+                last_instant_fps_update_time = current_time
+
             if progress_callback_local and (
                     current_time - last_progress_update_time > 0.2 or written_count == expected_frames):
                 # Send queue updates to GUI
@@ -321,20 +336,16 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
                     except Exception:
                         pass
 
-                # Calculate and send main progress
+                # --- Calculate and send main progress ---
                 time_elapsed = 0.0
+                avg_fps = 0.0
                 if first_result_received_time is not None:
                     time_elapsed = current_time - first_result_received_time
+                    if time_elapsed > 0:
+                        avg_fps = written_count / time_elapsed
 
-                # Guard to prevent division by zero
-                if time_elapsed > 0:
-                    fps = written_count / time_elapsed
-                else:
-                    fps = 0.0  # Default to 0 FPS if no time has passed
-
-                eta = (expected_frames - written_count) / fps if fps > 0 else 0
-                progress_callback_local(written_count, expected_frames, "Detecting objects & poses...", time_elapsed,
-                                        fps, eta)
+                eta = (expected_frames - written_count) / avg_fps if avg_fps > 0 else 0
+                progress_callback_local(written_count, expected_frames, "Detecting objects & poses...", time_elapsed, avg_fps, instant_fps, eta)
                 last_progress_update_time = current_time
         except Empty:
             continue
