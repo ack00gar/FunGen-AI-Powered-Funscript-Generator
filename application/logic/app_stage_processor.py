@@ -24,7 +24,7 @@ class AppStageProcessor:
         self.app_settings = self.app.app_settings
 
         # --- Threading Configuration ---
-        # REFACTORED deduplicate code, see function 'update_settings_from_app'
+        self.save_preprocessed_video: bool = False
         self.update_settings_from_app()
 
         # --- Analysis State ---
@@ -631,6 +631,11 @@ class AppStageProcessor:
             if not stage1_module:
                 self.gui_event_queue.put(("stage1_status_update", "Error - S1 Module not loaded.", "Error"))
                 return False
+
+            preprocessed_video_path = None
+            if self.save_preprocessed_video:
+                preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+
             result_path = stage1_module.perform_yolo_analysis(
                 video_path_arg=fm.video_path,
                 yolo_model_path_arg=self.app.yolo_det_model_path,
@@ -650,7 +655,9 @@ class AppStageProcessor:
                 app_logger_config_arg=logger_config_for_stage1,
                 gui_event_queue_arg=self.gui_event_queue,
                 frame_range_arg=frame_range,
-                output_filename_override=output_path
+                output_filename_override=output_path,
+                save_preprocessed_video_arg=self.save_preprocessed_video,
+                preprocessed_video_path_arg=preprocessed_video_path
             )
             if self.stop_stage_event.is_set():
                 self.gui_event_queue.put(("stage1_status_update", "S1 Aborted by user.", "Aborted"))
@@ -1160,8 +1167,6 @@ class AppStageProcessor:
                     new_actions = payload.get('new_actions')
 
                     if chapter and new_actions:
-                        # Delegate the application of the refinement to the Funscript Processor.
-                        # This ensures the action is properly recorded for undo/redo.
                         self.app.funscript_processor.apply_interactive_refinement(chapter, new_actions)
 
                 else:
@@ -1184,6 +1189,7 @@ class AppStageProcessor:
     def update_settings_from_app(self):
         prod_usr = self.app_settings.get("num_producers_stage1")
         cons_usr = self.app_settings.get("num_consumers_stage1")
+        self.save_preprocessed_video = self.app_settings.get("save_preprocessed_video", False)
 
         if not prod_usr or not cons_usr:
             cpu_cores = os.cpu_count() or 4
@@ -1196,6 +1202,7 @@ class AppStageProcessor:
     def save_settings_to_app(self):
         self.app_settings.set("num_producers_stage1", self.num_producers_stage1)
         self.app_settings.set("num_consumers_stage1", self.num_consumers_stage1)
+        self.app_settings.set("save_preprocessed_video", self.save_preprocessed_video)
 
     def get_project_save_data(self) -> Dict:
         return {

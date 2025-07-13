@@ -2,6 +2,7 @@ import numpy as np
 import msgpack
 import time
 from multiprocessing import Process, Queue, Event, Value, freeze_support
+import platform
 from threading import Thread as PyThread
 from queue import Empty, Full
 from ultralytics import YOLO
@@ -14,6 +15,83 @@ from queue import Queue as StdLibQueue
 from video.video_processor import VideoProcessor
 from config import constants
 
+log_vid = logging.getLogger(__name__)
+
+def _determine_actual_hwaccel(selected_method: str, available_methods: List[str]) -> str:
+    """Determines the best HW accel method based on user selection, platform, and availability."""
+    system = platform.system().lower()
+
+    if selected_method == "auto":
+        if system == 'darwin' and 'videotoolbox' in available_methods:
+            return 'videotoolbox'
+        elif system in ['linux', 'windows']:
+            if 'cuda' in available_methods or 'nvdec' in available_methods: return 'cuda'
+            if 'qsv' in available_methods: return 'qsv'
+            if system == 'linux' and 'vaapi' in available_methods: return 'vaapi'
+        return 'none' # Fallback for auto
+    elif selected_method in available_methods:
+        return selected_method # Use user's valid selection
+    else:
+        return 'none' # Fallback if selection is invalid
+
+# --- Integrated FFmpegEncoder Class ---
+class FFmpegEncoder:
+    def __init__(self, output_file: str, width: int, height: int, fps: float, ffmpeg_path: str, hwaccel_method: str):
+        self.encoder_process = None
+        self.output_file = output_file
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.ffmpeg_path = ffmpeg_path
+        self.hwaccel_method = hwaccel_method # This argument is now unused but kept for compatibility
+        self.stderr_thread = None
+
+    def start(self):
+        encoder_cmd = [
+            self.ffmpeg_path, "-y", "-hide_banner",
+            "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{self.width}x{self.height}",
+            "-r", str(self.fps), "-i", "pipe:0",
+            *self._get_encoder_args(),
+            self.output_file, "-loglevel", "error"
+        ]
+        log_vid.info(f"Encoder command: {' '.join(encoder_cmd)}")
+        self.encoder_process = subprocess.Popen(encoder_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.stderr_thread = PyThread(target=self._read_stderr, daemon=True)
+        self.stderr_thread.start()
+
+    def _read_stderr(self):
+        if self.encoder_process and self.encoder_process.stderr:
+            for line in iter(self.encoder_process.stderr.readline, b""):
+                decoded = line.decode("utf-8", errors="replace").strip()
+                if decoded: log_vid.error(f"FFmpeg: {decoded}")
+
+    def encode_frame(self, frame_bytes):
+        if self.encoder_process and self.encoder_process.stdin:
+            try:
+                self.encoder_process.stdin.write(frame_bytes)
+            except (BrokenPipeError, IOError):
+                log_vid.error("Encoder pipe broke. Stopping encoding for this frame.")
+                self.stop()
+
+    def stop(self):
+        if not self.encoder_process: return
+        log_vid.info("Stopping encoder process...")
+        if self.encoder_process.stdin:
+            try:
+                self.encoder_process.stdin.close()
+            except (BrokenPipeError, IOError): pass
+        try:
+            self.encoder_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            log_vid.warning("FFmpeg did not terminate gracefully. Killing.")
+            self.encoder_process.kill()
+        if self.stderr_thread: self.stderr_thread.join(timeout=1.0)
+        self.encoder_process = None
+        log_vid.info("Encoder process stopped.")
+
+    def _get_encoder_args(self):
+        log_vid.info("Forcing lossless software encoding for preprocessed video to ensure data integrity.")
+        return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv444p"]
 
 class Stage1QueueMonitor:
     def __init__(self):
@@ -74,11 +152,14 @@ def video_processor_producer_proc(
         stop_event_local: Event,
         hwaccel_method_producer: Optional[str],
         hwaccel_avail_list_producer: Optional[List[str]],
-        logger_config_for_vp_in_producer: Optional[dict] = None
+        logger_config_for_vp_in_producer: Optional[dict] = None,
+        is_encoding_preprocessed_video: bool = False,
+        output_path_for_encoding: Optional[str] = None
 ):
     frames_put_to_queue_this_producer = 0
     vp_instance = None
     producer_logger = None
+    encoder = None
 
     try:
         # Create a proxy object for the VideoProcessor instance
@@ -115,6 +196,23 @@ def video_processor_producer_proc(
                 f"[S1 VP Producer-{producer_idx}] VideoProcessor could not open video '{video_path_producer}'.")
             return
 
+        if is_encoding_preprocessed_video and output_path_for_encoding:
+            width = vp_instance.yolo_input_size
+            height = vp_instance.yolo_input_size
+            fps = vp_instance.video_info.get('fps', 30.0)
+            ffmpeg_path = os.environ.get("FFMPEG_PATH", "ffmpeg")
+
+            encoder = FFmpegEncoder(
+                output_file=output_path_for_encoding,
+                width=width,
+                height=height,
+                fps=fps,
+                ffmpeg_path=ffmpeg_path,
+                hwaccel_method='none'
+            )
+            producer_logger.info(f"Starting FFmpeg encoder for preprocessed video.")
+            encoder.start()
+
         producer_logger.info(
             f"[S1 VP Producer-{producer_idx}] Streaming segment: Video='{os.path.basename(vp_instance.video_path)}', StartFrameAbs={start_frame_abs_num}, NumFrames={num_frames_in_segment}, YOLOSize={vp_instance.yolo_input_size}")
 
@@ -123,6 +221,9 @@ def video_processor_producer_proc(
                 producer_logger.info(
                     f"[S1 VP Producer-{producer_idx}] Stop event detected. Processed {frames_put_to_queue_this_producer} frames.")
                 break
+
+            if encoder:
+                encoder.encode_frame(frame.tobytes())
 
             try:
                 # Attempt to put the frame on the queue with a 0.5 second timeout
@@ -161,6 +262,10 @@ def video_processor_producer_proc(
         effective_logger.critical(f"[S1 VP Producer-{producer_idx}] Error in producer {producer_idx}: {e}", exc_info=True)
         if not stop_event_local.is_set() : stop_event_local.set() # Signal main process about the error
     finally:
+        if encoder:
+            producer_logger.info(f"[S1 VP Producer-{producer_idx}] Stopping video encoder...")
+            encoder.stop()
+
         effective_logger_final = producer_logger if producer_logger else logging.getLogger(f"S1_VP_Producer_{producer_idx}_{os.getpid()}_FinallyFallback")
         if not effective_logger_final.hasHandlers() and not producer_logger: # Configure fallback if it's the finally fallback
             handler = logging.StreamHandler()
@@ -409,7 +514,9 @@ def perform_yolo_analysis(
         hwaccel_method_arg: Optional[str] = 'auto',
         hwaccel_avail_list_arg: Optional[List[str]] = None,
         frame_range_arg: Optional[Tuple[Optional[int], Optional[int]]] = None,
-        output_filename_override: Optional[str] = None
+        output_filename_override: Optional[str] = None,
+        save_preprocessed_video_arg: bool = False,
+        preprocessed_video_path_arg: Optional[str] = None
 ):
     process_logger = None
     fallback_config_for_subprocesses = None
@@ -486,6 +593,27 @@ def perform_yolo_analysis(
 
     queue_monitor = Stage1QueueMonitor()
 
+    video_path_to_use = video_path_arg
+    video_type_to_use = video_type_arg
+    is_encoding_preprocessed_video = False
+    num_producers_effective = num_producers_arg
+
+    if save_preprocessed_video_arg:
+        process_logger.info("'Save/Reuse Preprocessed Video' is enabled.")
+        num_producers_effective = 1  # Force producers to 1
+        if preprocessed_video_path_arg and os.path.exists(preprocessed_video_path_arg):
+            process_logger.info(f"Found existing preprocessed video. Using: {preprocessed_video_path_arg}")
+            video_path_to_use = preprocessed_video_path_arg
+            video_type_to_use = 'flat'  # Preprocessed video is already unwarped
+        elif preprocessed_video_path_arg:
+            process_logger.info(f"No existing preprocessed video found. Will encode to: {preprocessed_video_path_arg}")
+            is_encoding_preprocessed_video = True
+            preprocessed_dir = os.path.dirname(preprocessed_video_path_arg)
+            if preprocessed_dir:
+                os.makedirs(preprocessed_dir, exist_ok=True)
+        else:
+            process_logger.warning("Save preprocessed video was requested, but no output path was provided. Disabling.")
+
     class VPAppProxy:
         pass
 
@@ -496,7 +624,7 @@ def perform_yolo_analysis(
     main_vp_for_info = VideoProcessor(app_instance=vp_app_proxy,
                                       fallback_logger_config={'logger_instance': process_logger})
 
-    if not main_vp_for_info.open_video(video_path_arg):
+    if not main_vp_for_info.open_video(video_path_to_use):
         return None
     full_video_total_frames = main_vp_for_info.video_info.get('total_frames', 0)
     video_fps = main_vp_for_info.video_info.get('fps', 30.0)
@@ -520,16 +648,16 @@ def perform_yolo_analysis(
 
     try:
         # --- PROCESS CREATION ---
-        frames_per_producer = total_frames_to_process // num_producers_arg
-        extra_frames = total_frames_to_process % num_producers_arg
+        frames_per_producer = total_frames_to_process // num_producers_effective
+        extra_frames = total_frames_to_process % num_producers_effective
         current_frame = processing_start_frame
-        for i in range(num_producers_arg):
+        for i in range(num_producers_effective):
             num_frames = frames_per_producer + (1 if i < extra_frames else 0)
             if num_frames > 0:
-                p_args = (i, video_path_arg, yolo_input_size_arg, video_type_arg, vr_input_format_arg, vr_fov_arg,
+                p_args = (i, video_path_to_use, yolo_input_size_arg, video_type_to_use, vr_input_format_arg, vr_fov_arg,
                           vr_pitch_arg, current_frame, num_frames, frame_processing_queue, queue_monitor,
                           stop_event_internal, hwaccel_method_arg, hwaccel_avail_list_arg,
-                          fallback_config_for_subprocesses)
+                          fallback_config_for_subprocesses, is_encoding_preprocessed_video, preprocessed_video_path_arg)
                 producers_list.append(Process(target=video_processor_producer_proc, args=p_args, daemon=True))
                 current_frame += num_frames
 
@@ -606,4 +734,3 @@ def perform_yolo_analysis(
         if logger_p_thread and logger_p_thread.is_alive():
             logger_p_thread.join(timeout=1.0)
         process_logger.info("[S1 Lib] Cleanup complete.")
-

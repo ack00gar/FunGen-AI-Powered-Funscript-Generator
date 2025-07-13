@@ -127,6 +127,24 @@ class ControlPanelUI:
                     _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
                     imgui.same_line()
                     _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
+                    imgui.separator()
+                    if not hasattr(stage_proc, 'save_preprocessed_video'):
+                        stage_proc.save_preprocessed_video = self.app.app_settings.get("save_preprocessed_video", False)
+
+                    changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
+                    if changed:
+                        stage_proc.save_preprocessed_video = new_val
+                        self.app.app_settings.set("save_preprocessed_video", new_val)
+                        if new_val:
+                            stage_proc.num_producers_stage1 = 1
+                            self.app.app_settings.set("num_producers_stage1", 1)
+
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip(
+                            "Applies resizing/cropping and VR unwarping to the video, then saves it.\n"
+                            "This preprocessed video is reused in subsequent runs, speeding them up.\n"
+                            "Forces the number of Producer threads to 1."
+                        )
             imgui.separator()
 
         # --- Execution Buttons ---
@@ -428,11 +446,24 @@ class ControlPanelUI:
             imgui.separator()
             imgui.text("Stage 1 Inference Workers:")
             imgui.push_item_width(100)
+            is_saving_preprocessed = getattr(stage_proc, 'save_preprocessed_video', False)
+            if is_saving_preprocessed:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
             changed_prod, new_prod_s1_val = imgui.input_int("Producers##S1Producers", stage_proc.num_producers_stage1)
-            if changed_prod:
+            if changed_prod and not is_saving_preprocessed:
                 stage_proc.num_producers_stage1 = max(1, new_prod_s1_val)
                 self.app.app_settings.set("num_producers_stage1", stage_proc.num_producers_stage1)
-            if imgui.is_item_hovered(): imgui.set_tooltip("Number of threads for video decoding & preprocessing.")
+
+            if is_saving_preprocessed:
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Producers are forced to 1 when 'Save/Reuse Preprocessed Video' is enabled.")
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+            elif imgui.is_item_hovered():
+                imgui.set_tooltip("Number of threads for video decoding & preprocessing.")
+
 
             imgui.same_line()
             changed_cons, new_cons_s1_val = imgui.input_int("Consumers##S1Consumers", stage_proc.num_consumers_stage1)
