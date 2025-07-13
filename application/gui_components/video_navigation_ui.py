@@ -48,8 +48,7 @@ class VideoNavigationUI:
         fps = DEFAULT_CHAPTER_FPS
         if self.app.processor:
             if hasattr(self.app.processor,
-                       'video_info') and self.app.processor.video_info and self.app.processor.video_info.get('fps',
-                                                                                                             0) > 0:
+                       'video_info') and self.app.processor.video_info and self.app.processor.video_info.get('fps', 0) > 0:
                 fps = self.app.processor.video_info['fps']
             elif hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:
                 fps = self.app.processor.fps
@@ -87,8 +86,7 @@ class VideoNavigationUI:
                     'total_frames', 0) > 0:
                 total_frames_for_bars = self.app.processor.video_info.get('total_frames', 0)
             elif self.app.file_manager.video_path:
-                if self.app.processor and hasattr(self.app.processor,
-                                                  'total_frames') and self.app.processor.total_frames > 0:
+                if self.app.processor and hasattr(self.app.processor, 'total_frames') and self.app.processor.total_frames > 0:
                     total_frames_for_bars = self.app.processor.total_frames
 
             chapter_bar_h = fs_proc.chapter_bar_height if hasattr(fs_proc, 'chapter_bar_height') else 20
@@ -102,8 +100,7 @@ class VideoNavigationUI:
                 imgui.pop_item_width()
                 imgui.spacing()
             if app_state.show_heatmap:
-                self._render_funscript_heatmap_preview(eff_duration_s, actual_content_width,
-                                                       app_state.timeline_heatmap_height)
+                self._render_funscript_heatmap_preview(eff_duration_s, actual_content_width, app_state.timeline_heatmap_height)
                 imgui.spacing()
             if self.chapter_tooltip_segment and total_frames_for_bars > 0:
                 self._render_chapter_tooltip()
@@ -224,14 +221,13 @@ class VideoNavigationUI:
                 segment_color_tuple = (0.5, 0.5, 0.5, 0.7)
             seg_color = imgui.get_color_u32_rgba(*segment_color_tuple)
 
-            is_selected_for_scripting = (fs_proc.scripting_range_active and
-                                         fs_proc.selected_chapter_for_scripting and
-                                         fs_proc.selected_chapter_for_scripting.unique_id == segment.unique_id and
-                                         fs_proc.scripting_start_frame == segment.start_frame_id and
-                                         fs_proc.scripting_end_frame == segment.end_frame_id)
+            is_selected_for_scripting = (fs_proc.scripting_range_active
+                and fs_proc.selected_chapter_for_scripting
+                and fs_proc.selected_chapter_for_scripting.unique_id == segment.unique_id
+                and fs_proc.scripting_start_frame == segment.start_frame_id
+                and fs_proc.scripting_end_frame == segment.end_frame_id)
 
-            draw_list.add_rect_filled(seg_start_x, bar_start_y, seg_start_x + seg_width, bar_start_y + bar_height,
-                                      seg_color)
+            draw_list.add_rect_filled(seg_start_x, bar_start_y, seg_start_x + seg_width, bar_start_y + bar_height, seg_color)
 
             is_context_selected_primary = False
             is_context_selected_secondary = False
@@ -244,21 +240,15 @@ class VideoNavigationUI:
 
             if is_selected_for_scripting:
                 scripting_border_col = imgui.get_color_u32_rgba(1.0, 1.0, 0.0, 0.6)
-                draw_list.add_rect(seg_start_x + 0.5, bar_start_y + 0.5,
-                                   seg_start_x + seg_width - 0.5, bar_start_y + bar_height - 0.5,
-                                   scripting_border_col, thickness=1.0, rounding=0.0)
+                draw_list.add_rect(seg_start_x + 0.5, bar_start_y + 0.5, seg_start_x + seg_width - 0.5, bar_start_y + bar_height - 0.5, scripting_border_col, thickness=1.0, rounding=0.0)
 
             if is_context_selected_primary:
                 border_col_sel1 = imgui.get_color_u32_rgba(0.2, 1.0, 0.2, 0.95)
-                draw_list.add_rect(seg_start_x - 1, bar_start_y - 1,
-                                   seg_start_x + seg_width + 1, bar_start_y + bar_height + 1,
-                                   border_col_sel1, thickness=2.0, rounding=1.0)
+                draw_list.add_rect(seg_start_x - 1, bar_start_y - 1, seg_start_x + seg_width + 1, bar_start_y + bar_height + 1, border_col_sel1, thickness=2.0, rounding=1.0)
 
             if is_context_selected_secondary:
                 border_col_sel2 = imgui.get_color_u32_rgba(0.3, 0.5, 1.0, 0.95)
-                draw_list.add_rect(seg_start_x - 2, bar_start_y - 2,
-                                   seg_start_x + seg_width + 2, bar_start_y + bar_height + 2,
-                                   border_col_sel2, thickness=1.5, rounding=1.0)
+                draw_list.add_rect(seg_start_x - 2, bar_start_y - 2, seg_start_x + seg_width + 2, bar_start_y + bar_height + 2, border_col_sel2, thickness=1.5, rounding=1.0)
 
             text_to_draw = f"{segment.position_short_name}"
             text_width = imgui.calc_text_size(text_to_draw)[0]
@@ -331,11 +321,9 @@ class VideoNavigationUI:
         full_bar_rect_min = (bar_start_x, bar_start_y)
         full_bar_rect_max = (bar_start_x + bar_width, bar_start_y + bar_height)
 
-        is_mouse_over_bar = full_bar_rect_min[0] <= mouse_pos[0] <= full_bar_rect_max[0] and \
-                            full_bar_rect_min[1] <= mouse_pos[1] <= full_bar_rect_max[1]
+        is_mouse_over_bar = full_bar_rect_min[0] <= mouse_pos[0] <= full_bar_rect_max[0] and full_bar_rect_min[1] <= mouse_pos[1] <= full_bar_rect_max[1]
 
-        if is_mouse_over_bar and imgui.is_mouse_clicked(1) and \
-                not action_on_segment_this_frame:
+        if is_mouse_over_bar and imgui.is_mouse_clicked(1) and not action_on_segment_this_frame:
 
             clicked_x_on_bar = mouse_pos[0] - bar_start_x
             norm_click_pos = clicked_x_on_bar / bar_width
@@ -477,19 +465,16 @@ class VideoNavigationUI:
             if imgui.begin_menu("Select Points in Chapter(s)", enabled=can_select_points):
                 if imgui.menu_item("On Timeline 1")[0]:
                     if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
-                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters,
-                                                                               target_timeline='primary')
+                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='primary')
                 # Disable Timeline 2 option if it's not visible
                 timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
                 if imgui.menu_item("On Timeline 2", enabled=timeline2_visible)[0]:
                     if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
-                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters,
-                                                                               target_timeline='secondary')
+                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='secondary')
 
                 if imgui.menu_item("On Both Timelines")[0]:
                     if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
-                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters,
-                                                                               target_timeline='both')
+                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='both')
                 imgui.end_menu()
 
             imgui.separator()
@@ -524,8 +509,7 @@ class VideoNavigationUI:
                     if gap_end_frame < gap_start_frame:
                         self.app.logger.warning("No actual gap to track. Merging directly (if possible).")
                         if hasattr(fs_proc, 'merge_selected_chapters'):  # Standard merge
-                            merged_chapter = fs_proc.merge_selected_chapters(gap_fill_c1, gap_fill_c2,
-                                                                             return_chapter_object=True)
+                            merged_chapter = fs_proc.merge_selected_chapters(gap_fill_c1, gap_fill_c2, return_chapter_object=True)
                             if merged_chapter:
                                 self.context_selected_chapters = [merged_chapter]
                             else:
@@ -535,8 +519,7 @@ class VideoNavigationUI:
                         return  # Exit this handler early
 
                     # Record current funscript state for potential UNDO of the whole operation (tracking + merge)
-                    fs_proc._record_timeline_action(1,
-                                                    f"Prepare for Gap Track & Merge: {gap_fill_c1.unique_id[:4]}+{gap_fill_c2.unique_id[:4]}")
+                    fs_proc._record_timeline_action(1, f"Prepare for Gap Track & Merge: {gap_fill_c1.unique_id[:4]}+{gap_fill_c2.unique_id[:4]}")
                     # If secondary axis is also involved, record for it too.
 
                     # Set up AppLogic state for post-tracking action
@@ -626,6 +609,46 @@ class VideoNavigationUI:
                             self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
                     else:
                         self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
+            # --- Split Chapter ---
+            can_split = False
+            split_frame = self.app.processor.current_frame_index if self.app.processor else None
+            split_pos_key = None
+            if can_select_one and self.context_selected_chapters:
+                chapter = self.context_selected_chapters[0]
+                if split_frame is not None and chapter.start_frame_id < split_frame < chapter.end_frame_id:
+                    # Find the key in POSITION_INFO_MAPPING whose short_name matches the chapter's position_short_name
+                    from config.constants import POSITION_INFO_MAPPING
+                    for key, info in POSITION_INFO_MAPPING.items():
+                        if info.get("short_name") == chapter.position_short_name:
+                            split_pos_key = key
+                            break
+                    else:
+                        split_pos_key = chapter.position_short_name
+                    can_split = True
+            if imgui.menu_item("Split Chapter", enabled=can_split)[0]:
+                if can_split and split_frame is not None and split_pos_key is not None:
+                    original_end_frame = chapter.end_frame_id
+                    fs_proc.update_chapter_from_data(
+                        chapter.unique_id,
+                        {
+                            "start_frame_str": str(chapter.start_frame_id),
+                            "end_frame_str": str(split_frame),
+                            "position_short_name_key": split_pos_key
+                        }
+                    )
+                    fs_proc.create_new_chapter_from_data(
+                        {
+                            "start_frame_str": str(split_frame + 1),
+                            "end_frame_str": str(original_end_frame),
+                            "position_short_name_key": split_pos_key,
+                            "segment_type": chapter.segment_type,
+                            "source": chapter.source
+                        }
+                    )
+                    self.context_selected_chapters.clear()
+                    imgui.close_current_popup()
+                    imgui.end_popup()
+                    return
             imgui.end_popup()
 
     def _render_create_chapter_window(self):
@@ -652,30 +675,18 @@ class VideoNavigationUI:
             imgui.text("Create New Chapter Details")
             imgui.separator()
             imgui.push_item_width(200)
-            changed_start, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##CreateWin",
-                                                                                        self.chapter_edit_data.get(
-                                                                                            "start_frame_str", "0"), 64)
-            changed_end, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##CreateWin",
-                                                                                    self.chapter_edit_data.get(
-                                                                                        "end_frame_str", "0"), 64)
-            changed_type, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##CreateWin",
-                                                                                    self.chapter_edit_data.get(
-                                                                                        "segment_type", "SexAct"), 128)
-            clicked_pos, self.selected_position_idx_in_dialog = imgui.combo("Position##CreateWin",
-                                                                            self.selected_position_idx_in_dialog,
-                                                                            self.position_display_names)
+            changed_start, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##CreateWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            changed_end, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##CreateWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
+            changed_type, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##CreateWin", self.chapter_edit_data.get("segment_type", "SexAct"), 128)
+            clicked_pos, self.selected_position_idx_in_dialog = imgui.combo("Position##CreateWin", self.selected_position_idx_in_dialog, self.position_display_names)
             if clicked_pos and self.position_short_name_keys and 0 <= self.selected_position_idx_in_dialog < len(
                     self.position_short_name_keys):
                 self.chapter_edit_data["position_short_name_key"] = self.position_short_name_keys[
                     self.selected_position_idx_in_dialog]
             current_selected_key = self.chapter_edit_data.get("position_short_name_key")
-            long_name_display = POSITION_INFO_MAPPING.get(current_selected_key, {}).get("long_name",
-                                                                                              "N/A") if current_selected_key else "N/A"
+            long_name_display = POSITION_INFO_MAPPING.get(current_selected_key, {}).get("long_name", "N/A") if current_selected_key else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display}")
-            changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##CreateWin",
-                                                                                self.chapter_edit_data.get("source",
-                                                                                                           "manual"),
-                                                                                64)
+            changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##CreateWin", self.chapter_edit_data.get("source", "manual"), 64)
             imgui.pop_item_width()
             imgui.separator()
             if imgui.button("Create##ChapterCreateWinBtn"):
@@ -713,15 +724,9 @@ class VideoNavigationUI:
             imgui.text(f"Editing Chapter ID: {self.chapter_to_edit_id}")
             imgui.separator()
             imgui.push_item_width(200)
-            changed_start, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##EditWin",
-                                                                                        self.chapter_edit_data.get(
-                                                                                            "start_frame_str", "0"), 64)
-            changed_end, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin",
-                                                                                    self.chapter_edit_data.get(
-                                                                                        "end_frame_str", "0"), 64)
-            changed_type, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##EditWin",
-                                                                                    self.chapter_edit_data.get(
-                                                                                        "segment_type", ""), 128)
+            changed_start, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            changed_end, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
+            changed_type, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##EditWin", self.chapter_edit_data.get("segment_type", ""), 128)
             current_pos_key_for_edit = self.chapter_edit_data.get("position_short_name_key")
             try:
                 if self.position_short_name_keys and current_pos_key_for_edit in self.position_short_name_keys:
@@ -735,26 +740,20 @@ class VideoNavigationUI:
                 self.selected_position_idx_in_dialog = 0
                 if self.position_short_name_keys: self.chapter_edit_data["position_short_name_key"] = self.position_short_name_keys[0]
 
-            clicked_pos_edit, self.selected_position_idx_in_dialog = imgui.combo("Position##EditWin",
-                                                                                 self.selected_position_idx_in_dialog,
-                                                                                 self.position_display_names)
+            clicked_pos_edit, self.selected_position_idx_in_dialog = imgui.combo("Position##EditWin", self.selected_position_idx_in_dialog, self.position_display_names)
             if clicked_pos_edit and self.position_short_name_keys and 0 <= self.selected_position_idx_in_dialog < len(
                     self.position_short_name_keys):
                 self.chapter_edit_data["position_short_name_key"] = self.position_short_name_keys[
                     self.selected_position_idx_in_dialog]
             pos_key_edit_display = self.chapter_edit_data.get("position_short_name_key")
-            long_name_display_edit = POSITION_INFO_MAPPING.get(pos_key_edit_display, {}).get("long_name",
-                                                                                                   "N/A") if pos_key_edit_display else "N/A"
+            long_name_display_edit = POSITION_INFO_MAPPING.get(pos_key_edit_display, {}).get("long_name", "N/A") if pos_key_edit_display else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display_edit}")
-            changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##EditWin",
-                                                                                self.chapter_edit_data.get("source",
-                                                                                                           ""), 64)
+            changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##EditWin", self.chapter_edit_data.get("source", ""), 64)
             imgui.pop_item_width()
             imgui.separator()
             if imgui.button("Save##ChapterEditWinBtn"):
                 if self.app.funscript_processor and self.chapter_to_edit_id:
-                    self.app.funscript_processor.update_chapter_from_data(self.chapter_to_edit_id,
-                                                                          self.chapter_edit_data.copy())
+                    self.app.funscript_processor.update_chapter_from_data(self.chapter_to_edit_id, self.chapter_edit_data.copy())
                     self.show_edit_chapter_dialog = False
                     self.chapter_to_edit_id = None
             imgui.same_line()
@@ -768,8 +767,7 @@ class VideoNavigationUI:
     def _render_funscript_timeline_preview(self, total_duration_s: float, graph_height: int):
         self.gui_instance.render_funscript_timeline_preview(total_duration_s, graph_height)
 
-    def _render_funscript_heatmap_preview(self, total_video_duration_s: float, bar_width_float: float,
-                                          bar_height_float: float):
+    def _render_funscript_heatmap_preview(self, total_video_duration_s: float, bar_width_float: float, bar_height_float: float):
         # bar_width_float here is nav_content_width
         self.gui_instance.render_funscript_heatmap_preview(total_video_duration_s, bar_width_float, bar_height_float)
 
