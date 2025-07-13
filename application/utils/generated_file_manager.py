@@ -3,15 +3,16 @@ from send2trash import send2trash
 import logging
 
 class GeneratedFileManager:
-    def __init__(self, output_folder, logger=None):
+    def __init__(self, output_folder, logger=None, delete_funscript_files=False):
         self.output_folder = output_folder
         self.logger = logger or logging.getLogger(__name__)
-        self.file_tree = {}
-        self.total_size_mb = 0
+        self._file_tree = {}
+        self._total_size_mb = 0
+        self.delete_funscript_files = delete_funscript_files
         self._scan_files()
 
     def _scan_files(self):
-        self.file_tree = {}
+        self._file_tree = {}
         total_size_bytes = 0
         if not os.path.isdir(self.output_folder):
             return
@@ -29,18 +30,16 @@ class GeneratedFileManager:
                             total_size_bytes += size_bytes
                             folder_total_size_bytes += size_bytes
                             files_in_dir.append(
-                                {"name": filename, "path": file_path, "size_mb": size_bytes / (1024 * 1024)}
-                            )
+                                {"name": filename, "path": file_path, "size_mb": size_bytes / (1024 * 1024)})
                         except OSError:
                             continue
 
                 if files_in_dir or not os.listdir(video_dir_path):
-                    self.file_tree[video_dir_name] = {
+                    self._file_tree[video_dir_name] = {
                         "path": video_dir_path,
                         "files": sorted(files_in_dir, key=lambda x: x['name']),
-                        "total_size_mb": folder_total_size_bytes / (1024 * 1024)
-                    }
-        self.total_size_mb = total_size_bytes / (1024 * 1024)
+                        "total_size_mb": folder_total_size_bytes / (1024 * 1024)}
+        self._total_size_mb = total_size_bytes / (1024 * 1024)
 
     def delete_file(self, file_path):
         if file_path and os.path.exists(file_path):
@@ -52,7 +51,11 @@ class GeneratedFileManager:
                 return False
         return False
 
-    def delete_folder(self, folder_path, include_funscript_files=True):
+    def delete_folder(self, folder_path):
+        """
+        Delete a folder. Uses the global setting for whether to delete .funscript files.
+        """
+        include_funscript_files = getattr(self, 'delete_funscript_files', True)
         if folder_path and os.path.isdir(folder_path):
             try:
                 if include_funscript_files:
@@ -93,19 +96,19 @@ class GeneratedFileManager:
                     send2trash(entry_path)
                 else:
                     if os.path.isdir(entry_path):
-                        self.delete_folder(entry_path, include_funscript_files=False)
+                        self.delete_folder(entry_path)
                     elif os.path.isfile(entry_path) and not entry_path.endswith('.funscript'):
                         send2trash(entry_path)
             return True
         except Exception as e:
             self.logger.error(f"ERROR deleting all files in {self.output_folder}: {e}")
-            return False 
+            return False
 
     def get_sorted_file_tree(self, sort_by='name'):
         """
         Returns a sorted list of (video_dir, dir_data) tuples based on sort_by ('name' or 'size').
         """
-        folder_items = list(self.file_tree.items())
+        folder_items = list(self._file_tree.items())
         if sort_by == 'size':
             folder_items.sort(key=lambda item: item[1]['total_size_mb'], reverse=True)
         else:
@@ -113,6 +116,9 @@ class GeneratedFileManager:
         return folder_items
 
     @property
+    def file_tree(self):
+        return self._file_tree
+
+    @property
     def total_size(self):
-        """Returns the total size in MB of all files managed."""
-        return self.total_size_mb 
+        return self._total_size_mb 
