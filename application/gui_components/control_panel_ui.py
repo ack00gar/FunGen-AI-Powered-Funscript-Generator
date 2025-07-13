@@ -124,6 +124,9 @@ class ControlPanelUI:
                 if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
                     imgui.separator()
                     imgui.text("Stage Reruns:")
+                    if disable_combo:
+                        imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                        imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
                     _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
                     imgui.same_line()
                     _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
@@ -145,6 +148,9 @@ class ControlPanelUI:
                             "This preprocessed video is reused in subsequent runs, speeding them up.\n"
                             "Forces the number of Producer threads to 1."
                         )
+                    if disable_combo:
+                        imgui.pop_style_var()
+                        imgui.internal.pop_item_flag()
             imgui.separator()
 
         # --- Execution Buttons ---
@@ -895,12 +901,20 @@ class ControlPanelUI:
         is_analysis_running = stage_proc.full_analysis_active
         selected_mode = self.app.app_state_ui.selected_tracker_mode
 
+        active_progress_color = (0.2, 0.6, 1.0, 1.0) # Vibrant blue for active
+        completed_progress_color = (0.2, 0.7, 0.2, 1.0) # Vibrant green for completed
+
         # Stage 1
         imgui.text("Stage 1: YOLO Object Detection")
         if is_analysis_running and stage_proc.current_analysis_stage == 1:
             imgui.text(f"Time: {stage_proc.stage1_time_elapsed_str} | ETA: {stage_proc.stage1_eta_str} | Avg Speed:  {stage_proc.stage1_processing_fps_str}")
             imgui.text_wrapped(f"Progress: {stage_proc.stage1_progress_label}")
+
+            # Apply active color
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
             imgui.progress_bar(stage_proc.stage1_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage1_progress_value * 100:.0f}% | {stage_proc.stage1_instant_fps_str}" if stage_proc.stage1_progress_value >= 0 else "")
+            imgui.pop_style_color()
+
             frame_q_size = stage_proc.stage1_frame_queue_size
             frame_q_max = constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
@@ -917,9 +931,10 @@ class ControlPanelUI:
             if suggestion_message: imgui.text(suggestion_message)
             imgui.text(f"Result Queue Size: ~{stage_proc.stage1_result_queue_size}")
         elif stage_proc.stage1_final_elapsed_time_str:
-            imgui.text_wrapped(
-                f"Last Run: {stage_proc.stage1_final_elapsed_time_str} | Avg Speed: {stage_proc.stage1_final_fps_str or 'N/A'}")
+            imgui.text_wrapped(f"Last Run: {stage_proc.stage1_final_elapsed_time_str} | Avg Speed: {stage_proc.stage1_final_fps_str or 'N/A'}")
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
             imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+            imgui.pop_style_color()
         else:
             imgui.text_wrapped(f"Status: {stage_proc.stage1_status_text}")
         imgui.separator()
@@ -929,10 +944,17 @@ class ControlPanelUI:
         imgui.text(s2_title)
         if is_analysis_running and stage_proc.current_analysis_stage == 2:
             imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
+
+            # Apply active color
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
             imgui.progress_bar(stage_proc.stage2_main_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage2_main_progress_value * 100:.0f}%" if stage_proc.stage2_main_progress_value >= 0 else "")
+            imgui.pop_style_color()
+
         elif stage_proc.stage2_final_elapsed_time_str:
             imgui.text_wrapped(f"Status: Completed in {stage_proc.stage2_final_elapsed_time_str}")
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
             imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+            imgui.pop_style_color()
         else:
             imgui.text_wrapped(f"Status: {stage_proc.stage2_status_text}")
         imgui.separator()
@@ -941,8 +963,10 @@ class ControlPanelUI:
         if selected_mode == TrackerMode.OFFLINE_3_STAGE:
             imgui.text("Stage 3: Per-Segment Optical Flow")
             if is_analysis_running and stage_proc.current_analysis_stage == 3:
-                imgui.text(
-                    f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
+                imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
+
+                # Apply active color to both S3 progress bars
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
 
                 # --- Overall Progress ---
                 imgui.text(stage_proc.stage3_overall_progress_label)
@@ -954,10 +978,13 @@ class ControlPanelUI:
                 imgui.text_wrapped(f"Segment: {stage_proc.stage3_current_segment_label}")
                 imgui.progress_bar(stage_proc.stage3_segment_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage3_segment_progress_value * 100:.0f}%")
 
+                imgui.pop_style_color()
+
             elif stage_proc.stage3_final_elapsed_time_str:
-                imgui.text_wrapped(
-                    f"Last Run: {stage_proc.stage3_final_elapsed_time_str} | Avg Speed: {stage_proc.stage3_final_fps_str or 'N/A'}")
+                imgui.text_wrapped(f"Last Run: {stage_proc.stage3_final_elapsed_time_str} | Avg Speed: {stage_proc.stage3_final_fps_str or 'N/A'}")
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
                 imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+                imgui.pop_style_color()
             else:
                 imgui.text_wrapped(f"Status: {stage_proc.stage3_status_text}")
         imgui.spacing()

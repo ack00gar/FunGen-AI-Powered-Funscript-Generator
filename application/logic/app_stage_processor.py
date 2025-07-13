@@ -888,6 +888,10 @@ class AppStageProcessor:
         self.app.energy_saver.reset_activity_timer()
 
     def process_gui_events(self):
+        if self.full_analysis_active or self.scene_detection_active or self.refinement_analysis_active:
+            if hasattr(self.app, 'energy_saver'):
+                self.app.energy_saver.reset_activity_timer()
+
         fm = self.app.file_manager
         fs_proc = self.app.funscript_processor
         while not self.gui_event_queue.empty():
