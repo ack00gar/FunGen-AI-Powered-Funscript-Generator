@@ -203,6 +203,7 @@ class AppStageProcessor:
             self.stage1_progress_label = ""
             self.stage1_time_elapsed_str = "00:00:00"
             self.stage1_processing_fps_str = "0 FPS"
+            self.stage1_instant_fps_str = "0 FPS"
             self.stage1_eta_str = "N/A"
             self.stage1_frame_queue_size = 0
             self.stage1_result_queue_size = 0
@@ -264,11 +265,11 @@ class AppStageProcessor:
         self.scene_detection_thread = threading.Thread(target=self._run_scene_detection_thread, args=(threshold,), daemon=True)
         self.scene_detection_thread.start()
 
-    def _stage1_progress_callback(self, current, total, message="Processing...", time_elapsed=0.0, processing_fps=0.0, eta_seconds=0.0):
+    def _stage1_progress_callback(self, current, total, message="Processing...", time_elapsed=0.0, avg_fps=0.0, instant_fps=0.0, eta_seconds=0.0):
         progress = float(current) / total if total > 0 else -1.0
         progress_data = {
             "message": message, "current": current, "total": total,
-            "time_elapsed": time_elapsed, "fps": processing_fps, "eta": eta_seconds
+            "time_elapsed": time_elapsed, "avg_fps": avg_fps, "instant_fps": instant_fps, "eta": eta_seconds
         }
         self.gui_event_queue.put(("stage1_progress_update", progress, progress_data))
 
@@ -910,9 +911,10 @@ class AppStageProcessor:
                     if isinstance(prog_data, dict):
                         self.stage1_progress_value = prog_val if prog_val != -1.0 else self.stage1_progress_value
                         self.stage1_progress_label = str(prog_data.get("message", ""))
-                        t_el, fps, eta = prog_data.get("time_elapsed", 0.0), prog_data.get("fps", 0.0), prog_data.get("eta", 0.0)
+                        t_el, avg_fps, instant_fps, eta = prog_data.get("time_elapsed", 0.0), prog_data.get("avg_fps", 0.0), prog_data.get("instant_fps", 0.0), prog_data.get("eta", 0.0)
                         self.stage1_time_elapsed_str = f"{int(t_el // 3600):02d}:{int((t_el % 3600) // 60):02d}:{int(t_el % 60):02d}"
-                        self.stage1_processing_fps_str = f"{int(fps)} FPS"
+                        self.stage1_processing_fps_str = f"{int(avg_fps)} FPS"
+                        self.stage1_instant_fps_str = f"{int(instant_fps)} FPS"
                         if math.isnan(eta) or math.isinf(eta):
                             self.stage1_eta_str = "Calculating..."
                         elif eta > 0:

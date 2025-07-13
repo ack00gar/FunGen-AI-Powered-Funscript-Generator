@@ -1,7 +1,7 @@
 import imgui
 import os
 from config import constants
-from config.constants import TrackerMode, SCENE_DETECTION_DEFAULT_THRESHOLD
+from config.constants import TrackerMode, SCENE_DETECTION_DEFAULT_THRESHOLD, AI_MODEL_EXTENSIONS_FILTER, AI_MODEL_TOOLTIP_EXTENSIONS
 import time
 
 class ControlPanelUI:
@@ -119,13 +119,14 @@ class ControlPanelUI:
                 # --- Range Selection ---
                 imgui.text("Analysis Range")
                 self._render_range_selection(self.app.stage_processor, self.app.funscript_processor, self.app.event_handlers)
-                imgui.separator()
 
-                # --- Force Rerun ---
-                imgui.text("Stage Reruns:")
-                _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
-                imgui.same_line()
-                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
+                # --- Force Rerun (CONDITIONAL) ---
+                if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+                    imgui.separator()
+                    imgui.text("Stage Reruns:")
+                    _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
+                    imgui.same_line()
+                    _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
             imgui.separator()
 
         # --- Execution Buttons ---
@@ -139,6 +140,13 @@ class ControlPanelUI:
         if button_should_be_disabled:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+        # --- Execution & Progress Display ---
+        self._render_execution_progress_display()
+        imgui.separator()
+
+        # --- Interactive Refinement (conditionally visible) ---
+        self._render_interactive_refinement_controls()
 
         # Blinking button text when scene detection is active.
         # This is not part of the analysis pipeline so it doesn't affect the detection speed.
@@ -155,9 +163,11 @@ class ControlPanelUI:
 
         # --- Scene Detection Threshold Input ---
         if not hasattr(self, '_scene_detection_threshold'):
-            self._scene_detection_threshold = self.app.app_settings.get('scene_detection_threshold', SCENE_DETECTION_DEFAULT_THRESHOLD)
+            self._scene_detection_threshold = self.app.app_settings.get('scene_detection_threshold',
+                                                                        SCENE_DETECTION_DEFAULT_THRESHOLD)
         imgui.push_item_width(100)
-        changed, new_threshold = imgui.input_float("Scene & Chapter Detection Threshold", self._scene_detection_threshold, 0.5, 1.0, "%.2f")
+        changed, new_threshold = imgui.input_float("Scene & Chapter Detection Threshold",
+                                                   self._scene_detection_threshold, 0.5, 1.0, "%.2f")
         imgui.pop_item_width()
         if changed:
             self._scene_detection_threshold = new_threshold
@@ -198,13 +208,6 @@ class ControlPanelUI:
             imgui.internal.pop_item_flag()
 
         imgui.separator()
-
-        # --- Execution & Progress Display ---
-        self._render_execution_progress_display()
-        imgui.separator()
-
-        # --- Interactive Refinement (conditionally visible) ---
-        self._render_interactive_refinement_controls()
 
 
     def _render_configuration_tab(self):
@@ -311,8 +314,7 @@ class ControlPanelUI:
                 title=title,
                 is_save=False,
                 callback=callback,
-                # TODO: Move extension list to constants.py
-                extension_filter="AI Models (.pt .onnx .engine .mlpackage),.pt;.onnx;.engine;.mlpackage|All Files,*.*",
+                extension_filter=AI_MODEL_EXTENSIONS_FILTER,
                 initial_path=initial_dir
             )
 
@@ -373,8 +375,7 @@ class ControlPanelUI:
             self.app.unload_model('detection')
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
-            # TODO: Move extension list to constants.py
-            "Path to the YOLO object detection model file (.pt, .onnx, .engine, .mlpackage).")
+            f"Path to the YOLO object detection model file ({AI_MODEL_TOOLTIP_EXTENSIONS}).")
 
         # --- YOLO Pose Model ---
         imgui.text("Pose Model")
@@ -396,8 +397,7 @@ class ControlPanelUI:
             self.app.unload_model('pose')
 
         if imgui.is_item_hovered(): imgui.set_tooltip(
-            # TODO: Move extension list to constants.py
-            "Path to the YOLO pose estimation model file (.pt, .onnx, .engine, .mlpackage). This model is optional.")
+            f"Path to the YOLO pose estimation model file ({AI_MODEL_TOOLTIP_EXTENSIONS}). This model is optional.")
 
         # UI for selecting the Pose Model Artifacts Directory
         imgui.separator()
@@ -867,8 +867,9 @@ class ControlPanelUI:
         # Stage 1
         imgui.text("Stage 1: YOLO Object Detection")
         if is_analysis_running and stage_proc.current_analysis_stage == 1:
-            imgui.text(f"Time: {stage_proc.stage1_time_elapsed_str} | ETA: {stage_proc.stage1_eta_str} | Speed: {stage_proc.stage1_processing_fps_str}")
+            imgui.text(f"Time: {stage_proc.stage1_time_elapsed_str} | ETA: {stage_proc.stage1_eta_str} | Avg Speed:  {stage_proc.stage1_processing_fps_str}")
             imgui.text_wrapped(f"Progress: {stage_proc.stage1_progress_label}")
+            imgui.progress_bar(stage_proc.stage1_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage1_progress_value * 100:.0f}% | {stage_proc.stage1_instant_fps_str}" if stage_proc.stage1_progress_value >= 0 else "")
             frame_q_size = stage_proc.stage1_frame_queue_size
             frame_q_max = constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0

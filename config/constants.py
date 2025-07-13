@@ -58,6 +58,13 @@ class TrackerMode(Enum):
 
 
 ####################################################################################################
+# AI & MODELS
+####################################################################################################
+AI_MODEL_EXTENSIONS_FILTER = "AI Models (.pt .onnx .engine .mlpackage),.pt;.onnx;.engine;.mlpackage|All Files,*.*"
+AI_MODEL_TOOLTIP_EXTENSIONS = ".pt, .onnx, .engine, .mlpackage"
+
+
+####################################################################################################
 # KEYBOARD SHORTCUTS
 ####################################################################################################
 MOD_KEY = "SUPER" if platform.system() == "Darwin" else "CTRL"
