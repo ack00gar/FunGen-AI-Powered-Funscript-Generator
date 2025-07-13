@@ -31,42 +31,43 @@ class InfoGraphsUI:
         imgui.end()
 
     def _render_tabbed_content(self):
+        tab_selected = None
         if imgui.begin_tab_bar("InfoGraphsTabs"):
-            # --- Video Tab ---
             if imgui.begin_tab_item("Video")[0]:
-                imgui.spacing()
-                if imgui.collapsing_header("Video Information##VideoInfoSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[
-                    0]:
-                    self._render_content_video_info()
-                imgui.separator()
-                if imgui.collapsing_header("Video Settings##VideoSettingsSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[
-                    0]:
-                    self._render_content_video_settings()
+                tab_selected = "video"
                 imgui.end_tab_item()
-
-            # --- Funscript Tab ---
             if imgui.begin_tab_item("Funscript")[0]:
-                imgui.spacing()
-                if imgui.collapsing_header("Funscript Info (Timeline 1)##FSInfoT1Section",
-                                           flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                    self._render_content_funscript_info(1)
-                imgui.separator()
-                if self.app.app_state_ui.show_funscript_interactive_timeline2:
-                    if imgui.collapsing_header("Funscript Info (Timeline 2)##FSInfoT2Section",
-                                               flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                        self._render_content_funscript_info(2)
-                else:
-                    imgui.text_disabled("Enable Interactive Timeline 2 to see its stats.")
+                tab_selected = "funscript"
                 imgui.end_tab_item()
-
-            # --- History Tab ---
             if imgui.begin_tab_item("History")[0]:
-                imgui.spacing()
-                if imgui.collapsing_header("Undo-Redo History##UndoRedoSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                    self._render_content_undo_redo_history()
+                tab_selected = "history"
                 imgui.end_tab_item()
-
             imgui.end_tab_bar()
+
+        avail = imgui.get_content_region_available()
+        imgui.begin_child("InfoGraphsTabContent", width=0, height=avail[1], border=False)
+        if tab_selected == "video":
+            imgui.spacing()
+            if imgui.collapsing_header("Video Information##VideoInfoSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_content_video_info()
+            imgui.separator()
+            if imgui.collapsing_header("Video Settings##VideoSettingsSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_content_video_settings()
+        elif tab_selected == "funscript":
+            imgui.spacing()
+            if imgui.collapsing_header("Funscript Info (Timeline 1)##FSInfoT1Section", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_content_funscript_info(1)
+            imgui.separator()
+            if self.app.app_state_ui.show_funscript_interactive_timeline2:
+                if imgui.collapsing_header("Funscript Info (Timeline 2)##FSInfoT2Section", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                    self._render_content_funscript_info(2)
+            else:
+                imgui.text_disabled("Enable Interactive Timeline 2 to see its stats.")
+        elif tab_selected == "history":
+            imgui.spacing()
+            if imgui.collapsing_header("Undo-Redo History##UndoRedoSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_content_undo_redo_history()
+        imgui.end_child()
 
     def _get_k_resolution_label(self, width, height):
         if width <= 0 or height <= 0: return ""
