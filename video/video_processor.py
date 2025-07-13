@@ -62,6 +62,7 @@ class VideoProcessor:
         self.logger.info(f"VideoProcessor logger '{self.logger.name}' initialized.")
 
         self.video_path = ""
+        self._active_video_source_path: str = ""
         self.video_info = {}
         self.ffmpeg_process: Optional[subprocess.Popen] = None  # Main output process (pipe2 if active)
         self.ffmpeg_pipe1_process: Optional[subprocess.Popen] = None  # Pipe1 process, if active
@@ -212,7 +213,7 @@ class VideoProcessor:
 
     def open_video(self, video_path: str, from_project_load: bool = False) -> bool:
         self.stop_processing()
-        self.video_path = video_path
+        self.video_path = video_path # This will always be the ORIGINAL video path
         self._clear_cache()
         self.video_info = self._get_video_info(video_path)
         if not self.video_info or self.video_info.get("total_frames", 0) == 0:
@@ -220,6 +221,14 @@ class VideoProcessor:
             self.video_path = ""
             self.video_info = {}
             return False
+
+        # --- Set the active source path ---
+        if self.app and hasattr(self.app, 'file_manager') and self.app.file_manager.preprocessed_video_path:
+            self._active_video_source_path = self.app.file_manager.preprocessed_video_path
+            self.logger.info(f"VideoProcessor will use preprocessed video as its active source.")
+        else:
+            self._active_video_source_path = self.video_path
+            self.logger.info(f"VideoProcessor will use original video as its active source.")
 
         self._update_video_parameters()
 
@@ -371,7 +380,7 @@ class VideoProcessor:
                 cmd1 = common_ffmpeg_prefix[:]
                 cmd1.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
                 if start_time_seconds > 0.001: cmd1.extend(['-ss', str(start_time_seconds)])
-                cmd1.extend(['-i', self.video_path, '-an', '-sn', '-vf', pipe1_vf])
+                cmd1.extend(['-i', self._active_video_source_path, '-an', '-sn', '-vf', pipe1_vf])
                 cmd1.extend(['-frames:v', str(num_frames_to_fetch)])
                 cmd1.extend(['-c:v', 'hevc_nvenc', '-preset', 'fast', '-qp', '0', '-f', 'matroska', 'pipe:1'])
 
@@ -400,7 +409,7 @@ class VideoProcessor:
                 hwaccel_cmd_list = self._get_ffmpeg_hwaccel_args()
                 ffmpeg_input_options = hwaccel_cmd_list[:]
                 if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
-                cmd_single = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self.video_path, '-an', '-sn']
+                cmd_single = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
                 effective_vf = self.ffmpeg_filter_string
                 if not effective_vf: effective_vf = f"scale={self.yolo_input_size}:{self.yolo_input_size}"
                 cmd_single.extend(['-vf', effective_vf])
@@ -649,6 +658,13 @@ class VideoProcessor:
         return False
 
     def _build_ffmpeg_filter_string(self) -> str:
+        # --- Check if we are using the preprocessed file ---
+        is_using_preprocessed = hasattr(self, '_active_video_source_path') and self._active_video_source_path != self.video_path
+        if is_using_preprocessed:
+            self.logger.info("Using preprocessed video source. No FFmpeg filters will be applied.")
+            return "" # Return an empty filter string
+
+        # If not using preprocessed, build the filter string as before
         if not self.video_info:
             return ''
 
@@ -822,7 +838,7 @@ class VideoProcessor:
             cmd1 = common_ffmpeg_prefix[:]
             cmd1.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
             if start_time_seconds > 0.001: cmd1.extend(['-ss', str(start_time_seconds)])
-            cmd1.extend(['-i', self.video_path, '-an', '-sn', '-vf', pipe1_vf])
+            cmd1.extend(['-i', self._active_video_source_path, '-an', '-sn', '-vf', pipe1_vf])
             cmd1.extend(['-c:v', 'hevc_nvenc', '-preset', 'fast', '-qp', '0', '-f', 'matroska', 'pipe:1'])
 
             cmd2 = common_ffmpeg_prefix[:]
@@ -854,7 +870,7 @@ class VideoProcessor:
             ffmpeg_input_options = hwaccel_cmd_list[:]
             if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
 
-            cmd = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self.video_path, '-an', '-sn']
+            cmd = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
             effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
             cmd.extend(['-vf', effective_vf])
             if num_frames_to_output_ffmpeg and num_frames_to_output_ffmpeg > 0:
@@ -920,6 +936,8 @@ class VideoProcessor:
         self.is_processing = False
         self.is_paused = True
         self.stop_event.set()
+
+        self._terminate_ffmpeg_processes()
 
         thread_to_join = self.processing_thread
         if thread_to_join and thread_to_join.is_alive():
@@ -1117,12 +1135,10 @@ class VideoProcessor:
                                                        scripted_frame_range=end_range_eos)
                     break
 
-                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size,
-                                                                                  self.yolo_input_size, 3)
+                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
                 processed_frame_for_gui = frame_np
                 if self.tracker and self.tracker.tracking_active:
-                    timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
-                        time.time() * 1000)
+                    timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(time.time() * 1000)
                     try:
                         processed_frame_for_gui = self.tracker.process_frame(frame_np.copy(), timestamp_ms)[0]
                     except Exception as e:
@@ -1169,7 +1185,7 @@ class VideoProcessor:
         ffmpeg_cmd_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
         ffmpeg_input_options = hwaccel_cmd_list[:]
         if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
-        ffmpeg_cmd = ffmpeg_cmd_prefix + ffmpeg_input_options + ['-i', self.video_path, '-an', '-sn']
+        ffmpeg_cmd = ffmpeg_cmd_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
         effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
         ffmpeg_cmd.extend(['-vf', effective_vf])
 
@@ -1250,6 +1266,7 @@ class VideoProcessor:
             self.tracker.reset()
         if close_video:
             self.video_path = ""
+            self._active_video_source_path = ""
             self.video_info = {}
             self.determined_video_type = None
             self.ffmpeg_filter_string = ""

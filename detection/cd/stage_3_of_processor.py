@@ -15,6 +15,7 @@ from config import constants
 class Stage3OpticalFlowProcessor:
     def __init__(self,
                  video_path: str,
+                 preprocessed_video_path_arg: Optional[str],
                  atr_segments_list: List[ATRSegment],
                  s2_frame_objects_map: Dict[int, FrameObject],
                  tracker_config: Dict[str, Any],
@@ -24,6 +25,7 @@ class Stage3OpticalFlowProcessor:
                  parent_logger: logging.Logger):
 
         self.video_path = video_path
+        self.preprocessed_video_path = preprocessed_video_path_arg
         self.atr_segments = atr_segments_list
         self.s2_frame_objects_map = s2_frame_objects_map
         self.tracker_config = tracker_config
@@ -49,8 +51,12 @@ class Stage3OpticalFlowProcessor:
 
 
     def _initialize_dependencies(self) -> bool:
-        # Initialize VideoProcessor
-        # Create a dummy app instance for VideoProcessor if it expects one for logger
+        # Create a mock FileManager and AppProxy to give the isolated
+        # VideoProcessor the information it needs.
+        class MockFileManager:
+            def __init__(self, path):
+                self.preprocessed_video_path = path
+
         class VPAppProxy:
             pass
         vp_app_proxy = VPAppProxy()
@@ -59,6 +65,8 @@ class Stage3OpticalFlowProcessor:
 
         # Retrieve the list from the config and add it to the proxy
         vp_app_proxy.available_ffmpeg_hwaccels = self.common_app_config.get("available_ffmpeg_hwaccels", [])
+        # --- Provide the preprocessed path via the mock file manager ---
+        vp_app_proxy.file_manager = MockFileManager(self.preprocessed_video_path)
 
         self.video_processor = VideoProcessor(
             app_instance=vp_app_proxy, # Provides logger
@@ -395,6 +403,7 @@ class Stage3OpticalFlowProcessor:
 
 
 def perform_stage3_analysis(video_path: str,
+                              preprocessed_video_path_arg: Optional[str],
                               atr_segments_list: List[ATRSegment],
                               s2_frame_objects_map: Dict[int, FrameObject],
                               tracker_config: Dict[str, Any],
@@ -407,7 +416,9 @@ def perform_stage3_analysis(video_path: str,
     Main entry point for Stage 3 Optical Flow processing.
     """
     processor = Stage3OpticalFlowProcessor(
-        video_path, atr_segments_list, s2_frame_objects_map,
+        video_path,
+        preprocessed_video_path_arg,
+        atr_segments_list, s2_frame_objects_map,
         tracker_config, common_app_config,
         progress_callback, stop_event, parent_logger
     )

@@ -115,6 +115,22 @@ class InfoGraphsUI:
             imgui.next_column()
             imgui.text(f"{self.app.processor.determined_video_type or 'N/A'}")
             imgui.next_column()
+
+            # --- Section to Display Active Source ---
+            imgui.text("Active Source:")
+            imgui.next_column()
+            processor = self.app.processor
+            if hasattr(processor, '_active_video_source_path') and processor._active_video_source_path != processor.video_path:
+                imgui.text("Preprocessed File")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(f"Using: {os.path.basename(processor._active_video_source_path)}\nAll filtering/de-warping is pre-applied.")
+            else:
+                imgui.text("Original File")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(f"Using: {os.path.basename(processor.video_path)}\nFilters are applied on-the-fly.")
+            imgui.next_column()
+
+
         else:
             imgui.text("Status:");
             imgui.next_column();
