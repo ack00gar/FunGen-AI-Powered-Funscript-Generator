@@ -26,8 +26,15 @@ class GeneratedFileManagerWindow:
         if not is_open:
             app_state.show_generated_file_manager = False
         if is_visible:
+            # Render header and controls (sticky)
             self._render_header_controls()
+            # Begin a scrollable child region for the file/folder list
+            # Use -1 for width/height to fill remaining space
+            child_height = imgui.get_window_height() - imgui.get_cursor_pos_y() - 8  # 8px padding
+            imgui.begin_child("FileListRegion", width=0, height=child_height, border=True)
             self._render_file_tree()
+            imgui.end_child()
+            # Render popups/modals
             self._render_delete_all_popup()
         imgui.end()
 
