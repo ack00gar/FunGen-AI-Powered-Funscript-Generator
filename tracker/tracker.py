@@ -32,7 +32,8 @@ class ROITracker:
                  class_specific_amplification_multipliers: Optional[Dict[str, float]] = None,
                  logger: Optional[logging.Logger] = None,
                  inversion_detection_split_ratio: float = constants.INVERSION_DETECTION_SPLIT_RATIO,
-                 video_type_override: Optional[str] = None
+                 video_type_override: Optional[str] = None,
+                 load_models_on_init: bool = True
                  ):
         self.app = app_logic_instance # Can be None if instantiated by Stage 3
         self.video_type_override = video_type_override
@@ -67,7 +68,9 @@ class ROITracker:
         self.yolo_pose: Optional[YOLO] = None
         self.classes = []
 
-        self._load_models()
+        # Conditionally load models
+        if load_models_on_init:
+            self._load_models()
 
         self.confidence_threshold = confidence_threshold
         self.roi: Optional[Tuple[int, int, int, int]] = None
