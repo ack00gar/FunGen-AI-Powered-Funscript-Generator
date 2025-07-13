@@ -36,24 +36,36 @@ class ControlPanelUI:
             window_flags = imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
             imgui.begin("Control Panel##MainControlPanel", flags=window_flags)
 
-        # Create the main tab bar for the new workflow
+        # --- Sticky Tab Bar ---
+        tab_selected = None
         if imgui.begin_tab_bar("ControlPanelTabs"):
             if imgui.begin_tab_item("Run Control")[0]:
-                self._render_run_control_tab()
+                tab_selected = "run_control"
                 imgui.end_tab_item()
-
             if imgui.begin_tab_item("Configuration")[0]:
-                self._render_configuration_tab()
+                tab_selected = "configuration"
                 imgui.end_tab_item()
             if imgui.begin_tab_item("Post-Processing")[0]:
-                self._render_post_processing_tab()
+                tab_selected = "post_processing"
                 imgui.end_tab_item()
-
             if imgui.begin_tab_item("Settings")[0]:
-                self._render_settings_tab()
+                tab_selected = "settings"
                 imgui.end_tab_item()
-
             imgui.end_tab_bar()
+
+        # --- Scrollable Tab Content ---
+        # Fill remaining height in window using available content region
+        avail = imgui.get_content_region_available()
+        imgui.begin_child("TabContentRegion", width=0, height=avail[1], border=False)
+        if tab_selected == "run_control":
+            self._render_run_control_tab()
+        elif tab_selected == "configuration":
+            self._render_configuration_tab()
+        elif tab_selected == "post_processing":
+            self._render_post_processing_tab()
+        elif tab_selected == "settings":
+            self._render_settings_tab()
+        imgui.end_child()
         imgui.end()
 
     # --- Tab Renderer Methods ---
