@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any, Tuple
 import msgpack
 import numpy as np
 from bisect import bisect_left, bisect_right
+import multiprocessing
 
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
@@ -31,7 +32,7 @@ class AppStageProcessor:
         self.full_analysis_active: bool = False
         self.current_analysis_stage: int = 0
         self.stage_thread: Optional[threading.Thread] = None
-        self.stop_stage_event = threading.Event()
+        self.stop_stage_event = multiprocessing.Event()
         self.gui_event_queue = Queue()
 
         # --- Status and Progress Tracking ---
