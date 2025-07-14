@@ -6,8 +6,7 @@ import copy
 
 # Attempt to import optional libraries for processing
 try:
-    from scipy.signal import savgol_filter
-
+    from scipy.signal import savgol_filter, find_peaks
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
@@ -291,8 +290,7 @@ class DualAxisFunscript:
         stats["total_travel_dist"] = total_pos_change
         stats["num_strokes"] = num_strokes if num_strokes > 0 else (
             1 if total_pos_change > 0 and len(actions_list) >= 2 else 0)
-        if total_time_ms_for_speed > 0: stats["avg_speed_pos_per_s"] = (
-                    total_pos_change / (total_time_ms_for_speed / 1000.0))
+        if total_time_ms_for_speed > 0: stats["avg_speed_pos_per_s"] = (total_pos_change / (total_time_ms_for_speed / 1000.0))
         num_segments = len(actions_list) - 1
         if num_segments > 0: stats["avg_intensity_percent"] = total_pos_change / float(num_segments)
         if intervals:
@@ -463,6 +461,82 @@ class DualAxisFunscript:
 
         except Exception as e:
             self.logger.error(f"RDP failed: {str(e)}")
+
+    def find_peaks_and_valleys(self, axis: str,
+                               height: Optional[float] = None, threshold: Optional[float] = None,
+                               distance: Optional[float] = None, prominence: Optional[float] = None,
+                               width: Optional[float] = None,
+                               selected_indices: Optional[List[int]] = None):
+        if not SCIPY_AVAILABLE:
+            self.logger.warning("scipy not installed. Peak finding cannot be applied.")
+            return
+
+        target_list_attr = 'primary_actions' if axis == 'primary' else 'secondary_actions'
+        actions_list_ref = getattr(self, target_list_attr)
+
+        if not actions_list_ref or len(actions_list_ref) < 3:
+            self.logger.warning(f"Not enough points on {axis} for peak finding.")
+            return
+
+        # --- Segment Selection ---
+        s_idx_orig, e_idx_orig = 0, len(actions_list_ref) - 1
+        if selected_indices:
+            valid_indices = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
+            if len(valid_indices) < 3:
+                self.logger.warning("Not enough valid selected indices for peak finding.")
+                return
+            s_idx_orig, e_idx_orig = valid_indices[0], valid_indices[-1]
+
+        prefix_actions = actions_list_ref[:s_idx_orig]
+        segment_to_process = actions_list_ref[s_idx_orig:e_idx_orig + 1]
+        suffix_actions = actions_list_ref[e_idx_orig + 1:]
+
+        if len(segment_to_process) < 3:
+            # Nothing to process, restore original and exit
+            actions_list_ref[:] = prefix_actions + segment_to_process + suffix_actions
+            return
+
+        # --- Peak and Valley Finding ---
+        positions = np.array([a['pos'] for a in segment_to_process])
+        inverted_positions = 100 - positions
+
+        # Scipy find_peaks can return empty arrays, which is fine.
+        # Ensure None parameters are not passed if they are 0, as find_peaks expects None or a number.
+        kwargs = {
+            'height': height if height else None,
+            'threshold': threshold if threshold else None,
+            'distance': distance if distance else None,
+            'prominence': prominence if prominence else None,
+            'width': width if width else None
+        }
+
+        peak_indices, _ = find_peaks(positions, **kwargs)
+        valley_indices, _ = find_peaks(inverted_positions, **kwargs)
+
+        # Combine, sort, and unique the indices
+        # Also include the first and last points of the segment
+        keyframe_indices = {0, len(segment_to_process) - 1}
+        keyframe_indices.update(peak_indices)
+        keyframe_indices.update(valley_indices)
+
+        sorted_indices = sorted(list(keyframe_indices))
+
+        # --- Reconstruct Actions ---
+        new_segment_actions = [segment_to_process[i] for i in sorted_indices]
+
+        # Update the original list
+        actions_list_ref[:] = prefix_actions + new_segment_actions + suffix_actions
+
+        # Update last timestamp
+        last_ts = actions_list_ref[-1]['at'] if actions_list_ref else 0
+        if axis == 'primary':
+            self.last_timestamp_primary = last_ts
+        else:
+            self.last_timestamp_secondary = last_ts
+
+        self.logger.info(
+            f"Peak simplification applied to {axis} (indices {s_idx_orig}-{e_idx_orig}). "
+            f"Points: {len(segment_to_process)} -> {len(new_segment_actions)}")
 
     def clamp_points_thresholded(self, axis: str, lower_thresh: int, upper_thresh: int,
                                  start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
@@ -849,6 +923,31 @@ class DualAxisFunscript:
             if len(new_segment_actions) >= 2 and new_segment_actions[0] == new_segment_actions[-1]:
                 new_segment_actions = new_segment_actions[:-1]
 
+        elif filter_type == 'peaks':
+            if not SCIPY_AVAILABLE: return None
+            if len(segment_to_process) < 3: return None
+
+            positions = np.array([a['pos'] for a in segment_to_process])
+            inverted_positions = 100 - positions
+
+            # Get params, defaulting to None if 0
+            kwargs = {
+                'height': filter_params.get('height') if filter_params.get('height') else None,
+                'threshold': filter_params.get('threshold') if filter_params.get('threshold') else None,
+                'distance': filter_params.get('distance') if filter_params.get('distance') else None,
+                'prominence': filter_params.get('prominence') if filter_params.get('prominence') else None,
+                'width': filter_params.get('width') if filter_params.get('width') else None,
+            }
+
+            peak_indices, _ = find_peaks(positions, **kwargs)
+            valley_indices, _ = find_peaks(inverted_positions, **kwargs)
+
+            keyframe_indices = {0, len(segment_to_process) - 1}
+            keyframe_indices.update(peak_indices)
+            keyframe_indices.update(valley_indices)
+
+            new_segment_actions = [segment_to_process[i] for i in sorted(list(keyframe_indices))]
+
         elif filter_type == 'amp':
             scale_factor = filter_params.get('scale_factor', 1.0)
             center_value = filter_params.get('center_value', 50)
@@ -1144,8 +1243,7 @@ class DualAxisFunscript:
         # Pass 1: Find all local extrema (peaks and valleys)
         extrema = [segment_to_process[0]]
         for i in range(1, len(segment_to_process) - 1):
-            p_prev, p_curr, p_next = segment_to_process[i - 1]['pos'], segment_to_process[i]['pos'], \
-            segment_to_process[i + 1]['pos']
+            p_prev, p_curr, p_next = segment_to_process[i - 1]['pos'], segment_to_process[i]['pos'], segment_to_process[i + 1]['pos']
             if (p_curr > p_prev and p_curr >= p_next) or (p_curr < p_prev and p_curr <= p_next):
                 extrema.append(segment_to_process[i])
         extrema.append(segment_to_process[-1])
