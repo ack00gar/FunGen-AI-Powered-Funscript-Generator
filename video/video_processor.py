@@ -659,9 +659,9 @@ class VideoProcessor:
 
     def _build_ffmpeg_filter_string(self) -> str:
         # --- Check if we are using the preprocessed file ---
-        is_using_preprocessed = hasattr(self, '_active_video_source_path') and self._active_video_source_path != self.video_path
+        is_using_preprocessed = self._active_video_source_path != self.video_path
         if is_using_preprocessed:
-            self.logger.info("Using preprocessed video source. No FFmpeg filters will be applied.")
+            self.logger.info(f"Using preprocessed video source ('{os.path.basename(self._active_video_source_path)}'). No FFmpeg filters will be applied.")
             return "" # Return an empty filter string
 
         # If not using preprocessed, build the filter string as before

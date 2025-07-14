@@ -539,6 +539,8 @@ class AppStageProcessor:
                 self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in s2_output_data.get("all_s2_frame_objects_list", [])}
                 preprocessed_path_for_s3 = self.app.file_manager.preprocessed_video_path
 
+                self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
+
                 stage3_success = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
 
                 if stage3_success:
