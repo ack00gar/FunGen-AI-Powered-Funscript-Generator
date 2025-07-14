@@ -52,6 +52,15 @@ class InteractiveFunscriptTimeline:
         self.sg_poly_order = self.app.app_settings.get(f"timeline{self.timeline_num}_sg_default_polyorder", 2)
         self.rdp_epsilon = self.app.app_settings.get(f"timeline{self.timeline_num}_rdp_default_epsilon", 8.0)
 
+        # --- PEAKS STATE ---
+        self.show_peaks_settings_popup = False
+        self.peaks_apply_to_selection = False
+        self.peaks_height = self.app.app_settings.get(f"timeline{self.timeline_num}_peaks_default_height", 0)
+        self.peaks_threshold = self.app.app_settings.get(f"timeline{self.timeline_num}_peaks_default_threshold", 0)
+        self.peaks_distance = self.app.app_settings.get(f"timeline{self.timeline_num}_peaks_default_distance", 1)
+        self.peaks_prominence = self.app.app_settings.get(f"timeline{self.timeline_num}_peaks_default_prominence", 0)
+        self.peaks_width = self.app.app_settings.get(f"timeline{self.timeline_num}_peaks_default_width", 0)
+
         self.multi_selected_action_indices = set()
         self.is_marqueeing = False
         self.marquee_start_screen_pos = None
@@ -255,6 +264,15 @@ class InteractiveFunscriptTimeline:
     def _perform_rdp_simplification(self, epsilon: float, selected_indices: Optional[List[int]]):
         return (self._call_funscript_method('simplify_rdp', 'RDP simplification', epsilon = epsilon, selected_indices = selected_indices))
 
+    def _perform_peaks_simplification(self, height, threshold, distance, prominence, width, selected_indices: Optional[List[int]]):
+        return (self._call_funscript_method('find_peaks_and_valleys', 'Peak finding',
+                                           height=height,
+                                           threshold=threshold,
+                                           distance=distance,
+                                           prominence=prominence,
+                                           width=width,
+                                           selected_indices=selected_indices))
+
     def _perform_inversion(self, selected_indices: Optional[List[int]]):
         return (self._call_funscript_method('invert_points_values', 'inversion', selected_indices = selected_indices))
 
@@ -298,6 +316,8 @@ class InteractiveFunscriptTimeline:
             apply_to_selection = self.amp_apply_to_selection
         elif filter_type == 'keyframe':
             apply_to_selection = self.keyframe_apply_to_selection
+        elif filter_type == 'peaks':
+            apply_to_selection = self.peaks_apply_to_selection
 
         indices_to_process = list(self.multi_selected_action_indices) if apply_to_selection else None
 
@@ -312,6 +332,14 @@ class InteractiveFunscriptTimeline:
             params = {
                 'position_tolerance': self.keyframe_position_tolerance,
                 'time_tolerance_ms': self.keyframe_time_tolerance
+            }
+        elif filter_type == 'peaks':
+            params = {
+                'height': self.peaks_height,
+                'threshold': self.peaks_threshold,
+                'distance': self.peaks_distance,
+                'prominence': self.peaks_prominence,
+                'width': self.peaks_width
             }
         elif filter_type == 'speed_limiter':
             params = {
@@ -451,6 +479,21 @@ class InteractiveFunscriptTimeline:
                     self.rdp_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
             if rdp_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+            imgui.same_line()
+
+            # --- Peaks Button ---
+            peaks_disabled_bool = not allow_editing_timeline or not has_actions
+            if peaks_disabled_bool:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+            if imgui.button(f"Peaks##{window_id_suffix}"):
+                if not peaks_disabled_bool:
+                    self.show_peaks_settings_popup = True
+                    self.peaks_apply_to_selection = bool(
+                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
+            if peaks_disabled_bool:
                 imgui.pop_style_var()
                 imgui.internal.pop_item_flag()
             imgui.same_line()
@@ -798,7 +841,103 @@ class InteractiveFunscriptTimeline:
                         self.clear_preview()
                         self.show_rdp_settings_popup = False
                 imgui.end()
-            # endregion
+
+            # --- Peaks Settings Window ---
+            peaks_window_title = f"Peak Extraction Settings (Timeline {self.timeline_num})##PeaksSettingsWindow{window_id_suffix}"
+            if self.show_peaks_settings_popup:
+                if not self.is_previewing:
+                    self._update_preview('peaks')
+
+                main_viewport = imgui.get_main_viewport()
+                popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 450) * 0.5
+                popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 300) * 0.5
+                imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
+                imgui.set_next_window_size(450, 0, condition=imgui.APPEARING)
+
+                window_expanded, self.show_peaks_settings_popup = imgui.begin(peaks_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+
+                if window_expanded:
+                    imgui.text("Peak & Valley Extraction (scipy.find_peaks)")
+                    imgui.text_wrapped("Filters to only include peaks and valleys. Parameters with 0 are disabled.")
+                    imgui.separator()
+
+                    h_changed, self.peaks_height = imgui.slider_int("Height##PeaksHeight", self.peaks_height, 0, 100)
+                    if h_changed:
+                        self._update_preview('peaks')
+                    if imgui.is_item_hovered(): imgui.set_tooltip("Required height of peaks.")
+
+                    t_changed, self.peaks_threshold = imgui.slider_int("Threshold##PeaksThreshold", self.peaks_threshold, 0, 2)
+                    if t_changed:
+                        self._update_preview('peaks')
+                    if imgui.is_item_hovered(): imgui.set_tooltip("Vertical distance between a peak and its neighbors.")
+
+                    d_changed, self.peaks_distance = imgui.slider_int("Distance##PeaksDistance", self.peaks_distance, 1, 50)
+                    if d_changed:
+                        self._update_preview('peaks')
+                    if imgui.is_item_hovered(): imgui.set_tooltip(
+                        "Minimum horizontal distance (in # of points) between peaks.")
+
+                    p_changed, self.peaks_prominence = imgui.slider_int("Prominence##PeaksProminence", self.peaks_prominence, 0, 50)
+                    if p_changed:
+                        self._update_preview('peaks')
+                    if imgui.is_item_hovered(): imgui.set_tooltip("The vertical distance between the peak and its lowest contour line.")
+
+                    w_changed, self.peaks_width = imgui.slider_int("Width##PeaksWidth", self.peaks_width,0, 5)
+                    if w_changed:
+                        self._update_preview('peaks')
+                    if imgui.is_item_hovered(): imgui.set_tooltip("Required width of peaks in samples.")
+
+                    imgui.separator()
+
+                    if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3:
+                        sel_changed, self.peaks_apply_to_selection = imgui.checkbox(
+                            f"Apply to {len(self.multi_selected_action_indices)} selected##PeaksApplyToSel", self.peaks_apply_to_selection)
+                        if sel_changed: self._update_preview('peaks')
+                    else:
+                        imgui.text_disabled("Apply to: Full Script")
+                        self.peaks_apply_to_selection = False
+
+                    if imgui.button(f"Apply##PeaksApplyPop{window_id_suffix}"):
+                        indices_to_use = list(
+                            self.multi_selected_action_indices) if self.peaks_apply_to_selection else None
+                        op_desc = f"Applied Peaks Filter" + (" to selection" if indices_to_use else "")
+
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        if self._perform_peaks_simplification(
+                                height=self.peaks_height,
+                                threshold=self.peaks_threshold,
+                                distance=self.peaks_distance,
+                                prominence=self.peaks_prominence,
+                                width=self.peaks_width,
+                                selected_indices=indices_to_use
+                        ):
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                            # Save settings
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_height",
+                                                      self.peaks_height)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_threshold",
+                                                      self.peaks_threshold)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_distance",
+                                                      self.peaks_distance)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_prominence",
+                                                      self.peaks_prominence)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_width",
+                                                      self.peaks_width)
+                            self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+
+                        self.clear_preview()
+                        self.show_peaks_settings_popup = False
+
+                    imgui.same_line()
+                    if imgui.button(f"Cancel##PeaksCancelPop{window_id_suffix}"):
+                        self.clear_preview()
+                        self.show_peaks_settings_popup = False
+
+                if not self.show_peaks_settings_popup:
+                    self.clear_preview()
+
+                if window_expanded:
+                    imgui.end()
 
             # --- Amplify Settings Window ---
             amp_window_title = f"Amplify Settings (Timeline {self.timeline_num})##AmpSettingsWindow{window_id_suffix}"
@@ -924,7 +1063,7 @@ class InteractiveFunscriptTimeline:
                 if window_expanded:
                     imgui.end()
 
-            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup and not self.show_speed_limiter_popup:
+            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_peaks_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup and not self.show_speed_limiter_popup:
                 self.clear_preview()
 
             imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)
