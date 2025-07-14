@@ -61,6 +61,14 @@ class InteractiveFunscriptTimeline:
         self.peaks_prominence = self.app.app_settings.get(f"timeline{self.timeline_num}_peaks_default_prominence", 0)
         self.peaks_width = self.app.app_settings.get(f"timeline{self.timeline_num}_peaks_default_width", 0)
 
+        # --- AUTO-TUNE STATE ---
+        self.show_autotune_popup = False
+        self.autotune_apply_to_selection = False
+        self.autotune_sat_low = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_sat_low", 1)
+        self.autotune_sat_high = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_sat_high", 99)
+        self.autotune_max_window = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_max_window", 15)
+        self.autotune_polyorder = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_polyorder", 2)
+
         self.multi_selected_action_indices = set()
         self.is_marqueeing = False
         self.marquee_start_screen_pos = None
@@ -254,6 +262,27 @@ class InteractiveFunscriptTimeline:
                 f"T{self.timeline_num} Error in {error_context} ({method_name}): {str(e)}", exc_info=True,
                 extra = {'status_message': True})
             return False
+
+    def _perform_autotune_sg(self, sat_low: int, sat_high: int, max_window: int, polyorder: int, selected_indices: Optional[List[int]]):
+        """Wrapper to call the auto_tune_sg_filter method on the funscript object."""
+        funscript_instance, axis_name = self._get_target_funscript_details()
+        if not funscript_instance or not axis_name:
+            self.app.logger.warning(f"T{self.timeline_num}: Cannot auto-tune. Funscript object not found.", extra={'status_message': True})
+            return None # Return None on failure
+        try:
+            method_to_call = getattr(funscript_instance, 'auto_tune_sg_filter')
+            result = method_to_call(axis=axis_name,
+                                    saturation_low=sat_low,
+                                    saturation_high=sat_high,
+                                    max_window_size=max_window,
+                                    polyorder=polyorder,
+                                    selected_indices=selected_indices)
+            return result # Return the result dictionary on success or None on failure
+        except Exception as e:
+            self.app.logger.error(
+                f"T{self.timeline_num} Error in auto-tune: {str(e)}", exc_info=True,
+                extra={'status_message': True})
+            return None
 
     def _perform_sg_filter(self, window_length: int, polyorder: int, selected_indices: Optional[List[int]]):
         return (self._call_funscript_method('apply_savitzky_golay', 'SG filter', window_length=window_length, polyorder=polyorder, selected_indices=selected_indices))
@@ -466,6 +495,22 @@ class InteractiveFunscriptTimeline:
                     self.sg_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
             if sg_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.same_line()
+
+            # --- Auto-Tune SG Button ---
+            autotune_disabled_bool = not allow_editing_timeline or not has_actions
+            if autotune_disabled_bool:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+            if imgui.button(f"Auto-Tune SG##AutoTuneSGFilter{window_id_suffix}"):
+                if not autotune_disabled_bool:
+                    self.show_autotune_popup = True
+                    # Auto-tune needs at least 3 points for a minimal window size of 3
+                    self.autotune_apply_to_selection = bool(
+                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
+            if autotune_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- RDP Button ---
@@ -793,6 +838,90 @@ class InteractiveFunscriptTimeline:
                 if window_expanded:
                     imgui.end()
 
+            # --- Auto-Tune SG Settings Window ---
+            autotune_window_title = f"Auto-Tune SG Filter Settings (Timeline {self.timeline_num})##AutoTuneSettingsWindow{window_id_suffix}"
+            if self.show_autotune_popup:
+                main_viewport = imgui.get_main_viewport()
+                popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 400) * 0.5
+                popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 250) * 0.5
+                imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
+                imgui.set_next_window_size(400, 0, condition=imgui.APPEARING)
+                window_expanded, self.show_autotune_popup = imgui.begin(
+                    autotune_window_title, closable=True,
+                    flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+
+                if window_expanded:
+                    imgui.text(f"Auto-Tune SG Filter (Timeline {self.timeline_num})")
+                    imgui.text_wrapped("Finds the smallest SG window that removes harsh edges (0/100 clipping).")
+                    imgui.separator()
+
+                    _, self.autotune_sat_low = imgui.slider_int("Saturation Low##AutoTuneSatLow", self.autotune_sat_low,
+                                                                0, 10)
+                    if imgui.is_item_hovered(): imgui.set_tooltip("Points at or below this value are 'saturated'.")
+
+                    _, self.autotune_sat_high = imgui.slider_int("Saturation High##AutoTuneSatHigh",
+                                                                 self.autotune_sat_high, 90, 100)
+                    if imgui.is_item_hovered(): imgui.set_tooltip("Points at or above this value are 'saturated'.")
+
+                    changed, self.autotune_max_window = imgui.slider_int("Max Window Size##AutoTuneMaxWin",
+                                                                         self.autotune_max_window, 5, 25)
+                    if changed and self.autotune_max_window % 2 == 0: self.autotune_max_window += 1
+                    if imgui.is_item_hovered(): imgui.set_tooltip("The largest window size to try during the search.")
+
+                    imgui.text_disabled(f"Polynomial Order: {self.autotune_polyorder} (fixed)")
+                    imgui.separator()
+
+                    if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3:
+                        _, self.autotune_apply_to_selection = imgui.checkbox(
+                            f"Apply to {len(self.multi_selected_action_indices)} selected##AutoTuneApplyToSel",
+                            self.autotune_apply_to_selection)
+                    else:
+                        imgui.text_disabled("Apply to: Full Script")
+                        self.autotune_apply_to_selection = False
+
+                    imgui.separator()
+
+                    if imgui.button(f"Apply##AutoTuneApplyPop{window_id_suffix}"):
+                        indices_to_use = list(
+                            self.multi_selected_action_indices) if self.autotune_apply_to_selection else None
+                        op_desc = f"Applied Auto-Tune SG" + (" to selection" if indices_to_use else "")
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+
+                        result = self._perform_autotune_sg(
+                            self.autotune_sat_low, self.autotune_sat_high,
+                            self.autotune_max_window, self.autotune_polyorder,
+                            selected_indices=indices_to_use)
+
+                        if result:
+                            # Success! Finalize the undo action with a more descriptive message.
+                            final_op_desc = f"Auto-Tune SG (W:{result['window_length']}, P:{result['polyorder']})" + (
+                                " to sel." if indices_to_use else "")
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, final_op_desc)
+
+                            # Save settings for next time
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_low",
+                                                      self.autotune_sat_low)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_high",
+                                                      self.autotune_sat_high)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_max_window",
+                                                      self.autotune_max_window)
+                            self.app.logger.info(f"{final_op_desc} on T{self.timeline_num}.",
+                                                 extra={'status_message': True})
+                        else:
+                            # Failure or no solution found. The recorded action will be discarded by the undo manager.
+                            self.app.logger.warning(
+                                f"Auto-Tune SG on T{self.timeline_num} did not find a solution or failed.",
+                                extra={'status_message': True})
+
+                        self.show_autotune_popup = False
+
+                    imgui.same_line()
+                    if imgui.button(f"Cancel##AutoTuneCancelPop{window_id_suffix}"):
+                        self.show_autotune_popup = False
+
+                if window_expanded:
+                    imgui.end()
+
             # --- RDP Settings Window ---
             rdp_window_title = f"RDP Simplification Settings (Timeline {self.timeline_num})##RDPSettingsWindow{window_id_suffix}"
             if self.show_rdp_settings_popup:
@@ -1063,7 +1192,7 @@ class InteractiveFunscriptTimeline:
                 if window_expanded:
                     imgui.end()
 
-            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_peaks_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup and not self.show_speed_limiter_popup:
+            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_peaks_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup and not self.show_speed_limiter_popup and not self.show_autotune_popup:
                 self.clear_preview()
 
             imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)

@@ -365,6 +365,99 @@ class DualAxisFunscript:
         except Exception as e:
             self.logger.error(f"Error applying SG filter: {e}")
 
+    def auto_tune_sg_filter(self, axis: str,
+                             saturation_low: int = 1,
+                             saturation_high: int = 99,
+                             max_window_size: int = 15,
+                             polyorder: int = 2,
+                             selected_indices: Optional[List[int]] = None) -> Optional[Dict]:
+        """
+        Iteratively finds the best SG filter window size to minimize saturation and applies it.
+
+        :param axis: The axis to process ('primary' or 'secondary').
+        :param saturation_low: Position value at or below which is considered saturated.
+        :param saturation_high: Position value at or above which is considered saturated.
+        :param max_window_size: The largest window size to attempt.
+        :param polyorder: The polynomial order for the SG filter.
+        :param selected_indices: Optional list of indices to apply the filter to.
+        :return: A dictionary with the applied parameters on success, None on failure.
+        """
+        if not SCIPY_AVAILABLE:
+            self.logger.warning("scipy not installed. SG auto-tune cannot be applied.")
+            return None
+
+        actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list_ref: return None
+
+        # Determine the segment of actions to process
+        indices_to_filter: List[int] = []
+        if selected_indices is not None and len(selected_indices) > 0:
+            indices_to_filter = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
+        else:
+            indices_to_filter = list(range(len(actions_list_ref)))
+
+        if len(indices_to_filter) < 3:
+            self.logger.warning("Not enough points for SG auto-tune.")
+            return None
+
+        # Extract positions from the identified segment of actions
+        positions = np.array([actions_list_ref[i]['pos'] for i in indices_to_filter])
+        num_points_in_segment = len(positions)
+
+        best_window_length = -1
+        min_saturated_count = float('inf')
+
+        # Iterate through window sizes to find the one that minimizes saturation
+        for window_length in range(3, max_window_size + 1, 2):
+            if num_points_in_segment < window_length:
+                self.logger.info(f"Auto-Tune: Segment size ({num_points_in_segment}) is smaller than window size ({window_length}). Stopping search.")
+                break  # Stop if the window becomes larger than the number of points
+
+            actual_polyorder = min(polyorder, window_length - 1)
+
+            try:
+                # Apply filter to a temporary copy to check for saturation
+                smoothed_positions = savgol_filter(positions, window_length, actual_polyorder)
+            except ValueError as e:
+                self.logger.warning(f"Auto-Tune: SG filter failed for window {window_length}. Error: {e}. Stopping.")
+                break
+
+            # Count how many points are saturated after filtering
+            saturated_count = np.sum((smoothed_positions <= saturation_low) | (smoothed_positions >= saturation_high))
+            self.logger.debug(f"Auto-Tune trying W={window_length}, P={actual_polyorder}: Found {saturated_count} saturated points.")
+
+            # If this window size is better than the previous best, update it.
+            if saturated_count < min_saturated_count:
+                min_saturated_count = saturated_count
+                best_window_length = window_length
+
+            # If we find a perfect solution, we can stop early.
+            if saturated_count == 0:
+                break
+
+        if best_window_length == -1:
+            self.logger.error("Auto-Tune: Could not determine a best window size. This should not happen if there are enough points.")
+            return None
+
+        # Apply the best found filter, even if it's not perfect
+        self.logger.info(f"Auto-Tune determined best window W={best_window_length} with {min_saturated_count} saturated points remaining.")
+        final_polyorder = min(polyorder, best_window_length - 1)
+        try:
+            final_smoothed_positions = savgol_filter(positions, best_window_length, final_polyorder)
+            for i, original_list_idx in enumerate(indices_to_filter):
+                actions_list_ref[original_list_idx]['pos'] = int(round(np.clip(final_smoothed_positions[i], 0, 100)))
+
+            result = {
+                'window_length': best_window_length,
+                'polyorder': final_polyorder,
+                'points_affected': len(indices_to_filter)
+            }
+            self.logger.info(f"Applied Auto-Tuned SG to {axis} axis with W={result['window_length']}, P={result['polyorder']}.")
+            return result
+        except Exception as e:
+            self.logger.error(f"Error applying final auto-tuned SG filter: {e}")
+            return None
+
     def simplify_rdp(self, axis: str, epsilon: float,
                      start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
                      selected_indices: Optional[List[int]] = None):
