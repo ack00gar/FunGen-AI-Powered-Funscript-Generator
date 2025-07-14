@@ -60,10 +60,17 @@ def stage3_worker_proc(
     vp_app_proxy.available_ffmpeg_hwaccels = common_app_config.get("available_ffmpeg_hwaccels", [])
     vp_app_proxy.file_manager = MockFileManager(preprocessed_video_path)
 
+    # --- Use the preprocessed path if it exists for VideoProcessor initialization ---
+    video_path_to_use = preprocessed_video_path if preprocessed_video_path and os.path.exists(preprocessed_video_path) else video_path
+    video_type_for_vp = 'flat' if video_path_to_use == preprocessed_video_path else common_app_config.get('video_type', 'auto')
+    worker_logger.info(f"Worker {worker_id} will use video source: {os.path.basename(video_path_to_use)} with type '{video_type_for_vp}'")
+
+
     video_processor = VideoProcessor(app_instance=vp_app_proxy,
                                      yolo_input_size=common_app_config.get('yolo_input_size', 640),
-                                     video_type=common_app_config.get('video_type', 'auto'))
-    if not video_processor.open_video(video_path):
+                                     video_type=video_type_for_vp) # --- Use the determined video type
+    # --- open_video now correctly uses the preprocessed file if available via the mock file manager ---
+    if not video_processor.open_video(video_path): # Pass original path for metadata, open_video handles the switch internally
         worker_logger.error(f"VideoProcessor could not open video: {video_path}")
         return
 
@@ -79,8 +86,7 @@ def stage3_worker_proc(
             roi_padding=tracker_config.get('roi_padding', 20),
             roi_update_interval=tracker_config.get('roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
             roi_smoothing_factor=tracker_config.get('roi_smoothing_factor', constants.DEFAULT_ROI_SMOOTHING_FACTOR),
-            base_amplification_factor=tracker_config.get('base_amplification_factor',
-                                                         constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
+            base_amplification_factor=tracker_config.get('base_amplification_factor', constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
             dis_flow_preset=tracker_config.get('dis_flow_preset', "ULTRAFAST"),
             adaptive_flow_scale=tracker_config.get('adaptive_flow_scale', True),
             use_sparse_flow=tracker_config.get('use_sparse_flow', False),
@@ -125,9 +131,7 @@ def stage3_worker_proc(
                 processed_frame = roi_tracker_instance.preprocess_frame(frame_image)
                 current_frame_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
                 frame_time_ms = int(round((frame_id / common_app_config.get('video_fps', 30.0)) * 1000.0))
-                frame_obj_s2 = s2_frame_objects_map.get(frame_id, FrameObject(frame_id,
-                                                                              common_app_config.get('yolo_input_size',
-                                                                                                    640)))
+                frame_obj_s2 = s2_frame_objects_map.get(frame_id, FrameObject(frame_id, common_app_config.get('yolo_input_size', 640)))
 
                 # ROI Definition Logic (uses segment_obj for context)
                 run_roi_definition = (roi_tracker_instance.roi is None) or (
@@ -171,9 +175,7 @@ def stage3_worker_proc(
                             if determined_video_type == 'VR' and candidate_roi_xywh:
                                 penis_w = current_penis_box_for_roi_calc[2]
                                 rx, ry, rw, rh = candidate_roi_xywh
-                                new_rw = min(rw, penis_w * 2) if segment_obj.major_position not in ["Handjob",
-                                                                                                    "Blowjob",
-                                                                                                    "Handjob / Blowjob"] else penis_w
+                                new_rw = min(rw, penis_w * 2) if segment_obj.major_position not in ["Handjob", "Blowjob", "Handjob / Blowjob"] else penis_w
                                 if new_rw > 0:
                                     original_center_x = rx + rw / 2
                                     new_rx = int(original_center_x - new_rw / 2)
@@ -312,33 +314,51 @@ def perform_stage3_analysis(
     processed_task_count = 0
     total_tasks = len(all_tasks)
 
-    while processed_task_count < total_tasks and not stop_event.is_set():
+    while any(p.is_alive() for p in processes) and not stop_event.is_set():
+        # Check for completed results without blocking for a long time
         try:
-            result = result_queue.get(timeout=1.0)
+            result = result_queue.get(timeout=0.05) # Use a very short timeout
             all_primary_actions.extend(result["primary_actions"])
             all_secondary_actions.extend(result["secondary_actions"])
             processed_task_count += 1
-
-            time_elapsed_s3 = time.time() - s3_start_time
-            current_frames_done = total_frames_processed_counter.value
-            true_fps = current_frames_done / time_elapsed_s3 if time_elapsed_s3 > 0 else 0
-            eta_s3 = (total_frames_to_process - current_frames_done) / true_fps if true_fps > 0 else 0
-
-            progress_callback(current_segment_idx=processed_task_count, total_segments=total_tasks,
-                              current_segment_name=f"Processing chunk {processed_task_count}/{total_tasks}",
-                              frame_in_segment=current_frames_done, total_frames_in_segment=total_frames_to_process,
-                              total_frames_processed_overall=current_frames_done,
-                              total_frames_to_process_overall=total_frames_to_process, processing_fps=true_fps,
-                              time_elapsed=time_elapsed_s3, eta_seconds=eta_s3)
         except Empty:
-            if not any(p.is_alive() for p in processes):
-                logger.warning("Result queue empty and all workers exited. Some results may be missing.")
-                break
+            pass  # It's normal for the queue to be empty while workers are processing
+
+        time_elapsed_s3 = time.time() - s3_start_time
+        current_frames_done = total_frames_processed_counter.value
+        # Avoid division by zero at the very start
+        true_fps = current_frames_done / time_elapsed_s3 if time_elapsed_s3 > 0.1 else 0.0
+        eta_s3 = (total_frames_to_process - current_frames_done) / true_fps if true_fps > 0 else float('inf')
+
+        # Use the number of processed tasks to give a rough idea of the "chapter" progress
+        # This provides a more stable name than trying to derive it from frame numbers.
+        progress_callback(current_segment_idx=processed_task_count, total_segments=total_tasks,
+                          current_segment_name=f"Processing chunk {processed_task_count + 1}/{total_tasks}",
+                          frame_in_segment=current_frames_done, # This now acts as an overall frame counter for the progress bar
+                          total_frames_in_segment=total_frames_to_process,
+                          total_frames_processed_overall=current_frames_done,
+                          total_frames_to_process_overall=total_frames_to_process,
+                          processing_fps=true_fps,
+                          time_elapsed=time_elapsed_s3,
+                          eta_seconds=eta_s3)
+
+        # Sleep briefly to prevent this loop from consuming too much CPU
+        time.sleep(0.1)
 
     if stop_event.is_set():
         logger.warning("Stop event detected. Terminating workers.")
         for p in processes:
             if p.is_alive(): p.terminate()
+
+    # --- ADDED: Cleanup phase to ensure all results are collected after workers finish ---
+    while not result_queue.empty():
+        try:
+            result = result_queue.get_nowait()
+            all_primary_actions.extend(result["primary_actions"])
+            all_secondary_actions.extend(result["secondary_actions"])
+            processed_task_count += 1
+        except Empty:
+            break
 
     for p in processes:
         p.join()
