@@ -508,9 +508,7 @@ class InteractiveFunscriptTimeline:
                     # Auto-tune needs at least 3 points for a minimal window size of 3
                     self.autotune_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
-            if autotune_disabled_bool:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
+            if autotune_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- RDP Button ---
@@ -523,9 +521,7 @@ class InteractiveFunscriptTimeline:
                     self.show_rdp_settings_popup = True
                     self.rdp_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
-            if rdp_disabled_bool:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
+            if rdp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- Peaks Button ---
@@ -538,9 +534,7 @@ class InteractiveFunscriptTimeline:
                     self.show_peaks_settings_popup = True
                     self.peaks_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
-            if peaks_disabled_bool:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
+            if peaks_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- Amplify Button ---
@@ -604,9 +598,7 @@ class InteractiveFunscriptTimeline:
             if imgui.button(f"Speed Limiter##HandyBTLimiter{window_id_suffix}"):
                 if not speed_disabled_bool:
                     self.show_speed_limiter_popup = True
-            if speed_disabled_bool:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
+            if speed_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # Invert Button
@@ -677,9 +669,15 @@ class InteractiveFunscriptTimeline:
 
             # --- Zoom Buttons ---
             video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
-            # can_manual_pan_zoom = (video_loaded and not self.app.processor.is_processing) or not video_loaded
+            # Allow scrubbing if not actively processing, or if paused (is_processing True and pause_event is set)
+            processor = self.app.processor
+            can_manual_pan_zoom = (
+                video_loaded and (
+                    not processor.is_processing
+                    or (processor.is_processing and hasattr(processor, 'pause_event') and processor.pause_event.is_set())
+                )
+            ) or not video_loaded
             zoom_disabled_bool = False  # not allow_editing_timeline or not can_manual_pan_zoom
-
             if zoom_disabled_bool:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
@@ -1299,31 +1297,27 @@ class InteractiveFunscriptTimeline:
                 and canvas_abs_pos[0] - marquee_hover_padding <= mouse_pos[0] < canvas_abs_pos[0] + canvas_size[0] + marquee_hover_padding
                 and canvas_abs_pos[1] - marquee_hover_padding <= mouse_pos[1] < canvas_abs_pos[1] + canvas_size[1] + marquee_hover_padding)
 
-            can_manual_pan_zoom = (video_loaded and not self.app.processor.is_processing) or not video_loaded
-
             # Check all inputs that count as interaction
-            if is_timeline_hovered and can_manual_pan_zoom:  # Only allow pan/zoom if strictly hovered over canvas
-                # Mouse Pan/Zoom
-                is_mouse_panning = (imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_MIDDLE)
-                        or (io.key_shift
-                        and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT)
-                        and self.dragging_action_idx == -1
-                        and not self.is_marqueeing))
+            if is_timeline_hovered:
+                # Mouse Pan (still restricted)
+                if can_manual_pan_zoom:
+                    is_mouse_panning = (imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_MIDDLE)
+                            or (io.key_shift
+                            and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT)
+                            and self.dragging_action_idx == -1
+                            and not self.is_marqueeing))
 
-                if is_mouse_panning:
-                    app_state.timeline_pan_offset_ms -= io.mouse_delta[0] * app_state.timeline_zoom_factor_ms_per_px
-                    is_interacting_this_frame = True
-                    self.is_panning_active = True
+                    if is_mouse_panning:
+                        app_state.timeline_pan_offset_ms -= io.mouse_delta[0] * app_state.timeline_zoom_factor_ms_per_px
+                        is_interacting_this_frame = True
+                        self.is_panning_active = True
 
+                # Mouse Wheel Zoom (always allowed)
                 if io.mouse_wheel != 0.0:
-                    # Capture the time at the current center of the visible timeline BEFORE zoom
-                    time_at_current_center_ms = x_to_time(center_x_marker)  # Using the center_x_marker defined earlier
-
+                    time_at_current_center_ms = x_to_time(center_x_marker)
                     scale_factor = 0.85 if io.mouse_wheel > 0 else 1.15
                     app_state.timeline_zoom_factor_ms_per_px = max(0.01, min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, 2000.0))
-                    # Calculate new pan offset to keep the *original center time* at the *new center of the screen*
                     app_state.timeline_pan_offset_ms = time_at_current_center_ms - (canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
-
                     is_interacting_this_frame = True
                     self.is_zooming_active = True
 
@@ -1505,12 +1499,15 @@ class InteractiveFunscriptTimeline:
             if app_state.timeline_interaction_active:
                 app_state.timeline_pan_offset_ms = np.clip(app_state.timeline_pan_offset_ms, min_pan_allowed, max_pan_allowed)
 
+            # Determine paused state
+            is_paused = False
+            if video_loaded and self.app.processor and self.app.processor.is_processing:
+                is_paused = hasattr(self.app.processor, 'pause_event') and self.app.processor.pause_event.is_set()
+
             # Detect end of *panning* interaction to seek video
-            # Only seek if a pan was active and it just ended, OR if a non-panning interaction just ended
-            # AND there's no continuous interaction active right now (like auto-pan for playback)
-            # This specifically prevents video seeking on zoom ending.
             if (was_panning_active or was_zooming_active) and not self.is_panning_active and not self.is_zooming_active:
-                if video_loaded and not self.app.processor.is_processing:
+                # Allow seeking if stopped or paused (not actively playing)
+                if video_loaded and (not self.app.processor.is_processing or is_paused):
                     center_x_marker = canvas_abs_pos[0] + canvas_size[0] / 2.0
                     time_at_center_ms = x_to_time(center_x_marker)
                     clamped_time_ms = np.clip(time_at_center_ms, 0, effective_total_duration_ms)
@@ -1523,17 +1520,17 @@ class InteractiveFunscriptTimeline:
                         app_state.force_timeline_pan_to_current_frame = True  # This will cause it to pan to the frame if needed
 
             # Auto-pan logic (for playback or forced sync)
-            is_playing = video_loaded and self.app.processor.is_processing
+            is_playing = video_loaded and self.app.processor.is_processing and not is_paused
             pan_to_current_frame = video_loaded and not is_playing and app_state.force_timeline_pan_to_current_frame
             if (is_playing or pan_to_current_frame) and not app_state.timeline_interaction_active:  # No manual interaction right now
-                    current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
-                    # Using effective center of screen
-                    target_pan_offset = current_video_time_ms - center_marker_offset_ms  
-                    app_state.timeline_pan_offset_ms = np.clip(
-                        target_pan_offset, min_pan_allowed,
-                        max_pan_allowed)
-                    if pan_to_current_frame:
-                        app_state.force_timeline_pan_to_current_frame = False
+                current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
+                # Using effective center of screen
+                target_pan_offset = current_video_time_ms - center_marker_offset_ms  
+                app_state.timeline_pan_offset_ms = np.clip(
+                    target_pan_offset, min_pan_allowed,
+                    max_pan_allowed)
+                if pan_to_current_frame:
+                    app_state.force_timeline_pan_to_current_frame = False
 
             marker_color_fixed = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.9)
             draw_list.add_line(center_x_marker, canvas_abs_pos[1], center_x_marker, canvas_abs_pos[1] + canvas_size[1], marker_color_fixed, 1.5)
