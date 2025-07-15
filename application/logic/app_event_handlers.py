@@ -25,38 +25,26 @@ class AppEventHandlers:
 
         if action_name == "jump_start":
             processor.seek_video(0)
-        elif action_name == "prev_frame":
+            return
+        if action_name == "jump_end":
+            processor.seek_video(total_frames - 1)
+            return
+        if action_name == "prev_frame":
             processor.seek_video(max(0, current_frame - 1))
-
-        elif action_name == "play_pause":
-            # Determine the current "playing" state using the new event system.
+            return
+        if action_name == "next_frame":
+            processor.seek_video(min(total_frames - 1, current_frame + 1))
+            return
+        if action_name == "play_pause":
             is_currently_playing = processor.is_processing and not processor.pause_event.is_set()
-
             if is_currently_playing:
-                # If playing, the action is to PAUSE.
                 processor.pause_processing()
-                self.logger.info("Video paused.", extra={'status_message': True})
             else:
-                # If not playing (i.e., paused or stopped), the action is to PLAY/RESUME.
-                start_f = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else current_frame
-                end_f = fs_proc.scripting_end_frame if fs_proc.scripting_range_active else -1
-                processor.start_processing(start_frame=start_f, end_frame=end_f)
-                self.logger.info("Video playing.", extra={'status_message': True})
-
-        elif action_name == "stop":
+                processor.start_processing()
+            return
+        if action_name == "stop":
             processor.stop_processing()
-            self.logger.info("Video stopped.", extra={'status_message': True})
-            #processor.reset()
-            #target_seek_frame = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else 0
-            #processor.seek_video(target_seek_frame)
-            #self.logger.info("Video stopped.", extra={'status_message': True})
-        elif action_name == "next_frame":
-            processor.seek_video(min(total_frames - 1 if total_frames > 0 else 0, current_frame + 1))
-        elif action_name == "jump_end":
-            target_end_frame = total_frames - 1 if total_frames > 0 else 0
-            if fs_proc.scripting_range_active and fs_proc.scripting_end_frame != -1:
-                target_end_frame = fs_proc.scripting_end_frame
-            processor.seek_video(target_end_frame)
+            return
 
         # After any action other than starting playback, update the displayed frame.
         is_resuming_or_starting = action_name == "play_pause" and (

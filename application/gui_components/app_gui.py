@@ -554,8 +554,13 @@ class GUI:
             elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
                 pass
 
+            # Allow seeking if video is loaded, regardless of play/pause state
             if processed_seek and seek_delta_frames != 0:
                 if self.app.processor and self.app.processor.video_info:
+                    paused_state = False
+                    if hasattr(self.app.processor, 'pause_event'):
+                        paused_state = self.app.processor.pause_event.is_set()
+                    self.app.logger.debug(f"Shortcut seek triggered: {seek_delta_frames} frames (paused={paused_state}, is_processing={self.app.processor.is_processing})")
                     new_frame = self.app.processor.current_frame_index + seek_delta_frames
                     total_frames_vid = self.app.processor.total_frames
                     new_frame = np.clip(new_frame, 0, total_frames_vid - 1 if total_frames_vid > 0 else 0)

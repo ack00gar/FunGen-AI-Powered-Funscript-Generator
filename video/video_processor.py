@@ -992,6 +992,7 @@ class VideoProcessor:
         target_frame = max(0, min(frame_index, self.total_frames - 1))
 
         was_processing = self.is_processing
+        was_paused = self.is_processing and self.pause_event.is_set()
         stored_end_limit = self.processing_end_frame_limit
 
         if was_processing:
@@ -1007,8 +1008,9 @@ class VideoProcessor:
             self.logger.warning(f"Seek to frame {target_frame} failed to retrieve frame.")
             self.current_frame_index = target_frame
 
-        if was_processing:
+        if was_processing and not was_paused:
             self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
+        # If was_paused, do not restart processing (remain paused after seek)
 
     def is_vr_active_or_potential(self) -> bool:
         if self.video_type_setting == 'VR':
@@ -1097,9 +1099,10 @@ class VideoProcessor:
                 raw_frame_bytes = None
                 if loop_ffmpeg_process.stdout is not None:
                     raw_frame_bytes = loop_ffmpeg_process.stdout.read(self.frame_size_bytes)
-                if not raw_frame_bytes or len(raw_frame_bytes) < self.frame_size_bytes:
+                raw_frame_len = len(raw_frame_bytes) if raw_frame_bytes is not None else 0
+                if not raw_frame_bytes or raw_frame_len < self.frame_size_bytes:
                     self.logger.info(
-                        f"End of FFmpeg GUI stream or incomplete frame (read {len(raw_frame_bytes)}/{self.frame_size_bytes}).")
+                        f"End of FFmpeg GUI stream or incomplete frame (read {raw_frame_len}/{self.frame_size_bytes}).")
                     self.is_processing = False
                     if self.app:
                         was_scripting_at_end = self.tracker and self.tracker.tracking_active
