@@ -87,7 +87,14 @@ class ControlPanelUI:
         ]
         tracking_modes_display = [mode.value for mode in tracking_modes_enums]
 
-        disable_combo = stage_proc.full_analysis_active or (self.app.processor and self.app.processor.is_processing) or self.app.is_setting_user_roi_mode
+        processor = self.app.processor
+        disable_combo = (
+            stage_proc.full_analysis_active
+            or self.app.is_setting_user_roi_mode
+            or (
+                processor and processor.is_processing and not processor.pause_event.is_set() and not self._is_normal_playback_mode()
+            )
+        )
         if disable_combo:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
@@ -1008,8 +1015,14 @@ class ControlPanelUI:
         elif self.app.tracking_axis_mode == "horizontal":
             current_axis_mode_idx = 2
 
-        disable_axis_controls = stage_proc.full_analysis_active or (self.app.processor and self.app.processor.is_processing) or self.app.is_setting_user_roi_mode
-
+        processor = self.app.processor
+        disable_axis_controls = (
+            stage_proc.full_analysis_active
+            or self.app.is_setting_user_roi_mode
+            or (
+                processor and processor.is_processing and not processor.pause_event.is_set() and not self._is_normal_playback_mode()
+            )
+        )
         if disable_axis_controls:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
@@ -1563,3 +1576,14 @@ class ControlPanelUI:
         if proc_tools_disabled:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
+
+    def _is_normal_playback_mode(self):
+        # Normal playback: not full_analysis_active, not tracking, not ROI mode
+        stage_proc = self.app.stage_processor
+        processor = self.app.processor
+        return (
+            processor and processor.is_video_open()
+            and not stage_proc.full_analysis_active
+            and not self.app.is_setting_user_roi_mode
+            and not (hasattr(processor, 'enable_tracker_processing') and processor.enable_tracker_processing)
+        )
