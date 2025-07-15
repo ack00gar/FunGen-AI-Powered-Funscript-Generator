@@ -32,10 +32,16 @@ class AppEventHandlers:
             # Determine the current "playing" state using the new event system.
             is_currently_playing = processor.is_processing and not processor.pause_event.is_set()
 
+            # Check if only normal video playback is active (no inference/tracking)
+            is_plain_playback = not (hasattr(processor, 'tracker') and processor.tracker and processor.tracker.tracking_active)
             if is_currently_playing:
-                # If playing, the action is to PAUSE.
-                processor.pause_processing()
-                self.logger.info("Video paused.", extra={'status_message': True})
+                if is_plain_playback:
+                    self.logger.debug("Pause pressed during plain playback. Acting as stop.")
+                    processor.stop_processing()
+                    self.logger.info("Video stopped (pause acts as stop in plain playback).", extra={'status_message': True})
+                else:
+                    processor.pause_processing()
+                    self.logger.info("Video paused.", extra={'status_message': True})
             else:
                 # If not playing (i.e., paused or stopped), the action is to PLAY/RESUME.
                 start_f = fs_proc.scripting_start_frame if fs_proc.scripting_range_active else current_frame
