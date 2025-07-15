@@ -1298,28 +1298,26 @@ class InteractiveFunscriptTimeline:
                 and canvas_abs_pos[1] - marquee_hover_padding <= mouse_pos[1] < canvas_abs_pos[1] + canvas_size[1] + marquee_hover_padding)
 
             # Check all inputs that count as interaction
-            if is_timeline_hovered and can_manual_pan_zoom:  # Only allow pan/zoom if strictly hovered over canvas
-                # Mouse Pan/Zoom
-                is_mouse_panning = (imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_MIDDLE)
-                        or (io.key_shift
-                        and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT)
-                        and self.dragging_action_idx == -1
-                        and not self.is_marqueeing))
+            if is_timeline_hovered:
+                # Mouse Pan (still restricted)
+                if can_manual_pan_zoom:
+                    is_mouse_panning = (imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_MIDDLE)
+                            or (io.key_shift
+                            and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT)
+                            and self.dragging_action_idx == -1
+                            and not self.is_marqueeing))
 
-                if is_mouse_panning:
-                    app_state.timeline_pan_offset_ms -= io.mouse_delta[0] * app_state.timeline_zoom_factor_ms_per_px
-                    is_interacting_this_frame = True
-                    self.is_panning_active = True
+                    if is_mouse_panning:
+                        app_state.timeline_pan_offset_ms -= io.mouse_delta[0] * app_state.timeline_zoom_factor_ms_per_px
+                        is_interacting_this_frame = True
+                        self.is_panning_active = True
 
+                # Mouse Wheel Zoom (always allowed)
                 if io.mouse_wheel != 0.0:
-                    # Capture the time at the current center of the visible timeline BEFORE zoom
-                    time_at_current_center_ms = x_to_time(center_x_marker)  # Using the center_x_marker defined earlier
-
+                    time_at_current_center_ms = x_to_time(center_x_marker)
                     scale_factor = 0.85 if io.mouse_wheel > 0 else 1.15
                     app_state.timeline_zoom_factor_ms_per_px = max(0.01, min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, 2000.0))
-                    # Calculate new pan offset to keep the *original center time* at the *new center of the screen*
                     app_state.timeline_pan_offset_ms = time_at_current_center_ms - (canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
-
                     is_interacting_this_frame = True
                     self.is_zooming_active = True
 
