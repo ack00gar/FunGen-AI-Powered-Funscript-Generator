@@ -2,7 +2,6 @@ import numpy as np
 from typing import Tuple, Optional
 from config.constants import TrackerMode
 
-
 class AppStateUI:
     def __init__(self, app_logic_instance):
         self.app = app_logic_instance
@@ -176,14 +175,12 @@ class AppStateUI:
         # This method is called by AppLogic once the GUI main menu bar height is known.
         if not self.gauge_pos_initialized:
             defaults = self.app_settings.get_default_settings()
-            current_default_gauge_y_setting = self.app_settings.get("gauge_window_pos_y",
-                                                                    defaults.get("gauge_window_pos_y", 35))
+            current_default_gauge_y_setting = self.app_settings.get("gauge_window_pos_y", defaults.get("gauge_window_pos_y", 35))
             if self.gauge_window_pos[1] == current_default_gauge_y_setting or self.gauge_window_pos[
                 1] <= menu_bar_height:
                 self.gauge_window_pos = (self.gauge_window_pos[0], menu_bar_height + 10)
 
-            current_default_lr_dial_y_setting = self.app_settings.get("lr_dial_window_pos_y",
-                                                                      defaults.get("lr_dial_window_pos_y", 35))
+            current_default_lr_dial_y_setting = self.app_settings.get("lr_dial_window_pos_y", defaults.get("lr_dial_window_pos_y", 35))
             if self.lr_dial_window_pos[1] == current_default_lr_dial_y_setting or self.lr_dial_window_pos[
                 1] <= menu_bar_height:
                 self.lr_dial_window_pos = (self.lr_dial_window_pos[0], menu_bar_height + 10)
@@ -319,27 +316,14 @@ class AppStateUI:
         self.window_width = self.app_settings.get("window_width", defaults.get("window_width", self.window_width))
         self.window_height = self.app_settings.get("window_height", defaults.get("window_height", self.window_height))
 
-        self.timeline_zoom_factor_ms_per_px = self.app_settings.get("timeline_zoom_factor_ms_per_px",
-                                                                    defaults.get("timeline_zoom_factor_ms_per_px",
-                                                                                 self.timeline_zoom_factor_ms_per_px))
-        self.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms",
-                                                            defaults.get("timeline_pan_offset_ms",
-                                                                         self.timeline_pan_offset_ms))
+        self.timeline_zoom_factor_ms_per_px = self.app_settings.get("timeline_zoom_factor_ms_per_px", defaults.get("timeline_zoom_factor_ms_per_px", self.timeline_zoom_factor_ms_per_px))
+        self.timeline_pan_offset_ms = self.app_settings.get("timeline_pan_offset_ms", defaults.get("timeline_pan_offset_ms", self.timeline_pan_offset_ms))
 
-        self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline",
-                                                                         defaults.get(
-                                                                             "show_funscript_interactive_timeline",
-                                                                             self.show_funscript_interactive_timeline))
-        self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2",
-                                                                          defaults.get(
-                                                                              "show_funscript_interactive_timeline2",
-                                                                              self.show_funscript_interactive_timeline2))
-        self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline",
-                                                             defaults.get("show_funscript_timeline",
-                                                                          self.show_funscript_timeline))
+        self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline", defaults.get("show_funscript_interactive_timeline", self.show_funscript_interactive_timeline))
+        self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2", defaults.get("show_funscript_interactive_timeline2", self.show_funscript_interactive_timeline2))
+        self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", self.show_funscript_timeline))
         self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", self.show_heatmap))
-        self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay",
-                                                         defaults.get("show_stage2_overlay", self.show_stage2_overlay))
+        self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", defaults.get("show_stage2_overlay", self.show_stage2_overlay))
 
         self.show_audio_waveform = False
 
@@ -355,8 +339,7 @@ class AppStateUI:
             self.ui_layout_mode = project_data.get("ui_layout_mode", self.ui_layout_mode)
             self.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms", self.timeline_pan_offset_ms)
 
-        self.show_gauge_window = self.app_settings.get("show_gauge_window",
-                                                       defaults.get("show_gauge_window", self.show_gauge_window))
+        self.show_gauge_window = self.app_settings.get("show_gauge_window", defaults.get("show_gauge_window", self.show_gauge_window))
         default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
         default_gauge_h = self.app_settings.get("gauge_window_size_h", defaults.get("gauge_window_size_h", 220))
         menu_bar_h_for_default = self.app_settings.get("main_menu_bar_height_for_gauge_default_y", 25)
@@ -374,8 +357,7 @@ class AppStateUI:
             self.app_settings.get("gauge_window_size_h", default_gauge_h)
         )
 
-        self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph",
-                                                        defaults.get("show_lr_dial_graph", self.show_lr_dial_graph))
+        self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", self.show_lr_dial_graph))
         default_lr_dial_w = self.app_settings.get("lr_dial_window_size_w", defaults.get("lr_dial_window_size_w", 150))
         default_lr_dial_h = self.app_settings.get("lr_dial_window_size_h", defaults.get("lr_dial_window_size_h", 180))
         gauge_w_curr = self.gauge_window_size[0]  # Use current gauge width for positioning
@@ -393,12 +375,9 @@ class AppStateUI:
         if hasattr(self.app, 'project_data_on_load') and self.app.project_data_on_load:
             project_data = self.app.project_data_on_load
             self.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms", self.timeline_pan_offset_ms)
-            self.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px",
-                                                                   self.timeline_zoom_factor_ms_per_px)
-            self.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline",
-                                                                        self.show_funscript_interactive_timeline)
-            self.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2",
-                                                                         self.show_funscript_interactive_timeline2)
+            self.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px", self.timeline_zoom_factor_ms_per_px)
+            self.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline", self.show_funscript_interactive_timeline)
+            self.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2", self.show_funscript_interactive_timeline2)
             self.show_lr_dial_graph = project_data.get("show_lr_dial_graph", self.show_lr_dial_graph)
             self.show_heatmap = project_data.get("show_heatmap", self.show_heatmap)
             self.show_gauge_window = project_data.get("show_gauge_window", self.show_gauge_window)
