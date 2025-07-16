@@ -13,6 +13,7 @@ from application.classes import settings_manager, project_manager, shortcut_mana
 from application.utils.logger import AppLogger
 from config.constants import *
 from application.utils.write_access import check_write_access
+from application.updater import AutoUpdater
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -84,6 +85,9 @@ class ApplicationLogic:
         )
         self.logger = self._logger_instance.get_logger()
         self.app_settings.logger = self.logger  # Now provide the logger to AppSettings
+
+        # --- Initialize Auto-Updater ---
+        self.updater = AutoUpdater(self)
 
         # REFACTORED Defensive programming. Always make sure the type is a list of strings.
         discarded_tracking_classes = self.app_settings.get("discarded_tracking_classes", [])
@@ -200,6 +204,7 @@ class ApplicationLogic:
         self.funscript_processor._ensure_undo_managers_linked()
         self._check_for_autosave_restore()
         self.energy_saver.reset_activity_timer()
+        self.updater.check_for_updates_async()
 
     def toggle_file_manager_window(self):
         """Toggles the visibility of the Generated File Manager window."""
