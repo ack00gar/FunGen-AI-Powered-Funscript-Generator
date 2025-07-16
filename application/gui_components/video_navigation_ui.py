@@ -126,7 +126,7 @@ class VideoNavigationUI:
             imgui.push_font(self.gui_instance.small_font)
         # Left-aligned: T1, T2
         render_timeline_toggle("T1", "show_funscript_interactive_timeline")
-        imgui.same_line()
+        imgui.same_line(spacing=4)
         render_timeline_toggle("T2", "show_funscript_interactive_timeline2")
 
         # Right-aligned: Preview, Heatmap, Full Width Nav
@@ -136,13 +136,13 @@ class VideoNavigationUI:
         button_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in button_labels]
         total_button_width = sum(button_widths)
         avail = imgui.get_content_region_available()[0]
-        imgui.same_line(avail - total_button_width)
+        imgui.same_line(avail - total_button_width + 20)
         # Preview
         render_timeline_toggle("Preview", "show_funscript_timeline")
-        imgui.same_line()
+        imgui.same_line(spacing=4)
         # Heatmap
         render_timeline_toggle("Heatmap", "show_heatmap")
-        imgui.same_line()
+        imgui.same_line(spacing=4)
         # Full Width Nav Bar (hasattr check)
         if not hasattr(app_state, 'full_width_nav'):
             app_state.full_width_nav = False

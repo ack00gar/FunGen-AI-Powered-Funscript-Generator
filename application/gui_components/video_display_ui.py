@@ -192,7 +192,7 @@ class VideoDisplayUI:
             current_target_fps_setting, tracker_fps_mark, processor_fps_mark
         )
 
-        imgui.same_line()
+        imgui.same_line(spacing=4)
         if native_fps_val > 0:
             if imgui.button(reset_button_text + "##FPSResetTinyOverlay", width=reset_button_w):
                 if self.app.processor:
@@ -215,9 +215,7 @@ class VideoDisplayUI:
         tiny_fps_slider_w = 75.0
         native_fps_str, native_fps_val_for_reset = event_handlers.get_native_fps_info_for_button()
         tiny_fps_reset_button_text = f"R{native_fps_str}"
-        tiny_fps_reset_button_w = max(button_h_ref * 1.5,
-                                      imgui.calc_text_size(tiny_fps_reset_button_text)[0] + style.frame_padding[
-                                          0] * 2 + 5)
+        tiny_fps_reset_button_w = max(button_h_ref * 1.5, imgui.calc_text_size(tiny_fps_reset_button_text)[0] + style.frame_padding[0] * 2 + 5)
 
         total_fps_controls_width = tiny_fps_slider_w + style.item_spacing[0] + tiny_fps_reset_button_w
 
@@ -254,8 +252,7 @@ class VideoDisplayUI:
             kpt_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.5)  # Muted Red
             thickness = 1
 
-        skeleton = [[0, 1], [0, 2], [1, 3], [2, 4], [5, 6], [5, 11], [6, 12], [11, 12], [5, 7], [7, 9], [6, 8], [8, 10],
-                    [11, 13], [13, 15], [12, 14], [14, 16]]
+        skeleton = [[0, 1], [0, 2], [1, 3], [2, 4], [5, 6], [5, 11], [6, 12], [11, 12], [5, 7], [7, 9], [6, 8], [8, 10], [11, 13], [13, 15], [12, 14], [14, 16]]
 
         for conn in skeleton:
             idx1, idx2 = conn
@@ -265,8 +262,7 @@ class VideoDisplayUI:
                 p1_screen = self._video_to_screen_coords(int(kp1[0]), int(kp1[1]))
                 p2_screen = self._video_to_screen_coords(int(kp2[0]), int(kp2[1]))
                 if p1_screen and p2_screen:
-                    draw_list.add_line(p1_screen[0], p1_screen[1], p2_screen[0], p2_screen[1], limb_color,
-                                       thickness=thickness)
+                    draw_list.add_line(p1_screen[0], p1_screen[1], p2_screen[0], p2_screen[1], limb_color, thickness=thickness)
 
         for kp in keypoints:
             if kp[2] > 0.5:
@@ -274,8 +270,7 @@ class VideoDisplayUI:
                 if p_screen:
                     draw_list.add_circle_filled(p_screen[0], p_screen[1], 3.0, kpt_color)
 
-    def _render_motion_mode_overlay(self, draw_list, motion_mode: Optional[str], interaction_class: Optional[str],
-                                    roi_video_coords: Tuple[int, int, int, int]):
+    def _render_motion_mode_overlay(self, draw_list, motion_mode: Optional[str], interaction_class: Optional[str], roi_video_coords: Tuple[int, int, int, int]):
         """Renders the motion mode text (Thrusting, Riding, etc.) as an ImGui overlay."""
         if not motion_mode or motion_mode == 'undetermined':
             return
@@ -363,8 +358,7 @@ class VideoDisplayUI:
                 available_w_video, available_h_video = imgui.get_content_region_available()
 
                 if available_w_video > 0 and available_h_video > 0:
-                    display_w, display_h, cursor_x_offset, cursor_y_offset = app_state.calculate_video_display_dimensions(
-                        available_w_video, available_h_video)
+                    display_w, display_h, cursor_x_offset, cursor_y_offset = app_state.calculate_video_display_dimensions(available_w_video, available_h_video)
                     if display_w > 0 and display_h > 0:
                         self._update_actual_video_image_rect(display_w, display_h, cursor_x_offset, cursor_y_offset)
 
@@ -372,8 +366,7 @@ class VideoDisplayUI:
                         imgui.set_cursor_pos((win_content_x + cursor_x_offset, win_content_y + cursor_y_offset))
 
                         uv0_x, uv0_y, uv1_x, uv1_y = app_state.get_video_uv_coords()
-                        imgui.image(self.gui_instance.frame_texture_id, display_w, display_h, (uv0_x, uv0_y),
-                                    (uv1_x, uv1_y))
+                        imgui.image(self.gui_instance.frame_texture_id, display_w, display_h, (uv0_x, uv0_y), (uv1_x, uv1_y))
 
                         # Store the item rect for overlay positioning, AFTER imgui.image
                         self._video_display_rect_min = imgui.get_item_rect_min()
@@ -504,6 +497,38 @@ class VideoDisplayUI:
                         self._render_fps_controls_overlay()
                         self._render_video_zoom_pan_controls(app_state)
 
+                        # --- Overlay: Top-right buttons for L/R Dial and Gauge ---
+                        def render_overlay_toggle(label, visible_attr):
+                            pushed = False
+                            if not getattr(app_state, visible_attr):
+                                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                                pushed = True
+                            if imgui.button(label):
+                                setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
+                                self.app.project_manager.project_dirty = True
+                            if pushed:
+                                imgui.pop_style_var()
+
+                        # Position at top right of video frame
+                        btn_labels = ["Dial", "Gauge"]
+                        btn_attrs = ["show_lr_dial_graph", "show_gauge_window"]
+                        btn_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in btn_labels]
+                        total_btn_width = sum(btn_widths)
+                        # btn_height = imgui.get_frame_height()
+                        img_rect = self._actual_video_image_rect_on_screen
+                        top_right_x = img_rect['max_x'] - total_btn_width + 4
+                        top_right_y = img_rect['min_y'] + 8
+                        imgui.set_cursor_screen_pos((top_right_x, top_right_y))
+                        use_small_font = hasattr(self.gui_instance, 'small_font') and self.gui_instance.small_font and getattr(self.gui_instance.small_font, 'is_loaded', lambda: True)()
+                        if use_small_font:
+                            imgui.push_font(self.gui_instance.small_font)
+                        for i, (lbl, attr) in enumerate(zip(btn_labels, btn_attrs)):
+                            render_overlay_toggle(lbl, attr)
+                            if i < len(btn_labels) - 1:
+                                imgui.same_line(spacing=4)
+                        if use_small_font:
+                            imgui.pop_font()
+
             # --- Interactive Refinement Overlay and Click Handling ---
             if self.app.app_state_ui.interactive_refinement_mode_enabled:
                 # 1. Render the bounding boxes so the user can see what to click.
@@ -525,8 +550,7 @@ class VideoDisplayUI:
                     # Find the chapter at the current frame
                     chapter = self.app.funscript_processor.get_chapter_at_frame(current_frame_idx)
                     if not chapter:
-                        self.app.logger.info("Cannot refine: Please click within a chapter boundary.",
-                                             extra={'status_message': True})
+                        self.app.logger.info("Cannot refine: Please click within a chapter boundary.", extra={'status_message': True})
                         return
 
                     # Find which bounding box was clicked
@@ -538,15 +562,10 @@ class VideoDisplayUI:
                             if p1 and p2 and p1[0] <= mouse_x <= p2[0] and p1[1] <= mouse_y <= p2[1]:
                                 clicked_track_id = box.get("track_id")
                                 if clicked_track_id is not None:
-                                    self.app.logger.info(
-                                        f"Hint received! Refining chapter '{chapter.position_short_name}' "
-                                        f"to follow object with track_id: {clicked_track_id}",
-                                        extra={'status_message': True})
+                                    self.app.logger.info(f"Hint received! Refining chapter '{chapter.position_short_name}' "f"to follow object with track_id: {clicked_track_id}", extra={'status_message': True})
                                     # Trigger the backend process
-                                    self.app.event_handlers.handle_interactive_refinement_click(chapter,
-                                                                                                clicked_track_id)
+                                    self.app.event_handlers.handle_interactive_refinement_click(chapter, clicked_track_id)
                                     break  # Stop after finding the first clicked box
-
             else:
                 self._render_drop_video_prompt()
 
@@ -557,8 +576,7 @@ class VideoDisplayUI:
         if not (self.app.processor and self.app.processor.current_frame is not None): return
 
         img_rect = self._actual_video_image_rect_on_screen
-        is_hovering_video = imgui.is_mouse_hovering_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'],
-                                                         img_rect['max_y'])
+        is_hovering_video = imgui.is_mouse_hovering_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'])
 
         if not is_hovering_video: return
         # If in ROI selection mode, these interactions should be disabled or handled differently.
@@ -581,8 +599,7 @@ class VideoDisplayUI:
                     relative_mouse_y_in_view = (mouse_screen_y - img_rect['min_y']) / view_height_on_screen
                     zoom_speed = 1.1
                     factor = zoom_speed if io.mouse_wheel > 0.0 else 1.0 / zoom_speed
-                    app_state.adjust_video_zoom(factor, mouse_pos_normalized=(relative_mouse_x_in_view,
-                                                                              relative_mouse_y_in_view))
+                    app_state.adjust_video_zoom(factor, mouse_pos_normalized=(relative_mouse_x_in_view, relative_mouse_y_in_view))
                     self.app.energy_saver.reset_activity_timer()
 
         if app_state.video_zoom_factor > 1.0 and imgui.is_mouse_dragging(0) and not imgui.is_any_item_active():
@@ -686,16 +703,14 @@ class VideoDisplayUI:
                 draw_list.add_text(p1[0] + 3, p1[1] + 3, imgui.get_color_u32_rgba(1, 1, 1, 1), label)
 
         if is_occluded:
-            draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 20, imgui.get_color_u32_rgba(1, 0.6, 0, 0.9),
-                               "OCCLUSION (FALLBACK)")
+            draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 20, imgui.get_color_u32_rgba(1, 0.6, 0, 0.9), "OCCLUSION (FALLBACK)")
 
         motion_mode = frame_overlay_data.get("motion_mode")
         is_vr_video = self.app.processor and self.app.processor.determined_video_type == 'VR'
 
         if motion_mode and is_vr_video:
             roi_to_use = None
-            locked_penis_box = next(
-                (b for b in frame_overlay_data.get("yolo_boxes", []) if b.get("class_name") == "locked_penis"), None)
+            locked_penis_box = next((b for b in frame_overlay_data.get("yolo_boxes", []) if b.get("class_name") == "locked_penis"), None)
             if locked_penis_box and "bbox" in locked_penis_box:
                 x1, y1, x2, y2 = locked_penis_box["bbox"]
                 roi_to_use = (x1, y1, x2 - x1, y2 - y1)
@@ -726,8 +741,7 @@ class VideoDisplayUI:
         num_control_lines = 1
         pan_buttons_active = app_state.video_zoom_factor > 1.0
         if pan_buttons_active: num_control_lines = 2
-        group_height = (button_h_ref * num_control_lines) + (
-                    style.item_spacing[1] * (num_control_lines - 1 if num_control_lines > 1 else 0))
+        group_height = (button_h_ref * num_control_lines) + (style.item_spacing[1] * (num_control_lines - 1 if num_control_lines > 1 else 0))
         overlay_ctrl_y = img_rect['max_y'] - group_height - (style.item_spacing[1] * 2)
         overlay_ctrl_x = img_rect['min_x'] + style.item_spacing[1]
         overlay_ctrl_y = max(img_rect['min_y'] + style.item_spacing[1], overlay_ctrl_y)
@@ -740,26 +754,26 @@ class VideoDisplayUI:
             # Pan Arrows Block (Left, Right, Up, Down on one line)
             if imgui.arrow_button("##VidOverPanLeft", imgui.DIRECTION_LEFT):
                 app_state.pan_video_normalized_delta(-app_state.video_pan_step, 0)
-            imgui.same_line()
+            imgui.same_line(spacing=4)
             if imgui.arrow_button("##VidOverPanRight", imgui.DIRECTION_RIGHT):
                 app_state.pan_video_normalized_delta(app_state.video_pan_step, 0)
-            imgui.same_line()
+            imgui.same_line(spacing=4)
             if imgui.arrow_button("##VidOverPanUp", imgui.DIRECTION_UP):
                 app_state.pan_video_normalized_delta(0, -app_state.video_pan_step)
-            imgui.same_line()
+            imgui.same_line(spacing=4)
             if imgui.arrow_button("##VidOverPanDown", imgui.DIRECTION_DOWN):
                 app_state.pan_video_normalized_delta(0, app_state.video_pan_step)
 
         # Zoom Settings Block (Z-In, Z-Out, Rst, Text on one line)
         if imgui.button("Z-In##VidOverZoomIn"):
             app_state.adjust_video_zoom(1.2)
-        imgui.same_line()
+        imgui.same_line(spacing=4)
         if imgui.button("Z-Out##VidOverZoomOut"):
             app_state.adjust_video_zoom(1 / 1.2)
-        imgui.same_line()
+        imgui.same_line(spacing=4)
         if imgui.button("Rst##VidOverZoomReset"):
             app_state.reset_video_zoom_pan()
-        imgui.same_line()
+        imgui.same_line(spacing=4)
         imgui.text(f"{app_state.video_zoom_factor:.1f}x")
 
         imgui.end_group()
@@ -770,6 +784,5 @@ class VideoDisplayUI:
         text_to_display = "Drag and drop one or more video files here."
         text_size = imgui.calc_text_size(text_to_display)
         if win_size[0] > text_size[0] and win_size[1] > text_size[1]:  # Check if window is large enough for text
-            imgui.set_cursor_pos(((win_size[0] - text_size[0]) * 0.5 + cursor_start_pos[0],
-                                  (win_size[1] - text_size[1]) * 0.5 + cursor_start_pos[1]))
+            imgui.set_cursor_pos(((win_size[0] - text_size[0]) * 0.5 + cursor_start_pos[0], (win_size[1] - text_size[1]) * 0.5 + cursor_start_pos[1]))
         imgui.text(text_to_display)
