@@ -416,6 +416,7 @@ class AppFileManager:
         self.app.app_state_ui.heatmap_dirty = True
         self.app.app_state_ui.funscript_preview_dirty = True
         self.app.project_manager.project_dirty = True
+        self.app.app_state_ui.clear_bars_to_blank()
 
     def load_stage2_overlay_data(self, filepath: str):
         self.clear_stage2_overlay_data()  # Clear previous before loading new

@@ -755,6 +755,10 @@ class ApplicationLogic:
         """Resets the application to a clean state for a new or loaded project."""
         self.logger.info(f"Resetting project state ({'new project' if for_new_project else 'project load'})...")
 
+        # Preserve current bar visibility states
+        prev_show_heatmap = getattr(self.app_state_ui, 'show_heatmap', True)
+        prev_show_funscript_timeline = getattr(self.app_state_ui, 'show_funscript_timeline', True)
+
         # Stop any active processing
         if self.processor and self.processor.is_processing: self.processor.stop_processing()
         if self.stage_processor.full_analysis_active: self.stage_processor.abort_stage_processing()  # Signals thread
@@ -763,10 +767,6 @@ class ApplicationLogic:
         self.funscript_processor.reset_state_for_new_project()
         self.funscript_processor.update_funscript_stats_for_timeline(1, "Project Reset")
         self.funscript_processor.update_funscript_stats_for_timeline(2, "Project Reset")
-
-        # Reset waveform data
-        self.audio_waveform_data = None
-        self.app_state_ui.show_audio_waveform = False
 
         # Reset waveform data
         self.audio_waveform_data = None
@@ -806,6 +806,12 @@ class ApplicationLogic:
         self.app_state_ui.heatmap_dirty = True
         self.app_state_ui.funscript_preview_dirty = True
         self.app_state_ui.force_timeline_pan_to_current_frame = True
+
+        # Restore previous bar visibility states
+        if hasattr(self.app_state_ui, 'show_heatmap'):
+            self.app_state_ui.show_heatmap = prev_show_heatmap
+        if hasattr(self.app_state_ui, 'show_funscript_timeline'):
+            self.app_state_ui.show_funscript_timeline = prev_show_funscript_timeline
 
         if for_new_project:
             self.logger.info("New project state initialized.", extra={'status_message': True})
