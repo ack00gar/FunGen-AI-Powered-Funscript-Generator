@@ -395,7 +395,7 @@ class GUI:
             and (not is_live_tracking
             or (time.time() - self.last_preview_update_time_timeline >= self.preview_update_interval_seconds))))
 
-        if needs_regen and total_duration_s > 0.001 and self.preview_task_queue.empty():
+        if needs_regen and self.preview_task_queue.empty():
             actions_copy = self.app.funscript_processor.get_actions('primary').copy()
             task = {
                 'type': 'timeline',
@@ -453,7 +453,7 @@ class GUI:
 
         needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (time.time() - self.last_preview_update_time_heatmap >= self.preview_update_interval_seconds)))
 
-        if needs_regen and total_video_duration_s > 0.001 and self.preview_task_queue.empty():
+        if needs_regen and self.preview_task_queue.empty():
             actions_copy = self.app.funscript_processor.get_actions('primary').copy()
             task = {
                 'type': 'heatmap',
