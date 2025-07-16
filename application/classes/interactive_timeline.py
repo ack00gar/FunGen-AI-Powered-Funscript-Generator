@@ -246,6 +246,101 @@ class InteractiveFunscriptTimeline:
             f"Pasted to T{destination_timeline_num}, overwriting points in range [{min_timestamp}, {max_timestamp}].",
             extra = {'status_message': True})
 
+    # --- Selection Filtering Methods ---
+    def _select_top_points(self, selection: List[Dict]) -> List[Dict]:
+        """
+        Returns a list of points that are local maxima (top points) in the selection.
+        This version correctly handles endpoints and plateaus.
+        A point is a top point if it is greater than its left neighbor and greater than or equal to its right neighbor.
+        """
+        if len(selection) < 2:
+            return selection  # A single point is a peak; empty list is empty
+
+        top_points = []
+        for i, point in enumerate(selection):
+            pos = point['pos']
+
+            # Get previous and next position. Use -1 as a proxy for -infinity since position is always >= 0.
+            prev_pos = selection[i - 1]['pos'] if i > 0 else -1
+            next_pos = selection[i + 1]['pos'] if i < len(selection) - 1 else -1
+
+            # To be a peak, it must be strictly greater than what came before (or be the first point)
+            # and greater than or equal to what comes after (to select the start of a plateau).
+            if pos > prev_pos and pos >= next_pos:
+                top_points.append(point)
+        return top_points
+
+    def _select_bottom_points(self, selection: List[Dict]) -> List[Dict]:
+        """
+        Returns a list of points that are local minima (bottom points) in the selection.
+        This version correctly handles endpoints and plateaus.
+        A point is a bottom point if it is less than its left neighbor and less than or equal to its right neighbor.
+        """
+        if len(selection) < 2:
+            # For a 2-point selection, the lower point is the bottom point.
+            if len(selection) == 2:
+                return [selection[0]] if selection[0]['pos'] <= selection[1]['pos'] else [selection[1]]
+            return selection
+
+        bottom_points = []
+        for i, point in enumerate(selection):
+            pos = point['pos']
+
+            # Use 101 as a proxy for +infinity since position is always <= 100.
+            prev_pos = selection[i - 1]['pos'] if i > 0 else 101
+            next_pos = selection[i + 1]['pos'] if i < len(selection) - 1 else 101
+
+            # To be a valley, it must be strictly less than what came before (or be the first point)
+            # and less than or equal to what comes after (to select the start of a plateau).
+            if pos < prev_pos and pos <= next_pos:
+                bottom_points.append(point)
+        return bottom_points
+
+    def _select_mid_points(self, selection: List[Dict]) -> List[Dict]:
+        """
+        Returns a list of points that are neither local maxima nor local minima (mid points).
+        """
+        if len(selection) < 3:
+            return []  # Mid-points are only meaningful in selections of 3 or more.
+
+        # Get top and bottom points using the corrected functions
+        top_points = self._select_top_points(selection)
+        bottom_points = self._select_bottom_points(selection)
+
+        # Create a set of the unique object IDs of all "extreme" points for efficient lookup
+        extreme_ids = {id(p) for p in top_points} | {id(p) for p in bottom_points}
+
+        # A point is a "mid point" if it's not in the set of extreme points.
+        mid_points = [p for p in selection if id(p) not in extreme_ids]
+        return mid_points
+
+    def _handle_selection_filtering(self, filter_func):
+        """Generic handler to apply a selection filter and update the UI state."""
+        actions_list_ref = self._get_actions_list_ref()
+        if not actions_list_ref or len(self.multi_selected_action_indices) < 3:
+            return
+
+        # Get the selected actions, sorted by time, which is crucial for neighbor comparison
+        selected_indices_sorted = sorted(list(self.multi_selected_action_indices))
+        selection_of_actions = [actions_list_ref[i] for i in selected_indices_sorted]
+
+        # Apply the provided filter function (e.g., _select_top_points)
+        filtered_actions = filter_func(selection_of_actions)
+
+        if not filtered_actions:
+            self.multi_selected_action_indices.clear()
+            self.selected_action_idx = -1
+            return
+
+        # Create a map of object IDs to original indices for efficient lookup
+        action_id_to_index = {id(action): i for i, action in enumerate(actions_list_ref)}
+
+        # Find the new indices based on the filtered action objects
+        new_indices = {action_id_to_index[id(pt)] for pt in filtered_actions if id(pt) in action_id_to_index}
+
+        self.multi_selected_action_indices = new_indices
+        self.selected_action_idx = min(new_indices) if new_indices else -1
+
     # --- Bulk Operations Direct Calls to Funscript Object ---
     def _call_funscript_method(self, method_name: str, error_context: str, **kwargs) -> bool:
         funscript_instance, axis_name = self._get_target_funscript_details()
@@ -1970,6 +2065,26 @@ class InteractiveFunscriptTimeline:
                     if can_copy_to_other:
                         self._handle_copy_to_other_timeline()
                     imgui.close_current_popup()
+
+                imgui.separator()
+
+                # --- Selection Filtering ---
+                can_filter_selection = len(self.multi_selected_action_indices) >= 3
+                if imgui.menu_item("Select Top Points", enabled=can_filter_selection)[0]:
+                    if can_filter_selection:
+                        self._handle_selection_filtering(self._select_top_points)
+                    imgui.close_current_popup()
+
+                if imgui.menu_item("Select Bottom Points", enabled=can_filter_selection)[0]:
+                    if can_filter_selection:
+                        self._handle_selection_filtering(self._select_bottom_points)
+                    imgui.close_current_popup()
+
+                if imgui.menu_item("Select Mid Points", enabled=can_filter_selection)[0]:
+                    if can_filter_selection:
+                        self._handle_selection_filtering(self._select_mid_points)
+                    imgui.close_current_popup()
+                # --- End Selection Filtering ---
 
                 imgui.separator()
 
