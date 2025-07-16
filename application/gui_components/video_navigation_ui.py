@@ -109,6 +109,47 @@ class VideoNavigationUI:
             if self.show_create_chapter_dialog: self._render_create_chapter_window()
             if self.show_edit_chapter_dialog: self._render_edit_chapter_window()
 
+        # --- Timeline Visibility Toggles as Small Buttons ---
+        def render_timeline_toggle(label, visible_attr):
+            pushed = False
+            if not getattr(app_state, visible_attr):
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                pushed = True
+            if imgui.button(label):
+                setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
+                self.app.project_manager.project_dirty = True
+            if pushed:
+                imgui.pop_style_var()
+
+        use_small_font = hasattr(self.gui_instance, 'small_font') and self.gui_instance.small_font and getattr(self.gui_instance.small_font, 'is_loaded', lambda: True)()
+        if use_small_font:
+            imgui.push_font(self.gui_instance.small_font)
+        # Left-aligned: T1, T2
+        render_timeline_toggle("T1", "show_funscript_interactive_timeline")
+        imgui.same_line()
+        render_timeline_toggle("T2", "show_funscript_interactive_timeline2")
+
+        # Right-aligned: Preview, Heatmap, Full Width Nav
+        # Calculate width for right-aligned buttons
+        button_labels = ["Preview", "Heatmap", "FullWidth"]
+        button_attrs = ["show_funscript_timeline", "show_heatmap", "full_width_nav"]
+        button_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in button_labels]
+        total_button_width = sum(button_widths)
+        avail = imgui.get_content_region_available()[0]
+        imgui.same_line(avail - total_button_width)
+        # Preview
+        render_timeline_toggle("Preview", "show_funscript_timeline")
+        imgui.same_line()
+        # Heatmap
+        render_timeline_toggle("Heatmap", "show_heatmap")
+        imgui.same_line()
+        # Full Width Nav Bar (hasattr check)
+        if not hasattr(app_state, 'full_width_nav'):
+            app_state.full_width_nav = False
+        render_timeline_toggle("FullWidth", "full_width_nav")
+        if use_small_font:
+            imgui.pop_font()
+
         imgui.end()
 
     def _render_seek_bar(self, stage_proc, file_mgr, event_handlers, nav_content_width):
