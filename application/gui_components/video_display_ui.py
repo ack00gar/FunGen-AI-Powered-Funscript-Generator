@@ -566,7 +566,7 @@ class VideoDisplayUI:
                                     # Trigger the backend process
                                     self.app.event_handlers.handle_interactive_refinement_click(chapter, clicked_track_id)
                                     break  # Stop after finding the first clicked box
-            else:
+            if not video_frame_available:
                 self._render_drop_video_prompt()
 
         imgui.end()
