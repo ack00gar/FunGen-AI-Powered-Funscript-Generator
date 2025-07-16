@@ -969,17 +969,3 @@ class GUI:
             if self.window: glfw.destroy_window(self.window)
             glfw.terminate()
             self.app.logger.info("GUI terminated.", extra={'status_message': False})
-
-    def clear_bars_to_blank(self):
-        # Force the heatmap and preview bars to blank (dummy texture)
-        import OpenGL.GL as gl
-        import numpy as np
-        # Blank for heatmap
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self.heatmap_texture_id)
-        dummy_pixel = np.array([0, 0, 0, 0], dtype=np.uint8).tobytes()
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, 1, 1, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, dummy_pixel)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-        # Blank for preview
-        gl.glBindTexture(gl.GL_TEXTURE_2D, self.funscript_preview_texture_id)
-        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, 1, 1, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, dummy_pixel)
-        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
