@@ -846,7 +846,8 @@ class GUI:
             self.lr_dial_window_ui.render(),
             self._render_batch_confirmation_dialog(),
             self.file_dialog.draw() if self.file_dialog.open else None,
-            self._render_status_message(app_state)
+            self._render_status_message(app_state),
+            self.app.updater.render_update_dialog()
         ))
         self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
 
