@@ -419,19 +419,3 @@ class AppStateUI:
         self.app_settings.set("lr_dial_window_size_h", int(self.lr_dial_window_size[1]))
 
         self.app_settings.set("interactive_refinement_mode_enabled", self.interactive_refinement_mode_enabled)
-
-    def clear_bars_to_blank(self):
-        """Force the heatmap and preview bars to blank (dummy texture) via OpenGL."""
-        if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
-            gui = self.app.gui_instance
-            import OpenGL.GL as gl
-            import numpy as np
-            # Blank for heatmap
-            gl.glBindTexture(gl.GL_TEXTURE_2D, gui.heatmap_texture_id)
-            dummy_pixel = np.array([0, 0, 0, 0], dtype=np.uint8).tobytes()
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, 1, 1, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, dummy_pixel)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-            # Blank for preview
-            gl.glBindTexture(gl.GL_TEXTURE_2D, gui.funscript_preview_texture_id)
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, 1, 1, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, dummy_pixel)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)

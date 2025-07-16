@@ -1103,10 +1103,10 @@ class AppFunscriptProcessor:
         self.scripting_range_active = False
         self.scripting_start_frame = 0
         self.scripting_end_frame = 0
-        funscript_obj = self.get_funscript_obj()
-        if funscript_obj:
+        # funscript_obj = self.get_funscript_obj()
+        # if funscript_obj:
             # funscript_obj.clear() # Clearing funscript usually handled by FileManage.close_video or tracker.reset
-            pass
+            # pass
         self.update_funscript_stats_for_timeline(1, "Project Reset")
         self.update_funscript_stats_for_timeline(2, "Project Reset")
 
