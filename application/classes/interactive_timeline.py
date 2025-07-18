@@ -1476,26 +1476,41 @@ class InteractiveFunscriptTimeline:
                         if 0 <= idx < len(actions_list): actions_list[idx]["pos"] = min(100, max(0, actions_list[idx]["pos"] + pos_nudge_delta))
                     fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
 
+                # Determine paused state
+                is_paused = False
+                if video_loaded and self.app.processor and self.app.processor.is_processing:
+                    is_paused = hasattr(self.app.processor, 'pause_event') and self.app.processor.pause_event.is_set()
+
                 # Nudge Time
                 time_nudge_delta_ms = 0
                 snap_grid_time_ms_for_nudge = app_state.snap_to_grid_time_ms if app_state.snap_to_grid_time_ms > 0 else (
                     int(1000 / video_fps_for_calc) if video_fps_for_calc > 0 else 20)
+
                 nudge_prev_tuple = self.app._map_shortcut_to_glfw_key(
                     shortcuts.get("nudge_selection_time_prev", "SHIFT+LEFT_ARROW"))
-                if nudge_prev_tuple and imgui.is_key_pressed(nudge_prev_tuple[0]) and all(m == io_m for m, io_m in zip(
-                        nudge_prev_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super])):
+                # FIX: Switched to a robust, key-based modifier check
+                if nudge_prev_tuple and imgui.is_key_pressed(nudge_prev_tuple[0]) and \
+                        (nudge_prev_tuple[1]['shift'] == io.key_shift and
+                         nudge_prev_tuple[1]['ctrl'] == io.key_ctrl and
+                         nudge_prev_tuple[1]['alt'] == io.key_alt and
+                         nudge_prev_tuple[1]['super'] == io.key_super):
                     time_nudge_delta_ms = -snap_grid_time_ms_for_nudge
+
                 nudge_next_tuple = self.app._map_shortcut_to_glfw_key(
                     shortcuts.get("nudge_selection_time_next", "SHIFT+RIGHT_ARROW"))
-                if time_nudge_delta_ms == 0 and nudge_next_tuple and imgui.is_key_pressed(nudge_next_tuple[0]) and all(
-                        m == io_m for m, io_m in
-                        zip(nudge_next_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super])):
+                # FIX: Switched to a robust, key-based modifier check
+                if time_nudge_delta_ms == 0 and nudge_next_tuple and imgui.is_key_pressed(nudge_next_tuple[0]) and \
+                        (nudge_next_tuple[1]['shift'] == io.key_shift and
+                         nudge_next_tuple[1]['ctrl'] == io.key_ctrl and
+                         nudge_next_tuple[1]['alt'] == io.key_alt and
+                         nudge_next_tuple[1]['super'] == io.key_super):
                     time_nudge_delta_ms = snap_grid_time_ms_for_nudge
 
                 if time_nudge_delta_ms != 0 and self.multi_selected_action_indices:
                     op_desc = f"Nudged Point(s) Time by {time_nudge_delta_ms}ms"
                     fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                    indices_to_affect = sorted(list(self.multi_selected_action_indices), reverse=(time_nudge_delta_ms < 0))
+                    indices_to_affect = sorted(list(self.multi_selected_action_indices),
+                                               reverse=(time_nudge_delta_ms < 0))
 
                     objects_to_move = [actions_list[idx] for idx in indices_to_affect]
                     for i, action_obj in enumerate(objects_to_move):
@@ -1519,10 +1534,28 @@ class InteractiveFunscriptTimeline:
 
                     actions_list.sort(key=lambda a: a["at"])
                     # Re-select moved points robustly
-                    self.multi_selected_action_indices = {actions_list.index(obj) for obj in objects_to_move if obj in actions_list}
+                    self.multi_selected_action_indices = {actions_list.index(obj) for obj in objects_to_move if
+                                                          obj in actions_list}
                     self.selected_action_idx = min(
                         self.multi_selected_action_indices) if self.multi_selected_action_indices else -1
                     fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+
+                    # FIX: Added video sync logic
+                    # After nudging, seek the video to the new position of the primary selected point
+                    if video_loaded and (
+                            not self.app.processor.is_processing or is_paused) and self.selected_action_idx != -1:
+                        try:
+                            # Ensure the selected index is still valid
+                            if 0 <= self.selected_action_idx < len(actions_list):
+                                new_time_ms = actions_list[self.selected_action_idx]['at']
+                                target_frame = int(round((new_time_ms / 1000.0) * video_fps_for_calc))
+                                clamped_frame = np.clip(target_frame, 0, self.app.processor.total_frames - 1)
+
+                                # Seek the video and force the timeline to pan to the new frame
+                                self.app.processor.seek_video(clamped_frame)
+                                app_state.force_timeline_pan_to_current_frame = True
+                        except (IndexError, ValueError) as e:
+                            self.app.logger.warning(f"Could not sync video after nudge due to an error: {e}")
 
                 # Delete Selected
                 del_sc_str = shortcuts.get("delete_selected_point", "DELETE")
