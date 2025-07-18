@@ -458,6 +458,143 @@ class DualAxisFunscript:
             self.logger.error(f"Error applying final auto-tuned SG filter: {e}")
             return None
 
+    def recover_missing_strokes(self, axis: str, original_actions: List[Dict], threshold_factor: float = 1.8):
+        """
+        Analyzes the rhythm of keyframes to find and re-insert significant strokes
+        that were filtered out from the original script. This method is destructive.
+        """
+        target_list_attr = 'primary_actions' if axis == 'primary' else 'secondary_actions'
+        keyframes = getattr(self, target_list_attr)
+
+        if len(keyframes) < 2 or len(original_actions) < 3:
+            return  # Not enough data to analyze
+
+        # 1. Establish the rhythmic baseline from the current keyframes
+        intervals = np.array([p2['at'] - p1['at'] for p1, p2 in zip(keyframes, keyframes[1:]) if p2['at'] > p1['at']])
+        if len(intervals) < 2: return
+
+        median_interval = np.median(intervals)
+        gap_threshold = median_interval * threshold_factor
+
+        # 2. Find gaps and search for the most significant missing stroke in each
+        points_to_add = []
+        for i in range(len(keyframes) - 1):
+            p1, p2 = keyframes[i], keyframes[i + 1]
+            interval = p2['at'] - p1['at']
+
+            if interval > gap_threshold:
+                best_candidate = None
+                max_significance = -1
+
+                # Find original points within this time range using bisect for efficiency
+                action_times = [a['at'] for a in original_actions]
+                s_idx = bisect.bisect_right(action_times, p1['at'])
+                e_idx = bisect.bisect_left(action_times, p2['at'])
+                if s_idx >= e_idx: continue
+
+                candidates_in_gap = original_actions[s_idx:e_idx]
+                if not candidates_in_gap: continue
+
+                # Determine the most significant point by its distance from the connecting line
+                for p_cand in candidates_in_gap:
+                    progress = (p_cand['at'] - p1['at']) / float(interval)
+                    projected_pos = p1['pos'] + progress * (p2['pos'] - p1['pos'])
+                    significance = abs(p_cand['pos'] - projected_pos)
+
+                    if significance > max_significance:
+                        max_significance = significance
+                        best_candidate = p_cand
+
+                if best_candidate:
+                    points_to_add.append(copy.deepcopy(best_candidate))
+
+        if points_to_add:
+            self.logger.info(f"Ultimate Autotune: Recovered {len(points_to_add)} missing strokes.")
+            # Use add_actions_batch for efficient, sorted, and non-overlapping insertion
+            batch_data = [{
+                'timestamp_ms': p['at'],
+                'primary_pos': p['pos'] if axis == 'primary' else None,
+                'secondary_pos': p['pos'] if axis == 'secondary' else None
+            } for p in points_to_add]
+
+            self.add_actions_batch(batch_data)
+
+    def apply_ultimate_autotune(self, axis: str, params: Dict) -> Optional[List[Dict]]:
+        """
+        Applies a comprehensive, multi-stage enhancement pipeline by calling existing
+        methods on a temporary, isolated Funscript object.
+        This method is NON-DESTRUCTIVE and returns a new list of actions.
+        """
+        actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list_ref or len(actions_list_ref) < 3:
+            return copy.deepcopy(actions_list_ref)
+
+        self.logger.info("Starting Ultimate Autotune pipeline...")
+
+        # Create a temporary, isolated Funscript object to work with.
+        temp_fs = DualAxisFunscript(logger=self.logger)
+        if axis == 'primary':
+            temp_fs.primary_actions = copy.deepcopy(actions_list_ref)
+        else:
+            temp_fs.secondary_actions = copy.deepcopy(actions_list_ref)
+
+        # === NEW STEP 1: PRE-SMOOTHING ===
+        p = params.get('presmoothing', {})
+        if p.get('enabled', True):
+            self.logger.debug("Ultimate Autotune: (1) Pre-smoothing script.")
+            # Reuse the existing auto_tune_sg_filter on the temp object
+            temp_fs.auto_tune_sg_filter(
+                axis,
+                max_window_size=p.get('max_window_size', 15),
+                # Use sensible defaults for other params in this context
+                saturation_low=1,
+                saturation_high=99,
+                polyorder=2
+            )
+
+        # === STEP 2: CORE MOTION EXTRACTION ===
+        p = params.get('peaks', {})
+        if p.get('enabled', True):
+            self.logger.debug("Ultimate Autotune: (2) Extracting Core Motion.")
+            temp_fs.find_peaks_and_valleys(axis, prominence=p.get('prominence', 10), distance=p.get('distance', 1))
+
+        if len(getattr(temp_fs, f"{axis}_actions")) < 2:
+            self.logger.warning("Ultimate Autotune: Core motion extraction filtered all points.")
+            return getattr(temp_fs, f"{axis}_actions")
+
+        # === STEP 3: MISSING STROKE RECOVERY ===
+        p = params.get('recovery', {})
+        if p.get('enabled', True):
+            self.logger.debug("Ultimate Autotune: (3) Recovering Missing Strokes.")
+            temp_fs.recover_missing_strokes(axis, original_actions=actions_list_ref,
+                                            threshold_factor=p.get('threshold_factor', 1.8))
+            # Re-run peak finding to clean up after stroke recovery
+            temp_fs.find_peaks_and_valleys(axis, prominence=1)
+
+        # === STEP 4: DYNAMIC RANGE NORMALIZATION ===
+        p = params.get('normalization', {})
+        if p.get('enabled', True):
+            self.logger.debug("Ultimate Autotune: (4) Normalizing Dynamic Range.")
+            temp_fs.scale_points_to_range(axis, output_min=0, output_max=100)
+
+        # === STEP 5: SMOOTH STROKE REGENERATION ===
+        # p = params.get('regeneration', {})
+        # if p.get('enabled', True):
+        #     self.logger.debug("Ultimate Autotune: (5) Regenerating Smooth Strokes.")
+        #     temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=p.get('resample_rate_ms', 40))
+
+        # === STEP 6: SPEED LIMITER ===
+        p = params.get('speed_limiter', {})
+        if p.get('enabled', True):
+            self.logger.debug("Ultimate Autotune: (6) Applying Speed Limit.")
+            temp_fs.apply_speed_limiter(axis, min_interval=20, vibe_amount=0,
+                                        speed_threshold=p.get('speed_threshold', 500.0))
+
+        final_actions = getattr(temp_fs, f"{axis}_actions")
+        self.logger.info(
+            f"Ultimate Autotune pipeline finished. Points: {len(actions_list_ref)} -> {len(final_actions)}.")
+        return final_actions
+
     def simplify_rdp(self, axis: str, epsilon: float,
                      start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
                      selected_indices: Optional[List[int]] = None):
@@ -1170,7 +1307,7 @@ class DualAxisFunscript:
                 actions = sorted(actions_to_keep, key=lambda x: x['at'])
 
             # 2. Replace flat sections with vibrations
-            if len(actions) > 2:
+            if len(actions) > 2 and vibe_amount > 0:
                 last_action_at_vibe = actions[0]['at']
                 last_vibe = ''
                 unmod_last_action_height = 0
