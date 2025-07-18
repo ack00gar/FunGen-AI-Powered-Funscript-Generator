@@ -1125,7 +1125,6 @@ class AppStageProcessor:
 
                             saved_funscript_paths = self.app.file_manager.save_final_funscripts(video_path_from_event, chapters=chapters_for_save)
 
-                            # --- Start of Bug Fix ---
                             # Check if we are in batch mode and if the user requested a copy
                             if self.app.is_batch_processing_active and self.app.batch_copy_funscript_to_video_location:
                                 if saved_funscript_paths and isinstance(saved_funscript_paths, list):
@@ -1151,6 +1150,18 @@ class AppStageProcessor:
                             self.logger.info("Saving project file for completed video...")
                             project_filepath = self.app.file_manager.get_output_path_for_file(video_path_from_event, constants.PROJECT_FILE_EXTENSION)
                             self.app.project_manager.save_project(project_filepath)
+
+                        # Check if we are in simple mode and should auto-run post-processing
+                        is_simple_mode = getattr(self.app.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
+                        is_offline_analysis = self.app.app_state_ui.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]
+
+                        if is_simple_mode and is_offline_analysis:
+                            self.logger.info("Simple Mode: Automatically applying Ultimate Autotune with defaults...")
+                            self.app.set_status_message("Analysis complete! Applying auto-enhancements...")
+                            # Trigger the autotune on the primary timeline (timeline 1)
+                            if hasattr(self.app, 'trigger_ultimate_autotune_with_defaults'):
+                                self.app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+
                     elif status_override == "Aborted":
                         if self.current_analysis_stage == 1 or self.stage1_status_text.startswith(
                             "Running"): self.stage1_status_text = "S1 Aborted."

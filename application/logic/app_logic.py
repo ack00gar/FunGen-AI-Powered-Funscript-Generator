@@ -206,11 +206,42 @@ class ApplicationLogic:
         self.energy_saver.reset_activity_timer()
         self.updater.check_for_updates_async()
 
+    def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
+        """
+        Non-interactively runs the Ultimate Autotune pipeline with default settings.
+        This is called automatically in 'Simple Mode' after an analysis completes.
+        """
+        self.logger.info(f"Triggering default Ultimate Autotune for Timeline {timeline_num}...")
+        fs_proc = self.funscript_processor
+        funscript_instance, axis_name = fs_proc._get_target_funscript_object_and_axis(timeline_num)
+
+        if not funscript_instance or not axis_name:
+            self.logger.error(f"Ultimate Autotune (auto): Could not find target funscript for T{timeline_num}.")
+            return
+
+        # Get default parameters from the funscript processor helper
+        params = fs_proc.get_default_ultimate_autotune_params()
+        op_desc = "Auto-Applied Ultimate Autotune (Simple Mode)"
+
+        # 1. Record state for Undo
+        fs_proc._record_timeline_action(timeline_num, op_desc)
+
+        # 2. Run the non-destructive pipeline to get the result
+        new_actions = funscript_instance.apply_ultimate_autotune(axis_name, params)
+
+        # 3. Apply the result and finalize the Undo action
+        if new_actions is not None:
+            setattr(funscript_instance, f"{axis_name}_actions", new_actions)
+            fs_proc._finalize_action_and_update_ui(timeline_num, op_desc)
+            self.logger.info("Default Ultimate Autotune applied successfully.",
+                             extra={'status_message': True, 'duration': 5.0})
+        else:
+            self.logger.warning("Default Ultimate Autotune failed to produce a result.", extra={'status_message': True})
+
     def toggle_file_manager_window(self):
         """Toggles the visibility of the Generated File Manager window."""
         if hasattr(self, 'app_state_ui'):
             self.app_state_ui.show_generated_file_manager = not self.app_state_ui.show_generated_file_manager
-
 
     def unload_model(self, model_type: str):
         """

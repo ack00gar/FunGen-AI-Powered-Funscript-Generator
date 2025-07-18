@@ -814,11 +814,11 @@ class GUI:
             timeline_current_y_start = panel_y_start + available_height_for_main_panels
             if app_state.show_funscript_interactive_timeline:
                 app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
-                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h)
+                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h, view_mode=app_state.ui_view_mode)
                 timeline_current_y_start += timeline1_render_h
             if app_state.show_funscript_interactive_timeline2:
                 app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline2_render_h)}
-                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h)
+                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h, view_mode=app_state.ui_view_mode)
         else:
             if app_state.just_switched_to_floating:
                 if 'ControlPanel' in app_state.fixed_layout_geometry:
@@ -829,7 +829,7 @@ class GUI:
                     geom = app_state.fixed_layout_geometry['VideoDisplay']
                     imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
                     imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
-                # ... and so on for all other panels ...
+
             self._time_render("ControlPanelUI", self.control_panel_ui.render)
             self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
             self._time_render("VideoDisplayUI", self.video_display_ui.render)
