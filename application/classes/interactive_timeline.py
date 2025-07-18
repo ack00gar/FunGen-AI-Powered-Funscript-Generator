@@ -1309,8 +1309,6 @@ class InteractiveFunscriptTimeline:
 
             if canvas_size[0] <= 0 or canvas_size[1] <= 0:
                 imgui.end()
-                if is_floating:
-                    imgui.end()
                 return
 
             draw_list.add_rect_filled(canvas_abs_pos[0], canvas_abs_pos[1], canvas_abs_pos[0] + canvas_size[0], canvas_abs_pos[1] + canvas_size[1], imgui.get_color_u32_rgba(0.08, 0.08, 0.1, 1))
@@ -1889,7 +1887,6 @@ class InteractiveFunscriptTimeline:
 
                         # Prevent any other click logic from running for this event
                         imgui.end()
-                        if is_floating: imgui.end()
                         return
                     # ====== END: CALIBRATION HOOK ======
 
@@ -2151,5 +2148,3 @@ class InteractiveFunscriptTimeline:
 
         # --- Window End ---
         imgui.end()
-        if is_floating:
-            imgui.end()
