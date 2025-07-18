@@ -69,6 +69,26 @@ class InteractiveFunscriptTimeline:
         self.autotune_max_window = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_max_window", 15)
         self.autotune_polyorder = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_polyorder", 2)
 
+        # --- ULTIMATE AUTOTUNE STATE ---
+        self.show_ultimate_autotune_popup = False
+
+        self.ultimate_presmoothing_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_presmoothing_enabled", True)
+        self.ultimate_presmoothing_max_window = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_presmoothing_max_window", 15)
+
+        self.ultimate_peaks_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_peaks_enabled", True)
+        self.ultimate_peaks_prominence = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_peaks_prominence", 10)
+
+        self.ultimate_recovery_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_recovery_enabled", True)
+        self.ultimate_recovery_threshold = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_recovery_threshold", 1.8)
+
+        self.ultimate_normalization_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_normalization_enabled", True)
+
+        #self.ultimate_regeneration_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_regeneration_enabled", True)
+        #self.ultimate_resample_rate = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_resample_rate", 40)
+
+        self.ultimate_speed_limit_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_speed_limit_enabled", True)
+        self.ultimate_speed_threshold = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_speed_threshold", 500.0)
+
         self.multi_selected_action_indices = set()
         self.is_marqueeing = False
         self.marquee_start_screen_pos = None
@@ -379,6 +399,28 @@ class InteractiveFunscriptTimeline:
                 extra={'status_message': True})
             return None
 
+    def _perform_ultimate_autotune(self):
+        """ Gathers settings from the UI, runs the pipeline, and applies the result. """
+        fs_proc = self.app.funscript_processor
+        funscript_instance, axis_name = self._get_target_funscript_details()
+        if not funscript_instance or not axis_name:
+            self.app.logger.error("Ultimate Autotune: Could not find target funscript.")
+            return
+
+        params = self._get_ultimate_autotune_params()
+        op_desc = "Applied Ultimate Autotune"
+        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+
+        new_actions = funscript_instance.apply_ultimate_autotune(axis_name, params)
+
+        if new_actions is not None:
+            # Apply the result destructively
+            setattr(funscript_instance, f"{axis_name}_actions", new_actions)
+            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+            self.app.logger.info("✨ Ultimate Autotune applied successfully.", extra={'status_message': True})
+        else:
+            self.app.logger.warning("Ultimate Autotune failed to produce a result.", extra={'status_message': True})
+
     def _perform_sg_filter(self, window_length: int, polyorder: int, selected_indices: Optional[List[int]]):
         return (self._call_funscript_method('apply_savitzky_golay', 'SG filter', window_length=window_length, polyorder=polyorder, selected_indices=selected_indices))
 
@@ -415,6 +457,33 @@ class InteractiveFunscriptTimeline:
     def _perform_keyframe_simplification(self, position_tolerance: int, time_tolerance_ms: int, selected_indices: Optional[List[int]]):
         return (self._call_funscript_method('simplify_to_keyframes', 'Keyframe Extraction', position_tolerance = position_tolerance, time_tolerance_ms = time_tolerance_ms, selected_indices = selected_indices))
 
+    def _get_ultimate_autotune_params(self) -> Dict:
+        """Helper to gather all Ultimate Autotune settings from the UI state."""
+        return {
+            'presmoothing': {
+                'enabled': self.ultimate_presmoothing_enabled,
+                'max_window_size': self.ultimate_presmoothing_max_window
+            },
+            'peaks': {
+                'enabled': self.ultimate_peaks_enabled,
+                'prominence': self.ultimate_peaks_prominence,
+                'distance': 1
+            },
+            'recovery': {
+                'enabled': self.ultimate_recovery_enabled,
+                'threshold_factor': self.ultimate_recovery_threshold
+            },
+            'normalization': {'enabled': self.ultimate_normalization_enabled},
+            # 'regeneration': {
+            #     'enabled': self.ultimate_regeneration_enabled,
+            #     'resample_rate_ms': self.ultimate_resample_rate
+            # },
+            'speed_limiter': {
+                'enabled': self.ultimate_speed_limit_enabled,
+                'speed_threshold': self.ultimate_speed_threshold
+            }
+        }
+
     def set_preview_actions(self, preview_actions: Optional[List[Dict]]):
         self.preview_actions = preview_actions
         self.is_previewing = preview_actions is not None
@@ -444,6 +513,11 @@ class InteractiveFunscriptTimeline:
             apply_to_selection = self.peaks_apply_to_selection
         elif filter_type == 'autotune':
             apply_to_selection = self.autotune_apply_to_selection
+        elif filter_type == 'ultimate':
+            params = self._get_ultimate_autotune_params()
+            preview_actions = funscript_instance.apply_ultimate_autotune(axis_name, params)
+            self.set_preview_actions(preview_actions)
+            return
 
 
         indices_to_process = list(self.multi_selected_action_indices) if apply_to_selection else None
@@ -614,6 +688,21 @@ class InteractiveFunscriptTimeline:
                     self.autotune_apply_to_selection = bool(
                         self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
             if autotune_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+            imgui.same_line()
+
+            # --- Ultimate Autotune Button ---
+            ultimate_disabled_bool = not allow_editing_timeline or not has_actions
+            if ultimate_disabled_bool:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+            if imgui.button(f"Ultimate Autotune##UltimateAutotune{window_id_suffix}"):
+                if not ultimate_disabled_bool:
+                    self.show_ultimate_autotune_popup = True
+
+            if ultimate_disabled_bool:
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
             imgui.same_line()
 
             # --- RDP Button ---
@@ -1029,6 +1118,117 @@ class InteractiveFunscriptTimeline:
                 if window_expanded:
                     imgui.end()
 
+            # --- Ultimate Autotune Settings Window ---
+            ultimate_window_title = f"Ultimate Autotune (Timeline {self.timeline_num})##UltimateSettingsWindow{window_id_suffix}"
+            if self.show_ultimate_autotune_popup:
+                if not self.is_previewing:
+                    self._update_preview('ultimate')
+
+                imgui.set_next_window_size(480, 0, condition=imgui.APPEARING)
+                window_expanded, self.show_ultimate_autotune_popup = imgui.begin(
+                    ultimate_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+
+                if window_expanded:
+                    imgui.text_wrapped(
+                        "A one-click pipeline to enhance and clean your script. Changes are previewed live.")
+                    imgui.separator()
+
+                    # --- Pipeline Steps UI ---
+                    if imgui.tree_node("Stage 1: Cleanup & Analysis"):
+                        # Step 1
+                        c, self.ultimate_presmoothing_enabled = imgui.checkbox(
+                            "1. Pre-Smooth (Auto-SG)##UltimateSmooth", self.ultimate_presmoothing_enabled)
+                        if c:
+                            self._update_preview('ultimate')
+                        imgui.same_line(230);
+                        imgui.push_item_width(180)
+                        c, self.ultimate_presmoothing_max_window = imgui.slider_int("Max Window##UltimateSmoothWindow",
+                                                                                    self.ultimate_presmoothing_max_window,
+                                                                                    5, 35)
+                        if c:
+                            if self.ultimate_presmoothing_max_window % 2 == 0:
+                                self.ultimate_presmoothing_max_window += 1
+                            self._update_preview('ultimate')
+                        imgui.pop_item_width()
+
+                        # Step 2
+                        c, self.ultimate_peaks_enabled = imgui.checkbox("2. Extract Core Motion##UltimatePeaks",
+                                                                        self.ultimate_peaks_enabled)
+                        if c:
+                            self._update_preview('ultimate')
+                        imgui.same_line(230);
+                        imgui.push_item_width(180)
+                        c, self.ultimate_peaks_prominence = imgui.slider_int("Prominence##UltimateProminence",
+                                                                             self.ultimate_peaks_prominence, 1, 50)
+                        if c:
+                            self._update_preview('ultimate')
+                        imgui.pop_item_width()
+
+                        # Step 3
+                        c, self.ultimate_recovery_enabled = imgui.checkbox(
+                            "3. Recover Missing Strokes##UltimateRecovery", self.ultimate_recovery_enabled)
+                        if c:
+                            self._update_preview('ultimate')
+                        imgui.same_line(230);
+                        imgui.push_item_width(180)
+                        c, self.ultimate_recovery_threshold = imgui.slider_float(
+                            "Rhythm Factor##UltimateRecoveryThresh", self.ultimate_recovery_threshold, 1.1, 3.0,
+                            "%.1f x")
+                        if c:
+                            self._update_preview('ultimate')
+                        imgui.pop_item_width()
+                        imgui.tree_pop()
+
+                    if imgui.tree_node("Stage 2: Polish & Finalize"):
+                        # Step 4
+                        c, self.ultimate_normalization_enabled = imgui.checkbox(
+                            "4. Normalize Dynamic Range##UltimateNorm", self.ultimate_normalization_enabled)
+                        if c:
+                            self._update_preview('ultimate')
+
+                        # Step 5
+                        # c, self.ultimate_regeneration_enabled = imgui.checkbox(
+                        #     "5. Regenerate Smooth Strokes##UltimateRegen", self.ultimate_regeneration_enabled)
+                        # if c:
+                        #     self._update_preview('ultimate')
+                        # imgui.same_line(230);
+                        # imgui.push_item_width(180)
+                        # c, self.ultimate_resample_rate = imgui.slider_int("Interval (ms)##UltimateInterval",
+                        #                                                   self.ultimate_resample_rate, 20, 100)
+                        # if c:
+                        #     self._update_preview('ultimate')
+                        # imgui.pop_item_width()
+
+                        # Step 6
+                        c, self.ultimate_speed_limit_enabled = imgui.checkbox("5. Apply Speed Limit##UltimateSpeed", self.ultimate_speed_limit_enabled)
+                        if c:
+                            self._update_preview('ultimate')
+                        imgui.same_line(230);
+                        imgui.push_item_width(180)
+                        c, self.ultimate_speed_threshold = imgui.slider_float("Speed##UltimateSpeedLimit", self.ultimate_speed_threshold, 100.0,
+                                                                              1000.0, "%.0f")
+                        if c:
+                            self._update_preview('ultimate')
+                        imgui.pop_item_width()
+                        imgui.tree_pop()
+
+                    imgui.separator()
+                    if imgui.button("Apply Changes##UltimateApply",
+                                    width=imgui.get_content_region_available_width() - 80):
+                        self._perform_ultimate_autotune()
+                        self.clear_preview()
+                        self.show_ultimate_autotune_popup = False
+
+                    imgui.same_line()
+                    if imgui.button("Cancel##UltimateCancel", width=-1):
+                        self.clear_preview()
+                        self.show_ultimate_autotune_popup = False
+
+                if not self.show_ultimate_autotune_popup:
+                    self.clear_preview()
+                if window_expanded:
+                    imgui.end()
+
             # --- RDP Settings Window ---
             rdp_window_title = f"RDP Simplification Settings (Timeline {self.timeline_num})##RDPSettingsWindow{window_id_suffix}"
             if self.show_rdp_settings_popup:
@@ -1299,7 +1499,7 @@ class InteractiveFunscriptTimeline:
                 if window_expanded:
                     imgui.end()
 
-            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_peaks_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup and not self.show_speed_limiter_popup and not self.show_autotune_popup:
+            if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_peaks_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup and not self.show_speed_limiter_popup and not self.show_autotune_popup and not self.show_ultimate_autotune_popup:
                 self.clear_preview()
 
             imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)
