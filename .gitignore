@@ -181,3 +181,5 @@ __pycache__
 *.md
 *.ini
 settings.json
+autosave.fgnstate
+fungen.log
