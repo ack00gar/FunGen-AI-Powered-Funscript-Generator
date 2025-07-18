@@ -420,7 +420,7 @@ class DualAxisFunscript:
                 smoothed_positions = savgol_filter(positions, window_length, actual_polyorder)
             except ValueError as e:
                 self.logger.warning(f"Auto-Tune: SG filter failed for window {window_length}. Error: {e}. Stopping.")
-                break
+                continue
 
             # Count how many points are saturated after filtering
             saturated_count = np.sum((smoothed_positions <= saturation_low) | (smoothed_positions >= saturation_high))
@@ -1102,6 +1102,52 @@ class DualAxisFunscript:
                     final_keyframes = extrema
 
                 new_segment_actions = final_keyframes
+
+        # Autotune preview
+        elif filter_type == 'autotune':
+            if not SCIPY_AVAILABLE or len(segment_to_process) < 3:
+                return None  # Cannot preview
+
+            # Get parameters from the UI
+            saturation_low = filter_params.get('saturation_low', 1)
+            saturation_high = filter_params.get('saturation_high', 99)
+            max_window_size = filter_params.get('max_window_size', 15)
+            polyorder = filter_params.get('polyorder', 2)
+
+            positions = np.array([a['pos'] for a in segment_to_process])
+            num_points_in_segment = len(positions)
+            best_window_length = -1
+            min_saturated_count = float('inf')
+
+            # Find the best window size without modifying anything
+            for window_length in range(3, max_window_size + 1, 2):
+                if num_points_in_segment < window_length: break
+                actual_polyorder = min(polyorder, window_length - 1)
+                try:
+                    smoothed_positions = savgol_filter(positions, window_length, actual_polyorder)
+                except ValueError:
+                    continue  # Skip invalid window sizes
+
+                saturated_count = np.sum((smoothed_positions <= saturation_low) | (smoothed_positions >= saturation_high))
+                if saturated_count < min_saturated_count:
+                    min_saturated_count = saturated_count
+                    best_window_length = window_length
+                if saturated_count == 0: break
+
+            if best_window_length == -1:
+                # No suitable filter found, preview shows no change
+                new_segment_actions = segment_to_process
+            else:
+                # A best filter was found, calculate the result for preview
+                final_polyorder = min(polyorder, best_window_length - 1)
+                try:
+                    final_smoothed_positions = savgol_filter(positions, best_window_length, final_polyorder)
+                    new_segment_actions = segment_to_process  # Use the copy
+                    for i, action in enumerate(new_segment_actions):
+                        action['pos'] = int(round(np.clip(final_smoothed_positions[i], 0, 100)))
+                except Exception:
+                    # On error, preview shows no change
+                    new_segment_actions = segment_to_process
 
         elif filter_type == 'speed_limiter':
             min_interval = filter_params.get('min_interval', 60)
