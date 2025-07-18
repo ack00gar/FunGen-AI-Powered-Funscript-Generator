@@ -442,6 +442,9 @@ class InteractiveFunscriptTimeline:
             apply_to_selection = self.keyframe_apply_to_selection
         elif filter_type == 'peaks':
             apply_to_selection = self.peaks_apply_to_selection
+        elif filter_type == 'autotune':
+            apply_to_selection = self.autotune_apply_to_selection
+
 
         indices_to_process = list(self.multi_selected_action_indices) if apply_to_selection else None
 
@@ -464,6 +467,13 @@ class InteractiveFunscriptTimeline:
                 'distance': self.peaks_distance,
                 'prominence': self.peaks_prominence,
                 'width': self.peaks_width
+            }
+        elif filter_type == 'autotune':
+            params = {
+                'saturation_low': self.autotune_sat_low,
+                'saturation_high': self.autotune_sat_high,
+                'max_window_size': self.autotune_max_window,
+                'polyorder': self.autotune_polyorder
             }
         elif filter_type == 'speed_limiter':
             params = {
@@ -939,35 +949,39 @@ class InteractiveFunscriptTimeline:
                 popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 250) * 0.5
                 imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
                 imgui.set_next_window_size(400, 0, condition=imgui.APPEARING)
-                window_expanded, self.show_autotune_popup = imgui.begin(
-                    autotune_window_title, closable=True,
-                    flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+                window_expanded, self.show_autotune_popup = imgui.begin(autotune_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
 
                 if window_expanded:
                     imgui.text(f"Auto-Tune SG Filter (Timeline {self.timeline_num})")
                     imgui.text_wrapped("Finds the smallest SG window that removes harsh edges (0/100 clipping).")
                     imgui.separator()
 
-                    _, self.autotune_sat_low = imgui.slider_int("Saturation Low##AutoTuneSatLow", self.autotune_sat_low,
-                                                                0, 10)
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Points at or below this value are 'saturated'.")
+                    # MODIFIED: Sliders now update the preview
+                    sl_changed, self.autotune_sat_low = imgui.slider_int("Saturation Low##AutoTuneSatLow", self.autotune_sat_low, 0, 10)
+                    if sl_changed:
+                        self._update_preview('autotune')
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Points at or below this value are 'saturated'.")
 
-                    _, self.autotune_sat_high = imgui.slider_int("Saturation High##AutoTuneSatHigh",
-                                                                 self.autotune_sat_high, 90, 100)
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Points at or above this value are 'saturated'.")
+                    sh_changed, self.autotune_sat_high = imgui.slider_int("Saturation High##AutoTuneSatHigh", self.autotune_sat_high, 90, 100)
+                    if sh_changed:
+                        self._update_preview('autotune')
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Points at or above this value are 'saturated'.")
 
-                    changed, self.autotune_max_window = imgui.slider_int("Max Window Size##AutoTuneMaxWin",
-                                                                         self.autotune_max_window, 5, 25)
-                    if changed and self.autotune_max_window % 2 == 0: self.autotune_max_window += 1
+                    mw_changed, self.autotune_max_window = imgui.slider_int("Max Window Size##AutoTuneMaxWin", self.autotune_max_window, 5, 25)
+                    if mw_changed:
+                        if self.autotune_max_window % 2 == 0:
+                            self.autotune_max_window += 1
+                        self._update_preview('autotune')
                     if imgui.is_item_hovered(): imgui.set_tooltip("The largest window size to try during the search.")
 
                     imgui.text_disabled(f"Polynomial Order: {self.autotune_polyorder} (fixed)")
                     imgui.separator()
 
                     if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3:
-                        _, self.autotune_apply_to_selection = imgui.checkbox(
-                            f"Apply to {len(self.multi_selected_action_indices)} selected##AutoTuneApplyToSel",
-                            self.autotune_apply_to_selection)
+                        sel_changed, self.autotune_apply_to_selection = imgui.checkbox(f"Apply to {len(self.multi_selected_action_indices)} selected##AutoTuneApplyToSel", self.autotune_apply_to_selection)
+                        if sel_changed: self._update_preview('autotune')
                     else:
                         imgui.text_disabled("Apply to: Full Script")
                         self.autotune_apply_to_selection = False
@@ -975,8 +989,7 @@ class InteractiveFunscriptTimeline:
                     imgui.separator()
 
                     if imgui.button(f"Apply##AutoTuneApplyPop{window_id_suffix}"):
-                        indices_to_use = list(
-                            self.multi_selected_action_indices) if self.autotune_apply_to_selection else None
+                        indices_to_use = list(self.multi_selected_action_indices) if self.autotune_apply_to_selection else None
                         op_desc = f"Applied Auto-Tune SG" + (" to selection" if indices_to_use else "")
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
 
@@ -987,30 +1000,31 @@ class InteractiveFunscriptTimeline:
 
                         if result:
                             # Success! Finalize the undo action with a more descriptive message.
-                            final_op_desc = f"Auto-Tune SG (W:{result['window_length']}, P:{result['polyorder']})" + (
-                                " to sel." if indices_to_use else "")
+                            final_op_desc = f"Auto-Tune SG (W:{result['window_length']}, P:{result['polyorder']})" + (" to sel." if indices_to_use else "")
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, final_op_desc)
 
                             # Save settings for next time
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_low",
-                                                      self.autotune_sat_low)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_high",
-                                                      self.autotune_sat_high)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_max_window",
-                                                      self.autotune_max_window)
-                            self.app.logger.info(f"{final_op_desc} on T{self.timeline_num}.",
-                                                 extra={'status_message': True})
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_low", self.autotune_sat_low)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_high", self.autotune_sat_high)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_max_window", self.autotune_max_window)
+                            self.app.logger.info(f"{final_op_desc} on T{self.timeline_num}.", extra={'status_message': True})
                         else:
                             # Failure or no solution found. The recorded action will be discarded by the undo manager.
                             self.app.logger.warning(
                                 f"Auto-Tune SG on T{self.timeline_num} did not find a solution or failed.",
                                 extra={'status_message': True})
 
+                        self.clear_preview()
                         self.show_autotune_popup = False
 
                     imgui.same_line()
                     if imgui.button(f"Cancel##AutoTuneCancelPop{window_id_suffix}"):
+                        self.clear_preview()
                         self.show_autotune_popup = False
+
+                # Handle closing with 'X'
+                if not self.show_autotune_popup:
+                    self.clear_preview()
 
                 if window_expanded:
                     imgui.end()
