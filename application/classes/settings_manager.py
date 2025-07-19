@@ -23,6 +23,7 @@ class AppSettings:
                 self.logger.setLevel(logging.WARNING)  # Set a default level
             self.logger.info("AppSettings using its own configured fallback logger.")
 
+        self.is_first_run = False
         self.load_settings()
 
     def get_default_settings(self):
@@ -136,6 +137,7 @@ class AppSettings:
                 else:
                     self.data["funscript_editor_shortcuts"] = defaults.get("funscript_editor_shortcuts", {})
             else:
+                self.is_first_run = True
                 self.data = defaults
                 self.save_settings()  # Save defaults if no settings file exists
         except Exception as e:

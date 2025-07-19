@@ -15,6 +15,8 @@ from config.constants import *
 from application.utils.write_access import check_write_access
 from application.updater import AutoUpdater
 
+from config import constants
+
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
 from .app_stage_processor import AppStageProcessor
@@ -98,6 +100,12 @@ class ApplicationLogic:
 
         self.app_state_ui = AppStateUI(self)
         self.utility = AppUtility(self)
+
+        # --- State for first-run setup ---
+        self.show_first_run_setup_popup = False
+        self.first_run_progress = 0.0
+        self.first_run_status_message = ""
+        self.first_run_thread: Optional[threading.Thread] = None
 
         # --- Hardware Acceleration
         # Query ffmpeg for available hardware accelerations
@@ -205,6 +213,97 @@ class ApplicationLogic:
         self._check_for_autosave_restore()
         self.energy_saver.reset_activity_timer()
         self.updater.check_for_updates_async()
+
+        # --- First Run Model Setup ---
+        if getattr(self.app_settings, 'is_first_run', False):
+            self.logger.info("First application run detected. Preparing to download default models.")
+            self.trigger_first_run_setup()
+
+    def trigger_first_run_setup(self):
+        """Initiates the first-run model download process in a background thread."""
+        if self.first_run_thread and self.first_run_thread.is_alive():
+            return  # Already running
+        self.show_first_run_setup_popup = True
+        self.first_run_progress = 0
+        self.first_run_status_message = "Starting setup..."
+        self.first_run_thread = threading.Thread(target=self._run_first_run_setup_thread, daemon=True)
+        self.first_run_thread.start()
+
+    def _run_first_run_setup_thread(self):
+        """The actual logic for downloading and setting up models."""
+        try:
+            # 1. Create models directory
+            models_dir = constants.DEFAULT_MODELS_DIR
+            os.makedirs(models_dir, exist_ok=True)
+            self.first_run_status_message = f"Created directory: {models_dir}"
+            self.logger.info(self.first_run_status_message)
+
+            # 2. Determine which models to download based on OS
+            is_mac_arm = platform.system() == "Darwin" and platform.processor() == 'arm'
+
+            # Download Detection Model
+            if is_mac_arm:
+                det_url = constants.MODEL_DOWNLOAD_URLS["detection_mlpackage_zip"]
+                det_filename = os.path.basename(det_url)
+                det_zip_path = os.path.join(models_dir, det_filename)
+
+                self.first_run_status_message = f"Downloading {det_filename}..."
+                success = self.utility.download_file_with_progress(det_url, det_zip_path, self._update_first_run_progress)
+
+                if success:
+                    self.first_run_status_message = f"Extracting {det_filename}..."
+                    self.first_run_progress = 0  # Reset progress for extraction
+                    det_model_path = self.utility.extract_zip(det_zip_path, models_dir)
+                    if det_model_path:
+                        self.app_settings.set("yolo_det_model_path", det_model_path)
+                        self.yolo_detection_model_path_setting = det_model_path
+                        self.yolo_det_model_path = det_model_path
+                else:
+                    self.first_run_status_message = "Detection model download failed."
+                    time.sleep(3)  # Show error for a moment
+            else:
+                det_url = constants.MODEL_DOWNLOAD_URLS["detection_pt"]
+                det_filename = os.path.basename(det_url)
+                det_model_path = os.path.join(models_dir, det_filename)
+
+                self.first_run_status_message = f"Downloading {det_filename}..."
+                success = self.utility.download_file_with_progress(det_url, det_model_path, self._update_first_run_progress)
+                if success:
+                    self.app_settings.set("yolo_det_model_path", det_model_path)
+                    self.yolo_detection_model_path_setting = det_model_path
+                    self.yolo_det_model_path = det_model_path
+                else:
+                    self.first_run_status_message = "Detection model download failed."
+                    time.sleep(3)
+
+            # Download Pose Model
+            self.first_run_progress = 0
+            pose_url = constants.MODEL_DOWNLOAD_URLS["pose_pt"]
+            pose_filename = os.path.basename(pose_url)
+            pose_model_path = os.path.join(models_dir, pose_filename)
+
+            self.first_run_status_message = f"Downloading {pose_filename}..."
+            success = self.utility.download_file_with_progress(pose_url, pose_model_path, self._update_first_run_progress)
+
+            if success:
+                self.app_settings.set("yolo_pose_model_path", pose_model_path)
+                self.yolo_pose_model_path_setting = pose_model_path
+                self.yolo_pose_model_path = pose_model_path
+            else:
+                self.first_run_status_message = "Pose model download failed."
+                time.sleep(3)
+
+            self.first_run_status_message = "Setup complete! Please restart the application."
+            self.logger.info("Default model setup complete.")
+            self.first_run_progress = 100
+
+        except Exception as e:
+            self.first_run_status_message = f"An error occurred: {e}"
+            self.logger.error(f"First run setup failed: {e}", exc_info=True)
+
+    def _update_first_run_progress(self, percent, downloaded, total_size):
+        """Callback to update the progress bar state from the download thread."""
+        self.first_run_progress = percent
 
     def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
         """
