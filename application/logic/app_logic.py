@@ -245,22 +245,25 @@ class ApplicationLogic:
             if is_mac_arm:
                 det_url = constants.MODEL_DOWNLOAD_URLS["detection_mlpackage_zip"]
                 det_filename = os.path.basename(det_url)
-                det_zip_path = os.path.join(models_dir, det_filename)
+                temp_download_path = os.path.join(models_dir, "temp_det_model.download")
 
                 self.first_run_status_message = f"Downloading {det_filename}..."
-                success = self.utility.download_file_with_progress(det_url, det_zip_path, self._update_first_run_progress)
+                success = self.utility.download_file_with_progress(det_url, temp_download_path, self._update_first_run_progress)
 
                 if success:
-                    self.first_run_status_message = f"Extracting {det_filename}..."
-                    self.first_run_progress = 0  # Reset progress for extraction
-                    det_model_path = self.utility.extract_zip(det_zip_path, models_dir)
+                    self.first_run_status_message = f"Processing {det_filename}..."
+                    self.first_run_progress = 0
+                    det_model_path = self.utility.process_mac_model_archive(temp_download_path, models_dir, det_filename)
                     if det_model_path:
                         self.app_settings.set("yolo_det_model_path", det_model_path)
                         self.yolo_detection_model_path_setting = det_model_path
                         self.yolo_det_model_path = det_model_path
+                    else:
+                        self.first_run_status_message = "Failed to process the downloaded model file."
+                        time.sleep(3)
                 else:
                     self.first_run_status_message = "Detection model download failed."
-                    time.sleep(3)  # Show error for a moment
+                    time.sleep(3)
             else:
                 det_url = constants.MODEL_DOWNLOAD_URLS["detection_pt"]
                 det_filename = os.path.basename(det_url)

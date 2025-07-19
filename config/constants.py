@@ -310,7 +310,7 @@ DEFAULT_AUTO_POST_CLAMP_HIGH = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_up
 ####################################################################################################
 DEFAULT_MODELS_DIR = "models"
 MODEL_DOWNLOAD_URLS = {
-    "detection_pt": "https://store5.gofile.io/download/web/a8b948de-c378-4af3-a7be-202ca52071aa/FunGen-12s-pov-1.1.0.pt",
-    "detection_mlpackage_zip": "https://store3.gofile.io/download/web/e3399cba-32f2-43d4-80a3-3dc1698830b9/FunGen-12s-pov-1.1.0.mlpackage.zip",
+    "detection_pt": "https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/releases/download/models-v1.1.0/FunGen-12s-pov-1.1.0.pt",
+    "detection_mlpackage_zip": "https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/releases/download/models-v1.1.0/FunGen-12s-pov-1.1.0.mlpackage.zip",
     "pose_pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.pt"
 }

@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import shutil
 import urllib.request
 import zipfile
 from typing import Dict, Tuple, TYPE_CHECKING
@@ -32,59 +33,64 @@ class AppUtility:
             urllib.request.urlretrieve(url, destination_path, reporthook=reporthook)
             self.app.logger.info(f"Successfully downloaded {os.path.basename(destination_path)}.")
             if progress_callback:
-                progress_callback(100, 0, 0)  # Signal completion
+                progress_callback(100, 0, 0)
             return True
         except Exception as e:
             self.app.logger.error(f"Failed to download {url}: {e}", exc_info=True)
             if os.path.exists(destination_path):
-                os.remove(destination_path)  # Clean up partial download
+                os.remove(destination_path)
             return False
 
-    def extract_zip(self, zip_path: str, extract_to: str) -> str | None:
+    def process_mac_model_archive(self, downloaded_path: str, destination_dir: str,
+                                  original_filename: str) -> str | None:
         """
-        Extracts a zip file to a specified directory. If the file is not a valid zip
-        but has a .zip extension, it attempts to rename it and use it directly.
-        Returns the path to the final content (.mlpackage directory).
+        Processes the downloaded file for a macOS .mlpackage model.
+        It handles extraction if it's a zip, or renames it if it's an auto-unzipped package.
+        Returns the final path to the .mlpackage.
         """
-        self.app.logger.info(f"Processing archive: {os.path.basename(zip_path)}")
+        self.app.logger.info(f"Processing macOS model: {os.path.basename(downloaded_path)}")
 
-        # Check if the file is a valid zip archive
-        if zipfile.is_zipfile(zip_path):
-            self.app.logger.info(f"{os.path.basename(zip_path)} is a valid zip file. Extracting...")
+        if zipfile.is_zipfile(downloaded_path):
+            self.app.logger.info("Archive is a valid zip file. Extracting...")
             try:
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(extract_to)
-                os.remove(zip_path)  # Clean up the zip file
-                self.app.logger.info(f"Successfully extracted {os.path.basename(zip_path)}.")
-
-                # Find the .mlpackage directory inside the extracted contents
-                for item in os.listdir(extract_to):
-                    if item.endswith(".mlpackage"):
-                        return os.path.join(extract_to, item)
-
-                self.app.logger.warning("Could not find a .mlpackage file in the extracted archive.")
-                return None
+                with zipfile.ZipFile(downloaded_path, 'r') as zip_ref:
+                    mlpackage_name = next(
+                        (name.split('/')[0] for name in zip_ref.namelist() if name.endswith('.mlpackage/')), None)
+                    if not mlpackage_name:
+                        self.app.logger.error("Could not find a .mlpackage directory inside the zip file.")
+                        os.remove(downloaded_path)
+                        return None
+                    zip_ref.extractall(destination_dir)
+                os.remove(downloaded_path)
+                final_path = os.path.join(destination_dir, mlpackage_name)
+                self.app.logger.info(f"Successfully extracted to: {final_path}")
+                return final_path
             except Exception as e:
-                self.app.logger.error(f"Failed to extract {zip_path}: {e}", exc_info=True)
+                self.app.logger.error(f"Failed to extract zip file: {e}", exc_info=True)
                 return None
         else:
-            # If it's not a zip file, assume it might be the correct file already
             self.app.logger.warning(
-                f"{os.path.basename(zip_path)} is not a valid zip file. Attempting to use directly.")
+                "Downloaded item is not a zip archive. Assuming it is the model package and renaming.")
+            final_name = original_filename.replace('.zip', '')
+            final_path = os.path.join(destination_dir, final_name)
+            try:
+                if os.path.exists(final_path):
+                    if os.path.isdir(final_path):
+                        shutil.rmtree(final_path)
+                    else:
+                        os.remove(final_path)
 
-            # Check if it looks like the target file but with a .zip extension
-            if zip_path.lower().endswith(".mlpackage.zip"):
-                new_path = zip_path[:-4]  # Remove the '.zip'
-                try:
-                    os.rename(zip_path, new_path)
-                    self.app.logger.info(f"Renamed file to: {os.path.basename(new_path)}")
-                    return new_path
-                except Exception as e:
-                    self.app.logger.error(f"Failed to rename {os.path.basename(zip_path)}: {e}", exc_info=True)
+                os.rename(downloaded_path, final_path)
+
+                if os.path.exists(final_path):
+                    self.app.logger.info(f"Successfully processed model package: {os.path.basename(final_path)}")
+                    return final_path
+                else:
+                    self.app.logger.error(
+                        f"Processed path '{final_path}' does not exist after rename. Model setup failed.")
                     return None
-            else:
-                self.app.logger.error(
-                    f"File {os.path.basename(zip_path)} is not a zip and does not appear to be a misnamed model file.")
+            except Exception as e:
+                self.app.logger.error(f"Failed to process model file: {e}", exc_info=True)
                 return None
 
     def get_box_style(self, box_data: Dict) -> Tuple[Tuple[float, float, float, float], float, bool]:
