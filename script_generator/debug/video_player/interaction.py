@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Tuple
 
 import cv2
 
-from script_generator.constants import LEFT, RIGHT, SPACE, Q, COMMA, PERIOD, LEFT_BRACKET, RIGHT_BRACKET
+from script_generator.constants import LEFT, RIGHT, SPACE, Q, ESC, COMMA, PERIOD, LEFT_BRACKET, RIGHT_BRACKET
 from script_generator.debug.logger import log
 from script_generator.gui.messages.messages import UpdateGUIState
 from script_generator.video.data_classes.video_info import get_cropped_dimensions
@@ -60,7 +60,7 @@ def handle_user_input(window_name, state: "AppState", video_player: "VideoPlayer
     if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
         return False
 
-    if key == Q:
+    if key in [Q, ESC]:
         return False
 
     elif key == SPACE:  # Toggle pause on space bar

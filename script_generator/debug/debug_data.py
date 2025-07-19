@@ -21,6 +21,23 @@ class DebugData:
         if bounding_boxes:
             self.metrics[frame_id]["bounding_boxes"].extend(bounding_boxes)
 
+    def get_metrics_at_frame(self, frame_id):
+        return self.metrics.get(frame_id)
+
+    def get_variables_at_frame(self, frame_id):
+        return self.metrics.get(frame_id, {}).get("variables")
+
+    def get_all_frames(self):
+        return self.metrics
+
+    def edit_frame(self, frame_id, variables=None, bounding_boxes=None):
+        if frame_id in self.metrics:
+            if variables:
+                self.metrics[frame_id]["variables"].update(variables)
+
+            if bounding_boxes:
+                self.metrics[frame_id]["bounding_boxes"].extend(bounding_boxes)
+
     def save_debug_file(self):
         save_debug_metrics(self.app_state, self.metrics)
 
