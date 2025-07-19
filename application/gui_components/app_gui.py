@@ -475,6 +475,40 @@ class GUI:
         # Render the existing texture
         imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
 
+    def _render_first_run_setup_popup(self):
+        app = self.app
+        if app.show_first_run_setup_popup:
+            imgui.open_popup("First-Time Setup")
+            main_viewport = imgui.get_main_viewport()
+            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
+                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
+            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+
+            # Make the popup non-closable by the user until setup is done or fails.
+            closable = "complete" in app.first_run_status_message or "failed" in app.first_run_status_message
+            popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE | (0 if not closable else imgui.WINDOW_CLOSABLE)
+
+            if imgui.begin_popup_modal("First-Time Setup", closable, flags=popup_flags)[0]:
+                imgui.text("Welcome to FunGen!")
+                imgui.text_wrapped("For the application to work, some default AI models need to be downloaded.")
+                imgui.separator()
+
+                imgui.text_wrapped(f"Status: {app.first_run_status_message}")
+
+                # Progress Bar
+                progress_percent = app.first_run_progress / 100.0
+                imgui.progress_bar(progress_percent, size=(350, 0), overlay=f"{app.first_run_progress:.1f}%")
+
+                imgui.separator()
+
+                if closable:
+                    if imgui.button("Close", width=120):
+                        app.show_first_run_setup_popup = False
+                        imgui.close_current_popup()
+
+                imgui.end_popup()
+
+
     # TODO: Move this to a separate class/error management module
     def show_error_popup(self, title, message, action_label=None, action_callback=None):
         self.error_popup_active = True

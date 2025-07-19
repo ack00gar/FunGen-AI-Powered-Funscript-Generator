@@ -304,3 +304,13 @@ DEFAULT_AUTO_POST_RDP_EPSILON = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["rdp_eps
 # It's better to derive them from the new dictionary as well to maintain a single source of truth.
 DEFAULT_AUTO_POST_CLAMP_LOW = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_lower"]
 DEFAULT_AUTO_POST_CLAMP_HIGH = DEFAULT_AUTO_POST_AMP_CONFIG["Default"]["clamp_upper"]
+
+####################################################################################################
+# DEFAULT MODELS & DOWNLOADS
+####################################################################################################
+DEFAULT_MODELS_DIR = "models"
+MODEL_DOWNLOAD_URLS = {
+    "detection_pt": "https://store5.gofile.io/download/web/a8b948de-c378-4af3-a7be-202ca52071aa/FunGen-12s-pov-1.1.0.pt",
+    "detection_mlpackage_zip": "https://store3.gofile.io/download/web/e3399cba-32f2-43d4-80a3-3dc1698830b9/FunGen-12s-pov-1.1.0.mlpackage.zip",
+    "pose_pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.pt"
+}
