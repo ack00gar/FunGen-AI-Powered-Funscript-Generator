@@ -223,11 +223,34 @@ class VideoProcessor:
             return False
 
         # --- Set the active source path ---
+        self._active_video_source_path = self.video_path  # Default to original
+        preprocessed_path = None
         if self.app and hasattr(self.app, 'file_manager') and self.app.file_manager.preprocessed_video_path:
-            self._active_video_source_path = self.app.file_manager.preprocessed_video_path
+            preprocessed_path = self.app.file_manager.preprocessed_video_path
+
+        if preprocessed_path and os.path.exists(preprocessed_path):
+            # If loading from a project, we must verify the preprocessed file's integrity.
+            if from_project_load:
+                self.logger.info(f"Found potential preprocessed file from project: {os.path.basename(preprocessed_path)}. Verifying completeness...")
+                preprocessed_info = self._get_video_info(preprocessed_path)
+
+                original_frames = self.video_info.get("total_frames", 0)
+                preprocessed_frames = preprocessed_info.get("total_frames", -1) if preprocessed_info else -1
+
+                if preprocessed_frames == original_frames and original_frames > 0:
+                    self._active_video_source_path = preprocessed_path
+                else:
+                    self.logger.warning(
+                        f"Preprocessed file is incomplete or invalid ({preprocessed_frames}/{original_frames} frames). "
+                        f"Falling back to original video file. To fix, re-run Stage 1 with 'Save Preprocessed Video' enabled."
+                    )
+            else:
+                # If not loading from a project (e.g., just opened a video where a preprocessed file exists), assume it's valid.
+                self._active_video_source_path = preprocessed_path
+
+        if self._active_video_source_path == preprocessed_path:
             self.logger.info(f"VideoProcessor will use preprocessed video as its active source.")
         else:
-            self._active_video_source_path = self.video_path
             self.logger.info(f"VideoProcessor will use original video as its active source.")
 
         self._update_video_parameters()
