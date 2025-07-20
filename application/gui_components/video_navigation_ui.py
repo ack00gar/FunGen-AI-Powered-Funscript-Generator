@@ -728,6 +728,10 @@ class VideoNavigationUI:
             long_name_display = POSITION_INFO_MAPPING.get(current_selected_key, {}).get("long_name", "N/A") if current_selected_key else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display}")
             changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##CreateWin", self.chapter_edit_data.get("source", "manual"), 64)
+
+            if imgui.button("Set Range##ChapterCreateSetRangeWinBtn"):
+                self._set_chapter_range_by_selection()
+
             imgui.pop_item_width()
             imgui.separator()
             if imgui.button("Create##ChapterCreateWinBtn"):
@@ -790,6 +794,10 @@ class VideoNavigationUI:
             long_name_display_edit = POSITION_INFO_MAPPING.get(pos_key_edit_display, {}).get("long_name", "N/A") if pos_key_edit_display else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display_edit}")
             changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##EditWin", self.chapter_edit_data.get("source", ""), 64)
+
+            if imgui.button("Set Range##ChapterUpdateSetRangeWinBtn"):
+                self._set_chapter_range_by_selection()
+
             imgui.pop_item_width()
             imgui.separator()
             if imgui.button("Save##ChapterEditWinBtn"):
@@ -804,6 +812,33 @@ class VideoNavigationUI:
         imgui.end()
         if not self.show_edit_chapter_dialog:
             self.chapter_to_edit_id = None
+
+    def _set_chapter_range_by_selection(self):
+        selected_idxs = []
+        t1_selected_idxs = self.gui_instance.timeline_editor1.multi_selected_action_indices
+        t2_selected_idxs = self.gui_instance.timeline_editor2.multi_selected_action_indices
+        fs = self.app.processor.tracker.funscript
+        fs_actions = []
+        # Take selection from either, primary if both
+        if len(t1_selected_idxs) >= 2:
+            selected_idxs = t1_selected_idxs
+            fs_actions = fs.primary_actions
+        elif len(t2_selected_idxs) >= 2:
+            selected_idxs = t2_selected_idxs
+            fs_actions = fs.secondary_actions
+
+        if len(selected_idxs) < 2:
+            return
+
+        v_info = self.app.processor.video_info
+        start_action_ms = fs_actions[min(selected_idxs)]['at']
+        end_action_ms = fs_actions[max(selected_idxs)]['at']
+
+        start_frame = VideoSegment.ms_to_frame_idx(ms=start_action_ms, total_frames=v_info['total_frames'], fps=v_info['fps'])
+        end_frame = VideoSegment.ms_to_frame_idx(ms=end_action_ms, total_frames=v_info['total_frames'], fps=v_info['fps'])
+
+        self.chapter_edit_data["start_frame_str"] = str(start_frame)
+        self.chapter_edit_data["end_frame_str"] = str(end_frame)
 
     def _render_funscript_timeline_preview(self, total_duration_s: float, graph_height: int):
         self.gui_instance.render_funscript_timeline_preview(total_duration_s, graph_height)
