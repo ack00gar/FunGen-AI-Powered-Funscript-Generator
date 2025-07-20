@@ -2,9 +2,11 @@ import time
 import logging
 import subprocess
 import os
+import platform
 import threading
 from typing import Optional, Dict, Tuple, List, Any
 from datetime import datetime, timedelta
+from ultralytics import YOLO
 
 from video.video_processor import VideoProcessor
 from tracker.tracker import ROITracker as Tracker
@@ -98,6 +100,12 @@ class ApplicationLogic:
 
         self.app_state_ui = AppStateUI(self)
         self.utility = AppUtility(self)
+
+        # --- State for first-run setup ---
+        self.show_first_run_setup_popup = False
+        self.first_run_progress = 0.0
+        self.first_run_status_message = ""
+        self.first_run_thread: Optional[threading.Thread] = None
 
         # --- Hardware Acceleration
         # Query ffmpeg for available hardware accelerations
@@ -206,11 +214,144 @@ class ApplicationLogic:
         self.energy_saver.reset_activity_timer()
         self.updater.check_for_updates_async()
 
+        # --- First Run Model Setup ---
+        if getattr(self.app_settings, 'is_first_run', False):
+            self.logger.info("First application run detected. Preparing to download default models.")
+            self.trigger_first_run_setup()
+
+    def trigger_first_run_setup(self):
+        """Initiates the first-run model download process in a background thread."""
+        if self.first_run_thread and self.first_run_thread.is_alive():
+            return  # Already running
+        self.show_first_run_setup_popup = True
+        self.first_run_progress = 0
+        self.first_run_status_message = "Starting setup..."
+        self.first_run_thread = threading.Thread(target=self._run_first_run_setup_thread, daemon=True)
+        self.first_run_thread.start()
+
+    def _run_first_run_setup_thread(self):
+        """The actual logic for downloading and setting up models."""
+        try:
+            # 1. Create models directory
+            models_dir = DEFAULT_MODELS_DIR
+            os.makedirs(models_dir, exist_ok=True)
+            self.first_run_status_message = f"Created directory: {models_dir}"
+            self.logger.info(self.first_run_status_message)
+
+            # 2. Determine which models to download based on OS
+            is_mac_arm = platform.system() == "Darwin" and platform.processor() == 'arm'
+
+            # --- Download and Process Detection Model ---
+            det_url = MODEL_DOWNLOAD_URLS["detection_pt"]
+            det_filename_pt = os.path.basename(det_url)
+            det_model_path_pt = os.path.join(models_dir, det_filename_pt)
+            self.first_run_status_message = f"Downloading Detection Model: {det_filename_pt}..."
+            success = self.utility.download_file_with_progress(det_url, det_model_path_pt, self._update_first_run_progress)
+
+            if not success:
+                self.first_run_status_message = "Detection model download failed."
+                time.sleep(3)
+                return
+
+            final_det_model_path = det_model_path_pt
+            if is_mac_arm:
+                self.first_run_status_message = "Converting detection model to CoreML format..."
+                self.logger.info(f"Running on macOS ARM. Converting {det_filename_pt} to .mlpackage")
+                try:
+                    model = YOLO(det_model_path_pt)
+                    model.export(format="coreml")
+                    final_det_model_path = det_model_path_pt.replace('.pt', '.mlpackage')
+                    self.logger.info(f"Successfully converted detection model to {final_det_model_path}")
+                except Exception as e:
+                    self.logger.error(f"Failed to convert detection model to CoreML: {e}", exc_info=True)
+                    self.first_run_status_message = "Detection model conversion to CoreML failed."
+                    time.sleep(3)
+                    # Continue with the .pt file if conversion fails
+
+            self.app_settings.set("yolo_det_model_path", final_det_model_path)
+            self.yolo_detection_model_path_setting = final_det_model_path
+            self.yolo_det_model_path = final_det_model_path
+
+            # --- Download and Process Pose Model ---
+            self.first_run_progress = 0
+            pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
+            pose_filename_pt = os.path.basename(pose_url)
+            pose_model_path_pt = os.path.join(models_dir, pose_filename_pt)
+            self.first_run_status_message = f"Downloading Pose Model: {pose_filename_pt}..."
+            success = self.utility.download_file_with_progress(pose_url, pose_model_path_pt, self._update_first_run_progress)
+
+            if not success:
+                self.first_run_status_message = "Pose model download failed."
+                time.sleep(3)
+                return
+
+            final_pose_model_path = pose_model_path_pt
+            if is_mac_arm:
+                self.first_run_status_message = "Converting pose model to CoreML format..."
+                self.logger.info(f"Running on macOS ARM. Converting {pose_filename_pt} to .mlpackage")
+                try:
+                    model = YOLO(pose_model_path_pt)
+                    model.export(format="coreml")
+                    final_pose_model_path = pose_model_path_pt.replace('.pt', '.mlpackage')
+                    self.logger.info(f"Successfully converted pose model to {final_pose_model_path}")
+                except Exception as e:
+                    self.logger.error(f"Failed to convert pose model to CoreML: {e}", exc_info=True)
+                    self.first_run_status_message = "Pose model conversion to CoreML failed."
+                    time.sleep(3)
+                    # Continue with the .pt file if conversion fails
+
+            self.app_settings.set("yolo_pose_model_path", final_pose_model_path)
+            self.yolo_pose_model_path_setting = final_pose_model_path
+            self.yolo_pose_model_path = final_pose_model_path
+
+            self.first_run_status_message = "Setup complete! Please restart the application."
+            self.logger.info("Default model setup complete.")
+            self.first_run_progress = 100
+
+        except Exception as e:
+            self.first_run_status_message = f"An error occurred: {e}"
+            self.logger.error(f"First run setup failed: {e}", exc_info=True)
+
+    def _update_first_run_progress(self, percent, downloaded, total_size):
+        """Callback to update the progress bar state from the download thread."""
+        self.first_run_progress = percent
+
+    def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
+        """
+        Non-interactively runs the Ultimate Autotune pipeline with default settings.
+        This is called automatically in 'Simple Mode' after an analysis completes.
+        """
+        self.logger.info(f"Triggering default Ultimate Autotune for Timeline {timeline_num}...")
+        fs_proc = self.funscript_processor
+        funscript_instance, axis_name = fs_proc._get_target_funscript_object_and_axis(timeline_num)
+
+        if not funscript_instance or not axis_name:
+            self.logger.error(f"Ultimate Autotune (auto): Could not find target funscript for T{timeline_num}.")
+            return
+
+        # Get default parameters from the funscript processor helper
+        params = fs_proc.get_default_ultimate_autotune_params()
+        op_desc = "Auto-Applied Ultimate Autotune (Simple Mode)"
+
+        # 1. Record state for Undo
+        fs_proc._record_timeline_action(timeline_num, op_desc)
+
+        # 2. Run the non-destructive pipeline to get the result
+        new_actions = funscript_instance.apply_ultimate_autotune(axis_name, params)
+
+        # 3. Apply the result and finalize the Undo action
+        if new_actions is not None:
+            setattr(funscript_instance, f"{axis_name}_actions", new_actions)
+            fs_proc._finalize_action_and_update_ui(timeline_num, op_desc)
+            self.logger.info("Default Ultimate Autotune applied successfully.",
+                             extra={'status_message': True, 'duration': 5.0})
+        else:
+            self.logger.warning("Default Ultimate Autotune failed to produce a result.", extra={'status_message': True})
+
     def toggle_file_manager_window(self):
         """Toggles the visibility of the Generated File Manager window."""
         if hasattr(self, 'app_state_ui'):
             self.app_state_ui.show_generated_file_manager = not self.app_state_ui.show_generated_file_manager
-
 
     def unload_model(self, model_type: str):
         """

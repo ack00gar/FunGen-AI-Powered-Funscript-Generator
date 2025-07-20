@@ -20,6 +20,13 @@ class ControlPanelUI:
             self._render_calibration_window(calibration_mgr, app_state)
             return
 
+        is_simple_mode = getattr(app_state, 'ui_view_mode', 'expert') == 'simple'
+
+        if is_simple_mode:
+            # If in simple mode, call a dedicated renderer and exit early
+            self._render_simple_mode_ui()
+            return
+
         window_title = "Control Panel##ControlPanelFloating"
         window_flags = 0
 
@@ -69,6 +76,48 @@ class ControlPanelUI:
         imgui.end()
 
     # --- Tab Renderer Methods ---
+
+    def _render_simple_mode_ui(self):
+        """Renders a stripped-down UI for the 'Simple Mode' workflow."""
+        stage_proc = self.app.stage_processor
+        fs_proc = self.app.funscript_processor
+        app_state = self.app.app_state_ui
+        event_handlers = self.app.event_handlers
+
+        window_flags = imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
+        imgui.begin("FunGen Simple##SimpleControlPanel", flags=window_flags)
+
+        imgui.text("FunGen Simple Workflow")
+        imgui.text_wrapped("1. Drag & drop a video onto the window.")
+        imgui.text_wrapped("2. Choose an analysis method below.")
+        imgui.text_wrapped("3. Click Start.")
+        imgui.separator()
+
+        # Simplified Tracker Type Selection
+        tracking_modes_display = ["Offline AI Analysis (3-Stage)", "Live Tracking (YOLO ROI)"]
+        tracking_modes_enums = [TrackerMode.OFFLINE_3_STAGE, TrackerMode.LIVE_YOLO_ROI]
+
+        try:
+            current_mode_idx = tracking_modes_enums.index(app_state.selected_tracker_mode)
+        except ValueError:
+            current_mode_idx = 0 # Default to Offline
+            app_state.selected_tracker_mode = TrackerMode.OFFLINE_3_STAGE
+
+        imgui.push_item_width(-1)
+        clicked, new_idx = imgui.combo("Analysis Method##SimpleTrackerMode", current_mode_idx, tracking_modes_display)
+        imgui.pop_item_width()
+
+        if clicked and new_idx != current_mode_idx:
+            app_state.selected_tracker_mode = tracking_modes_enums[new_idx]
+
+        imgui.separator()
+
+        # Start/Stop buttons and Progress Display
+        self._render_start_stop_buttons(stage_proc, fs_proc, event_handlers)
+        imgui.separator()
+        self._render_execution_progress_display()
+
+        imgui.end()
 
     def _render_run_control_tab(self):
         """Renders Tab 1: Mode selection, axis config, execution, and progress."""
@@ -240,7 +289,6 @@ class ControlPanelUI:
 
         imgui.separator()
 
-
     def _render_configuration_tab(self):
         """Renders Tab 2: All mode-specific configurations."""
         app_state = self.app.app_state_ui
@@ -274,8 +322,6 @@ class ControlPanelUI:
         }
         if selected_mode not in modes_with_config:
             imgui.text_disabled("No configuration available for this mode.")
-
-
 
     def _render_settings_tab(self):
         """Renders the new global Application Settings tab."""

@@ -563,7 +563,7 @@ class InteractiveFunscriptTimeline:
             selected_indices = indices_to_process)
         self.set_preview_actions(generated_preview_actions)
 
-    def render(self, timeline_y_start_coord: float = 0, timeline_render_height: float = 0):
+    def render(self, timeline_y_start_coord: float = 0, timeline_render_height: float = 0, view_mode: str = 'expert'):
         app_state = self.app.app_state_ui
         is_floating = app_state.ui_layout_mode == 'floating'
 
@@ -628,267 +628,268 @@ class InteractiveFunscriptTimeline:
                 else:
                     script_info_text += "(Secondary Axis - Empty)"
 
-            # --- Buttons ---
-            # Clear Button
-            num_selected_for_clear = len(self.multi_selected_action_indices)
-            clear_button_text = f"Clear Sel. ({num_selected_for_clear})" if num_selected_for_clear > 0 and has_actions else "Clear All"
-            clear_op_disabled = not (
-                    allow_editing_timeline and has_actions and target_funscript_instance_for_render and axis_name_for_render)
-            if clear_op_disabled:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"{clear_button_text}##ClearButton{window_id_suffix}"):
-                if not clear_op_disabled:
-                    indices_to_clear = list(self.multi_selected_action_indices) if num_selected_for_clear > 0 else None
-                    op_desc = f"Cleared {len(indices_to_clear) if indices_to_clear else 'All'} Point(s)"
-                    fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                    target_funscript_instance_for_render.clear_points(axis=axis_name_for_render, selected_indices = indices_to_clear)
-                    if indices_to_clear: self.multi_selected_action_indices.clear()
-                    self.selected_action_idx = -1
-                    self.dragging_action_idx = -1
-                    fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                    self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
-            if clear_op_disabled: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            if imgui.button(f"Unload##Unload{window_id_suffix}"):
-                if allow_editing_timeline and has_actions and target_funscript_instance_for_render:
-                    op_desc = "Funscript Unloaded via Timeline"
-                    fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                    target_funscript_instance_for_render.clear_points(axis=axis_name_for_render)
-                    self.selected_action_idx = -1
-                    self.multi_selected_action_indices.clear()
-                    self.dragging_action_idx = -1
-                    fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                    self.app.logger.info(f"T{self.timeline_num} Unloaded.", extra={'status_message': True})
-            imgui.same_line()
-
-            # --- SG Filter Button ---
-            sg_disabled_bool = not allow_editing_timeline or not has_actions
-            if sg_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"Smooth (SG)##SGFilter{window_id_suffix}"):
-                if not sg_disabled_bool:
-                    self.show_sg_settings_popup = True
-                    self.sg_apply_to_selection = bool(
-                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
-            if sg_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # --- Auto-Tune SG Button ---
-            autotune_disabled_bool = not allow_editing_timeline or not has_actions
-            if autotune_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"Auto-Tune SG##AutoTuneSGFilter{window_id_suffix}"):
-                if not autotune_disabled_bool:
-                    self.show_autotune_popup = True
-                    # Auto-tune needs at least 3 points for a minimal window size of 3
-                    self.autotune_apply_to_selection = bool(
-                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
-            if autotune_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # --- Ultimate Autotune Button ---
-            ultimate_disabled_bool = not allow_editing_timeline or not has_actions
-            if ultimate_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-            if imgui.button(f"Ultimate Autotune##UltimateAutotune{window_id_suffix}"):
-                if not ultimate_disabled_bool:
-                    self.show_ultimate_autotune_popup = True
-
-            if ultimate_disabled_bool:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # --- RDP Button ---
-            rdp_disabled_bool = not allow_editing_timeline or not has_actions
-            if rdp_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"Simplify (RDP)##{window_id_suffix}"):
-                if not rdp_disabled_bool:
-                    self.show_rdp_settings_popup = True
-                    self.rdp_apply_to_selection = bool(
-                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
-            if rdp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # --- Peaks Button ---
-            peaks_disabled_bool = not allow_editing_timeline or not has_actions
-            if peaks_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"Peaks##{window_id_suffix}"):
-                if not peaks_disabled_bool:
-                    self.show_peaks_settings_popup = True
-                    self.peaks_apply_to_selection = bool(
-                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
-            if peaks_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # --- Amplify Button ---
-            amp_disabled_bool = not allow_editing_timeline or not has_actions
-            if amp_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-            if imgui.button(f"Amplify##AmpFilter{window_id_suffix}"):
-                if not amp_disabled_bool:
-                    self.show_amp_settings_popup = True
-                    self.amp_apply_to_selection = bool(
-                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
-
-            if amp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # --- Resample Button ---
-            resample_disabled_bool = not allow_editing_timeline or not has_actions
-            if resample_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-            if imgui.button(f"Resample##ResampleFilter{window_id_suffix}"):
-                if not resample_disabled_bool:
-                    indices_to_use = list(self.multi_selected_action_indices) if (
-                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3
-                    ) else None
-
-                    op_desc = "Applied Peak-Preserving Resample" + (" to selection" if indices_to_use else "")
-
-                    fs_proc._record_timeline_action(self.timeline_num, op_desc)  # For Undo
-                    if self._perform_resample(selected_indices=indices_to_use):
+            if view_mode == 'expert':
+                # --- Buttons ---
+                # Clear Button
+                num_selected_for_clear = len(self.multi_selected_action_indices)
+                clear_button_text = f"Clear Sel. ({num_selected_for_clear})" if num_selected_for_clear > 0 and has_actions else "Clear All"
+                clear_op_disabled = not (
+                        allow_editing_timeline and has_actions and target_funscript_instance_for_render and axis_name_for_render)
+                if clear_op_disabled:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if imgui.button(f"{clear_button_text}##ClearButton{window_id_suffix}"):
+                    if not clear_op_disabled:
+                        indices_to_clear = list(self.multi_selected_action_indices) if num_selected_for_clear > 0 else None
+                        op_desc = f"Cleared {len(indices_to_clear) if indices_to_clear else 'All'} Point(s)"
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        target_funscript_instance_for_render.clear_points(axis=axis_name_for_render, selected_indices = indices_to_clear)
+                        if indices_to_clear: self.multi_selected_action_indices.clear()
+                        self.selected_action_idx = -1
+                        self.dragging_action_idx = -1
                         fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                         self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                if clear_op_disabled: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
 
-            if resample_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # --- Keyframe Extraction Button ---
-            keyframe_disabled_bool = not allow_editing_timeline or not has_actions
-            if keyframe_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-            if imgui.button(f"Keyframes##KeyframeFilter{window_id_suffix}"):
-                # This now opens the popup instead of applying directly
-                if not keyframe_disabled_bool:
-                    self.show_keyframe_settings_popup = True
-                    self.keyframe_apply_to_selection = bool(
-                        self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
-
-            if keyframe_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # --- Speed Limiter Button ---
-            speed_disabled_bool = not allow_editing_timeline or not has_actions
-            if speed_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"Speed Limiter##HandyBTLimiter{window_id_suffix}"):
-                if not speed_disabled_bool:
-                    self.show_speed_limiter_popup = True
-            if speed_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
-
-            # Invert Button
-            invert_button_prefix = "Invert Sel." if self.multi_selected_action_indices else "Invert All"
-            invert_disabled_bool = not allow_editing_timeline or not has_actions
-            if invert_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"{invert_button_prefix}##Invert{window_id_suffix}"):
-                if not invert_disabled_bool:
-                    indices_to_op = list(
-                        self.multi_selected_action_indices) if self.multi_selected_action_indices else None
-                    op_desc = "Inverted Selected Points" if indices_to_op else "Inverted Funscript Actions"
-                    fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                    if self._perform_inversion(selected_indices=indices_to_op):
+                if imgui.button(f"Unload##Unload{window_id_suffix}"):
+                    if allow_editing_timeline and has_actions and target_funscript_instance_for_render:
+                        op_desc = "Funscript Unloaded via Timeline"
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        target_funscript_instance_for_render.clear_points(axis=axis_name_for_render)
+                        self.selected_action_idx = -1
+                        self.multi_selected_action_indices.clear()
+                        self.dragging_action_idx = -1
                         fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                        self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
-            if invert_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
+                        self.app.logger.info(f"T{self.timeline_num} Unloaded.", extra={'status_message': True})
+                imgui.same_line()
 
-            # Clamp Buttons
-            clamp_button_prefix = "Clamp Sel. to" if self.multi_selected_action_indices else "Clamp All to"
-            clamp_disabled_bool = not allow_editing_timeline or not has_actions
-            if clamp_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            if imgui.button(f"{clamp_button_prefix} 0##Clamp0{window_id_suffix}"):
-                if not clamp_disabled_bool:
-                    indices_to_op = list(
-                        self.multi_selected_action_indices) if self.multi_selected_action_indices else None
-                    op_desc = "Clamped Selected to 0" if indices_to_op else "Clamped All to 0"
-                    fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                    if self._perform_clamp(0, selected_indices=indices_to_op):
-                        fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                        self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
-            imgui.same_line()
-            if imgui.button(f"{clamp_button_prefix} 100##Clamp100{window_id_suffix}"):
-                if not clamp_disabled_bool:
-                    indices_to_op = list(self.multi_selected_action_indices) if self.multi_selected_action_indices else None
-                    op_desc = "Clamped Selected to 100" if indices_to_op else "Clamped All to 100"
-                    fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                    if self._perform_clamp(100, selected_indices=indices_to_op):
-                        fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                        self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
-            if clamp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
+                # --- SG Filter Button ---
+                sg_disabled_bool = not allow_editing_timeline or not has_actions
+                if sg_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if imgui.button(f"Smooth (SG)##SGFilter{window_id_suffix}"):
+                    if not sg_disabled_bool:
+                        self.show_sg_settings_popup = True
+                        self.sg_apply_to_selection = bool(
+                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
+                if sg_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
 
-            # --- Time Shift controls ---
-            time_shift_disabled_bool = not allow_editing_timeline or not has_actions or not (
-                    self.app.processor and self.app.processor.fps and self.app.processor.fps > 0)
-            if time_shift_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                # --- Auto-Tune SG Button ---
+                autotune_disabled_bool = not allow_editing_timeline or not has_actions
+                if autotune_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if imgui.button(f"Auto-Tune SG##AutoTuneSGFilter{window_id_suffix}"):
+                    if not autotune_disabled_bool:
+                        self.show_autotune_popup = True
+                        # Auto-tune needs at least 3 points for a minimal window size of 3
+                        self.autotune_apply_to_selection = bool(
+                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
+                if autotune_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
 
-            if imgui.button(f"<<##ShiftLeft{window_id_suffix}"):
-                if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(-self.shift_frames_amount)
-            imgui.same_line()
+                # --- Ultimate Autotune Button ---
+                ultimate_disabled_bool = not allow_editing_timeline or not has_actions
+                if ultimate_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-            imgui.push_item_width(80 * self.app.app_settings.get("global_font_scale", 1.0))
-            _, self.shift_frames_amount = imgui.input_int(f"Frames##ShiftAmount{window_id_suffix}", self.shift_frames_amount, 1, 10)
-            if self.shift_frames_amount < 0: self.shift_frames_amount = 0
-            imgui.pop_item_width()
-            imgui.same_line()
-            if imgui.button(f">>##ShiftRight{window_id_suffix}"):
-                if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(self.shift_frames_amount)
-            if time_shift_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-            imgui.same_line()
+                if imgui.button(f"Ultimate Autotune##UltimateAutotune{window_id_suffix}"):
+                    if not ultimate_disabled_bool:
+                        self.show_ultimate_autotune_popup = True
 
-            # --- Zoom Buttons ---
-            video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
-            # Allow scrubbing if not actively processing, or if paused (is_processing True and pause_event is set)
-            processor = self.app.processor
-            can_manual_pan_zoom = (
-                video_loaded and (
-                    not processor.is_processing
-                    or (processor.is_processing and hasattr(processor, 'pause_event') and processor.pause_event.is_set())
-                )
-            ) or not video_loaded
-            zoom_disabled_bool = False  # not allow_editing_timeline or not can_manual_pan_zoom
-            if zoom_disabled_bool:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if ultimate_disabled_bool:
+                    imgui.pop_style_var()
+                    imgui.internal.pop_item_flag()
+                imgui.same_line()
 
-            imgui.text("Zoom:")
-            imgui.same_line()
-            if imgui.button(f"+##ZoomIn{window_id_suffix}"):
-                self.zoom_action_request = 0.85  # Set zoom-in request
-            imgui.same_line()
-            if imgui.button(f"-##ZoomOut{window_id_suffix}"):
-                self.zoom_action_request = 1.15  # Set zoom-out request
+                # --- RDP Button ---
+                rdp_disabled_bool = not allow_editing_timeline or not has_actions
+                if rdp_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if imgui.button(f"Simplify (RDP)##{window_id_suffix}"):
+                    if not rdp_disabled_bool:
+                        self.show_rdp_settings_popup = True
+                        self.rdp_apply_to_selection = bool(
+                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
+                if rdp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
 
-            if zoom_disabled_bool:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
-            imgui.same_line()
-            # endregion
+                # --- Peaks Button ---
+                peaks_disabled_bool = not allow_editing_timeline or not has_actions
+                if peaks_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if imgui.button(f"Peaks##{window_id_suffix}"):
+                    if not peaks_disabled_bool:
+                        self.show_peaks_settings_popup = True
+                        self.peaks_apply_to_selection = bool(
+                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
+                if peaks_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
+
+                # --- Amplify Button ---
+                amp_disabled_bool = not allow_editing_timeline or not has_actions
+                if amp_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+                if imgui.button(f"Amplify##AmpFilter{window_id_suffix}"):
+                    if not amp_disabled_bool:
+                        self.show_amp_settings_popup = True
+                        self.amp_apply_to_selection = bool(
+                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
+
+                if amp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
+
+                # --- Resample Button ---
+                resample_disabled_bool = not allow_editing_timeline or not has_actions
+                if resample_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+                if imgui.button(f"Resample##ResampleFilter{window_id_suffix}"):
+                    if not resample_disabled_bool:
+                        indices_to_use = list(self.multi_selected_action_indices) if (
+                                self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3
+                        ) else None
+
+                        op_desc = "Applied Peak-Preserving Resample" + (" to selection" if indices_to_use else "")
+
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)  # For Undo
+                        if self._perform_resample(selected_indices=indices_to_use):
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                            self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+
+                if resample_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
+
+                # --- Keyframe Extraction Button ---
+                keyframe_disabled_bool = not allow_editing_timeline or not has_actions
+                if keyframe_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+                if imgui.button(f"Keyframes##KeyframeFilter{window_id_suffix}"):
+                    # This now opens the popup instead of applying directly
+                    if not keyframe_disabled_bool:
+                        self.show_keyframe_settings_popup = True
+                        self.keyframe_apply_to_selection = bool(
+                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3)
+
+                if keyframe_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
+
+                # --- Speed Limiter Button ---
+                speed_disabled_bool = not allow_editing_timeline or not has_actions
+                if speed_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if imgui.button(f"Speed Limiter##HandyBTLimiter{window_id_suffix}"):
+                    if not speed_disabled_bool:
+                        self.show_speed_limiter_popup = True
+                if speed_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
+
+                # Invert Button
+                invert_button_prefix = "Invert Sel." if self.multi_selected_action_indices else "Invert All"
+                invert_disabled_bool = not allow_editing_timeline or not has_actions
+                if invert_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if imgui.button(f"{invert_button_prefix}##Invert{window_id_suffix}"):
+                    if not invert_disabled_bool:
+                        indices_to_op = list(
+                            self.multi_selected_action_indices) if self.multi_selected_action_indices else None
+                        op_desc = "Inverted Selected Points" if indices_to_op else "Inverted Funscript Actions"
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        if self._perform_inversion(selected_indices=indices_to_op):
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                            self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                if invert_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
+
+                # Clamp Buttons
+                clamp_button_prefix = "Clamp Sel. to" if self.multi_selected_action_indices else "Clamp All to"
+                clamp_disabled_bool = not allow_editing_timeline or not has_actions
+                if clamp_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                if imgui.button(f"{clamp_button_prefix} 0##Clamp0{window_id_suffix}"):
+                    if not clamp_disabled_bool:
+                        indices_to_op = list(
+                            self.multi_selected_action_indices) if self.multi_selected_action_indices else None
+                        op_desc = "Clamped Selected to 0" if indices_to_op else "Clamped All to 0"
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        if self._perform_clamp(0, selected_indices=indices_to_op):
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                            self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                imgui.same_line()
+                if imgui.button(f"{clamp_button_prefix} 100##Clamp100{window_id_suffix}"):
+                    if not clamp_disabled_bool:
+                        indices_to_op = list(self.multi_selected_action_indices) if self.multi_selected_action_indices else None
+                        op_desc = "Clamped Selected to 100" if indices_to_op else "Clamped All to 100"
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        if self._perform_clamp(100, selected_indices=indices_to_op):
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                            self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                if clamp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
+
+                # --- Time Shift controls ---
+                time_shift_disabled_bool = not allow_editing_timeline or not has_actions or not (
+                        self.app.processor and self.app.processor.fps and self.app.processor.fps > 0)
+                if time_shift_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+                if imgui.button(f"<<##ShiftLeft{window_id_suffix}"):
+                    if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(-self.shift_frames_amount)
+                imgui.same_line()
+
+                imgui.push_item_width(80 * self.app.app_settings.get("global_font_scale", 1.0))
+                _, self.shift_frames_amount = imgui.input_int(f"Frames##ShiftAmount{window_id_suffix}", self.shift_frames_amount, 1, 10)
+                if self.shift_frames_amount < 0: self.shift_frames_amount = 0
+                imgui.pop_item_width()
+                imgui.same_line()
+                if imgui.button(f">>##ShiftRight{window_id_suffix}"):
+                    if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(self.shift_frames_amount)
+                if time_shift_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
+                imgui.same_line()
+
+                # --- Zoom Buttons ---
+                video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
+                # Allow scrubbing if not actively processing, or if paused (is_processing True and pause_event is set)
+                processor = self.app.processor
+                can_manual_pan_zoom = (
+                    video_loaded and (
+                        not processor.is_processing
+                        or (processor.is_processing and hasattr(processor, 'pause_event') and processor.pause_event.is_set())
+                    )
+                ) or not video_loaded
+                zoom_disabled_bool = False  # not allow_editing_timeline or not can_manual_pan_zoom
+                if zoom_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+                imgui.text("Zoom:")
+                imgui.same_line()
+                if imgui.button(f"+##ZoomIn{window_id_suffix}"):
+                    self.zoom_action_request = 0.85  # Set zoom-in request
+                imgui.same_line()
+                if imgui.button(f"-##ZoomOut{window_id_suffix}"):
+                    self.zoom_action_request = 1.15  # Set zoom-out request
+
+                if zoom_disabled_bool:
+                    imgui.pop_style_var()
+                    imgui.internal.pop_item_flag()
+                imgui.same_line()
+                # endregion
 
             # --- Popup Windows ---
             # region Popups
@@ -1528,6 +1529,10 @@ class InteractiveFunscriptTimeline:
             draw_list.add_rect_filled(canvas_abs_pos[0], canvas_abs_pos[1], canvas_abs_pos[0] + canvas_size[0], canvas_abs_pos[1] + canvas_size[1], imgui.get_color_u32_rgba(0.08, 0.08, 0.1, 1))
 
             video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
+
+            processor = self.app.processor
+            can_manual_pan_zoom = (video_loaded and (not processor.is_processing or (processor.is_processing and hasattr(processor,'pause_event') and processor.pause_event.is_set()))) or not video_loaded
+
             video_fps_for_calc = self.app.processor.fps if video_loaded and self.app.processor.fps > 0 else 30.0
             effective_total_duration_s, _, _ = self.app.get_effective_video_duration_params()
             effective_total_duration_ms = effective_total_duration_s * 1000.0

@@ -184,6 +184,22 @@ class MainMenu:
             # --- VIEW MENU (Simplified) ---
             if imgui.begin_menu("View", True):
 
+                imgui.text("UI Mode")
+                imgui.indent()
+                is_expert_mode = app_state.ui_view_mode == 'expert'
+                if imgui.radio_button("Expert Mode##UIModeExpert", is_expert_mode):
+                    if not is_expert_mode:
+                        app_state.ui_view_mode = 'expert'
+                        self.app.app_settings.set("ui_view_mode", "expert")
+
+                is_simple_mode = app_state.ui_view_mode == 'simple'
+                if imgui.radio_button("Simple Mode##UIModeSimple", is_simple_mode):
+                    if not is_simple_mode:
+                        app_state.ui_view_mode = 'simple'
+                        self.app.app_settings.set("ui_view_mode", "simple")
+                imgui.unindent()
+                imgui.separator()
+
                 imgui.text("UI Layout Mode")
                 imgui.indent()
                 is_fixed_mode = app_state.ui_layout_mode == 'fixed'

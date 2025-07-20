@@ -475,6 +475,40 @@ class GUI:
         # Render the existing texture
         imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
 
+    def _render_first_run_setup_popup(self):
+        app = self.app
+        if app.show_first_run_setup_popup:
+            imgui.open_popup("First-Time Setup")
+            main_viewport = imgui.get_main_viewport()
+            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
+                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
+            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+
+            # Make the popup non-closable by the user until setup is done or fails.
+            closable = "complete" in app.first_run_status_message or "failed" in app.first_run_status_message
+            popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE | (0 if not closable else imgui.WINDOW_CLOSABLE)
+
+            if imgui.begin_popup_modal("First-Time Setup", closable, flags=popup_flags)[0]:
+                imgui.text("Welcome to FunGen!")
+                imgui.text_wrapped("For the application to work, some default AI models need to be downloaded.")
+                imgui.separator()
+
+                imgui.text_wrapped(f"Status: {app.first_run_status_message}")
+
+                # Progress Bar
+                progress_percent = app.first_run_progress / 100.0
+                imgui.progress_bar(progress_percent, size=(350, 0), overlay=f"{app.first_run_progress:.1f}%")
+
+                imgui.separator()
+
+                if closable:
+                    if imgui.button("Close", width=120):
+                        app.show_first_run_setup_popup = False
+                        imgui.close_current_popup()
+
+                imgui.end_popup()
+
+
     # TODO: Move this to a separate class/error management module
     def show_error_popup(self, title, message, action_label=None, action_callback=None):
         self.error_popup_active = True
@@ -814,11 +848,11 @@ class GUI:
             timeline_current_y_start = panel_y_start + available_height_for_main_panels
             if app_state.show_funscript_interactive_timeline:
                 app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
-                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h)
+                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h, view_mode=app_state.ui_view_mode)
                 timeline_current_y_start += timeline1_render_h
             if app_state.show_funscript_interactive_timeline2:
                 app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline2_render_h)}
-                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h)
+                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h, view_mode=app_state.ui_view_mode)
         else:
             if app_state.just_switched_to_floating:
                 if 'ControlPanel' in app_state.fixed_layout_geometry:
@@ -829,7 +863,7 @@ class GUI:
                     geom = app_state.fixed_layout_geometry['VideoDisplay']
                     imgui.set_next_window_position(geom['pos'][0], geom['pos'][1], condition=imgui.APPEARING)
                     imgui.set_next_window_size(geom['size'][0], geom['size'][1], condition=imgui.APPEARING)
-                # ... and so on for all other panels ...
+
             self._time_render("ControlPanelUI", self.control_panel_ui.render)
             self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
             self._time_render("VideoDisplayUI", self.video_display_ui.render)
