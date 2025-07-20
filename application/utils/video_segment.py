@@ -88,6 +88,12 @@ class VideoSegment:
             # print(f"Generic error parsing timecode '{timecode_str}'")
             return 0
 
+    @staticmethod
+    def ms_to_frame_idx(ms: int, total_frames: int, fps: float) -> int:
+        time_in_seconds = ms / 1000
+        frame_idx = int(time_in_seconds * fps)
+        return min(frame_idx, total_frames - 1)
+
     def to_dict(self):  # For project saving (full data)
         return {
             'start_frame_id': self.start_frame_id,
