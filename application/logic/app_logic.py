@@ -2,6 +2,7 @@ import time
 import logging
 import subprocess
 import os
+import platform
 import threading
 from typing import Optional, Dict, Tuple, List, Any
 from datetime import datetime, timedelta
@@ -15,8 +16,6 @@ from application.utils.logger import AppLogger
 from config.constants import *
 from application.utils.write_access import check_write_access
 from application.updater import AutoUpdater
-
-from config import constants
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -234,7 +233,7 @@ class ApplicationLogic:
         """The actual logic for downloading and setting up models."""
         try:
             # 1. Create models directory
-            models_dir = constants.DEFAULT_MODELS_DIR
+            models_dir = DEFAULT_MODELS_DIR
             os.makedirs(models_dir, exist_ok=True)
             self.first_run_status_message = f"Created directory: {models_dir}"
             self.logger.info(self.first_run_status_message)
@@ -243,7 +242,7 @@ class ApplicationLogic:
             is_mac_arm = platform.system() == "Darwin" and platform.processor() == 'arm'
 
             # --- Download and Process Detection Model ---
-            det_url = constants.MODEL_DOWNLOAD_URLS["detection_pt"]
+            det_url = MODEL_DOWNLOAD_URLS["detection_pt"]
             det_filename_pt = os.path.basename(det_url)
             det_model_path_pt = os.path.join(models_dir, det_filename_pt)
             self.first_run_status_message = f"Downloading Detection Model: {det_filename_pt}..."
@@ -275,7 +274,7 @@ class ApplicationLogic:
 
             # --- Download and Process Pose Model ---
             self.first_run_progress = 0
-            pose_url = constants.MODEL_DOWNLOAD_URLS["pose_pt"]
+            pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
             pose_filename_pt = os.path.basename(pose_url)
             pose_model_path_pt = os.path.join(models_dir, pose_filename_pt)
             self.first_run_status_message = f"Downloading Pose Model: {pose_filename_pt}..."
