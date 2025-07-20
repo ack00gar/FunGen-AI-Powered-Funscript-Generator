@@ -22,13 +22,22 @@ class InfoGraphsUI:
                 imgui.end()
                 return
         else:  # Fixed mode
-            imgui.begin("Graphs##RightGraphsContainer",
-                        flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE)
+            imgui.begin("Graphs##RightGraphsContainer", flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE)
 
-        # Render tabbed content, which is now the main view
-        self._render_tabbed_content()
+        if app_state.ui_view_mode == 'simple':
+            self._render_simple_view_content()
+        else:
+            self._render_tabbed_content()
 
         imgui.end()
+
+    def _render_simple_view_content(self):
+        """Renders only the video information for Simple Mode."""
+        imgui.begin_child("SimpleInfoChild", border=False)
+        imgui.spacing()
+        # We don't need the collapsing header in this focused view
+        self._render_content_video_info()
+        imgui.end_child()
 
     def _render_tabbed_content(self):
         tab_selected = None

@@ -726,7 +726,7 @@ class ROITracker:
         normalized_centered_flow = (2 * (value - min_h) / flow_range) - 1.0 if flow_range != 0 else 0.0
         normalized_centered_flow = np.clip(normalized_centered_flow, -1.0, 1.0)
         effective_amp_factor = self._get_effective_amplification_factor()
-        max_deviation = (self.sensitivity / 2.0) * effective_amp_factor
+        max_deviation = (self.sensitivity / 2.5) * effective_amp_factor
         pos_offset = self.y_offset if is_primary else self.x_offset
         return int(np.clip(50 + normalized_centered_flow * max_deviation + pos_offset, 0, 100))
 
@@ -1023,7 +1023,6 @@ class ROITracker:
                             self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))),
                                                                     max(0.0, min(new_y_rel, float(urh_c))))
                     else:
-                        # --- CORRECTED LOGIC BRANCH ---
                         # Fallback to calculating flow on the whole User ROI without calling YOLO-specific methods.
                         dx_raw, dy_raw, _, _ = self._calculate_flow_in_patch(
                             current_user_roi_patch_gray,
@@ -1041,10 +1040,8 @@ class ROITracker:
                         if len(self.secondary_flow_history_smooth) > self.flow_history_window_smooth:
                             self.secondary_flow_history_smooth.pop(0)
 
-                        dy_smooth = np.median(
-                            self.primary_flow_history_smooth) if self.primary_flow_history_smooth else dy_raw
-                        dx_smooth = np.median(
-                            self.secondary_flow_history_smooth) if self.secondary_flow_history_smooth else dx_raw
+                        dy_smooth = np.median(self.primary_flow_history_smooth) if self.primary_flow_history_smooth else dy_raw
+                        dx_smooth = np.median(self.secondary_flow_history_smooth) if self.secondary_flow_history_smooth else dx_raw
 
                         # Apply scaling and generate final position
                         size_factor = 1.0  # No object detection in this mode
@@ -1058,10 +1055,8 @@ class ROITracker:
                         else:
                             effective_amp_factor = self._get_effective_amplification_factor()
                             manual_scale_multiplier = (self.sensitivity / 10.0) * effective_amp_factor
-                            final_primary_pos = int(
-                                np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
-                            final_secondary_pos = int(
-                                np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
+                            final_primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
+                            final_secondary_pos = int(np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
 
                         # Update state
                         self.user_roi_current_flow_vector = (dx_smooth, dy_smooth)
@@ -1089,15 +1084,13 @@ class ROITracker:
             # --- Automatic Lag Compensation ---
             # Calculate the inherent delay from the smoothing window. A window of size N has a lag of (N-1)/2 frames.
             # A window size of 1 means no smoothing and no delay.
-            automatic_smoothing_delay_frames = (
-                                                           self.flow_history_window_smooth - 1) / 2.0 if self.flow_history_window_smooth > 1 else 0.0
+            automatic_smoothing_delay_frames = (self.flow_history_window_smooth - 1) / 2.0 if self.flow_history_window_smooth > 1 else 0.0
 
             # Combine the automatic compensation with the user's manual delay setting.
             total_delay_frames = self.output_delay_frames + automatic_smoothing_delay_frames
 
             # Convert the total frame delay to milliseconds.
-            delay_ms = (
-                                   total_delay_frames / self.current_video_fps_for_delay) * 1000.0 if self.current_video_fps_for_delay > 0 else 0.0
+            delay_ms = (total_delay_frames / self.current_video_fps_for_delay) * 1000.0 if self.current_video_fps_for_delay > 0 else 0.0
 
             # Adjust the timestamp to compensate for the total delay.
             adjusted_frame_time_ms = frame_time_ms - delay_ms
@@ -1154,26 +1147,6 @@ class ROITracker:
                             f"Lost: {self.frames_since_target_lost}/{self.max_frames_for_roi_persistence}",
                             (rx, ry + rh + 10), cv2.FONT_HERSHEY_PLAIN, 0.6, (0, 0, 255), 1)
 
-            # is_vr_video = self.app and hasattr(self.app,
-            #                                    'processor') and self.app.processor.determined_video_type == 'VR'
-            is_vr_video = self._is_vr_video()
-            # if self.enable_inversion_detection and is_vr_video:
-            #     mode_color = (255, 255, 0)  # Default for undetermined
-            #     mode_text = "Undetermined"
-            #     if self.motion_mode == 'thrusting':
-            #         mode_text = "Thrusting"
-            #         mode_color = (0, 255, 0)
-            #     elif self.motion_mode == 'riding':
-            #         mode_color = (255, 100, 255)
-            #         if self.main_interaction_class == 'face':
-            #             mode_text = "Blowing"
-            #         elif self.main_interaction_class == 'hand':
-            #             mode_text = "Stroking"
-            #         else:
-            #             mode_text = "Riding"
-            #     cv2.putText(processed_frame, mode_text, (rx + 5, ry + rh - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
-            #                 mode_color, 1)
-
         elif self.tracking_mode == "USER_FIXED_ROI" and self.show_roi and self.user_roi_fixed:
             urx, ury, urw, urh = self.user_roi_fixed
             urx_c, ury_c = max(0, urx), max(0, ury)
@@ -1185,28 +1158,6 @@ class ROITracker:
                 point_y_abs = ury_c + int(self.user_roi_tracked_point_relative[1])
                 cv2.circle(processed_frame, (point_x_abs, point_y_abs), 3, (0, 255, 0), -1)
 
-            # is_vr_video = self.app and hasattr(self.app,
-            #                                    'processor') and self.app.processor.determined_video_type == 'VR'
-            is_vr_video = self._is_vr_video()
-            # if self.enable_inversion_detection and is_vr_video:
-            #     mode_color = (255, 255, 0)  # Default for undetermined
-            #     mode_text = "Undetermined"
-            #     if self.motion_mode == 'thrusting':
-            #         mode_text = "Thrusting"
-            #         mode_color = (0, 255, 0)
-            #     elif self.motion_mode == 'riding':
-            #         mode_color = (255, 100, 255)
-            #         # Note: main_interaction_class is primarily driven by YOLO_ROI mode.
-            #         # In User ROI, this relies on a class being set externally (e.g., via UI or project file).
-            #         if self.main_interaction_class == 'face':
-            #             mode_text = "Blowing"
-            #         elif self.main_interaction_class == 'hand':
-            #             mode_text = "Stroking"
-            #         else:
-            #             mode_text = "Riding"
-            #     cv2.putText(processed_frame, mode_text, (urx_c + 5, ury_c + urh_c - 5), cv2.FONT_HERSHEY_PLAIN, 0.8,
-            #                 mode_color, 1)
-
         if self.show_stats:
             for i, stat_text in enumerate(self.stats_display):
                 cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 220, 220),
@@ -1214,9 +1165,6 @@ class ROITracker:
 
         self.internal_frame_counter += 1
         return processed_frame, action_log_list if action_log_list else None
-
-    # process_frame_for_stage3 is REMOVED from ROITracker.
-    # Its logic will be adapted into the new stage_3_optical_flow_processor.py
 
     def get_class_color(self, class_name: Optional[str]) -> Tuple[int, int, int]:
         return self.CLASS_COLORS.get(class_name.lower() if class_name else "", (180, 180, 180))
@@ -1252,7 +1200,6 @@ class ROITracker:
             # Fallback to the default if FPS is not available
             self.motion_mode_history_window = 30
             self.logger.info(f"Falling back to default motion history window: {self.motion_mode_history_window} frames.")
-
 
         if self.tracking_mode == "YOLO_ROI": # Also applies to S3 like processing
             self.frames_since_target_lost = 0

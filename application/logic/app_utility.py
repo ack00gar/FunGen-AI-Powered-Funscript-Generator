@@ -1,15 +1,97 @@
 import numpy as np
-from typing import Dict, Tuple
+import os
+import shutil
+import urllib.request
+import zipfile
+from typing import Dict, Tuple, TYPE_CHECKING
 
 
 from config.constants import TIMELINE_HEATMAP_COLORS, TIMELINE_COLOR_SPEED_STEP, TIMELINE_COLOR_ALPHA, STATUS_DETECTED, STATUS_SMOOTHED
 
+if TYPE_CHECKING:
+    from application.logic.app_logic import ApplicationLogic
 
 class AppUtility:
     def __init__(self, app_instance=None):
         # app_instance might not be needed if all utility methods are static
         # or don't rely on application state.
         self.app = app_instance
+
+    def _download_reporthook(self, block_num, block_size, total_size, progress_callback):
+        """Callback for urllib.request.urlretrieve to report progress."""
+        downloaded = block_num * block_size
+        if total_size > 0:
+            percent = min(100.0, downloaded * 100 / total_size)
+            if progress_callback:
+                progress_callback(percent, downloaded, total_size)
+
+    def download_file_with_progress(self, url: str, destination_path: str, progress_callback=None) -> bool:
+        """Downloads a file and reports progress."""
+        self.app.logger.info(f"Downloading from {url} to {destination_path}")
+        try:
+            reporthook = lambda bn, bs, ts: self._download_reporthook(bn, bs, ts, progress_callback)
+            urllib.request.urlretrieve(url, destination_path, reporthook=reporthook)
+            self.app.logger.info(f"Successfully downloaded {os.path.basename(destination_path)}.")
+            if progress_callback:
+                progress_callback(100, 0, 0)
+            return True
+        except Exception as e:
+            self.app.logger.error(f"Failed to download {url}: {e}", exc_info=True)
+            if os.path.exists(destination_path):
+                os.remove(destination_path)
+            return False
+
+    def process_mac_model_archive(self, downloaded_path: str, destination_dir: str,
+                                  original_filename: str) -> str | None:
+        """
+        Processes the downloaded file for a macOS .mlpackage model.
+        It handles extraction if it's a zip, or renames it if it's an auto-unzipped package.
+        Returns the final path to the .mlpackage.
+        """
+        self.app.logger.info(f"Processing macOS model: {os.path.basename(downloaded_path)}")
+
+        if zipfile.is_zipfile(downloaded_path):
+            self.app.logger.info("Archive is a valid zip file. Extracting...")
+            try:
+                with zipfile.ZipFile(downloaded_path, 'r') as zip_ref:
+                    mlpackage_name = next(
+                        (name.split('/')[0] for name in zip_ref.namelist() if name.endswith('.mlpackage/')), None)
+                    if not mlpackage_name:
+                        self.app.logger.error("Could not find a .mlpackage directory inside the zip file.")
+                        os.remove(downloaded_path)
+                        return None
+                    zip_ref.extractall(destination_dir)
+                os.remove(downloaded_path)
+                final_path = os.path.join(destination_dir, mlpackage_name)
+                self.app.logger.info(f"Successfully extracted to: {final_path}")
+                return final_path
+            except Exception as e:
+                self.app.logger.error(f"Failed to extract zip file: {e}", exc_info=True)
+                return None
+        else:
+            self.app.logger.warning(
+                "Downloaded item is not a zip archive. Assuming it is the model package and renaming.")
+            final_name = original_filename.replace('.zip', '')
+            final_path = os.path.join(destination_dir, final_name)
+            try:
+                if os.path.exists(final_path):
+                    if os.path.isdir(final_path):
+                        shutil.rmtree(final_path)
+                    else:
+                        os.remove(final_path)
+
+                os.rename(downloaded_path, final_path)
+
+                if os.path.exists(final_path):
+                    self.app.logger.info(f"Successfully processed model package: {os.path.basename(final_path)}")
+                    return final_path
+                else:
+                    self.app.logger.error(
+                        f"Processed path '{final_path}' does not exist after rename. Model setup failed.")
+                    return None
+            except Exception as e:
+                self.app.logger.error(f"Failed to process model file: {e}", exc_info=True)
+                return None
 
     def get_box_style(self, box_data: Dict) -> Tuple[Tuple[float, float, float, float], float, bool]:
         role = box_data.get("role_in_frame", "general_detection")

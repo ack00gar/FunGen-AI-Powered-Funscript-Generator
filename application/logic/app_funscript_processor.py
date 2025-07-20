@@ -46,6 +46,36 @@ class AppFunscriptProcessor:
         # Clipboard
         self.clipboard_actions_data: List[Dict] = []
 
+    def get_default_ultimate_autotune_params(self) -> Dict:
+        """
+        Constructs a dictionary of the default parameters for the Ultimate Autotune pipeline.
+        This avoids needing to instantiate a UI class in the logic layer.
+        """
+        # Note: These setting keys match the ones saved by the UI in interactive_timeline.py
+        return {
+            'presmoothing': {
+                'enabled': self.app.app_settings.get("timeline1_ultimate_presmoothing_enabled", True),
+                'max_window_size': self.app.app_settings.get("timeline1_ultimate_presmoothing_max_window", 15)
+            },
+            'peaks': {
+                'enabled': self.app.app_settings.get("timeline1_ultimate_peaks_enabled", True),
+                'prominence': self.app.app_settings.get("timeline1_ultimate_peaks_prominence", 10),
+                'distance': 1
+            },
+            'recovery': {
+                'enabled': self.app.app_settings.get("timeline1_ultimate_recovery_enabled", True),
+                'threshold_factor': self.app.app_settings.get("timeline1_ultimate_recovery_threshold", 1.8)
+            },
+            'normalization': {
+                'enabled': self.app.app_settings.get("timeline1_ultimate_normalization_enabled", True)
+            },
+            # Regeneration is disabled
+            'speed_limiter': {
+                'enabled': self.app.app_settings.get("timeline1_ultimate_speed_limit_enabled", True),
+                'speed_threshold': self.app.app_settings.get("timeline1_ultimate_speed_threshold", 500.0)
+            }
+        }
+
     def get_chapter_at_frame(self, frame_index: int) -> Optional[VideoSegment]:
         """
         Efficiently finds the chapter that contains the given frame index.
