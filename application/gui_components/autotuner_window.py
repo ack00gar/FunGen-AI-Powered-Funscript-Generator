@@ -4,6 +4,7 @@ from config.constants import DEFAULT_S1_NUM_PRODUCERS, DEFAULT_S1_NUM_CONSUMERS
 class AutotunerWindow:
     def __init__(self, app_logic):
         self.app = app_logic
+        self.selected_hwaccel_idx = 0
 
     def render(self):
         app_state = self.app.app_state_ui
@@ -29,6 +30,20 @@ class AutotunerWindow:
                 if not is_ready:
                     imgui.text_colored("Please load a video first.", 1.0, 0.5, 0.5, 1.0)
 
+                # --- UI for selecting test mode ---
+                hwaccel_options = ["Default (Test CPU + Best GPU)"] + self.app.available_ffmpeg_hwaccels
+                if is_running:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+                imgui.text("Test Mode:")
+                imgui.set_next_item_width(-1)
+                _, self.selected_hwaccel_idx = imgui.combo("##Test Mode", self.selected_hwaccel_idx, hwaccel_options)
+
+                if is_running:
+                    imgui.pop_style_var()
+                    imgui.internal.pop_item_flag()
+
                 # --- Start Button ---
                 if is_running:
                     imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
@@ -36,7 +51,12 @@ class AutotunerWindow:
 
                 if imgui.button("Start Autotune", width=-1):
                     if is_ready:
-                        self.app.start_autotuner()
+                        force_hwaccel = None
+                        if self.selected_hwaccel_idx > 0:
+                            selected_option = hwaccel_options[self.selected_hwaccel_idx]
+                            if selected_option != "Default (Test CPU + Best GPU)":
+                                force_hwaccel = selected_option
+                        self.app.start_autotuner(force_hwaccel=force_hwaccel)
 
                 if is_running:
                     imgui.pop_style_var()

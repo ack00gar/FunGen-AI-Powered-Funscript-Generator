@@ -114,6 +114,7 @@ class ApplicationLogic:
         self.autotuner_results: Dict[Tuple[int, int, str], Tuple[float, str]] = {}
         self.autotuner_best_combination: Optional[Tuple[int, int, str]] = None
         self.autotuner_best_fps: float = 0.0
+        self.autotuner_forced_hwaccel: Optional[str] = None
 
         # --- Hardware Acceleration
         # Query ffmpeg for available hardware accelerations
@@ -324,7 +325,7 @@ class ApplicationLogic:
         """Callback to update the progress bar state from the download thread."""
         self.first_run_progress = percent
 
-    def start_autotuner(self):
+    def start_autotuner(self, force_hwaccel: Optional[str] = None):
         """Initiates the autotuning process in a background thread."""
         if self.is_autotuning_active:
             self.logger.warning("Autotuner is already running.")
@@ -333,6 +334,7 @@ class ApplicationLogic:
             self.logger.error("Cannot start autotuner: No video loaded.", extra={'status_message': True})
             return
 
+        self.autotuner_forced_hwaccel = force_hwaccel
         self.is_autotuning_active = True
         self.autotuner_thread = threading.Thread(target=self._run_autotuner_thread, daemon=True)
         self.autotuner_thread.start()
@@ -429,18 +431,24 @@ class ApplicationLogic:
                 get_perf(p, c, accel)
 
         try:
-            best_hw_accel = 'none'
-            available_hw = self.available_ffmpeg_hwaccels
-            if 'cuda' in available_hw or 'nvdec' in available_hw:
-                best_hw_accel = 'cuda'
-            elif 'qsv' in available_hw:
-                best_hw_accel = 'qsv'
-            elif 'videotoolbox' in available_hw:
-                best_hw_accel = 'videotoolbox'
+            accel_methods_to_test = []
+            if self.autotuner_forced_hwaccel:
+                self.logger.info(f"Autotuner forced to test only HW Accel: {self.autotuner_forced_hwaccel}")
+                accel_methods_to_test.append(self.autotuner_forced_hwaccel)
+            else:
+                self.logger.info("Autotuner running in default mode (testing CPU and best GPU).")
+                best_hw_accel = 'none'
+                available_hw = self.available_ffmpeg_hwaccels
+                if 'cuda' in available_hw or 'nvdec' in available_hw:
+                    best_hw_accel = 'cuda'
+                elif 'qsv' in available_hw:
+                    best_hw_accel = 'qsv'
+                elif 'videotoolbox' in available_hw:
+                    best_hw_accel = 'videotoolbox'
 
-            accel_methods_to_test = ['none']
-            if best_hw_accel != 'none':
-                accel_methods_to_test.append(best_hw_accel)
+                accel_methods_to_test.append('none')
+                if best_hw_accel != 'none':
+                    accel_methods_to_test.append(best_hw_accel)
 
             max_cores = os.cpu_count() or 4
             PRODUCER_RANGE = range(1, 3)
