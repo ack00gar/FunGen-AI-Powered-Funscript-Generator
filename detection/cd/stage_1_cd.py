@@ -79,7 +79,8 @@ class FFmpegEncoder:
         if self.encoder_process.stdin:
             try:
                 self.encoder_process.stdin.close()
-            except (BrokenPipeError, IOError): pass
+            except (BrokenPipeError, IOError):
+                pass
         try:
             self.encoder_process.wait(timeout=5)
         except subprocess.TimeoutExpired:
@@ -126,7 +127,7 @@ class Stage1QueueMonitor:
         """Returns the approximate size of the queue."""
         try:
             return queue.qsize()
-        except NotImplementedError: # Some platforms might not implement qsize()
+        except NotImplementedError:  # Some platforms might not implement qsize()
             # Fallback to the original, less accurate method if qsize() is not available
             with self.frame_queue_puts.get_lock(), self.frame_queue_gets.get_lock():
                 return self.frame_queue_puts.value - self.frame_queue_gets.value
@@ -165,6 +166,7 @@ def video_processor_producer_proc(
         # Create a proxy object for the VideoProcessor instance
         class VPAppProxy:
             pass
+
         vp_app_proxy = VPAppProxy()
         vp_app_proxy.hardware_acceleration_method = hwaccel_method_producer
         vp_app_proxy.available_ffmpeg_hwaccels = hwaccel_avail_list_producer if hwaccel_avail_list_producer is not None else []
@@ -235,8 +237,6 @@ def video_processor_producer_proc(
                     break
                 continue # Go to the next iteration of the main for loop to re-check stop event
 
-
-
             if stop_event_local.is_set(): # Check if stop was set during the put_success loop
                 producer_logger.info(
                     f"[S1 VP Producer-{producer_idx}] Stop event detected after attempting to queue frame {frame_id}. Loop terminating.")
@@ -300,10 +300,6 @@ def video_processor_producer_proc(
         frames_count_final = frames_put_to_queue_this_producer if 'frames_put_to_queue_this_producer' in locals() else 'unknown'
         effective_logger_final.info(
             f"[S1 VP Producer-{producer_idx}] Fully Exited. Final count of frames put to queue: {frames_count_final}. Stop event: {stop_event_local.is_set()}")
-        # Ensure VideoProcessor's own reset/cleanup if it has one that's relevant
-        #if vp_instance and hasattr(vp_instance, 'stop_processing'):
-        #    vp_instance.stop_processing() # This should handle its internal ffmpeg if any was for main loop, not segment
-
 
 def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, yolo_pose_model_path,
                   confidence_threshold, yolo_input_size_consumer, queue_monitor_local, stop_event_local,
@@ -349,7 +345,7 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                 # --- Step 2: Conditionally perform Pose Estimation ---
                 # Run only on the first frame of every second (approximately)
                 poses = []  # Default to empty
-                if frame_id % (int(video_fps)//10) == 0:
+                if frame_id % (int(video_fps) // 10) == 0:
                     pose_results = pose_model(frame, device=pose_device, verbose=False, imgsz=yolo_input_size_consumer,
                                         conf=confidence_threshold)
                     for r in pose_results:
@@ -384,7 +380,8 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
 def logger_proc(frame_processing_queue, result_queue, output_file_local, expected_frames,
                 progress_callback_local, queue_monitor_local, stop_event_local,
                 s1_start_time_param, parent_logger: logging.Logger,
-                gui_event_queue_arg: Optional[StdLibQueue] = None):
+                gui_event_queue_arg: Optional[StdLibQueue] = None,
+                max_fps_container: Optional[list] = None):
     results_dict = {}
     written_count = 0
     last_progress_update_time = time.time()
@@ -393,6 +390,7 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
     last_instant_fps_update_time = time.time()
     frames_since_last_instant_update = 0
     instant_fps = 0.0
+    max_instant_fps = 0.0
     parent_logger.info(f"[S1 Logger] Expecting {expected_frames} frames. Writing to {output_file_local}")
 
     if progress_callback_local:
@@ -420,10 +418,11 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
 
             current_time = time.time()
 
-            # --- Instant FPS calculation every 5 seconds ---
+            # --- Instant FPS calculation every 1 second ---
             time_since_last_instant_update = current_time - last_instant_fps_update_time
-            if time_since_last_instant_update >= 5.0:
+            if time_since_last_instant_update >= 1.0:
                 instant_fps = frames_since_last_instant_update / time_since_last_instant_update
+                max_instant_fps = max(max_instant_fps, instant_fps)
                 frames_since_last_instant_update = 0
                 last_instant_fps_update_time = current_time
 
@@ -494,6 +493,10 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
     except Exception as e:
         parent_logger.error(f"Error writing output file '{output_file_local}': {e}", exc_info=True)
 
+    if max_fps_container is not None:
+        max_fps_container[0] = max_instant_fps
+    parent_logger.info(f"[S1 Logger] Final Max FPS recorded: {max_instant_fps:.2f}")
+
 
 def perform_yolo_analysis(
         video_path_arg: str,
@@ -552,7 +555,7 @@ def perform_yolo_analysis(
         process_logger.critical("Stage 1 Critical Error: No output file path was specified for the msgpack file. Aborting analysis.")
         if progress_callback:
             progress_callback(0, 0, "Stage 1 Error: No output path specified.", 0, 0, 0)
-        return None
+        return None, 0.0
 
     if app_logger_config_arg and app_logger_config_arg.get('log_file') and app_logger_config_arg.get(
             'log_level') is not None:
@@ -577,7 +580,7 @@ def perform_yolo_analysis(
         msg = "Error: YOLO Pose model not found"
         process_logger.error(msg)
         if progress_callback: progress_callback(0, 0, msg, 0, 0, 0)
-        return None
+        return None, 0.0
 
     s1_start_time = time.time()
     stop_event_internal = Event()
@@ -625,7 +628,7 @@ def perform_yolo_analysis(
                                       fallback_logger_config={'logger_instance': process_logger})
 
     if not main_vp_for_info.open_video(video_path_to_use):
-        return None
+        return None, 0.0
     full_video_total_frames = main_vp_for_info.video_info.get('total_frames', 0)
     video_fps = main_vp_for_info.video_info.get('fps', 30.0)
     main_vp_for_info.reset(close_video=True)
@@ -639,12 +642,13 @@ def perform_yolo_analysis(
         if end is not None and end != -1: processing_end_frame = end
     total_frames_to_process = processing_end_frame - processing_start_frame + 1
     if total_frames_to_process <= 0:
-        return None
+        return None, 0.0
 
     frame_processing_queue = Queue(maxsize=constants.STAGE1_FRAME_QUEUE_MAXSIZE)
     yolo_result_queue = Queue()
     producers_list, consumers_list = [], []
     logger_p_thread = None
+    max_fps_container = [0.0]
 
     try:
         # --- PROCESS CREATION ---
@@ -669,7 +673,7 @@ def perform_yolo_analysis(
 
         logger_thread_args = (frame_processing_queue, yolo_result_queue, result_file_local, total_frames_to_process,
                               progress_callback, queue_monitor, stop_event_internal,
-                              s1_start_time, process_logger, gui_event_queue_arg)
+                              s1_start_time, process_logger, gui_event_queue_arg, max_fps_container)
 
         logger_p_thread = PyThread(target=logger_proc, args=logger_thread_args, daemon=True)
 
@@ -711,15 +715,19 @@ def perform_yolo_analysis(
             logger_p_thread.join()
 
         if stop_event_external.is_set():
-            return None
-        return result_file_local if os.path.exists(result_file_local) else None
+            return None, 0.0
+
+        final_max_fps = max_fps_container[0]
+        process_logger.info(f"Stage 1 analysis completed. Final Max FPS: {final_max_fps:.2f}")
+
+        return (result_file_local, final_max_fps) if os.path.exists(result_file_local) else (None, 0.0)
 
 
     except Exception as e:
         process_logger.critical(f"[S1 Lib] CRITICAL EXCEPTION in perform_yolo_analysis: {e}", exc_info=True)
         if not stop_event_internal.is_set():
             stop_event_internal.set()
-        return None
+        return None, 0.0
     finally:
         # This 'finally' block ensures cleanup happens no matter what.
         process_logger.info("[S1 Lib] Entering cleanup block.")

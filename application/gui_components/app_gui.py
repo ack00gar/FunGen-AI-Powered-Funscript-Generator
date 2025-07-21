@@ -19,6 +19,7 @@ from application.gui_components.video_display_ui import VideoDisplayUI
 from application.gui_components.video_navigation_ui import VideoNavigationUI, ChapterListWindow
 from application.gui_components.info_graphs_ui import InfoGraphsUI
 from application.gui_components.generated_file_manager_window import GeneratedFileManagerWindow
+from application.gui_components.autotuner_window import AutotunerWindow
 
 from config import constants
 
@@ -70,6 +71,7 @@ class GUI:
         self.info_graphs_ui = InfoGraphsUI(self.app)
         self.chapter_list_window_ui = ChapterListWindow(self.app, nav_ui=self.video_navigation_ui)
         self.generated_file_manager_ui = GeneratedFileManagerWindow(self.app)
+        self.autotuner_window_ui = AutotunerWindow(self.app)
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -898,7 +900,7 @@ class GUI:
             # Fallback: center on window size if viewport not available
             popup_pos = (self.window_width * 0.5, self.window_height * 0.5)
             imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-        popup_width = 480 
+        popup_width = 480
         imgui.set_next_window_size(popup_width, 0)  # Normal width, auto height
         if imgui.begin_popup_modal("ErrorPopup")[0]:
             # Center title
@@ -931,6 +933,9 @@ class GUI:
         # --- Render Generated File Manager window ---
         if self.app.app_state_ui.show_generated_file_manager:
             self.generated_file_manager_ui.render()
+
+        # --- Render Autotuner Window ---
+        self._time_render("AutotunerWindow", self.autotuner_window_ui.render)
 
         self.perf_frame_count += 1
         if time.time() - self.last_perf_log_time > self.perf_log_interval:
@@ -1004,3 +1009,4 @@ class GUI:
             if self.window: glfw.destroy_window(self.window)
             glfw.terminate()
             self.app.logger.info("GUI terminated.", extra={'status_message': False})
+            
