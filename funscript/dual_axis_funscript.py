@@ -27,6 +27,13 @@ class DualAxisFunscript:
         self.last_timestamp_primary: int = 0
         self.last_timestamp_secondary: int = 0
 
+        # Timestamp caching mechanism
+        self._primary_timestamps_cache: List[int] = []
+        self._secondary_timestamps_cache: List[int] = []
+        self._cache_dirty_primary: bool = True
+        self._cache_dirty_secondary: bool = True
+
+
         if logger:
             self.logger = logger
         else:
@@ -34,40 +41,56 @@ class DualAxisFunscript:
             if not self.logger.handlers:
                 self.logger.addHandler(logging.NullHandler())
 
+    def _invalidate_cache(self, axis: str = 'both'):
+        """Marks the timestamp cache(s) as dirty."""
+        if axis == 'primary' or axis == 'both':
+            self._cache_dirty_primary = True
+        if axis == 'secondary' or axis == 'both':
+            self._cache_dirty_secondary = True
+
+    def _get_timestamps_for_axis(self, axis: str) -> List[int]:
+        """
+        Returns a cached list of timestamps for the specified axis,
+        regenerating it from the actions list only if necessary.
+        """
+        if axis == 'primary':
+            if self._cache_dirty_primary:
+                self._primary_timestamps_cache = [a["at"] for a in self.primary_actions]
+                self._cache_dirty_primary = False
+            return self._primary_timestamps_cache
+        else: # secondary
+            if self._cache_dirty_secondary:
+                self._secondary_timestamps_cache = [a["at"] for a in self.secondary_actions]
+                self._cache_dirty_secondary = False
+            return self._secondary_timestamps_cache
+
     def _process_action_for_axis(self,
                                  actions_target_list: List[Dict],
                                  timestamp_ms: int,
                                  pos: int,
                                  min_interval_ms: int,
-                                 is_from_live_tracker: bool
+                                 axis_name: str # 'primary' or 'secondary'
                                  ) -> int:
         """
         Processes and adds/updates a single action in the target list (in-place).
-        Optimized for performance, especially with large action lists.
+        Optimized with a timestamp cache.
         Returns the timestamp of the last action in the list.
         """
         clamped_pos = max(0, min(100, pos))
         new_action = {"at": timestamp_ms, "pos": clamped_pos}
 
-        original_length_before_add = len(actions_target_list)
-
-        # Find insertion point or existing action with the same timestamp
-        # This list comprehension for timestamps is O(N) but happens once per call.
-        # For extremely frequent calls on huge lists, further optimization might involve
-        # a data structure that keeps timestamps indexed, but that's a larger change.
-        action_timestamps = [a["at"] for a in actions_target_list]
+        # Use the cached timestamps for performance
+        action_timestamps = self._get_timestamps_for_axis(axis_name)
         idx = bisect.bisect_left(action_timestamps, timestamp_ms)
 
         action_inserted_or_updated = False
         if idx < len(actions_target_list) and actions_target_list[idx]["at"] == timestamp_ms:
-            # Timestamp exists, update position if different
             if actions_target_list[idx]["pos"] != clamped_pos:
                 actions_target_list[idx]["pos"] = clamped_pos
-                action_inserted_or_updated = True  # Position updated
-            # If pos is the same, no effective change from this new_action
+                # No timestamp change, so cache is still valid
         else:
             can_insert = True
-            if idx > 0:  # Check interval with predecessor if not inserting at the beginning
+            if idx > 0:
                 prev_action = actions_target_list[idx - 1]
                 if timestamp_ms - prev_action["at"] < min_interval_ms:
                     can_insert = False
@@ -75,27 +98,28 @@ class DualAxisFunscript:
             if can_insert:
                 actions_target_list.insert(idx, new_action)
                 action_inserted_or_updated = True
+                self._invalidate_cache(axis_name) # Cache is now dirty
 
-        # Enforce min_interval_ms after an insert/update that might have caused violations
-        # This pass is O(N) but ensures correctness similar to the original's filter pass.
-        if action_inserted_or_updated and min_interval_ms > 0:  # Only re-filter if a change occurred
-            if not actions_target_list:  # Should not happen if we just inserted/updated
+        if action_inserted_or_updated and min_interval_ms > 0:
+            if not actions_target_list:
                 return 0
 
-            # Efficient in-place filter for min_interval_ms
+            original_len = len(actions_target_list)
             current_valid_idx = 0
-            # The first point is always valid if the list is not empty (which it isn't here).
-            # Iterate from the second point.
             if len(actions_target_list) > 1:
                 for i in range(1, len(actions_target_list)):
                     if actions_target_list[i]["at"] - actions_target_list[current_valid_idx]["at"] >= min_interval_ms:
                         current_valid_idx += 1
-                        if i != current_valid_idx:  # if elements were skipped due to interval
+                        if i != current_valid_idx:
                             actions_target_list[current_valid_idx] = actions_target_list[i]
 
-            # Trim the list if elements were removed from the end by filtering
             if current_valid_idx + 1 < len(actions_target_list):
                 del actions_target_list[current_valid_idx + 1:]
+
+            # If filtering removed points, invalidate the cache again
+            if len(actions_target_list) != original_len:
+                self._invalidate_cache(axis_name)
+
 
         return actions_target_list[-1]["at"] if actions_target_list else 0
 
@@ -112,26 +136,26 @@ class DualAxisFunscript:
                                      might not be desired for the loaded portion.
         """
         new_last_ts_primary = self.last_timestamp_primary
-        if primary_pos is not None: # Only process if primary_pos is provided
+        if primary_pos is not None:
             new_last_ts_primary = self._process_action_for_axis(
                 actions_target_list=self.primary_actions,
                 timestamp_ms=timestamp_ms,
-                pos=primary_pos, # primary_pos is guaranteed not None here
+                pos=primary_pos,
                 min_interval_ms=self.min_interval_ms,
-                is_from_live_tracker=is_from_live_tracker
+                axis_name='primary' # Pass axis name
             )
         # Update last_timestamp_primary only if actions were actually processed or if list became empty
         self.last_timestamp_primary = new_last_ts_primary if self.primary_actions else 0
 
 
         new_last_ts_secondary = self.last_timestamp_secondary
-        if secondary_pos is not None: # Only process if secondary_pos is provided
+        if secondary_pos is not None:
             new_last_ts_secondary = self._process_action_for_axis(
                 actions_target_list=self.secondary_actions,
                 timestamp_ms=timestamp_ms,
-                pos=secondary_pos, # secondary_pos is guaranteed not None here
+                pos=secondary_pos,
                 min_interval_ms=self.min_interval_ms,
-                is_from_live_tracker=is_from_live_tracker
+                axis_name='secondary' # Pass axis name
             )
             self.last_timestamp_secondary = new_last_ts_secondary if self.secondary_actions else 0
 
@@ -143,28 +167,24 @@ class DualAxisFunscript:
         if not actions_to_search:
             return 50
 
-        # Optimized with bisect_left for O(log N) find + O(N) for timestamp list (can be cached if list doesn't change often)
-        # However, for get_value, the list of timestamps is small enough that direct creation is fine.
-        action_timestamps = [a["at"] for a in actions_to_search]
+        # Use the cached timestamps for performance
+        action_timestamps = self._get_timestamps_for_axis(axis)
         idx = bisect.bisect_left(action_timestamps, time_ms)
 
-        if idx == 0:  # time_ms is before or at the first action
+        if idx == 0:
             return actions_to_search[0]["pos"]
-        # Note: len(actions_to_search) because idx can be len(actions_to_search) if time_ms is after all actions
-        if idx == len(actions_to_search):  # time_ms is after or at the last action
+        if idx == len(actions_to_search):
             return actions_to_search[-1]["pos"]
 
-        # Interpolate between actions_to_search[idx-1] and actions_to_search[idx]
         p1 = actions_to_search[idx - 1]
         p2 = actions_to_search[idx]
 
-        if time_ms == p1["at"]:  # Exact match with the point before insertion point
+        if time_ms == p1["at"]:
             return p1["pos"]
-        # p2["at"] should be >= time_ms because of bisect_left. If p2["at"] == time_ms, it means p1["at"] < time_ms.
 
         # Denominator for interpolation
         time_diff = float(p2["at"] - p1["at"])
-        if time_diff == 0:  # Should not happen if min_interval_ms > 0 and enforced
+        if time_diff == 0:
             return p1["pos"]
 
         t_ratio = (time_ms - p1["at"]) / time_diff
@@ -182,6 +202,7 @@ class DualAxisFunscript:
         self.secondary_actions = []
         self.last_timestamp_primary = 0
         self.last_timestamp_secondary = 0
+        self._invalidate_cache('both') # Invalidate caches
         self.logger.info("Cleared all actions from DualAxisFunscript.")
 
     def find_next_jump_frame(self, current_frame: int, fps: float, axis: str = 'primary') -> Optional[int]:
@@ -244,17 +265,19 @@ class DualAxisFunscript:
                     not all(isinstance(item, dict) and "at" in item and "pos" in item for item in value):
                 self.logger.error(
                     "Invalid value for actions setter: Must be a list of action dicts {'at': ms, 'pos': val}.")
-                self.primary_actions = []  # Clear to maintain a consistent state
+                self.primary_actions = []
             else:
                 # Create a new list from sorted items to ensure we don't keep a reference to a mutable 'value'
                 self.primary_actions = sorted(list(item for item in value), key=lambda x: x["at"])
 
             self.last_timestamp_primary = self.primary_actions[-1]["at"] if self.primary_actions else 0
-            # self.logger.debug(f"Primary actions set externally. Count: {len(self.primary_actions)}")
+            self._invalidate_cache('primary') # Invalidate cache
+
         except Exception as e:
             self.logger.error(f"Error in actions.setter: {e}. Clearing primary actions as a precaution.")
             self.primary_actions = []
             self.last_timestamp_primary = 0
+            self._invalidate_cache('primary')  # Invalidate cache
 
     def _get_default_stats_values(self) -> dict:
         return {
@@ -685,6 +708,7 @@ class DualAxisFunscript:
             else:
                 self.last_timestamp_secondary = last_ts
 
+            self._invalidate_cache(axis)
             self.logger.info(
                 f"RDP applied to {axis} (indices {s_idx_orig}-{e_idx_orig}). "
                 f"Points: {len(segment_to_simplify)} -> {len(new_segment_actions)} (e={epsilon})")
@@ -764,6 +788,7 @@ class DualAxisFunscript:
         else:
             self.last_timestamp_secondary = last_ts
 
+        self._invalidate_cache(axis)
         self.logger.info(
             f"Peak simplification applied to {axis} (indices {s_idx_orig}-{e_idx_orig}). "
             f"Points: {len(segment_to_process)} -> {len(new_segment_actions)}")
@@ -869,6 +894,7 @@ class DualAxisFunscript:
                 if not valid_indices_to_remove_set: continue
                 target_actions_list[:] = [action for i, action in enumerate(target_actions_list) if
                                           i not in valid_indices_to_remove_set]
+                self._invalidate_cache(axis_name)
             elif start_time_ms is not None and end_time_ms is not None:
                 s_idx, e_idx = self._get_action_indices_in_time_range(target_actions_list, start_time_ms, end_time_ms)
                 if s_idx is not None and e_idx is not None and s_idx <= e_idx:
@@ -969,6 +995,7 @@ class DualAxisFunscript:
 
         # Re-sorting is good practice, though not strictly necessary if all points are shifted equally.
         actions_list_ref.sort(key=lambda x: x['at'])
+        self._invalidate_cache(axis)
 
         # Update last timestamp for the axis
         last_ts = actions_list_ref[-1]['at'] if actions_list_ref else 0
@@ -1009,6 +1036,8 @@ class DualAxisFunscript:
                                 actions_list[valid_idx] = actions_list[i]
                     if valid_idx + 1 < len(actions_list):
                         del actions_list[valid_idx + 1:]
+
+        self._invalidate_cache('both')
 
         # Update last timestamps
         self.last_timestamp_primary = self.primary_actions[-1]['at'] if self.primary_actions else 0
