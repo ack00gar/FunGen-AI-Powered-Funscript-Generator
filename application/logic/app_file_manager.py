@@ -245,12 +245,14 @@ class AppFileManager:
                 # We can decide whether to proceed with the overwrite or not.
                 # For safety, let's proceed but the user is warned.
 
+        sanitized_actions = [ {'at': int(action['at']), 'pos': int(action['pos'])} for action in actions]
+
         funscript_data = {
             "version": "1.0",
             "author": f"FunGen beta {APP_VERSION}",
             "inverted": False,
             "range": 100,
-            "actions": sorted(actions, key=lambda x: x["at"]),  # Ensure sorted
+            "actions": sorted(sanitized_actions, key=lambda x: x["at"]),
             "metadata": {"chapters": []}  # Default empty metadata
         }
 

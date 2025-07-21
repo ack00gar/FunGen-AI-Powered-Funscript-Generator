@@ -214,6 +214,7 @@ class ATRLockedPenisState:
         self.consecutive_non_detections: int = 0
         self.visible_part: float = 100.0  # Percentage
         self.glans_detected: bool = False
+        self.last_raw_coords: Optional[Tuple[float, float, float, float]] = None
 
 
 class FrameObject:
@@ -290,10 +291,21 @@ class FrameObject:
             box_dims = lp_state.box
             w = box_dims[2] - box_dims[0]
             h = box_dims[3] - box_dims[1]
-            frame_data["yolo_boxes"].append(
-                {"frame_id": self.frame_id, "bbox": list(box_dims), "confidence": 1.0, "class_id": -1,
-                 "class_name": "locked_penis", "status": "ATR_LOCKED", "width": w, "height": h,
-                 "cx": box_dims[0] + w / 2, "cy": box_dims[1] + h / 2})
+            locked_penis_dict = {
+                "frame_id": self.frame_id,
+                "bbox": list(box_dims),
+                "confidence": 1.0,
+                "class_id": -1,
+                "class_name": "locked_penis",
+                "status": "ATR_LOCKED",
+                "width": w,
+                "height": h,
+                "cx": box_dims[0] + w / 2,
+                "cy": box_dims[1] + h / 2
+            }
+            if self.atr_penis_box_kalman:
+                locked_penis_dict["visible_bbox"] = list(self.atr_penis_box_kalman)
+            frame_data["yolo_boxes"].append(locked_penis_dict)
         return frame_data
 
     def __repr__(self):
@@ -732,7 +744,7 @@ def resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.L
     # --- Configuration for the new tracker ---
     fps = state.video_info.get('fps', 30.0)
     IOU_THRESHOLD = 0.3  # Min overlap to be considered the same object in consecutive frames.
-    MAX_FRAMES_TO_BECOME_LOST = int(fps * 0.75)  # A track is "lost" if unseen for 0.75s.
+    MAX_FRAMES_TO_BECOME_LOST = int(fps * 0.75)  # A track is "lost" if unseen for 1s.
     MAX_FRAMES_IN_LOST_STATE = int(fps * 10)  # A "lost" track is permanently deleted after 10s.
     REID_DISTANCE_THRESHOLD_FACTOR = 2.0  # Search radius for re-identification is 2x the object's size.
 
@@ -827,7 +839,7 @@ def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logg
     _debug_log(logger, "Starting ATR Pass 1: Interpolate Boxes (using S2 Tracker IDs)")
     track_history: Dict[int, Dict[str, Any]] = {}
     total_interpolated = 0
-    MAX_GAP_FRAMES = int(state.video_info.get('fps', 30) * 0.3)  # Max 0.3 second gap for interpolation
+    MAX_GAP_FRAMES = int(state.video_info.get('fps', 30) * 1)  # Max 1 second gap for interpolation
 
     all_frames_sorted = sorted(state.frames, key=lambda f: f.frame_id)
 
@@ -902,13 +914,63 @@ def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logg
     _debug_log(logger, f"ATR Pass 1: Interpolated {total_interpolated} boxes.")
 
 
-def atr_pass_3_build_locked_penis(state: AppStateContainer, logger: Optional[logging.Logger]):
-    """ ATR Pass 3: Build the locked penis box concept for each frame.
-        Operates on state.frames. Modifies frame_obj.atr_locked_penis_state and frame_obj.atr_penis_box_kalman
+def atr_pass_2_preliminary_height_estimation(state: AppStateContainer, logger: Optional[logging.Logger]):
     """
-    _debug_log(logger, "Starting ATR Pass 3: Build Locked Penis")
+    A new, lightweight pass to provide a preliminary max_height estimate for each frame.
+    This is crucial for the Kalman filter pass (Pass 3) to function correctly before
+    the final, per-chapter height is calculated later in Pass 5.
+    """
+    _debug_log(logger, "Starting ATR Pass 2: Preliminary Height Estimation")
+
+    # We use a simple moving average to provide a slightly more stable preliminary height
+    # than just the raw detection of a single frame.
+    window_size = 5  # A small 5-frame window
+    heights_buffer = []
+
+    for frame_obj in state.frames:
+        # Find the best penis detection for the current frame
+        selected_penis = frame_obj.get_preferred_penis_box(
+            state.video_info.get('actual_video_type', '2D'),
+            state.vr_vertical_third_filter
+        )
+
+        current_height = 0.0
+        if selected_penis:
+            current_height = selected_penis.height
+
+        # Add the current height (or 0 if no detection) to the buffer
+        heights_buffer.append(current_height)
+        if len(heights_buffer) > window_size:
+            heights_buffer.pop(0)
+
+        # Calculate the average of non-zero heights in the buffer
+        non_zero_heights = [h for h in heights_buffer if h > 0]
+        if non_zero_heights:
+            avg_height = sum(non_zero_heights) / len(non_zero_heights)
+            frame_obj.atr_locked_penis_state.max_height = avg_height
+        else:
+            # If no detections in the window, keep the last known average or default to 0
+            if not hasattr(frame_obj.atr_locked_penis_state, 'max_height'):
+                frame_obj.atr_locked_penis_state.max_height = 0.0
+
+    _debug_log(logger, "Preliminary height estimation complete.")
+
+
+def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[logging.Logger]):
+    """
+    REFACTORED: This pass now only manages the lock state (active/inactive) and
+    calculates the Kalman-filtered VISIBLE penis box. It no longer creates the
+    full conceptual box, as the final max_height is not yet known.
+    """
+    _debug_log(logger, "Starting ATR Pass 3: Kalman Filter and Lock State")
     fps, yolo_size = state.video_info.get('fps', 30.0), state.yolo_input_size
-    current_lp_active, current_lp_last_raw_box_coords, current_lp_max_height, current_lp_max_penetration_height, current_lp_area, current_lp_consecutive_detections, current_lp_consecutive_non_detections = False, None, 0.0, 0.0, 0.0, 0, 0
+    # --- State variables for the loop ---
+    current_lp_active = False
+    current_lp_last_raw_box_coords: Optional[Tuple[float, ...]] = None
+    current_lp_consecutive_detections = 0
+    current_lp_consecutive_non_detections = 0
+
+    # --- Kalman Filter Setup ---
     kf_height = cv2.KalmanFilter(2, 1)
     kf_height.measurementMatrix = np.array([[1, 0]], np.float32)
     kf_height.transitionMatrix = np.array([[1, 1], [0, 1]], np.float32)
@@ -916,6 +978,7 @@ def atr_pass_3_build_locked_penis(state: AppStateContainer, logger: Optional[log
     kf_height.measurementNoiseCov = np.eye(1, dtype=np.float32) * 0.1
     kf_height.errorCovPost = np.eye(2, dtype=np.float32) * 1.0
     kf_height.statePost = np.array([[yolo_size * 0.1], [0]], dtype=np.float32)
+
     last_frame_dominant_pose: Optional[PoseRecord] = None
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
     pelvis_zone_indices = [11, 12]  # Left and Right Hip
@@ -928,102 +991,47 @@ def atr_pass_3_build_locked_penis(state: AppStateContainer, logger: Optional[log
         selected_penis_box_rec = frame_obj.get_preferred_penis_box(state.video_info.get('actual_video_type', '2D'),
                                                                    state.vr_vertical_third_filter)
 
-        frame_glans_detected = False
-
         if selected_penis_box_rec:
             current_lp_consecutive_detections += 1
             current_lp_consecutive_non_detections = 0
             current_lp_last_raw_box_coords = tuple(selected_penis_box_rec.bbox)
             current_raw_height = selected_penis_box_rec.height
 
-            # Update max_height (ATR logic: only increase unless glans detected)
-            if current_raw_height > current_lp_max_height:
-                current_lp_max_height = current_raw_height
-                # ATR set max_penetration_height as 0.65 * current_height when max_height was updated
-                current_lp_max_penetration_height = 0.65 * current_raw_height
-
-            # Check for glans contact with this selected_penis_box_rec
-            glans_boxes_in_frame = [b for b in frame_obj.boxes if
-                                    b.class_name == constants.GLANS_CLASS_NAME and not b.is_excluded]
-            for glans_br in glans_boxes_in_frame:
-                if _atr_calculate_iou(selected_penis_box_rec.box, glans_br.box) > 0.05:  # Small IOU to confirm overlap
-                    frame_glans_detected = True
-                    # ATR: Adjust height if glans detected
-                    # glans_bottom_height = selected_penis_box_rec.bbox[3] - glans_br.bbox[3] (dist from penis bottom to glans bottom)
-                    # glans_top_height = selected_penis_box_rec.bbox[3] - glans_br.bbox[1] (dist from penis bottom to glans top)
-                    # ATR logic for height update with glans:
-                    # current_lp_max_penetration_height = max(0, min(current_lp_max_height, glans_bottom_height))
-                    # current_lp_max_height = max(0, min(current_lp_max_height, current_raw_height), glans_top_height)
-                    # Simplified: if glans is detected, the currently visible height is a better estimate for "full extension" for that moment
-                    # This part of ATR logic is tricky and might need tuning.
-                    # For now, let's say glans detection means the current_raw_height is considered more authoritative
-                    # and might refine max_height downwards if current raw height is smaller.
-                    if current_raw_height < current_lp_max_height:  # If glans visible and current height is less than established max
-                        current_lp_max_height = current_raw_height
-                    current_lp_max_penetration_height = current_raw_height * 0.65  # Penetration depth based on current visible glans
-
-                    break  # Found a glans associated with this penis
-
-            if not current_lp_active and current_lp_consecutive_detections >= fps / 5:  # Activate lock
+            if not current_lp_active and current_lp_consecutive_detections >= fps / 5:
                 current_lp_active = True
-                # Initialize Kalman filter state with current height if it's the first activation in a sequence
                 kf_height.statePost = np.array([[current_raw_height], [0]], dtype=np.float32)
-                _debug_log(logger, f"ATR LP Lock ACTIVATE at frame {frame_obj.frame_id}, h={current_raw_height:.0f}")
+                _debug_log(logger, f"ATR LP Lock ACTIVATE at frame {frame_obj.frame_id}")
 
-            # Update Kalman filter with observed current_raw_height
             kf_height.correct(np.array([[current_raw_height]], dtype=np.float32))
-            frame_obj.atr_penis_box_kalman = None  # Will be set below if active
-
-        else:  # No penis detection this frame
+        else:
             current_lp_consecutive_detections = 0
-            pose_is_stable_in_interaction_zone = False
+            pose_is_stable = False
+            # Check for pose stability to hold the lock during brief occlusions
+            if frame_obj.poses and current_lp_active and dominant_pose_this_frame and last_frame_dominant_pose:
+                dissimilarity = dominant_pose_this_frame.calculate_zone_dissimilarity(last_frame_dominant_pose,
+                                                                                      pelvis_zone_indices)
+                if dissimilarity < constants.POSE_STABILITY_THRESHOLD:
+                    pose_is_stable = True
 
-            # If the lock was active, check if the person's pelvis is still where the penis was
-            # Check if pose data is available before using it
-            if frame_obj.poses and current_lp_active and dominant_pose_this_frame and last_frame_dominant_pose and current_lp_last_raw_box_coords:
-                person_iou_with_last_penis = _atr_calculate_iou(dominant_pose_this_frame.bbox, current_lp_last_raw_box_coords)
-                if person_iou_with_last_penis > 0.1:
-                    pelvis_dissimilarity = dominant_pose_this_frame.calculate_zone_dissimilarity(
-                        last_frame_dominant_pose, pelvis_zone_indices)
-                    if pelvis_dissimilarity < 2.0:
-                        pose_is_stable_in_interaction_zone = True
-
-                        _debug_log(logger,
-                                   f"Frame {frame_obj.frame_id}: Penis lock held by stable pelvis (IoU: {person_iou_with_last_penis:.2f}, Dissim: {pelvis_dissimilarity:.2f}).")
-
-            # Only increment non-detection counter if pose is NOT stable
-            if not pose_is_stable_in_interaction_zone:
+            if not pose_is_stable:
                 current_lp_consecutive_non_detections += 1
 
-            # Deactivation logic is now naturally robust to flicker
-            if current_lp_active and current_lp_consecutive_non_detections >= (state.video_info.get('fps', 30) * 3):
+            if current_lp_active and current_lp_consecutive_non_detections >= (fps * 2):
                 current_lp_active = False
 
-
+        # --- Update the frame state ---
         lp_state = frame_obj.atr_locked_penis_state
         lp_state.active = current_lp_active
-        lp_state.consecutive_detections = current_lp_consecutive_detections
-        lp_state.consecutive_non_detections = current_lp_consecutive_non_detections
-        lp_state.max_height = current_lp_max_height
-        lp_state.max_penetration_height = current_lp_max_penetration_height
-        lp_state.glans_detected = frame_glans_detected
+        lp_state.last_raw_coords = current_lp_last_raw_box_coords  # Store for later passes
+
+        # We only calculate the VISIBLE (Kalman) box here.
+        # The full conceptual box is calculated in a later pass.
         if current_lp_active and current_lp_last_raw_box_coords:
             predicted_height_kalman = kf_height.predict()[0, 0]
-            predicted_height_final = np.clip(predicted_height_kalman, 0, current_lp_max_height)
-
-            # The "visible" penis box based on Kalman prediction for height
-            # Position (x1, x2, y2) comes from last raw detection. y1 is derived from predicted_height_final.
             x1, _, x2, y2_raw = current_lp_last_raw_box_coords
-            frame_obj.atr_penis_box_kalman = (x1, y2_raw - predicted_height_final, x2, y2_raw)
-            lp_state.box = (x1, y2_raw - current_lp_max_height, x2, y2_raw)
-            lp_state.area = (x2 - x1) * current_lp_max_height if current_lp_max_height > 0 else 0
-            lp_state.visible_part = (
-                                                predicted_height_final / current_lp_max_height) * 100.0 if current_lp_max_height > 0 else 0.0
+            # Store the smoothed, visible box
+            frame_obj.atr_penis_box_kalman = (x1, y2_raw - predicted_height_kalman, x2, y2_raw)
         else:
-            # If not active, or no last_raw_box, no specific ATR box for this frame
-            lp_state.box = None
-            lp_state.area = 0.0
-            lp_state.visible_part = 0.0  # Or 100.0 if no detection implies full? ATR implies 0 if not active.
             frame_obj.atr_penis_box_kalman = None
 
         last_frame_dominant_pose = dominant_pose_this_frame
@@ -1050,13 +1058,14 @@ def atr_pass_4_assign_positions_and_segments(state: AppStateContainer, logger: O
         # 2. Run original logic based on YOLO contact boxes
         frame_obj.atr_detected_contact_boxes.clear()
         assigned_pos_for_frame = "Not Relevant"
-        if frame_obj.atr_locked_penis_state.active and frame_obj.atr_locked_penis_state.box:
-            lp_box_coords = frame_obj.atr_locked_penis_state.box
+
+        # Use the kalman-filtered visible box for contact detection, not the conceptual box.
+        if frame_obj.atr_locked_penis_state.active and frame_obj.atr_penis_box_kalman:
+            visible_penis_coords = frame_obj.atr_penis_box_kalman # <-- USE THIS
             for box_rec in frame_obj.boxes:
-                if box_rec.is_excluded or box_rec.class_name in [constants.PENIS_CLASS_NAME,
-                                                                 constants.GLANS_CLASS_NAME]:
+                if box_rec.is_excluded or box_rec.class_name in [constants.PENIS_CLASS_NAME, constants.GLANS_CLASS_NAME]:
                     continue
-                if _atr_calculate_iou(lp_box_coords, box_rec.bbox) > 0.05:
+                if _atr_calculate_iou(visible_penis_coords, box_rec.bbox) > 0.05:
                     frame_obj.atr_detected_contact_boxes.append({"class_name": box_rec.class_name, "box_rec": box_rec})
             assigned_pos_for_frame = _atr_assign_frame_position(frame_obj.atr_detected_contact_boxes)
 
@@ -1090,8 +1099,58 @@ def atr_pass_4_assign_positions_and_segments(state: AppStateContainer, logger: O
     BaseSegment._id_counter = 0
     state.atr_segments = _atr_aggregate_segments(state.frames, fps, int(1.0 * fps), logger)
 
+def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, logger: Optional[logging.Logger]):
+    """
+    Recalculates max_height for the penis based on the final, aggregated chapter segments.
+    This ensures height is consistent across a logical action, fixing the "drop to zero" issue.
+    This pass should run AFTER atr_pass_4_assign_positions_and_segments.
+    """
+    _debug_log(logger, "Starting ATR Pass: Recalculate Heights Post-Aggregation")
 
-def atr_pass_5_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
+    # Create a quick lookup for raw penis heights from the original detections
+    raw_penis_heights = {}
+    video_type = state.video_info.get('actual_video_type', '2D')
+    vr_filter = state.vr_vertical_third_filter
+    for frame_obj in state.frames:
+        # We need the original, non-interpolated penis box for its height
+        penis_detections = [b for b in frame_obj.boxes if b.class_name == constants.PENIS_CLASS_NAME and b.status == constants.STATUS_DETECTED]
+        if penis_detections:
+            # Sort by confidence or area to get the most likely "real" penis
+            penis_detections.sort(key=lambda d: d.confidence, reverse=True)
+            raw_penis_heights[frame_obj.frame_id] = penis_detections[0].height
+
+    # Create a frame-to-object map for quick updates
+    frames_by_id = {f.frame_id: f for f in state.frames}
+
+    # Iterate through the final, aggregated segments
+    for segment in state.atr_segments:
+        if segment.major_position == "Not Relevant":
+            chapter_max_h = 0.0
+        else:
+            # Collect all raw penis heights that fall within this final segment
+            heights_in_segment = [h for fid, h in raw_penis_heights.items() if segment.start_frame_id <= fid <= segment.end_frame_id]
+
+            if not heights_in_segment:
+                # If no raw detections exist in this segment (e.g., fully interpolated),
+                # we must fall back to a reasonable default or carry over from a previous segment.
+                # For now, a fallback based on input size is safer than 0.
+                chapter_max_h = state.yolo_input_size * 0.2
+            else:
+                # Use 95th percentile as a robust statistic for max height
+                chapter_max_h = np.percentile(heights_in_segment, 95)
+
+        _debug_log(logger, f"Final Segment '{segment.major_position}' ({segment.start_frame_id}-{segment.end_frame_id}): setting max_height to {chapter_max_h:.2f}")
+
+        # Apply this calculated height to every frame object within the segment
+        for i in range(segment.start_frame_id, segment.end_frame_id + 1):
+            if i in frames_by_id:
+                lp_state = frames_by_id[i].atr_locked_penis_state
+                lp_state.max_height = chapter_max_h
+                # Set a reasonable penetration height based on the final max height
+                lp_state.max_penetration_height = chapter_max_h * 0.65
+
+
+def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
     _debug_log(logger, "Starting ATR Pass 5: Determine Frame Distances (Corrected Logic)")
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
 
@@ -1099,16 +1158,26 @@ def atr_pass_5_determine_distance(state: AppStateContainer, logger: Optional[log
     prev_valid_distance = 100  # Default starting value
 
     for frame_obj in state.frames:
+        lp_state = frame_obj.atr_locked_penis_state
         frame_obj.is_occluded = False
         frame_obj.active_interaction_track_id = None
 
-        if not frame_obj.atr_locked_penis_state.active or not frame_obj.atr_locked_penis_state.box:
+        if not lp_state.active or not lp_state.last_raw_coords:
             frame_obj.atr_funscript_distance = 100
             continue
 
-        # --- ENSURE WE USE THE LOCKED PENIS BOX CONSISTENTLY ---
-        lp_state = frame_obj.atr_locked_penis_state
-        lp_box_coords = lp_state.box
+        # --- On-the-fly calculation of the conceptual "full-stroke" box ---
+        # This is the key change: we use the final max_height, which is now stable.
+        x1, _, x2, y2_raw = lp_state.last_raw_coords
+        conceptual_full_box = (x1, y2_raw - lp_state.max_height, x2, y2_raw)
+        lp_state.box = conceptual_full_box # Now we can finally set the correct box
+
+        # Also calculate the final visible_part percentage here
+        if frame_obj.atr_penis_box_kalman and lp_state.max_height > 0:
+            visible_height = frame_obj.atr_penis_box_kalman[3] - frame_obj.atr_penis_box_kalman[1]
+            lp_state.visible_part = (visible_height / lp_state.max_height) * 100.0
+        else:
+            lp_state.visible_part = 0.0
 
         current_pos = frame_obj.atr_assigned_position
         relevant_classes, is_penetration_pos, secondary_classes = [], False, []
@@ -1147,18 +1216,15 @@ def atr_pass_5_determine_distance(state: AppStateContainer, logger: Optional[log
                     frame_obj.is_occluded = True
 
         if active_box:
-            frame_obj.active_interaction_track_id = active_box.track_id  # Tag for highlighting
+            frame_obj.active_interaction_track_id = active_box.track_id
+            max_dist_ref = lp_state.max_height
+            if max_dist_ref <= 0: max_dist_ref = state.yolo_input_size * 0.3
 
-            # --- UNIFIED DISTANCE LOGIC USING THE NEW BOTTOM-TO-BOTTOM CALCULATION ---
-            max_dist_ref = lp_state.max_height  # Use the full penis height as the normalization reference
-            if max_dist_ref <= 0: max_dist_ref = state.yolo_input_size * 0.3  # Fallback
-
-            comp_dist_for_frame = _atr_calculate_normalized_distance_to_base(lp_box_coords, active_box.class_name,
-                                                                             active_box.bbox, max_dist_ref)
-            prev_valid_distance = comp_dist_for_frame  # Update the previous valid distance
-
-        elif frame_obj.is_occluded and is_penetration_pos:
-            # Fallback to penis visibility only if occluded and in a penetration scene with no secondary motion
+            comp_dist_for_frame = _atr_calculate_normalized_distance_to_base(
+                conceptual_full_box, active_box.class_name, active_box.bbox, max_dist_ref
+            )
+            prev_valid_distance = comp_dist_for_frame
+        elif is_penetration_pos: # Fallback to penis visibility only in penetration scenes
             comp_dist_for_frame = lp_state.visible_part
             prev_valid_distance = comp_dist_for_frame  # Update the previous valid distance
         else:
@@ -1440,13 +1506,15 @@ def perform_contact_analysis(
     atr_main_steps_list_base = [
         ("Step 1: Tracking Objects", resilient_tracker_step0),
         ("Step 2: Interpolate Boxes", atr_pass_1_interpolate_boxes),
-        ("Step 3: Build Locked Penis", atr_pass_3_build_locked_penis),
-        ("Step 4: Assign Positions & Segments", atr_pass_4_assign_positions_and_segments),
-        ("Step 5: Determine Frame Distances", atr_pass_5_determine_distance),
+#        ("Step 3: Preliminary Height Estimation", atr_pass_2_preliminary_height_estimation),
+        ("Step 4: Kalman & Lock State", atr_pass_3_kalman_and_lock_state),
+        ("Step 5: Assign Positions & Segments", atr_pass_4_assign_positions_and_segments),
+        ("Step 6: Recalculate Chapter Heights", atr_pass_5_recalculate_heights_post_aggregation),
+        ("Step 7: Determine Frame Distances", atr_pass_6_determine_distance),
     ]
     atr_main_steps_list_funscript_gen = [
-        ("Step 6: Smooth & Normalize Distances", atr_pass_6_smooth_and_normalize_distances),
-        ("Step 7: Simplify Signal", atr_pass_7_8_simplify_signal)
+        ("Step 8: Smooth & Normalize Distances", atr_pass_6_smooth_and_normalize_distances),
+        ("Step 9: Simplify Signal", atr_pass_7_8_simplify_signal)
     ]
     atr_main_steps_list = atr_main_steps_list_base
     if generate_funscript_actions_arg:
