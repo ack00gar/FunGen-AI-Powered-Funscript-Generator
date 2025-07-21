@@ -665,7 +665,7 @@ class VideoDisplayUI:
             if p1 and p2:
                 is_active_interactor = (box.get("track_id") is not None and box.get("track_id") == active_track_id)
                 is_locked_penis = (box.get("class_name") == "locked_penis")
-                is_inferred_relative = (box.get("status") == constants.STATUS_INFERRED_RELATIVE)
+                is_inferred_status = (box.get("status") == constants.STATUS_INFERRED_RELATIVE or box.get("status") == constants.STATUS_POSE_INFERRED)
 
                 is_refined_track = False
                 if current_chapter and current_chapter.refined_track_id is not None:
@@ -692,7 +692,7 @@ class VideoDisplayUI:
                             fill_color = (0.1, 1.0, 0.1, 0.4)
                             fill_color_u32 = imgui.get_color_u32_rgba(*fill_color)
                             draw_list.add_rect_filled(p1_vis[0], p1_vis[1], p2_vis[0], p2_vis[1], fill_color_u32, rounding=2.0)
-                elif is_inferred_relative:
+                elif is_inferred_status:
                     color = (0.8, 0.4, 1.0, 0.85) # A distinct purple for inferred boxes
                     thickness = 1.0
                 else:
@@ -707,13 +707,13 @@ class VideoDisplayUI:
 
                 if is_active_interactor:
                     label += " (ACTIVE)"
-                elif is_inferred_relative:
+                elif is_inferred_status:
                     label += " (Inferred)"
 
                 draw_list.add_text(p1[0] + 3, p1[1] + 3, imgui.get_color_u32_rgba(1, 1, 1, 1), label)
 
         if is_occluded:
-            draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 20, imgui.get_color_u32_rgba(1, 0.6, 0, 0.9), "OCCLUSION (FALLBACK)")
+            draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 30, imgui.get_color_u32_rgba(1, 0.6, 0, 0.95), "OCCLUSION (FALLBACK)")
 
         motion_mode = frame_overlay_data.get("motion_mode")
         is_vr_video = self.app.processor and self.app.processor.determined_video_type == 'VR'

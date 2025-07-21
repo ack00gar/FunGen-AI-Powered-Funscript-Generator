@@ -13,6 +13,7 @@ from copy import deepcopy
 from video.video_processor import VideoProcessor
 from config import constants
 
+# --- Global Debug Flag ---
 _of_debug_prints_stage2 = False
 
 
@@ -20,7 +21,7 @@ def _debug_log(logger_instance: Optional[logging.Logger], message: str):
     """Helper for conditional debug logging."""
     if _of_debug_prints_stage2 and logger_instance:
         logger_instance.debug(f"[S2 DEBUG] {message}")
-    elif _of_debug_prints_stage2 and not logger_instance:  # Fallback if no logger but debug is on
+    elif _of_debug_prints_stage2 and not logger_instance:
         print(f"[S2 DEBUG - NO LOGGER] {message}")
 
 
@@ -29,6 +30,8 @@ def _progress_update(callback, task_name, current, total, force_update=False):
         if force_update or current == 0 or current == total or (total > 0 and (current % (max(1, total // 20))) == 0):
             callback(task_name, current, total)
 
+
+# --- Data Structures ---
 
 class BaseSegment:
     _id_counter = 0
@@ -61,9 +64,12 @@ class BaseSegment:
             inserted = False
             for i, f_obj in enumerate(self.frames):
                 if frame.frame_id < f_obj.frame_id:
-                    self.frames.insert(i, frame); inserted = True; break
+                    self.frames.insert(i, frame)
+                    inserted = True
+                    break
                 elif frame.frame_id == f_obj.frame_id:
-                    inserted = True; break
+                    inserted = True
+                    break
             if not inserted: self.frames.append(frame)
             self.update_duration()
 
@@ -196,8 +202,7 @@ class PoseRecord:
         if valid_points_count < len(zone_keypoint_indices) * 0.5: return 999.0  # Require at least half the zone points
 
         normalization_factor = np.sqrt(self.person_box_area) if self.person_box_area > 0 else 1.0
-        return (
-                           total_distance / valid_points_count) / normalization_factor * 100.0 if normalization_factor > 0 else 999.0
+        return (total_distance / valid_points_count) / normalization_factor * 100.0 if normalization_factor > 0 else 999.0
 
     def to_dict(self):
         return {"id": self.id, "bbox": self.bbox.tolist(), "keypoints": self.keypoints.tolist()}
@@ -260,11 +265,19 @@ class FrameObject:
         for pose_data in raw_poses:
             self.poses.append(PoseRecord(self.frame_id, pose_data.get('bbox'), pose_data.get('keypoints')))
 
-    def get_preferred_penis_box(self, actual_video_type: str = '2D', vr_vertical_third_filter: bool = False) -> \
-    Optional[BoxRecord]:
+    def get_preferred_penis_box(self, actual_video_type: str = '2D', vr_vertical_third_filter: bool = False) -> Optional[BoxRecord]:
         penis_detections = [b for b in self.boxes if b.class_name == constants.PENIS_CLASS_NAME and not b.is_excluded]
         if not penis_detections: return None
-        penis_detections.sort(key=lambda d: (d.bbox[3], d.area), reverse=True)
+
+        # --- MODIFICATION: Prioritize low-center boxes for VR/POV ---
+        if actual_video_type == 'VR':
+            # Score based on a combination of being low (high y2) and centered (low distance to center x)
+            center_x = self.yolo_input_size / 2
+            penis_detections.sort(key=lambda d: (abs(d.cx - center_x), -d.bbox[3]), reverse=False)
+        else:
+            # Original logic: sort by lowness (y2) then area
+            penis_detections.sort(key=lambda d: (d.bbox[3], d.area), reverse=True)
+
         selected_penis = penis_detections[0]
         if vr_vertical_third_filter and actual_video_type == 'VR':
             if not (self.yolo_input_size / 3 <= selected_penis.cx <= 2 * self.yolo_input_size / 3):
@@ -316,8 +329,20 @@ class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with 
     def __init__(self, start_frame_id: int, end_frame_id: int, major_position: str):
         super().__init__(start_frame_id, end_frame_id)
         self.major_position = major_position
-        # Store frame objects belonging to this segment for easy access
         self.segment_frame_objects: List[FrameObject] = []
+        # List to hold different analysis sub-segments
+        # Each entry is a dict: {'start': int, 'end': int, 'mode': str, 'roi': tuple}
+        self.sub_segments = []
+
+    def add_sub_segment(self, start_frame, end_frame, mode, roi=None):
+        # mode can be 'YOLO' or 'OPTICAL_FLOW'
+        # roi is the (x,y,w,h) tuple for optical flow to use
+        self.sub_segments.append({
+            'start': start_frame,
+            'end': end_frame,
+            'mode': mode,
+            'roi_hint': roi
+        })
 
     def to_dict(self) -> Dict[str, Any]:
         # Mimic SexActSegment.to_dict() structure for GUI compatibility
@@ -338,7 +363,6 @@ class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with 
             if info["long_name"] == self.major_position:
                 position_short_name_key_val = key
                 break
-
 
         # ATR's funscript generation is 1D. Range/offset might not directly map.
         # These can be calculated from the self.atr_funscript_distance values within this segment's frames.
@@ -425,35 +449,25 @@ def _atr_assign_frame_position(contacts: List[Dict]) -> str:
     # Use a set for faster 'in' checks
     detected_class_names = {contact["class_name"] for contact in contacts}
 
-    # --- NEW Explicit Prioritization Logic ---
+    # --- Strict Priority Hierarchy ---
+    # This order is now the single source of truth for classification.
+    priority_order = [
+        ('pussy', 'Cowgirl / Missionary'),
+        ('butt', 'Rev. Cowgirl / Doggy'),
+        ('face', 'Blowjob'),
+        ('hand', 'Handjob'),
+        ('breast', 'Boobjob'),
+        ('navel', 'Not Relevant'),  # Navel contact is not a distinct action
+        ('foot', 'Footjob'),
+        ('anus', 'Rev. Cowgirl / Doggy')  # Anus implies a Doggy-style position
+    ]
 
-    # Highest priority sexual acts
-    if 'pussy' in detected_class_names:
-        return 'Cowgirl / Missionary'
-    if 'butt' in detected_class_names:
-        return 'Rev. Cowgirl / Doggy'
+    for class_name, position in priority_order:
+        if class_name in detected_class_names:
+            return position
 
-    # Check for face and hand presence
-    has_face = 'face' in detected_class_names
-    has_hand = 'hand' in detected_class_names
+    return "Not Relevant"  # Default if no priority classes are found
 
-    # If a face is involved, it is ALWAYS a Blowjob, regardless of hand presence.
-    # This correctly merges "Handjob" into "Blowjob" when a face is also detected.
-    if has_face:
-        return 'Blowjob'
-
-    # Only if a face is NOT present can it be classified as a Handjob.
-    if has_hand:
-        return 'Handjob'
-
-    # Other non-penetrative acts
-    if 'breast' in detected_class_names:
-        return 'Boobjob'
-    if 'foot' in detected_class_names:
-        return 'Footjob'
-
-    # Default if no priority classes are found
-    return "Not Relevant"
 
 
 def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_segment_duration_frames: int,
@@ -464,6 +478,9 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
     """
     if not frame_objects:
         return []
+
+    # --- Config for Stability ---
+    SHORT_FLICKER_DURATION = int(fps * 1.0)  # Anything less than 1s is a potential flicker to be merged.
 
     # --- Pass 1: Create an initial, granular list of segments. ---
     # We create a segment for every single change in position. This list will be messy
@@ -618,10 +635,10 @@ def _atr_calculate_normalized_distance_to_base(locked_penis_box_coords: Tuple[fl
     if class_name == 'face':
         box_y_ref = class_box_coords[3]  # Bottom of the face
     elif class_name == 'hand':
-        box_y_ref = (class_box_coords[1] + class_box_coords[3]) / 2  # Center Y of the hand/face
-    elif class_name == 'butt':
+        box_y_ref = (class_box_coords[1] + class_box_coords[3]) / 2  # Center Y of the hand
+    elif class_name in ['butt', 'pussy']:
         box_y_ref = (9 * class_box_coords[3] + class_box_coords[1]) / 10  # Mostly bottom of butt
-    else:  # pussy, breast, foot, etc.
+    else:  # breast, foot, etc.
         box_y_ref = (class_box_coords[1] + class_box_coords[3]) / 2  # Center of other parts
 
     raw_distance = penis_base_y - box_y_ref
@@ -969,6 +986,8 @@ def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[
     current_lp_last_raw_box_coords: Optional[Tuple[float, ...]] = None
     current_lp_consecutive_detections = 0
     current_lp_consecutive_non_detections = 0
+    last_known_interaction_type = 'unknown'  # Tracks context: 'penetration', 'other', or 'unknown'
+    last_known_penis_box: Optional[BoxRecord] = None
 
     # --- Kalman Filter Setup ---
     kf_height = cv2.KalmanFilter(2, 1)
@@ -983,27 +1002,86 @@ def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
     pelvis_zone_indices = [11, 12]  # Left and Right Hip
 
+    # --- Global state for locked penis ---
+    locked_penis_tracker = {'box_rec': None, 'unseen_frames': 0}
+    PENIS_PATIENCE = int(fps * 0.5)  # How many frames to hold onto a lock without seeing it
+
     for frame_obj in state.frames:
         dominant_pose_this_frame = _get_dominant_pose(frame_obj, is_vr, state.yolo_input_size)
         if dominant_pose_this_frame:
             frame_obj.dominant_pose_id = dominant_pose_this_frame.id
 
-        selected_penis_box_rec = frame_obj.get_preferred_penis_box(state.video_info.get('actual_video_type', '2D'),
-                                                                   state.vr_vertical_third_filter)
+        penis_candidates = [b for b in frame_obj.boxes if
+                            b.class_name == constants.PENIS_CLASS_NAME and not b.is_excluded]
+        selected_penis_box_rec = None
 
+        # --- Stable Penis Selection Logic ---
+        # 1. Try to find the previously locked penis via IoU
+        if locked_penis_tracker['box_rec']:
+            best_iou = 0
+            best_candidate = None
+            for cand in penis_candidates:
+                iou = _atr_calculate_iou(locked_penis_tracker['box_rec'].bbox, cand.bbox)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_candidate = cand
+            if best_iou > 0.1:  # Generous IoU threshold to maintain lock
+                selected_penis_box_rec = best_candidate
+                locked_penis_tracker['box_rec'] = selected_penis_box_rec
+                locked_penis_tracker['unseen_frames'] = 0
+            else:
+                locked_penis_tracker['unseen_frames'] += 1
+
+        # 2. If no IoU match, get the preferred (new) penis
+        if not selected_penis_box_rec:
+            preferred_penis = frame_obj.get_preferred_penis_box(state.video_info.get('actual_video_type', '2D'),
+                                                                state.vr_vertical_third_filter)
+            if preferred_penis:
+                # Only switch if the old lock is lost or this new one is significantly better
+                if locked_penis_tracker['unseen_frames'] > PENIS_PATIENCE or not locked_penis_tracker['box_rec']:
+                    selected_penis_box_rec = preferred_penis
+                    locked_penis_tracker['box_rec'] = selected_penis_box_rec
+                    locked_penis_tracker['unseen_frames'] = 0
+
+        # Reset lock if patient has run out
+        if locked_penis_tracker['box_rec'] and locked_penis_tracker['unseen_frames'] > PENIS_PATIENCE:
+            locked_penis_tracker['box_rec'] = None
+
+        # --- CONTEXT-AWARE LOCK AND INFERENCE LOGIC (uses the now stable selected_penis_box_rec) ---
         if selected_penis_box_rec:
+            last_known_penis_box = selected_penis_box_rec
             current_lp_consecutive_detections += 1
             current_lp_consecutive_non_detections = 0
             current_lp_last_raw_box_coords = tuple(selected_penis_box_rec.bbox)
             current_raw_height = selected_penis_box_rec.height
 
-            if not current_lp_active and current_lp_consecutive_detections >= fps / 5:
+            # Update the interaction context based on current contact
+            has_penetration_contact = False
+            has_other_contact = False
+            penetration_classes = {'pussy', 'butt', 'anus'}
+            other_classes = {'hand', 'face', 'breast', 'foot'}
+            for box_rec in frame_obj.boxes:
+                if _atr_calculate_iou(selected_penis_box_rec.bbox, box_rec.bbox) > 0.001:
+                    if box_rec.class_name in penetration_classes:
+                        has_penetration_contact = True
+                        break
+                    elif box_rec.class_name in other_classes:
+                        has_other_contact = True
+
+            if has_penetration_contact:
+                last_known_interaction_type = 'penetration'
+            elif has_other_contact:
+                last_known_interaction_type = 'other'
+
+            # Activate lock if needed
+            if not current_lp_active and current_lp_consecutive_detections >= fps:  # / 2:
                 current_lp_active = True
                 kf_height.statePost = np.array([[current_raw_height], [0]], dtype=np.float32)
                 _debug_log(logger, f"ATR LP Lock ACTIVATE at frame {frame_obj.frame_id}")
 
             kf_height.correct(np.array([[current_raw_height]], dtype=np.float32))
-        else:
+
+        else:  # NO penis detected in this frame
             current_lp_consecutive_detections = 0
             pose_is_stable = False
             # Check for pose stability to hold the lock during brief occlusions
@@ -1013,23 +1091,34 @@ def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[
                 if dissimilarity < constants.POSE_STABILITY_THRESHOLD:
                     pose_is_stable = True
 
-            if not pose_is_stable:
-                current_lp_consecutive_non_detections += 1
+            # CORE LOGIC: Infer penis ONLY if pose is stable AND the context is penetration
+            if current_lp_active and pose_is_stable and last_known_interaction_type == 'penetration':
+                inferred_penis = _infer_penis_box_from_pose(frame_obj)
+                if inferred_penis:
+                    selected_penis_box_rec = inferred_penis  # This treats the inference as a valid detection for this frame
+                    # Add inferred box to frame's boxes so it can be used by other passes
+                    frame_obj.boxes.append(inferred_penis)
+                    _debug_log(logger, f"Frame {frame_obj.frame_id}: Penis occluded, using pose-inference due to stable penetration context.")
+
+            # If no box was inferred, this is a true non-detection frame.
+            if not selected_penis_box_rec:
+                if not pose_is_stable:  # Only increment non-detections if pose is also unstable
+                    current_lp_consecutive_non_detections += 1
 
             if current_lp_active and current_lp_consecutive_non_detections >= (fps * 2):
                 current_lp_active = False
+                last_known_interaction_type = 'unknown'  # Reset context on lock deactivation
 
         # --- Update the frame state ---
         lp_state = frame_obj.atr_locked_penis_state
         lp_state.active = current_lp_active
-        lp_state.last_raw_coords = current_lp_last_raw_box_coords  # Store for later passes
+        # Use the box from the stable tracker for last raw coords
+        if last_known_penis_box:
+            lp_state.last_raw_coords = tuple(last_known_penis_box.bbox)
 
-        # We only calculate the VISIBLE (Kalman) box here.
-        # The full conceptual box is calculated in a later pass.
-        if current_lp_active and current_lp_last_raw_box_coords:
+        if current_lp_active and lp_state.last_raw_coords:
             predicted_height_kalman = kf_height.predict()[0, 0]
-            x1, _, x2, y2_raw = current_lp_last_raw_box_coords
-            # Store the smoothed, visible box
+            x1, _, x2, y2_raw = lp_state.last_raw_coords
             frame_obj.atr_penis_box_kalman = (x1, y2_raw - predicted_height_kalman, x2, y2_raw)
         else:
             frame_obj.atr_penis_box_kalman = None
@@ -1061,11 +1150,11 @@ def atr_pass_4_assign_positions_and_segments(state: AppStateContainer, logger: O
 
         # Use the kalman-filtered visible box for contact detection, not the conceptual box.
         if frame_obj.atr_locked_penis_state.active and frame_obj.atr_penis_box_kalman:
-            visible_penis_coords = frame_obj.atr_penis_box_kalman # <-- USE THIS
+            visible_penis_coords = frame_obj.atr_penis_box_kalman
             for box_rec in frame_obj.boxes:
                 if box_rec.is_excluded or box_rec.class_name in [constants.PENIS_CLASS_NAME, constants.GLANS_CLASS_NAME]:
                     continue
-                if _atr_calculate_iou(visible_penis_coords, box_rec.bbox) > 0.05:
+                if _atr_calculate_iou(visible_penis_coords, box_rec.bbox) > 0:
                     frame_obj.atr_detected_contact_boxes.append({"class_name": box_rec.class_name, "box_rec": box_rec})
             assigned_pos_for_frame = _atr_assign_frame_position(frame_obj.atr_detected_contact_boxes)
 
@@ -1106,6 +1195,19 @@ def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, lo
     This pass should run AFTER atr_pass_4_assign_positions_and_segments.
     """
     _debug_log(logger, "Starting ATR Pass: Recalculate Heights Post-Aggregation")
+
+    # --- Reset penis lock at the start of each new major segment ---
+    # This prevents the lock from carrying over across completely different scenes
+    # which was a key part of the user request.
+    for i in range(len(state.atr_segments)):
+        segment = state.atr_segments[i]
+        # On the first frame of any segment that isn't the very first one...
+        if i > 0:
+            first_frame_of_segment_id = segment.start_frame_id
+            if first_frame_of_segment_id < len(state.frames):
+                # This is a conceptual reset. The actual lock state is managed in Pass 3.
+                # Here we ensure the logic in Pass 6, which depends on this, knows about the change.
+                _debug_log(logger, f"Chapter changed at frame {first_frame_of_segment_id}. Resetting interactor context for segment '{segment.major_position}'.")
 
     # Create a quick lookup for raw penis heights from the original detections
     raw_penis_heights = {}
@@ -1151,92 +1253,161 @@ def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, lo
 
 
 def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
-    _debug_log(logger, "Starting ATR Pass 5: Determine Frame Distances (Corrected Logic)")
-    is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
+    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (Hierarchical & Context-Aware)")
+    fps = state.video_info.get('fps', 30.0)
 
-    # Initialize previous distance tracker
-    prev_valid_distance = 100  # Default starting value
+    # --- Keep track of last bbox position to detect movement ---
+    last_known_box_positions = {}  # {track_id: (cx, cy)}
 
-    for frame_obj in state.frames:
-        lp_state = frame_obj.atr_locked_penis_state
-        frame_obj.is_occluded = False
-        frame_obj.active_interaction_track_id = None
+    for segment in state.atr_segments:
+        # --- Define context for the entire segment based on its final, stable classification ---
+        primary_classes_for_segment: List[str] = []
+        fallback_classes_for_segment: List[str] = []
+        is_penetration_pos = False
 
-        if not lp_state.active or not lp_state.last_raw_coords:
-            frame_obj.atr_funscript_distance = 100
-            continue
+        if segment.major_position == 'Cowgirl / Missionary':
+            primary_classes_for_segment = ['pussy']
+            fallback_classes_for_segment = ['navel', 'breast', 'face']
+            is_penetration_pos = True
+        elif segment.major_position == 'Rev. Cowgirl / Doggy':
+            primary_classes_for_segment = ['butt']
+            fallback_classes_for_segment = ['anus', 'face']
+            is_penetration_pos = True
+        elif segment.major_position == 'Blowjob':
+            primary_classes_for_segment = ['face']
+            fallback_classes_for_segment = ['hand']
+        elif segment.major_position == 'Handjob':
+            primary_classes_for_segment = ['hand']
+            fallback_classes_for_segment = ['breast']
+        elif segment.major_position == 'Boobjob':
+            primary_classes_for_segment = ['breast']
+            fallback_classes_for_segment = ['hand']
+        elif segment.major_position == 'Footjob':
+            primary_classes_for_segment = ['foot']
 
-        # --- On-the-fly calculation of the conceptual "full-stroke" box ---
-        # This is the key change: we use the final max_height, which is now stable.
-        x1, _, x2, y2_raw = lp_state.last_raw_coords
-        conceptual_full_box = (x1, y2_raw - lp_state.max_height, x2, y2_raw)
-        lp_state.box = conceptual_full_box # Now we can finally set the correct box
+        _debug_log(logger,
+                   f"Processing segment '{segment.major_position}': Primary={primary_classes_for_segment}, Fallback={fallback_classes_for_segment}")
 
-        # Also calculate the final visible_part percentage here
-        if frame_obj.atr_penis_box_kalman and lp_state.max_height > 0:
-            visible_height = frame_obj.atr_penis_box_kalman[3] - frame_obj.atr_penis_box_kalman[1]
-            lp_state.visible_part = (visible_height / lp_state.max_height) * 100.0
-        else:
-            lp_state.visible_part = 0.0
+        # --- Initialize state for this segment's processing ---
+        # The lock/stickiness is now reset for each segment.
+        active_interactor_state = {'id': None, 'unseen_frames': 0}
+        INTERACTOR_PATIENCE = int(fps * 0.75)
+        last_valid_distance = 100  # Start at 'out' position for each segment
 
-        current_pos = frame_obj.atr_assigned_position
-        relevant_classes, is_penetration_pos, secondary_classes = [], False, []
+        # Assign all frame objects to their segment for easy lookup
+        segment.segment_frame_objects = [fo for fo in state.frames if
+                                         segment.start_frame_id <= fo.frame_id <= segment.end_frame_id]
 
-        # Define primary and secondary interaction classes based on position
-        if "Cowgirl" in current_pos or "Doggy" in current_pos:
-            relevant_classes, is_penetration_pos, secondary_classes = ["pussy", "butt"], not lp_state.glans_detected, [
-                "breast", "navel"]
-        elif "Blowjob" in current_pos:
-            relevant_classes, is_penetration_pos, secondary_classes = ["face", "hand"], False, ["breast"]
-        elif "Handjob" in current_pos:
-            relevant_classes, is_penetration_pos, secondary_classes = ["hand"], False, ["breast"]
+        for frame_obj in segment.segment_frame_objects:
+            lp_state = frame_obj.atr_locked_penis_state
+            frame_obj.is_occluded = False
+            frame_obj.active_interaction_track_id = None
 
-        #if not relevant_classes:
-        #    frame_obj.atr_funscript_distance = 100
-        #    continue
+            if not lp_state.active or not lp_state.last_raw_coords:
+                frame_obj.atr_funscript_distance = 100
+                continue
 
-        contacting_boxes = [c['box_rec'] for c in frame_obj.atr_detected_contact_boxes]
-        primary_contacts = [b for b in contacting_boxes if b.class_name in relevant_classes]
+            # --- Calculate conceptual box and visible part ---
+            x1, _, x2, y2_raw = lp_state.last_raw_coords
+            conceptual_full_box = (x1, y2_raw - lp_state.max_height, x2, y2_raw)
+            lp_state.box = conceptual_full_box
 
-        #comp_dist_for_frame = 100.0
-        active_box = None
+            if frame_obj.atr_penis_box_kalman and lp_state.max_height > 0:
+                visible_height = frame_obj.atr_penis_box_kalman[3] - frame_obj.atr_penis_box_kalman[1]
+                lp_state.visible_part = (visible_height / lp_state.max_height) * 100.0
+            else:
+                lp_state.visible_part = 0.0
 
-        # --- UNIFIED LOGIC FOR ALL POSITIONS ---
-        if primary_contacts:
-            # Use the most confident primary contact as the active one
-            active_box = max(primary_contacts, key=lambda b: b.confidence)
-        else:  # Occlusion Logic
-            dominant_pose = _get_dominant_pose(frame_obj, is_vr, state.yolo_input_size)
-            if dominant_pose:
-                secondary_contacts = [b for b in contacting_boxes if
-                                      b.class_name in secondary_classes and _atr_calculate_iou(dominant_pose.bbox, b.bbox) > 0]
+            # --- Get all contacting objects for the frame ---
+            contacting_boxes_all = [c['box_rec'] for c in frame_obj.atr_detected_contact_boxes]
+            active_box = None
+            comp_dist_for_frame = -1
 
-                if secondary_contacts:
-                    active_box = max(secondary_contacts, key=lambda b: b.confidence)
-                    frame_obj.is_occluded = True
+            # --- STATEFUL & HIERARCHICAL INTERACTOR SELECTION ---
 
-        if active_box:
-            frame_obj.active_interaction_track_id = active_box.track_id
-            max_dist_ref = lp_state.max_height
-            if max_dist_ref <= 0: max_dist_ref = state.yolo_input_size * 0.3
+            # 1. Check if the locked interactor is still valid and PRIMARY for this segment
+            locked_id = active_interactor_state['id']
+            if locked_id is not None:
+                found_locked_interactor = next((b for b in contacting_boxes_all if
+                                                b.track_id == locked_id and b.class_name in primary_classes_for_segment), None)
+                if found_locked_interactor:
+                    active_box = found_locked_interactor
+                    active_interactor_state['unseen_frames'] = 0
+                else:
+                    active_interactor_state['unseen_frames'] += 1
+                    if active_interactor_state['unseen_frames'] > INTERACTOR_PATIENCE:
+                        active_interactor_state['id'] = None  # Lost the lock
 
-            comp_dist_for_frame = _atr_calculate_normalized_distance_to_base(
-                conceptual_full_box, active_box.class_name, active_box.bbox, max_dist_ref
-            )
-            prev_valid_distance = comp_dist_for_frame
-        elif is_penetration_pos: # Fallback to penis visibility only in penetration scenes
-            comp_dist_for_frame = lp_state.visible_part
-            prev_valid_distance = comp_dist_for_frame  # Update the previous valid distance
-        else:
-            # No active box found and not occluded - use previous valid distance
-            comp_dist_for_frame = prev_valid_distance
+            # 2. If no valid lock, find the best NEW PRIMARY interactor
+            if active_box is None:
+                primary_contacts = [b for b in contacting_boxes_all if b.class_name in primary_classes_for_segment]
 
-        frame_obj.atr_funscript_distance = int(np.clip(round(comp_dist_for_frame), 0, 100))
+                # --- Filter out non-moving parts ---
+                moving_primary_contacts = []
+                for b in primary_contacts:
+                    is_moving = True
+                    if b.track_id in last_known_box_positions:
+                        last_cx, last_cy = last_known_box_positions[b.track_id]
+                        # Consider not moving if center moves less than 1 pixel
+                        if abs(b.cx - last_cx) < 1 and abs(b.cy - last_cy) < 1:
+                            is_moving = False
+                    if is_moving:
+                        moving_primary_contacts.append(b)
+
+                if moving_primary_contacts:
+                    active_box = max(moving_primary_contacts, key=lambda b: b.confidence)
+                    if active_box.track_id != active_interactor_state.get('id'):
+                        active_interactor_state['id'] = active_box.track_id
+                        _debug_log(logger,
+                                   f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
+                    active_interactor_state['unseen_frames'] = 0
+
+            # --- CALCULATE DISTANCE OR USE FALLBACKS ---
+            max_dist_ref = lp_state.max_height if lp_state.max_height > 0 else state.yolo_input_size * 0.3
+
+            if active_box:  # A primary interactor was found and selected
+                comp_dist_for_frame = _atr_calculate_normalized_distance_to_base(
+                    conceptual_full_box, active_box.class_name, active_box.bbox, max_dist_ref
+                )
+                frame_obj.active_interaction_track_id = active_box.track_id
+
+            else:  # No primary interactor found, proceed to fallbacks
+                frame_obj.is_occluded = True  # Mark as occluded if we can't find the primary target
+
+                # Fallback A: Use average of designated fallback classes
+                fallback_contacts = [b for b in contacting_boxes_all if b.class_name in fallback_classes_for_segment]
+                if fallback_contacts:
+                    fallback_distances = [
+                        _atr_calculate_normalized_distance_to_base(conceptual_full_box, b.class_name, b.bbox,
+                                                                   max_dist_ref)
+                        for b in fallback_contacts
+                    ]
+                    comp_dist_for_frame = sum(fallback_distances) / len(fallback_distances)
+                    _debug_log(logger,
+                               f"Frame {frame_obj.frame_id}: Occlusion - Using fallback classes {[b.class_name for b in fallback_contacts]}. Avg Dist: {comp_dist_for_frame:.1f}")
+
+                # Fallback B: Use visible penis part (only for penetration scenes)
+                elif is_penetration_pos:
+                    comp_dist_for_frame = lp_state.visible_part
+                    _debug_log(logger, f"Frame {frame_obj.frame_id}: Occlusion - Using visible part ({comp_dist_for_frame:.1f}%).")
+
+                # Fallback C: Hold last known valid distance
+                else:
+                    comp_dist_for_frame = last_valid_distance
+                    _debug_log(logger,
+                               f"Frame {frame_obj.frame_id}: Occlusion - Holding last valid distance ({comp_dist_for_frame:.1f}).")
+
+            frame_obj.atr_funscript_distance = int(np.clip(round(comp_dist_for_frame), 0, 100))
+            last_valid_distance = frame_obj.atr_funscript_distance  # Update the last valid distance for the next frame
+
+            for box in contacting_boxes_all:
+                if box.track_id:
+                    last_known_box_positions[box.track_id] = (box.cx, box.cy)
 
 
-def atr_pass_6_smooth_and_normalize_distances(state: AppStateContainer, logger: Optional[logging.Logger]):
-    """ ATR Pass 6 (denoising with SG) and Pass 9 (amplifying/normalizing per segment) combined """
-    _debug_log(logger, "Starting ATR Pass 6 & 9: Smooth and Normalize Distances")
+def atr_pass_7_smooth_and_normalize_distances(state: AppStateContainer, logger: Optional[logging.Logger]):
+    """ ATR Pass 7 (denoising with SG) and Pass 9 (amplifying/normalizing per segment) combined """
+    _debug_log(logger, "Starting ATR Pass 7: Smooth and Normalize Distances")
 
     all_raw_distances = [fo.atr_funscript_distance for fo in state.frames]
     if not all_raw_distances or len(all_raw_distances) < 11:  # Savgol needs enough points
@@ -1253,12 +1424,12 @@ def atr_pass_6_smooth_and_normalize_distances(state: AppStateContainer, logger: 
     _debug_log(logger, "Applied per-segment normalization to distances.")
 
 
-def atr_pass_7_8_simplify_signal(state: AppStateContainer, logger: Optional[logging.Logger]):
-    """ ATR Pass 7 & 8: Simplify the funscript signal using peak/valley and RDP.
+def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[logging.Logger]):
+    """ ATR Pass 8: Simplify the funscript signal using peak/valley and RDP.
         This modifies state.funscript_frames and state.funscript_distances.
         It assumes atr_funscript_distance on FrameObjects is the signal to simplify.
     """
-    _debug_log(logger, "Starting ATR Pass 7 & 8: Simplify Signal")
+    _debug_log(logger, "Starting ATR Pass 8: Simplify Signal")
 
     # Initial data: (frame_id, position)
     full_script_data = [(fo.frame_id, fo.atr_funscript_distance) for fo in state.frames]
@@ -1506,15 +1677,14 @@ def perform_contact_analysis(
     atr_main_steps_list_base = [
         ("Step 1: Tracking Objects", resilient_tracker_step0),
         ("Step 2: Interpolate Boxes", atr_pass_1_interpolate_boxes),
-#        ("Step 3: Preliminary Height Estimation", atr_pass_2_preliminary_height_estimation),
-        ("Step 4: Kalman & Lock State", atr_pass_3_kalman_and_lock_state),
-        ("Step 5: Assign Positions & Segments", atr_pass_4_assign_positions_and_segments),
-        ("Step 6: Recalculate Chapter Heights", atr_pass_5_recalculate_heights_post_aggregation),
-        ("Step 7: Determine Frame Distances", atr_pass_6_determine_distance),
+        ("Step 3: Kalman & Lock State", atr_pass_3_kalman_and_lock_state),
+        ("Step 4: Assign Positions & Segments", atr_pass_4_assign_positions_and_segments),
+        ("Step 5: Recalculate Chapter Heights", atr_pass_5_recalculate_heights_post_aggregation),
+        ("Step 6: Determine Frame Distances", atr_pass_6_determine_distance),
     ]
     atr_main_steps_list_funscript_gen = [
-        ("Step 8: Smooth & Normalize Distances", atr_pass_6_smooth_and_normalize_distances),
-        ("Step 9: Simplify Signal", atr_pass_7_8_simplify_signal)
+        ("Step 7: Smooth & Normalize Distances", atr_pass_7_smooth_and_normalize_distances),
+        ("Step 8: Simplify Signal", atr_pass_8_simplify_signal)
     ]
     atr_main_steps_list = atr_main_steps_list_base
     if generate_funscript_actions_arg:
