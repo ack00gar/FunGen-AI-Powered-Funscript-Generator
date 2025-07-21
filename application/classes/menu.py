@@ -315,6 +315,13 @@ class MainMenu:
                 if clicked:
                     self.app.toggle_file_manager_window()
 
+                # --- Autotuner Tool ---
+                if not hasattr(app_state, 'show_autotuner_window'):
+                    app_state.show_autotuner_window = False
+                clicked, selected = imgui.menu_item("Performance Autotuner...", selected=app_state.show_autotuner_window)
+                if clicked:
+                    app_state.show_autotuner_window = not app_state.show_autotuner_window
+
                 # --- TensorRT Compiler Tool ---
                 if not hasattr(self.app, 'tensorrt_compiler_window'):
                     self.app.tensorrt_compiler_window = None
@@ -323,6 +330,7 @@ class MainMenu:
                     def on_close():
                         self.app.tensorrt_compiler_window = None
                     self.app.tensorrt_compiler_window = TensorRTCompilerWindow(self.app, on_close_callback=on_close)
+
                 imgui.end_menu()
 
             # --- STATUS MESSAGE ---

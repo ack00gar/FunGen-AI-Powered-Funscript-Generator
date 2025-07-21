@@ -107,6 +107,14 @@ class ApplicationLogic:
         self.first_run_status_message = ""
         self.first_run_thread: Optional[threading.Thread] = None
 
+        # --- Autotuner State ---
+        self.is_autotuning_active: bool = False
+        self.autotuner_thread: Optional[threading.Thread] = None
+        self.autotuner_status_message: str = "Idle"
+        self.autotuner_results: Dict[Tuple[int, int, str], Tuple[float, str]] = {}
+        self.autotuner_best_combination: Optional[Tuple[int, int, str]] = None
+        self.autotuner_best_fps: float = 0.0
+
         # --- Hardware Acceleration
         # Query ffmpeg for available hardware accelerations
         self.available_ffmpeg_hwaccels = self._get_available_ffmpeg_hwaccels()
@@ -315,6 +323,151 @@ class ApplicationLogic:
     def _update_first_run_progress(self, percent, downloaded, total_size):
         """Callback to update the progress bar state from the download thread."""
         self.first_run_progress = percent
+
+    def start_autotuner(self):
+        """Initiates the autotuning process in a background thread."""
+        if self.is_autotuning_active:
+            self.logger.warning("Autotuner is already running.")
+            return
+        if not self.processor or not self.processor.is_video_open():
+            self.logger.error("Cannot start autotuner: No video loaded.", extra={'status_message': True})
+            return
+
+        self.is_autotuning_active = True
+        self.autotuner_thread = threading.Thread(target=self._run_autotuner_thread, daemon=True)
+        self.autotuner_thread.start()
+
+    def _run_autotuner_thread(self):
+        """The actual logic for the autotuning process."""
+        self.logger.info("Starting Stage 1 performance autotuner thread.")
+        self.autotuner_results = {}
+        self.autotuner_best_combination = None
+        self.autotuner_best_fps = 0.0
+
+        def run_single_test(p: int, c: int, accel: str) -> Optional[float]:
+            """Helper to run one analysis and return its FPS."""
+            self.autotuner_status_message = f"Running test: {p}P / {c}C (HW Accel: {accel})..."
+            self.logger.info(self.autotuner_status_message)
+
+            completion_event = threading.Event()
+            # Set the flag as an attribute on the stage processor instance
+            self.stage_processor.force_rerun_stage1 = True
+
+            original_hw_method = self.hardware_acceleration_method
+            try:
+                self.hardware_acceleration_method = accel
+
+                total_frames = self.processor.total_frames
+                start_frame = min(1000, total_frames // 4)
+                end_frame = min(start_frame + 1000, total_frames - 1)
+                autotune_frame_range = (start_frame, end_frame)
+
+                self.stage_processor.start_full_analysis(
+                    override_producers=p,
+                    override_consumers=c,
+                    completion_event=completion_event,
+                    frame_range_override=autotune_frame_range
+                )
+                completion_event.wait()
+
+            finally:
+                self.hardware_acceleration_method = original_hw_method
+
+            if self.stage_processor.stage1_final_fps_str and "FPS" in self.stage_processor.stage1_final_fps_str:
+                try:
+                    fps_str = self.stage_processor.stage1_final_fps_str.replace(" FPS", "").strip()
+                    fps = float(fps_str)
+                    self.logger.info(f"Test finished for {p}P / {c}C ({accel}). Result: {fps:.2f} FPS")
+                    return fps
+                except (ValueError, TypeError):
+                    self.logger.error(f"Could not parse FPS string: '{self.stage_processor.stage1_final_fps_str}'")
+                    return None
+            else:
+                self.logger.error(f"Test failed for {p}P / {c}C ({accel}). No final FPS reported.")
+                return None
+
+        def get_perf(p, c, accel):
+            if (p, c, accel) in self.autotuner_results:
+                return self.autotuner_results[(p, c, accel)][0]
+
+            fps = run_single_test(p, c, accel)
+            if fps is None:
+                self.autotuner_results[(p, c, accel)] = (0.0, "Failed")
+                return 0.0
+
+            self.autotuner_results[(p, c, accel)] = (fps, "")
+
+            if fps > self.autotuner_best_fps:
+                self.autotuner_best_fps = fps
+                self.autotuner_best_combination = (p, c, accel)
+            return fps
+
+        def find_best_consumer_for_producer(p, accel, max_cores):
+            self.logger.info(f"Starting search for best consumer count for P={p}, Accel={accel}...")
+            low = 2
+            high = max(2, max_cores - p)
+
+            while high - low >= 3:
+                if self.stop_batch_event.is_set(): return
+                m1 = low + (high - low) // 3
+                m2 = high - (high - low) // 3
+
+                perf_m1 = get_perf(p, m1, accel)
+                if self.stop_batch_event.is_set(): return
+
+                perf_m2 = get_perf(p, m2, accel)
+                if self.stop_batch_event.is_set(): return
+
+                if perf_m1 < perf_m2:
+                    low = m1
+                else:
+                    high = m2
+
+            self.logger.info(f"Narrowed search for P={p}, Accel={accel} to range [{low}, {high}]. Finalizing...")
+            for c in range(low, high + 1):
+                if self.stop_batch_event.is_set(): return
+                get_perf(p, c, accel)
+
+        try:
+            best_hw_accel = 'none'
+            available_hw = self.available_ffmpeg_hwaccels
+            if 'cuda' in available_hw or 'nvdec' in available_hw:
+                best_hw_accel = 'cuda'
+            elif 'qsv' in available_hw:
+                best_hw_accel = 'qsv'
+            elif 'videotoolbox' in available_hw:
+                best_hw_accel = 'videotoolbox'
+
+            accel_methods_to_test = ['none']
+            if best_hw_accel != 'none':
+                accel_methods_to_test.append(best_hw_accel)
+
+            max_cores = os.cpu_count() or 4
+            PRODUCER_RANGE = range(1, 3)
+
+            for accel in accel_methods_to_test:
+                for p in PRODUCER_RANGE:
+                    if self.stop_batch_event.is_set():
+                        raise InterruptedError("Autotuner aborted by user.")
+                    find_best_consumer_for_producer(p, accel, max_cores)
+
+            if self.autotuner_best_combination:
+                p_final, c_final, accel_final = self.autotuner_best_combination
+                self.autotuner_status_message = f"Finished! Best: {p_final}P/{c_final}C, Accel: {accel_final} at {self.autotuner_best_fps:.2f} FPS"
+                self.logger.info(f"Autotuner finished. Best combination: {self.autotuner_best_combination} with {self.autotuner_best_fps:.2f} FPS.")
+            else:
+                self.autotuner_status_message = "Finished, but no successful runs were completed."
+                self.logger.warning("Autotuner finished without any successful test runs.")
+
+        except InterruptedError as e:
+            self.autotuner_status_message = "Aborted by user."
+            self.logger.info(str(e))
+        except Exception as e:
+            self.autotuner_status_message = f"An error occurred: {e}"
+            self.logger.error(f"Autotuner thread failed: {e}", exc_info=True)
+        finally:
+            self.is_autotuning_active = False
+            self.stage_processor.force_rerun_stage1 = False
 
     def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
         """

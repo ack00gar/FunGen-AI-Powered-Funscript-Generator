@@ -28,6 +28,8 @@ class AppStageProcessor:
         self.save_preprocessed_video: bool = False
         self.update_settings_from_app()
 
+        self.stage_completion_event: Optional[threading.Event] = None
+
         # --- Analysis State ---
         self.full_analysis_active: bool = False
         self.current_analysis_stage: int = 0
@@ -60,6 +62,8 @@ class AppStageProcessor:
 
         self.refinement_analysis_active: bool = False
         self.refinement_thread: Optional[threading.Thread] = None
+
+        self.frame_range_override: Optional[Tuple[int, int]] = None
 
     def start_interactive_refinement_analysis(self, chapter, track_id):
         if self.full_analysis_active or self.refinement_analysis_active:
@@ -337,7 +341,10 @@ class AppStageProcessor:
             "original_segment_idx": original_segment_idx}
         self.gui_event_queue.put(("stage3_progress_update", progress_data, None))
 
-    def start_full_analysis(self):
+    def start_full_analysis(self, override_producers: Optional[int] = None,
+                            override_consumers: Optional[int] = None,
+                            completion_event: Optional[threading.Event] = None,
+                            frame_range_override: Optional[Tuple[int, int]] = None):
         fm = self.app.file_manager
         fs_proc = self.app.funscript_processor
 
@@ -357,6 +364,13 @@ class AppStageProcessor:
         self.full_analysis_active = True
         self.current_analysis_stage = 0
         self.stop_stage_event.clear()
+        self.stage_completion_event = completion_event
+        self.frame_range_override = frame_range_override
+
+        # Store the overrides to be used by the thread
+        self.override_producers = override_producers
+        self.override_consumers = override_consumers
+
         selected_mode = self.app.app_state_ui.selected_tracker_mode
 
         range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
@@ -385,8 +399,14 @@ class AppStageProcessor:
 
         full_msgpack_exists = os.path.exists(full_msgpack_path)
 
-        should_run_s1 = True
-        if range_is_active:
+        # Use the override if it exists, otherwise check for active scripting range
+        if self.frame_range_override:
+            start_f_name, end_f_name = self.frame_range_override
+            range_specific_path = fm.get_output_path_for_file(fm.video_path, f"_range_{start_f_name}-{end_f_name}.msgpack")
+            fm.stage1_output_msgpack_path = range_specific_path
+            # For autotuner, we always want to rerun
+            should_run_s1 = True
+        elif range_is_active:
             if full_msgpack_exists and not self.force_rerun_stage1:
                 fm.stage1_output_msgpack_path = full_msgpack_path
                 should_run_s1 = False
@@ -411,11 +431,6 @@ class AppStageProcessor:
         self.stage2_status_text = "Queued..."
         if selected_mode == TrackerMode.OFFLINE_3_STAGE:
             self.stage3_status_text = "Queued..."
-
-        # if not range_is_active:
-        #     fs_proc.video_chapters.clear()
-        #     fs_proc.clear_timeline_history_and_set_new_baseline(1, [], "New Full Analysis")
-        #     fs_proc.clear_timeline_history_and_set_new_baseline(2, [], "New Full Analysis")
 
         self.logger.info("Starting Full Analysis sequence...", extra={'status_message': True})
         self.stage_thread = threading.Thread(target=self._run_full_analysis_thread_target, daemon=True)
@@ -443,20 +458,30 @@ class AppStageProcessor:
             self.current_analysis_stage = 1
             range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
 
+            # Use the override if it exists, otherwise determine range normally
+            frame_range_for_s1 = self.frame_range_override if self.frame_range_override else \
+                ((range_start_frame, range_end_frame) if range_is_active else None)
+
             target_s1_path = fm.stage1_output_msgpack_path
 
-            is_s1_data_source_ranged = range_is_active and target_s1_path and "_range_" in os.path.basename(target_s1_path)
+            is_s1_data_source_ranged = (frame_range_for_s1 is not None) and target_s1_path and "_range_" in os.path.basename(target_s1_path)
             should_skip_stage1 = not self.force_rerun_stage1 and target_s1_path and os.path.exists(target_s1_path)
 
-            if should_skip_stage1:
+            if should_skip_stage1 and not self.frame_range_override:  # Never skip for autotuner
                 stage1_success = True
                 self.logger.info(f"[Thread] Stage 1 skipped, using: {target_s1_path}")
                 self.gui_event_queue.put(("stage1_completed", "00:00:00 (Cached)", "Cached"))
             else:
-                frame_range_for_s1 = (range_start_frame, range_end_frame) if range_is_active else None # If frame range is too short or not enough actions are present, the process will still run but not output any data. This is not a bug.
-                stage1_success = self._execute_stage1_logic(frame_range=frame_range_for_s1, output_path=target_s1_path)
+                stage1_results = self._execute_stage1_logic(
+                    frame_range=frame_range_for_s1,
+                    output_path=target_s1_path,
+                    num_producers_override=getattr(self, 'override_producers', None),
+                    num_consumers_override=getattr(self, 'override_consumers', None)
+                )
+                stage1_success = stage1_results.get("success", False)
                 if stage1_success:
-                    self.gui_event_queue.put(("stage1_completed", self.stage1_time_elapsed_str, self.stage1_processing_fps_str))
+                    max_fps_str = f"{stage1_results.get('max_fps', 0.0):.2f} FPS"
+                    self.gui_event_queue.put(("stage1_completed", self.stage1_time_elapsed_str, max_fps_str))
 
             if self.stop_stage_event.is_set() or not stage1_success:
                 self.logger.info("[Thread] Exiting after Stage 1 due to stop event or failure.")
@@ -511,7 +536,7 @@ class AppStageProcessor:
                     packaged_data = {
                         "results_dict": s2_output_data,
                         "was_ranged": is_s1_data_source_ranged,
-                        "range_frames": (range_start_frame, range_end_frame)
+                        "range_frames": frame_range_for_s1 or (range_start_frame, range_end_frame)
                     }
                     self.gui_event_queue.put(("stage2_results_success", packaged_data, s2_overlay_path))
 
@@ -530,7 +555,12 @@ class AppStageProcessor:
                 if video_segments_for_gui:
                     self.gui_event_queue.put(("stage2_results_success_segments_only", video_segments_for_gui, None))
 
-                segments_for_s3 = self._filter_segments_for_range(atr_segments_objects, range_is_active, range_start_frame, range_end_frame)
+                effective_range_is_active = frame_range_for_s1 is not None
+                effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
+                effective_end_frame = frame_range_for_s1[1] if effective_range_is_active else range_end_frame
+
+                segments_for_s3 = self._filter_segments_for_range(atr_segments_objects, effective_range_is_active,
+                                                                  effective_start_frame, effective_end_frame)
 
                 if not segments_for_s3:
                     self.gui_event_queue.put(("analysis_message", "No relevant segments in range for Stage 3.", "Info"))
@@ -595,6 +625,9 @@ class AppStageProcessor:
         finally:
             self.full_analysis_active = False
             self.current_analysis_stage = 0
+            self.frame_range_override = None
+            if self.stage_completion_event:
+                self.stage_completion_event.set()
             self.logger.info("[Thread] Full analysis thread finished or exited.")
             if hasattr(self.app, 'single_video_analysis_complete_event'):
                 self.app.single_video_analysis_complete_event.set()
@@ -621,7 +654,10 @@ class AppStageProcessor:
         self.logger.info(f"Found {len(filtered_segments)} segments overlapping with the selected range.")
         return filtered_segments
 
-    def _execute_stage1_logic(self, frame_range: Optional[Tuple[Optional[int], Optional[int]]] = None, output_path: Optional[str] = None) -> bool:
+    def _execute_stage1_logic(self, frame_range: Optional[Tuple[Optional[int], Optional[int]]] = None,
+                                  output_path: Optional[str] = None,
+                                  num_producers_override: Optional[int] = None,
+                                  num_consumers_override: Optional[int] = None) -> Dict[str, Any]:
         self.gui_event_queue.put(("stage1_status_update", "Running S1...", "Initializing S1..."))
         fm = self.app.file_manager
         self.stage1_frame_queue_size = 0
@@ -635,21 +671,24 @@ class AppStageProcessor:
         try:
             if not stage1_module:
                 self.gui_event_queue.put(("stage1_status_update", "Error - S1 Module not loaded.", "Error"))
-                return False
+                return {"success": False, "max_fps": 0.0}
 
             preprocessed_video_path = None
             if self.save_preprocessed_video:
                 preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
 
-            result_path = stage1_module.perform_yolo_analysis(
+            num_producers = num_producers_override if num_producers_override is not None else self.num_producers_stage1
+            num_consumers = num_consumers_override if num_consumers_override is not None else self.num_consumers_stage1
+
+            result_path, max_fps = stage1_module.perform_yolo_analysis(
                 video_path_arg=fm.video_path,
                 yolo_model_path_arg=self.app.yolo_det_model_path,
                 yolo_pose_model_path_arg=self.app.yolo_pose_model_path,
                 confidence_threshold=self.app.tracker.confidence_threshold,
                 progress_callback=self._stage1_progress_callback,
                 stop_event_external=self.stop_stage_event,
-                num_producers_arg=self.num_producers_stage1,
-                num_consumers_arg=self.num_consumers_stage1,
+                num_producers_arg=num_producers,
+                num_consumers_arg=num_consumers,
                 hwaccel_method_arg=self.app.hardware_acceleration_method,
                 hwaccel_avail_list_arg=self.app.available_ffmpeg_hwaccels,
                 video_type_arg=self.app.processor.video_type_setting if self.app.processor else "auto",
@@ -668,21 +707,21 @@ class AppStageProcessor:
                 self.gui_event_queue.put(("stage1_status_update", "S1 Aborted by user.", "Aborted"))
                 self.gui_event_queue.put(
                     ("stage1_progress_update", 0.0, {"message": "Aborted", "current": 0, "total": 1}))
-                return False
+                return {"success": False, "max_fps": 0.0}
             if result_path and os.path.exists(result_path):
                 fm.stage1_output_msgpack_path = result_path
                 final_msg = f"S1 Completed. Output: {os.path.basename(result_path)}"
                 self.gui_event_queue.put(("stage1_status_update", final_msg, "Done"))
                 self.gui_event_queue.put(("stage1_progress_update", 1.0, {"message": "Done", "current": 1, "total": 1}))
                 self.app.project_manager.project_dirty = True
-                return True
+                return {"success": True, "max_fps": max_fps}
             self.gui_event_queue.put(("stage1_status_update", "S1 Failed (no output file).", "Failed"))
-            return False
+            return {"success": False, "max_fps": 0.0}
         except Exception as e:
             self.logger.error(f"Stage 1 execution error in AppLogic: {e}", exc_info=True,
                               extra={'status_message': True})
             self.gui_event_queue.put(("stage1_status_update", f"S1 Error - {str(e)}", "Error"))
-            return False
+            return {"success": False, "max_fps": 0.0}
 
     def _execute_stage2_logic(self, s2_overlay_output_path: Optional[str], generate_funscript_actions: bool = True, is_ranged_data_source: bool = False) -> Dict[str, Any]:
         self.gui_event_queue.put(("stage2_status_update", "Running S2...", "Initializing S2..."))
