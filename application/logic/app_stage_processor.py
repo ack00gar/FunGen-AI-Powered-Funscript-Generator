@@ -8,6 +8,7 @@ import msgpack
 import numpy as np
 from bisect import bisect_left, bisect_right
 import multiprocessing
+import gc
 
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
@@ -69,7 +70,7 @@ class AppStageProcessor:
         if self.full_analysis_active or self.refinement_analysis_active:
             self.logger.warning("Another analysis is already running.", extra={'status_message': True})
             return
-        # CORRECTED: Check for the correct data map that is always available after Stage 2.
+        # Check for the correct data map that is always available after Stage 2.
         if not self.stage2_overlay_data_map:
             self.logger.error("Cannot start refinement: Stage 2 overlay data map is not available.",
                               extra={'status_message': True})
@@ -315,30 +316,26 @@ class AppStageProcessor:
                 actual_main_step_tuple_for_queue = (scaled_current, num_segmentation_main_steps, name)
         self.gui_event_queue.put(("stage2_dual_progress", actual_main_step_tuple_for_queue, actual_sub_step_tuple_for_queue))
 
-    def _stage3_progress_callback(self, current_segment_idx, total_segments, current_segment_name, frame_in_segment, total_frames_in_segment, total_frames_processed_overall, total_frames_to_process_overall, processing_fps = 0.0, time_elapsed = 0.0, eta_seconds = 0.0, original_segment_idx = None):
+    def _stage3_progress_callback(self, current_chapter_idx: int, total_chapters: int, chapter_name: str, current_chunk_idx: int, total_chunks: int, total_frames_processed_overall, total_frames_to_process_overall, processing_fps = 0.0, time_elapsed = 0.0, eta_seconds = 0.0):
         # REFACTORED for readability and maintainability
-        if total_frames_in_segment > 0:
-            segment_progress = float(frame_in_segment) / total_frames_in_segment
-        else:
-            segment_progress = 0.0
-
         if total_frames_to_process_overall > 0:
             overall_progress = float(total_frames_processed_overall) / total_frames_to_process_overall
         else:
             overall_progress = 0.0
 
         progress_data = {
-            "current_segment_idx": current_segment_idx,
-            "total_segments": total_segments,
-            "current_segment_name": current_segment_name,
-            "segment_progress": segment_progress,
+            "current_chapter_idx": current_chapter_idx,
+            "total_chapters": total_chapters,
+            "chapter_name": chapter_name,
+            "current_chunk_idx": current_chunk_idx,
+            "total_chunks": total_chunks,
             "overall_progress": overall_progress,
             "total_frames_processed_overall": total_frames_processed_overall,
             "total_frames_to_process_overall": total_frames_to_process_overall,
             "fps": processing_fps,
             "time_elapsed": time_elapsed,
-            "eta": eta_seconds,
-            "original_segment_idx": original_segment_idx}
+            "eta": eta_seconds
+        }
         self.gui_event_queue.put(("stage3_progress_update", progress_data, None))
 
     def start_full_analysis(self, override_producers: Optional[int] = None,
@@ -628,6 +625,13 @@ class AppStageProcessor:
             self.frame_range_override = None
             if self.stage_completion_event:
                 self.stage_completion_event.set()
+
+            # Clear the large data map from memory
+            if hasattr(self.app, 's2_frame_objects_map_for_s3'):
+                self.logger.info("[Thread] Clearing Stage 2 data map from memory.")
+                self.app.s2_frame_objects_map_for_s3 = None
+                gc.collect() # Encourage garbage collection
+
             self.logger.info("[Thread] Full analysis thread finished or exited.")
             if hasattr(self.app, 'single_video_analysis_complete_event'):
                 self.app.single_video_analysis_complete_event.set()
@@ -843,8 +847,7 @@ class AppStageProcessor:
             "yolo_input_size": self.app.yolo_input_size,
             "video_fps": video_fps_s3,
             "output_delay_frames": self.app.tracker.output_delay_frames if self.app.tracker else 0,
-            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10 + (
-                self.app.tracker.output_delay_frames if self.app.tracker else 0)),
+            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10 + (self.app.tracker.output_delay_frames if self.app.tracker else 0)),
             "roi_narrow_factor_hjbj": self.app_settings.get("roi_narrow_factor_hjbj", constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ),
             "min_roi_dim_hjbj": self.app_settings.get("min_roi_dim_hjbj", constants.DEFAULT_MIN_ROI_DIM_HJBJ),
             "tracking_axis_mode": self.app.tracking_axis_mode,
@@ -855,7 +858,10 @@ class AppStageProcessor:
             "video_type": self.app.processor.video_type_setting if self.app.processor else "auto",
             "vr_input_format": self.app.processor.vr_input_format if self.app.processor else "he",
             "vr_fov": self.app.processor.vr_fov if self.app.processor else 190,
-            "vr_pitch": self.app.processor.vr_pitch if self.app.processor else 0
+            "vr_pitch": self.app.processor.vr_pitch if self.app.processor else 0,
+            "s3_chunk_size": self.app.app_settings.get("s3_chunk_size", 1000),
+            "s3_overlap_size": self.app.app_settings.get("s3_overlap_size", 30)
+
         }
 
         s3_results = stage3_module.perform_stage3_analysis(
@@ -1080,15 +1086,14 @@ class AppStageProcessor:
                 elif event_type == "stage3_progress_update":
                     prog_data = data1
                     if isinstance(prog_data, dict):
-                        rel_idx = prog_data.get('current_segment_idx', 0)
-                        rel_total = prog_data.get('total_segments', 0)
-                        abs_idx = prog_data.get('original_segment_idx')
-                        seg_name = prog_data.get('current_segment_name', '')
+                        chap_idx = prog_data.get('current_chapter_idx', 0)
+                        total_chaps = prog_data.get('total_chapters', 0)
+                        chap_name = prog_data.get('chapter_name', '')
+                        chunk_idx = prog_data.get('current_chunk_idx', 0)
+                        total_chunks = prog_data.get('total_chunks', 0)
 
-                        if abs_idx is not None:
-                            self.stage3_current_segment_label = f"Chapter {rel_idx}/{rel_total} (Abs. #{abs_idx}): {seg_name}"
-                        else:
-                            self.stage3_current_segment_label = f"Chapter {rel_idx}/{rel_total}: {seg_name}"
+                        self.stage3_current_segment_label = f"Chapter: {chap_idx}/{total_chaps} ({chap_name})"
+                        self.stage3_overall_progress_label = f"Overall Task: Chunk {chunk_idx}/{total_chunks}"
 
                         self.stage3_segment_progress_value = prog_data.get('segment_progress', 0.0)
                         self.stage3_overall_progress_value = prog_data.get('overall_progress', 0.0)
@@ -1101,17 +1106,13 @@ class AppStageProcessor:
                         self.stage3_status_text = "Running Stage 3 (Optical Flow)..."
                         t_el_s3, fps_s3, eta_s3 = prog_data.get("time_elapsed", 0.0), prog_data.get("fps", 0.0), prog_data.get("eta", 0.0)
                         self.stage3_time_elapsed_str = f"{int(t_el_s3 // 3600):02d}:{int((t_el_s3 % 3600) // 60):02d}:{int(t_el_s3 % 60):02d}" if not math.isnan(t_el_s3) else "Calculating..."
-                        self.stage3_processing_fps_str = f"{fps_s3:.1f} FPS" if not math.isnan(
-                            fps_s3) else "N/A FPS"
+                        self.stage3_processing_fps_str = f"{fps_s3:.1f} FPS" if not math.isnan(fps_s3) else "N/A FPS"
 
-                        current_seg_idx = prog_data.get('current_segment_idx', 0)
-                        total_segs = prog_data.get('total_segments', 0)
-                        seg_progress = prog_data.get('segment_progress', 0.0)
-                        is_s3_done = (current_seg_idx >= total_segs and seg_progress >= 0.99 and total_segs > 0)
+                        is_s3_done = (chunk_idx >= total_chunks and total_chunks > 0)
 
                         if math.isnan(eta_s3) or math.isinf(eta_s3):
                             self.stage3_eta_str = "Calculating..."
-                        elif eta_s3 > 1.0 and not is_s3_done:  # ETA > 1 second threshold
+                        elif eta_s3 > 1.0 and not is_s3_done:
                             self.stage3_eta_str = f"{int(eta_s3 // 3600):02d}:{int((eta_s3 % 3600) // 60):02d}:{int(eta_s3 % 60):02d}"
                         else:
                             self.stage3_eta_str = "Done"

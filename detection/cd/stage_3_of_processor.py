@@ -13,9 +13,6 @@ from tracker.tracker import ROITracker
 from detection.cd.stage_2_cd import ATRSegment, FrameObject
 from config import constants
 
-# --- Configuration for the Chunking Model ---
-CHUNK_SIZE = 1000
-OVERLAP_SIZE = 30
 
 
 def stage3_worker_proc(
@@ -26,7 +23,6 @@ def stage3_worker_proc(
         total_frames_processed_counter: Value,
         video_path: str,
         preprocessed_video_path: Optional[str],
-        s2_frame_objects_map: Dict[int, FrameObject],
         tracker_config: Dict[str, Any],
         common_app_config: Dict[str, Any],
         logger_config: Dict[str, Any]
@@ -69,7 +65,7 @@ def stage3_worker_proc(
     video_processor = VideoProcessor(app_instance=vp_app_proxy,
                                      yolo_input_size=common_app_config.get('yolo_input_size', 640),
                                      video_type=video_type_for_vp) # --- Use the determined video type
-    # --- open_video now correctly uses the preprocessed file if available via the mock file manager ---
+
     if not video_processor.open_video(video_path): # Pass original path for metadata, open_video handles the switch internally
         worker_logger.error(f"VideoProcessor could not open video: {video_path}")
         return
@@ -110,7 +106,8 @@ def stage3_worker_proc(
             if task is None:
                 break
 
-            segment_obj, chunk_start, chunk_end, output_start, output_end = task
+            # Unpack the smaller data map for this chunk
+            segment_obj, chunk_data_map, chunk_start, chunk_end, output_start, output_end = task
             worker_logger.info(
                 f"Processing chunk F{chunk_start}-{chunk_end} for Chapter '{segment_obj.major_position}'")
 
@@ -131,7 +128,9 @@ def stage3_worker_proc(
                 processed_frame = roi_tracker_instance.preprocess_frame(frame_image)
                 current_frame_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
                 frame_time_ms = int(round((frame_id / common_app_config.get('video_fps', 30.0)) * 1000.0))
-                frame_obj_s2 = s2_frame_objects_map.get(frame_id, FrameObject(frame_id, common_app_config.get('yolo_input_size', 640)))
+
+                # Use the small, pre-filtered chunk_data_map
+                frame_obj_s2 = chunk_data_map.get(frame_id, FrameObject(frame_id, common_app_config.get('yolo_input_size', 640)))
 
                 # ROI Definition Logic (uses segment_obj for context)
                 run_roi_definition = (roi_tracker_instance.roi is None) or (
@@ -265,6 +264,11 @@ def perform_stage3_analysis(
     logger.info(f"--- Starting Stage 3 Analysis with {num_workers} Workers (Overlapping Chunk Model) ---")
     s3_start_time = time.time()
 
+    # Get chunking parameters from the configuration
+    CHUNK_SIZE = common_app_config.get("s3_chunk_size", 1000)
+    OVERLAP_SIZE = common_app_config.get("s3_overlap_size", 30)
+    logger.info(f"Using chunk size: {CHUNK_SIZE}, overlap: {OVERLAP_SIZE}")
+
     relevant_segments = [seg for seg in atr_segments_list if seg.major_position not in ["Not Relevant", "Close Up"]]
     if not relevant_segments:
         logger.info("No relevant segments to process in Stage 3.")
@@ -283,17 +287,33 @@ def perform_stage3_analysis(
     result_queue = Queue()
     total_frames_processed_counter = Value('i', 0)
 
+    # Prepare chunked data for workers before they start
+    logger.info("Preparing optimized data chunks for Stage 3 workers...")
     all_tasks = []
     for segment in relevant_segments:
         step_size = CHUNK_SIZE - OVERLAP_SIZE
         for i, start_frame in enumerate(range(segment.start_frame_id, segment.end_frame_id + 1, step_size)):
             chunk_start = start_frame
             chunk_end = min(chunk_start + CHUNK_SIZE - 1, segment.end_frame_id)
+
+            # Create the small, targeted data map for this chunk
+            chunk_data_map = {
+                frame_id: s2_frame_objects_map[frame_id]
+                for frame_id in range(chunk_start, chunk_end + 1)
+                if frame_id in s2_frame_objects_map
+            }
+
             output_start = chunk_start if i == 0 else chunk_start + OVERLAP_SIZE
             output_end = chunk_end
             if output_start > output_end: continue
-            task = (segment, chunk_start, chunk_end, output_start, output_end)
+
+            # The new task payload includes the pre-filtered data
+            task = (segment, chunk_data_map, chunk_start, chunk_end, output_start, output_end)
             all_tasks.append(task)
+
+    # The large map is no longer needed in this scope and can be garbage collected
+    del s2_frame_objects_map
+    logger.info(f"Prepared {len(all_tasks)} data chunks. Main S2 data map released from memory.")
 
     for task in all_tasks:
         task_queue.put(task)
@@ -305,7 +325,7 @@ def perform_stage3_analysis(
     for i in range(num_workers):
         p = Process(target=stage3_worker_proc,
                     args=(i, task_queue, result_queue, stop_event, total_frames_processed_counter, video_path,
-                          preprocessed_video_path_arg, s2_frame_objects_map, tracker_config, common_app_config,
+                          preprocessed_video_path_arg, tracker_config, common_app_config,
                           logger_config))
         processes.append(p)
         p.start()
@@ -313,6 +333,10 @@ def perform_stage3_analysis(
     all_primary_actions, all_secondary_actions = [], []
     processed_task_count = 0
     total_tasks = len(all_tasks)
+
+    # Pre-calculate frames per segment for progress reporting
+    frames_per_segment = [(s.end_frame_id - s.start_frame_id + 1) for s in relevant_segments]
+    cumulative_frames = np.cumsum(frames_per_segment)
 
     while any(p.is_alive() for p in processes) and not stop_event.is_set():
         # Check for completed results without blocking for a long time
@@ -322,7 +346,7 @@ def perform_stage3_analysis(
             all_secondary_actions.extend(result["secondary_actions"])
             processed_task_count += 1
         except Empty:
-            pass  # It's normal for the queue to be empty while workers are processing
+            pass
 
         time_elapsed_s3 = time.time() - s3_start_time
         current_frames_done = total_frames_processed_counter.value
@@ -330,17 +354,35 @@ def perform_stage3_analysis(
         true_fps = current_frames_done / time_elapsed_s3 if time_elapsed_s3 > 0.1 else 0.0
         eta_s3 = (total_frames_to_process - current_frames_done) / true_fps if true_fps > 0 else float('inf')
 
-        # Use the number of processed tasks to give a rough idea of the "chapter" progress
-        # This provides a more stable name than trying to derive it from frame numbers.
-        progress_callback(current_segment_idx=processed_task_count, total_segments=total_tasks,
-                          current_segment_name=f"Processing chunk {processed_task_count + 1}/{total_tasks}",
-                          frame_in_segment=current_frames_done, # This now acts as an overall frame counter for the progress bar
-                          total_frames_in_segment=total_frames_to_process,
-                          total_frames_processed_overall=current_frames_done,
-                          total_frames_to_process_overall=total_frames_to_process,
-                          processing_fps=true_fps,
-                          time_elapsed=time_elapsed_s3,
-                          eta_seconds=eta_s3)
+        # --- Determine current chapter based on total frames processed ---
+        current_chapter_idx_for_progress = 1
+        chapter_name_for_progress = "Starting..."
+        if relevant_segments:
+            # Find the index of the first cumulative total that is >= current frames done
+            chapter_index = np.searchsorted(cumulative_frames, current_frames_done, side='left')
+            if chapter_index < len(relevant_segments):
+                current_chapter_idx_for_progress = chapter_index + 1
+                chapter_name_for_progress = relevant_segments[chapter_index].major_position
+            else: # If done, lock to the last chapter
+                current_chapter_idx_for_progress = len(relevant_segments)
+                chapter_name_for_progress = relevant_segments[-1].major_position
+
+        # --- Call progress_callback with both chapter and chunk info ---
+        progress_callback(
+            # Chapter Info
+            current_chapter_idx=current_chapter_idx_for_progress,
+            total_chapters=len(relevant_segments),
+            chapter_name=chapter_name_for_progress,
+            # Chunk Info (previously was current_segment_idx/total_segments)
+            current_chunk_idx=processed_task_count,
+            total_chunks=total_tasks,
+            # Overall Progress Info
+            total_frames_processed_overall=current_frames_done,
+            total_frames_to_process_overall=total_frames_to_process,
+            processing_fps=true_fps,
+            time_elapsed=time_elapsed_s3,
+            eta_seconds=eta_s3
+        )
 
         # Sleep briefly to prevent this loop from consuming too much CPU
         time.sleep(0.1)
@@ -350,7 +392,7 @@ def perform_stage3_analysis(
         for p in processes:
             if p.is_alive(): p.terminate()
 
-    # --- ADDED: Cleanup phase to ensure all results are collected after workers finish ---
+    # --- Cleanup phase to ensure all results are collected after workers finish ---
     while not result_queue.empty():
         try:
             result = result_queue.get_nowait()

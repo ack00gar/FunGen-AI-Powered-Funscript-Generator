@@ -1028,18 +1028,16 @@ class ControlPanelUI:
             if is_analysis_running and stage_proc.current_analysis_stage == 3:
                 imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
 
+                # Display chapter and chunk progress on separate lines for clarity
+                imgui.text_wrapped(stage_proc.stage3_current_segment_label) # e.g., "Chapter: 1/5 (Cowgirl)"
+                imgui.text_wrapped(stage_proc.stage3_overall_progress_label) # e.g., "Overall Task: Chunk 12/240"
+
                 # Apply active color to both S3 progress bars
                 imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
 
-                # --- Overall Progress ---
-                imgui.text(stage_proc.stage3_overall_progress_label)
+                # Overall Progress bar remains tied to total frames processed
                 overlay_text = f"{stage_proc.stage3_overall_progress_value * 100:.0f}%"
                 imgui.progress_bar(stage_proc.stage3_overall_progress_value, size=(-1, 0), overlay=overlay_text)
-
-
-                # --- Per-Segment Progress ---
-                imgui.text_wrapped(f"Segment: {stage_proc.stage3_current_segment_label}")
-                imgui.progress_bar(stage_proc.stage3_segment_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage3_segment_progress_value * 100:.0f}%")
 
                 imgui.pop_style_color()
 
