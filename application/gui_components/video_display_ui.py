@@ -682,6 +682,16 @@ class VideoDisplayUI:
                 elif is_locked_penis:
                     color = (0.1, 1.0, 0.1, 0.95)  # Bright Green for LOCKED PENIS
                     thickness = 2.0
+                    # If it's a locked penis and has a visible part, draw the solid fill first.
+                    if "visible_bbox" in box and box["visible_bbox"]:
+                        vis_bbox = box["visible_bbox"]
+                        p1_vis = self._video_to_screen_coords(vis_bbox[0], vis_bbox[1])
+                        p2_vis = self._video_to_screen_coords(vis_bbox[2], vis_bbox[3])
+                        if p1_vis and p2_vis:
+                            # Use a semi-transparent fill of the same base color
+                            fill_color = (0.1, 1.0, 0.1, 0.4)
+                            fill_color_u32 = imgui.get_color_u32_rgba(*fill_color)
+                            draw_list.add_rect_filled(p1_vis[0], p1_vis[1], p2_vis[0], p2_vis[1], fill_color_u32, rounding=2.0)
                 elif is_inferred_relative:
                     color = (0.8, 0.4, 1.0, 0.85) # A distinct purple for inferred boxes
                     thickness = 1.0

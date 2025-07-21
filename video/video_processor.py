@@ -682,8 +682,10 @@ class VideoProcessor:
 
     def _build_ffmpeg_filter_string(self) -> str:
         # --- Check if we are using the preprocessed file ---
-        is_using_preprocessed = self._active_video_source_path != self.video_path
-        if is_using_preprocessed:
+        is_using_preprocessed_by_path_diff = self._active_video_source_path != self.video_path
+        is_preprocessed_by_name = self._active_video_source_path.endswith("_preprocessed.mkv")
+
+        if is_using_preprocessed_by_path_diff or is_preprocessed_by_name:
             self.logger.info(f"Using preprocessed video source ('{os.path.basename(self._active_video_source_path)}'). No FFmpeg filters will be applied.")
             return "" # Return an empty filter string
 
