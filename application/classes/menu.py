@@ -349,7 +349,6 @@ class MainMenu:
                         self.app.tensorrt_compiler_window = None
                     self.app.tensorrt_compiler_window = TensorRTCompilerWindow(self.app, on_close_callback=on_close)
 
-                imgui.end_menu()
 
                 # --- Update Controls Sub-Menu ---
                 if imgui.begin_menu("Update Settings..."):
