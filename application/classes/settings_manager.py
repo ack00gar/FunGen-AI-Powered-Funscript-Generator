@@ -50,7 +50,8 @@ class AppSettings:
             "show_funscript_timeline": True,
             "show_heatmap": True,
             "show_stage2_overlay": True,
-            "show_gauge_window": True,
+            "show_gauge_window_timeline1": True,
+            "show_gauge_window_timeline2": False,
             "show_lr_dial_graph": True,
             "show_chapter_list_window": False,
 
@@ -129,6 +130,11 @@ class AppSettings:
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r') as f:
                     loaded_settings = json.load(f)
+
+                # Migration for old setting name
+                if "show_gauge_window" in loaded_settings:
+                    loaded_settings["show_gauge_window_timeline1"] = loaded_settings.pop("show_gauge_window")
+
 
                 # Merge defaults with loaded settings, ensuring all keys from defaults are present
                 self.data = defaults.copy()  # Start with defaults
