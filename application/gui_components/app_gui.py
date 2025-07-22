@@ -58,7 +58,8 @@ class GUI:
         # Standard Components (owned by GUI)
         self.file_dialog = ImGuiFileDialog(logger=self.app.logger)
         self.main_menu = MainMenu(self.app)
-        self.gauge_window_ui = GaugeWindow(self.app)
+        self.gauge_window_ui_t1 = GaugeWindow(self.app, timeline_num=1)
+        self.gauge_window_ui_t2 = GaugeWindow(self.app, timeline_num=2)
         self.lr_dial_window_ui = LRDialWindow(self.app)
 
         self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=self.app, timeline_num=1)
@@ -878,7 +879,8 @@ class GUI:
         if hasattr(app_state, 'show_chapter_list_window') and app_state.show_chapter_list_window:
             self._time_render("ChapterListWindow", self.chapter_list_window_ui.render)
         self._time_render("Popups", lambda: (
-            self.gauge_window_ui.render(),
+            self.gauge_window_ui_t1.render(),
+            self.gauge_window_ui_t2.render(),
             self.lr_dial_window_ui.render(),
             self._render_batch_confirmation_dialog(),
             self.file_dialog.draw() if self.file_dialog.open else None,
