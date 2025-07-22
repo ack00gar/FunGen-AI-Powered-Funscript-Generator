@@ -1342,25 +1342,37 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
             if active_box is None:
                 primary_contacts = [b for b in contacting_boxes_all if b.class_name in primary_classes_for_segment]
 
-                # --- Filter out non-moving parts ---
-                moving_primary_contacts = []
-                for b in primary_contacts:
-                    is_moving = True
-                    if b.track_id in last_known_box_positions:
-                        last_cx, last_cy = last_known_box_positions[b.track_id]
-                        # Consider not moving if center moves less than 1 pixel
-                        if abs(b.cx - last_cx) < 1 and abs(b.cy - last_cy) < 1:
-                            is_moving = False
-                    if is_moving:
-                        moving_primary_contacts.append(b)
+                # --- Prefer moving contacts, but accept static ones if no moving ones exist ---
+                if primary_contacts:
+                    moving_contacts = []
+                    static_contacts = []
 
-                if moving_primary_contacts:
-                    active_box = max(moving_primary_contacts, key=lambda b: b.confidence)
-                    if active_box.track_id != active_interactor_state.get('id'):
-                        active_interactor_state['id'] = active_box.track_id
-                        _debug_log(logger,
-                                   f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
-                    active_interactor_state['unseen_frames'] = 0
+                    for b in primary_contacts:
+                        is_moving = True
+                        if b.track_id in last_known_box_positions:
+                            last_cx, last_cy = last_known_box_positions[b.track_id]
+                            if abs(b.cx - last_cx) < 1 and abs(b.cy - last_cy) < 1:
+                                is_moving = False
+
+                        if is_moving:
+                            moving_contacts.append(b)
+                        else:
+                            static_contacts.append(b)
+
+                    # Prioritize any moving contact over any static one.
+                    if moving_contacts:
+                        active_box = max(moving_contacts, key=lambda b: b.confidence)
+                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Selected a MOVING primary contact ('{active_box.class_name}' TID {active_box.track_id}).")
+                    elif static_contacts:
+                        active_box = max(static_contacts, key=lambda b: b.confidence)
+                        _debug_log(logger, f"Frame {frame_obj.frame_id}: No moving primary contacts. Selected a STATIC one ('{active_box.class_name}' TID {active_box.track_id}).")
+
+                    # If we selected a box, update the stateful tracker
+                    if active_box:
+                        if active_box.track_id != active_interactor_state.get('id'):
+                            active_interactor_state['id'] = active_box.track_id
+                            _debug_log(logger, f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
+                        active_interactor_state['unseen_frames'] = 0
 
             # --- CALCULATE DISTANCE OR USE FALLBACKS ---
             max_dist_ref = lp_state.max_height if lp_state.max_height > 0 else state.yolo_input_size * 0.3
