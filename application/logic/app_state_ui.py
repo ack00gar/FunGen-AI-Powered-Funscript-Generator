@@ -96,7 +96,11 @@ class AppStateUI:
         self.last_funscript_preview_action_count = -1
 
         # Gauge Window Attributes
-        self.show_gauge_window = self.app_settings.get("show_gauge_window", defaults.get("show_gauge_window", True))
+        self.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1",
+                                                                 defaults.get("show_gauge_window_timeline1", True))
+        self.show_gauge_window_timeline2 = self.app_settings.get("show_gauge_window_timeline2",
+                                                                 defaults.get("show_gauge_window_timeline2", False))
+
         default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
         default_gauge_h = self.app_settings.get("gauge_window_size_h", defaults.get("gauge_window_size_h", 220))
         # Default Y needs main menu bar height, which is usually set after GUI init.
@@ -110,8 +114,9 @@ class AppStateUI:
             self.app_settings.get("gauge_window_pos_y", default_gauge_y)
         )
         self.gauge_window_size = (default_gauge_w, default_gauge_h)
-        self.gauge_value = 0.0  # Live value from script
-        self.gauge_pos_initialized = False  # Flag to check if default Y has been adjusted
+        self.gauge_value_t1 = 0.0  # Live value from script for T1
+        self.gauge_value_t2 = 0.0  # Live value from script for T2
+        self.gauge_pos_initialized = False
 
         # L/R Dial Window Attributes
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
@@ -302,13 +307,15 @@ class AppStateUI:
             current_time_ms = int(round((self.app.processor.current_frame_index / fps) * 1000.0))
 
             script_val_primary = self.app.processor.tracker.funscript.get_value(current_time_ms, axis='primary')
-            self.gauge_value = float(script_val_primary)  # Default to 0 if not found
+            self.gauge_value_t1 = float(script_val_primary)
 
             script_val_secondary = self.app.processor.tracker.funscript.get_value(current_time_ms, axis='secondary')
-            self.lr_dial_value = float(script_val_secondary)  # Default to 50 if not found
+            self.gauge_value_t2 = float(script_val_secondary)
+            self.lr_dial_value = float(script_val_secondary)
         else:
-            self.gauge_value = 0.0
-            self.lr_dial_value = 50.0  # Default center for L/R dial
+            self.gauge_value_t1 = 0.0
+            self.gauge_value_t2 = 50.0
+            self.lr_dial_value = 50.0
 
     def update_settings_from_app(self):
         """Called by AppLogic when settings are loaded or project is loaded."""
@@ -342,7 +349,13 @@ class AppStateUI:
             self.ui_layout_mode = project_data.get("ui_layout_mode", self.ui_layout_mode)
             self.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms", self.timeline_pan_offset_ms)
 
-        self.show_gauge_window = self.app_settings.get("show_gauge_window", defaults.get("show_gauge_window", self.show_gauge_window))
+        self.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1",
+                                                                 defaults.get("show_gauge_window_timeline1",
+                                                                              self.show_gauge_window_timeline1))
+        self.show_gauge_window_timeline2 = self.app_settings.get("show_gauge_window_timeline2",
+                                                                 defaults.get("show_gauge_window_timeline2",
+                                                                              self.show_gauge_window_timeline2))
+
         default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
         default_gauge_h = self.app_settings.get("gauge_window_size_h", defaults.get("gauge_window_size_h", 220))
         menu_bar_h_for_default = self.app_settings.get("main_menu_bar_height_for_gauge_default_y", 25)
@@ -383,7 +396,10 @@ class AppStateUI:
             self.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2", self.show_funscript_interactive_timeline2)
             self.show_lr_dial_graph = project_data.get("show_lr_dial_graph", self.show_lr_dial_graph)
             self.show_heatmap = project_data.get("show_heatmap", self.show_heatmap)
-            self.show_gauge_window = project_data.get("show_gauge_window", self.show_gauge_window)
+            self.show_gauge_window_timeline1 = project_data.get("show_gauge_window_timeline1",
+                                                                self.show_gauge_window_timeline1)
+            self.show_gauge_window_timeline2 = project_data.get("show_gauge_window_timeline2",
+                                                                self.show_gauge_window_timeline2)
             self.show_stage2_overlay = project_data.get("show_stage2_overlay", self.show_stage2_overlay)
             self.interactive_refinement_mode_enabled = project_data.get("interactive_refinement_mode_enabled", False)
 
@@ -409,7 +425,9 @@ class AppStateUI:
         self.app_settings.set("show_heatmap", self.show_heatmap)
         self.app_settings.set("show_stage2_overlay", self.show_stage2_overlay)
 
-        self.app_settings.set("show_gauge_window", self.show_gauge_window)
+        self.app_settings.set("show_gauge_window_timeline1", self.show_gauge_window_timeline1)
+        self.app_settings.set("show_gauge_window_timeline2", self.show_gauge_window_timeline2)
+
         self.app_settings.set("gauge_window_pos_x", int(self.gauge_window_pos[0]))
         self.app_settings.set("gauge_window_pos_y", int(self.gauge_window_pos[1]))
         self.app_settings.set("gauge_window_size_w", int(self.gauge_window_size[0]))

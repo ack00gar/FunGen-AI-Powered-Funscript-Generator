@@ -3,30 +3,55 @@ import numpy as np
 
 
 class GaugeWindow:
-    def __init__(self, app_instance):
+    def __init__(self, app_instance, timeline_num: int):
         self.app = app_instance
+        self.timeline_num = timeline_num
+        self.window_title = f"Gauge T{self.timeline_num}##GaugeWindowT{self.timeline_num}"
 
     def render(self):
         app_state = self.app.app_state_ui  # Cache for convenience
 
-        if not app_state.show_gauge_window:
+        # Determine which state variables to use based on timeline_num
+        show_window_attr = f'show_gauge_window_timeline{self.timeline_num}'
+        gauge_value_attr = f'gauge_value_t{self.timeline_num}'
+        window_pos_attr = f'gauge_window_pos_t{self.timeline_num}'
+        window_size_attr = f'gauge_window_size_t{self.timeline_num}'
+
+        # Ensure attributes exist, provide defaults if not
+        if not hasattr(app_state, show_window_attr):
+            setattr(app_state, show_window_attr, False)
+        if not hasattr(app_state, gauge_value_attr):
+            setattr(app_state, gauge_value_attr, 0)
+        if not hasattr(app_state, window_pos_attr):
+            # Stagger the default position for the second gauge
+            default_pos = app_state.gauge_window_pos if self.timeline_num == 1 else (app_state.gauge_window_pos[0] + 30, app_state.gauge_window_pos[1] + 30)
+            setattr(app_state, window_pos_attr, default_pos)
+        if not hasattr(app_state, window_size_attr):
+            setattr(app_state, window_size_attr, app_state.gauge_window_size)
+
+
+        show_window = getattr(app_state, show_window_attr)
+        if not show_window:
             return
 
-        imgui.set_next_window_size(*app_state.gauge_window_size, condition=imgui.ONCE)
+        window_pos = getattr(app_state, window_pos_attr)
+        window_size = getattr(app_state, window_size_attr)
 
-        imgui.set_next_window_position(*app_state.gauge_window_pos, condition=imgui.ONCE)
+        imgui.set_next_window_size(*window_size, condition=imgui.ONCE)
+        imgui.set_next_window_position(*window_pos, condition=imgui.ONCE)
+
 
         window_flags = imgui.WINDOW_NO_SCROLLBAR
 
         opened, new_show_state = imgui.begin(
-            "Gauge##GaugeWindow",  # Unique ID for the window
+            self.window_title,
             closable=True,
             flags=window_flags
         )
 
         # Update the app state if the window was closed using the 'X'
-        if app_state.show_gauge_window != new_show_state:
-            app_state.show_gauge_window = new_show_state
+        if show_window != new_show_state:
+            setattr(app_state, show_window_attr, new_show_state)
             self.app.project_manager.project_dirty = True  # Closing/opening can be a preference to save
 
         if not opened:
@@ -40,12 +65,14 @@ class GaugeWindow:
         current_size_int = (int(current_size[0]), int(current_size[1]))
 
         # Get stored pos/size from app_state for comparison
-        stored_pos_int = (int(app_state.gauge_window_pos[0]), int(app_state.gauge_window_pos[1]))
-        stored_size_int = (int(app_state.gauge_window_size[0]), int(app_state.gauge_window_size[1]))
+        stored_pos_int = (int(window_pos[0]), int(window_pos[1]))
+        stored_size_int = (int(window_size[0]), int(window_size[1]))
+
 
         if current_pos_int != stored_pos_int or current_size_int != stored_size_int:
-            app_state.gauge_window_pos = current_pos_int
-            app_state.gauge_window_size = current_size_int
+            setattr(app_state, window_pos_attr, current_pos_int)
+            setattr(app_state, window_size_attr, current_size_int)
+
             self.app.project_manager.project_dirty = True  # Window move/resize makes project dirty
 
         # --- Gauge Drawing ---
@@ -70,7 +97,8 @@ class GaugeWindow:
         # Colors
         bg_color = imgui.get_color_u32_rgba(0.1, 0.1, 0.1, 1.0)
         border_color = imgui.get_color_u32_rgba(0.5, 0.5, 0.5, 1.0)
-        bar_color_fill = imgui.get_color_u32_rgba(0.2, 0.7, 0.2, 1.0)  # Green fill
+        # Change bar color for the second timeline's gauge
+        bar_color_fill = imgui.get_color_u32_rgba(0.7, 0.2, 0.2, 1.0) if self.timeline_num == 2 else imgui.get_color_u32_rgba(0.2, 0.7, 0.2, 1.0)
         text_color = imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0)
 
         # Draw gauge background and border
@@ -81,8 +109,10 @@ class GaugeWindow:
                            gauge_area_x + gauge_area_width, gauge_area_y + gauge_area_height,
                            border_color, rounding=3.0, thickness=1.0)
 
-        # Draw gauge fill based on app_state.gauge_value
-        normalized_value = np.clip(app_state.gauge_value / 100.0, 0.0, 1.0)
+        # Draw gauge fill based on the correct gauge_value
+        gauge_value = getattr(app_state, gauge_value_attr)
+        normalized_value = np.clip(gauge_value / 100.0, 0.0, 1.0)
+
         bar_fill_height = normalized_value * gauge_area_height
         bar_fill_top_y = gauge_area_y + gauge_area_height - bar_fill_height
 
@@ -101,7 +131,7 @@ class GaugeWindow:
                 draw_list.add_text(gauge_area_x + gauge_area_width + 3, label_50_pos_y, text_color, "50")
 
         # Display the numerical value below the gauge
-        value_text = f"{int(app_state.gauge_value)}"
+        value_text = f"{int(gauge_value)}"
         text_size_val = imgui.calc_text_size(value_text)
 
         # Position for the value text

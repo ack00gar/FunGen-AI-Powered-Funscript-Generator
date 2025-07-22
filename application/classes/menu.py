@@ -280,9 +280,19 @@ class MainMenu:
 
                 imgui.text("Overlays & Aux Windows")
                 imgui.indent()
-                clicked, app_state.show_gauge_window = imgui.menu_item("Script Gauge",
-                                                                       selected=app_state.show_gauge_window)
-                if clicked: self.app.project_manager.project_dirty = True
+
+                # Gauge T1
+                clicked, current_val_t1 = imgui.menu_item("Script Gauge (Timeline 1)", selected=app_state.show_gauge_window_timeline1)
+                if clicked:
+                    app_state.show_gauge_window_timeline1 = current_val_t1
+                    self.app.project_manager.project_dirty = True
+
+                # Gauge T2
+                clicked, current_val_t2 = imgui.menu_item("Script Gauge (Timeline 2)", selected=app_state.show_gauge_window_timeline2)
+                if clicked:
+                    app_state.show_gauge_window_timeline2 = current_val_t2
+                    self.app.project_manager.project_dirty = True
+
                 clicked, app_state.show_lr_dial_graph = imgui.menu_item("L/R Dial Graph",
                                                                         selected=app_state.show_lr_dial_graph)
                 if clicked: self.app.project_manager.project_dirty = True
