@@ -351,6 +351,53 @@ class MainMenu:
 
                 imgui.end_menu()
 
+                # --- Update Controls Sub-Menu ---
+                if imgui.begin_menu("Update Settings..."):
+                    # Toggle for checking on startup
+                    check_startup = self.app.app_settings.get("updater_check_on_startup", True)
+                    clicked, new_val_startup = imgui.menu_item("Check for Updates on Startup", selected=check_startup)
+                    if clicked:
+                        self.app.app_settings.set("updater_check_on_startup", new_val_startup)
+
+                    # Toggle for periodic background checks
+                    check_periodic = self.app.app_settings.get("updater_check_periodically", True)
+                    clicked, new_val_periodic = imgui.menu_item("Check Periodically in Background (Hourly)", selected=check_periodic)
+                    if clicked:
+                        self.app.app_settings.set("updater_check_periodically", new_val_periodic)
+
+                    # Toggle for suppressing the update popup
+                    suppress_popup = self.app.app_settings.get("updater_suppress_popup", False)
+                    clicked, new_val_suppress = imgui.menu_item("Suppress Update Notification Popup", selected=suppress_popup)
+                    if clicked:
+                        self.app.app_settings.set("updater_suppress_popup", new_val_suppress)
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("If suppressed, only the menu bar indicator will be shown.")
+
+                    imgui.end_menu()
+
+                # Manual trigger to apply a pending update
+                can_apply_update = self.app.updater.update_available and not self.app.updater.update_in_progress
+                if imgui.menu_item("Apply Pending Update...", enabled=can_apply_update)[0]:
+                    self.app.updater.show_update_dialog = True  # Re-opens the confirmation dialog
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Shows the update dialog if an update has been detected.")
+
+                imgui.end_menu()
+
+            # --- UPDATE INDICATOR ---
+            # This is now a non-interactive, colored text label placed after the menus.
+            if self.app.updater.update_available and not self.app.updater.update_in_progress:
+                imgui.same_line()
+                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + 15) # Add some padding
+                if imgui.is_mouse_hovering_rect(imgui.get_item_rect_min(), imgui.get_item_rect_max()):
+                    imgui.set_tooltip("A new version is available! Find options in the Tools menu.")
+
+                # Make the text clickable to re-open the dialog
+                if imgui.button("Update Available!"):
+                    self.app.updater.show_update_dialog = True
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Click to see update details and apply.")
+
             # --- STATUS MESSAGE ---
             if app_state.status_message and time.time() < app_state.status_message_time:
                 text_size_status = imgui.calc_text_size(app_state.status_message)

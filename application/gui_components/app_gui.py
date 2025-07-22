@@ -986,6 +986,9 @@ class GUI:
                 current_target_duration = target_frame_duration_energy_saver if self.app.energy_saver.energy_saver_active else target_frame_duration_normal
                 elapsed_time_for_frame = time.time() - frame_start_time
                 sleep_duration = current_target_duration - elapsed_time_for_frame
+                # Periodic update checks
+                if self.app.app_settings.get("updater_check_periodically", True) and time.time() - self.app.updater.last_check_time > 3600:  # 1 hour
+                    self.app.updater.check_for_updates_async()
                 if sleep_duration > 0:
                     time.sleep(sleep_duration)
         finally:
