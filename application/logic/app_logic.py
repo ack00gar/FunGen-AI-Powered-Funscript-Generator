@@ -221,7 +221,12 @@ class ApplicationLogic:
         self.funscript_processor._ensure_undo_managers_linked()
         self._load_last_project_on_startup()
         self.energy_saver.reset_activity_timer()
-        self.updater.check_for_updates_async()
+
+        # Check for updates on startup only if the setting is enabled
+        if self.app_settings.get("updater_check_on_startup", True):
+            self.updater.check_for_updates_async()
+
+        #self.updater.check_for_updates_async()
 
         # --- First Run Model Setup ---
         if getattr(self.app_settings, 'is_first_run', False):

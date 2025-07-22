@@ -106,6 +106,11 @@ class AppSettings:
 
             # Recent Projects
             "recent_projects": [],
+
+            # Updater Settings
+            "updater_check_on_startup": True,
+            "updater_check_periodically": True,
+            "updater_suppress_popup": False,
         }
         # The following settings are not configurable via UI but are still managed here
         # Note: These were previously in the main dict, but it's cleaner to separate them.

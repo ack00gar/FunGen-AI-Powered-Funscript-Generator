@@ -25,6 +25,8 @@ class AutoUpdater:
         self.update_check_complete = False
         self.status_message = "Checking for updates..."
         self.show_update_dialog = False
+        self.last_check_time = 0
+        self.update_changelog = []
         self.update_in_progress = False
 
     def _get_local_commit_hash(self) -> str | None:
@@ -56,8 +58,26 @@ class AutoUpdater:
             self.status_message = "Could not connect to check for updates."
             return None
 
+    def _get_commit_diff(self, local_hash: str, remote_hash: str) -> list[str]:
+        """Gets commit messages between local and remote versions."""
+        compare_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/compare/{local_hash}...{remote_hash}"
+        changelog = []
+        try:
+            response = requests.get(compare_url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            commits = data.get('commits', [])
+            for commit_data in commits:
+                message = commit_data.get('commit', {}).get('message', 'No commit message.')
+                # Get the first line of the commit message for brevity
+                changelog.append(message.split('\\n')[0])
+            return changelog
+        except requests.RequestException as e:
+            self.logger.error(f"Failed to fetch commit diff: {e}")
+            return ["Could not retrieve update details."]
+
     def _check_worker(self):
-        """Worker thread to check for updates without blocking the UI."""
+        """Worker thread to check for updates and fetch changelog."""
         self.local_commit_hash = self._get_local_commit_hash()
         if self.local_commit_hash:
             self.remote_commit_hash = self._get_remote_commit_hash()
@@ -67,15 +87,20 @@ class AutoUpdater:
                 self.logger.info("Update available.")
                 self.status_message = "A new update is available!"
                 self.update_available = True
-                self.show_update_dialog = True
+                # Fetch the changelog
+                self.update_changelog = self._get_commit_diff(self.local_commit_hash, self.remote_commit_hash)
+                if not self.app.app_settings.get("updater_suppress_popup", False):
+                    self.show_update_dialog = True
             else:
                 self.logger.info("Application is up to date.")
                 self.status_message = "You are on the latest version."
+                self.update_changelog = []
 
         self.update_check_complete = True
 
     def check_for_updates_async(self):
-        """Starts the update check in a background thread."""
+        """Starts the update check in a background thread and updates the timestamp."""
+        self.last_check_time = time.time() # Update time when a check is initiated
         threading.Thread(target=self._check_worker, daemon=True).start()
 
     def apply_update_and_restart(self):
@@ -129,9 +154,17 @@ class AutoUpdater:
                 imgui.text("A new version is available for FunGen.")
                 imgui.text("Would you like to update and restart the application?")
                 imgui.separator()
+
+                # Display Changelog
+                if self.update_changelog:
+                    imgui.text("Changes in this update:")
+                    imgui.begin_child("Changelog", 280, 80, border=True)
+                    for message in self.update_changelog:
+                        imgui.bullet_text(message)
+                    imgui.end_child()
+
                 imgui.text_wrapped(f"Your Version: {self.local_commit_hash[:7] if self.local_commit_hash else 'N/A'}")
-                imgui.text_wrapped(
-                    f"Latest Version: {self.remote_commit_hash[:7] if self.remote_commit_hash else 'N/A'}")
+                imgui.text_wrapped(f"Latest Version: {self.remote_commit_hash[:7] if self.remote_commit_hash else 'N/A'}")
                 imgui.separator()
 
                 if imgui.button("Update and Restart", width=150):
