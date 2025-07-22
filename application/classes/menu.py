@@ -389,7 +389,9 @@ class MainMenu:
             if self.app.updater.update_available and not self.app.updater.update_in_progress:
                 imgui.same_line()
                 imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + 15) # Add some padding
-                if imgui.is_mouse_hovering_rect(imgui.get_item_rect_min(), imgui.get_item_rect_max()):
+                rect_min = imgui.get_item_rect_min()
+                rect_max = imgui.get_item_rect_max()
+                if imgui.is_mouse_hovering_rect(rect_min[0], rect_min[1], rect_max[0], rect_max[1]):
                     imgui.set_tooltip("A new version is available! Find options in the Tools menu.")
 
                 # Make the text clickable to re-open the dialog
