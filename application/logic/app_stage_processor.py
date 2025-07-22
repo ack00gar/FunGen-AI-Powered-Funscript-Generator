@@ -341,14 +341,15 @@ class AppStageProcessor:
     def start_full_analysis(self, override_producers: Optional[int] = None,
                             override_consumers: Optional[int] = None,
                             completion_event: Optional[threading.Event] = None,
-                            frame_range_override: Optional[Tuple[int, int]] = None):
+                            frame_range_override: Optional[Tuple[int, int]] = None,
+                            is_autotune_run: bool = False):
         fm = self.app.file_manager
         fs_proc = self.app.funscript_processor
 
         if not fm.video_path:
             self.logger.info("Please load a video first.", extra={'status_message': True})
             return
-        if self.full_analysis_active or (self.app.processor and self.app.processor.is_processing) or (self.stage_thread and self.stage_thread.is_alive()):
+        if self.full_analysis_active or (self.app.processor and self.app.processor.is_processing):
             self.logger.info("A process is already running.", extra={'status_message': True})
             return
         if not stage1_module or not stage2_module or not stage3_module:
@@ -363,6 +364,9 @@ class AppStageProcessor:
         self.stop_stage_event.clear()
         self.stage_completion_event = completion_event
         self.frame_range_override = frame_range_override
+
+        # Store the flag for the thread to use it
+        self.is_autotune_run_for_thread = is_autotune_run
 
         # Store the overrides to be used by the thread
         self.override_producers = override_producers
@@ -461,6 +465,9 @@ class AppStageProcessor:
 
             target_s1_path = fm.stage1_output_msgpack_path
 
+            # Determine if this is an autotuner run
+            is_autotune_context = self.frame_range_override is not None
+
             is_s1_data_source_ranged = (frame_range_for_s1 is not None) and target_s1_path and "_range_" in os.path.basename(target_s1_path)
             should_skip_stage1 = not self.force_rerun_stage1 and target_s1_path and os.path.exists(target_s1_path)
 
@@ -473,11 +480,15 @@ class AppStageProcessor:
                     frame_range=frame_range_for_s1,
                     output_path=target_s1_path,
                     num_producers_override=getattr(self, 'override_producers', None),
-                    num_consumers_override=getattr(self, 'override_consumers', None)
+                    num_consumers_override=getattr(self, 'override_consumers', None),
+                    is_autotune_run=is_autotune_context
                 )
                 stage1_success = stage1_results.get("success", False)
                 if stage1_success:
                     max_fps_str = f"{stage1_results.get('max_fps', 0.0):.2f} FPS"
+                    # Directly set the final FPS string to avoid the race condition.
+                    # The autotuner reads this value immediately after the completion event is set.
+                    self.stage1_final_fps_str = max_fps_str
                     self.gui_event_queue.put(("stage1_completed", self.stage1_time_elapsed_str, max_fps_str))
 
             if self.stop_stage_event.is_set() or not stage1_success:
@@ -486,6 +497,12 @@ class AppStageProcessor:
                     self.gui_event_queue.put(("stage2_status_update", "Skipped", "S1 Failed/Aborted"))
                 if "Queued" in self.stage3_status_text:
                     self.gui_event_queue.put(("stage3_status_update", "Skipped", "S1 Failed/Aborted"))
+                return
+
+            # If this is an autotuner run (indicated by frame_range_override),
+            # our job is done after Stage 1. The 'finally' block will handle cleanup.
+            if self.frame_range_override is not None:
+                self.logger.info("[Thread] Autotuner context detected. Finishing after Stage 1.")
                 return
 
             # --- Stage 2 ---
@@ -661,7 +678,8 @@ class AppStageProcessor:
     def _execute_stage1_logic(self, frame_range: Optional[Tuple[Optional[int], Optional[int]]] = None,
                                   output_path: Optional[str] = None,
                                   num_producers_override: Optional[int] = None,
-                                  num_consumers_override: Optional[int] = None) -> Dict[str, Any]:
+                                  num_consumers_override: Optional[int] = None,
+                                  is_autotune_run: bool = False) -> Dict[str, Any]:
         self.gui_event_queue.put(("stage1_status_update", "Running S1...", "Initializing S1..."))
         fm = self.app.file_manager
         self.stage1_frame_queue_size = 0
@@ -705,7 +723,8 @@ class AppStageProcessor:
                 frame_range_arg=frame_range,
                 output_filename_override=output_path,
                 save_preprocessed_video_arg=self.save_preprocessed_video,
-                preprocessed_video_path_arg=preprocessed_video_path
+                preprocessed_video_path_arg=preprocessed_video_path,
+                is_autotune_run_arg=is_autotune_run
             )
             if self.stop_stage_event.is_set():
                 self.gui_event_queue.put(("stage1_status_update", "S1 Aborted by user.", "Aborted"))

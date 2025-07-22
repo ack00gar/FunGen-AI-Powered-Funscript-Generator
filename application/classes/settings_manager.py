@@ -103,6 +103,9 @@ class AppSettings:
 
             # Shortcuts
             "funscript_editor_shortcuts": shortcuts,
+
+            # Recent Projects
+            "recent_projects": [],
         }
         # The following settings are not configurable via UI but are still managed here
         # Note: These were previously in the main dict, but it's cleaner to separate them.

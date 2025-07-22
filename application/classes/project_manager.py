@@ -89,6 +89,30 @@ class ProjectManager:
         else:
             self.app.logger.error("File dialog cannot be shown from ProjectManager. GUI bridge missing.")
 
+    def _add_to_recent_projects(self, filepath: str):
+        """Adds a project path to the top of the recent projects list."""
+        if not filepath:
+            return
+
+        # Ensure we're working with an absolute path for consistency
+        abs_filepath = os.path.abspath(filepath)
+
+        recent_list = self.app.app_settings.get("recent_projects", [])
+
+        # Remove any existing instance of this path to avoid duplicates and move it to the top
+        if abs_filepath in recent_list:
+            recent_list.remove(abs_filepath)
+
+        # Add the new path to the front of the list
+        recent_list.insert(0, abs_filepath)
+
+        # Trim the list to a maximum of 10 recent files
+        max_recent_files = 10
+        trimmed_list = recent_list[:max_recent_files]
+
+        # Persist the changes to settings
+        self.app.app_settings.set("recent_projects", trimmed_list)
+
     def load_project(self, filepath: str, is_autosave: bool = False):  # Added is_autosave
         if not is_autosave and self.project_dirty:
             self.app.logger.warning("WARNING: Unsaved changes in current project. Loading new project will discard them.")
@@ -115,6 +139,11 @@ class ProjectManager:
                         f"Video file specified in project not found: {self.app.file_manager.video_path}")
                 self.app.file_manager.video_path = ""  # Ensure video_path is cleared if not valid
 
+            # On successful load, update the recent projects list
+            self._add_to_recent_projects(filepath)
+
+            self.project_file_path = filepath
+
             # Final UI updates after everything is loaded
             self.app.app_state_ui.heatmap_dirty = True
             self.app.app_state_ui.funscript_preview_dirty = True
@@ -127,6 +156,12 @@ class ProjectManager:
 
         except Exception as e:
             self.app.logger.error(f"Error loading project '{os.path.basename(filepath)}': {e}", exc_info=True, extra={'status_message': True})
+            # If loading fails, remove the bad path from the recent list
+            recent_list = self.app.app_settings.get("recent_projects", [])
+            abs_filepath = os.path.abspath(filepath)
+            if abs_filepath in recent_list:
+                recent_list.remove(abs_filepath)
+                self.app.app_settings.set("recent_projects", recent_list)
             if is_autosave:
                 self.app.logger.error(f"Autosave restoration from '{os.path.basename(filepath)}' failed critically.")
 
@@ -153,64 +188,60 @@ class ProjectManager:
 
     def save_project(self, filepath: str):
         check_write_access(filepath)
-        project_data = self._get_project_state_as_dict()  # Gets data from all app sub-modules
+        project_data = self._get_project_state_as_dict()
         project_data["version"] = APP_VERSION
 
         try:
             with open(filepath, 'wb') as f:
                 f.write(orjson.dumps(project_data, default=numpy_default_handler))
             self.project_file_path = filepath
-            self.project_dirty = False  # Saved, so no longer dirty
+            self.project_dirty = False
+
+            # On successful save, update the recent projects list
+            self._add_to_recent_projects(filepath)
+
             self.app.logger.info(f"Project saved to '{os.path.basename(filepath)}'.", extra={'status_message': True})
             self.app.energy_saver.reset_activity_timer()
         except Exception as e:
-            self.app.logger.error(f"Error saving project to '{filepath}': {e}", exc_info=True,
-                                  extra={'status_message': True})
+            self.app.logger.error(f"Error saving project to '{filepath}': {e}", exc_info=True, extra={'status_message': True})
 
     def perform_autosave(self, is_exit_save: bool = False):
+        """
+        Performs an autosave of the current project file if autosave is enabled
+        and the project state is dirty. The save is video-specific.
+        """
         if not self.app.app_settings.get("autosave_enabled", True):
             if is_exit_save:
                 self.app.logger.info("Autosave on exit skipped: Autosave is disabled in settings.")
             return
 
-        # Determine if there's meaningful content or if it's dirty
-        is_dirty_for_autosave = self.project_dirty
-        has_content = bool(
-            self.app.file_manager.video_path or
-            (self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript and
-             (self.app.funscript_processor.get_actions('primary') or self.app.funscript_processor.get_actions(
-                 'secondary')))
-        )
-
-        if not is_dirty_for_autosave and not has_content and not is_exit_save:
-            self.last_autosave_time = time.time()  # Update time even if skipped, to avoid frequent checks
+        # The primary condition for autosave is that the project has unsaved changes.
+        if not self.project_dirty:
+            self.last_autosave_time = time.time()  # Update timestamp to avoid rapid re-checking
             return
 
-        log_message_prefix = "Performing final autosave on exit" if is_exit_save else "Performing autosave"
-        self.app.logger.info(
-            f"{log_message_prefix} at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            extra={'status_message': not is_exit_save}  # Don't show status on exit
-        )
-
-        autosave_data = self._get_project_state_as_dict()
-        autosave_data["version"] = APP_VERSION + "_autosave"  # Distinguish autosave version
-
-        # Ensure there is data to save before writing the file
-        if not autosave_data.get("video_path") and not autosave_data.get("funscript_actions_timeline1"):
-            self.app.logger.info("Autosave skipped: No content to save.")
+        # A video must be loaded to save a video-specific project file.
+        video_path = self.app.file_manager.video_path
+        if not video_path:
+            self.app.logger.debug("Autosave skipped: No video loaded to associate the project with.")
             self.last_autosave_time = time.time()
             return
 
-        try:
-            check_write_access(AUTOSAVE_FILE)
-            with open(AUTOSAVE_FILE, 'wb') as f:
-                f.write(orjson.dumps(autosave_data, default=numpy_default_handler))
-            if not is_exit_save:
-                self.app.logger.info(
-                    f"State autosaved to {os.path.basename(AUTOSAVE_FILE)}", extra={'status_message': True})
-        except Exception as e:
-            self.app.logger.error(f"Autosave failed: {e}", exc_info=True, extra={'status_message': not is_exit_save})
+        # Determine the standard project file path for the current video.
+        project_filepath = self.app.file_manager.get_output_path_for_file(video_path, PROJECT_FILE_EXTENSION)
 
+        log_message_prefix = "Performing final project autosave on exit" if is_exit_save else "Autosaving project"
+        self.app.logger.info(
+            f"{log_message_prefix} for '{os.path.basename(video_path)}'...",
+            extra={'status_message': not is_exit_save}
+        )
+
+        # Use the existing save_project method, which handles state gathering,
+        # writing the file, and resetting the dirty flag.
+        self.save_project(project_filepath)
+
+        # The save_project method resets the dirty flag, which is what we want.
+        # It also logs its own success message.
         self.last_autosave_time = time.time()
 
 

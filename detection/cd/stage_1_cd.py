@@ -519,7 +519,8 @@ def perform_yolo_analysis(
         frame_range_arg: Optional[Tuple[Optional[int], Optional[int]]] = None,
         output_filename_override: Optional[str] = None,
         save_preprocessed_video_arg: bool = False,
-        preprocessed_video_path_arg: Optional[str] = None
+        preprocessed_video_path_arg: Optional[str] = None,
+        is_autotune_run_arg: bool = False
 ):
     process_logger = None
     fallback_config_for_subprocesses = None
@@ -687,7 +688,20 @@ def perform_yolo_analysis(
         # --- PROCESS JOINING AND SENTINEL LOGIC ---
         producers_finished = False
         all_procs = producers_list + consumers_list
+        loop_start_time = time.time()
+        ANALYSIS_TIMEOUT_SECONDS = 60  # 1 minute
+
         while any(p.is_alive() for p in all_procs):
+            # Conditionally check for timeout ONLY if it's an autotuner run
+            if is_autotune_run_arg and (time.time() - loop_start_time > ANALYSIS_TIMEOUT_SECONDS):
+                process_logger.critical(
+                    f"[S1 Lib] Autotuner analysis timed out after {ANALYSIS_TIMEOUT_SECONDS} seconds. "
+                    "A subprocess likely hung. Aborting this test."
+                )
+                if not stop_event_internal.is_set():
+                    stop_event_internal.set()
+                break  # Exit the monitoring loop to trigger cleanup
+
             # If an abort is requested, break the loop immediately to trigger cleanup.
             if stop_event_internal.is_set():
                 process_logger.warning("[S1 Lib] Abort detected in main monitoring loop.")

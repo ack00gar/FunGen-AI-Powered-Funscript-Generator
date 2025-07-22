@@ -330,6 +330,18 @@ class AppFileManager:
             self._save_funscript_file(secondary_path, secondary_actions, None)
 
     def handle_video_file_load(self, file_path: str, is_project_load=False):
+        # If this is a direct video load, first check if an associated project exists.
+        # If it does, load that project instead. The project load will handle opening the video.
+        if not is_project_load:
+            potential_project_path = self.get_output_path_for_file(file_path, PROJECT_FILE_EXTENSION)
+            if os.path.exists(potential_project_path):
+                self.logger.info(f"Found existing project file for this video. Loading project: {os.path.basename(potential_project_path)}")
+                # The load_project method will internally call this function again,
+                # but with is_project_load=True, so this block won't re-run.
+                self.app.project_manager.load_project(potential_project_path)
+                return # End this function call here.
+
+        # If we are here, it's either a project load, or a direct video load with no existing project file.
         self.video_path = file_path
         funscript_processor = self.app.funscript_processor
         stage_processor = self.app.stage_processor
@@ -343,14 +355,9 @@ class AppFileManager:
             self.preprocessed_video_path = None
 
         if not is_project_load:
-            # This block is for when a user opens a video file directly.
-            self.funscript_path = ""
-            self.loaded_funscript_path = ""
-            stage_processor.reset_stage_status(stages=("stage1", "stage2", "stage3")) # REFACTORED for maintainability. Create as many stages you want without having to make a new function. Simply pass in a tuple of stage names you want to reset.
-            self.clear_stage2_overlay_data()
-            funscript_processor.video_chapters.clear()
-            self.app.app_state_ui.heatmap_dirty = True
-            self.app.app_state_ui.funscript_preview_dirty = True
+            # This block is for a direct video load where no project was found. This is a "new project".
+            self.app.reset_project_state(for_new_project=True)
+            self.video_path = file_path # reset_project_state clears the path, so set it again.
 
             potential_s1_path = self.get_output_path_for_file(self.video_path, ".msgpack")
             if os.path.exists(potential_s1_path):
@@ -362,14 +369,10 @@ class AppFileManager:
             if os.path.exists(potential_s2_overlay):
                 self.load_stage2_overlay_data(potential_s2_overlay)
 
-            if not self.loaded_funscript_path:
-                funscript_processor.clear_timeline_history_and_set_new_baseline(1, [], "New Video (T1 Cleared)")
-                funscript_processor.clear_timeline_history_and_set_new_baseline(2, [], "New Video (T2 Cleared)")
-
-        # This part runs for both direct video load and project video load.
+        # This part runs for both project loads and new projects.
         if self.app.processor:
             if self.app.processor.open_video(file_path, from_project_load=is_project_load):
-                # This funscript loading logic should ONLY run for direct video loads.
+                # If it was a new project, we can still try to auto-load an adjacent funscript.
                 if not is_project_load:
                     path_in_output = self.get_output_path_for_file(file_path, ".funscript")
                     path_next_to_video = os.path.splitext(file_path)[0] + ".funscript"
