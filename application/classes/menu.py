@@ -45,10 +45,28 @@ class MainMenu:
                     if imgui.is_item_hovered(): imgui.set_tooltip("Open a new video file for processing.")
                     imgui.end_menu()
 
-                # Placeholder for a future "Open Recent" feature
-                if imgui.begin_menu("Open Recent", enabled=False):
+                # --- Open Recent Sub-Menu ---
+                recent_projects = self.app.app_settings.get("recent_projects", [])
+                can_open_recent = bool(recent_projects)
+
+                if imgui.begin_menu("Open Recent", enabled=can_open_recent):
+                    if not recent_projects:
+                        imgui.menu_item("(No recent projects)", enabled=False)
+                    else:
+                        for project_path in recent_projects:
+                            # Display a shorter, more readable version of the path
+                            try:
+                                # e.g., "my_video/my_video.fgn"
+                                display_name = f"{os.path.basename(os.path.dirname(project_path))}{os.sep}{os.path.basename(project_path)}"
+                            except Exception:
+                                display_name = project_path  # Fallback
+
+                            if imgui.menu_item(display_name)[0]:
+                                self.app.project_manager.load_project(project_path)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip(project_path)  # Show full path on hover
                     imgui.end_menu()
-                if imgui.is_item_hovered(): imgui.set_tooltip("Feature not yet implemented.")
+
                 imgui.separator()
 
                 # --- Close and Save ---

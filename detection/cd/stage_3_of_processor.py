@@ -237,7 +237,7 @@ def stage3_worker_proc(
 
         except Empty:
             worker_logger.info("Task queue is empty.")
-            break
+            continue
         except Exception as e:
             worker_logger.error(f"Error processing a chunk: {e}", exc_info=True)
             if not stop_event.is_set():
@@ -270,6 +270,10 @@ def perform_stage3_analysis(
     logger.info(f"Using chunk size: {CHUNK_SIZE}, overlap: {OVERLAP_SIZE}")
 
     relevant_segments = [seg for seg in atr_segments_list if seg.major_position not in ["Not Relevant", "Close Up"]]
+
+    logger.info(f"Found {len(relevant_segments)} relevant segments to process in Stage 3.")
+    logger.info(f"Details: {[seg.to_dict() for seg in relevant_segments]}")
+
     if not relevant_segments:
         logger.info("No relevant segments to process in Stage 3.")
         return {"primary_actions": [], "secondary_actions": [],

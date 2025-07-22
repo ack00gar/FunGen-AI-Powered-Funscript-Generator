@@ -219,7 +219,7 @@ class ApplicationLogic:
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
         self.funscript_processor._ensure_undo_managers_linked()
-        self._check_for_autosave_restore()
+        self._load_last_project_on_startup()
         self.energy_saver.reset_activity_timer()
         self.updater.check_for_updates_async()
 
@@ -368,7 +368,8 @@ class ApplicationLogic:
                     override_producers=p,
                     override_consumers=c,
                     completion_event=completion_event,
-                    frame_range_override=autotune_frame_range
+                    frame_range_override=autotune_frame_range,
+                    is_autotune_run=True
                 )
                 completion_event.wait()
 
@@ -1049,14 +1050,30 @@ class ApplicationLogic:
         self.logger.info("Application settings saved.", extra={'status_message': True})
         self.energy_saver.reset_activity_timer()
 
-    def _check_for_autosave_restore(self):
-        if os.path.exists(AUTOSAVE_FILE) and self.app_settings.get("autosave_enabled", True):
+    def _load_last_project_on_startup(self):
+        """Checks for and loads the most recently used project on application start."""
+        self.logger.info("Checking for last opened project...")
+        recent_projects = self.app_settings.get("recent_projects", [])
+
+        if not recent_projects:
+            self.logger.info("No recent projects found. Starting fresh.")
+            return
+
+        last_project_path = recent_projects[0]
+        if os.path.exists(last_project_path):
             try:
-                self.project_manager.load_project(AUTOSAVE_FILE)
-                self.project_manager.project_dirty = True
-                self.logger.info(f"State restored from autosave: {AUTOSAVE_FILE}.", extra={'status_message': True})
+                self.logger.info(f"Loading last opened project: {last_project_path}")
+                self.project_manager.load_project(last_project_path)
             except Exception as e:
-                self.logger.error(f"Failed to auto-restore from {AUTOSAVE_FILE}: {e}", exc_info=True, extra={'status_message': False})
+                self.logger.error(f"Failed to load last project '{last_project_path}': {e}", exc_info=True)
+                # Remove the invalid path from the list
+                recent_projects.pop(0)
+                self.app_settings.set("recent_projects", recent_projects)
+        else:
+            self.logger.warning(f"Last project file not found: '{last_project_path}'. Removing from recent list.")
+            # Remove the missing path from the list
+            recent_projects.pop(0)
+            self.app_settings.set("recent_projects", recent_projects)
 
     def reset_project_state(self, for_new_project: bool = True):
         """Resets the application to a clean state for a new or loaded project."""
