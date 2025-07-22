@@ -3,6 +3,7 @@ import os
 import numpy as np
 import math
 import glfw
+import copy
 from typing import Optional, List, Dict, Tuple
 from bisect import bisect_left, bisect_right
 
@@ -562,6 +563,84 @@ class InteractiveFunscriptTimeline:
             filter_params = params,
             selected_indices = indices_to_process)
         self.set_preview_actions(generated_preview_actions)
+
+    def _handle_copy_full_timeline_to_other(self):
+        fs_proc = self.app.funscript_processor
+        source_actions_ref = self._get_actions_list_ref()
+
+        # We can copy even if the source is empty, which effectively clears the destination.
+
+        destination_timeline_num = 2 if self.timeline_num == 1 else 1
+        dest_funscript_instance, dest_axis_name = fs_proc._get_target_funscript_object_and_axis(
+            destination_timeline_num)
+
+        if not dest_funscript_instance or not dest_axis_name:
+            self.app.logger.error(f"T{self.timeline_num}: Could not find destination timeline to copy to.",
+                                  extra={'status_message': True})
+            return
+
+        # Deep copy the actions to avoid reference issues
+        actions_to_copy = copy.deepcopy(source_actions_ref) if source_actions_ref else []
+
+        op_desc = f"Replaced T{destination_timeline_num} with T{self.timeline_num}"
+
+        # Record the action on the DESTINATION timeline for undo
+        fs_proc._record_timeline_action(destination_timeline_num, op_desc)
+
+        # Directly set the actions list on the destination object
+        dest_actions_attr = f"{dest_axis_name}_actions"
+        setattr(dest_funscript_instance, dest_actions_attr, actions_to_copy)
+
+        # Invalidate the cache for the destination axis
+        dest_funscript_instance._invalidate_cache(dest_axis_name)
+
+        # Finalize the action and update UI state
+        fs_proc._finalize_action_and_update_ui(destination_timeline_num, op_desc)
+        self.app.logger.info(
+            f"Copied all points from T{self.timeline_num} to T{destination_timeline_num}.",
+            extra={'status_message': True})
+
+    def _handle_swap_with_other_timeline(self):
+        fs_proc = self.app.funscript_processor
+
+        # Get details for both timelines
+        other_timeline_num = 2 if self.timeline_num == 1 else 1
+        this_fs_obj, this_axis = fs_proc._get_target_funscript_object_and_axis(self.timeline_num)
+        other_fs_obj, other_axis = fs_proc._get_target_funscript_object_and_axis(other_timeline_num)
+
+        if not this_fs_obj or not other_fs_obj:
+            self.app.logger.error("Could not find both funscript objects to perform swap.",
+                                  extra={'status_message': True})
+            return
+
+        # Get the action lists
+        this_actions_attr = f"{this_axis}_actions"
+        other_actions_attr = f"{other_axis}_actions"
+        this_actions = getattr(this_fs_obj, this_actions_attr, [])
+        other_actions = getattr(other_fs_obj, other_actions_attr, [])
+
+        # Record undo actions on BOTH timelines.
+        op_desc = f"Swap T{self.timeline_num} and T{other_timeline_num}"
+        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+        fs_proc._record_timeline_action(other_timeline_num, op_desc)
+
+        # Perform the swap using deep copies to be safe
+        actions_copy_this = copy.deepcopy(this_actions)
+        actions_copy_other = copy.deepcopy(other_actions)
+
+        setattr(this_fs_obj, this_actions_attr, actions_copy_other)
+        setattr(other_fs_obj, other_actions_attr, actions_copy_this)
+
+        # Invalidate caches for both
+        this_fs_obj._invalidate_cache(this_axis)
+        other_fs_obj._invalidate_cache(other_axis)
+
+        # Finalize both actions
+        fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+        fs_proc._finalize_action_and_update_ui(other_timeline_num, op_desc)
+
+        self.app.logger.info(op_desc, extra={'status_message': True})
+
 
     def render(self, timeline_y_start_coord: float = 0, timeline_render_height: float = 0, view_mode: str = 'expert'):
         app_state = self.app.app_state_ui
@@ -2307,6 +2386,24 @@ class InteractiveFunscriptTimeline:
                     imgui.menu_item("Add Point Here", enabled=False)
 
                 imgui.separator()
+
+                other_timeline_num = 2 if self.timeline_num == 1 else 1
+
+                # Option 1: Copy this entire timeline over to the other one
+                if imgui.menu_item(f"Copy All to Timeline {other_timeline_num}##CTXCopyFull", enabled=allow_editing_timeline)[0]:
+                    if allow_editing_timeline:
+                        self._handle_copy_full_timeline_to_other()
+                    imgui.close_current_popup()
+
+                # Option 2: Swap the contents of the two timelines
+                if imgui.menu_item(f"Swap with Timeline {other_timeline_num}##CTXSwap", enabled=allow_editing_timeline)[0]:
+                    if allow_editing_timeline:
+                        self._handle_swap_with_other_timeline()
+                    imgui.close_current_popup()
+
+                imgui.separator()
+
+
                 can_copy_to_other = allow_editing_timeline and bool(self.multi_selected_action_indices)
                 copy_dest_t_num = 2 if self.timeline_num == 1 else 1
 
