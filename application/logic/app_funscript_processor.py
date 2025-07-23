@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from bisect import bisect_left, bisect_right
 import numpy as np
+from scipy.signal import correlate, find_peaks
 
 from application.utils.video_segment import VideoSegment
 from funscript.dual_axis_funscript import DualAxisFunscript
@@ -45,6 +46,91 @@ class AppFunscriptProcessor:
 
         # Clipboard
         self.clipboard_actions_data: List[Dict] = []
+
+    def compare_funscript_signals(self, actions_ref: List[Dict], actions_target: List[Dict],
+                                  prominence: int = 5) -> Dict:
+        """
+        Compares a target funscript (e.g., Stage 3) to a reference (e.g., Stage 2).
+
+        This method uses cross-correlation on detected signal peaks to find the optimal
+        time offset and gathers key comparative statistics.
+
+        Args:
+            actions_ref (List[Dict]): The reference signal with correct timing (e.g., Stage 2).
+            actions_target (List[Dict]): The signal to compare and align (e.g., Stage 3).
+            prominence (int): The prominence used for peak/valley detection. A higher value
+                              detects only more significant strokes.
+
+        Returns:
+            Dict: A dictionary of comparison statistics, including the calculated time offset.
+        """
+        stats = {
+            "calculated_offset_ms": 0,
+            "ref_stroke_count": 0,
+            "target_stroke_count": 0,
+            "error": None
+        }
+
+        if not actions_ref or not actions_target:
+            stats["error"] = "One or both action lists are empty."
+            self.logger.warning(stats["error"])
+            return stats
+
+        # --- 1. Feature Extraction: Get Peaks and Valleys Timestamps ---
+        def get_extrema_times(actions: List[Dict]) -> np.ndarray:
+            if len(actions) < 3:
+                return np.array([], dtype=int)
+
+            positions = np.array([a['pos'] for a in actions])
+
+            # Find peaks (maxima)
+            peaks, _ = find_peaks(positions, prominence=prominence)
+
+            # Find valleys (minima) by inverting the signal
+            valleys, _ = find_peaks(-positions, prominence=prominence)
+
+            # Combine, sort, and get the timestamps
+            extrema_indices = np.unique(np.concatenate((peaks, valleys)))
+
+            if len(extrema_indices) == 0:
+                return np.array([], dtype=int)
+
+            return np.array([actions[i]['at'] for i in extrema_indices], dtype=int)
+
+        ref_extrema_times = get_extrema_times(actions_ref)
+        target_extrema_times = get_extrema_times(actions_target)
+
+        stats["ref_stroke_count"] = len(ref_extrema_times)
+        stats["target_stroke_count"] = len(target_extrema_times)
+
+        if len(ref_extrema_times) < 5 or len(target_extrema_times) < 5:
+            stats["error"] = "Not enough significant peaks/valleys found to perform a reliable correlation."
+            self.logger.warning(stats["error"])
+            return stats
+
+        # --- 2. Offset Calculation using Cross-Correlation ---
+        # Determine the total duration for the binary signals
+        duration = max(actions_ref[-1]['at'], actions_target[-1]['at']) + 1
+
+        # Create binary event signals where '1' marks a peak/valley
+        ref_signal = np.zeros(duration)
+        target_signal = np.zeros(duration)
+        ref_signal[ref_extrema_times] = 1
+        target_signal[target_extrema_times] = 1
+
+        # Compute the cross-correlation
+        correlation = correlate(target_signal, ref_signal, mode='full', method='fft')
+
+        # The lag is the offset from the center of the correlation array where the peak occurs
+        delay_array_index = np.argmax(correlation)
+        # The center of the 'full' correlation result corresponds to a lag of 0
+        center_index = len(ref_signal) - 1
+        lag = delay_array_index - center_index
+
+        stats["calculated_offset_ms"] = int(lag)
+        self.logger.info( f"Signal comparison complete. Calculated offset: {lag} ms. Ref strokes: {stats['ref_stroke_count']}, Target strokes: {stats['target_stroke_count']}.")
+
+        return stats
 
     def get_default_ultimate_autotune_params(self) -> Dict:
         """
@@ -309,16 +395,14 @@ class AppFunscriptProcessor:
                 undo_manager.record_state_before_action(action_description)
                 self.logger.debug(f"UndoRec: T{timeline_num} - '{action_description}'")
             except Exception as e:
-                self.logger.error(f"Error recording undo for T{timeline_num} ('{action_description}'): {e}",
-                                  exc_info=True)
+                self.logger.error(f"Error recording undo for T{timeline_num} ('{action_description}'): {e}", exc_info=True)
         else:
             self.logger.warning(f"Could not record undo for T{timeline_num}: Undo manager not found.")
 
     def perform_undo_redo(self, timeline_num: int, operation: str):  # operation is 'undo' or 'redo'
         undo_manager = self._get_undo_manager(timeline_num)
         if not undo_manager:
-            self.logger.info(f"Cannot {operation} on Timeline {timeline_num}: Manager missing.",
-                             extra={'status_message': False})
+            self.logger.info(f"Cannot {operation} on Timeline {timeline_num}: Manager missing.", extra={'status_message': False})
             return
 
         action_description = None

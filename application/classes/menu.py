@@ -8,6 +8,116 @@ class MainMenu:
     def __init__(self, app_instance):
         self.app = app_instance
 
+    def _render_timeline_selection_popup(self):
+        """Renders a popup to select the reference timeline for comparison."""
+        app_state = self.app.app_state_ui
+        if not app_state.show_timeline_selection_popup:
+            return
+
+        imgui.open_popup("Select Reference Timeline##TimelineSelectPopup")
+
+        main_viewport = imgui.get_main_viewport()
+        popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 450) * 0.5
+        popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 220) * 0.5
+        imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
+        imgui.set_next_window_size(450, 0, condition=imgui.APPEARING)
+
+        if imgui.begin_popup_modal("Select Reference Timeline##TimelineSelectPopup", True,
+                                   flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+            imgui.text("Which timeline has the correct timing?")
+            imgui.text_wrapped("The offset will be calculated for the other timeline and applied to it.")
+            imgui.separator()
+
+            # --- FIX: Assign the boolean return value to a single variable ---
+            if imgui.radio_button("Timeline 1 is the Reference", app_state.timeline_comparison_reference_num == 1):
+                app_state.timeline_comparison_reference_num = 1
+
+            if imgui.radio_button("Timeline 2 is the Reference", app_state.timeline_comparison_reference_num == 2):
+                app_state.timeline_comparison_reference_num = 2
+            # --- END FIX ---
+
+            imgui.separator()
+
+            if imgui.button("Compare", width=120):
+                self.app.run_and_display_comparison_results(app_state.timeline_comparison_reference_num)
+                app_state.show_timeline_selection_popup = False
+                imgui.close_current_popup()
+
+            imgui.same_line()
+
+            if imgui.button("Cancel", width=120):
+                app_state.show_timeline_selection_popup = False
+                imgui.close_current_popup()
+
+            imgui.end_popup()
+
+    def _render_timeline_comparison_results_popup(self):
+        """Renders the popup showing the comparison results."""
+        app_state = self.app.app_state_ui
+        if not app_state.show_timeline_comparison_results_popup:
+            return
+
+        imgui.open_popup("Timeline Comparison Results##TimelineResultsPopup")
+
+        main_viewport = imgui.get_main_viewport()
+        popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 400) * 0.5
+        popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 240) * 0.5  # Increased height slightly
+        imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
+        imgui.set_next_window_size(400, 0, condition=imgui.APPEARING)
+
+        if imgui.begin_popup_modal("Timeline Comparison Results##TimelineResultsPopup", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+            results = app_state.timeline_comparison_results
+            if results:
+                offset_ms = results.get("calculated_offset_ms", 0)
+                ref_strokes = results.get("ref_stroke_count", 0)
+                target_strokes = results.get("target_stroke_count", 0)
+                target_timeline_num = results.get("target_timeline_num", "N/A")
+                ref_timeline_num = 1 if target_timeline_num == 2 else 2
+
+                # --- Get FPS and calculate frame offset ---
+                fps = 0
+                if self.app.processor and self.app.processor.fps > 0:
+                    fps = self.app.processor.fps
+
+                frame_offset_str = ""
+                if fps > 0:
+                    frame_offset = round((offset_ms / 1000.0) * fps)
+                    frame_offset_str = f" (approx. {frame_offset:.0f} frames)"
+
+                imgui.text(f"Reference: Timeline {ref_timeline_num} ({ref_strokes} strokes)")
+                imgui.text(f"Target:    Timeline {target_timeline_num} ({target_strokes} strokes)")
+                imgui.separator()
+
+                imgui.text_wrapped(
+                    f"The Target (T{target_timeline_num}) appears to be delayed relative to the Reference (T{ref_timeline_num}) by:")
+                imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 0.0, 1.0)
+                imgui.text(f"  {offset_ms} milliseconds{frame_offset_str}")
+                imgui.pop_style_color()
+
+                imgui.separator()
+
+                if imgui.button(f"Apply Offset to Timeline {target_timeline_num}", width=-1):
+                    fs_proc = self.app.funscript_processor
+                    op_desc = f"Apply Timeline Offset ({offset_ms}ms)"
+
+                    fs_proc._record_timeline_action(target_timeline_num, op_desc)
+                    funscript_obj, axis_name = fs_proc._get_target_funscript_object_and_axis(target_timeline_num)
+
+                    if funscript_obj and axis_name:
+                        # Apply a NEGATIVE offset to shift the target script EARLIER to match the reference
+                        funscript_obj.shift_points_time(axis=axis_name, time_delta_ms=-offset_ms)
+                        fs_proc._finalize_action_and_update_ui(target_timeline_num, op_desc)
+                        self.app.logger.info(f"Applied {offset_ms}ms offset to Timeline {target_timeline_num}.", extra={'status_message': True})
+
+                    app_state.show_timeline_comparison_results_popup = False
+                    imgui.close_current_popup()
+
+            if imgui.button("Close", width=-1):
+                app_state.show_timeline_comparison_results_popup = False
+                imgui.close_current_popup()
+
+            imgui.end_popup()
+
     def render(self):
 
         if imgui.begin_main_menu_bar():
@@ -244,17 +354,13 @@ class MainMenu:
                 imgui.text("Main Panels")
                 imgui.indent()
                 if app_state.ui_layout_mode == 'floating':
-                    clicked, app_state.show_control_panel_window = imgui.menu_item("Control Panel",
-                                                                                   selected=app_state.show_control_panel_window)
+                    clicked, app_state.show_control_panel_window = imgui.menu_item("Control Panel", selected=app_state.show_control_panel_window)
                     if clicked: self.app.project_manager.project_dirty = True
-                    clicked, app_state.show_info_graphs_window = imgui.menu_item("Info & Graphs",
-                                                                                 selected=app_state.show_info_graphs_window)
+                    clicked, app_state.show_info_graphs_window = imgui.menu_item("Info & Graphs", selected=app_state.show_info_graphs_window)
                     if clicked: self.app.project_manager.project_dirty = True
-                    clicked, app_state.show_video_display_window = imgui.menu_item("Video Display",
-                                                                                   selected=app_state.show_video_display_window)
+                    clicked, app_state.show_video_display_window = imgui.menu_item("Video Display", selected=app_state.show_video_display_window)
                     if clicked: self.app.project_manager.project_dirty = True
-                    clicked, app_state.show_video_navigation_window = imgui.menu_item("Video Navigation",
-                                                                                      selected=app_state.show_video_navigation_window)
+                    clicked, app_state.show_video_navigation_window = imgui.menu_item("Video Navigation", selected=app_state.show_video_navigation_window)
                     if clicked: self.app.project_manager.project_dirty = True
                 else:
                     imgui.text_disabled("Window toggles are for Floating Mode.")
@@ -263,15 +369,12 @@ class MainMenu:
 
                 imgui.text("Timeline Editors & Previews")
                 imgui.indent()
-                clicked, app_state.show_funscript_interactive_timeline = imgui.menu_item("Interactive Timeline 1",
-                                                                                         selected=app_state.show_funscript_interactive_timeline)
+                clicked, app_state.show_funscript_interactive_timeline = imgui.menu_item("Interactive Timeline 1", selected=app_state.show_funscript_interactive_timeline)
                 if clicked: self.app.project_manager.project_dirty = True
-                clicked, app_state.show_funscript_interactive_timeline2 = imgui.menu_item("Interactive Timeline 2",
-                                                                                          selected=app_state.show_funscript_interactive_timeline2)
+                clicked, app_state.show_funscript_interactive_timeline2 = imgui.menu_item("Interactive Timeline 2", selected=app_state.show_funscript_interactive_timeline2)
                 if clicked: self.app.project_manager.project_dirty = True
                 imgui.separator()
-                clicked, app_state.show_funscript_timeline = imgui.menu_item("Funscript Preview Bar",
-                                                                             selected=app_state.show_funscript_timeline)
+                clicked, app_state.show_funscript_timeline = imgui.menu_item("Funscript Preview Bar", selected=app_state.show_funscript_timeline)
                 if clicked: self.app.project_manager.project_dirty = True
                 clicked, app_state.show_heatmap = imgui.menu_item("Heatmap", selected=app_state.show_heatmap)
                 if clicked: self.app.project_manager.project_dirty = True
@@ -293,15 +396,13 @@ class MainMenu:
                     app_state.show_gauge_window_timeline2 = current_val_t2
                     self.app.project_manager.project_dirty = True
 
-                clicked, app_state.show_lr_dial_graph = imgui.menu_item("L/R Dial Graph",
-                                                                        selected=app_state.show_lr_dial_graph)
+                clicked, app_state.show_lr_dial_graph = imgui.menu_item("L/R Dial Graph", selected=app_state.show_lr_dial_graph)
                 if clicked: self.app.project_manager.project_dirty = True
 
                 # Added defensive hasattr check
                 if not hasattr(app_state, 'show_chapter_list_window'):
                     app_state.show_chapter_list_window = False
-                clicked, app_state.show_chapter_list_window = imgui.menu_item("Chapter List",
-                                                                              selected=app_state.show_chapter_list_window)
+                clicked, app_state.show_chapter_list_window = imgui.menu_item("Chapter List", selected=app_state.show_chapter_list_window)
                 if clicked: self.app.project_manager.project_dirty = True
 
                 imgui.separator()
@@ -349,6 +450,19 @@ class MainMenu:
                 clicked, selected = imgui.menu_item("Performance Autotuner...", selected=app_state.show_autotuner_window)
                 if clicked:
                     app_state.show_autotuner_window = not app_state.show_autotuner_window
+
+                # --- Timeline Comparison Tool ---
+                # The menu item is enabled only if both timelines have actions to compare.
+                can_compare = (
+                    hasattr(self.app, 'funscript_processor') and
+                    self.app.funscript_processor.get_actions('primary') and
+                    self.app.funscript_processor.get_actions('secondary')
+                )
+                if imgui.menu_item("Compare Timelines...", enabled=can_compare)[0]:
+                    if hasattr(self.app, 'trigger_timeline_comparison'):
+                        self.app.trigger_timeline_comparison()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Compares the signals on Timeline 1 and Timeline 2 to calculate the optimal time offset.")
 
                 # --- TensorRT Compiler Tool ---
                 if not hasattr(self.app, 'tensorrt_compiler_window'):
@@ -423,3 +537,7 @@ class MainMenu:
                 app_state.status_message = ""
 
             imgui.end_main_menu_bar()
+
+            # --- RENDER POPUPS MANAGED BY THIS CLASS ---
+            self._render_timeline_selection_popup()
+            self._render_timeline_comparison_results_popup()

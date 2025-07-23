@@ -1008,40 +1008,52 @@ class DualAxisFunscript:
 
     def add_actions_batch(self, actions_data: List[Dict], is_from_live_tracker: bool = False):
         """
-        Adds a batch of actions efficiently. It temporarily disables min_interval checks
-        during addition and re-applies it once at the end.
+        Adds a batch of actions efficiently by extending and sorting once.
         """
-        original_min_interval = self.min_interval_ms
-        self.min_interval_ms = 0  # Temporarily disable for batch insertion
-
+        primary_to_add = []
+        secondary_to_add = []
         for action in actions_data:
-            self.add_action(
-                timestamp_ms=action['timestamp_ms'],
-                primary_pos=action.get('primary_pos'),
-                secondary_pos=action.get('secondary_pos'),
-                is_from_live_tracker=is_from_live_tracker
-            )
+            if action.get('primary_pos') is not None:
+                primary_to_add.append({'at': action['timestamp_ms'], 'pos': int(action['primary_pos'])})
+            if action.get('secondary_pos') is not None:
+                secondary_to_add.append({'at': action['timestamp_ms'], 'pos': int(action['secondary_pos'])})
 
-        self.min_interval_ms = original_min_interval
+        # Process Primary Axis
+        if primary_to_add:
+            self.primary_actions.extend(primary_to_add)
+            self.primary_actions.sort(key=lambda x: x['at'])
+            self._filter_list_by_interval('primary')
 
-        # Re-apply min_interval filtering to the entire list after batch addition
-        if self.min_interval_ms > 0:
-            for actions_list in [self.primary_actions, self.secondary_actions]:
-                if len(actions_list) > 1:
-                    valid_idx = 0
-                    for i in range(1, len(actions_list)):
-                        if actions_list[i]['at'] - actions_list[valid_idx]['at'] >= self.min_interval_ms:
-                            valid_idx += 1
-                            if i != valid_idx:
-                                actions_list[valid_idx] = actions_list[i]
-                    if valid_idx + 1 < len(actions_list):
-                        del actions_list[valid_idx + 1:]
+        # Process Secondary Axis
+        if secondary_to_add:
+            self.secondary_actions.extend(secondary_to_add)
+            self.secondary_actions.sort(key=lambda x: x['at'])
+            self._filter_list_by_interval('secondary')
 
         self._invalidate_cache('both')
-
-        # Update last timestamps
         self.last_timestamp_primary = self.primary_actions[-1]['at'] if self.primary_actions else 0
         self.last_timestamp_secondary = self.secondary_actions[-1]['at'] if self.secondary_actions else 0
+
+    # You will need this new helper method in the same class:
+    def _filter_list_by_interval(self, axis: str):
+        """Helper to enforce unique timestamps and min_interval after a batch operation."""
+        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if len(actions_list) < 2:
+            return
+
+        # First pass: ensure unique timestamps, keeping the last one
+        unique_actions_map = {action['at']: action for action in actions_list}
+        unique_actions = sorted(unique_actions_map.values(), key=lambda x: x['at'])
+
+        # Second pass: enforce min_interval
+        if self.min_interval_ms > 0 and unique_actions:
+            final_actions = [unique_actions[0]]
+            for i in range(1, len(unique_actions)):
+                if unique_actions[i]['at'] - final_actions[-1]['at'] >= self.min_interval_ms:
+                    final_actions.append(unique_actions[i])
+            actions_list[:] = final_actions
+        else:
+            actions_list[:] = unique_actions
 
     def scale_points_to_range(self, axis: str, output_min: int, output_max: int,
                               start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
