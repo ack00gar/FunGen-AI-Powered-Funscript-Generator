@@ -500,7 +500,7 @@ class VideoDisplayUI:
                         # --- Overlay: Top-right buttons for L/R Dial and Gauge ---
                         def render_overlay_toggle(label, visible_attr):
                             pushed = False
-                            if not getattr(app_state, visible_attr):
+                            if not getattr(app_state, visible_attr, False):
                                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
                                 pushed = True
                             if imgui.button(label):
@@ -510,8 +510,8 @@ class VideoDisplayUI:
                                 imgui.pop_style_var()
 
                         # Position at top right of video frame
-                        btn_labels = ["Dial", "Gauge"]
-                        btn_attrs = ["show_lr_dial_graph", "show_gauge_window"]
+                        btn_labels = ["Gauge T1", "Gauge T2", "Dial T2"]
+                        btn_attrs = ["show_gauge_window_timeline1", "show_gauge_window_timeline2", "show_lr_dial_graph"]
                         btn_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in btn_labels]
                         total_btn_width = sum(btn_widths)
                         # btn_height = imgui.get_frame_height()
