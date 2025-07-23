@@ -853,11 +853,21 @@ class DualAxisFunscript:
         if not indices_to_process:
             self.logger.warning("No points for operation.")
             return
-        count_changed = 0
-        for idx in indices_to_process:
-            actions_list_ref[idx]['pos'] = max(0, min(100, operation_func(actions_list_ref[idx]['pos'])))
-            count_changed += 1
-        if count_changed > 0: self.logger.info(f"Applied operation to {count_changed} points on {axis} axis.")
+
+        # 1. Extract only the positions to a NumPy array
+        positions = np.array([actions_list_ref[i]['pos'] for i in indices_to_process], dtype=np.float64)
+
+        # 2. Apply the vectorized operation function to the entire array at once
+        new_positions = operation_func(positions)
+
+        # 3. Clip the results and convert to int
+        new_positions = np.clip(new_positions, 0, 100).round().astype(int)
+
+        # 4. Update the original list with the new values
+        for i, original_list_idx in enumerate(indices_to_process):
+            actions_list_ref[original_list_idx]['pos'] = new_positions[i]
+
+        self.logger.info(f"Applied vectorized operation to {len(indices_to_process)} points on {axis} axis.")
 
     def clamp_points_values(self, axis: str, clamp_value: int,
                             start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
@@ -865,12 +875,18 @@ class DualAxisFunscript:
         if clamp_value not in [0, 100]:
             self.logger.warning("Clamp value must be 0 or 100.")
             return
-        self._apply_to_points(axis, lambda pos: clamp_value, start_time_ms, end_time_ms, selected_indices)
+
+        # Create a function that sets all values to the clamp_value (0 or 100)
+        # Using np.full_like to maintain the same shape as input positions
+        operation_func = lambda pos: np.full_like(pos, clamp_value)
+
+        self._apply_to_points(axis, operation_func, start_time_ms, end_time_ms, selected_indices)
 
     def invert_points_values(self, axis: str,
                              start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
                              selected_indices: Optional[List[int]] = None):
-        self._apply_to_points(axis, lambda pos: 100 - pos, start_time_ms, end_time_ms, selected_indices)
+        """Inverts points by passing a simple lambda function."""
+        self._apply_to_points(axis, lambda pos_array: 100 - pos_array, start_time_ms, end_time_ms, selected_indices)
 
     def clear_points(self, axis: str = 'both',
                      start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
@@ -919,13 +935,12 @@ class DualAxisFunscript:
     def amplify_points_values(self, axis: str, scale_factor: float, center_value: int = 50,
                               start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
                               selected_indices: Optional[List[int]] = None):
-        def operation_func(pos):
-            deviation = pos - center_value
-            new_pos = center_value + deviation * scale_factor
-            return int(round(np.clip(new_pos, 0, 100)))
+        """Inverts points by passing a function that operates on the array."""
 
-        self._apply_to_points(axis, operation_func, start_time_ms, end_time_ms, selected_indices)
-        # self.logger.info(f"Applied amplification (Factor: {scale_factor}, Center: {center_value}) to points on {axis} axis.")
+        def amplify_operation(pos_array: np.ndarray) -> np.ndarray:
+            return center_value + (pos_array - center_value) * scale_factor
+
+        self._apply_to_points(axis, amplify_operation, start_time_ms, end_time_ms, selected_indices)
 
     def clear_actions_in_time_range(self, start_time_ms: int, end_time_ms: int, axis: str = 'both'):
         """Clears actions within a specified millisecond time range for the given axis or both."""

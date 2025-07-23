@@ -2351,7 +2351,7 @@ class InteractiveFunscriptTimeline:
                         if pos_min_val <= action['pos'] <= pos_max_val:
                             newly_selected.add(i)
 
-                    # 4. Update selection state (your existing logic)
+                    # 4. Update selection state
                     if io.key_ctrl:
                         self.multi_selected_action_indices.symmetric_difference_update(newly_selected)
                     else:
