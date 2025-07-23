@@ -1114,7 +1114,8 @@ class ApplicationLogic:
             app_settings_defaults.get("show_funscript_interactive_timeline2", False))
         self.app_state_ui.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", app_settings_defaults.get("show_lr_dial_graph", True))
         self.app_state_ui.show_heatmap = self.app_settings.get("show_heatmap", app_settings_defaults.get("show_heatmap", True))
-        self.app_state_ui.show_gauge_window = self.app_settings.get("show_gauge_window", app_settings_defaults.get("show_gauge_window", True))
+        self.app_state_ui.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1",app_settings_defaults.get("show_gauge_window_timeline1", True))
+        self.app_state_ui.show_gauge_window_timeline2 = self.app_settings.get("show_gauge_window_timeline2",app_settings_defaults.get("show_gauge_window_timeline2", False))
         self.app_state_ui.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", app_settings_defaults.get("show_stage2_overlay", True))
         self.app_state_ui.reset_video_zoom_pan()
 
