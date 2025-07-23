@@ -94,31 +94,79 @@ class InfoGraphsUI:
 
     def _render_content_video_info(self):
         file_mgr = self.app.file_manager
-        imgui.text("Video Path:")
-        imgui.text_wrapped(file_mgr.video_path if file_mgr.video_path else "N/A (Drag & Drop Video)")
-        imgui.separator()
 
         imgui.columns(2, "video_info_stats", border=False)
         imgui.set_column_width(0, 120 * imgui.get_io().font_global_scale)
 
         if self.app.processor and self.app.processor.video_info:
+            path = (os.path.dirname(file_mgr.video_path) if file_mgr.video_path else "N/A (Drag & Drop Video)")
+            filename =  self.app.processor.video_info.get('filename', "N/A")
+
             info = self.app.processor.video_info
             width, height = info.get('width', 0), info.get('height', 0)
+
+            imgui.text("Path:")
+            imgui.next_column()
+            imgui.text_wrapped(path)
+            imgui.next_column()
+
+            imgui.text("File:")
+            imgui.next_column()
+            imgui.text_wrapped(filename)
+            imgui.next_column()
+
             imgui.text("Resolution:")
             imgui.next_column()
             imgui.text(f"{width}x{height}{self._get_k_resolution_label(width, height)}")
             imgui.next_column()
-            imgui.text("FPS:")
-            imgui.next_column()
-            imgui.text(f"{info.get('fps', 0):.2f}")
-            imgui.next_column()
-            imgui.text("Total Frames:")
-            imgui.next_column();
-            imgui.text(f"{info.get('total_frames', 0)}")
-            imgui.next_column()
+
             imgui.text("Duration:")
             imgui.next_column()
             imgui.text(f"{_format_time(self.app, info.get('duration', 0.0))}")
+            imgui.next_column()
+
+            imgui.text("Total Frames:")
+            imgui.next_column()
+            imgui.text(f"{info.get('total_frames', 0)}")
+            imgui.next_column()
+
+            imgui.text("Frame Rate:")
+            imgui.next_column()
+            # Display with more precision and add VFR/CFR indicator
+            fps_text = f"{info.get('fps', 0):.3f}"
+            fps_mode = " (VFR)" if info.get('is_vfr', False) else " (CFR)"
+            imgui.text(fps_text + fps_mode)
+            imgui.next_column()
+
+            imgui.text("Size:")
+            imgui.next_column()
+            # Format file size from bytes to MB or GB
+            size_bytes = info.get('file_size', 0)
+            if size_bytes > 0:
+                if size_bytes > 1024 * 1024 * 1024:
+                    size_str = f"{size_bytes / (1024**3):.2f} GB"
+                else:
+                    size_str = f"{size_bytes / (1024**2):.2f} MB"
+            else:
+                size_str = "N/A"
+            imgui.text(size_str)
+            imgui.next_column()
+
+            imgui.text("Bitrate:")
+            imgui.next_column()
+            # Format bitrate from bps to Mbit/s
+            bitrate_bps = info.get('bitrate', 0)
+            if bitrate_bps > 0:
+                bitrate_mbps = bitrate_bps / 1_000_000
+                bitrate_str = f"{bitrate_mbps:.2f} Mbit/s"
+            else:
+                bitrate_str = "N/A"
+            imgui.text(bitrate_str)
+            imgui.next_column()
+
+            imgui.text("Bit Depth:")
+            imgui.next_column()
+            imgui.text(f"{info.get('bit_depth', 'N/A')} bit")
             imgui.next_column()
             imgui.text("Detected Type:")
             imgui.next_column()
@@ -138,12 +186,10 @@ class InfoGraphsUI:
                 if imgui.is_item_hovered():
                     imgui.set_tooltip(f"Using: {os.path.basename(processor.video_path)}\nFilters are applied on-the-fly.")
             imgui.next_column()
-
-
         else:
-            imgui.text("Status:");
-            imgui.next_column();
-            imgui.text("Video details not loaded.");
+            imgui.text("Status:")
+            imgui.next_column()
+            imgui.text("Video details not loaded.")
             imgui.next_column()
         imgui.columns(1)
         imgui.spacing()

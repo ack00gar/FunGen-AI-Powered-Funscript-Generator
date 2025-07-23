@@ -541,7 +541,7 @@ class VideoProcessor:
         cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                '-show_entries',
                'stream=width,height,r_frame_rate,nb_frames,avg_frame_rate,duration,codec_type,pix_fmt,bits_per_raw_sample',
-               '-show_entries', 'format=duration', '-of', 'json', filename]
+               '-show_entries', 'format=duration,size,bit_rate', '-of', 'json', filename]
         try:
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
             data = json.loads(result.stdout)
@@ -558,6 +558,16 @@ class VideoProcessor:
             tf_str = stream_info.get('nb_frames')
             total_frames = int(tf_str) if tf_str and tf_str != 'N/A' else 0
             if total_frames == 0 and duration > 0 and fps > 0: total_frames = int(duration * fps)
+
+            # --- New Fields ---
+            file_size_bytes = int(format_info.get('size', 0))
+            bitrate_bps = int(format_info.get('bit_rate', 0))
+            file_name = os.path.basename(filename)
+
+            # VFR check
+            r_frame_rate_str = stream_info.get('r_frame_rate', '0/0')
+            avg_frame_rate_str = stream_info.get('avg_frame_rate', '0/0')
+            is_vfr = r_frame_rate_str != avg_frame_rate_str
 
             has_audio_ffprobe = False
             cmd_audio_check = ['ffprobe', '-v', 'error', '-select_streams', 'a:0',
@@ -591,8 +601,10 @@ class VideoProcessor:
                     self.logger.warning(f"Could not parse bits_per_raw_sample: {bits_per_raw_sample_str}")
             else:
                 pix_fmt = stream_info.get('pix_fmt', '').lower()
-                # [OPTIMIZED] - Cleaner check for 10-bit pixel formats
-                if any(fmt in pix_fmt for fmt in ['10le', 'p010', '10be']):
+                # Check for higher bit depths first
+                if any(fmt in pix_fmt for fmt in ['12le', 'p012', '12be']):
+                    bit_depth = 12
+                elif any(fmt in pix_fmt for fmt in ['10le', 'p010', '10be']):
                     bit_depth = 10
 
             self.logger.info(
@@ -600,7 +612,10 @@ class VideoProcessor:
 
             return {"duration": duration, "total_frames": total_frames, "fps": fps,
                     "width": int(stream_info.get('width', 0)), "height": int(stream_info.get('height', 0)),
-                    "has_audio": has_audio_ffprobe, "bit_depth": bit_depth}
+                    "has_audio": has_audio_ffprobe, "bit_depth": bit_depth,
+                    "file_size": file_size_bytes, "bitrate": bitrate_bps,
+                    "is_vfr": is_vfr, "filename": file_name
+                    }
         except Exception as e:
             self.logger.error(f"Error in _get_video_info for {filename}: {e}")
             return None
