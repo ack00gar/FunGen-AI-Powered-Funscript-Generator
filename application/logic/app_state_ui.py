@@ -109,11 +109,27 @@ class AppStateUI:
         default_gauge_x = self.window_width - default_gauge_w - 20
         default_gauge_y = menu_bar_h_for_default + 10
 
-        self.gauge_window_pos = (
-            self.app_settings.get("gauge_window_pos_x", default_gauge_x),
-            self.app_settings.get("gauge_window_pos_y", default_gauge_y)
+        # Timeline 1 Gauge
+        self.gauge_window_pos_t1 = (
+            self.app_settings.get("gauge_window_pos_t1_x", default_gauge_x),
+            self.app_settings.get("gauge_window_pos_t1_y", default_gauge_y)
         )
-        self.gauge_window_size = (default_gauge_w, default_gauge_h)
+        self.gauge_window_size_t1 = (
+            self.app_settings.get("gauge_window_size_t1_w", default_gauge_w),
+            self.app_settings.get("gauge_window_size_t1_h", default_gauge_h)
+        )
+
+        # Timeline 2 Gauge (with staggered default)
+        default_gauge_t2_x = default_gauge_x - default_gauge_w - 10 # Place it to the left of T1
+        self.gauge_window_pos_t2 = (
+            self.app_settings.get("gauge_window_pos_t2_x", default_gauge_t2_x),
+            self.app_settings.get("gauge_window_pos_t2_y", default_gauge_y)
+        )
+        self.gauge_window_size_t2 = (
+            self.app_settings.get("gauge_window_size_t2_w", default_gauge_w),
+            self.app_settings.get("gauge_window_size_t2_h", default_gauge_h)
+        )
+
         self.gauge_value_t1 = 0.0  # Live value from script for T1
         self.gauge_value_t2 = 0.0  # Live value from script for T2
         self.gauge_pos_initialized = False
@@ -180,10 +196,16 @@ class AppStateUI:
         # This method is called by AppLogic once the GUI main menu bar height is known.
         if not self.gauge_pos_initialized:
             defaults = self.app_settings.get_default_settings()
-            current_default_gauge_y_setting = self.app_settings.get("gauge_window_pos_y", defaults.get("gauge_window_pos_y", 35))
-            if self.gauge_window_pos[1] == current_default_gauge_y_setting or self.gauge_window_pos[
-                1] <= menu_bar_height:
-                self.gauge_window_pos = (self.gauge_window_pos[0], menu_bar_height + 10)
+
+            # Update T1 Gauge Y
+            current_default_t1_y = self.app_settings.get("gauge_window_pos_t1_y", defaults.get("gauge_window_pos_y", 35))
+            if self.gauge_window_pos_t1[1] == current_default_t1_y or self.gauge_window_pos_t1[1] <= menu_bar_height:
+                self.gauge_window_pos_t1 = (self.gauge_window_pos_t1[0], menu_bar_height + 10)
+
+            # Update T2 Gauge Y
+            current_default_t2_y = self.app_settings.get("gauge_window_pos_t2_y", defaults.get("gauge_window_pos_y", 35))
+            if self.gauge_window_pos_t2[1] == current_default_t2_y or self.gauge_window_pos_t2[1] <= menu_bar_height:
+                self.gauge_window_pos_t2 = (self.gauge_window_pos_t2[0], menu_bar_height + 10)
 
             current_default_lr_dial_y_setting = self.app_settings.get("lr_dial_window_pos_y", defaults.get("lr_dial_window_pos_y", 35))
             if self.lr_dial_window_pos[1] == current_default_lr_dial_y_setting or self.lr_dial_window_pos[
@@ -314,7 +336,7 @@ class AppStateUI:
             self.lr_dial_value = float(script_val_secondary)
         else:
             self.gauge_value_t1 = 0.0
-            self.gauge_value_t2 = 50.0
+            self.gauge_value_t2 = 0.0
             self.lr_dial_value = 50.0
 
     def update_settings_from_app(self):
@@ -359,24 +381,32 @@ class AppStateUI:
         default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
         default_gauge_h = self.app_settings.get("gauge_window_size_h", defaults.get("gauge_window_size_h", 220))
         menu_bar_h_for_default = self.app_settings.get("main_menu_bar_height_for_gauge_default_y", 25)
-
-        # Calculate default_gauge_x based on potentially updated self.window_width
-        calc_default_gauge_x = self.window_width - default_gauge_w - 20
+        default_gauge_x = self.window_width - default_gauge_w - 20
         default_gauge_y = menu_bar_h_for_default + 10
 
-        self.gauge_window_pos = (
-            self.app_settings.get("gauge_window_pos_x", calc_default_gauge_x),
-            self.app_settings.get("gauge_window_pos_y", default_gauge_y)
+        self.gauge_window_pos_t1 = (
+            self.app_settings.get("gauge_window_pos_t1_x", default_gauge_x),
+            self.app_settings.get("gauge_window_pos_t1_y", default_gauge_y)
         )
-        self.gauge_window_size = (
-            self.app_settings.get("gauge_window_size_w", default_gauge_w),
-            self.app_settings.get("gauge_window_size_h", default_gauge_h)
+        self.gauge_window_size_t1 = (
+            self.app_settings.get("gauge_window_size_t1_w", default_gauge_w),
+            self.app_settings.get("gauge_window_size_t1_h", default_gauge_h)
+        )
+
+        default_gauge_t2_x = default_gauge_x - default_gauge_w - 10
+        self.gauge_window_pos_t2 = (
+            self.app_settings.get("gauge_window_pos_t2_x", default_gauge_t2_x),
+            self.app_settings.get("gauge_window_pos_t2_y", default_gauge_y)
+        )
+        self.gauge_window_size_t2 = (
+            self.app_settings.get("gauge_window_size_t2_w", default_gauge_w),
+            self.app_settings.get("gauge_window_size_t2_h", default_gauge_h)
         )
 
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", self.show_lr_dial_graph))
         default_lr_dial_w = self.app_settings.get("lr_dial_window_size_w", defaults.get("lr_dial_window_size_w", 150))
         default_lr_dial_h = self.app_settings.get("lr_dial_window_size_h", defaults.get("lr_dial_window_size_h", 180))
-        gauge_w_curr = self.gauge_window_size[0]  # Use current gauge width for positioning
+        gauge_w_curr = self.gauge_window_size_t1[0]  # Use current gauge width for positioning
 
         calc_def_lr_dial_x = self.window_width - gauge_w_curr - default_lr_dial_w - 30
         default_lr_dial_y = menu_bar_h_for_default + 10
@@ -428,10 +458,15 @@ class AppStateUI:
         self.app_settings.set("show_gauge_window_timeline1", self.show_gauge_window_timeline1)
         self.app_settings.set("show_gauge_window_timeline2", self.show_gauge_window_timeline2)
 
-        self.app_settings.set("gauge_window_pos_x", int(self.gauge_window_pos[0]))
-        self.app_settings.set("gauge_window_pos_y", int(self.gauge_window_pos[1]))
-        self.app_settings.set("gauge_window_size_w", int(self.gauge_window_size[0]))
-        self.app_settings.set("gauge_window_size_h", int(self.gauge_window_size[1]))
+        self.app_settings.set("gauge_window_pos_t1_x", int(self.gauge_window_pos_t1[0]))
+        self.app_settings.set("gauge_window_pos_t1_y", int(self.gauge_window_pos_t1[1]))
+        self.app_settings.set("gauge_window_size_t1_w", int(self.gauge_window_size_t1[0]))
+        self.app_settings.set("gauge_window_size_t1_h", int(self.gauge_window_size_t1[1]))
+
+        self.app_settings.set("gauge_window_pos_t2_x", int(self.gauge_window_pos_t2[0]))
+        self.app_settings.set("gauge_window_pos_t2_y", int(self.gauge_window_pos_t2[1]))
+        self.app_settings.set("gauge_window_size_t2_w", int(self.gauge_window_size_t2[0]))
+        self.app_settings.set("gauge_window_size_t2_h", int(self.gauge_window_size_t2[1]))
 
         self.app_settings.set("show_lr_dial_graph", self.show_lr_dial_graph)
         self.app_settings.set("lr_dial_window_pos_x", int(self.lr_dial_window_pos[0]))
