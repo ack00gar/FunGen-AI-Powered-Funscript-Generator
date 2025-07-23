@@ -181,8 +181,8 @@ class MainMenu:
 
                 # --- Close and Save ---
                 if imgui.menu_item("Close Project")[0]:
-                    file_mgr.close_video_action(clear_funscript_unconditionally=True)
-                if imgui.is_item_hovered(): imgui.set_tooltip("Close the current video and all associated data.")
+                    self.app.project_manager.new_project()
+                if imgui.is_item_hovered(): imgui.set_tooltip("Close the current project and return to a clean state.")
                 imgui.separator()
 
                 can_save_project = self.app.project_manager.project_dirty or not self.app.project_manager.project_file_path

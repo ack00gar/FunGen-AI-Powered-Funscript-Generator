@@ -1111,27 +1111,26 @@ class ApplicationLogic:
     def _load_last_project_on_startup(self):
         """Checks for and loads the most recently used project on application start."""
         self.logger.info("Checking for last opened project...")
-        recent_projects = self.app_settings.get("recent_projects", [])
 
-        if not recent_projects:
-            self.logger.info("No recent projects found. Starting fresh.")
+        # Read from the new dedicated setting, not the recent projects list.
+        last_project_path = self.app_settings.get("last_opened_project_path")
+
+        if not last_project_path:
+            self.logger.info("No last project found to load. Starting fresh.")
             return
 
-        last_project_path = recent_projects[0]
         if os.path.exists(last_project_path):
             try:
                 self.logger.info(f"Loading last opened project: {last_project_path}")
                 self.project_manager.load_project(last_project_path)
             except Exception as e:
                 self.logger.error(f"Failed to load last project '{last_project_path}': {e}", exc_info=True)
-                # Remove the invalid path from the list
-                recent_projects.pop(0)
-                self.app_settings.set("recent_projects", recent_projects)
+                # Clear the invalid path so it doesn't try again next time
+                self.app_settings.set("last_opened_project_path", None)
         else:
-            self.logger.warning(f"Last project file not found: '{last_project_path}'. Removing from recent list.")
-            # Remove the missing path from the list
-            recent_projects.pop(0)
-            self.app_settings.set("recent_projects", recent_projects)
+                self.logger.warning(f"Last project file not found: '{last_project_path}'. Clearing setting.")
+                # Clear the missing path so it doesn't try again next time
+                self.app_settings.set("last_opened_project_path", None)
 
     def reset_project_state(self, for_new_project: bool = True):
         """Resets the application to a clean state for a new or loaded project."""
