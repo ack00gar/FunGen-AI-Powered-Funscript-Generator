@@ -1034,19 +1034,21 @@ class DualAxisFunscript:
         self.last_timestamp_primary = self.primary_actions[-1]['at'] if self.primary_actions else 0
         self.last_timestamp_secondary = self.secondary_actions[-1]['at'] if self.secondary_actions else 0
 
-    # You will need this new helper method in the same class:
     def _filter_list_by_interval(self, axis: str):
-        """Helper to enforce unique timestamps and min_interval after a batch operation."""
         actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
         if len(actions_list) < 2:
             return
 
-        # First pass: ensure unique timestamps, keeping the last one
-        unique_actions_map = {action['at']: action for action in actions_list}
-        unique_actions = sorted(unique_actions_map.values(), key=lambda x: x['at'])
+        unique_actions = [actions_list[0]]
+        for i in range(1, len(actions_list)):
+            # Keep only the last point at a given timestamp to remove duplicates
+            if actions_list[i]['at'] == unique_actions[-1]['at']:
+                unique_actions[-1] = actions_list[i]
+            else:
+                unique_actions.append(actions_list[i])
 
-        # Second pass: enforce min_interval
-        if self.min_interval_ms > 0 and unique_actions:
+        # Now apply the min_interval filter
+        if self.min_interval_ms > 0:
             final_actions = [unique_actions[0]]
             for i in range(1, len(unique_actions)):
                 if unique_actions[i]['at'] - final_actions[-1]['at'] >= self.min_interval_ms:
