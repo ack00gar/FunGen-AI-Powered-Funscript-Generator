@@ -50,6 +50,11 @@ class ProjectManager:
         if self.project_dirty:
             self.app.logger.warning("Unsaved changes in current project. Consider saving first.")
 
+        # Set the last opened project to None so it doesn't load on next startup.
+        # This does NOT affect the recent projects list.
+        self.app.app_settings.set("last_opened_project_path", None)
+        self.app.logger.info("Last project reference cleared. App will start fresh next time.")
+
         # Delegate to ApplicationLogic's comprehensive reset method
         self.app.reset_project_state(for_new_project=True)
 
@@ -139,6 +144,7 @@ class ProjectManager:
 
             # On successful load, update the recent projects list
             self._add_to_recent_projects(filepath)
+            self.app.app_settings.set("last_opened_project_path", os.path.abspath(filepath))
 
             self.project_file_path = filepath
 
@@ -197,6 +203,7 @@ class ProjectManager:
 
             # On successful save, update the recent projects list
             self._add_to_recent_projects(filepath)
+            self.app.app_settings.set("last_opened_project_path", os.path.abspath(filepath))
 
             self.app.logger.info(f"Project saved to '{os.path.basename(filepath)}'.", extra={'status_message': True})
             self.app.energy_saver.reset_activity_timer()
@@ -332,8 +339,7 @@ class ProjectManager:
 
         # Data for AppStateUI
         app_state = self.app.app_state_ui
-        app_state.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms",
-    self.app.app_settings.get("timeline_pan_offset_ms", 0.0))
+        app_state.timeline_pan_offset_ms = project_data.get("timeline_pan_offset_ms",self.app.app_settings.get("timeline_pan_offset_ms", 0.0))
         app_state.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px", self.app.app_settings.get("timeline_zoom_factor_ms_per_px", 20.0))
         app_state.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline", self.app.app_settings.get("show_funscript_interactive_timeline",True))
         app_state.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2", self.app.app_settings.get("show_funscript_interactive_timeline2", False))

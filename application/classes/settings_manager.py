@@ -106,6 +106,7 @@ class AppSettings:
             "funscript_editor_shortcuts": shortcuts,
 
             # Recent Projects
+            "last_opened_project_path": "",
             "recent_projects": [],
 
             # Updater Settings
