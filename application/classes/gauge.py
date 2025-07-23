@@ -17,19 +17,6 @@ class GaugeWindow:
         window_pos_attr = f'gauge_window_pos_t{self.timeline_num}'
         window_size_attr = f'gauge_window_size_t{self.timeline_num}'
 
-        # Ensure attributes exist, provide defaults if not
-        if not hasattr(app_state, show_window_attr):
-            setattr(app_state, show_window_attr, False)
-        if not hasattr(app_state, gauge_value_attr):
-            setattr(app_state, gauge_value_attr, 0)
-        if not hasattr(app_state, window_pos_attr):
-            # Stagger the default position for the second gauge
-            default_pos = app_state.gauge_window_pos if self.timeline_num == 1 else (app_state.gauge_window_pos[0] + 30, app_state.gauge_window_pos[1] + 30)
-            setattr(app_state, window_pos_attr, default_pos)
-        if not hasattr(app_state, window_size_attr):
-            setattr(app_state, window_size_attr, app_state.gauge_window_size)
-
-
         show_window = getattr(app_state, show_window_attr)
         if not show_window:
             return
@@ -39,7 +26,6 @@ class GaugeWindow:
 
         imgui.set_next_window_size(*window_size, condition=imgui.ONCE)
         imgui.set_next_window_position(*window_pos, condition=imgui.ONCE)
-
 
         window_flags = imgui.WINDOW_NO_SCROLLBAR
 

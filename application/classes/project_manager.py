@@ -45,7 +45,6 @@ class ProjectManager:
     def project_dirty(self, value: bool):
         if self._project_dirty != value:
             self._project_dirty = value
-            # self.app.logger.debug(f"Project dirty status set to: {value}") # Optional logging
 
     def new_project(self):
         if self.project_dirty:
@@ -116,7 +115,6 @@ class ProjectManager:
     def load_project(self, filepath: str, is_autosave: bool = False):  # Added is_autosave
         if not is_autosave and self.project_dirty:
             self.app.logger.warning("WARNING: Unsaved changes in current project. Loading new project will discard them.")
-            # self.app.energy_saver.reset_activity_timer() # Activity related to user interaction
 
         try:
             with open(filepath, 'rb') as f:

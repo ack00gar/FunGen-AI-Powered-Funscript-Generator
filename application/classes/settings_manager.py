@@ -113,15 +113,6 @@ class AppSettings:
             "updater_check_periodically": True,
             "updater_suppress_popup": False,
         }
-        # The following settings are not configurable via UI but are still managed here
-        # Note: These were previously in the main dict, but it's cleaner to separate them.
-        # However, for this example, we will keep them as is. Let's ensure the previous auto_post_proc settings are removed to avoid duplication
-        # The following are now derived from the amp_config dict, so they are not needed as separate settings.
-        # "auto_post_processing_sg_window": constants.DEFAULT_AUTO_POST_SG_WINDOW,
-        # "auto_post_processing_sg_polyorder": constants.DEFAULT_AUTO_POST_SG_POLYORDER,
-        # "auto_post_processing_rdp_epsilon": constants.DEFAULT_AUTO_POST_RDP_EPSILON,
-        # "auto_post_processing_clamp_lower_threshold_primary": constants.DEFAULT_AUTO_POST_CLAMP_LOW,
-        # "auto_post_processing_clamp_upper_threshold_primary": constants.DEFAULT_AUTO_POST_CLAMP_HIGH,
         return defaults
 
     def load_settings(self):
