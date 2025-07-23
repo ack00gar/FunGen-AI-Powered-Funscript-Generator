@@ -201,13 +201,13 @@ class AutoUpdater:
             self.update_error_message = ""
 
         main_viewport = imgui.get_main_viewport()
-        imgui.set_next_window_size(main_viewport.size[0] * 0.4, 0, condition=imgui.APPEARING)
+        # Set size to 40% of viewport width and 60% of viewport height.
+        imgui.set_next_window_size(main_viewport.size[0] * 0.4, main_viewport.size[1] * 0.6, condition=imgui.APPEARING)
         imgui.set_next_window_position(main_viewport.work_pos[0] + main_viewport.work_size[0] * 0.5,
                                        main_viewport.work_pos[1] + main_viewport.work_size[1] * 0.5,
                                        pivot_x=0.5, pivot_y=0.5, condition=imgui.APPEARING)
 
-        # Make the popup closable by the user
-        popup_opened, _ = imgui.begin_popup_modal("Update Available", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+        popup_opened, _ = imgui.begin_popup_modal("Update Available", True)
 
         if popup_opened:
             window_width = imgui.get_content_region_available()[0]
@@ -263,7 +263,7 @@ class AutoUpdater:
 
                 if self.update_changelog:
                     imgui.text("Changes in this update:")
-                    # NEW: Taller, resizable changelog with wrapped text
+                    # This child window will now correctly scroll within the parent's fixed size
                     imgui.begin_child("Changelog", 0, -50, border=True)
                     for message in self.update_changelog:
                         imgui.bullet()
