@@ -1786,7 +1786,7 @@ class InteractiveFunscriptTimeline:
 
                 nudge_prev_tuple = self.app._map_shortcut_to_glfw_key(
                     shortcuts.get("nudge_selection_time_prev", "SHIFT+LEFT_ARROW"))
-                # FIX: Switched to a robust, key-based modifier check
+                # Robust, key-based modifier check
                 if nudge_prev_tuple and imgui.is_key_pressed(nudge_prev_tuple[0]) and \
                         (nudge_prev_tuple[1]['shift'] == io.key_shift and
                          nudge_prev_tuple[1]['ctrl'] == io.key_ctrl and
@@ -1796,7 +1796,7 @@ class InteractiveFunscriptTimeline:
 
                 nudge_next_tuple = self.app._map_shortcut_to_glfw_key(
                     shortcuts.get("nudge_selection_time_next", "SHIFT+RIGHT_ARROW"))
-                # FIX: Switched to a robust, key-based modifier check
+                # Robust, key-based modifier check
                 if time_nudge_delta_ms == 0 and nudge_next_tuple and imgui.is_key_pressed(nudge_next_tuple[0]) and \
                         (nudge_next_tuple[1]['shift'] == io.key_shift and
                          nudge_next_tuple[1]['ctrl'] == io.key_ctrl and
@@ -2086,14 +2086,43 @@ class InteractiveFunscriptTimeline:
                 if start_idx < end_idx:
                     visible_actions_indices_range = (start_idx, end_idx)
 
+            # --- START: LOD OPTIMIZATION ---
+            actions_to_render = self.preview_actions if self.is_previewing else actions_list
+            indices_to_draw = []
+
+            if actions_to_render:
+                # Calculate the average time interval between points in the script
+                fs_proc = self.app.funscript_processor  # Get the funscript processor instance
+                stats = fs_proc.funscript_stats_t1 if self.timeline_num == 1 else fs_proc.funscript_stats_t2  # Access stats from the processor
+                avg_interval_ms = stats.get('avg_interval_ms', 20)  # Use pre-calculated avg interval
+
+                # Calculate how many points, on average, would fall into a single horizontal pixel
+                points_per_pixel = (
+                            app_state.timeline_zoom_factor_ms_per_px / avg_interval_ms) if avg_interval_ms > 0 else 1.0
+
+                # Determine the step size for drawing. Never less than 1.
+                # The '4.0' is a tunable value; a lower number means a denser line when zoomed out.
+                draw_step = max(1, int(points_per_pixel / 4.0))
+
+                # Use the existing culling to find the visible range
+                s_idx, e_idx = 0, len(actions_to_render)
+                if visible_actions_indices_range:
+                    s_idx, e_idx = visible_actions_indices_range
+
+                # Create the decimated list of indices for drawing
+                indices_to_draw = range(s_idx, e_idx, draw_step)
+
+                # Ensure the very last visible point is always included to complete the line segment
+                last_visible_idx = e_idx - 1
+                if last_visible_idx >= s_idx and last_visible_idx not in indices_to_draw:
+                    indices_to_draw = list(indices_to_draw) + [last_visible_idx]
+            # --- END: LOD OPTIMIZATION ---
+
             # --- Draw Lines (Vectorized) ---
             if len(actions_list) > 1 and visible_actions_indices_range:
-                s_idx, e_idx = visible_actions_indices_range
-                render_e_idx = min(e_idx, len(actions_list) - 1)
-
-                if s_idx < render_e_idx:
-                    p1_indices = np.arange(s_idx, render_e_idx)
-                    p2_indices = p1_indices + 1
+                if len(indices_to_draw) > 1:
+                    p1_indices = np.array(list(indices_to_draw)[:-1])
+                    p2_indices = np.array(list(indices_to_draw)[1:])
 
                     p1_ats = np.array([actions_list[i]["at"] for i in p1_indices], dtype=float)
                     p1_poss = np.array([actions_list[i]["pos"] for i in p1_indices], dtype=float)
@@ -2128,9 +2157,8 @@ class InteractiveFunscriptTimeline:
 
             # --- Draw Points ---
             if actions_list and visible_actions_indices_range:
-                s_idx, e_idx = visible_actions_indices_range
-                point_indices = np.arange(s_idx, e_idx)
-                if point_indices.size > 0:
+                if indices_to_draw:
+                    point_indices = np.array(list(indices_to_draw))
                     point_ats = np.array([actions_list[i]["at"] for i in point_indices], dtype=float)
                     point_poss = np.array([actions_list[i]["pos"] for i in point_indices], dtype=float)
                     pxs = time_to_x_vec(point_ats)
@@ -2299,41 +2327,38 @@ class InteractiveFunscriptTimeline:
             # Handle Mouse Release for Marquee Selection
             if imgui.is_mouse_released(glfw.MOUSE_BUTTON_LEFT) and self.is_marqueeing:
                 self.is_marqueeing = False
+                if self.marquee_start_screen_pos and self.marquee_end_screen_pos and actions_list:
+                    # 1. Convert screen-space rect to data-space
+                    min_x = min(self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0])
+                    max_x = max(self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0])
+                    min_y = min(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1])
+                    max_y = max(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1])
 
-                # Ensure all conditions are valid before attempting selection
-                if self.marquee_start_screen_pos and self.marquee_end_screen_pos and visible_actions_indices_range and actions_list:
-                    start_x, start_y = self.marquee_start_screen_pos
-                    end_x, end_y = self.marquee_end_screen_pos
+                    time_start_ms = x_to_time(min_x)
+                    time_end_ms = x_to_time(max_x)
+                    pos_max_val = y_to_pos(min_y)  # Y axis is inverted
+                    pos_min_val = y_to_pos(max_y)
 
-                    min_x, max_x = min(start_x, end_x), max(start_x, end_x)
-                    min_y, max_y = min(start_y, end_y), max(start_y, end_y)
+                    # 2. Get all timestamps and use bisect to find the small slice in the time range
+                    action_times = [a['at'] for a in actions_list]
+                    s_idx_time = bisect_left(action_times, time_start_ms)
+                    e_idx_time = bisect_right(action_times, time_end_ms)
 
-                    s_idx_vis, e_idx_vis = visible_actions_indices_range
-                    vis_range = range(s_idx_vis, e_idx_vis)
+                    newly_selected = set()
+                    # 3. Iterate ONLY over the much smaller, time-culled slice
+                    for i in range(s_idx_time, e_idx_time):
+                        action = actions_list[i]
+                        if pos_min_val <= action['pos'] <= pos_max_val:
+                            newly_selected.add(i)
 
-                    # Extract visible action times and positions
-                    vis_ats = np.array([actions_list[i]["at"] for i in vis_range], dtype=float)
-                    vis_poss = np.array([actions_list[i]["pos"] for i in vis_range], dtype=float)
-
-                    if vis_ats.size > 0:
-                        vis_pxs = time_to_x_vec(vis_ats)
-                        vis_pys = pos_to_y_vec(vis_poss)
-
-                        in_rect_mask = (
-                            (vis_pxs >= min_x) & (vis_pxs <= max_x) &
-                            (vis_pys >= min_y) & (vis_pys <= max_y))
-                        newly_selected = set(np.array(list(vis_range))[in_rect_mask])
-                    else:
-                        newly_selected = set()
-
+                    # 4. Update selection state (your existing logic)
                     if io.key_ctrl:
                         self.multi_selected_action_indices.symmetric_difference_update(newly_selected)
                     else:
                         self.multi_selected_action_indices = newly_selected
 
-                    self.selected_action_idx = (
-                        min(self.multi_selected_action_indices)
-                        if self.multi_selected_action_indices else -1)
+                    self.selected_action_idx = min(
+                        self.multi_selected_action_indices) if self.multi_selected_action_indices else -1
 
                 # Reset marquee state
                 self.marquee_start_screen_pos = None

@@ -216,6 +216,11 @@ class ApplicationLogic:
         # --- Audio waveform data ---
         self.audio_waveform_data = None
 
+        self.app_state_ui.show_timeline_selection_popup = False
+        self.app_state_ui.show_timeline_comparison_results_popup = False
+        self.app_state_ui.timeline_comparison_results = None
+        self.app_state_ui.timeline_comparison_reference_num = 1 # Default to T1 as reference
+
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
         self.funscript_processor._ensure_undo_managers_linked()
@@ -329,6 +334,54 @@ class ApplicationLogic:
     def _update_first_run_progress(self, percent, downloaded, total_size):
         """Callback to update the progress bar state from the download thread."""
         self.first_run_progress = percent
+
+    def trigger_timeline_comparison(self):
+        """
+        Initiates the timeline comparison process by showing the selection popup.
+        """
+        # Reset previous results and open the first dialog
+        self.app_state_ui.timeline_comparison_results = None
+        self.app_state_ui.show_timeline_selection_popup = True
+        self.logger.info("Timeline comparison process started.")
+
+    def run_and_display_comparison_results(self, reference_timeline_num: int):
+        """
+        Executes the comparison and prepares the results for display.
+        Called by the UI after the user selects the reference timeline.
+        """
+        target_timeline_num = 2 if reference_timeline_num == 1 else 1
+
+        ref_axis = 'primary' if reference_timeline_num == 1 else 'secondary'
+        target_axis = 'secondary' if reference_timeline_num == 1 else 'primary'
+
+        self.logger.info(
+            f"Running comparison: Reference=T{reference_timeline_num} ({ref_axis}), Target=T{target_timeline_num} ({target_axis})")
+
+        ref_actions = self.funscript_processor.get_actions(ref_axis)
+        target_actions = self.funscript_processor.get_actions(target_axis)
+
+        if not ref_actions or not target_actions:
+            self.logger.error("Cannot compare signals: one of the timelines has no actions.",
+                              extra={'status_message': True})
+            return
+
+        comparison_stats = self.funscript_processor.compare_funscript_signals(
+            actions_ref=ref_actions,
+            actions_target=target_actions,
+            prominence=5
+        )
+
+        if comparison_stats and comparison_stats.get("error") is None:
+            # Store results along with which timeline is the target for applying the offset
+            comparison_stats['target_timeline_num'] = target_timeline_num
+            self.app_state_ui.timeline_comparison_results = comparison_stats
+            self.app_state_ui.show_timeline_comparison_results_popup = True
+
+        elif comparison_stats:
+            self.logger.error(f"Funscript comparison failed: {comparison_stats.get('error')}",
+                              extra={'status_message': True})
+        else:
+            self.logger.error("Funscript comparison returned no results.", extra={'status_message': True})
 
     def start_autotuner(self, force_hwaccel: Optional[str] = None):
         """Initiates the autotuning process in a background thread."""
