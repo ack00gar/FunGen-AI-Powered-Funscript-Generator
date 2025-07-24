@@ -225,24 +225,29 @@ class VideoProcessor:
         # --- Set the active source path ---
         self._active_video_source_path = self.video_path  # Default to original
         preprocessed_path = None
-        if self.app and hasattr(self.app, 'file_manager') and self.app.file_manager.preprocessed_video_path:
-            preprocessed_path = self.app.file_manager.preprocessed_video_path
+        # Proactively search for the preprocessed file for the *current* video
+        if self.app and hasattr(self.app, 'file_manager'):
+            potential_preprocessed_path = self.app.file_manager.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
+            if os.path.exists(potential_preprocessed_path):
+                preprocessed_path = potential_preprocessed_path
+                # Also update the file_manager's state to be consistent
+                self.app.file_manager.preprocessed_video_path = preprocessed_path
 
-        if preprocessed_path and os.path.exists(preprocessed_path):
-            # If loading from a project, we must verify the preprocessed file's integrity.
+        if preprocessed_path:
+            # If loading from a project, we can be more stringent about validation.
             if from_project_load:
-                self.logger.info(f"Found potential preprocessed file from project: {os.path.basename(preprocessed_path)}. Verifying completeness...")
+                self.logger.info(f"Found potential preprocessed file: {os.path.basename(preprocessed_path)}. Verifying...")
                 preprocessed_info = self._get_video_info(preprocessed_path)
 
                 original_frames = self.video_info.get("total_frames", 0)
                 preprocessed_frames = preprocessed_info.get("total_frames", -1) if preprocessed_info else -1
 
-                if preprocessed_frames == original_frames and original_frames > 0:
+                if preprocessed_frames >= original_frames > 0:
                     self._active_video_source_path = preprocessed_path
                 else:
                     self.logger.warning(
                         f"Preprocessed file is incomplete or invalid ({preprocessed_frames}/{original_frames} frames). "
-                        f"Falling back to original video file. To fix, re-run Stage 1 with 'Save Preprocessed Video' enabled."
+                        f"Falling back to original video. Re-run Stage 1 with 'Save Preprocessed Video' enabled to fix."
                     )
             else:
                 # If not loading from a project (e.g., just opened a video where a preprocessed file exists), assume it's valid.

@@ -481,7 +481,7 @@ class AppFileManager:
         self.app.logger.info(f"Opening video: {os.path.basename(file_path)}", extra={'status_message': True})
 
         # Reset relevant states before loading a new video
-        self.close_video_action(clear_funscript_unconditionally=False)
+        self.close_video_action(clear_funscript_unconditionally=True)
 
         # Call the core video opening logic in the VideoProcessor
         success = self.app.processor.open_video(file_path)
@@ -573,15 +573,17 @@ class AppFileManager:
         # Model paths are handled by AppLogic's save_app_settings directly
         pass
 
-    def save_final_funscripts(self, video_path: str, chapters: Optional[List[Dict]] = None):
+    def save_final_funscripts(self, video_path: str, chapters: Optional[List[Dict]] = None) -> List[str]:
         """
         Saves the final (potentially post-processed) funscripts.
         Adheres to the 'autosave_final_funscript_to_video_location' setting.
+        Returns a list of the full paths of the saved files.
         """
         if not self.app.funscript_processor:
             self.logger.error("Funscript processor not available for saving final funscripts.")
-            return
+            return []
 
+        saved_paths = []
         save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
         if self.app.is_batch_processing_active:
             save_next_to_video = self.app.batch_copy_funscript_to_video_location
@@ -596,14 +598,8 @@ class AppFileManager:
         else:
             chapters_to_save = self.app.funscript_processor.video_chapters
 
-        # Always save to the output directory
-        if primary_actions:
-            path_in_output = self.get_output_path_for_file(video_path, ".funscript")
-            self._save_funscript_file(path_in_output, primary_actions, chapters_to_save)
-
-        # 1. Start with the global setting as the default.
+        # Determine roll generation setting
         generate_roll = self.app.app_settings.get("generate_roll_file", True)
-        # 2. If in batch mode, override with the specific choice made for that batch.
         if self.app.is_batch_processing_active:
             generate_roll = self.app.batch_generate_roll_file
 
@@ -611,19 +607,25 @@ class AppFileManager:
         if primary_actions:
             path_in_output = self.get_output_path_for_file(video_path, ".funscript")
             self._save_funscript_file(path_in_output, primary_actions, chapters_to_save)
+            saved_paths.append(path_in_output)
 
-        # --- Roll funscript saving now respects the final 'generate_roll' value ---
+            if save_next_to_video:
+                self.logger.info("Also saving a copy of the final funscript next to the video file.")
+                base, _ = os.path.splitext(video_path)
+                path_next_to_vid = f"{base}.funscript"
+                self._save_funscript_file(path_next_to_vid, primary_actions, chapters_to_save)
+                # Do not add this to saved_paths to avoid double copying
+
+        # --- Roll funscript saving ---
         if secondary_actions and generate_roll:
             path_in_output_t2 = self.get_output_path_for_file(video_path, ".roll.funscript")
             self._save_funscript_file(path_in_output_t2, secondary_actions, None)
+            saved_paths.append(path_in_output_t2)
 
-        # Additionally, save next to the video if the setting is enabled
-        if save_next_to_video:
-            self.logger.info("Also saving a copy of the final funscript next to the video file.")
-            base, _ = os.path.splitext(video_path)
-            if primary_actions:
-                path_next_to_vid = f"{base}.funscript"
-                self._save_funscript_file(path_next_to_vid, primary_actions, chapters_to_save)
-            if secondary_actions and generate_roll:
+            if save_next_to_video:
+                base, _ = os.path.splitext(video_path)
                 path_next_to_vid_t2 = f"{base}.roll.funscript"
                 self._save_funscript_file(path_next_to_vid_t2, secondary_actions, None)
+                # Do not add this to saved_paths to avoid double copying
+
+        return saved_paths

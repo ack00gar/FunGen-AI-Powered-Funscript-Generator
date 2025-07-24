@@ -186,24 +186,24 @@ class ControlPanelUI:
                     _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
                     imgui.same_line()
                     _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
-                    imgui.separator()
-                    if not hasattr(stage_proc, 'save_preprocessed_video'):
-                        stage_proc.save_preprocessed_video = self.app.app_settings.get("save_preprocessed_video", False)
-
-                    changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
-                    if changed:
-                        stage_proc.save_preprocessed_video = new_val
-                        self.app.app_settings.set("save_preprocessed_video", new_val)
-                        if new_val:
-                            stage_proc.num_producers_stage1 = 1
-                            self.app.app_settings.set("num_producers_stage1", 1)
-
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip(
-                            "Applies resizing/cropping and VR unwarping to the video, then saves it.\n"
-                            "This preprocessed video is reused in subsequent runs, speeding them up.\n"
-                            "Forces the number of Producer threads to 1."
-                        )
+                    # imgui.separator()
+                    # if not hasattr(stage_proc, 'save_preprocessed_video'):
+                    #     stage_proc.save_preprocessed_video = self.app.app_settings.get("save_preprocessed_video", False)
+                    #
+                    # changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
+                    # if changed:
+                    #     stage_proc.save_preprocessed_video = new_val
+                    #     self.app.app_settings.set("save_preprocessed_video", new_val)
+                    #     if new_val:
+                    #         stage_proc.num_producers_stage1 = 1
+                    #         self.app.app_settings.set("num_producers_stage1", 1)
+                    #
+                    # if imgui.is_item_hovered():
+                    #     imgui.set_tooltip(
+                    #         "Applies resizing/cropping and VR unwarping to the video, then saves it.\n"
+                    #         "This preprocessed video is reused in subsequent runs, speeding them up.\n"
+                    #         "Forces the number of Producer threads to 1."
+                    #     )
                     if disable_combo:
                         imgui.pop_style_var()
                         imgui.internal.pop_item_flag()
@@ -992,6 +992,24 @@ class ControlPanelUI:
             imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
             imgui.pop_style_color()
             if suggestion_message: imgui.text(suggestion_message)
+
+            if getattr(stage_proc, 'save_preprocessed_video', False):
+                # The encoding queue (OS pipe buffer) isn't directly measurable.
+                # However, its fill rate is entirely dependent on the producer, which is
+                # throttled by the main frame queue. Therefore, the main frame queue's
+                # size is an excellent proxy for the encoding backpressure.
+                encoding_q_fraction = frame_q_fraction # Use the same fraction
+                encoding_bar_color = bar_color # Use the same color logic
+
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *encoding_bar_color)
+                imgui.progress_bar(encoding_q_fraction, size=(-1, 0), overlay=f"Encoding Queue: ~{frame_q_size}/{frame_q_max}")
+                imgui.pop_style_color()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "This is an estimate of the video encoding buffer.\n"
+                        "It is based on the main analysis frame queue, which acts as a throttle for the encoder."
+                    )
+
             imgui.text(f"Result Queue Size: ~{stage_proc.stage1_result_queue_size}")
         elif stage_proc.stage1_final_elapsed_time_str:
             imgui.text_wrapped(f"Last Run: {stage_proc.stage1_final_elapsed_time_str} | Avg Speed: {stage_proc.stage1_final_fps_str or 'N/A'}")
@@ -1012,6 +1030,21 @@ class ControlPanelUI:
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
             imgui.progress_bar(stage_proc.stage2_main_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage2_main_progress_value * 100:.0f}%" if stage_proc.stage2_main_progress_value >= 0 else "")
             imgui.pop_style_color()
+
+            # Show this bar only when a sub-task is actively reporting progress.
+            is_sub_task_active = stage_proc.stage2_sub_progress_value > 0.0 and stage_proc.stage2_sub_progress_value < 1.0
+            if is_sub_task_active:
+                # Add timing gauges if the data is available
+                if stage_proc.stage2_sub_time_elapsed_str:
+                    imgui.text(f"Time: {stage_proc.stage2_sub_time_elapsed_str} | ETA: {stage_proc.stage2_sub_eta_str} | Speed: {stage_proc.stage2_sub_processing_fps_str}")
+
+                sub_progress_color = (0.3, 0.7, 1.0, 1.0)
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *sub_progress_color)
+
+                # Construct the overlay text with a percentage.
+                overlay_text = f"{stage_proc.stage2_sub_progress_value * 100:.0f}%"
+                imgui.progress_bar(stage_proc.stage2_sub_progress_value, size=(-1, 0), overlay=overlay_text)
+                imgui.pop_style_color()
 
         elif stage_proc.stage2_final_elapsed_time_str:
             imgui.text_wrapped(f"Status: Completed in {stage_proc.stage2_final_elapsed_time_str}")

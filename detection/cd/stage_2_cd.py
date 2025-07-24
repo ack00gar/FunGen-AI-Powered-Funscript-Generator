@@ -8,14 +8,17 @@ import logging
 import cv2
 from scipy.signal import savgol_filter, find_peaks
 from simplification.cutil import simplify_coords_vw
-from copy import deepcopy
+from multiprocessing import Pool
+import multiprocessing
+import psutil
+import time
 
 from video.video_processor import VideoProcessor
 from config import constants
 
 # --- Global Debug Flag ---
 _of_debug_prints_stage2 = False
-
+CONTACT_ONLY_FALLBACKS = {'hand', 'pussy', 'butt'}
 
 def _debug_log(logger_instance: Optional[logging.Logger], message: str):
     """Helper for conditional debug logging."""
@@ -198,8 +201,10 @@ class PoseRecord:
                 total_distance += np.linalg.norm(kp1[:2] - kp2[:2])
                 valid_points_count += 1
 
-        if valid_points_count == 0: return 999.0  # No common points in the zone to compare
-        if valid_points_count < len(zone_keypoint_indices) * 0.5: return 999.0  # Require at least half the zone points
+        if valid_points_count == 0:
+            return 999.0  # No common points in the zone to compare
+        if valid_points_count < len(zone_keypoint_indices) * 0.5:
+            return 999.0  # Require at least half the zone points
 
         normalization_factor = np.sqrt(self.person_box_area) if self.person_box_area > 0 else 1.0
         return (total_distance / valid_points_count) / normalization_factor * 100.0 if normalization_factor > 0 else 999.0
@@ -244,6 +249,8 @@ class FrameObject:
         self.atr_locked_penis_state = ATRLockedPenisState()
         self.atr_detected_contact_boxes: List[Dict] = []
         self.atr_distances_to_penis: List[Dict] = []
+        # List to hold all unique-class fallback contributors.
+        self.atr_fallback_contributor_ids: List[int] = []
         self.atr_assigned_position: str = "Not Relevant"
         self.atr_funscript_distance: int = 50
         self.pos_0_100: int = 50
@@ -293,9 +300,10 @@ class FrameObject:
             "frame_id": self.frame_id,
             "atr_assigned_position": self.atr_assigned_position,
             "dominant_pose_id": self.dominant_pose_id,
-            "active_interaction_track_id": self.active_interaction_track_id,  # <-- Add this for highlighting
+            "active_interaction_track_id": self.active_interaction_track_id,
             "is_occluded": self.is_occluded,
             "motion_mode": self.motion_mode,
+            "atr_aligned_fallback_candidate_ids": self.atr_fallback_contributor_ids,
             "yolo_boxes": [b.to_dict() for b in self.boxes if not b.is_excluded],
             "poses": [p.to_dict() for p in self.poses]
         }
@@ -345,13 +353,7 @@ class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with 
         })
 
     def to_dict(self) -> Dict[str, Any]:
-        # Mimic SexActSegment.to_dict() structure for GUI compatibility
-        # Occlusion info might need to be re-evaluated based on ATR's continuous distance
-        occlusion_info = []  # Placeholder, ATR logic doesn't directly define occlusions like S2
-
-        # Map ATR major_position to position_long_name and short_name if possible
-        # This requires POSITION_INFO_MAPPING_CONST to understand ATR's position strings
-        # For now, use major_position directly or a generic mapping.
+        occlusion_info = []  # Placeholder
 
         # 1. position_long_name_val is straightforward:
         position_long_name_val = self.major_position
@@ -427,6 +429,87 @@ class AppStateContainer:
         self.funscript_distances_lr: List[int] = []
 
 
+# --- Kalman Smoother Helpers ---
+q_ext = np.diag(np.array([0.03, 0.03, 100.0, 100.0, 0.03, 0.03, 50.0, 50.0], dtype=np.float32))
+r_ext = np.diag(np.array([0.1, 0.1, 0.1, 0.1], dtype=np.float32))
+h_ext = np.array(
+    [[1, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0]],
+    dtype=np.float32)
+
+def run_rts_smoother_numpy(track_array: np.ndarray) -> np.ndarray:
+    """
+    A high-performance, NumPy-native implementation of the RTS smoother.
+    It operates directly on a NumPy array of box data for a single track.
+
+    Args:
+        track_array: A 2D NumPy array for a single track with columns:
+                     [frame_id, cx, cy, width, height].
+
+    Returns:
+        A 2D NumPy array with the smoothed [cx, cy, width, height] data.
+    """
+    n = track_array.shape[0]
+    frame_ids = track_array[:, 0]
+    measurements = track_array[:, 1:5]  # cx, cy, w, h
+
+    # Kalman filter matrices (constants)
+    q_ext = np.diag([0.03, 0.03, 100.0, 100.0, 0.03, 0.03, 50.0, 50.0], dtype=np.float32)
+    r_ext = np.diag([0.1, 0.1, 0.1, 0.1], dtype=np.float32)
+    h_ext = np.array(
+        [[1, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0]],
+        dtype=np.float32)
+
+    # Vectorized calculation of time deltas (dt)
+    dts = np.diff(frame_ids, prepend=frame_ids[0])
+    dts[dts <= 0] = 1.0
+
+    # Initialize lists for storing states
+    x_filtered = np.zeros((n, 8, 1), dtype=np.float32)
+    P_filtered = np.zeros((n, 8, 8), dtype=np.float32)
+    x_pred_list = np.zeros((n, 8, 1), dtype=np.float32)
+    P_pred_list = np.zeros((n, 8, 8), dtype=np.float32)
+
+    # Initial state
+    initial_v = (measurements[1] - measurements[0]) / dts[1] if n > 1 else np.zeros(4)
+    x_filtered[0] = np.hstack([measurements[0], initial_v]).reshape(8, 1)
+    P_filtered[0] = np.eye(8, dtype=np.float32) * 100.0
+
+    # --- Forward Pass (Kalman Filter) ---
+    A = np.eye(8, dtype=np.float32)
+    for i in range(1, n):
+        dt = dts[i]
+        A[0, 4] = A[1, 5] = A[2, 6] = A[3, 7] = dt
+
+        x_pred = A @ x_filtered[i - 1]
+        P_pred = A @ P_filtered[i - 1] @ A.T + q_ext
+
+        x_pred_list[i] = x_pred
+        P_pred_list[i] = P_pred
+
+        z = measurements[i].reshape(4, 1)
+        y = z - (h_ext @ x_pred)
+        S = h_ext @ P_pred @ h_ext.T + r_ext
+        K = P_pred @ h_ext.T @ np.linalg.pinv(S)
+
+        x_filtered[i] = x_pred + K @ y
+        P_filtered[i] = (np.eye(8) - K @ h_ext) @ P_pred
+
+    # --- Backward Pass (RTS Smoother) ---
+    x_smoothed = np.copy(x_filtered)
+    P_smoothed = np.copy(P_filtered)
+
+    for i in range(n - 2, -1, -1):
+        dt = dts[i + 1]
+        A[0, 4] = A[1, 5] = A[2, 6] = A[3, 7] = dt
+
+        P_pred_inv = np.linalg.pinv(P_pred_list[i + 1])
+        J = P_filtered[i] @ A.T @ P_pred_inv
+
+        x_smoothed[i] += J @ (x_smoothed[i + 1] - x_pred_list[i + 1])
+        # P_smoothed is not needed for the final output, so we can skip its calculation
+
+    return x_smoothed[:, :4, 0]  # Return only the smoothed [cx, cy, w, h]
+
 # --- ATR Helper Functions (to be moved into this file) ---
 def _atr_calculate_iou(box1: Tuple[float, ...], box2: Tuple[float, ...]) -> float:
     x1_1, y1_1, x2_1, y2_1 = box1
@@ -441,6 +524,32 @@ def _atr_calculate_iou(box1: Tuple[float, ...], box2: Tuple[float, ...]) -> floa
     union_area = box1_area + box2_area - inter_area
     return inter_area / union_area if union_area > 0 else 0.0
 
+def _get_aligned_fallback_boxes(
+        potential_fallback_boxes: List[BoxRecord],
+        dominant_pose: Optional[PoseRecord],
+        alignment_ref_cx: float,
+        max_alignment_offset: float
+) -> List[BoxRecord]:
+    """
+    Selects fallback boxes associated with a dominant pose and in vertical alignment.
+    """
+    if not dominant_pose:
+        return []
+
+    # 1. Filter to boxes spatially associated with the dominant pose
+    person_box = dominant_pose.bbox
+    associated_boxes = [
+        box for box in potential_fallback_boxes
+        if (person_box[0] < box.cx < person_box[2]) and (person_box[1] < box.cy < person_box[3])
+    ]
+
+    # 2. Filter by vertical alignment
+    aligned_boxes = [
+        box for box in associated_boxes
+        if abs(box.cx - alignment_ref_cx) < max_alignment_offset
+    ]
+
+    return aligned_boxes
 
 def _atr_assign_frame_position(contacts: List[Dict]) -> str:
     if not contacts:
@@ -641,8 +750,12 @@ def _atr_calculate_normalized_distance_to_base(locked_penis_box_coords: Tuple[fl
     else:  # breast, foot, etc.
         box_y_ref = (class_box_coords[1] + class_box_coords[3]) / 2  # Center of other parts
 
+    # --- TEST LOGIC ---
+    #box_y_ref = (class_box_coords[1] + class_box_coords[3]) / 2
+
     raw_distance = penis_base_y - box_y_ref
-    if max_distance_ref <= 0: return 50.0
+    if max_distance_ref <= 0:
+        return 50.0
     normalized_distance = (raw_distance / max_distance_ref) * 100.0
     return np.clip(normalized_distance, 0, 100)
 
@@ -701,49 +814,6 @@ def _get_dominant_pose(frame_obj: FrameObject, is_vr: bool, frame_width: int) ->
         return min(frame_obj.poses, key=lambda p: abs(((p.bbox[0] + p.bbox[2]) / 2) - frame_center_x))
     else:
         return max(frame_obj.poses, key=lambda p: p.person_box_area)
-
-
-def _infer_penis_box_from_pose(frame_obj: FrameObject) -> Optional[BoxRecord]:
-    dominant_pose = _get_dominant_pose(frame_obj, False, frame_obj.yolo_input_size)
-    if not dominant_pose: return None
-    keypoints = dominant_pose.keypoints
-    l_hip_idx, r_hip_idx = 11, 12
-    if len(keypoints) > max(l_hip_idx, r_hip_idx) and keypoints[l_hip_idx][2] > 0.3 and keypoints[r_hip_idx][2] > 0.3:
-        l_hip, r_hip = keypoints[l_hip_idx], keypoints[r_hip_idx]
-        hip_center_x, hip_center_y = (l_hip[0] + r_hip[0]) / 2, (l_hip[1] + r_hip[1]) / 2
-        person_height = dominant_pose.bbox[3] - dominant_pose.bbox[1]
-        inferred_box_width, inferred_box_height = person_height * 0.1, person_height * 0.2
-        x1, y1 = hip_center_x - inferred_box_width / 2, hip_center_y - inferred_box_height / 4
-        x2, y2 = x1 + inferred_box_width, y1 + inferred_box_height
-        return BoxRecord(frame_id=frame_obj.frame_id, bbox=[x1, y1, x2, y2], confidence=0.5, class_id=-1,
-                         class_name=constants.PENIS_CLASS_NAME, status=constants.STATUS_POSE_INFERRED,
-                         yolo_input_size=frame_obj.yolo_input_size)
-    return None
-
-
-def _infer_interaction_box_from_pose(pose: PoseRecord, class_name: str) -> Optional[Tuple[float, float, float, float]]:
-    keypoints = pose.keypoints
-    l_hip_idx, r_hip_idx = 11, 12
-    l_sho_idx, r_sho_idx = 5, 6
-    if len(keypoints) <= max(l_hip_idx, r_hip_idx) or keypoints[l_hip_idx][2] < 0.3 or keypoints[r_hip_idx][
-        2] < 0.3: return None
-    l_hip, r_hip = keypoints[l_hip_idx], keypoints[r_hip_idx]
-    hip_center_x, hip_center_y = (l_hip[0] + r_hip[0]) / 2, (l_hip[1] + r_hip[1]) / 2
-    hip_width = np.linalg.norm(l_hip[:2] - r_hip[:2])
-    if hip_width < 1: return None
-    if class_name in ['pussy', 'butt']:
-        box_h, box_w = hip_width * 0.8, hip_width * 1.2
-        x1, y1 = hip_center_x - box_w / 2, hip_center_y - box_h / 4
-        return (x1, y1, x1 + box_w, y1 + box_h)
-    elif class_name == 'face':
-        if len(keypoints) > max(l_sho_idx, r_sho_idx) and keypoints[l_sho_idx][2] > 0.3 and keypoints[r_sho_idx][
-            2] > 0.3:
-            l_sho, r_sho = keypoints[l_sho_idx], keypoints[r_sho_idx]
-            sho_center_x = (l_sho[0] + r_sho[0]) / 2
-            sho_width = np.linalg.norm(l_sho[:2] - r_sho[:2])
-            if sho_width > 1: box_h = box_w = sho_width; x1, y1 = sho_center_x - box_w / 2, l_sho[1] - box_h; return (
-                x1, y1, x1 + box_w, y1 + box_h)
-    return None
 
 
 # --- Step 0: Global Object Tracking (IoU Tracker) ---
@@ -931,6 +1001,92 @@ def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logg
     _debug_log(logger, f"ATR Pass 1: Interpolated {total_interpolated} boxes.")
 
 
+def smooth_single_track_worker_numpy(track_data_tuple: Tuple[np.ndarray, int]) -> Optional[np.ndarray]:
+    """
+    NumPy-native worker. It receives a NumPy array for a track, smoothes it,
+    and returns the smoothed data along with the original track ID.
+    """
+    track_array, track_id = track_data_tuple
+
+    try:
+        # Run the high-performance NumPy-native smoother
+        smoothed_coords = run_rts_smoother_numpy(track_array)
+
+        # Apply additional size smoothing (temporally)
+        widths, heights = smoothed_coords[:, 2], smoothed_coords[:, 3]
+        alpha = 0.1  # Simple exponential moving average for size
+        for i in range(1, len(widths)):
+            widths[i] = widths[i - 1] + alpha * (widths[i] - widths[i - 1])
+            heights[i] = heights[i - 1] + alpha * (heights[i] - heights[i - 1])
+
+        # Return the final smoothed cx, cy, w, h and the track_id to map it back
+        return np.hstack([smoothed_coords[:, :2], widths[:, np.newaxis], heights[:, np.newaxis]]), track_id
+    except Exception:
+        # If smoothing fails for any reason, return None
+        return None
+
+# numpy
+def atr_pass_1b_smooth_all_tracks(state: AppStateContainer, logger: Optional[logging.Logger]):
+    """
+    FULLY OPTIMIZED: Uses a NumPy-centric data structure and multiprocessing
+    to smooth all tracks at maximum speed.
+    """
+    return
+
+    _debug_log(logger, "Starting FULLY OPTIMIZED ATR Pass 1b: Smooth All Tracked Boxes")
+
+    # --- 1. One-time conversion to a unified NumPy array ---
+    box_list_for_np = []
+    for frame in state.frames:
+        for box in frame.boxes:
+            if box.track_id is not None:
+                box_list_for_np.append([frame.frame_id, box.track_id, box.cx, box.cy, box.width, box.height])
+
+    if not box_list_for_np:
+        _debug_log(logger, "No tracked boxes to smooth.")
+        return
+
+    master_array = np.array(box_list_for_np, dtype=np.float32)
+    unique_track_ids = np.unique(master_array[:, 1])
+
+    # --- 2. Prepare arguments for parallel workers ---
+    worker_args = []
+    for track_id in unique_track_ids:
+        track_array = master_array[master_array[:, 1] == track_id]
+        # Ensure track is sorted by frame ID
+        track_array = track_array[track_array[:, 0].argsort()]
+        if len(track_array) < 5: continue
+        worker_args.append((track_array, int(track_id)))
+
+    # --- 3. Execute in parallel ---
+    num_workers = psutil.cpu_count(logical=False)
+    _debug_log(logger, f"Distributing {len(worker_args)} tracks to {num_workers} NumPy-native workers...")
+
+    all_smoothed_data = []
+    with Pool(processes=num_workers) as pool:
+        # Use imap_unordered for better performance with uneven task times
+        for result in pool.imap_unordered(smooth_single_track_worker_numpy, worker_args):
+            if result is not None:
+                all_smoothed_data.append(result)
+
+    # --- 4. Integrate results back into the original FrameObjects ---
+    _debug_log(logger, "Integrating smoothed results...")
+    # Create a fast lookup: {track_id: {frame_id: smoothed_box_data}}
+    results_map = {}
+    for smoothed_track, track_id in all_smoothed_data:
+        frame_ids_for_track = worker_args[track_id - 1][0][:, 0].astype(int)  # Get frame_ids from original args
+        results_map[track_id] = {fid: smoothed_track[i] for i, fid in enumerate(frame_ids_for_track)}
+
+    for frame in state.frames:
+        for box in frame.boxes:
+            if box.track_id in results_map and frame.frame_id in results_map[box.track_id]:
+                smoothed_data = results_map[box.track_id][frame.frame_id]
+                cx, cy, w, h = smoothed_data
+                new_bbox = np.array([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2])
+                box.update_bbox(new_bbox, new_status=constants.STATUS_SMOOTHED)
+
+    _debug_log(logger, "Fully optimized smoothing pass complete.")
+
 def atr_pass_2_preliminary_height_estimation(state: AppStateContainer, logger: Optional[logging.Logger]):
     """
     A new, lightweight pass to provide a preliminary max_height estimate for each frame.
@@ -1074,7 +1230,7 @@ def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[
                 last_known_interaction_type = 'other'
 
             # Activate lock if needed
-            if not current_lp_active and current_lp_consecutive_detections >= fps:  # / 2:
+            if not current_lp_active and current_lp_consecutive_detections >= fps / 5:
                 current_lp_active = True
                 kf_height.statePost = np.array([[current_raw_height], [0]], dtype=np.float32)
                 _debug_log(logger, f"ATR LP Lock ACTIVATE at frame {frame_obj.frame_id}")
@@ -1090,15 +1246,6 @@ def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[
                                                                                       pelvis_zone_indices)
                 if dissimilarity < constants.POSE_STABILITY_THRESHOLD:
                     pose_is_stable = True
-
-            # CORE LOGIC: Infer penis ONLY if pose is stable AND the context is penetration
-            if current_lp_active and pose_is_stable and last_known_interaction_type == 'penetration':
-                inferred_penis = _infer_penis_box_from_pose(frame_obj)
-                if inferred_penis:
-                    selected_penis_box_rec = inferred_penis  # This treats the inference as a valid detection for this frame
-                    # Add inferred box to frame's boxes so it can be used by other passes
-                    frame_obj.boxes.append(inferred_penis)
-                    _debug_log(logger, f"Frame {frame_obj.frame_id}: Penis occluded, using pose-inference due to stable penetration context.")
 
             # If no box was inferred, this is a true non-detection frame.
             if not selected_penis_box_rec:
@@ -1252,9 +1399,11 @@ def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, lo
                 lp_state.max_penetration_height = chapter_max_h * 0.65
 
 
-def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
-    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (Hierarchical & Context-Aware)")
+def initial_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
+    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (Multi-Fallback Heuristic with LOCKING)")
     fps = state.video_info.get('fps', 30.0)
+    yolo_size = state.yolo_input_size
+    is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
 
     # --- Keep track of last bbox position to detect movement ---
     last_known_box_positions = {}  # {track_id: (cx, cy)}
@@ -1291,28 +1440,45 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
         # --- Initialize state for this segment's processing ---
         # The lock/stickiness is now reset for each segment.
         active_interactor_state = {'id': None, 'unseen_frames': 0}
+        # --- NEW: State for locking fallback interactors per-segment ---
+        locked_fallback_interactors = {}  # Format: {class_name: {'id': track_id, 'unseen_frames': 0}}
+        FALLBACK_PATIENCE = int(fps * 0.5) # 0.5 seconds of patience
         INTERACTOR_PATIENCE = int(fps * 0.75)
         last_valid_distance = 100  # Start at 'out' position for each segment
 
         # Assign all frame objects to their segment for easy lookup
-        segment.segment_frame_objects = [fo for fo in state.frames if
-                                         segment.start_frame_id <= fo.frame_id <= segment.end_frame_id]
+        segment.segment_frame_objects = [fo for fo in state.frames if segment.start_frame_id <= fo.frame_id <= segment.end_frame_id]
 
         for frame_obj in segment.segment_frame_objects:
             lp_state = frame_obj.atr_locked_penis_state
             frame_obj.is_occluded = False
             frame_obj.active_interaction_track_id = None
+            frame_obj.atr_fallback_contributor_ids = []  # Reset for each frame
 
             if not lp_state.active or not lp_state.last_raw_coords:
                 frame_obj.atr_funscript_distance = 100
                 continue
 
-            # --- Calculate conceptual box and visible part ---
+            # --- Calculate conceptual box and CLAMP the visible box ---
             x1, _, x2, y2_raw = lp_state.last_raw_coords
             conceptual_full_box = (x1, y2_raw - lp_state.max_height, x2, y2_raw)
             lp_state.box = conceptual_full_box
 
+            # Clamp the visible kalman box to ensure it's within the conceptual box's bounds
+            if frame_obj.atr_penis_box_kalman:
+                conceptual_y1 = conceptual_full_box[1]  # Top of the conceptual box
+                kalman_x1, kalman_y1, kalman_x2, kalman_y2 = frame_obj.atr_penis_box_kalman
+
+                # The top of the visible box (kalman_y1) cannot be higher than the conceptual top
+                clamped_y1 = max(kalman_y1, conceptual_y1)
+                clamped_y1 = min(clamped_y1, kalman_y2)  # Ensure y1 <= y2
+
+                # Update the box in-place so all subsequent logic uses the corrected value
+                frame_obj.atr_penis_box_kalman = (kalman_x1, clamped_y1, kalman_x2, kalman_y2)
+
+            # --- Now calculate visible part using the corrected (clamped) box ---
             if frame_obj.atr_penis_box_kalman and lp_state.max_height > 0:
+                # This calculation now uses the clamped coordinates, ensuring a correct result
                 visible_height = frame_obj.atr_penis_box_kalman[3] - frame_obj.atr_penis_box_kalman[1]
                 lp_state.visible_part = (visible_height / lp_state.max_height) * 100.0
             else:
@@ -1328,8 +1494,7 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
             # 1. Check if the locked interactor is still valid and PRIMARY for this segment
             locked_id = active_interactor_state['id']
             if locked_id is not None:
-                found_locked_interactor = next((b for b in contacting_boxes_all if
-                                                b.track_id == locked_id and b.class_name in primary_classes_for_segment), None)
+                found_locked_interactor = next((b for b in contacting_boxes_all if b.track_id == locked_id and b.class_name in primary_classes_for_segment), None)
                 if found_locked_interactor:
                     active_box = found_locked_interactor
                     active_interactor_state['unseen_frames'] = 0
@@ -1344,78 +1509,707 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
 
                 # --- Prefer moving contacts, but accept static ones if no moving ones exist ---
                 if primary_contacts:
-                    moving_contacts = []
-                    static_contacts = []
+                    moving_contacts = [b for b in primary_contacts if
+                                     b.track_id not in last_known_box_positions or
+                                     (abs(b.cx - last_known_box_positions[b.track_id][0]) >= 1 or
+                                      abs(b.cy - last_known_box_positions[b.track_id][1]) >= 1)]
 
-                    for b in primary_contacts:
-                        is_moving = True
-                        if b.track_id in last_known_box_positions:
-                            last_cx, last_cy = last_known_box_positions[b.track_id]
-                            if abs(b.cx - last_cx) < 1 and abs(b.cy - last_cy) < 1:
-                                is_moving = False
-
-                        if is_moving:
-                            moving_contacts.append(b)
-                        else:
-                            static_contacts.append(b)
-
-                    # Prioritize any moving contact over any static one.
                     if moving_contacts:
                         active_box = max(moving_contacts, key=lambda b: b.confidence)
-                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Selected a MOVING primary contact ('{active_box.class_name}' TID {active_box.track_id}).")
-                    elif static_contacts:
-                        active_box = max(static_contacts, key=lambda b: b.confidence)
-                        _debug_log(logger, f"Frame {frame_obj.frame_id}: No moving primary contacts. Selected a STATIC one ('{active_box.class_name}' TID {active_box.track_id}).")
+                    else:
+                        active_box = max(primary_contacts, key=lambda b: b.confidence)
 
-                    # If we selected a box, update the stateful tracker
-                    if active_box:
-                        if active_box.track_id != active_interactor_state.get('id'):
-                            active_interactor_state['id'] = active_box.track_id
-                            _debug_log(logger, f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
-                        active_interactor_state['unseen_frames'] = 0
+                    if active_box and active_box.track_id != active_interactor_state.get('id'):
+                        active_interactor_state['id'] = active_box.track_id
+                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
+                    active_interactor_state['unseen_frames'] = 0
 
-            # --- CALCULATE DISTANCE OR USE FALLBACKS ---
+            # --- NEW: STATEFUL & HIERARCHICAL FALLBACK SELECTION ---
+            final_contributors = []
+            dominant_pose = _get_dominant_pose(frame_obj, is_vr, yolo_size)
+            alignment_ref_cx = lp_state.last_raw_coords[0] + (lp_state.last_raw_coords[2] - lp_state.last_raw_coords[0]) / 2
+            max_alignment_offset = yolo_size * 0.25
+
+            potential_fallbacks = [b for b in frame_obj.boxes if b.class_name in fallback_classes_for_segment and b != active_box]
+            aligned_fallback_candidates = _get_aligned_fallback_boxes(potential_fallbacks, dominant_pose, alignment_ref_cx, max_alignment_offset)
+
+            # Iterate through the possible fallback classes for this segment type
+            for fb_class in fallback_classes_for_segment:
+                found_current_frame = False
+                # 1. Check if we have a lock for this class
+                if fb_class in locked_fallback_interactors:
+                    lock_info = locked_fallback_interactors[fb_class]
+                    locked_box = next((b for b in aligned_fallback_candidates if b.track_id == lock_info['id']), None)
+                    if locked_box:
+                        final_contributors.append(locked_box)
+                        lock_info['unseen_frames'] = 0
+                        found_current_frame = True
+                    else:
+                        lock_info['unseen_frames'] += 1
+                        if lock_info['unseen_frames'] > FALLBACK_PATIENCE:
+                            del locked_fallback_interactors[fb_class]
+
+                # 2. If no lock or lock expired, find the best new candidate
+                if not found_current_frame:
+                    penis_base_y = conceptual_full_box[3]
+                    # Get candidates of the right class that aren't already locked by another class
+                    locked_ids = {info['id'] for info in locked_fallback_interactors.values()}
+                    best_new_candidate = sorted([
+                        b for b in aligned_fallback_candidates if b.class_name == fb_class and b.track_id not in locked_ids
+                    ], key=lambda b: abs(b.cy - penis_base_y))
+
+                    if best_new_candidate:
+                        new_box_to_lock = best_new_candidate[0]
+                        final_contributors.append(new_box_to_lock)
+                        locked_fallback_interactors[fb_class] = {'id': new_box_to_lock.track_id, 'unseen_frames': 0}
+                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
+
+            if final_contributors:
+                frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if c.track_id is not None]
+
+            # --- WEIGHTED DISTANCE CALCULATION ---
+            total_weighted_distance = 0.0
+            total_weight = 0.0
             max_dist_ref = lp_state.max_height if lp_state.max_height > 0 else state.yolo_input_size * 0.3
 
-            if active_box:  # A primary interactor was found and selected
-                comp_dist_for_frame = _atr_calculate_normalized_distance_to_base(
-                    conceptual_full_box, active_box.class_name, active_box.bbox, max_dist_ref
-                )
+            # 1. Primary Contributor (Weight: 1.0)
+            if active_box:
+                dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, active_box.class_name, active_box.bbox, max_dist_ref)
+                total_weighted_distance += dist * 1.0
+                total_weight += 1.0
                 frame_obj.active_interaction_track_id = active_box.track_id
+                frame_obj.is_occluded = False
+            else:
+                 frame_obj.is_occluded = True # Occluded if no primary contact
 
-            else:  # No primary interactor found, proceed to fallbacks
-                frame_obj.is_occluded = True  # Mark as occluded if we can't find the primary target
+            # 2. Visible Penis Part (Weight: 0.05)
+            #if lp_state.visible_part > 0 and is_penetration_pos:
+            #    # The visible part is already a 0-100 value, representing "out". We invert it for distance.
+            #    total_weighted_distance += (100.0 - lp_state.visible_part) * 0.5
+            #    total_weight += 0.05
 
-                # Fallback A: Use average of designated fallback classes
-                fallback_contacts = [b for b in contacting_boxes_all if b.class_name in fallback_classes_for_segment]
-                if fallback_contacts:
-                    fallback_distances = [
-                        _atr_calculate_normalized_distance_to_base(conceptual_full_box, b.class_name, b.bbox,
-                                                                   max_dist_ref)
-                        for b in fallback_contacts
-                    ]
-                    comp_dist_for_frame = sum(fallback_distances) / len(fallback_distances)
-                    _debug_log(logger,
-                               f"Frame {frame_obj.frame_id}: Occlusion - Using fallback classes {[b.class_name for b in fallback_contacts]}. Avg Dist: {comp_dist_for_frame:.1f}")
+            # 3. Best-of-Class Fallback Contributors (Weight: 0.2 each)
+            for contributor in final_contributors:
+                dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, contributor.class_name, contributor.bbox, max_dist_ref)
+                total_weighted_distance += dist * 0.5
+                total_weight += 0.5
 
-                # Fallback B: Use visible penis part (only for penetration scenes)
-                elif is_penetration_pos:
-                    comp_dist_for_frame = lp_state.visible_part
-                    _debug_log(logger, f"Frame {frame_obj.frame_id}: Occlusion - Using visible part ({comp_dist_for_frame:.1f}%).")
+            # --- Finalize Frame Distance ---
+            if total_weight > 0:
+                final_distance = total_weighted_distance / total_weight
+            else:
+                # If no contributors at all, hold the last known value
+                final_distance = last_valid_distance
+                _debug_log(logger, f"Frame {frame_obj.frame_id}: No contributors found. Holding last valid distance ({final_distance:.1f}).")
 
-                # Fallback C: Hold last known valid distance
-                else:
-                    comp_dist_for_frame = last_valid_distance
-                    _debug_log(logger,
-                               f"Frame {frame_obj.frame_id}: Occlusion - Holding last valid distance ({comp_dist_for_frame:.1f}).")
+            frame_obj.atr_funscript_distance = int(np.clip(round(final_distance), 0, 100))
+            last_valid_distance = frame_obj.atr_funscript_distance
 
-            frame_obj.atr_funscript_distance = int(np.clip(round(comp_dist_for_frame), 0, 100))
-            last_valid_distance = frame_obj.atr_funscript_distance  # Update the last valid distance for the next frame
-
+            # Update positions for next frame's movement check
             for box in contacting_boxes_all:
                 if box.track_id:
                     last_known_box_positions[box.track_id] = (box.cx, box.cy)
 
+
+def prev_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
+    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (Multi-Fallback Heuristic with ROBUST LOCKING)")
+    fps = state.video_info.get('fps', 30.0)
+    yolo_size = state.yolo_input_size
+    is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
+
+    last_known_box_positions = {}
+
+    for segment in state.atr_segments:
+        # --- Define context for the entire segment ---
+        primary_classes_for_segment: List[str] = []
+        fallback_classes_for_segment: List[str] = []
+        is_penetration_pos = False
+
+        if segment.major_position == 'Cowgirl / Missionary':
+            primary_classes_for_segment = ['pussy']
+            fallback_classes_for_segment = ['navel', 'breast', 'face']
+            is_penetration_pos = True
+        elif segment.major_position == 'Rev. Cowgirl / Doggy':
+            primary_classes_for_segment = ['butt']
+            fallback_classes_for_segment = ['anus', 'face']
+            is_penetration_pos = True
+        elif segment.major_position == 'Blowjob':
+            primary_classes_for_segment = ['face']
+            fallback_classes_for_segment = ['hand']
+        elif segment.major_position == 'Handjob':
+            primary_classes_for_segment = ['hand']
+            fallback_classes_for_segment = ['breast']
+        elif segment.major_position == 'Boobjob':
+            primary_classes_for_segment = ['breast']
+            fallback_classes_for_segment = ['hand']
+        elif segment.major_position == 'Footjob':
+            primary_classes_for_segment = ['foot']
+
+        _debug_log(logger,
+                   f"Processing segment '{segment.major_position}': Primary={primary_classes_for_segment}, Fallback={fallback_classes_for_segment}")
+
+        # --- Initialize state for this segment's processing ---
+        active_interactor_state = {'id': None, 'unseen_frames': 0}
+        locked_fallback_interactors = {}
+        FALLBACK_PATIENCE = int(fps * 0.5)
+        INTERACTOR_PATIENCE = int(fps * 0.75)
+        last_valid_distance = 100
+
+        segment.segment_frame_objects = [fo for fo in state.frames if segment.start_frame_id <= fo.frame_id <= segment.end_frame_id]
+
+        for frame_obj in segment.segment_frame_objects:
+            lp_state = frame_obj.atr_locked_penis_state
+            frame_obj.is_occluded = False  # Default to not occluded
+            frame_obj.active_interaction_track_id = None
+            frame_obj.atr_fallback_contributor_ids = []
+
+            if not lp_state.active or not lp_state.last_raw_coords:
+                frame_obj.atr_funscript_distance = 100
+                continue
+
+            # --- Calculate conceptual box and clamp visible box ---
+            x1, _, x2, y2_raw = lp_state.last_raw_coords
+            conceptual_full_box = (x1, y2_raw - lp_state.max_height, x2, y2_raw)
+            lp_state.box = conceptual_full_box
+
+            if frame_obj.atr_penis_box_kalman:
+                conceptual_y1 = conceptual_full_box[1]
+                kalman_x1, kalman_y1, kalman_x2, kalman_y2 = frame_obj.atr_penis_box_kalman
+                clamped_y1 = max(kalman_y1, conceptual_y1)
+                clamped_y1 = min(clamped_y1, kalman_y2)
+                frame_obj.atr_penis_box_kalman = (kalman_x1, clamped_y1, kalman_x2, kalman_y2)
+
+            if frame_obj.atr_penis_box_kalman and lp_state.max_height > 0:
+                visible_height = frame_obj.atr_penis_box_kalman[3] - frame_obj.atr_penis_box_kalman[1]
+                lp_state.visible_part = (visible_height / lp_state.max_height) * 100.0
+            else:
+                lp_state.visible_part = 0.0
+
+            contacting_boxes_all = [c['box_rec'] for c in frame_obj.atr_detected_contact_boxes]
+            active_box = None
+
+            # --- ROBUST Primary Interactor Selection (Stateful) ---
+            locked_id = active_interactor_state['id']
+            if locked_id is not None:
+                # First, check if the tracked object is present ANYWHERE in the frame, making the lock robust.
+                robustly_found_interactor = next((b for b in frame_obj.boxes if b.track_id == locked_id and b.class_name in primary_classes_for_segment), None)
+
+                if robustly_found_interactor:
+                    active_box = robustly_found_interactor
+                    active_interactor_state['unseen_frames'] = 0
+                    # Check if the robustly found interactor is actually touching now. This determines occlusion, not the lock.
+                    if not any(b.track_id == locked_id for b in contacting_boxes_all):
+                        frame_obj.is_occluded = True  # It's locked but not touching, so it's occluded.
+                else:
+                    # The track ID is truly gone from the frame.
+                    active_interactor_state['unseen_frames'] += 1
+                    if active_interactor_state['unseen_frames'] > INTERACTOR_PATIENCE:
+                        active_interactor_state['id'] = None
+                        active_box = None
+
+            # --- Find a NEW Primary Interactor if no lock is active ---
+            if active_box is None:
+                frame_obj.is_occluded = True  # Occluded if there's no primary contact
+                primary_contacts = [b for b in contacting_boxes_all if b.class_name in primary_classes_for_segment]
+                if primary_contacts:
+                    moving_contacts = [b for b in primary_contacts if b.track_id not in last_known_box_positions or (
+                            abs(b.cx - last_known_box_positions[b.track_id][0]) >= 1 or abs(
+                        b.cy - last_known_box_positions[b.track_id][1]) >= 1)]
+                    active_box = max(moving_contacts, key=lambda b: b.confidence) if moving_contacts else max(primary_contacts, key=lambda b: b.confidence)
+
+                    if active_box and active_box.track_id != active_interactor_state.get('id'):
+                        active_interactor_state['id'] = active_box.track_id
+                        active_interactor_state['unseen_frames'] = 0
+                        frame_obj.is_occluded = False  # A new primary contact was found
+                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
+
+            # --- ROBUST, STATEFUL & HIERARCHICAL FALLBACK SELECTION ---
+            final_contributors = []
+            for fb_class in fallback_classes_for_segment:
+                found_current_frame = False
+                if fb_class in locked_fallback_interactors:
+                    lock_info = locked_fallback_interactors[fb_class]
+                    # This lock is robust: it just checks for the ID's presence in the whole frame.
+                    locked_box = next((b for b in frame_obj.boxes if b.track_id == lock_info['id']), None)
+
+                    if locked_box:
+                        final_contributors.append(locked_box)
+                        lock_info['unseen_frames'] = 0
+                        found_current_frame = True
+                    else:
+                        lock_info['unseen_frames'] += 1
+                        if lock_info['unseen_frames'] > FALLBACK_PATIENCE:
+                            del locked_fallback_interactors[fb_class]
+
+                if not found_current_frame:
+                    dominant_pose = _get_dominant_pose(frame_obj, is_vr, yolo_size)
+                    alignment_ref_cx = lp_state.last_raw_coords[0] + (lp_state.last_raw_coords[2] - lp_state.last_raw_coords[0]) / 2
+                    max_alignment_offset = yolo_size * 0.25
+
+                    potential_fallbacks = [b for b in frame_obj.boxes if
+                                           b.class_name in fallback_classes_for_segment and b != active_box]
+                    aligned_fallback_candidates = _get_aligned_fallback_boxes(potential_fallbacks, dominant_pose, alignment_ref_cx, max_alignment_offset)
+
+                    penis_base_y = conceptual_full_box[3]
+                    locked_ids = {info['id'] for info in locked_fallback_interactors.values()}
+                    best_new_candidate = sorted([
+                        b for b in aligned_fallback_candidates if
+                        b.class_name == fb_class and b.track_id not in locked_ids
+                    ], key=lambda b: abs(b.cy - penis_base_y))
+
+                    if best_new_candidate:
+                        new_box_to_lock = best_new_candidate[0]
+                        final_contributors.append(new_box_to_lock)
+                        locked_fallback_interactors[fb_class] = {'id': new_box_to_lock.track_id, 'unseen_frames': 0}
+                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
+
+            if final_contributors:
+                frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if c.track_id is not None]
+
+            # --- WEIGHTED DISTANCE CALCULATION ---
+            total_weighted_distance = 0.0
+            total_weight = 0.0
+            max_dist_ref = lp_state.max_height if lp_state.max_height > 0 else state.yolo_input_size * 0.3
+
+            # Primary Contributor (Weight: 1.0)
+            if active_box:
+                dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, active_box.class_name, active_box.bbox, max_dist_ref)
+                total_weighted_distance += dist * 1.0
+                total_weight += 1.0
+                frame_obj.active_interaction_track_id = active_box.track_id
+
+            # Fallback Contributors (Weight: 0.2 each)
+            for contributor in final_contributors:
+                # Ensure we don't double-count if a primary is also somehow a fallback
+                if active_box and contributor.track_id == active_box.track_id:
+                    continue
+                dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, contributor.class_name, contributor.bbox, max_dist_ref)
+                total_weighted_distance += dist * 0.5
+                total_weight += 0.5
+
+            # Finalize Frame Distance
+            if total_weight > 0:
+                final_distance = total_weighted_distance / total_weight
+            else:
+                final_distance = last_valid_distance
+                _debug_log(logger, f"Frame {frame_obj.frame_id}: No contributors found. Holding last valid distance ({final_distance:.1f}).")
+
+            frame_obj.atr_funscript_distance = int(np.clip(round(final_distance), 0, 100))
+            last_valid_distance = frame_obj.atr_funscript_distance
+
+            # Update positions for next frame's movement check
+            for box in (contacting_boxes_all + final_contributors):
+                if box and box.track_id:
+                    last_known_box_positions[box.track_id] = (box.cx, box.cy)
+
+def prev2_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
+    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (DYNAMIC AMPLIFICATION)")
+    fps = state.video_info.get('fps', 30.0)
+    yolo_size = state.yolo_input_size
+    is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
+
+    # --- Pre-fetch raw penis heights for efficient lookup ---
+    raw_penis_heights = {}
+    for frame_obj in state.frames:
+        penis_detections = [b for b in frame_obj.boxes if b.class_name == constants.PENIS_CLASS_NAME and b.status == constants.STATUS_DETECTED]
+        if penis_detections:
+            penis_detections.sort(key=lambda d: d.confidence, reverse=True)
+            raw_penis_heights[frame_obj.frame_id] = penis_detections[0].height
+
+    # --- 💡 CONFIGURATION FOR DYNAMIC AMPLIFICATION 💡 ---
+    # This is the parameter to tweak. It sets the look-back duration in seconds.
+    ROLLING_WINDOW_SECONDS = 20
+    rolling_window_frames = int(fps * ROLLING_WINDOW_SECONDS)
+
+    last_known_box_positions = {}
+
+    for segment in state.atr_segments:
+        # (Segment setup logic remains the same)
+        primary_classes_for_segment: List[str] = []
+        fallback_classes_for_segment: List[str] = []
+        is_penetration_pos = False
+        if segment.major_position == 'Cowgirl / Missionary':
+            primary_classes_for_segment = ['pussy']
+            fallback_classes_for_segment = ['navel', 'breast', 'face']
+            is_penetration_pos = True
+        elif segment.major_position == 'Rev. Cowgirl / Doggy':
+            primary_classes_for_segment = ['butt']
+            fallback_classes_for_segment = ['anus', 'face']
+            is_penetration_pos = True
+        elif segment.major_position == 'Blowjob':
+            primary_classes_for_segment = ['face']
+            fallback_classes_for_segment = ['hand']
+        elif segment.major_position == 'Handjob':
+            primary_classes_for_segment = ['hand']
+            fallback_classes_for_segment = ['breast']
+        elif segment.major_position == 'Boobjob':
+            primary_classes_for_segment = ['breast']
+            fallback_classes_for_segment = ['hand']
+        elif segment.major_position == 'Footjob':
+            primary_classes_for_segment = ['foot']
+        _debug_log(logger,
+                   f"Processing segment '{segment.major_position}': Primary={primary_classes_for_segment}, Fallback={fallback_classes_for_segment}")
+        active_interactor_state = {'id': None, 'unseen_frames': 0}
+        locked_fallback_interactors = {}
+        FALLBACK_PATIENCE = int(fps * 0.5)
+        INTERACTOR_PATIENCE = int(fps * 0.75)
+        last_valid_distance = 100
+        segment.segment_frame_objects = [fo for fo in state.frames if
+                                         segment.start_frame_id <= fo.frame_id <= segment.end_frame_id]
+
+
+        for frame_obj in segment.segment_frame_objects:
+            lp_state = frame_obj.atr_locked_penis_state
+            frame_obj.is_occluded = False
+            frame_obj.active_interaction_track_id = None
+            frame_obj.atr_fallback_contributor_ids = []
+
+            if not lp_state.active or not lp_state.last_raw_coords:
+                frame_obj.atr_funscript_distance = 100
+                continue
+
+            # (Conceptual box and interactor locking logic remains the same)
+            x1, _, x2, y2_raw = lp_state.last_raw_coords
+            conceptual_full_box = (x1, y2_raw - lp_state.max_height, x2, y2_raw)
+            lp_state.box = conceptual_full_box
+            if frame_obj.atr_penis_box_kalman:
+                conceptual_y1 = conceptual_full_box[1]
+                kalman_x1, kalman_y1, kalman_x2, kalman_y2 = frame_obj.atr_penis_box_kalman
+                clamped_y1 = max(kalman_y1, conceptual_y1)
+                clamped_y1 = min(clamped_y1, kalman_y2)
+                frame_obj.atr_penis_box_kalman = (kalman_x1, clamped_y1, kalman_x2, kalman_y2)
+            if frame_obj.atr_penis_box_kalman and lp_state.max_height > 0:
+                visible_height = frame_obj.atr_penis_box_kalman[3] - frame_obj.atr_penis_box_kalman[1]
+                lp_state.visible_part = (visible_height / lp_state.max_height) * 100.0
+            else:
+                lp_state.visible_part = 0.0
+            contacting_boxes_all = [c['box_rec'] for c in frame_obj.atr_detected_contact_boxes]
+            active_box = None
+            locked_id = active_interactor_state['id']
+            if locked_id is not None:
+                robustly_found_interactor = next((b for b in frame_obj.boxes if b.track_id == locked_id and b.class_name in primary_classes_for_segment), None)
+                if robustly_found_interactor:
+                    active_box = robustly_found_interactor
+                    active_interactor_state['unseen_frames'] = 0
+                    if not any(b.track_id == locked_id for b in contacting_boxes_all):
+                        frame_obj.is_occluded = True
+                else:
+                    active_interactor_state['unseen_frames'] += 1
+                    if active_interactor_state['unseen_frames'] > INTERACTOR_PATIENCE:
+                        active_interactor_state['id'] = None
+                        active_box = None
+            if active_box is None:
+                frame_obj.is_occluded = True
+                primary_contacts = [b for b in contacting_boxes_all if b.class_name in primary_classes_for_segment]
+                if primary_contacts:
+                    moving_contacts = [b for b in primary_contacts if b.track_id not in last_known_box_positions or (
+                                abs(b.cx - last_known_box_positions[b.track_id][0]) >= 1 or abs(
+                            b.cy - last_known_box_positions[b.track_id][1]) >= 1)]
+                    active_box = max(moving_contacts, key=lambda b: b.confidence) if moving_contacts else max(
+                        primary_contacts, key=lambda b: b.confidence)
+                    if active_box and active_box.track_id != active_interactor_state.get('id'):
+                        active_interactor_state['id'] = active_box.track_id
+                        active_interactor_state['unseen_frames'] = 0
+                        frame_obj.is_occluded = False
+                        _debug_log(logger,
+                                   f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
+            final_contributors = []
+            for fb_class in fallback_classes_for_segment:
+                found_current_frame = False
+                if fb_class in locked_fallback_interactors:
+                    lock_info = locked_fallback_interactors[fb_class]
+                    locked_box = next((b for b in frame_obj.boxes if b.track_id == lock_info['id']), None)
+                    if locked_box:
+                        final_contributors.append(locked_box)
+                        lock_info['unseen_frames'] = 0
+                        found_current_frame = True
+                    else:
+                        lock_info['unseen_frames'] += 1
+                        if lock_info['unseen_frames'] > FALLBACK_PATIENCE:
+                            del locked_fallback_interactors[fb_class]
+                if not found_current_frame:
+                    dominant_pose = _get_dominant_pose(frame_obj, is_vr, yolo_size)
+                    alignment_ref_cx = lp_state.last_raw_coords[0] + (
+                                lp_state.last_raw_coords[2] - lp_state.last_raw_coords[0]) / 2
+                    max_alignment_offset = yolo_size * 0.25
+                    potential_fallbacks = [b for b in frame_obj.boxes if
+                                           b.class_name in fallback_classes_for_segment and b != active_box]
+                    aligned_fallback_candidates = _get_aligned_fallback_boxes(potential_fallbacks, dominant_pose,
+                                                                              alignment_ref_cx, max_alignment_offset)
+                    penis_base_y = conceptual_full_box[3]
+                    locked_ids = {info['id'] for info in locked_fallback_interactors.values()}
+                    best_new_candidate = sorted([
+                        b for b in aligned_fallback_candidates if
+                        b.class_name == fb_class and b.track_id not in locked_ids
+                    ], key=lambda b: abs(b.cy - penis_base_y))
+                    if best_new_candidate:
+                        new_box_to_lock = best_new_candidate[0]
+                        final_contributors.append(new_box_to_lock)
+                        locked_fallback_interactors[fb_class] = {'id': new_box_to_lock.track_id, 'unseen_frames': 0}
+                        _debug_log(logger,
+                                   f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
+            if final_contributors:
+                frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if
+                                                          c.track_id is not None]
+
+
+            # --- DYNAMIC AMPLIFICATION: Calculate max_dist_ref on the fly ---
+            current_frame_id = frame_obj.frame_id
+            window_start_frame = max(0, current_frame_id - rolling_window_frames)
+
+            heights_in_window = [
+                h for fid, h in raw_penis_heights.items()
+                if window_start_frame <= fid <= current_frame_id
+            ]
+
+            dynamic_max_dist_ref = 0
+            if heights_in_window:
+                dynamic_max_dist_ref = np.percentile(heights_in_window, 95)
+
+            if dynamic_max_dist_ref <= 0:
+                dynamic_max_dist_ref = lp_state.max_height if lp_state.max_height > 0 else yolo_size * 0.3
+
+
+            # --- WEIGHTED DISTANCE CALCULATION (using dynamic reference) ---
+            total_weighted_distance = 0.0
+            total_weight = 0.0
+            max_dist_ref = dynamic_max_dist_ref # Use the newly calculated dynamic reference
+
+            if active_box:
+                dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, active_box.class_name, active_box.bbox, max_dist_ref)
+                total_weighted_distance += dist * 1.0
+                total_weight += 1.0
+                frame_obj.active_interaction_track_id = active_box.track_id
+
+            for contributor in final_contributors:
+                if active_box and contributor.track_id == active_box.track_id:
+                    continue
+                dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, contributor.class_name, contributor.bbox, max_dist_ref)
+                if contributor.class_name == 'face':
+                    total_weighted_distance += dist * 0.2
+                    total_weight += 0.2
+                elif contributor.class_name == 'breast':
+                    total_weighted_distance += dist * 0.4
+                    total_weight += 0.4
+                else:
+                    total_weighted_distance += dist * 0.7
+                    total_weight += 0.7
+
+            if total_weight > 0:
+                final_distance = total_weighted_distance / total_weight
+            else:
+                final_distance = last_valid_distance
+
+            frame_obj.atr_funscript_distance = int(np.clip(round(final_distance), 0, 100))
+            last_valid_distance = frame_obj.atr_funscript_distance
+
+            for box in (contacting_boxes_all + final_contributors):
+                if box and box.track_id:
+                    last_known_box_positions[box.track_id] = (box.cx, box.cy)
+
+def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
+    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (DYNAMIC AMPLIFICATION)")
+    fps = state.video_info.get('fps', 30.0)
+    yolo_size = state.yolo_input_size
+    is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
+
+    # --- Pre-fetch raw penis heights for efficient lookup ---
+    raw_penis_heights = {}
+    for frame_obj in state.frames:
+        penis_detections = [b for b in frame_obj.boxes if b.class_name == constants.PENIS_CLASS_NAME and b.status == constants.STATUS_DETECTED]
+        if penis_detections:
+            penis_detections.sort(key=lambda d: d.confidence, reverse=True)
+            raw_penis_heights[frame_obj.frame_id] = penis_detections[0].height
+
+    # --- 💡 CONFIGURATION FOR DYNAMIC AMPLIFICATION 💡 ---
+    # This is the parameter you can tweak. It sets the look-back duration in seconds.
+    ROLLING_WINDOW_SECONDS = 30
+    rolling_window_frames = int(fps * ROLLING_WINDOW_SECONDS)
+
+    last_known_box_positions = {}
+
+    for segment in state.atr_segments:
+        # (Segment setup logic remains the same)
+        primary_classes_for_segment: List[str] = []
+        fallback_classes_for_segment: List[str] = []
+        is_penetration_pos = False
+        if segment.major_position == 'Cowgirl / Missionary':
+            primary_classes_for_segment = ['pussy']
+            fallback_classes_for_segment = ['navel', 'breast', 'face']
+            is_penetration_pos = True
+        elif segment.major_position == 'Rev. Cowgirl / Doggy':
+            primary_classes_for_segment = ['butt']
+            fallback_classes_for_segment = ['anus', 'face']
+            is_penetration_pos = True
+        elif segment.major_position == 'Blowjob':
+            primary_classes_for_segment = ['face']
+            fallback_classes_for_segment = ['hand']
+        elif segment.major_position == 'Handjob':
+            primary_classes_for_segment = ['hand']
+            fallback_classes_for_segment = ['breast']
+        elif segment.major_position == 'Boobjob':
+            primary_classes_for_segment = ['breast']
+            fallback_classes_for_segment = ['hand']
+        elif segment.major_position == 'Footjob':
+            primary_classes_for_segment = ['foot']
+        _debug_log(logger,
+                   f"Processing segment '{segment.major_position}': Primary={primary_classes_for_segment}, Fallback={fallback_classes_for_segment}")
+        active_interactor_state = {'id': None, 'unseen_frames': 0}
+        locked_fallback_interactors = {}
+        FALLBACK_PATIENCE = int(fps * 0.5)
+        INTERACTOR_PATIENCE = int(fps * 0.75)
+        last_valid_distance = 100
+        segment.segment_frame_objects = [fo for fo in state.frames if segment.start_frame_id <= fo.frame_id <= segment.end_frame_id]
+
+        for frame_obj in segment.segment_frame_objects:
+            lp_state = frame_obj.atr_locked_penis_state
+            frame_obj.is_occluded = False
+            frame_obj.active_interaction_track_id = None
+            frame_obj.atr_fallback_contributor_ids = []
+
+            if not lp_state.active or not lp_state.last_raw_coords:
+                frame_obj.atr_funscript_distance = 100
+                continue
+
+            # (Conceptual box and interactor locking logic remains the same)
+            x1, _, x2, y2_raw = lp_state.last_raw_coords
+            conceptual_full_box = (x1, y2_raw - lp_state.max_height, x2, y2_raw)
+            lp_state.box = conceptual_full_box
+            if frame_obj.atr_penis_box_kalman:
+                conceptual_y1 = conceptual_full_box[1]
+                kalman_x1, kalman_y1, kalman_x2, kalman_y2 = frame_obj.atr_penis_box_kalman
+                clamped_y1 = max(kalman_y1, conceptual_y1)
+                clamped_y1 = min(clamped_y1, kalman_y2)
+                frame_obj.atr_penis_box_kalman = (kalman_x1, clamped_y1, kalman_x2, kalman_y2)
+            if frame_obj.atr_penis_box_kalman and lp_state.max_height > 0:
+                visible_height = frame_obj.atr_penis_box_kalman[3] - frame_obj.atr_penis_box_kalman[1]
+                lp_state.visible_part = (visible_height / lp_state.max_height) * 100.0
+            else:
+                lp_state.visible_part = 0.0
+            contacting_boxes_all = [c['box_rec'] for c in frame_obj.atr_detected_contact_boxes]
+            active_box = None
+            locked_id = active_interactor_state['id']
+            if locked_id is not None:
+                robustly_found_interactor = next((b for b in frame_obj.boxes if b.track_id == locked_id and b.class_name in primary_classes_for_segment), None)
+                if robustly_found_interactor:
+                    active_box = robustly_found_interactor
+                    active_interactor_state['unseen_frames'] = 0
+                    if not any(b.track_id == locked_id for b in contacting_boxes_all):
+                        frame_obj.is_occluded = True
+                else:
+                    active_interactor_state['unseen_frames'] += 1
+                    if active_interactor_state['unseen_frames'] > INTERACTOR_PATIENCE:
+                        active_interactor_state['id'] = None
+                        active_box = None
+            if active_box is None:
+                frame_obj.is_occluded = True
+                primary_contacts = [b for b in contacting_boxes_all if b.class_name in primary_classes_for_segment]
+                if primary_contacts:
+                    moving_contacts = [b for b in primary_contacts if b.track_id not in last_known_box_positions or (
+                                abs(b.cx - last_known_box_positions[b.track_id][0]) >= 1 or abs(
+                            b.cy - last_known_box_positions[b.track_id][1]) >= 1)]
+                    active_box = max(moving_contacts, key=lambda b: b.confidence) if moving_contacts else max(
+                        primary_contacts, key=lambda b: b.confidence)
+                    if active_box and active_box.track_id != active_interactor_state.get('id'):
+                        active_interactor_state['id'] = active_box.track_id
+                        active_interactor_state['unseen_frames'] = 0
+                        frame_obj.is_occluded = False
+                        _debug_log(logger,
+                                   f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
+            final_contributors = []
+            for fb_class in fallback_classes_for_segment:
+                found_current_frame = False
+                if fb_class in locked_fallback_interactors:
+                    lock_info = locked_fallback_interactors[fb_class]
+                    locked_box = next((b for b in frame_obj.boxes if b.track_id == lock_info['id']), None)
+                    if locked_box:
+                        final_contributors.append(locked_box)
+                        lock_info['unseen_frames'] = 0
+                        found_current_frame = True
+                    else:
+                        lock_info['unseen_frames'] += 1
+                        if lock_info['unseen_frames'] > FALLBACK_PATIENCE:
+                            del locked_fallback_interactors[fb_class]
+                if not found_current_frame:
+                    dominant_pose = _get_dominant_pose(frame_obj, is_vr, yolo_size)
+                    alignment_ref_cx = lp_state.last_raw_coords[0] + (lp_state.last_raw_coords[2] - lp_state.last_raw_coords[0]) / 2
+                    max_alignment_offset = yolo_size * 0.25
+                    potential_fallbacks = [b for b in frame_obj.boxes if
+                                           b.class_name in fallback_classes_for_segment and b != active_box]
+                    aligned_fallback_candidates = _get_aligned_fallback_boxes(potential_fallbacks, dominant_pose, alignment_ref_cx, max_alignment_offset)
+                    penis_base_y = conceptual_full_box[3]
+                    locked_ids = {info['id'] for info in locked_fallback_interactors.values()}
+                    best_new_candidate = sorted([
+                        b for b in aligned_fallback_candidates if
+                        b.class_name == fb_class and b.track_id not in locked_ids
+                    ], key=lambda b: abs(b.cy - penis_base_y))
+                    if best_new_candidate:
+                        new_box_to_lock = best_new_candidate[0]
+                        final_contributors.append(new_box_to_lock)
+                        locked_fallback_interactors[fb_class] = {'id': new_box_to_lock.track_id, 'unseen_frames': 0}
+                        _debug_log(logger,
+                                   f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
+            if final_contributors:
+                frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if
+                                                          c.track_id is not None]
+
+
+            # --- DYNAMIC AMPLIFICATION: Calculate max_dist_ref on the fly ---
+            current_frame_id = frame_obj.frame_id
+            window_start_frame = max(0, current_frame_id - rolling_window_frames)
+
+            heights_in_window = [
+                h for fid, h in raw_penis_heights.items()
+                if window_start_frame <= fid <= current_frame_id
+            ]
+
+            dynamic_max_dist_ref = 0
+            if heights_in_window:
+                dynamic_max_dist_ref = np.percentile(heights_in_window, 95)
+
+            if dynamic_max_dist_ref <= 0:
+                dynamic_max_dist_ref = lp_state.max_height if lp_state.max_height > 0 else yolo_size * 0.3
+
+
+            # --- WEIGHTED DISTANCE CALCULATION (using dynamic reference) ---
+            total_weighted_distance = 0.0
+            total_weight = 0.0
+            max_dist_ref = dynamic_max_dist_ref # Use the newly calculated dynamic reference
+
+            if active_box:
+                dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, active_box.class_name, active_box.bbox, max_dist_ref)
+                total_weighted_distance += dist * 1.0
+                total_weight += 1.0
+                frame_obj.active_interaction_track_id = active_box.track_id
+
+            for contributor in final_contributors:
+                if active_box and contributor.track_id == active_box.track_id:
+                    continue
+                dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, contributor.class_name, contributor.bbox, max_dist_ref)
+                if contributor.class_name == 'breast':
+                    weight = 0.3
+                elif contributor.class_name == 'anus':
+                    weight = 0.4
+                elif contributor.class_name == 'face':
+                    weight = 0.5
+                elif contributor.class_name == 'navel':
+                    weight = 0.8
+                else:
+                    weight = 0.2
+                total_weighted_distance += dist * weight
+                total_weight += weight
+
+            if total_weight > 0:
+                final_distance = total_weighted_distance / total_weight
+            else:
+                final_distance = last_valid_distance
+
+            frame_obj.atr_funscript_distance = int(np.clip(round(final_distance), 0, 100))
+            last_valid_distance = frame_obj.atr_funscript_distance
+
+            for box in (contacting_boxes_all + final_contributors):
+                if box and box.track_id:
+                    last_known_box_positions[box.track_id] = (box.cx, box.cy)
 
 def atr_pass_7_smooth_and_normalize_distances(state: AppStateContainer, logger: Optional[logging.Logger]):
     """ ATR Pass 7 (denoising with SG) and Pass 9 (amplifying/normalizing per segment) combined """
@@ -1573,8 +2367,257 @@ def load_yolo_results_stage2(msgpack_file_path: str, stop_event: threading.Event
             print(f"Error loading/unpacking msgpack {msgpack_file_path}: {e}")
         return None
 
+
+def _pre_scan_for_interactor_ids(state: AppStateContainer, logger: Optional[logging.Logger]) -> set:
+    """
+    Performs a read-only pre-scan of all frames to identify the track IDs of all
+    objects that ever interact with the penis. This avoids running expensive
+    recovery on irrelevant tracks.
+    """
+    _debug_log(logger, "Pre-scanning to identify all potential interactor track IDs...")
+    interactor_ids = set()
+
+    # This scan simulates the lock-on logic from Pass 3 to accurately find interactors.
+    # It does not modify any frame state.
+    current_lp_active = False
+    current_lp_consecutive_detections = 0
+    current_lp_consecutive_non_detections = 0
+    fps = state.video_info.get('fps', 30.0)
+
+    for frame in state.frames:
+        penis_box = frame.get_preferred_penis_box(
+            state.video_info.get('actual_video_type', '2D'),
+            state.vr_vertical_third_filter
+        )
+
+        # Simulate lock state
+        if penis_box:
+            current_lp_consecutive_detections += 1
+            current_lp_consecutive_non_detections = 0
+            if not current_lp_active and current_lp_consecutive_detections >= fps / 5:
+                current_lp_active = True
+        else:
+            current_lp_consecutive_detections = 0
+            current_lp_consecutive_non_detections += 1
+            if current_lp_active and current_lp_consecutive_non_detections >= (fps * 2):
+                current_lp_active = False
+
+        # If locked, find contacts and add their track IDs
+        if current_lp_active and penis_box:
+            for other_box in frame.boxes:
+                if other_box.track_id is not None and other_box.class_name != constants.PENIS_CLASS_NAME:
+                    if _atr_calculate_iou(penis_box.bbox, other_box.bbox) > 0:
+                        interactor_ids.add(other_box.track_id)
+
+    _debug_log(logger, f"Pre-scan found {len(interactor_ids)} unique interactor track IDs.")
+    return interactor_ids
+
+
+def _recover_gap_worker(args: dict) -> Tuple[List[BoxRecord], int]:
+    """
+    A worker function designed to be run in a separate process to recover a single gap.
+    It now processes a precise range from start_frame to end_frame, as determined by
+    the parent process, which handles the interruption logic.
+    """
+    gap_info = args['gap_info']
+    preprocessed_video_path = args['preprocessed_video_path']
+    yolo_input_size = args['yolo_input_size']
+
+    recovered_boxes = []
+    frames_processed_in_worker = 0
+
+    # Each worker needs its own VideoProcessor instance
+    class DummyAppForVP:
+        def __init__(self):
+            # Create a logger unique to the worker process for easier debugging
+            self.logger = logging.getLogger(f"S2_OF_Worker_{os.getpid()}")
+            self.hardware_acceleration_method = 'none'
+            self.available_ffmpeg_hwaccels = ['none']
+
+    vp = VideoProcessor(app_instance=DummyAppForVP(), yolo_input_size=yolo_input_size)
+    if not vp.open_video(preprocessed_video_path):
+        return [], 0
+
+    try:
+        # The start frame for OF is the last known good frame
+        initial_frame_img = vp._get_specific_frame(gap_info["start_frame"] - 1)
+        if initial_frame_img is None: return [], 0
+
+        prev_gray = cv2.cvtColor(initial_frame_img, cv2.COLOR_BGR2GRAY)
+        current_tracked_box = np.array(gap_info["last_known_box"].bbox, dtype=np.float32)
+        flow_dense = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_FAST)
+
+        # The loop now runs only for the precise, pre-calculated duration.
+        # No extra 'interrupt' check is needed here.
+        for frame_id in range(gap_info["start_frame"], gap_info["end_frame"] + 1):
+            frames_processed_in_worker += 1
+            current_frame_img = vp._get_specific_frame(frame_id)
+            if current_frame_img is None: break
+
+            current_gray = cv2.cvtColor(current_frame_img, cv2.COLOR_BGR2GRAY)
+            flow = flow_dense.calc(prev_gray, current_gray, None)
+            if flow is None: break
+
+            x1, y1, x2, y2 = [max(0, int(c)) for c in current_tracked_box]
+            h, w = prev_gray.shape
+            x2, y2 = min(w, x2), min(h, y2)
+
+            if x2 > x1 and y2 > y1:
+                # Use median flow in the box to be robust to outliers
+                dx, dy = np.median(flow[y1:y2, x1:x2, 0]), np.median(flow[y1:y2, x1:x2, 1])
+                current_tracked_box += [dx, dy, dx, dy]
+
+                new_box = BoxRecord(
+                    frame_id=frame_id, bbox=current_tracked_box,
+                    confidence=gap_info["last_known_box"].confidence * 0.75,  # Lower confidence for recovered boxes
+                    class_id=gap_info["last_known_box"].class_id, class_name=gap_info["last_known_box"].class_name,
+                    status=constants.STATUS_OF_RECOVERED, yolo_input_size=yolo_input_size,
+                    track_id=gap_info["track_id"]
+                )
+                recovered_boxes.append(new_box)
+                prev_gray = current_gray
+            else:
+                # Stop if the tracked box becomes invalid
+                break
+    finally:
+        vp.stop_processing(join_thread=False)
+        del vp
+
+    return recovered_boxes, frames_processed_in_worker
+
+
+def atr_pass_1c_recover_lost_tracks_with_of(
+        state: AppStateContainer,
+        preprocessed_video_path_arg: str,
+        logger: Optional[logging.Logger],
+        progress_callback: callable,
+        main_step_info: tuple
+):
+    """
+    MODIFIED: Identifies gaps and provides an 'interrupt_frame' to the worker if a
+    high-confidence re-detection appears within the gap.
+    """
+    _debug_log(logger, "Starting ATR Pass 1c: Recover Lost Tracks with INTERRUPTIBLE Optical Flow")
+
+    if not preprocessed_video_path_arg or not os.path.exists(preprocessed_video_path_arg):
+        message = "Skipped - Preprocessed file not found."
+        logger.warning(f"Optical flow recovery: {message} Path: {preprocessed_video_path_arg}")
+        if progress_callback: progress_callback(main_step_info, {"message": message, "current": 1, "total": 1}, True)
+        return
+
+    # Gap identification remains the same (it's very fast)
+    interactor_track_ids = _pre_scan_for_interactor_ids(state, logger)
+    if not interactor_track_ids:
+        if progress_callback: progress_callback(main_step_info, {"message": "Skipped - No interactors", "current": 1, "total": 1}, True)
+        return
+    fps = state.video_info.get('fps', 30.0)
+    # Max gap to attempt OF recovery on
+    MAX_RECOVERY_GAP = int(fps * 5)
+    # Min gap to trigger OF instead of simple interpolation
+    MIN_RECOVERY_GAP = int(fps * 1)
+    # Confidence threshold for a detection to be considered a valid "interrupter"
+    INTERRUPT_CONFIDENCE_THRESHOLD = 0.6
+
+    frames_map = {f.frame_id: f for f in state.frames}
+
+    # Create a map for quick lookup of all boxes by track_id
+    # {track_id: {frame_id: box_record}}
+    track_box_map = {}
+    for frame in state.frames:
+        for box in frame.boxes:
+            if box.track_id not in track_box_map:
+                track_box_map[box.track_id] = {}
+            track_box_map[box.track_id][frame.frame_id] = box
+
+    gaps_to_recover = []
+    for track_id in interactor_track_ids:
+        if track_id not in track_box_map: continue
+
+        present_frames = sorted(track_box_map[track_id].keys())
+        if len(present_frames) < 2: continue
+
+        for i in range(len(present_frames) - 1):
+            last_frame_id = present_frames[i]
+            next_frame_id = present_frames[i + 1]
+            gap_size = next_frame_id - last_frame_id - 1
+
+            if MIN_RECOVERY_GAP < gap_size <= MAX_RECOVERY_GAP:
+                last_box = track_box_map[track_id][last_frame_id]
+
+                # --- NEW LOGIC: Check for interrupter frames ---
+                interrupt_frame = None
+                # We search for a re-detection starting from the *next* known presence.
+                # The tracker might have re-identified the object at 'next_frame_id'.
+                # We check if that re-detection is high-confidence.
+                next_box = track_box_map[track_id][next_frame_id]
+                if next_box.status == constants.STATUS_DETECTED and next_box.confidence >= INTERRUPT_CONFIDENCE_THRESHOLD:
+                    interrupt_frame = next_frame_id
+
+                # The effective end of the gap is either the interrupt frame or the original end.
+                effective_end_frame = interrupt_frame -1 if interrupt_frame else next_frame_id - 1
+
+                gaps_to_recover.append({
+                    "track_id": track_id,
+                    "start_frame": last_frame_id + 1,
+                    # The worker will run up to this frame
+                    "end_frame": effective_end_frame,
+                    "last_known_box": last_box,
+                    # The original full gap size, for progress reporting
+                    "gap_size": gap_size
+                })
+
+
+    if not gaps_to_recover:
+        if progress_callback: progress_callback(main_step_info, {"message": "Completed (No gaps)", "current": 1, "total": 1}, True)
+        return
+
+    # --- Parallel Processing Setup ---
+    num_workers = max(1, psutil.cpu_count(logical=False) - 2)
+    logger.info(f"Distributing {len(gaps_to_recover)} recovery gaps to {num_workers} worker processes.")
+
+    worker_args = [{
+        'gap_info': gap,
+        'preprocessed_video_path': preprocessed_video_path_arg,
+        'yolo_input_size': state.yolo_input_size
+    } for gap in gaps_to_recover]
+
+    total_frames_to_recover = sum(g['end_frame'] - g['start_frame'] + 1 for g in gaps_to_recover)
+    frames_processed_count = 0
+    total_boxes_added = 0
+    start_time = time.time()
+
+    with multiprocessing.Pool(processes=num_workers) as pool:
+        # Use imap_unordered for better responsiveness as jobs finish
+        for result_boxes, frames_in_worker in pool.imap_unordered(_recover_gap_worker, worker_args):
+            frames_processed_count += frames_in_worker
+            if result_boxes:
+                for box in result_boxes:
+                    frames_map[box.frame_id].boxes.append(box)
+                total_boxes_added += len(result_boxes)
+
+            # --- Update Progress Bar ---
+            if progress_callback:
+                time_elapsed = time.time() - start_time
+                # Calculate true FPS and ETA based on frames.
+                fps_val = frames_processed_count / time_elapsed if time_elapsed > 0 else 0
+                eta = (total_frames_to_recover - frames_processed_count) / fps_val if fps_val > 0 else 0
+
+                progress_data = {
+                    "current": frames_processed_count, "total": total_frames_to_recover,
+                    "message": "Recovering gaps...", "time_elapsed": time_elapsed,
+                    "fps": fps_val, "eta": eta
+                }
+                progress_callback(main_step_info, progress_data, False)
+
+    if progress_callback:
+        progress_callback(main_step_info, {"message": "Completed", "current": total_frames_to_recover, "total": total_frames_to_recover}, True)
+
+    logger.info(f"Parallel OF recovery finished. Added {total_boxes_added} new boxes across {len(gaps_to_recover)} gaps.")
+
+
 def perform_contact_analysis(
         video_path_arg: str, msgpack_file_path_arg: str,
+        preprocessed_video_path_arg: Optional[str],
         progress_callback: callable, stop_event: threading.Event,
         app_logic_instance=None,  # To access AppStateContainer-like features
         ml_model_dir_path_arg: Optional[str] = None,
@@ -1612,16 +2655,11 @@ def perform_contact_analysis(
     BaseSegment._id_counter = 0
     logger.info(f"--- Starting ATR-based Stage 2 Analysis ---")
 
-    # Progress updates will need to be mapped to the sub_step_progress_wrapper
-    # For now, use a simplified callback for ATR steps.
-    def atr_progress_wrapper(main_step_tuple, sub_task_name, current, total, force=False):
-        # Example: ("Step X: ATR Y", current, total)
-        # This requires the calling code to manage main_step_tuple
-        if progress_callback:  # Check if the main callback exists
-            # The original progress_callback from AppStageProcessor expects:
-            # main_info_from_module, sub_info_from_module, force_update=False
-            sub_info = (current, total, sub_task_name)
-            progress_callback(main_step_tuple, sub_info, force)
+    def atr_progress_wrapper(main_step_tuple, sub_info_from_module, force=False):
+        """ This wrapper now passes the sub_info_from_module (which can be a tuple or dict) directly. """
+        if progress_callback:
+            # The original callback expects: main_info, sub_info, force
+            progress_callback(main_step_tuple, sub_info_from_module, force)
 
     # 1. Initialize VideoProcessor (Simplified, primarily for video_info)
     vp_logger = logger.getChild("VideoProcessor_ATR_S2") if logger else logging.getLogger(
@@ -1688,15 +2726,18 @@ def perform_contact_analysis(
     # Base steps for segmentation
     atr_main_steps_list_base = [
         ("Step 1: Tracking Objects", resilient_tracker_step0),
-        ("Step 2: Interpolate Boxes", atr_pass_1_interpolate_boxes),
-        ("Step 3: Kalman & Lock State", atr_pass_3_kalman_and_lock_state),
-        ("Step 4: Assign Positions & Segments", atr_pass_4_assign_positions_and_segments),
-        ("Step 5: Recalculate Chapter Heights", atr_pass_5_recalculate_heights_post_aggregation),
-        ("Step 6: Determine Frame Distances", atr_pass_6_determine_distance),
+        ("Step 2: Interpolate Short Gaps", atr_pass_1_interpolate_boxes),
+        ("Step 3: Recover Long Gaps (OF)", atr_pass_1c_recover_lost_tracks_with_of),
+        ("Step 4: Smooth All Tracked Boxes", atr_pass_1b_smooth_all_tracks),
+        ("Step 5: Kalman Filter & Lock State", atr_pass_3_kalman_and_lock_state),
+        ("Step 6: Assign Positions & Segments", atr_pass_4_assign_positions_and_segments),
+        ("Step 7: Recalculate Chapter Heights", atr_pass_5_recalculate_heights_post_aggregation),
+        ("Step 8: Determine Frame Distances", atr_pass_6_determine_distance),
+        ("Step 9: Smooth & Normalize Distances", atr_pass_7_smooth_and_normalize_distances),
     ]
     atr_main_steps_list_funscript_gen = [
-        ("Step 7: Smooth & Normalize Distances", atr_pass_7_smooth_and_normalize_distances),
-        ("Step 8: Simplify Signal", atr_pass_8_simplify_signal)
+        #("Step 8: Smooth & Normalize Distances", atr_pass_7_smooth_and_normalize_distances),
+        ("Step 9: Simplify Signal", atr_pass_8_simplify_signal)
     ]
     atr_main_steps_list = atr_main_steps_list_base
     if generate_funscript_actions_arg:
@@ -1708,18 +2749,24 @@ def perform_contact_analysis(
         logger.info(f"Starting {main_step_name_atr} (ATR S2)")
         main_step_tuple_for_callback = (i + 1, num_main_atr_steps, main_step_name_atr)
 
-        # Signal start of this main ATR step (sub-progress will be 0/1 initially)
-        atr_progress_wrapper(main_step_tuple_for_callback, "Initializing...", 0, 1, True)
+        atr_progress_wrapper(main_step_tuple_for_callback, (0, 1, "Initializing..."), True)
 
-        step_func_atr(state, logger)  # Most ATR passes don't have internal progress loops for callback
+        # --- Special handling for the OF recovery pass ---
+        if step_func_atr == atr_pass_1c_recover_lost_tracks_with_of:
+            step_func_atr(state, preprocessed_video_path_arg, logger, atr_progress_wrapper,
+                          main_step_tuple_for_callback)
+        else:
+            # Standard call for all other passes
+            step_func_atr(state, logger)
 
         if stop_event.is_set():
             logger.info(f"ATR S2 stopped during {main_step_name_atr}.")
             atr_progress_wrapper(main_step_tuple_for_callback, "Aborted", 1, 1, True)
             return {"error": f"Processing stopped during {main_step_name_atr} (ATR S2)"}
 
-        # Signal completion of this main ATR step
-        atr_progress_wrapper(main_step_tuple_for_callback, "Completed", 1, 1, True)
+        if step_func_atr != atr_pass_1c_recover_lost_tracks_with_of:
+
+            atr_progress_wrapper(main_step_tuple_for_callback, (1, 1, "Completed"), True)
 
     # --- Funscript Data Population from ATR results ---
     if state.funscript_frames:

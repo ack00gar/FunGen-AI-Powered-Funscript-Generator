@@ -545,7 +545,7 @@ def perform_yolo_analysis(
         hwaccel_avail_list_arg: Optional[List[str]] = None,
         frame_range_arg: Optional[Tuple[Optional[int], Optional[int]]] = None,
         output_filename_override: Optional[str] = None,
-        save_preprocessed_video_arg: bool = False,
+        save_preprocessed_video_arg: bool = True,
         preprocessed_video_path_arg: Optional[str] = None,
         is_autotune_run_arg: bool = False
 ):
@@ -624,26 +624,29 @@ def perform_yolo_analysis(
 
     queue_monitor = Stage1QueueMonitor()
 
+    # --- Preprocessed Video Logic (Now Mandatory) ---
+    process_logger.info("Preprocessed video generation/reuse is mandatory for Stage 1.")
     video_path_to_use = video_path_arg
     video_type_to_use = video_type_arg
     is_encoding_preprocessed_video = False
+
+    # Default to multiple producers. Only use 1 if we are actively encoding.
     num_producers_effective = num_producers_arg
 
-    if save_preprocessed_video_arg:
-        process_logger.info("'Save/Reuse Preprocessed Video' is enabled.")
-        num_producers_effective = 1  # Force producers to 1
-        if preprocessed_video_path_arg and os.path.exists(preprocessed_video_path_arg):
-            process_logger.info(f"Found existing preprocessed video. Using: {preprocessed_video_path_arg}")
-            video_path_to_use = preprocessed_video_path_arg
-            video_type_to_use = 'flat'  # Preprocessed video is already unwarped
-        elif preprocessed_video_path_arg:
-            process_logger.info(f"No existing preprocessed video found. Will encode to: {preprocessed_video_path_arg}")
-            is_encoding_preprocessed_video = True
-            preprocessed_dir = os.path.dirname(preprocessed_video_path_arg)
-            if preprocessed_dir:
-                os.makedirs(preprocessed_dir, exist_ok=True)
-        else:
-            process_logger.warning("Save preprocessed video was requested, but no output path was provided. Disabling.")
+    if preprocessed_video_path_arg and os.path.exists(preprocessed_video_path_arg):
+        process_logger.info(f"Found existing preprocessed video. Using: {preprocessed_video_path_arg}")
+        video_path_to_use = preprocessed_video_path_arg
+        video_type_to_use = 'flat'  # Preprocessed video is already unwarped
+    elif preprocessed_video_path_arg:
+        process_logger.info(f"No existing preprocessed video found. Will encode to: {preprocessed_video_path_arg}")
+        is_encoding_preprocessed_video = True
+        num_producers_effective = 1  # Force producers to 1 for safe encoding to a single file
+        preprocessed_dir = os.path.dirname(preprocessed_video_path_arg)
+        if preprocessed_dir:
+            os.makedirs(preprocessed_dir, exist_ok=True)
+    else:
+        process_logger.error("Mandatory preprocessed video path was not provided. Cannot proceed.")
+        return None, 0.0
 
     class VPAppProxy:
         pass
