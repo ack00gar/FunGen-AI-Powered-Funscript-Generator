@@ -90,9 +90,36 @@ class FFmpegEncoder:
         self.encoder_process = None
         log_vid.info("Encoder process stopped.")
 
-    def _get_encoder_args(self):
-        log_vid.info("Forcing lossless software encoding for preprocessed video to ensure data integrity.")
-        return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv444p"]
+    def _get_encoder_args(self) -> List[str]:
+        """
+        Chooses the best available hardware encoder (prefers VideoToolbox on macOS).
+        Falls back to software libx265 if none is available.
+        """
+        try:
+            output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True)
+        except Exception as e:
+            log_vid.warning(f"Failed to query FFmpeg encoders: {e}")
+            output = ""
+
+        if "hevc_videotoolbox" in output:
+            log_vid.info("Using H.265 Apple VideoToolbox for hardware encoding.")
+            return ["-c:v", "hevc_videotoolbox", "-q:v", "20", "-pix_fmt", "yuv420p", "-b:v", "0"]
+
+        elif "hevc_nvenc" in output:
+            log_vid.info("Using H.265 NVENC for hardware encoding.")
+            return ["-c:v", "hevc_nvenc", "-preset", "fast", "-qp", "26", "-pix_fmt", "yuv420p"]
+
+        elif "hevc_qsv" in output:
+            log_vid.info("Using H.265 Intel QSV for hardware encoding.")
+            return ["-c:v", "hevc_qsv", "-preset", "fast", "-global_quality", "26", "-pix_fmt", "yuv420p"]
+
+        elif "hevc_vaapi" in output:
+            log_vid.info("Using H.265 VAAPI for hardware encoding.")
+            return ["-c:v", "hevc_vaapi", "-qp", "26", "-pix_fmt", "yuv420p"]
+
+        else:
+            log_vid.warning("No hardware encoder available. Falling back to software libx265.")
+            return ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p"]
 
 class Stage1QueueMonitor:
     def __init__(self):
