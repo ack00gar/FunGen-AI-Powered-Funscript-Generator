@@ -32,6 +32,13 @@ AUTOSAVE_FILE = "autosave.fgnstate"
 PROJECT_FILE_EXTENSION = ".fgnproj"
 DEFAULT_OUTPUT_FOLDER = "output"
 
+# --- Send2Trash Configuration ---
+SEND2TRASH_MAX_ATTEMPTS = 3
+SEND2TRASH_RETRY_DELAY = 2  # Delay in seconds between retry attempts
+
+# --- TensorRT Compiler UI ---
+TENSORRT_OUTPUT_DISPLAY_HEIGHT = 150  # Height in pixels for subprocess output display
+
 
 ####################################################################################################
 # SYSTEM & PERFORMANCE

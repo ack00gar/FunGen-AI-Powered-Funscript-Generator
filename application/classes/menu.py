@@ -468,10 +468,15 @@ class MainMenu:
                 if not hasattr(self.app, 'tensorrt_compiler_window'):
                     self.app.tensorrt_compiler_window = None
                 if imgui.menu_item("Compile YOLO Model to TensorRT (.engine)...")[0]:
-                    from application.gui_components.tensorrt_compiler_window import TensorRTCompilerWindow
+                    from application.gui_components.engine_compiler.tensorrt_compiler_window import TensorRTCompilerWindow
                     def on_close():
                         self.app.tensorrt_compiler_window = None
-                    self.app.tensorrt_compiler_window = TensorRTCompilerWindow(self.app, on_close_callback=on_close)
+                    if self.app.tensorrt_compiler_window is None:
+                        self.app.tensorrt_compiler_window = TensorRTCompilerWindow(self.app, on_close_callback=on_close)
+                    else:
+                        # Reset state if window already exists
+                        self.app.tensorrt_compiler_window._reset_state()
+                        self.app.tensorrt_compiler_window.is_open = True
 
 
                 # --- Update Controls Sub-Menu ---
