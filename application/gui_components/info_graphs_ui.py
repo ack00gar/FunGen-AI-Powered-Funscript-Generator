@@ -1,11 +1,68 @@
 import imgui
 import os
+import threading
 from application.utils.time_format import _format_time
 
 
 class InfoGraphsUI:
+    # Constants
+    PITCH_SLIDER_DELAY_MS = 1000
+    PITCH_SLIDER_MIN = -40
+    PITCH_SLIDER_MAX = 40
+    
     def __init__(self, app):
         self.app = app
+        # Debounced video rendering for View Pitch slider
+        self.video_render_timer = None
+        self.timer_lock = threading.Lock()
+        self.last_pitch_value = None
+        # Track slider interaction state
+        self.pitch_slider_is_dragging = False
+        self.pitch_slider_was_dragging = False
+
+    def _apply_video_render(self, new_pitch):
+        """Execute video rendering with the new pitch value after delay"""
+        processor = self.app.processor
+        if processor:
+            processor.set_active_vr_parameters(pitch=new_pitch)
+            processor.reapply_video_settings()
+
+    def _schedule_video_render(self, new_pitch):
+        """Schedule video rendering with delay, canceling any existing timer"""
+        with self.timer_lock:
+            # Cancel existing timer if it exists
+            if self.video_render_timer:
+                self.video_render_timer.cancel()
+            
+            # Create new timer for delay
+            self.video_render_timer = threading.Timer(
+                self.PITCH_SLIDER_DELAY_MS / 1000.0, 
+                self._apply_video_render, 
+                args=[new_pitch]
+            )
+            self.video_render_timer.daemon = True
+            self.video_render_timer.start()
+
+    def _cancel_video_render_timer(self):
+        """Cancel any pending video render timer"""
+        with self.timer_lock:
+            if self.video_render_timer:
+                self.video_render_timer.cancel()
+                self.video_render_timer = None
+
+    def _handle_mouse_release(self):
+        """Handle mouse release - cancel timer and render immediately"""
+        self.pitch_slider_is_dragging = False
+        self.pitch_slider_was_dragging = False
+        self._cancel_video_render_timer()
+        
+        # Execute video rendering immediately with final value
+        if self.last_pitch_value is not None:
+            self._apply_video_render(self.last_pitch_value)
+
+    def cleanup(self):
+        """Clean up any pending timers"""
+        self._cancel_video_render_timer()
 
     def render(self):
         app_state = self.app.app_state_ui
@@ -240,10 +297,28 @@ class InfoGraphsUI:
                 processor.set_active_vr_parameters(input_format=vr_fmt_val[new_idx])
                 processor.reapply_video_settings()
 
-            changed_pitch, new_pitch = imgui.slider_int("View Pitch##vrPitch", processor.vr_pitch, -40, 40)
+            # Track slider dragging state
+            is_slider_hovered = imgui.is_item_hovered()
+            is_mouse_down = imgui.is_mouse_down(0)  # Left mouse button
+            is_mouse_released = imgui.is_mouse_released(0)  # Left mouse button released
+            
+            # Update dragging state
+            if is_slider_hovered and is_mouse_down:
+                self.pitch_slider_is_dragging = True
+                self.pitch_slider_was_dragging = True
+            elif (is_mouse_released or not is_mouse_down) and self.pitch_slider_was_dragging:
+                self._handle_mouse_release()
+
+            changed_pitch, new_pitch = imgui.slider_int("View Pitch##vrPitch", processor.vr_pitch, self.PITCH_SLIDER_MIN, self.PITCH_SLIDER_MAX)
             if changed_pitch:
-                processor.set_active_vr_parameters(pitch=new_pitch)
-                processor.reapply_video_settings()
+                # Update the processor value immediately so slider shows the new value
+                processor.vr_pitch = new_pitch
+                
+                # Update the tracked value
+                self.last_pitch_value = new_pitch
+                
+                # Schedule debounced video rendering (only the expensive video processing)
+                self._schedule_video_render(new_pitch)
 
     def _render_content_funscript_info(self, timeline_num):
         fs_proc = self.app.funscript_processor
