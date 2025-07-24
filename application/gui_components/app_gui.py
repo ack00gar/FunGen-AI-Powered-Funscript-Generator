@@ -80,6 +80,7 @@ class GUI:
         self.batch_apply_post_processing_ui = True
         self.batch_copy_funscript_to_video_location_ui = True
         self.batch_generate_roll_file_ui = True
+        self.batch_apply_ultimate_autotune_ui = True
 
         self.control_panel_ui.timeline_editor1 = self.timeline_editor1
         self.control_panel_ui.timeline_editor2 = self.timeline_editor2
@@ -665,8 +666,9 @@ class GUI:
                 imgui.separator()
                 imgui.text("Output Options:")
 
-                _, self.batch_apply_post_processing_ui = imgui.checkbox("Apply Auto Post-Processing", self.batch_apply_post_processing_ui)
-
+                # _, self.batch_apply_post_processing_ui = imgui.checkbox("Apply Auto Post-Processing", self.batch_apply_post_processing_ui)
+                # imgui.same_line()
+                _, self.batch_apply_ultimate_autotune_ui = imgui.checkbox("Apply Ultimate Autotune", self.batch_apply_ultimate_autotune_ui)
                 imgui.same_line()
 
                 is_3_stage = self.selected_batch_method_idx_ui == 0
@@ -683,7 +685,14 @@ class GUI:
 
                 imgui.separator()
                 if imgui.button("Yes", width=100):
-                    app._initiate_batch_processing_from_confirmation(self.selected_batch_method_idx_ui, self.batch_apply_post_processing_ui, self.batch_copy_funscript_to_video_location_ui, self.batch_overwrite_mode_ui,self.batch_generate_roll_file_ui)
+                    app._initiate_batch_processing_from_confirmation(
+                        self.selected_batch_method_idx_ui,
+                        self.batch_apply_post_processing_ui,
+                        self.batch_copy_funscript_to_video_location_ui,
+                        self.batch_overwrite_mode_ui,
+                        self.batch_generate_roll_file_ui,
+                        self.batch_apply_ultimate_autotune_ui
+                    )
                     imgui.close_current_popup()
                 imgui.same_line()
                 if imgui.button("No", width=100):

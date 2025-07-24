@@ -651,6 +651,9 @@ class VideoDisplayUI:
         dominant_pose_id = frame_overlay_data.get("dominant_pose_id")
         active_track_id = frame_overlay_data.get("active_interaction_track_id")
         is_occluded = frame_overlay_data.get("is_occluded", False)
+        # Get the list of aligned fallback candidate IDs for this frame
+        aligned_fallback_ids = set(frame_overlay_data.get("atr_aligned_fallback_candidate_ids", []))
+
 
         for pose in frame_overlay_data.get("poses", []):
             is_dominant = (pose.get("id") == dominant_pose_id)
@@ -663,13 +666,18 @@ class VideoDisplayUI:
             p2 = self._video_to_screen_coords(box["bbox"][2], box["bbox"][3])
 
             if p1 and p2:
-                is_active_interactor = (box.get("track_id") is not None and box.get("track_id") == active_track_id)
+                track_id = box.get("track_id")
+                is_active_interactor = (track_id is not None and track_id == active_track_id)
                 is_locked_penis = (box.get("class_name") == "locked_penis")
                 is_inferred_status = (box.get("status") == constants.STATUS_INFERRED_RELATIVE or box.get("status") == constants.STATUS_POSE_INFERRED)
+                is_of_recovered = (box.get("status") == constants.STATUS_OF_RECOVERED or box.get("status") == constants.STATUS_OF_RECOVERED)
+
+                # Check if this box is an aligned fallback candidate
+                is_aligned_candidate = (track_id is not None and track_id in aligned_fallback_ids)
 
                 is_refined_track = False
                 if current_chapter and current_chapter.refined_track_id is not None:
-                    if box.get('track_id') == current_chapter.refined_track_id:
+                    if track_id == current_chapter.refined_track_id:
                         is_refined_track = True
 
                 # --- HIERARCHICAL HIGHLIGHTING LOGIC ---
@@ -692,6 +700,9 @@ class VideoDisplayUI:
                             fill_color = (0.1, 1.0, 0.1, 0.4)
                             fill_color_u32 = imgui.get_color_u32_rgba(*fill_color)
                             draw_list.add_rect_filled(p1_vis[0], p1_vis[1], p2_vis[0], p2_vis[1], fill_color_u32, rounding=2.0)
+                elif is_aligned_candidate:
+                    color = (1.0, 0.5, 0.0, 0.9)  # Orange for ALIGNED FALLBACK candidates
+                    thickness = 1.5
                 elif is_inferred_status:
                     color = (0.8, 0.4, 1.0, 0.85) # A distinct purple for inferred boxes
                     thickness = 1.0
@@ -701,14 +712,18 @@ class VideoDisplayUI:
                 color_u32 = imgui.get_color_u32_rgba(*color)
                 draw_list.add_rect(p1[0], p1[1], p2[0], p2[1], color_u32, thickness=thickness, rounding=2.0)
 
-
-                track_id_str = f" (TID: {box.get('track_id')})" if box.get('track_id') is not None else ""
+                track_id_str = f" (id: {track_id})" if track_id is not None else ""
                 label = f'{box.get("class_name", "?")}{track_id_str}'
 
                 if is_active_interactor:
                     label += " (ACTIVE)"
+                elif is_aligned_candidate:
+                    label += " (Aligned)"
                 elif is_inferred_status:
                     label += " (Inferred)"
+
+                if is_of_recovered:
+                    label += " [OF]"
 
                 draw_list.add_text(p1[0] + 3, p1[1] + 3, imgui.get_color_u32_rgba(1, 1, 1, 1), label)
 

@@ -662,7 +662,7 @@ class ApplicationLogic:
 
     def _initiate_batch_processing_from_confirmation(self, selected_method_idx: int, apply_post_processing: bool,
                                                      copy_to_video_location: bool, overwrite_mode: int,
-                                                     generate_roll: bool):
+                                                     generate_roll: bool, apply_ultimate_autotune: bool):
         """
         [Private] Called from the GUI when the user clicks 'Yes' in the confirmation dialog.
         This method starts the actual batch processing thread.
@@ -681,9 +681,11 @@ class ApplicationLogic:
         self.batch_copy_funscript_to_video_location = copy_to_video_location
         self.batch_overwrite_mode = overwrite_mode
         self.batch_generate_roll_file = generate_roll
+        self.batch_apply_ultimate_autotune = apply_ultimate_autotune
 
         self.logger.info(
-            f"User confirmed. Starting batch processing with method: {selected_method_idx}, post-proc: {apply_post_processing}, copy: {copy_to_video_location}, overwrite: {overwrite_mode}, gen_roll: {generate_roll}")
+            f"User confirmed. Starting batch processing with method: {selected_method_idx}, post-proc: {apply_post_processing}, copy: {copy_to_video_location}, overwrite: {overwrite_mode}, gen_roll: {generate_roll}, autotune: {apply_ultimate_autotune}")
+
 
         # Update the main UI state to reflect the chosen batch mode, so the correct progress UI is displayed.
         batch_mode_map = {

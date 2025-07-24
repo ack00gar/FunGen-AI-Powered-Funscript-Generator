@@ -223,12 +223,15 @@ CLASS_PRIORITY_ANALYSIS = {"pussy": 8, "butt": 7, "face": 6, "hand": 5, "breast"
 LEAD_BODY_PARTS = ["pussy", "butt", "face", "hand"]
 CLASS_INTERACTION_PRIORITY = ["pussy", "butt", "face", "hand", "breast", "foot"]
 DEFAULT_S2_ATR_PASS_COUNT = 10
+
 STATUS_DETECTED = "Detected"
 STATUS_INTERPOLATED = "Interpolated"
 STATUS_OPTICAL_FLOW = "OpticalFlow"
 STATUS_SMOOTHED = "Smoothed"
 STATUS_POSE_INFERRED = "Pose_Inferred"
 STATUS_INFERRED_RELATIVE = "Inferred_Relative"
+STATUS_OF_RECOVERED = "OF_Recovered"
+STATUS_EXCLUDED_VR = "Excluded_VR_Filter_Peripheral"
 
 S2_LOCKED_PENIS_DEACTIVATION_SECONDS = 3.0
 
@@ -314,3 +317,51 @@ MODEL_DOWNLOAD_URLS = {
     "detection_mlpackage_zip": "https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/releases/download/models-v1.1.0/FunGen-12s-pov-1.1.0.mlpackage.zip",
     "pose_pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.pt"
 }
+
+
+
+# FOR SF
+
+PENIS_INTERPOLATION_MAX_GAP_CONST = 30  # May be replaced by Kalman/RTS params
+LOCKED_PENIS_EXTENDED_INTERPOLATION_MAX_FRAMES_CONST = 180  # May be replaced
+CONTACT_EXTENDED_INTERPOLATION_MAX_FRAMES_CONST = 5  # May be replaced
+CONTACT_OPTICAL_FLOW_MAX_GAP_FRAMES_CONST = 20  # May be replaced
+OPTICAL_FLOW_CALC_ROI_MARGIN_CONST = 20  # Likely unused if optical flow is replaced
+PENIS_OF_ROI_MARGIN_CONST = 5  # Likely unused
+#DIS_PRESET_CONST = cv2.DISOpticalFlow_PRESET_ULTRAFAST  # Likely unused
+PENIS_BASE_Y2_MARGIN_CONST = 5  # May be used in funscript generation
+PENIS_LENGTH_SMOOTHING_WINDOW_CONST = 15  # May be replaced by RTS params
+PENIS_ABSENCE_THRESHOLD_FOR_HEIGHT_RESET_CONST = 180  # Logic replaced by generate_cuts_and_positions
+SMOOTH_MAX_FLICKER_DURATION_CONST = 60  # From original, new smoothing has its own params
+SMOOTH_MAX_SHORT_DURATION_CONST = 180  # From original
+SMOOTH_MIN_BRACKETING_DURATION_CONST = 10  # From original
+SMOOTH_MAX_INTER_GAP_CONST = 1  # From original
+SMOOTH_PRIORITY_ADVANTAGE_FOR_B_TO_RESIST_FLICKER_OVERRIDE_CONST = 2  # From original
+
+#STATUS_DETECTED = "Detected"
+#STATUS_INTERPOLATED = "Interpolated"
+#STATUS_OPTICAL_FLOW = "OpticalFlow"
+STATUS_SYNTHESIZED_KALMAN = "Synthesized_Kalman"
+#STATUS_SMOOTHED = "Smoothed"
+STATUS_GENERATED_PROPAGATED = "Generated_Propagated"
+STATUS_GENERATED_LINEAR = "Generated_Linear"
+STATUS_GENERATED_RTS = "Generated_RTS"
+
+# Thresholds from generate_in_between_boxes.py
+SHORT_GAP_THRESHOLD = 2
+LONG_GAP_THRESHOLD = 30
+RTS_WINDOW_PADDING = 20 # Frames to include before start_frame and after end_frame for RTS window
+
+
+
+# --- Constants from new helper scripts ---
+# From smooth_tracked_classes.py
+SIZE_SMOOTHING_FRAMES_CONST = 30
+
+# From generate_tracked_classes.py
+FILTER_BOXES_AREA_TO_LOCKED_CONST = {
+    "pussy": 10, "butt": 40, "face": 15, "hand": 6, "breast": 25, "foot": 6,
+}
+FILTER_BOXES_AREA_TO_LOCKED_MIN_CONST = {"foot": 1}
+CENTER_SCREEN_CONST = 320  # Assuming YOLO input size of 640 / 2. Should be dynamic.
+CENTER_SCREEN_FOCUS_AREA_CONST = 320  # Example, make dynamic or pass based on yolo_input_size

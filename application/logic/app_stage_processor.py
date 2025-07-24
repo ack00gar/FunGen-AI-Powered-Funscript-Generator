@@ -3,7 +3,7 @@ import threading
 import math
 import time
 from queue import Queue
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Union
 import msgpack
 import numpy as np
 from bisect import bisect_left, bisect_right
@@ -12,6 +12,7 @@ import gc
 
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
+#import detection.stage_2_orchestrator as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
 
 from config import constants
@@ -26,7 +27,6 @@ class AppStageProcessor:
         self.app_settings = self.app.app_settings
 
         # --- Threading Configuration ---
-        self.save_preprocessed_video: bool = False
         self.update_settings_from_app()
 
         self.stage_completion_event: Optional[threading.Event] = None
@@ -224,6 +224,9 @@ class AppStageProcessor:
             self.stage2_main_progress_label = ""
             self.stage2_sub_progress_value = 0.0
             self.stage2_sub_progress_label = ""
+            self.stage2_sub_time_elapsed_str = ""
+            self.stage2_sub_processing_fps_str = ""
+            self.stage2_sub_eta_str = ""
             self.stage2_final_elapsed_time_str = ""
         if "stage3" in stages:
             self.stage3_status_text = "Not run."
@@ -280,41 +283,21 @@ class AppStageProcessor:
         self.gui_event_queue.put(("stage1_progress_update", progress, progress_data))
 
     def _stage2_progress_callback(self, main_info_from_module, sub_info_from_module, force_update=False):
-        actual_main_step_tuple_for_queue: tuple
-        if isinstance(main_info_from_module, str):
-            actual_main_step_tuple_for_queue = (-1, 0, main_info_from_module)
-        elif isinstance(main_info_from_module, tuple) and len(main_info_from_module) == 3:
-            actual_main_step_tuple_for_queue = main_info_from_module
-        else:
-            self.logger.warning(
-                f"Malformed main_info_from_module in _stage2_progress_callback: {main_info_from_module}. Using placeholder.")
-            actual_main_step_tuple_for_queue = (-1, 0, "Error: Invalid Main Step Data")
+        """A simplified callback to directly pass progress data to the GUI queue."""
+        if not self.gui_event_queue:
+            return
 
-        actual_sub_step_tuple_for_queue: tuple
-        if isinstance(sub_info_from_module, tuple) and len(sub_info_from_module) == 3:
-            actual_sub_step_tuple_for_queue = sub_info_from_module
-        elif isinstance(sub_info_from_module, (int, float)):
-            self.logger.warning(
-                f"Received numerical sub_info_from_module in _stage2_progress_callback: {sub_info_from_module}. Interpreting as sub_task_name with placeholder progress.")
-            actual_sub_step_tuple_for_queue = (0, 0, f"Sub-status: {sub_info_from_module}")
-        else:
-            self.logger.warning(
-                f"Malformed sub_info_from_module in _stage2_progress_callback: {sub_info_from_module}. Using placeholder.")
-            actual_sub_step_tuple_for_queue = (0, 0, "Error: Invalid Sub Step Data")
+        # Basic validation
+        if not isinstance(main_info_from_module, tuple) or len(main_info_from_module) != 3:
+            self.logger.warning(f"Malformed main_info in S2 callback: {main_info_from_module}")
+            main_info_from_module = (-1, 0, "Invalid Main Step")
 
-        current_mode = self.app.app_state_ui.selected_tracker_mode
-        if current_mode == TrackerMode.OFFLINE_3_STAGE:
-            num_segmentation_main_steps = 3
-            if actual_main_step_tuple_for_queue[1] > 0:
-                original_current, original_total, name = actual_main_step_tuple_for_queue
-                # REFACTORED for readability and maintainability
-                if original_total > 0:
-                    scaled_current = min(num_segmentation_main_steps, int(
-                        (original_current / original_total) * num_segmentation_main_steps))
-                else:
-                    scaled_current = original_current
-                actual_main_step_tuple_for_queue = (scaled_current, num_segmentation_main_steps, name)
-        self.gui_event_queue.put(("stage2_dual_progress", actual_main_step_tuple_for_queue, actual_sub_step_tuple_for_queue))
+        if not isinstance(sub_info_from_module, (dict, tuple)):
+            self.logger.warning(f"Malformed sub_info in S2 callback: {sub_info_from_module}")
+            sub_info_from_module = (0, 1, "Invalid Sub Step")
+
+        # Directly put the validated/corrected data onto the queue.
+        self.gui_event_queue.put(("stage2_dual_progress", main_info_from_module, sub_info_from_module))
 
     def _stage3_progress_callback(self, current_chapter_idx: int, total_chapters: int, chapter_name: str, current_chunk_idx: int, total_chunks: int, total_frames_processed_overall, total_frames_to_process_overall, processing_fps = 0.0, time_elapsed = 0.0, eta_seconds = 0.0):
         # REFACTORED for readability and maintainability
@@ -373,53 +356,44 @@ class AppStageProcessor:
         self.override_consumers = override_consumers
 
         selected_mode = self.app.app_state_ui.selected_tracker_mode
-
         range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
 
-        # Determine the target msgpack path using the centralized file manager
+        # --- MODIFIED LOGIC TO CHECK FOR BOTH FILES ---
         full_msgpack_path = fm.get_output_path_for_file(fm.video_path, ".msgpack")
+        preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
 
-        # If the file manager fails to return a path (e.g., in a stateless batch context),
-        # construct a default path manually.
-        if not full_msgpack_path:
-            self.logger.warning(
-                "get_output_path_for_file returned None. Manually constructing a fallback path for msgpack.")
-            # Get the base output folder from settings.
-            base_output_dir = self.app.app_settings.get("output_folder_path", constants.DEFAULT_OUTPUT_FOLDER)
+        # Stage 1 can be skipped only if BOTH the msgpack and preprocessed video exist.
+        full_run_artifacts_exist = os.path.exists(full_msgpack_path) and os.path.exists(preprocessed_video_path)
 
-            # Create a subdirectory for the video to keep files organized.
-            video_filename_no_ext = os.path.splitext(os.path.basename(fm.video_path))[0]
-            video_specific_output_dir = os.path.join(base_output_dir, video_filename_no_ext)
-
-            # Create the directory if it doesn't exist.
-            os.makedirs(video_specific_output_dir, exist_ok=True)
-
-            # Construct the full path for the msgpack file.
-            full_msgpack_path = os.path.join(video_specific_output_dir, video_filename_no_ext + ".msgpack")
-            self.logger.info(f"Fallback msgpack path set to: {full_msgpack_path}")
-
-        full_msgpack_exists = os.path.exists(full_msgpack_path)
-
-        # Use the override if it exists, otherwise check for active scripting range
         if self.frame_range_override:
             start_f_name, end_f_name = self.frame_range_override
             range_specific_path = fm.get_output_path_for_file(fm.video_path, f"_range_{start_f_name}-{end_f_name}.msgpack")
             fm.stage1_output_msgpack_path = range_specific_path
-            # For autotuner, we always want to rerun
-            should_run_s1 = True
+            should_run_s1 = True # Always rerun for autotuner
+            self.logger.info("Autotuner mode: Forcing Stage 1 run for performance testing.")
         elif range_is_active:
-            if full_msgpack_exists and not self.force_rerun_stage1:
-                fm.stage1_output_msgpack_path = full_msgpack_path
-                should_run_s1 = False
-            else:
-                start_f_name = range_start_frame if range_start_frame is not None else 0
-                end_f_name = range_end_frame if range_end_frame is not None else 'end'
-                range_specific_path = fm.get_output_path_for_file(fm.video_path, f"_range_{start_f_name}-{end_f_name}.msgpack")
-                fm.stage1_output_msgpack_path = range_specific_path
-                should_run_s1 = self.force_rerun_stage1 or not os.path.exists(range_specific_path)
-        else:
+            # Ranged analysis is more complex and usually for specific reprocessing,
+            # so we assume it relies on the full preprocessed/msgpack files.
             fm.stage1_output_msgpack_path = full_msgpack_path
-            should_run_s1 = self.force_rerun_stage1 or not full_msgpack_exists
+            if not full_run_artifacts_exist:
+                should_run_s1 = True
+                self.logger.info("Ranged analysis requested, but full Stage 1 artifacts are missing. Running Stage 1.")
+            else:
+                should_run_s1 = self.force_rerun_stage1
+                if should_run_s1:
+                    self.logger.info("Ranged analysis with force rerun: Running Stage 1.")
+                else:
+                    self.logger.info("Ranged analysis: Using existing full Stage 1 artifacts.")
+        else: # Full analysis
+            fm.stage1_output_msgpack_path = full_msgpack_path
+            should_run_s1 = self.force_rerun_stage1 or not full_run_artifacts_exist
+            if not should_run_s1:
+                self.logger.info("All necessary Stage 1 artifacts exist. Skipping Stage 1 run.")
+            elif self.force_rerun_stage1:
+                self.logger.info("Forcing Stage 1 re-run as requested.")
+            else:
+                self.logger.info("One or more Stage 1 artifacts missing. Running Stage 1.")
+
 
         if not should_run_s1:
             self.stage1_status_text = f"Using existing: {os.path.basename(fm.stage1_output_msgpack_path or '')}"
@@ -443,16 +417,9 @@ class AppStageProcessor:
         fs_proc = self.app.funscript_processor
         stage1_success = False
 
-        if self.app.is_batch_processing_active:
-            # Batch processing uses an index, so we map it back to our enum key
-            batch_mode_map = {
-                #0: TrackerMode.LIVE_YOLO_ROI, 1: TrackerMode.LIVE_USER_ROI,
-                1: TrackerMode.OFFLINE_2_STAGE, 0: TrackerMode.OFFLINE_3_STAGE
-            }
-            selected_mode = batch_mode_map.get(self.app.batch_processing_method_idx, TrackerMode.OFFLINE_2_STAGE)
-            self.logger.info(f"[Thread] Using batch processing mode: {selected_mode.name}")
-        else:
-            selected_mode = self.app.app_state_ui.selected_tracker_mode
+        # Always use the tracker mode from the UI state, which is the single source of truth.
+        selected_mode = self.app.app_state_ui.selected_tracker_mode
+        self.logger.info(f"[Thread] Using processing mode: {selected_mode.name}")
 
         try:
             # --- Stage 1 ---
@@ -464,16 +431,19 @@ class AppStageProcessor:
                 ((range_start_frame, range_end_frame) if range_is_active else None)
 
             target_s1_path = fm.stage1_output_msgpack_path
+            preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+
 
             # Determine if this is an autotuner run
             is_autotune_context = self.frame_range_override is not None
 
-            is_s1_data_source_ranged = (frame_range_for_s1 is not None) and target_s1_path and "_range_" in os.path.basename(target_s1_path)
-            should_skip_stage1 = not self.force_rerun_stage1 and target_s1_path and os.path.exists(target_s1_path)
+            should_skip_stage1 = (not self.force_rerun_stage1
+                                  and target_s1_path and os.path.exists(target_s1_path)
+                                  and preprocessed_video_path and os.path.exists(preprocessed_video_path))
 
             if should_skip_stage1 and not self.frame_range_override:  # Never skip for autotuner
                 stage1_success = True
-                self.logger.info(f"[Thread] Stage 1 skipped, using: {target_s1_path}")
+                self.logger.info(f"[Thread] Stage 1 skipped, using existing artifacts.")
                 self.gui_event_queue.put(("stage1_completed", "00:00:00 (Cached)", "Cached"))
             else:
                 stage1_results = self._execute_stage1_logic(
@@ -516,6 +486,7 @@ class AppStageProcessor:
                     self.logger.error(f"Error determining S2 overlay path: {e}")
 
             generate_s2_funscript_actions = selected_mode == TrackerMode.OFFLINE_2_STAGE
+            is_s1_data_source_ranged = (frame_range_for_s1 is not None)
 
             s2_start_time = time.time()
             stage2_run_results = self._execute_stage2_logic(
@@ -607,7 +578,7 @@ class AppStageProcessor:
                                     return float(obj)
                                 elif isinstance(obj, np.ndarray):
                                     return obj.tolist()
-                                raise TypeError(f"Object of type {obj.__class__.__name__} is not serializable for msgpack")
+                                raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable for msgpack")
 
                             if all_frames_data is not None:
                                 packed_data = msgpack.packb(all_frames_data, use_bin_type=True, default=numpy_default_handler)
@@ -695,9 +666,12 @@ class AppStageProcessor:
                 self.gui_event_queue.put(("stage1_status_update", "Error - S1 Module not loaded.", "Error"))
                 return {"success": False, "max_fps": 0.0}
 
-            preprocessed_video_path = None
-            if self.save_preprocessed_video:
-                preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+            #preprocessed_video_path = None
+            #if self.save_preprocessed_video:
+            #    preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+
+            # Preprocessed video is now mandatory for pipeline reliability.
+            preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
 
             num_producers = num_producers_override if num_producers_override is not None else self.num_producers_stage1
             num_consumers = num_consumers_override if num_consumers_override is not None else self.num_consumers_stage1
@@ -722,7 +696,8 @@ class AppStageProcessor:
                 gui_event_queue_arg=self.gui_event_queue,
                 frame_range_arg=frame_range,
                 output_filename_override=output_path,
-                save_preprocessed_video_arg=self.save_preprocessed_video,
+                #save_preprocessed_video_arg=self.save_preprocessed_video,
+                save_preprocessed_video_arg=True,  # This is now always true
                 preprocessed_video_path_arg=preprocessed_video_path,
                 is_autotune_run_arg=is_autotune_run
             )
@@ -765,11 +740,23 @@ class AppStageProcessor:
                 self.gui_event_queue.put(("stage2_status_update", msg, "Error"))
                 return {"success": False, "error": msg}
 
+            # Stage 2 OF recovery requires the preprocessed video from Stage 1.
+            preprocessed_video_path_for_s2 = None
+            if self.app.file_manager.preprocessed_video_path and os.path.exists(self.app.file_manager.preprocessed_video_path):
+                preprocessed_video_path_for_s2 = self.app.file_manager.preprocessed_video_path
+            else:
+                # Fallback: try to guess the path if the direct reference is missing.
+                preprocessed_video_path_for_s2 = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+                if not os.path.exists(preprocessed_video_path_for_s2):
+                    self.logger.warning("Optical flow recovery may fail: Preprocessed video from Stage 1 not found.")
+                    preprocessed_video_path_for_s2 = None
+
             range_is_active, range_start_frame, range_end_frame = self.app.funscript_processor.get_effective_scripting_range()
 
             stage2_results = stage2_module.perform_contact_analysis(
                 video_path_arg=fm.video_path,
                 msgpack_file_path_arg=fm.stage1_output_msgpack_path,
+                preprocessed_video_path_arg=preprocessed_video_path_for_s2,
                 progress_callback=self._stage2_progress_callback,
                 stop_event=self.stop_stage_event,
                 ml_model_dir_path_arg=self.app.pose_model_artifacts_dir,
@@ -1021,10 +1008,32 @@ class AppStageProcessor:
                         main_current, total_main, main_name = main_step_info
                         self.stage2_main_progress_value = float(main_current) / total_main if total_main > 0 else 0.0
                         self.stage2_main_progress_label = f"{main_name} ({int(main_current)}/{int(total_main)})"
-                    if isinstance(sub_step_info, tuple) and len(sub_step_info) == 3:
+
+                    # --- Handle both tuple (for simple steps) and dict (for complex steps) ---
+                    if isinstance(sub_step_info, dict):
+                        # This is our new, detailed progress payload
+                        sub_current = sub_step_info.get("current", 0)
+                        sub_total = sub_step_info.get("total", 0)
+                        self.stage2_sub_progress_value = float(sub_current) / sub_total if sub_total > 0 else 0.0
+                        self.stage2_sub_progress_label = f"{sub_step_info.get('message', '')} ({sub_current}/{sub_total})"
+
+                        t_el = sub_step_info.get("time_elapsed", 0.0)
+                        fps = sub_step_info.get("fps", 0.0)
+                        eta = sub_step_info.get("eta", 0.0)
+
+                        self.stage2_sub_time_elapsed_str = f"{int(t_el // 3600):02d}:{int((t_el % 3600) // 60):02d}:{int(t_el % 60):02d}"
+                        self.stage2_sub_processing_fps_str = f"{int(fps)} FPS"
+                        if math.isnan(eta) or math.isinf(eta) or eta <= 0:
+                            self.stage2_sub_eta_str = "N/A"
+                        else:
+                            self.stage2_sub_eta_str = f"{int(eta // 3600):02d}:{int((eta % 3600) // 60):02d}:{int(eta % 60):02d}"
+
+                    elif isinstance(sub_step_info, tuple) and len(sub_step_info) == 3:
+                        # Fallback for simple steps that don't provide timing info
                         sub_current, sub_total, sub_name = sub_step_info
                         self.stage2_sub_progress_value = float(sub_current) / sub_total if sub_total > 0 else 0.0
                         self.stage2_sub_progress_label = f"{sub_name} ({int(sub_current)}/{int(sub_total)})"
+                        self.stage2_sub_time_elapsed_str, self.stage2_sub_processing_fps_str, self.stage2_sub_eta_str = "", "", ""
                 elif event_type == "stage2_status_update":
                     self.stage2_status_text = str(data1)
                     if data2 is not None:
@@ -1166,9 +1175,10 @@ class AppStageProcessor:
 
                             self.app.file_manager.save_raw_funscripts_after_generation(video_path_from_event)
                             post_processing_enabled = self.app.app_settings.get("enable_auto_post_processing", False)
+                            # In batch mode, we disable post-processing to ensure raw scripts are saved reliably.
                             if self.app.is_batch_processing_active:
-                                # If in batch mode, use the choice made in the batch dialog
-                                post_processing_enabled = self.app.batch_apply_post_processing
+                                self.logger.info("Batch processing active. Skipping auto post-processing.")
+                                post_processing_enabled = False
 
                             chapters_for_save = segments_from_event
 
@@ -1179,6 +1189,14 @@ class AppStageProcessor:
                                 chapters_for_save = self.app.funscript_processor.video_chapters
                             else:
                                 self.logger.info("Auto post-processing disabled for this run, skipping.")
+
+                            if self.app.is_batch_processing_active and self.app.batch_apply_ultimate_autotune:
+                                self.logger.info("Triggering Ultimate Autotune for batch processing.")
+                                if hasattr(self.app, 'trigger_ultimate_autotune_with_defaults'):
+                                    self.app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+                                # After autotune, the funscript_processor's chapter list is still the most current.
+                                chapters_for_save = self.app.funscript_processor.video_chapters
+
 
                             self.logger.info("Saving final funscripts...")
 
