@@ -163,14 +163,23 @@ class DualAxisFunscript:
         self.add_action(timestamp_ms, 100, 50, is_from_live_tracker=True)
 
     def get_value(self, time_ms: int, axis: str = 'primary') -> int:
-        actions_to_search = self.primary_actions if axis == 'primary' else self.secondary_actions
-        if not actions_to_search:
-            return 50
+        """
+        [MODIFIED] Now thread-safe. Creates a local copy of the actions list
+        to prevent race conditions during list clearing from other threads.
+        """
+        # Create a local, thread-safe copy of the actions list.
+        actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+        actions_to_search = list(actions_list_ref) # A shallow copy is sufficient and fast.
 
-        # Use the cached timestamps for performance
-        action_timestamps = self._get_timestamps_for_axis(axis)
+        if not actions_to_search:
+            return 50 # Default neutral position
+
+        # All subsequent logic operates on the consistent 'actions_to_search' copy.
+        # It's safer to derive timestamps directly from this copy rather than using the cache.
+        action_timestamps = [a["at"] for a in actions_to_search]
         idx = bisect.bisect_left(action_timestamps, time_ms)
 
+        # The rest of the logic is safe because 'actions_to_search' will not change.
         if idx == 0:
             return actions_to_search[0]["pos"]
         if idx == len(actions_to_search):
