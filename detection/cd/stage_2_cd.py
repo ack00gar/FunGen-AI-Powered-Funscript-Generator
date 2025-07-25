@@ -2572,7 +2572,10 @@ def atr_pass_1c_recover_lost_tracks_with_of(
         return
 
     # --- Parallel Processing Setup ---
-    num_workers = max(1, psutil.cpu_count(logical=False) - 2)
+    # --- Limit the number of OF Long Gap Recovery workers to a quarter of the CPU count, minimum 1, maximum 4
+    # TODO: Will need to benchmark this part
+    num_workers = min(4, max(1, (psutil.cpu_count(logical=False) - 2) // 4))
+    # num_workers = max(1, (psutil.cpu_count(logical=False) - 2) // 4)
     logger.info(f"Distributing {len(gaps_to_recover)} recovery gaps to {num_workers} worker processes.")
 
     worker_args = [{
