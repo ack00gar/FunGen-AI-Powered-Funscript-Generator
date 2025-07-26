@@ -28,7 +28,7 @@ class AutotunerWindow:
                 is_running = self.app.is_autotuning_active
 
                 if not is_ready:
-                    imgui.text_colored("Please load a video first.", 1.0, 0.5, 0.5, 1.0)
+                    imgui.text_colored("Please load a video first.", 1.0, 0.5, 0.5, 1.0) # TODO: move to theme, red
 
                 # --- UI for selecting test mode ---
                 hwaccel_options = ["Default (Test CPU + Best GPU)"] + self.app.available_ffmpeg_hwaccels
@@ -67,7 +67,7 @@ class AutotunerWindow:
                 # --- Status & Progress ---
                 imgui.text("Status:")
                 imgui.same_line()
-                imgui.text_colored(self.app.autotuner_status_message, 0.2, 0.8, 1.0, 1.0)
+                imgui.text_colored(self.app.autotuner_status_message, 0.2, 0.8, 1.0, 1.0) # TODO: move to theme, blue
 
                 if is_running:
                     stage_proc = self.app.stage_processor
@@ -97,7 +97,7 @@ class AutotunerWindow:
                         # If this is the best row, push a new text color
                         if is_best:
                             # Push a bright green color for the text
-                            imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 1.0, 0.4, 1.0)
+                            imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 1.0, 0.4, 1.0) # TODO: move to theme, green
 
                         imgui.table_set_column_index(0)
                         imgui.text(accel)

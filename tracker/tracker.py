@@ -2,7 +2,6 @@ import cv2
 from collections import Counter
 import numpy as np
 import time
-import platform
 from typing import List, Dict, Tuple, Optional, Any
 from ultralytics import YOLO
 import logging
@@ -10,6 +9,8 @@ import os
 
 from funscript.dual_axis_funscript import DualAxisFunscript
 from config import constants
+from config.constants_colors import RGBColors
+from config.element_group_colors import AppGUIColors
 
 
 class ROITracker:
@@ -90,12 +91,9 @@ class ROITracker:
         self.output_delay_frames: int = self.app.tracker.output_delay_frames if self.app and hasattr(self.app, 'tracker') else 0
         self.current_video_fps_for_delay: float = self.app.tracker.current_video_fps_for_delay if self.app and hasattr(self.app, 'tracker') else 30.0
         # Sensitivity and offsets should also be settable or taken from defaults if no app
-        self.y_offset = self.app.tracker.y_offset if self.app and hasattr(self.app,
-                                                                          'tracker') else constants.DEFAULT_LIVE_TRACKER_Y_OFFSET
-        self.x_offset = self.app.tracker.x_offset if self.app and hasattr(self.app,
-                                                                          'tracker') else constants.DEFAULT_LIVE_TRACKER_X_OFFSET
-        self.sensitivity = self.app.tracker.sensitivity if self.app and hasattr(self.app,
-                                                                                'tracker') else constants.DEFAULT_LIVE_TRACKER_SENSITIVITY
+        self.y_offset = self.app.tracker.y_offset if self.app and hasattr(self.app, 'tracker') else constants.DEFAULT_LIVE_TRACKER_Y_OFFSET
+        self.x_offset = self.app.tracker.x_offset if self.app and hasattr(self.app, 'tracker') else constants.DEFAULT_LIVE_TRACKER_X_OFFSET
+        self.sensitivity = self.app.tracker.sensitivity if self.app and hasattr(self.app, 'tracker') else constants.DEFAULT_LIVE_TRACKER_SENSITIVITY
 
         self.dis_flow_preset = dis_flow_preset
         self.dis_finest_scale = dis_finest_scale
@@ -136,10 +134,7 @@ class ROITracker:
         self.prev_features_main_roi: Optional[np.ndarray] = None
         self.main_interaction_class: Optional[str] = None
         self.CLASS_PRIORITY = {"pussy": 0, "anus": 0, "butt": 1, "face": 2, "hand": 3, "breast": 4, "foot": 5}
-        self.CLASS_COLORS = {
-            "pussy": (255, 0, 255), "anus": (255, 0, 255), "butt": (255, 165, 0), "face": (0, 255, 255),
-            "hand": (0, 0, 255), "breast": (255, 192, 203), "foot": (139, 69, 19), "penis": (0, 255, 0)
-        }
+        # CLASS_COLORS is now imported from constants_colors.py
         self.INTERACTION_CLASSES = ["pussy", "anus", "butt", "face", "hand", "breast", "foot"]
         self.class_history: List[Optional[str]] = []
         self.class_stability_window: int = 10
@@ -230,7 +225,7 @@ class ROITracker:
         """
         # 1. Handle edge cases
         if self.flow_dense is None or prev_patch_gray is None or prev_patch_gray.shape != patch_gray.shape:
-            return 0.0, 0.0, 0.0, 0.0, None
+            return AppGUIColors.TRANSPARENT, None
 
         prev_patch_cont = np.ascontiguousarray(prev_patch_gray)
         patch_cont = np.ascontiguousarray(patch_gray)
@@ -238,7 +233,7 @@ class ROITracker:
         # 2. Calculate optical flow for the entire patch once
         flow = self.flow_dense.calc(prev_patch_cont, patch_cont, None)
         if flow is None:
-            return 0.0, 0.0, 0.0, 0.0, None
+            return AppGUIColors.TRANSPARENT, None
 
         h, w, _ = flow.shape
         # is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
@@ -323,7 +318,7 @@ class ROITracker:
         """
         # 1. Handle edge cases
         if self.flow_dense is None or prev_patch_gray is None or prev_patch_gray.shape != patch_gray.shape:
-            return 0.0, 0.0, 0.0, 0.0, None
+            return AppGUIColors.TRANSPARENT, None
 
         prev_patch_cont = np.ascontiguousarray(prev_patch_gray)
         patch_cont = np.ascontiguousarray(patch_gray)
@@ -331,7 +326,7 @@ class ROITracker:
         # 2. Calculate optical flow for the entire patch once
         flow = self.flow_dense.calc(prev_patch_cont, patch_cont, None)
         if flow is None:
-            return 0.0, 0.0, 0.0, 0.0, None
+            return AppGUIColors.TRANSPARENT, None
 
         h, w, _ = flow.shape
         # is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
@@ -538,7 +533,7 @@ class ROITracker:
         delta_w, delta_h = target_w - new_w, target_h - new_h
         top, bottom = delta_h // 2, delta_h - (delta_h // 2)
         left, right = delta_w // 2, delta_w - (delta_w // 2)
-        return cv2.copyMakeBorder(frame_resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+        return cv2.copyMakeBorder(frame_resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=RGBColors.BLACK)
 
     def detect_objects(self, frame: np.ndarray) -> List[Dict]:
         detections = []
@@ -557,10 +552,7 @@ class ROITracker:
                 if class_name in discarded_classes_runtime: # Use runtime list
                     continue
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                detections.append({
-                    "box": (x1, y1, x2 - x1, y2 - y1),
-                    "class_id": class_id, "class_name": class_name, "confidence": conf
-                })
+                detections.append({"box": (x1, y1, x2 - x1, y2 - y1), "class_id": class_id, "class_name": class_name, "confidence": conf})
         return detections
 
     def _update_penis_tracking(self, penis_box_xywh: Tuple[int, int, int, int]):
@@ -570,8 +562,7 @@ class ROITracker:
         if len(self.penis_max_size_history) > self.penis_size_history_window:
             self.penis_max_size_history.pop(0)
 
-    def _find_interacting_objects(self, penis_box_xywh: Tuple[int, int, int, int],
-                                  all_detections: List[Dict]) -> List[Dict]:
+    def _find_interacting_objects(self, penis_box_xywh: Tuple[int, int, int, int], all_detections: List[Dict]) -> List[Dict]:
         if not penis_box_xywh or not all_detections: return []
         px, py, pw, ph = penis_box_xywh
         pcx, pcy = px + pw // 2, py + ph // 2
@@ -612,14 +603,12 @@ class ROITracker:
             self.main_interaction_class = None
         self.current_effective_amp_factor = self._get_effective_amplification_factor()
 
-    def _calculate_combined_roi(self, frame_shape: Tuple[int, int], penis_box_xywh: Tuple[int, int, int, int],
-                                interacting_objects: List[Dict]) -> Tuple[int, int, int, int]:
+    def _calculate_combined_roi(self, frame_shape: Tuple[int, int], penis_box_xywh: Tuple[int, int, int, int], interacting_objects: List[Dict]) -> Tuple[int, int, int, int]:
         entities = [penis_box_xywh] + [obj["box"] for obj in interacting_objects]
         min_x, min_y = min(e[0] for e in entities), min(e[1] for e in entities)
         max_x_coord, max_y_coord = max(e[0] + e[2] for e in entities), max(e[1] + e[3] for e in entities)
         rx1, ry1 = max(0, min_x - self.roi_padding), max(0, min_y - self.roi_padding)
-        rx2, ry2 = min(frame_shape[1], max_x_coord + self.roi_padding), min(frame_shape[0],
-                                                                            max_y_coord + self.roi_padding)
+        rx2, ry2 = min(frame_shape[1], max_x_coord + self.roi_padding), min(frame_shape[0], max_y_coord + self.roi_padding)
         rw, rh = rx2 - rx1, ry2 - ry1
         min_w, min_h = 128, 128
         if rw < min_w:
@@ -680,8 +669,7 @@ class ROITracker:
             self.logger.error(f"An unexpected error occurred while updating DIS flow config: {e}")
             self.flow_dense = None
 
-    def _calculate_flow_in_patch(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray],
-                                 use_sparse: bool = False, prev_features_for_sparse: Optional[np.ndarray] = None) \
+    def _calculate_flow_in_patch(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray], use_sparse: bool = False, prev_features_for_sparse: Optional[np.ndarray] = None) \
             -> Tuple[float, float, Optional[np.ndarray], Optional[np.ndarray]]:
         dx, dy = 0.0, 0.0
         flow_vis = None
@@ -695,8 +683,7 @@ class ROITracker:
 
         if use_sparse and self.feature_params:
             if prev_features_for_sparse is not None and len(prev_features_for_sparse) > 0:
-                next_feat, status, _ = cv2.calcOpticalFlowPyrLK(prev_cont, curr_cont, prev_features_for_sparse, None,
-                                                                **self.lk_params)
+                next_feat, status, _ = cv2.calcOpticalFlowPyrLK(prev_cont, curr_cont, prev_features_for_sparse, None, **self.lk_params)
                 good_prev = prev_features_for_sparse[status == 1]
                 good_next = next_feat[status == 1] if next_feat is not None else np.array([]) # Ensure good_next is an array
 
@@ -704,19 +691,16 @@ class ROITracker:
                     dx, dy = np.median(good_next[:, 0] - good_prev[:, 0]), np.median(good_next[:, 1] - good_prev[:, 1])
                     updated_sparse = good_next.reshape(-1, 1, 2)
                 else:
-                    updated_sparse = cv2.goodFeaturesToTrack(curr_cont, mask=None,
-                                                             **self.feature_params) if curr_cont.size > 0 else None
+                    updated_sparse = cv2.goodFeaturesToTrack(curr_cont, mask=None, **self.feature_params) if curr_cont.size > 0 else None
             else:
-                updated_sparse = cv2.goodFeaturesToTrack(curr_cont, mask=None,
-                                                         **self.feature_params) if curr_cont.size > 0 else None
+                updated_sparse = cv2.goodFeaturesToTrack(curr_cont, mask=None, **self.feature_params) if curr_cont.size > 0 else None
         elif self.flow_dense:
             flow = self.flow_dense.calc(prev_cont, curr_cont, None)
             if flow is not None:
                 dx, dy, flow_vis = np.median(flow[..., 0]), np.median(flow[..., 1]), flow
         return dx, dy, flow_vis, updated_sparse
 
-    def _apply_adaptive_scaling(self, value: float, min_val_attr: str, max_val_attr: str, size_factor: float,
-                                is_primary: bool) -> int:
+    def _apply_adaptive_scaling(self, value: float, min_val_attr: str, max_val_attr: str, size_factor: float, is_primary: bool) -> int:
         min_h, max_h = getattr(self, min_val_attr), getattr(self, max_val_attr)
         setattr(self, min_val_attr, min(min_h * 0.995, value * 0.9 if value < -0.1 else value * 1.1))
         setattr(self, max_val_attr, max(max_h * 0.995, value * 1.1 if value > 0.1 else value * 0.9))
@@ -750,13 +734,10 @@ class ROITracker:
         if self.use_sparse_flow:
             dx_raw, dy_raw, _, updated_sparse_features_out = self._calculate_flow_in_patch(
                 current_roi_patch_gray, prev_roi_patch_gray, use_sparse=True,
-                prev_features_for_sparse=prev_sparse_features
-            )
+                prev_features_for_sparse=prev_sparse_features)
         else:
             # Use our sub-region analysis method for dense flow
-            dy_raw, dx_raw, lower_mag, upper_mag, flow_field_for_vis = self._calculate_flow_in_sub_regions(
-                current_roi_patch_gray, prev_roi_patch_gray
-            )
+            dy_raw, dx_raw, lower_mag, upper_mag, flow_field_for_vis = self._calculate_flow_in_sub_regions(current_roi_patch_gray, prev_roi_patch_gray)
 
         # is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
         is_vr_video = self._is_vr_video()
@@ -798,10 +779,8 @@ class ROITracker:
         # Calculate the base positions before potential inversion
         size_factor = self.get_current_penis_size_factor()
         if self.adaptive_flow_scale:
-            base_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
-                                                            "flow_max_primary_adaptive", size_factor, True)
-            secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive",
-                                                         "flow_max_secondary_adaptive", size_factor, False)
+            base_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive", "flow_max_primary_adaptive", size_factor, True)
+            secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive", "flow_max_secondary_adaptive", size_factor, False)
         else:
             effective_amp_factor = self._get_effective_amplification_factor()
             manual_scale_multiplier = (self.sensitivity / 10.0) * (1.0 / size_factor) * effective_amp_factor
@@ -825,20 +804,18 @@ class ROITracker:
                                 hsv[..., 0] = ang * 180 / np.pi / 2
                                 hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
                                 vis = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-                                processed_frame_draw_target[ry:ry + rh, rx:rx + rw] = cv2.addWeighted(roi_display_patch,
-                                                                                                      0.5, vis.astype(
-                                        roi_display_patch.dtype), 0.5, 0)
+                                processed_frame_draw_target[ry:ry + rh, rx:rx + rw] = cv2.addWeighted(roi_display_patch, 0.5, vis.astype( roi_display_patch.dtype), 0.5, 0)
                         except cv2.error as e:
                             self.logger.error(f"Flow vis error: {e}")
                     if self.use_sparse_flow and updated_sparse_features_out is not None and self.show_tracking_points:
                         for pt in updated_sparse_features_out:
                             x, y = pt.ravel()
                             if 0 <= x < rw and 0 <= y < rh:
-                                cv2.circle(roi_display_patch, (int(x), int(y)), 2, (0, 255, 255), -1)
+                                cv2.circle(roi_display_patch, (int(x), int(y)), 2, RGBColors.CYAN, -1)
                     cx, cy = rw // 2, rh // 2
                     arrow_end_x = np.clip(int(cx + dx_smooth * 5), 0, rw - 1)
                     arrow_end_y = np.clip(int(cy + dy_smooth * 5), 0, rh - 1)
-                    cv2.arrowedLine(roi_display_patch, (cx, cy), (arrow_end_x, arrow_end_y), (0, 0, 255), 1)
+                    cv2.arrowedLine(roi_display_patch, (cx, cy), (arrow_end_x, arrow_end_y), RGBColors.BLUE, 1)
 
         return primary_pos, secondary_pos, dy_smooth, dx_smooth, updated_sparse_features_out
 
@@ -855,12 +832,13 @@ class ROITracker:
         self.current_effective_amp_factor = self._get_effective_amplification_factor()
 
         if self.tracking_mode == "YOLO_ROI":
-            run_detection_this_frame = (self.internal_frame_counter % self.roi_update_interval == 0) or \
-                                       (self.roi is None) or \
-                                       (
-                                                   not self.penis_last_known_box and self.frames_since_target_lost < self.max_frames_for_roi_persistence and \
-                                                   self.internal_frame_counter % max(1,
-                                                                                     self.roi_update_interval // 3) == 0)
+            run_detection_this_frame = (
+                (self.internal_frame_counter % self.roi_update_interval == 0)
+                or (self.roi is None)
+                or (not self.penis_last_known_box
+                    and self.frames_since_target_lost < self.max_frames_for_roi_persistence
+                    and self.internal_frame_counter % max(1, self.roi_update_interval // 3) == 0)
+            )
 
             self.stats_display = [
                 f"T-FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
@@ -877,15 +855,13 @@ class ROITracker:
                 if penis_boxes:
                     self.frames_since_target_lost = 0
                     self._update_penis_tracking(penis_boxes[0])
-                    interacting_objs = self._find_interacting_objects(self.penis_last_known_box,
-                                                                      detected_objects_this_frame)
+                    interacting_objs = self._find_interacting_objects(self.penis_last_known_box, detected_objects_this_frame)
                     current_best_interaction_name = None
                     if interacting_objs:
                         interacting_objs.sort(key=lambda x: self.CLASS_PRIORITY.get(x["class_name"].lower(), 99))
                         current_best_interaction_name = interacting_objs[0]["class_name"].lower()
                     self.update_main_interaction_class(current_best_interaction_name)
-                    combined_roi_candidate = self._calculate_combined_roi(processed_frame.shape[:2],
-                                                                          self.penis_last_known_box, interacting_objs)
+                    combined_roi_candidate = self._calculate_combined_roi(processed_frame.shape[:2], self.penis_last_known_box, interacting_objs)
 
                     # Apply new VR-specific ROI width limits
                     if self._is_vr_video() and self.penis_last_known_box:
@@ -934,13 +910,11 @@ class ROITracker:
 
             if self.roi and self.tracking_active and self.roi[2] > 0 and self.roi[3] > 0:
                 rx, ry, rw, rh = self.roi
-                main_roi_patch_gray = current_frame_gray[ry:min(ry + rh, current_frame_gray.shape[0]),
-                                      rx:min(rx + rw, current_frame_gray.shape[1])]
+                main_roi_patch_gray = current_frame_gray[ry:min(ry + rh, current_frame_gray.shape[0]), rx:min(rx + rw, current_frame_gray.shape[1])]
                 if main_roi_patch_gray.size > 0:
                     # process_main_roi_content returns updated_sparse_features, which we store in self.prev_features_main_roi
                     final_primary_pos, final_secondary_pos, _, _, self.prev_features_main_roi = \
-                        self.process_main_roi_content(processed_frame, main_roi_patch_gray, self.prev_gray_main_roi,
-                                                      self.prev_features_main_roi)
+                        self.process_main_roi_content(processed_frame, main_roi_patch_gray, self.prev_gray_main_roi, self.prev_features_main_roi)
                     self.prev_gray_main_roi = main_roi_patch_gray.copy()
                 else:
                     self.prev_gray_main_roi = None
@@ -956,8 +930,7 @@ class ROITracker:
             if self.user_roi_fixed and self.tracking_active:
                 urx, ury, urw, urh = self.user_roi_fixed
                 urx_c, ury_c = max(0, urx), max(0, ury)
-                urw_c, urh_c = min(urw, current_frame_gray.shape[1] - urx_c), min(urh,
-                                                                                  current_frame_gray.shape[0] - ury_c)
+                urw_c, urh_c = min(urw, current_frame_gray.shape[1] - urx_c), min(urh, current_frame_gray.shape[0] - ury_c)
 
                 if urw_c > 0 and urh_c > 0:
                     current_user_roi_patch_gray = current_frame_gray[ury_c: ury_c + urh_c, urx_c: urx_c + urw_c]
@@ -965,8 +938,7 @@ class ROITracker:
 
                     if self.enable_user_roi_sub_tracking and self.prev_gray_user_roi_patch is not None and self.user_roi_tracked_point_relative and self.flow_dense:
                         if self.prev_gray_user_roi_patch.shape == current_user_roi_patch_gray.shape:
-                            flow = self.flow_dense.calc(np.ascontiguousarray(self.prev_gray_user_roi_patch),
-                                                        np.ascontiguousarray(current_user_roi_patch_gray), None)
+                            flow = self.flow_dense.calc(np.ascontiguousarray(self.prev_gray_user_roi_patch), np.ascontiguousarray(current_user_roi_patch_gray), None)
 
                             if flow is not None:
                                 track_w, track_h = self.user_roi_tracking_box_size
@@ -1000,12 +972,8 @@ class ROITracker:
 
                         size_factor = self.get_current_penis_size_factor()
                         if self.adaptive_flow_scale:
-                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
-                                                                             "flow_max_primary_adaptive", size_factor,
-                                                                             True)
-                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive",
-                                                                               "flow_max_secondary_adaptive",
-                                                                               size_factor, False)
+                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive", "flow_max_primary_adaptive", size_factor, True)
+                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive", "flow_max_secondary_adaptive", size_factor, False)
                         else:
                             effective_amp_factor = self._get_effective_amplification_factor()
                             manual_scale_multiplier = (self.sensitivity / 10.0) * effective_amp_factor
@@ -1020,8 +988,7 @@ class ROITracker:
                             prev_x_rel, prev_y_rel = self.user_roi_tracked_point_relative
                             new_x_rel = prev_x_rel + dx_smooth
                             new_y_rel = prev_y_rel + dy_smooth
-                            self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))),
-                                                                    max(0.0, min(new_y_rel, float(urh_c))))
+                            self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))), max(0.0, min(new_y_rel, float(urh_c))))
                     else:
                         # Fallback to calculating flow on the whole User ROI without calling YOLO-specific methods.
                         dx_raw, dy_raw, _, _ = self._calculate_flow_in_patch(
@@ -1046,12 +1013,8 @@ class ROITracker:
                         # Apply scaling and generate final position
                         size_factor = 1.0  # No object detection in this mode
                         if self.adaptive_flow_scale:
-                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
-                                                                             "flow_max_primary_adaptive", size_factor,
-                                                                             True)
-                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive",
-                                                                               "flow_max_secondary_adaptive",
-                                                                               size_factor, False)
+                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive", "flow_max_primary_adaptive", size_factor, True)
+                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive", "flow_max_secondary_adaptive", size_factor, False)
                         else:
                             effective_amp_factor = self._get_effective_amplification_factor()
                             manual_scale_multiplier = (self.sensitivity / 10.0) * effective_amp_factor
@@ -1064,8 +1027,7 @@ class ROITracker:
                             prev_x_rel, prev_y_rel = self.user_roi_tracked_point_relative
                             new_x_rel = prev_x_rel + dx_smooth
                             new_y_rel = prev_y_rel + dy_smooth
-                            self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))),
-                                                                    max(0.0, min(new_y_rel, float(urh_c))))
+                            self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))), max(0.0, min(new_y_rel, float(urh_c))))
 
                     self.prev_gray_user_roi_patch = np.ascontiguousarray(current_user_roi_patch_gray)
 
@@ -1145,29 +1107,28 @@ class ROITracker:
             if not self.penis_last_known_box:
                 cv2.putText(processed_frame,
                             f"Lost: {self.frames_since_target_lost}/{self.max_frames_for_roi_persistence}",
-                            (rx, ry + rh + 10), cv2.FONT_HERSHEY_PLAIN, 0.6, (0, 0, 255), 1)
+                            (rx, ry + rh + 10), cv2.FONT_HERSHEY_PLAIN, 0.6, RGBColors.BLUE, 1)
 
         elif self.tracking_mode == "USER_FIXED_ROI" and self.show_roi and self.user_roi_fixed:
             urx, ury, urw, urh = self.user_roi_fixed
             urx_c, ury_c = max(0, urx), max(0, ury)
             urw_c, urh_c = min(urw, processed_frame.shape[1] - urx_c), min(urh, processed_frame.shape[0] - ury_c)
-            cv2.rectangle(processed_frame, (urx_c, ury_c), (urx_c + urw_c, ury_c + urh_c), (0, 255, 255), 2)
+            cv2.rectangle(processed_frame, (urx_c, ury_c), (urx_c + urw_c, ury_c + urh_c), RGBColors.CYAN, 2)
 
             if self.user_roi_tracked_point_relative:
                 point_x_abs = urx_c + int(self.user_roi_tracked_point_relative[0])
                 point_y_abs = ury_c + int(self.user_roi_tracked_point_relative[1])
-                cv2.circle(processed_frame, (point_x_abs, point_y_abs), 3, (0, 255, 0), -1)
+                cv2.circle(processed_frame, (point_x_abs, point_y_abs), 3, RGBColors.GREEN, -1)
 
         if self.show_stats:
             for i, stat_text in enumerate(self.stats_display):
-                cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 220, 220),
-                            1)
+                cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35, RGBColors.TEAL, 1)
 
         self.internal_frame_counter += 1
         return processed_frame, action_log_list if action_log_list else None
 
     def get_class_color(self, class_name: Optional[str]) -> Tuple[int, int, int]:
-        return self.CLASS_COLORS.get(class_name.lower() if class_name else "", (180, 180, 180))
+        return RGBColors.CLASS_COLORS.get(class_name.lower() if class_name else "", RGBColors.GREY_LIGHT)
 
     def draw_detections(self, frame: np.ndarray, detected_objects: List[Dict]):
         for obj in detected_objects:

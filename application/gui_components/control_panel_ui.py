@@ -3,6 +3,7 @@ import os
 from config import constants
 from config.constants import TrackerMode, SCENE_DETECTION_DEFAULT_THRESHOLD, AI_MODEL_EXTENSIONS_FILTER, AI_MODEL_TOOLTIP_EXTENSIONS
 import time
+from config.element_group_colors import ControlPanelColors, GeneralColors
 
 class ControlPanelUI:
     def __init__(self, app):
@@ -697,7 +698,7 @@ class ControlPanelUI:
                 display_key = "PRESS KEY..."
                 button_text = "Cancel"
 
-            imgui.text_colored(display_key, 0.2, 0.8, 1.0, 1.0)
+            imgui.text_colored(display_key, 0.2, 0.8, 1.0, 1.0) # TODO: move to theme, blue
             imgui.same_line()
 
             if imgui.button(f"{button_text}##record_btn_{action_name}"):
@@ -908,7 +909,7 @@ class ControlPanelUI:
         is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi or stage_proc.scene_detection_active
 
         if is_batch_mode:
-            imgui.text_ansi_colored("--- BATCH PROCESSING ACTIVE ---", 1.0, 0.7, 0.3)
+            imgui.text_ansi_colored("--- BATCH PROCESSING ACTIVE ---", 1.0, 0.7, 0.3) # TODO: move to theme, orange
             total_videos = len(self.app.batch_video_paths)
             current_idx = self.app.current_batch_video_index
             if 0 <= current_idx < total_videos:
@@ -964,8 +965,8 @@ class ControlPanelUI:
         is_analysis_running = stage_proc.full_analysis_active
         selected_mode = self.app.app_state_ui.selected_tracker_mode
 
-        active_progress_color = (0.2, 0.6, 1.0, 1.0) # Vibrant blue for active
-        completed_progress_color = (0.2, 0.7, 0.2, 1.0) # Vibrant green for completed
+        active_progress_color = ControlPanelColors.ACTIVE_PROGRESS # Vibrant blue for active
+        completed_progress_color = ControlPanelColors.COMPLETED_PROGRESS # Vibrant green for completed
 
         # Stage 1
         imgui.text("Stage 1: YOLO Object Detection")
@@ -981,13 +982,13 @@ class ControlPanelUI:
             frame_q_size = stage_proc.stage1_frame_queue_size
             frame_q_max = constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
-            suggestion_message, bar_color = "", (0.2, 0.8, 0.2)
+            suggestion_message, bar_color = "", (0.2, 0.8, 0.2) # TODO: move to theme, green
             if frame_q_fraction > 0.9:
-                bar_color, suggestion_message = (0.9, 0.3, 0.3), "Suggestion: Add consumer if resources allow"
+                bar_color, suggestion_message = (0.9, 0.3, 0.3), "Suggestion: Add consumer if resources allow" # TODO: move to theme, red
             elif frame_q_fraction > 0.2:
-                bar_color, suggestion_message = (1.0, 0.5, 0.0), "Balanced"
+                bar_color, suggestion_message = (1.0, 0.5, 0.0), "Balanced" # TODO: move to theme, yellow
             else:
-                bar_color, suggestion_message = (0.2, 0.8, 0.2), "Suggestion: Lessen consumers or add producer"
+                bar_color, suggestion_message = (0.2, 0.8, 0.2), "Suggestion: Lessen consumers or add producer" # TODO: move to theme, green
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *bar_color)
             imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
             imgui.pop_style_color()
@@ -1038,7 +1039,7 @@ class ControlPanelUI:
                 if stage_proc.stage2_sub_time_elapsed_str:
                     imgui.text(f"Time: {stage_proc.stage2_sub_time_elapsed_str} | ETA: {stage_proc.stage2_sub_eta_str} | Speed: {stage_proc.stage2_sub_processing_fps_str}")
 
-                sub_progress_color = (0.3, 0.7, 1.0, 1.0)
+                sub_progress_color = ControlPanelColors.SUB_PROGRESS
                 imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *sub_progress_color)
 
                 # Construct the overlay text with a percentage.
@@ -1216,7 +1217,7 @@ class ControlPanelUI:
             imgui.internal.pop_item_flag()
 
         if self.app.is_setting_user_roi_mode:
-            imgui.text_ansi_colored("Selection Active: Draw ROI then click point on video.", 1.0, 0.7, 0.2)
+            imgui.text_ansi_colored("Selection Active: Draw ROI then click point on video.", 1.0, 0.7, 0.2) # TODO: move to theme, orange
 
     def _render_interactive_refinement_controls(self):
         """Renders the interactive refinement toggle and status, visible only when relevant."""
@@ -1234,9 +1235,9 @@ class ControlPanelUI:
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
         if is_enabled:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.9, 0.3, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 1.0, 0.2, 0.2, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON, GeneralColors.RED_DARK)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, GeneralColors.RED_LIGHT)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, GeneralColors.RED)
             button_text = "Disable Refinement Mode"
         else:
             button_text = "Enable Refinement Mode"
@@ -1253,9 +1254,9 @@ class ControlPanelUI:
 
         if is_enabled:
             if self.app.stage_processor.refinement_analysis_active:
-                imgui.text_ansi_colored("Refining chapter...", 1.0, 0.7, 0.2)
+                imgui.text_ansi_colored("Refining chapter...", 1.0, 0.7, 0.2) # TODO: move to theme, orange
             else:
-                imgui.text_ansi_colored("Click a box in the video to start.", 0.2, 1.0, 0.2)
+                imgui.text_ansi_colored("Click a box in the video to start.", 0.2, 1.0, 0.2) # TODO: move to theme, green
 
         if refinement_disabled:
             if imgui.is_item_hovered():
@@ -1509,7 +1510,7 @@ class ControlPanelUI:
             imgui.internal.pop_item_flag()
 
     def _render_latency_calibration(self, calibration_mgr):
-        imgui.text_ansi_colored("--- LATENCY CALIBRATION MODE ---", 1.0, 0.7, 0.3)
+        imgui.text_ansi_colored("--- LATENCY CALIBRATION MODE ---", 1.0, 0.7, 0.3) # TODO: move to theme, orange
         if not calibration_mgr.calibration_reference_point_selected:
             imgui.text_wrapped("1. Start the live tracker for 10s of action then pause it.")
             imgui.text_wrapped("   Select a clear action point on Timeline 1.")

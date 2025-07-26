@@ -90,7 +90,7 @@ class MainMenu:
 
                 imgui.text_wrapped(
                     f"The Target (T{target_timeline_num}) appears to be delayed relative to the Reference (T{ref_timeline_num}) by:")
-                imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 0.0, 1.0)
+                imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 0.0, 1.0) # TODO: move to theme, yellow
                 imgui.text(f"  {offset_ms} milliseconds{frame_offset_str}")
                 imgui.pop_style_color()
 
@@ -537,7 +537,7 @@ class MainMenu:
                                  imgui.get_style().item_spacing[0] * 2
                 if padding_needed > 0:
                     imgui.same_line(cursor_x_after_menus + padding_needed)
-                imgui.text_colored(app_state.status_message, 0.9, 0.9, 0.3, 1.0)
+                imgui.text_colored(app_state.status_message, 0.9, 0.9, 0.3, 1.0) # TODO: move to theme, yellow
             elif app_state.status_message:
                 app_state.status_message = ""
 
