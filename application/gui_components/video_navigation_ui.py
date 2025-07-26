@@ -5,6 +5,8 @@ from typing import Optional
 from application.utils.time_format import _format_time
 from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS
 from application.utils.video_segment import VideoSegment
+from config.element_group_colors import VideoNavigationColors
+from config.constants_colors import CurrentTheme
 
 
 class VideoNavigationUI:
@@ -224,7 +226,7 @@ class VideoNavigationUI:
         bar_start_y = cursor_screen_pos[1]
         # bar_width is nav_content_width
 
-        bg_col = imgui.get_color_u32_rgba(0.1, 0.1, 0.12, 1.0)
+        bg_col = imgui.get_color_u32_rgba(*VideoNavigationColors.BACKGROUND)
         # Draw the background for the chapter bar using full bar_width
         draw_list.add_rect_filled(bar_start_x, bar_start_y, bar_start_x + bar_width, bar_start_y + bar_height, bg_col)
 
@@ -251,7 +253,7 @@ class VideoNavigationUI:
             if segment.user_roi_fixed:
                 icon_pos_x = seg_start_x + 3
                 icon_pos_y = bar_start_y + (bar_height - imgui.get_text_line_height()) / 2
-                icon_color = imgui.get_color_u32_rgba(1.0, 1.0, 0.2, 0.9)  # Bright Yellow
+                icon_color = imgui.get_color_u32_rgba(*VideoNavigationColors.ICON)  # Bright Yellow
                 # Using a simple character as an icon. A texture could be used for a nicer look.
                 draw_list.add_text(icon_pos_x, icon_pos_y, icon_color, "[R]")
 
@@ -259,7 +261,7 @@ class VideoNavigationUI:
             if not (isinstance(segment_color_tuple, (tuple, list)) and len(segment_color_tuple) in [3, 4]):
                 self.app.logger.warning(
                     f"Segment {segment.unique_id} ('{segment.class_name if hasattr(segment, 'class_name') else 'N/A'}') has invalid color {segment_color_tuple}, using default gray.")
-                segment_color_tuple = (0.5, 0.5, 0.5, 0.7)
+                segment_color_tuple = (*CurrentTheme.GRAY_MEDIUM[:3], 0.7)  # Using GRAY_MEDIUM with 0.7 alpha
             seg_color = imgui.get_color_u32_rgba(*segment_color_tuple)
 
             is_selected_for_scripting = (fs_proc.scripting_range_active
@@ -280,15 +282,15 @@ class VideoNavigationUI:
                 is_context_selected_secondary = True
 
             if is_selected_for_scripting:
-                scripting_border_col = imgui.get_color_u32_rgba(1.0, 1.0, 0.0, 0.6)
+                scripting_border_col = imgui.get_color_u32_rgba(*VideoNavigationColors.SCRIPTING_BORDER)
                 draw_list.add_rect(seg_start_x + 0.5, bar_start_y + 0.5, seg_start_x + seg_width - 0.5, bar_start_y + bar_height - 0.5, scripting_border_col, thickness=1.0, rounding=0.0)
 
             if is_context_selected_primary:
-                border_col_sel1 = imgui.get_color_u32_rgba(0.2, 1.0, 0.2, 0.95)
+                border_col_sel1 = imgui.get_color_u32_rgba(*VideoNavigationColors.SELECTION_PRIMARY)
                 draw_list.add_rect(seg_start_x - 1, bar_start_y - 1, seg_start_x + seg_width + 1, bar_start_y + bar_height + 1, border_col_sel1, thickness=2.0, rounding=1.0)
 
             if is_context_selected_secondary:
-                border_col_sel2 = imgui.get_color_u32_rgba(0.3, 0.5, 1.0, 0.95)
+                border_col_sel2 = imgui.get_color_u32_rgba(*VideoNavigationColors.SELECTION_SECONDARY)
                 draw_list.add_rect(seg_start_x - 2, bar_start_y - 2, seg_start_x + seg_width + 2, bar_start_y + bar_height + 2, border_col_sel2, thickness=1.5, rounding=1.0)
 
             text_to_draw = f"{segment.position_short_name}"
@@ -297,9 +299,9 @@ class VideoNavigationUI:
                 text_pos_x = seg_start_x + (seg_width - text_width) / 2
                 text_pos_y = bar_start_y + (bar_height - imgui.get_text_line_height()) / 2
                 valid_color_for_lum = segment_color_tuple if isinstance(segment_color_tuple, tuple) and len(
-                    segment_color_tuple) >= 3 else (0.5, 0.5, 0.5)
+                    segment_color_tuple) >= 3 else CurrentTheme.GRAY_MEDIUM[:3]  # Using GRAY_MEDIUM
                 lum = 0.2100 * valid_color_for_lum[0] + 0.587 * valid_color_for_lum[1] + 0.114 * valid_color_for_lum[2]
-                text_color = imgui.get_color_u32_rgba(0, 0, 0, 1) if lum > 0.6 else imgui.get_color_u32_rgba(1, 1, 1, 1)
+                text_color = imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_BLACK) if lum > 0.6 else imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_WHITE)
                 draw_list.add_text(text_pos_x, text_pos_y, text_color, text_to_draw)
 
             imgui.set_cursor_screen_pos((seg_start_x, bar_start_y))
@@ -354,7 +356,7 @@ class VideoNavigationUI:
             current_norm_pos = self.app.processor.current_frame_index / total_video_frames
             # marker_x = bar_start_x + current_norm_pos * bar_width
             marker_x = effective_marker_area_start_x + current_norm_pos * effective_marker_area_width
-            marker_col = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.7)
+            marker_col = imgui.get_color_u32_rgba(*VideoNavigationColors.MARKER)
             draw_list.add_line(marker_x, bar_start_y, marker_x, bar_start_y + bar_height, marker_col, thickness=2.0)
 
         io = imgui.get_io()
@@ -1023,7 +1025,7 @@ class ChapterListWindow:
                     cursor_pos = imgui.get_cursor_screen_pos()
                     swatch_start = (cursor_pos[0] + 2, cursor_pos[1] + 2)
                     swatch_end = (cursor_pos[0] + imgui.get_column_width() - 2, swatch_start[1] + 16)
-                    color_tuple = chapter.color if isinstance(chapter.color, (tuple, list)) else (0.5, 0.5, 0.5, 0.7)
+                    color_tuple = chapter.color if isinstance(chapter.color, (tuple, list)) else (*CurrentTheme.GRAY_MEDIUM[:3], 0.7)  # Using GRAY_MEDIUM with 0.7 alpha
                     color_u32 = imgui.get_color_u32_rgba(*color_tuple)
                     draw_list.add_rect_filled(swatch_start[0], swatch_start[1], swatch_end[0], swatch_end[1], color_u32, rounding=3.0)
 
