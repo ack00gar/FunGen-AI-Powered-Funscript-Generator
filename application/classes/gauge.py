@@ -1,6 +1,6 @@
 import imgui
 import numpy as np
-
+from config.element_group_colors import GaugeColors
 
 class GaugeWindow:
     def __init__(self, app_instance, timeline_num: int):
@@ -54,7 +54,6 @@ class GaugeWindow:
         stored_pos_int = (int(window_pos[0]), int(window_pos[1]))
         stored_size_int = (int(window_size[0]), int(window_size[1]))
 
-
         if current_pos_int != stored_pos_int or current_size_int != stored_size_int:
             setattr(app_state, window_pos_attr, current_pos_int)
             setattr(app_state, window_size_attr, current_size_int)
@@ -81,11 +80,11 @@ class GaugeWindow:
             return
 
         # Colors
-        bg_color = imgui.get_color_u32_rgba(0.1, 0.1, 0.1, 1.0)
-        border_color = imgui.get_color_u32_rgba(0.5, 0.5, 0.5, 1.0)
+        bg_color = imgui.get_color_u32_rgba(*GaugeColors.BACKGROUND)
+        border_color = imgui.get_color_u32_rgba(*GaugeColors.BORDER)
         # Change bar color for the second timeline's gauge
-        bar_color_fill = imgui.get_color_u32_rgba(0.7, 0.2, 0.2, 1.0) if self.timeline_num == 2 else imgui.get_color_u32_rgba(0.2, 0.7, 0.2, 1.0)
-        text_color = imgui.get_color_u32_rgba(0.9, 0.9, 0.9, 1.0)
+        bar_color_fill = imgui.get_color_u32_rgba(*GaugeColors.BAR_RED) if self.timeline_num == 2 else imgui.get_color_u32_rgba(*GaugeColors.BAR_GREEN)
+        text_color = imgui.get_color_u32_rgba(*GaugeColors.TEXT)
 
         # Draw gauge background and border
         draw_list.add_rect_filled(gauge_area_x, gauge_area_y,
@@ -125,6 +124,6 @@ class GaugeWindow:
         text_pos_y_val = gauge_area_y + gauge_area_height + (padding / 2 if gauge_area_height > 0 else padding)
 
         imgui.set_cursor_pos((text_pos_x_val - content_start_pos[0], text_pos_y_val - content_start_pos[1]))
-        imgui.text_colored(value_text, 0.9, 0.9, 0.1, 1.0)  # Yellowish text for value
+        imgui.text_colored(value_text, *GaugeColors.VALUE_TEXT)  # Yellowish text for value
 
         imgui.end()

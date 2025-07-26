@@ -5,14 +5,7 @@ import time
 from application.gui_components.engine_compiler.tensorrt_validation_panel import ValidationPanel
 from application.logic.tensorrt_compiler_logic import TensorRTCompilerLogic
 from config.constants import TENSORRT_OUTPUT_DISPLAY_HEIGHT
-
-# Color palette for compiler window
-_GREEN = (0.2, 0.8, 0.2, 1.0)    # Success color
-_RED = (0.9, 0.2, 0.2, 1.0)      # Error color
-_ORANGE = (1.0, 0.6, 0.0, 1.0)   # In-progress color
-_YELLOW = (0.9, 0.9, 0.2, 1.0)   # Warning color
-_LIGHT_BLUE = (0.7, 0.9, 1.0, 1.0)  # Standard output color
-_GRAY = (0.7, 0.7, 0.7, 1.0)     # Waiting/neutral color
+from config.element_group_colors import CompilerToolColors
 
 class TensorRTCompilerWindow:
     """Main TensorRT compiler window - GUI only."""
@@ -98,8 +91,6 @@ class TensorRTCompilerWindow:
 
     def _render_compilation_controls(self):
         """Render compilation controls."""
-        imgui.separator()
-        
         # Get compilation state from logic
         can_compile = self.logic.can_compile()
         is_compiling = self.logic.get_compilation_status()
@@ -114,12 +105,12 @@ class TensorRTCompilerWindow:
             if not button_enabled:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            
+
             if imgui.button("Stop Compilation", width=120):
                 if button_enabled:
                     self.logic.request_stop_compilation()
                     self.last_button_time = current_time
-            
+
             if not button_enabled:
                 imgui.pop_style_var()
                 imgui.internal.pop_item_flag()
@@ -156,21 +147,18 @@ class TensorRTCompilerWindow:
     def _render_colored_status_message(self, message: str):
         """Render status message with appropriate colors."""
         if "Error" in message or "Failed" in message:
-            imgui.text_colored(message, *_RED)
+            imgui.text_colored(message, *CompilerToolColors.ERROR)
         elif "Success" in message or "complete" in message.lower():
-            imgui.text_colored(message, *_GREEN)
+            imgui.text_colored(message, *CompilerToolColors.SUCCESS)
         elif "Starting" in message or "Loading" in message or "Exporting" in message:
-            imgui.text_colored(message, *_ORANGE)
+            imgui.text_colored(message, *CompilerToolColors.STARTING)
         elif "Stopping" in message:
-            imgui.text_colored(message, *_YELLOW)
+            imgui.text_colored(message, *CompilerToolColors.STOPPING)
         else:
-            # Default white for other messages
             imgui.text_wrapped(message)
     
     def _render_subprocess_output(self):
         """Render subprocess output display."""
-        imgui.separator()
-        imgui.text("Compilation Output:")
         
         # Get subprocess output from the compiler
         output_lines = self.logic.compiler.get_subprocess_output()
@@ -179,13 +167,13 @@ class TensorRTCompilerWindow:
         imgui.begin_child("SubprocessOutput", 0, TENSORRT_OUTPUT_DISPLAY_HEIGHT, border=True)
         
         if not output_lines:
-            imgui.text_colored("Waiting for compilation output...", *_GRAY)
+            imgui.text_colored("Waiting for compilation output...", *CompilerToolColors.INFO)
         else:
             for line in output_lines:
                 if line.startswith("[ERR]"):
-                    imgui.text_colored(line, *_RED)
+                    imgui.text_colored(line, *CompilerToolColors.ERROR)
                 elif line.startswith("[OUT]"):
-                    imgui.text_colored(line, *_LIGHT_BLUE)
+                    imgui.text_colored(line, *CompilerToolColors.OUTPUT_TEXT)
                 else:
                     # Default for other lines
                     imgui.text(line)

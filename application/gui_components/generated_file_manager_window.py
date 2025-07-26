@@ -145,7 +145,7 @@ class GeneratedFileManagerWindow:
         imgui.text_disabled(f"{file_info['size_mb']:.3f} MB")
         imgui.same_line(imgui.get_window_width() - 80)
         imgui.push_id(file_info['path'])
-        imgui.push_style_color(imgui.COLOR_BUTTON, 0.65, 0.15, 0.15)
+        imgui.push_style_color(imgui.COLOR_BUTTON, 0.65, 0.15, 0.15) # TODO: move to theme, red
         is_funscript = file_info['name'].endswith('.funscript')
         delete_enabled = self.file_manager.delete_funscript_files or not is_funscript
         if not delete_enabled:
@@ -163,7 +163,7 @@ class GeneratedFileManagerWindow:
         """Renders the modal popup for confirming deletion of all generated files."""
         opened, visible = imgui.begin_popup_modal("ConfirmDeleteAll")
         if opened:
-            imgui.text_ansi_colored("WARNING: This will delete ALL subfolders and files in the output directory!", 1.0, 0.2, 0.2)
+            imgui.text_ansi_colored("WARNING: This will delete ALL subfolders and files in the output directory!", 1.0, 0.2, 0.2) # TODO: move to theme, red
             imgui.text(f"Directory: {os.path.abspath(self.output_folder)}")
             imgui.text("Contents will be moved to the recycle bin.")
             imgui.separator()
