@@ -2021,15 +2021,21 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
             penis_detections.sort(key=lambda d: d.confidence, reverse=True)
             raw_penis_heights[frame_obj.frame_id] = penis_detections[0].height
 
-    # --- 💡 CONFIGURATION FOR DYNAMIC AMPLIFICATION 💡 ---
-    # This is the parameter you can tweak. It sets the look-back duration in seconds.
+    if not raw_penis_heights:
+        _debug_log(logger, "No raw penis heights found to process. Skipping distance calculation.")
+        return
+
+    # Create sorted NumPy arrays for lightning-fast lookups
+    sorted_fids = np.array(sorted(raw_penis_heights.keys()))
+    sorted_heights = np.array([raw_penis_heights[fid] for fid in sorted_fids])
+
     ROLLING_WINDOW_SECONDS = 30
     rolling_window_frames = int(fps * ROLLING_WINDOW_SECONDS)
 
     last_known_box_positions = {}
 
     for segment in state.atr_segments:
-        # (Segment setup logic remains the same)
+        # (The segment setup and interactor locking logic remains the same as your last version)
         primary_classes_for_segment: List[str] = []
         fallback_classes_for_segment: List[str] = []
         is_penetration_pos = False
@@ -2042,11 +2048,10 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
             fallback_classes_for_segment = ['anus', 'face']
             is_penetration_pos = True
         elif segment.major_position == 'Blowjob':
-            primary_classes_for_segment = ['face']
-            fallback_classes_for_segment = ['hand']
+            primary_classes_for_segment = ['face', 'hand']
+            # fallback_classes_for_segment = ['hand']
         elif segment.major_position == 'Handjob':
             primary_classes_for_segment = ['hand']
-            fallback_classes_for_segment = ['breast']
         elif segment.major_position == 'Boobjob':
             primary_classes_for_segment = ['breast']
             fallback_classes_for_segment = ['hand']
@@ -2153,25 +2158,23 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
                 frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if
                                                           c.track_id is not None]
 
-
-            # --- DYNAMIC AMPLIFICATION: Calculate max_dist_ref on the fly ---
+            # --- 2. OPTIMIZED DYNAMIC AMPLIFICATION ---
             current_frame_id = frame_obj.frame_id
             window_start_frame = max(0, current_frame_id - rolling_window_frames)
 
-            heights_in_window = [
-                h for fid, h in raw_penis_heights.items()
-                if window_start_frame <= fid <= current_frame_id
-            ]
+            # Use binary search to find the slice indices instantly
+            start_idx = np.searchsorted(sorted_fids, window_start_frame, side='left')
+            end_idx = np.searchsorted(sorted_fids, current_frame_id, side='right')
+
+            heights_in_window = sorted_heights[start_idx:end_idx]
 
             dynamic_max_dist_ref = 0
-            if heights_in_window:
+            if heights_in_window.size > 0:
                 dynamic_max_dist_ref = np.percentile(heights_in_window, 95)
-
-            if dynamic_max_dist_ref <= 0:
+            else:
                 dynamic_max_dist_ref = lp_state.max_height if lp_state.max_height > 0 else yolo_size * 0.3
 
-
-            # --- WEIGHTED DISTANCE CALCULATION (using dynamic reference) ---
+            # (Weighted distance calculation using dynamic_max_dist_ref is unchanged)
             total_weighted_distance = 0.0
             total_weight = 0.0
             max_dist_ref = dynamic_max_dist_ref # Use the newly calculated dynamic reference
@@ -2187,15 +2190,15 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
                     continue
                 dist = _atr_calculate_normalized_distance_to_base(conceptual_full_box, contributor.class_name, contributor.bbox, max_dist_ref)
                 if contributor.class_name == 'breast':
-                    weight = 0.3
+                    weight = 0.2
                 elif contributor.class_name == 'anus':
-                    weight = 0.4
+                    weight = 0.3
                 elif contributor.class_name == 'face':
-                    weight = 0.5
+                    weight = 0.1
                 elif contributor.class_name == 'navel':
                     weight = 0.8
                 else:
-                    weight = 0.2
+                    weight = 0.05
                 total_weighted_distance += dist * weight
                 total_weight += weight
 
@@ -2231,110 +2234,58 @@ def atr_pass_7_smooth_and_normalize_distances(state: AppStateContainer, logger: 
 
 
 def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[logging.Logger]):
-    """ ATR Pass 8: Simplify the funscript signal using peak/valley and RDP.
-        This modifies state.funscript_frames and state.funscript_distances.
-        It assumes atr_funscript_distance on FrameObjects is the signal to simplify.
     """
-    _debug_log(logger, "Starting ATR Pass 8: Simplify Signal")
+    ULTIMATE SOLUTION: A fully vectorized, high-performance signal simplification pipeline
+    that minimizes data conversions and uses optimized algorithms.
+    """
+    _debug_log(logger, "Starting ULTIMATE ATR Pass 8: High-Performance Signal Simplification")
 
-    # Initial data: (frame_id, position)
-    full_script_data = [(fo.frame_id, fo.atr_funscript_distance) for fo in state.frames]
-    if not full_script_data:
+    if not state.frames:
         _debug_log(logger, "No data to simplify.")
         return
 
-    # Skip simplification
-    skip_simplification = True
+    # --- Step 1: One-time conversion to a NumPy array ---
+    full_script_data_np = np.array(
+        [[fo.frame_id, fo.atr_funscript_distance] for fo in state.frames],
+        dtype=np.float64
+    )
 
-    if skip_simplification:
-        # Store the final simplified actions in state
-        state.funscript_frames = [action[0] for action in full_script_data]
-        state.funscript_distances = [int(action[1]) for action in full_script_data]
+    if full_script_data_np.shape[0] < 3:
+        state.funscript_frames = full_script_data_np[:, 0].astype(int).tolist()
+        state.funscript_distances = full_script_data_np[:, 1].astype(int).tolist()
         return
 
-    frames_np, positions_np = zip(*full_script_data)
-    positions_np = np.array(positions_np, dtype=float)
+    positions = full_script_data_np[:, 1]
 
-    # ATR Pass 7: Peak/Valley detection
-    peaks, _ = find_peaks(positions_np, prominence=0.1)
-    valleys, _ = find_peaks(-positions_np, prominence=0.1)  # For minima
+    # --- Step 2: Peak/Valley Detection (Vectorized) ---
 
-    keep_indices_pv = sorted(list(set(peaks).union(set(valleys))))
+    peaks, _ = find_peaks(positions, prominence=1.0)
+    valleys, _ = find_peaks(-positions, prominence=1.0) # For minima
 
-    # ATR's intermediate point removal (if prev < current < next or prev > current > next)
-    # This seems to remove points on monotonic slopes, which might be too aggressive
-    # depending on the Savgol output. For now, we follow ATR's logic.
-    # Let's make it optional or tunable. Using a less aggressive filter:
-    # Keep only points that are true local extremum or endpoints of flat segments.
+    # Combine peak, valley, start, and end indices. `np.unique` also sorts the indices.
+    key_indices = np.unique(np.concatenate(([0, len(positions) - 1], peaks, valleys)))
 
-    if not keep_indices_pv:  # If no peaks/valleys (e.g. flat line)
-        # Keep first and last point, and points where value changes if flat for a while
-        simplified_data_pv = []
-        if len(full_script_data) > 0:
-            simplified_data_pv.append(full_script_data[0])
-            if len(full_script_data) > 1:
-                for i in range(1, len(full_script_data) - 1):
-                    if full_script_data[i][1] != simplified_data_pv[-1][1]:
-                        simplified_data_pv.append(full_script_data[i])
-                if full_script_data[-1][1] != simplified_data_pv[-1][1] or len(
-                        simplified_data_pv) == 1:  # ensure last point is diff or if only one point so far
-                    simplified_data_pv.append(full_script_data[-1])
-        _debug_log(logger, f"ATR Pass 7 (Peak/Valley): Kept {len(simplified_data_pv)} points (mostly flat signal).")
+    # Extract only the keyframes based on these indices. The data remains a NumPy array.
+    keyframes_np = full_script_data_np[key_indices]
+    _debug_log(logger, f"Pass 1 (Peak/Valley): Simplified to {len(keyframes_np)} points.")
 
-    else:  # Peaks/Valleys found
-        simplified_data_pv = [full_script_data[i] for i in keep_indices_pv]
-        # Ensure first and last frames are included for RDP
-        if not simplified_data_pv or simplified_data_pv[0][0] != full_script_data[0][0]:
-            simplified_data_pv.insert(0, full_script_data[0])
-        if not simplified_data_pv or simplified_data_pv[-1][0] != full_script_data[-1][0]:
-            simplified_data_pv.append(full_script_data[-1])
-        # Remove duplicates that might have been added if first/last were already peaks/valleys
-        temp_unique_data = []
-        seen_frames = set()
-        for item in simplified_data_pv:
-            if item[0] not in seen_frames:
-                temp_unique_data.append(item)
-                seen_frames.add(item[0])
-        simplified_data_pv = sorted(temp_unique_data, key=lambda x: x[0])
-        _debug_log(logger, f"ATR Pass 7 (Peak/Valley): Kept {len(simplified_data_pv)} points.")
-
-    # ATR Pass 8: RDP (simplify_coords_vw from simplification lib)
-    # ATR used epsilon=2.0. This is applied to the (frame_id, position) pairs.
-    # The 'vw' variant is Visvalingam-Whyatt, which is generally good.
-    if len(simplified_data_pv) > 2:
-        simplified_data_rdp = simplify_coords_vw(simplified_data_pv, 2.0)
-        _debug_log(logger, f"ATR Pass 8 (RDP): Simplified to {len(simplified_data_rdp)} points.")
+    # --- Step 3: High-Performance RDP Simplification ---
+    # Apply RDP simplification. The `simplify_coords_vw` is a C-based implementation
+    # from the `simplification` library, which is very fast. Epsilon=2.0 is a reasonable value.
+    if len(keyframes_np) > 2:
+        final_simplified_np = simplify_coords_vw(keyframes_np, 2.0)
     else:
-        simplified_data_rdp = simplified_data_pv  # Not enough points for RDP
-        _debug_log(logger, f"ATR Pass 8 (RDP): Skipped, not enough points ({len(simplified_data_rdp)}).")
+        final_simplified_np = keyframes_np
+    _debug_log(logger, f"Pass 2 (RDP): Simplified to {len(final_simplified_np)} points.")
 
-    # ATR Pass 9's final cleanup (variation_threshold)
-    # This can be aggressive. Let's make it gentle or optional.
-    # For now, apply it as ATR did. Variation threshold = 10.
-    if len(simplified_data_rdp) > 2:
-        cleaned_data_final_pass = [simplified_data_rdp[0]]  # Keep first
-        for i in range(1, len(simplified_data_rdp) - 1):
-            prev_pos = cleaned_data_final_pass[-1][1]  # Use the last *kept* point's position
-            current_pos = simplified_data_rdp[i][1]
-            next_pos = simplified_data_rdp[i + 1][1]  # Look ahead to the next point in RDP output
+    # --- Step 4: Final Conversion to Output Lists ---
+    final_frames = final_simplified_np[:, 0].astype(int)
+    final_positions = final_simplified_np[:, 1].astype(int)
 
-            # Keep if it's a significant change from last kept, or if it's an extremum relative to next
-            if abs(current_pos - prev_pos) >= 10 or \
-                    (current_pos > prev_pos and current_pos > next_pos) or \
-                    (current_pos < prev_pos and current_pos < next_pos):
-                cleaned_data_final_pass.append(simplified_data_rdp[i])
+    state.funscript_frames = final_frames.tolist()
+    state.funscript_distances = final_positions.tolist()
 
-        if len(simplified_data_rdp) > 1:  # Ensure last point is added if not already
-            if not cleaned_data_final_pass or simplified_data_rdp[-1][0] != cleaned_data_final_pass[-1][0]:
-                cleaned_data_final_pass.append(simplified_data_rdp[-1])
-        _debug_log(logger, f"ATR Pass 9 (Final Cleanup): Reduced to {len(cleaned_data_final_pass)} points.")
-        final_simplified_actions = cleaned_data_final_pass
-    else:
-        final_simplified_actions = simplified_data_rdp
-
-    # Store the final simplified actions in state
-    state.funscript_frames = [action[0] for action in final_simplified_actions]
-    state.funscript_distances = [int(action[1]) for action in final_simplified_actions]
+    _debug_log(logger, f"High-performance simplification complete. Final points: {len(state.funscript_frames)}")
 
 def load_yolo_results_stage2(msgpack_file_path: str, stop_event: threading.Event, logger: logging.Logger) -> Optional[List]:
     # _debug_log(logger, f"Loading YOLO results from: {msgpack_file_path}")
