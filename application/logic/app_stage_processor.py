@@ -552,7 +552,18 @@ class AppStageProcessor:
                     return
 
                 self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in s2_output_data.get("all_s2_frame_objects_list", [])}
-                preprocessed_path_for_s3 = self.app.file_manager.preprocessed_video_path
+                
+                # Stage 3 OF processing requires the preprocessed video from Stage 1.
+                # Use the same robust fallback pattern as Stage 2.
+                preprocessed_path_for_s3 = None
+                if self.app.file_manager.preprocessed_video_path and os.path.exists(self.app.file_manager.preprocessed_video_path):
+                    preprocessed_path_for_s3 = self.app.file_manager.preprocessed_video_path
+                else:
+                    # Fallback: try to generate the path if the direct reference is missing.
+                    preprocessed_path_for_s3 = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+                    if not os.path.exists(preprocessed_path_for_s3):
+                        self.logger.warning("Preprocessed video from Stage 1 not found for Stage 3.")
+                        preprocessed_path_for_s3 = None
 
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 

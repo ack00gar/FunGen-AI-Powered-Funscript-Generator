@@ -45,7 +45,26 @@ def stage3_worker_proc(
     worker_logger.info(f"Worker {worker_id} started.")
 
     class MockFileManager:
-        def __init__(self, path): self.preprocessed_video_path = path
+        def __init__(self, preprocessed_path: Optional[str], original_video_path: str):
+            self._preprocessed_video_path = preprocessed_path
+            self._original_video_path = original_video_path
+
+        def get_output_path_for_file(self, base_video_path: str, suffix: str) -> str:
+            # Simulate the logic of the real FileManager's get_output_path_for_file
+            if suffix == "_preprocessed.mkv" and self._preprocessed_video_path:
+                return self._preprocessed_video_path
+            # Fallback for other files (e.g., .msgpack) or if preprocessed path is None
+            base_name = os.path.splitext(os.path.basename(base_video_path))[0]
+            output_dir = os.path.dirname(self._original_video_path)
+            return os.path.join(output_dir, f"{base_name}{suffix}")
+
+        @property
+        def preprocessed_video_path(self):
+            return self._preprocessed_video_path
+
+        @preprocessed_video_path.setter
+        def preprocessed_video_path(self, value):
+            self._preprocessed_video_path = value
 
     class VPAppProxy:
         pass
@@ -54,7 +73,7 @@ def stage3_worker_proc(
     vp_app_proxy.logger = worker_logger.getChild("VideoProcessor")
     vp_app_proxy.hardware_acceleration_method = common_app_config.get("hardware_acceleration_method", "none")
     vp_app_proxy.available_ffmpeg_hwaccels = common_app_config.get("available_ffmpeg_hwaccels", [])
-    vp_app_proxy.file_manager = MockFileManager(preprocessed_video_path)
+    vp_app_proxy.file_manager = MockFileManager(preprocessed_video_path, video_path)
 
     # --- Use the preprocessed path if it exists for VideoProcessor initialization ---
     video_path_to_use = preprocessed_video_path if preprocessed_video_path and os.path.exists(preprocessed_video_path) else video_path
@@ -66,7 +85,7 @@ def stage3_worker_proc(
                                      yolo_input_size=common_app_config.get('yolo_input_size', 640),
                                      video_type=video_type_for_vp) # --- Use the determined video type
 
-    if not video_processor.open_video(video_path): # Pass original path for metadata, open_video handles the switch internally
+    if not video_processor.open_video(video_path): # Pass original video_path to allow internal preprocessed detection
         worker_logger.error(f"VideoProcessor could not open video: {video_path}")
         return
 
