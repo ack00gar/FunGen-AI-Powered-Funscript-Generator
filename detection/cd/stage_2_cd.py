@@ -20,6 +20,37 @@ from config import constants
 _of_debug_prints_stage2 = False
 CONTACT_ONLY_FALLBACKS = {'hand', 'pussy', 'butt'}
 
+# --- Optical Flow Configuration ---
+# Set to 'farneback' for speed or 'dis' for quality
+OF_METHOD = 'farneback'  # Options: 'farneback', 'dis'
+OF_SCALE_FACTOR = 3  # Downsample ROI by this factor for faster processing
+OF_ROI_MARGIN = 0.2  # Add 20% margin around bounding box for ROI
+
+# --- Signal Processing Configuration ---
+SIMPLIFICATION_ENABLED = True  # Enable/disable signal simplification
+SIMPLIFICATION_VARIATION_THRESHOLD = 10  # Threshold for final cleanup pass
+
+# --- Global Worker Variables for Optical Flow Optimization ---
+# These are process-local variables (not shared between processes)
+# Each worker process gets its own copy, so there are no race conditions
+_worker_vp = None
+_worker_yolo_input_size = None
+
+def _init_of_worker(preprocessed_video_path: str, yolo_input_size: int):
+    """Initialize worker with shared VideoProcessor to avoid repeated video opening."""
+    global _worker_vp, _worker_yolo_input_size
+    
+    class DummyAppForVP:
+        def __init__(self):
+            self.logger = logging.getLogger(f"S2_OF_Worker_{os.getpid()}")
+            self.hardware_acceleration_method = 'none'
+            self.available_ffmpeg_hwaccels = ['none']
+    
+    _worker_vp = VideoProcessor(app_instance=DummyAppForVP(), yolo_input_size=yolo_input_size)
+    if not _worker_vp.open_video(preprocessed_video_path):
+        raise RuntimeError(f"Failed to open video in worker: {preprocessed_video_path}")
+    _worker_yolo_input_size = yolo_input_size
+
 def _debug_log(logger_instance: Optional[logging.Logger], message: str):
     """Helper for conditional debug logging."""
     if _of_debug_prints_stage2 and logger_instance:
@@ -2233,59 +2264,232 @@ def atr_pass_7_smooth_and_normalize_distances(state: AppStateContainer, logger: 
     _debug_log(logger, "Applied per-segment normalization to distances.")
 
 
-def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[logging.Logger]):
-    """
-    ULTIMATE SOLUTION: A fully vectorized, high-performance signal simplification pipeline
-    that minimizes data conversions and uses optimized algorithms.
-    """
-    _debug_log(logger, "Starting ULTIMATE ATR Pass 8: High-Performance Signal Simplification")
+def process_signal_chunk_worker(chunk_data):
+    """Process a chunk of signal data in parallel. This function must be at module level for multiprocessing."""
+    start_idx, end_idx, chunk_frames, chunk_positions, min_distance_frames = chunk_data
+    
+    try:
+        # Extract chunk data
+        chunk_frames_np = np.array(chunk_frames, dtype=np.int32)
+        chunk_positions_np = np.array(chunk_positions, dtype=np.float32)
+        
+        if len(chunk_frames_np) < 3:
+            # Too few points to process meaningfully
+            return list(zip(chunk_frames_np, chunk_positions_np))
+        
+        # Peak and valley detection for this chunk
+        peaks, _ = find_peaks(chunk_positions_np, prominence=0.1, distance=min_distance_frames)
+        valleys, _ = find_peaks(-chunk_positions_np, prominence=0.1, distance=min_distance_frames)
+        
+        # Determine key indices to keep
+        if peaks.size == 0 and valleys.size == 0:
+            # No peaks or valleys -> mostly flat or monotonic signal
+            indices_to_keep = [0]
+            if len(chunk_positions_np) > 1:
+                tolerance = 1e-6
+                change_points = np.nonzero(np.abs(np.diff(chunk_positions_np)) > tolerance)[0]
+                if change_points.size > 0:
+                    indices_to_keep.extend((change_points + 1).tolist())
+                if len(indices_to_keep) == 1 or abs(chunk_positions_np[-1] - chunk_positions_np[indices_to_keep[-1]]) > tolerance:
+                    indices_to_keep.append(len(chunk_positions_np) - 1)
+            
+            indices_to_keep = np.array(sorted(set(indices_to_keep)), dtype=np.int32)
+        else:
+            # Union of peak and valley indices, plus ensure first and last indices included
+            key_indices = set(peaks.tolist()) | set(valleys.tolist())
+            key_indices.add(0)
+            key_indices.add(len(chunk_positions_np) - 1)
+            indices_to_keep = np.array(sorted(key_indices), dtype=np.int32)
+        
+        # Validate indices are within bounds
+        indices_to_keep = indices_to_keep[indices_to_keep < len(chunk_positions_np)]
+        if indices_to_keep.size == 0:
+            return list(zip(chunk_frames_np[[0, -1]], chunk_positions_np[[0, -1]]))
+        
+        # Prepare coordinates for simplification
+        coords = np.column_stack((chunk_frames_np[indices_to_keep].astype(np.float64),
+                                 chunk_positions_np[indices_to_keep].astype(np.float64)))
+        
+        # Apply Visvalingam-Whyatt simplification
+        if coords.shape[0] > 2:
+            simplified_coords = simplify_coords_vw(coords, 2.0)
+            simplified_coords = np.array(simplified_coords)
+        else:
+            simplified_coords = coords
+        
+        # Final variation threshold cleanup
+        if simplified_coords.shape[0] > 2:
+            positions = simplified_coords[:, 1]
+            keep_mask = np.ones(len(positions), dtype=bool)
+            keep_mask[0] = True
+            keep_mask[-1] = True
+            
+            for i in range(1, len(positions) - 1):
+                if keep_mask[i]:
+                    prev_kept_indices = np.where(keep_mask[:i])[0]
+                    if len(prev_kept_indices) > 0:
+                        last_kept_pos = positions[prev_kept_indices[-1]]
+                    else:
+                        last_kept_pos = positions[0]
+                    
+                    curr_pos = positions[i]
+                    next_pos = positions[i + 1]
+                    
+                    significant_change = abs(curr_pos - last_kept_pos) >= SIMPLIFICATION_VARIATION_THRESHOLD
+                    is_local_max = curr_pos > last_kept_pos and curr_pos > next_pos
+                    is_local_min = curr_pos < last_kept_pos and curr_pos < next_pos
+                    
+                    if not (significant_change or is_local_max or is_local_min):
+                        keep_mask[i] = False
+            
+            final_points = simplified_coords[keep_mask]
+        else:
+            final_points = simplified_coords
+        
+        # Return as list of tuples (frame_id, position)
+        return list(zip(final_points[:, 0], final_points[:, 1]))
+        
+    except Exception as e:
+        # Return first and last points as fallback
+        return list(zip(chunk_frames_np[[0, -1]], chunk_positions_np[[0, -1]]))
 
-    if not state.frames:
+def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[logging.Logger]):
+    """Multi-threaded ATR Pass 8: Simplify the funscript signal using parallel processing.
+    
+    This version splits the signal into chunks and processes them in parallel across multiple CPU cores,
+    then merges the results. This provides significant speedup for large datasets.
+    
+    Modifies state.funscript_frames and state.funscript_distances.
+    """
+    _debug_log(logger, "Starting ATR Pass 8: Simplify Signal (Multi-threaded)")
+
+    # Extract frame IDs and distances as numpy arrays for efficient processing
+    num_frames = len(state.frames)
+    if num_frames == 0:
         _debug_log(logger, "No data to simplify.")
         return
 
-    # --- Step 1: One-time conversion to a NumPy array ---
-    full_script_data_np = np.array(
-        [[fo.frame_id, fo.atr_funscript_distance] for fo in state.frames],
-        dtype=np.float64
-    )
-
-    if full_script_data_np.shape[0] < 3:
-        state.funscript_frames = full_script_data_np[:, 0].astype(int).tolist()
-        state.funscript_distances = full_script_data_np[:, 1].astype(int).tolist()
+    try:
+        # Use float32 for distances (sufficient precision) and int32 for frame IDs
+        # Add error handling for potential None values or invalid data
+        frame_ids = []
+        distances = []
+        
+        for fo in state.frames:
+            if fo.frame_id is not None and fo.atr_funscript_distance is not None:
+                frame_ids.append(fo.frame_id)
+                distances.append(fo.atr_funscript_distance)
+            else:
+                _debug_log(logger, f"Skipping frame with None values: frame_id={fo.frame_id}, distance={fo.atr_funscript_distance}")
+        
+        if not frame_ids:
+            _debug_log(logger, "No valid data to simplify after filtering None values.")
+            return
+            
+        frames_np = np.array(frame_ids, dtype=np.int32)
+        positions_np = np.array(distances, dtype=np.float32)
+        
+        # Validate data ranges - atr_funscript_distance should be 0-100
+        positions_np = np.clip(positions_np, 0.0, 100.0)
+        
+        # Update num_frames to reflect actual valid data
+        num_frames = len(frames_np)
+        
+    except Exception as e:
+        _debug_log(logger, f"Error extracting frame data: {e}")
+        return
+    
+    if not SIMPLIFICATION_ENABLED:
+        # If simplification is disabled, just output the raw frames (casting distances to int as before)
+        state.funscript_frames = frames_np.tolist()
+        state.funscript_distances = [int(x) for x in positions_np]  # truncate float to int
+        _debug_log(logger, f"Simplification disabled, keeping all {num_frames} points.")
         return
 
-    positions = full_script_data_np[:, 1]
-
-    # --- Step 2: Peak/Valley Detection (Vectorized) ---
-
-    peaks, _ = find_peaks(positions, prominence=1.0)
-    valleys, _ = find_peaks(-positions, prominence=1.0) # For minima
-
-    # Combine peak, valley, start, and end indices. `np.unique` also sorts the indices.
-    key_indices = np.unique(np.concatenate(([0, len(positions) - 1], peaks, valleys)))
-
-    # Extract only the keyframes based on these indices. The data remains a NumPy array.
-    keyframes_np = full_script_data_np[key_indices]
-    _debug_log(logger, f"Pass 1 (Peak/Valley): Simplified to {len(keyframes_np)} points.")
-
-    # --- Step 3: High-Performance RDP Simplification ---
-    # Apply RDP simplification. The `simplify_coords_vw` is a C-based implementation
-    # from the `simplification` library, which is very fast. Epsilon=2.0 is a reasonable value.
-    if len(keyframes_np) > 2:
-        final_simplified_np = simplify_coords_vw(keyframes_np, 2.0)
-    else:
-        final_simplified_np = keyframes_np
-    _debug_log(logger, f"Pass 2 (RDP): Simplified to {len(final_simplified_np)} points.")
-
-    # --- Step 4: Final Conversion to Output Lists ---
-    final_frames = final_simplified_np[:, 0].astype(int)
-    final_positions = final_simplified_np[:, 1].astype(int)
-
-    state.funscript_frames = final_frames.tolist()
-    state.funscript_distances = final_positions.tolist()
-
-    _debug_log(logger, f"High-performance simplification complete. Final points: {len(state.funscript_frames)}")
+    # Multi-threading configuration
+    fps = state.video_info.get('fps', 30.0)
+    min_distance_seconds = 0.25  # 250ms minimum between peaks
+    min_distance_frames = max(1, int(fps * min_distance_seconds))
+    
+    # Determine optimal chunk size and number of workers
+    cpu_count = psutil.cpu_count(logical=False)  # Physical cores only
+    optimal_chunk_size = max(1000, num_frames // (cpu_count * 4))  # Ensure chunks aren't too small
+    
+    _debug_log(logger, f"Multi-threading config: {cpu_count} cores, {optimal_chunk_size} frames per chunk")
+    
+    try:
+        # Split data into chunks for parallel processing
+        chunks = []
+        for i in range(0, num_frames, optimal_chunk_size):
+            end_idx = min(i + optimal_chunk_size, num_frames)
+            chunk_frames = frames_np[i:end_idx].tolist()
+            chunk_positions = positions_np[i:end_idx].tolist()
+            # Include min_distance_frames in the chunk data
+            chunks.append((i, end_idx, chunk_frames, chunk_positions, min_distance_frames))
+        
+        _debug_log(logger, f"Split data into {len(chunks)} chunks for parallel processing")
+        
+        # Process chunks in parallel using multiprocessing
+        with Pool(processes=cpu_count) as pool:
+            chunk_results = pool.map(process_signal_chunk_worker, chunks)
+        
+        # Merge results from all chunks
+        all_points = []
+        for chunk_result in chunk_results:
+            all_points.extend(chunk_result)
+        
+        # Remove duplicates and sort by frame_id
+        unique_points = {}
+        for frame_id, position in all_points:
+            frame_id_int = int(frame_id)
+            if frame_id_int not in unique_points:
+                unique_points[frame_id_int] = position
+            else:
+                # If duplicate frame_id, keep the one with more extreme position (better for peaks/valleys)
+                if abs(position - 50.0) > abs(unique_points[frame_id_int] - 50.0):
+                    unique_points[frame_id_int] = position
+        
+        # Convert back to sorted arrays
+        sorted_frame_ids = sorted(unique_points.keys())
+        sorted_positions = [unique_points[fid] for fid in sorted_frame_ids]
+        
+        # Ensure we have at least first and last frames
+        if len(sorted_frame_ids) == 0:
+            sorted_frame_ids = [int(frames_np[0]), int(frames_np[-1])]
+            sorted_positions = [float(positions_np[0]), float(positions_np[-1])]
+        elif len(sorted_frame_ids) == 1:
+            if sorted_frame_ids[0] != int(frames_np[0]):
+                sorted_frame_ids.insert(0, int(frames_np[0]))
+                sorted_positions.insert(0, float(positions_np[0]))
+            if sorted_frame_ids[-1] != int(frames_np[-1]):
+                sorted_frame_ids.append(int(frames_np[-1]))
+                sorted_positions.append(float(positions_np[-1]))
+        else:
+            # Ensure first and last frames are included
+            if sorted_frame_ids[0] != int(frames_np[0]):
+                sorted_frame_ids.insert(0, int(frames_np[0]))
+                sorted_positions.insert(0, float(positions_np[0]))
+            if sorted_frame_ids[-1] != int(frames_np[-1]):
+                sorted_frame_ids.append(int(frames_np[-1]))
+                sorted_positions.append(float(positions_np[-1]))
+        
+        # Store results in state
+        state.funscript_frames = sorted_frame_ids
+        state.funscript_distances = [int(np.clip(pos, 0, 100)) for pos in sorted_positions]
+        
+        # Final validation and logging
+        final_count = len(state.funscript_frames)
+        if final_count > 0:
+            retention_rate = 100.0 * final_count / num_frames
+            _debug_log(logger, f"ATR Pass 8 completed: {num_frames} -> {final_count} points ({retention_rate:.2f}% retained).")
+        else:
+            _debug_log(logger, "Warning: No points retained after simplification.")
+            
+    except Exception as e:
+        _debug_log(logger, f"Error in multi-threaded processing: {e}")
+        # Emergency fallback - just use first and last frames
+        state.funscript_frames = [int(frames_np[0]), int(frames_np[-1])]
+        state.funscript_distances = [int(positions_np[0]), int(positions_np[-1])]
 
 def load_yolo_results_stage2(msgpack_file_path: str, stop_event: threading.Event, logger: logging.Logger) -> Optional[List]:
     # _debug_log(logger, f"Loading YOLO results from: {msgpack_file_path}")
@@ -2366,63 +2570,110 @@ def _pre_scan_for_interactor_ids(state: AppStateContainer, logger: Optional[logg
 
 def _recover_gap_worker(args: dict) -> Tuple[List[BoxRecord], int]:
     """
-    A worker function designed to be run in a separate process to recover a single gap.
-    It now processes a precise range from start_frame to end_frame, as determined by
-    the parent process, which handles the interruption logic.
+    Optimized worker function using shared VideoProcessor and faster optical flow.
     """
+    global _worker_vp, _worker_yolo_input_size
+    
     gap_info = args['gap_info']
-    preprocessed_video_path = args['preprocessed_video_path']
-    yolo_input_size = args['yolo_input_size']
-
     recovered_boxes = []
     frames_processed_in_worker = 0
-
-    # Each worker needs its own VideoProcessor instance
-    class DummyAppForVP:
-        def __init__(self):
-            # Create a logger unique to the worker process for easier debugging
-            self.logger = logging.getLogger(f"S2_OF_Worker_{os.getpid()}")
-            self.hardware_acceleration_method = 'none'
-            self.available_ffmpeg_hwaccels = ['none']
-
-    vp = VideoProcessor(app_instance=DummyAppForVP(), yolo_input_size=yolo_input_size)
-    if not vp.open_video(preprocessed_video_path):
-        return [], 0
+    
+    # Profile: Track timing for this gap
+    gap_start_time = time.time()
 
     try:
-        # The start frame for OF is the last known good frame
-        initial_frame_img = vp._get_specific_frame(gap_info["start_frame"] - 1)
-        if initial_frame_img is None: return [], 0
+        # Get the "last known" frame only once
+        initial_frame_img = _worker_vp._get_specific_frame(gap_info["start_frame"] - 1)
+        if initial_frame_img is None: 
+            return [], 0
 
         prev_gray = cv2.cvtColor(initial_frame_img, cv2.COLOR_BGR2GRAY)
         current_tracked_box = np.array(gap_info["last_known_box"].bbox, dtype=np.float32)
-        flow_dense = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_FAST)
+        
+        # Configure optical flow method based on global setting
+        if OF_METHOD == 'farneback':
+            # Use faster Farneback optical flow - 2-5x faster than DIS
+            flow_params = {
+                'pyr_scale': 0.5, 'levels': 1, 'winsize': 15, 
+                'iterations': 2, 'poly_n': 5, 'poly_sigma': 1.1, 'flags': 0
+            }
+        else:  # 'dis'
+            # Use DIS for higher quality (slower)
+            flow_dense = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_FAST)
 
-        # The loop now runs only for the precise, pre-calculated duration.
-        # No extra 'interrupt' check is needed here.
         for frame_id in range(gap_info["start_frame"], gap_info["end_frame"] + 1):
             frames_processed_in_worker += 1
-            current_frame_img = vp._get_specific_frame(frame_id)
-            if current_frame_img is None: break
+            current_frame_img = _worker_vp._get_specific_frame(frame_id)
+            if current_frame_img is None: 
+                break
 
             current_gray = cv2.cvtColor(current_frame_img, cv2.COLOR_BGR2GRAY)
-            flow = flow_dense.calc(prev_gray, current_gray, None)
-            if flow is None: break
-
+            
+            # Optimize ROI processing: crop to bounding box with margin and resize
             x1, y1, x2, y2 = [max(0, int(c)) for c in current_tracked_box]
             h, w = prev_gray.shape
             x2, y2 = min(w, x2), min(h, y2)
-
-            if x2 > x1 and y2 > y1:
+            
+            if x2 <= x1 or y2 <= y1:
+                break
+                
+            # Add margin around ROI (configurable percentage of box size)
+            margin_x = int((x2 - x1) * OF_ROI_MARGIN)
+            margin_y = int((y2 - y1) * OF_ROI_MARGIN)
+            roi_x1 = max(0, x1 - margin_x)
+            roi_y1 = max(0, y1 - margin_y)
+            roi_x2 = min(w, x2 + margin_x)
+            roi_y2 = min(h, y2 + margin_y)
+            
+            # Crop ROI and resize to 1/3 resolution for faster processing
+            prev_roi = prev_gray[roi_y1:roi_y2, roi_x1:roi_x2]
+            curr_roi = current_gray[roi_y1:roi_y2, roi_x1:roi_x2]
+            
+            if prev_roi.size == 0 or curr_roi.size == 0:
+                break
+                
+            # Resize to configurable resolution for faster processing
+            small_h, small_w = prev_roi.shape
+            small_prev = cv2.resize(prev_roi, (small_w // OF_SCALE_FACTOR, small_h // OF_SCALE_FACTOR))
+            small_curr = cv2.resize(curr_roi, (small_w // OF_SCALE_FACTOR, small_h // OF_SCALE_FACTOR))
+            
+            # Calculate optical flow on smaller ROI
+            if OF_METHOD == 'farneback':
+                flow_small = cv2.calcOpticalFlowFarneback(
+                    small_prev, small_curr, None, **flow_params
+                )
+            else:  # 'dis'
+                flow_small = flow_dense.calc(small_prev, small_curr, None)
+            
+            if flow_small is None:
+                break
+                
+            # Scale flow back up and extract median movement
+            flow_full = cv2.resize(flow_small, (small_w, small_h)) * OF_SCALE_FACTOR
+            
+            # Calculate relative position within ROI for the actual box
+            box_x1_rel = x1 - roi_x1
+            box_y1_rel = y1 - roi_y1
+            box_x2_rel = x2 - roi_x1
+            box_y2_rel = y2 - roi_y1
+            
+            # Ensure box coordinates are within ROI bounds
+            box_x1_rel = max(0, min(box_x1_rel, small_w - 1))
+            box_y1_rel = max(0, min(box_y1_rel, small_h - 1))
+            box_x2_rel = max(box_x1_rel + 1, min(box_x2_rel, small_w))
+            box_y2_rel = max(box_y1_rel + 1, min(box_y2_rel, small_h))
+            
+            if box_x2_rel > box_x1_rel and box_y2_rel > box_y1_rel:
                 # Use median flow in the box to be robust to outliers
-                dx, dy = np.median(flow[y1:y2, x1:x2, 0]), np.median(flow[y1:y2, x1:x2, 1])
+                dx = np.median(flow_full[box_y1_rel:box_y2_rel, box_x1_rel:box_x2_rel, 0])
+                dy = np.median(flow_full[box_y1_rel:box_y2_rel, box_x1_rel:box_x2_rel, 1])
                 current_tracked_box += [dx, dy, dx, dy]
 
                 new_box = BoxRecord(
                     frame_id=frame_id, bbox=current_tracked_box,
                     confidence=gap_info["last_known_box"].confidence * 0.75,  # Lower confidence for recovered boxes
                     class_id=gap_info["last_known_box"].class_id, class_name=gap_info["last_known_box"].class_name,
-                    status=constants.STATUS_OF_RECOVERED, yolo_input_size=yolo_input_size,
+                    status=constants.STATUS_OF_RECOVERED, yolo_input_size=_worker_yolo_input_size,
                     track_id=gap_info["track_id"]
                 )
                 recovered_boxes.append(new_box)
@@ -2430,9 +2681,19 @@ def _recover_gap_worker(args: dict) -> Tuple[List[BoxRecord], int]:
             else:
                 # Stop if the tracked box becomes invalid
                 break
-    finally:
-        vp.stop_processing(join_thread=False)
-        del vp
+                
+    except Exception as e:
+        # Log error but don't crash the worker
+        logging.getLogger(f"S2_OF_Worker_{os.getpid()}").error(f"Error in gap recovery: {e}")
+        return [], frames_processed_in_worker
+
+    # Profile: Log timing for this gap
+    gap_time = time.time() - gap_start_time
+    if gap_time > 1.0:  # Only log slow gaps (>1s)
+        logging.getLogger(f"S2_OF_Worker_{os.getpid()}").info(
+            f"Gap {gap_info['track_id']}:{gap_info['start_frame']}-{gap_info['end_frame']} "
+            f"({gap_info['gap_size']} frames) took {gap_time:.2f}s, recovered {len(recovered_boxes)} boxes"
+        )
 
     return recovered_boxes, frames_processed_in_worker
 
@@ -2464,8 +2725,8 @@ def atr_pass_1c_recover_lost_tracks_with_of(
     fps = state.video_info.get('fps', 30.0)
     # Max gap to attempt OF recovery on
     MAX_RECOVERY_GAP = int(fps * 5)
-    # Min gap to trigger OF instead of simple interpolation
-    MIN_RECOVERY_GAP = int(fps * 1)
+    # Min gap to trigger OF instead of simple interpolation - increased to 2 seconds
+    MIN_RECOVERY_GAP = int(fps * 2)  # Only recover gaps ≥2s, let interpolation handle shorter gaps
     # Confidence threshold for a detection to be considered a valid "interrupter"
     INTERRUPT_CONFIDENCE_THRESHOLD = 0.6
 
@@ -2524,25 +2785,29 @@ def atr_pass_1c_recover_lost_tracks_with_of(
 
     # --- Parallel Processing Setup ---
     # --- Limit the number of OF Long Gap Recovery workers to a quarter of the CPU count, minimum 1, maximum 4
-    # TODO: Will need to benchmark this part
     num_workers = min(4, max(1, (psutil.cpu_count(logical=False) - 2) // 4))
-    # num_workers = max(1, (psutil.cpu_count(logical=False) - 2) // 4)
     logger.info(f"Distributing {len(gaps_to_recover)} recovery gaps to {num_workers} worker processes.")
 
-    worker_args = [{
-        'gap_info': gap,
-        'preprocessed_video_path': preprocessed_video_path_arg,
-        'yolo_input_size': state.yolo_input_size
-    } for gap in gaps_to_recover]
+    worker_args = [{'gap_info': gap} for gap in gaps_to_recover]
 
     total_frames_to_recover = sum(g['end_frame'] - g['start_frame'] + 1 for g in gaps_to_recover)
     frames_processed_count = 0
     total_boxes_added = 0
     start_time = time.time()
+    
+    # Profile: Log gap statistics
+    gap_sizes = [g['gap_size'] for g in gaps_to_recover]
+    logger.info(f"Gap recovery stats: {len(gaps_to_recover)} gaps, sizes: min={min(gap_sizes)}, max={max(gap_sizes)}, avg={sum(gap_sizes)/len(gap_sizes):.1f}")
 
-    with multiprocessing.Pool(processes=num_workers) as pool:
+    pool = None
+    try:
+        pool = Pool(
+            processes=num_workers,
+            initializer=_init_of_worker,
+            initargs=(preprocessed_video_path_arg, state.yolo_input_size)
+        )
         # Use imap_unordered for better responsiveness as jobs finish
-        for result_boxes, frames_in_worker in pool.imap_unordered(_recover_gap_worker, worker_args):
+        for result_boxes, frames_in_worker in pool.imap_unordered(_recover_gap_worker, worker_args, chunksize=1):
             frames_processed_count += frames_in_worker
             if result_boxes:
                 for box in result_boxes:
@@ -2562,11 +2827,29 @@ def atr_pass_1c_recover_lost_tracks_with_of(
                     "fps": fps_val, "eta": eta
                 }
                 progress_callback(main_step_info, progress_data, False)
+    except KeyboardInterrupt:
+        logger.info("Optical flow recovery interrupted by user")
+        if pool:
+            pool.terminate()
+            pool.join()
+        raise
+    except Exception as e:
+        logger.error(f"Error during optical flow recovery: {e}")
+        if pool:
+            pool.terminate()
+            pool.join()
+        raise
+    finally:
+        if pool:
+            pool.close()
+            pool.join()
+
+    total_time = time.time() - start_time
+    logger.info(f"Parallel OF recovery finished in {total_time:.2f}s. Added {total_boxes_added} new boxes across {len(gaps_to_recover)} gaps.")
+    logger.info(f"Performance: {frames_processed_count/total_time:.1f} frames/sec, {total_boxes_added/total_time:.1f} boxes/sec")
 
     if progress_callback:
         progress_callback(main_step_info, {"message": "Completed", "current": total_frames_to_recover, "total": total_frames_to_recover}, True)
-
-    logger.info(f"Parallel OF recovery finished. Added {total_boxes_added} new boxes across {len(gaps_to_recover)} gaps.")
 
 
 def perform_contact_analysis(
