@@ -225,7 +225,7 @@ class ROITracker:
         """
         # 1. Handle edge cases
         if self.flow_dense is None or prev_patch_gray is None or prev_patch_gray.shape != patch_gray.shape:
-            return AppGUIColors.TRANSPARENT, None
+            return 0.0, 0.0, 0.0, 0.0, None
 
         prev_patch_cont = np.ascontiguousarray(prev_patch_gray)
         patch_cont = np.ascontiguousarray(patch_gray)
@@ -233,7 +233,7 @@ class ROITracker:
         # 2. Calculate optical flow for the entire patch once
         flow = self.flow_dense.calc(prev_patch_cont, patch_cont, None)
         if flow is None:
-            return AppGUIColors.TRANSPARENT, None
+            return 0.0, 0.0, 0.0, 0.0, None
 
         h, w, _ = flow.shape
         # is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
@@ -318,7 +318,7 @@ class ROITracker:
         """
         # 1. Handle edge cases
         if self.flow_dense is None or prev_patch_gray is None or prev_patch_gray.shape != patch_gray.shape:
-            return AppGUIColors.TRANSPARENT, None
+            return 0.0, 0.0, 0.0, 0.0, None
 
         prev_patch_cont = np.ascontiguousarray(prev_patch_gray)
         patch_cont = np.ascontiguousarray(patch_gray)
@@ -326,7 +326,7 @@ class ROITracker:
         # 2. Calculate optical flow for the entire patch once
         flow = self.flow_dense.calc(prev_patch_cont, patch_cont, None)
         if flow is None:
-            return AppGUIColors.TRANSPARENT, None
+            return 0.0, 0.0, 0.0, 0.0, None
 
         h, w, _ = flow.shape
         # is_vr_video = self.app and hasattr(self.app, 'processor') and self.app.processor.determined_video_type == 'VR'
