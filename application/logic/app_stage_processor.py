@@ -437,9 +437,17 @@ class AppStageProcessor:
             # Determine if this is an autotuner run
             is_autotune_context = self.frame_range_override is not None
 
-            should_skip_stage1 = (not self.force_rerun_stage1
-                                  and target_s1_path and os.path.exists(target_s1_path)
-                                  and preprocessed_video_path and os.path.exists(preprocessed_video_path))
+            msgpack_exists = os.path.exists(target_s1_path) if target_s1_path else False
+            preprocessed_video_exists = os.path.exists(preprocessed_video_path) if preprocessed_video_path else False
+
+            if self.save_preprocessed_video:
+                # If we want a preprocessed video, both must exist to skip Stage 1.
+                full_run_artifacts_exist = msgpack_exists and preprocessed_video_exists
+            else:
+                # If we don't care about a preprocessed video, only the msgpack matters.
+                full_run_artifacts_exist = msgpack_exists
+
+            should_skip_stage1 = (not self.force_rerun_stage1 and full_run_artifacts_exist)
 
             if should_skip_stage1 and not self.frame_range_override:  # Never skip for autotuner
                 stage1_success = True
@@ -528,8 +536,7 @@ class AppStageProcessor:
                 completion_payload = {
                     "message": "AI CV (2-Stage) analysis completed successfully.",
                     "status": "Completed",
-                    "video_path": fm.video_path,
-                    "video_segments": video_segments_for_funscript
+                    "video_path": fm.video_path
                 }
                 self.gui_event_queue.put(("analysis_message", completion_payload, None))
             elif selected_mode == TrackerMode.OFFLINE_3_STAGE:
@@ -670,7 +677,7 @@ class AppStageProcessor:
             #if self.save_preprocessed_video:
             #    preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
 
-            # Preprocessed video is now mandatory for pipeline reliability.
+            # Preprocessed video is now optional.
             preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
 
             num_producers = num_producers_override if num_producers_override is not None else self.num_producers_stage1
@@ -696,9 +703,8 @@ class AppStageProcessor:
                 gui_event_queue_arg=self.gui_event_queue,
                 frame_range_arg=frame_range,
                 output_filename_override=output_path,
-                #save_preprocessed_video_arg=self.save_preprocessed_video,
-                save_preprocessed_video_arg=True,  # This is now always true
-                preprocessed_video_path_arg=preprocessed_video_path,
+                save_preprocessed_video_arg=self.save_preprocessed_video,
+                preprocessed_video_path_arg=preprocessed_video_path if self.save_preprocessed_video else None,
                 is_autotune_run_arg=is_autotune_run
             )
             if self.stop_stage_event.is_set():
@@ -1083,8 +1089,13 @@ class AppStageProcessor:
                             fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
 
                     elif axis_mode == "horizontal":
-                        # Do nothing, as Stage 2 does not produce horizontal data. Both timelines remain untouched.
-                        self.app.logger.info("Horizontal axis mode selected, but 2-Stage analysis only produces vertical data. No timelines were modified.")
+                        # Overwrite ONLY the target timeline with the secondary (horizontal) actions.
+                        if target_timeline == "primary":
+                            self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
+                            fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
+                        else:  # Target is secondary
+                            self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
+                            fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
 
                     self.stage2_status_text = "S2 Completed. Results Processed."
                     self.app.project_manager.project_dirty = True
@@ -1154,90 +1165,14 @@ class AppStageProcessor:
                     self.stage3_overall_progress_value = 1.0
                 elif event_type == "analysis_message":
                     payload = data1 if isinstance(data1, dict) else {}
-                    log_msg = payload.get("message", str(data1))
                     status_override = payload.get("status", data2)
-                    video_path_from_event = payload.get("video_path")
-                    segments_from_event = payload.get("video_segments")
-
-                    if log_msg:
-                        self.logger.info(log_msg, extra={'status_message': True})
+                    log_msg = payload.get("message", str(data1))
 
                     if status_override == "Completed":
-                        if not video_path_from_event:
-                            self.logger.warning("Completion event is missing its video path. Cannot save funscripts.")
-                        else:
-                            # --- Update the central chapter list from the event data BEFORE saving ---
-                            if segments_from_event is not None:
-                                self.logger.info(f"Updating app state with {len(segments_from_event)} chapters for saving.")
-                                self.app.funscript_processor.video_chapters = [
-                                    VideoSegment.from_dict(chap_data) for chap_data in segments_from_event if isinstance(chap_data, dict)
-                                ]
-
-                            self.app.file_manager.save_raw_funscripts_after_generation(video_path_from_event)
-                            post_processing_enabled = self.app.app_settings.get("enable_auto_post_processing", False)
-                            # In batch mode, we disable post-processing to ensure raw scripts are saved reliably.
-                            if self.app.is_batch_processing_active:
-                                self.logger.info("Batch processing active. Skipping auto post-processing.")
-                                post_processing_enabled = False
-
-                            chapters_for_save = segments_from_event
-
-                            if post_processing_enabled:
-                                self.logger.info("Triggering auto post-processing after completed analysis.")
-                                self.app.funscript_processor.apply_automatic_post_processing()
-                                # After post-processing, the funscript_processor's chapter list is the most current.
-                                chapters_for_save = self.app.funscript_processor.video_chapters
-                            else:
-                                self.logger.info("Auto post-processing disabled for this run, skipping.")
-
-                            if self.app.is_batch_processing_active and self.app.batch_apply_ultimate_autotune:
-                                self.logger.info("Triggering Ultimate Autotune for batch processing.")
-                                if hasattr(self.app, 'trigger_ultimate_autotune_with_defaults'):
-                                    self.app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
-                                # After autotune, the funscript_processor's chapter list is still the most current.
-                                chapters_for_save = self.app.funscript_processor.video_chapters
-
-
-                            self.logger.info("Saving final funscripts...")
-
-                            saved_funscript_paths = self.app.file_manager.save_final_funscripts(video_path_from_event, chapters=chapters_for_save)
-
-                            # Check if we are in batch mode and if the user requested a copy
-                            if self.app.is_batch_processing_active and self.app.batch_copy_funscript_to_video_location:
-                                if saved_funscript_paths and isinstance(saved_funscript_paths, list):
-                                    video_dir = os.path.dirname(video_path_from_event)
-                                    for source_path in saved_funscript_paths:
-                                        if not source_path or not os.path.exists(source_path):
-                                            continue
-                                        try:
-                                            file_basename = os.path.basename(source_path)
-                                            destination_path = os.path.join(video_dir, file_basename)
-                                            # Manually copy the file
-                                            with open(source_path, 'rb') as src_file:
-                                                content = src_file.read()
-                                            with open(destination_path, 'wb') as dest_file:
-                                                dest_file.write(content)
-                                            self.logger.info(f"Saved copy of {file_basename} next to video.")
-                                        except Exception as e:
-                                            self.logger.error(f"Failed to save copy of {os.path.basename(source_path)} next to video: {e}")
-                                else:
-                                    self.logger.warning("save_final_funscripts did not return file paths. Cannot save copy next to video.")
-
-                            # --- Save the project file for the completed video ---
-                            self.logger.info("Saving project file for completed video...")
-                            project_filepath = self.app.file_manager.get_output_path_for_file(video_path_from_event, constants.PROJECT_FILE_EXTENSION)
-                            self.app.project_manager.save_project(project_filepath)
-
-                        # Check if we are in simple mode and should auto-run post-processing
-                        is_simple_mode = getattr(self.app.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
-                        is_offline_analysis = self.app.app_state_ui.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]
-
-                        if is_simple_mode and is_offline_analysis:
-                            self.logger.info("Simple Mode: Automatically applying Ultimate Autotune with defaults...")
-                            self.app.set_status_message("Analysis complete! Applying auto-enhancements...")
-                            # Trigger the autotune on the primary timeline (timeline 1)
-                            if hasattr(self.app, 'trigger_ultimate_autotune_with_defaults'):
-                                self.app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+                        if log_msg:
+                            self.logger.info(log_msg, extra={'status_message': True})
+                        # Delegate all finalization logic to the main app logic controller
+                        self.app.on_offline_analysis_completed(payload)
 
                     elif status_override == "Aborted":
                         if self.current_analysis_stage == 1 or self.stage1_status_text.startswith(
@@ -1246,18 +1181,19 @@ class AppStageProcessor:
                             "Running"): self.stage2_status_text = "S2 Aborted."
                         if self.current_analysis_stage == 3 or self.stage3_status_text.startswith(
                             "Running"): self.stage3_status_text = "S3 Aborted."
-                    elif status_override == "Failed":
-                        if self.current_analysis_stage == 1 or self.stage1_status_text.startswith(
-                            "Running"): self.stage1_status_text = "S1 Failed."
-                        if self.current_analysis_stage == 2 or self.stage2_status_text.startswith(
-                            "Running"): self.stage2_status_text = "S2 Failed."
-                        if self.current_analysis_stage == 3 or self.stage3_status_text.startswith(
-                            "Running"): self.stage3_status_text = "S3 Failed."
+                        # Signal batch loop to continue on abort
+                        if self.app.is_batch_processing_active and hasattr(self.app, 'save_and_reset_complete_event'):
+                            self.logger.debug(f"Signaling batch loop to continue after handling '{status_override}' status.")
+                            self.app.save_and_reset_complete_event.set()
 
-                    # --- Signal the batch loop to continue, regardless of outcome ---
-                    if self.app.is_batch_processing_active and hasattr(self.app, 'save_and_reset_complete_event'):
-                        self.logger.debug(f"Signaling batch loop to continue after handling '{status_override}' status.")
-                        self.app.save_and_reset_complete_event.set()
+                    elif status_override == "Failed":
+                        if self.current_analysis_stage == 1 or self.stage1_status_text.startswith("Running"): self.stage1_status_text = "S1 Failed."
+                        if self.current_analysis_stage == 2 or self.stage2_status_text.startswith("Running"): self.stage2_status_text = "S2 Failed."
+                        if self.current_analysis_stage == 3 or self.stage3_status_text.startswith("Running"): self.stage3_status_text = "S3 Failed."
+                        # Signal batch loop to continue on failure
+                        if self.app.is_batch_processing_active and hasattr(self.app, 'save_and_reset_complete_event'):
+                            self.logger.debug(f"Signaling batch loop to continue after handling '{status_override}' status.")
+                            self.app.save_and_reset_complete_event.set()
 
                 elif event_type == "refinement_completed":
                     payload = data1

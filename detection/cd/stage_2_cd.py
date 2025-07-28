@@ -2232,6 +2232,15 @@ def atr_pass_7_smooth_and_normalize_distances(state: AppStateContainer, logger: 
     _atr_normalize_funscript_sparse_per_segment(state, logger)
     _debug_log(logger, "Applied per-segment normalization to distances.")
 
+    full_script_data_np = np.array(
+        [[fo.frame_id, fo.atr_funscript_distance] for fo in state.frames],
+        dtype=np.float64
+    )
+
+    state.funscript_frames = full_script_data_np[:, 0].astype(int).tolist()
+    state.funscript_distances = full_script_data_np[:, 1].astype(int).tolist()
+
+
 
 def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[logging.Logger]):
     """
@@ -2442,7 +2451,8 @@ def atr_pass_1c_recover_lost_tracks_with_of(
         preprocessed_video_path_arg: str,
         logger: Optional[logging.Logger],
         progress_callback: callable,
-        main_step_info: tuple
+        main_step_info: tuple,
+        num_workers: int
 ):
     """
     MODIFIED: Identifies gaps and provides an 'interrupt_frame' to the worker if a
@@ -2523,10 +2533,6 @@ def atr_pass_1c_recover_lost_tracks_with_of(
         return
 
     # --- Parallel Processing Setup ---
-    # --- Limit the number of OF Long Gap Recovery workers to a quarter of the CPU count, minimum 1, maximum 4
-    # TODO: Will need to benchmark this part
-    num_workers = min(4, max(1, (psutil.cpu_count(logical=False) - 2) // 4))
-    # num_workers = max(1, (psutil.cpu_count(logical=False) - 2) // 4)
     logger.info(f"Distributing {len(gaps_to_recover)} recovery gaps to {num_workers} worker processes.")
 
     worker_args = [{
@@ -2589,7 +2595,8 @@ def perform_contact_analysis(
         scripting_range_start_frame_arg: Optional[int] = None,
         scripting_range_end_frame_arg: Optional[int] = None,
         generate_funscript_actions_arg: bool = True,
-        is_ranged_data_source: bool = False
+        is_ranged_data_source: bool = False,
+        num_workers_stage2_of_arg: int = constants.DEFAULT_S2_OF_WORKERS
 ):
     global _of_debug_prints_stage2
     _of_debug_prints_stage2 = enable_of_debug_prints
@@ -2690,12 +2697,12 @@ def perform_contact_analysis(
         ("Step 9: Smooth & Normalize Distances", atr_pass_7_smooth_and_normalize_distances),
     ]
     atr_main_steps_list_funscript_gen = [
-        #("Step 8: Smooth & Normalize Distances", atr_pass_7_smooth_and_normalize_distances),
-        ("Step 9: Simplify Signal", atr_pass_8_simplify_signal)
+    #    #("Step 8: Smooth & Normalize Distances", atr_pass_7_smooth_and_normalize_distances),
+        ("Step 10: Simplify Signal", atr_pass_8_simplify_signal)
     ]
     atr_main_steps_list = atr_main_steps_list_base
-    if generate_funscript_actions_arg:
-        atr_main_steps_list.extend(atr_main_steps_list_funscript_gen)
+    # if generate_funscript_actions_arg:
+    #     atr_main_steps_list.extend(atr_main_steps_list_funscript_gen)
 
     num_main_atr_steps = len(atr_main_steps_list)
 
@@ -2708,7 +2715,7 @@ def perform_contact_analysis(
         # --- Special handling for the OF recovery pass ---
         if step_func_atr == atr_pass_1c_recover_lost_tracks_with_of:
             step_func_atr(state, preprocessed_video_path_arg, logger, atr_progress_wrapper,
-                          main_step_tuple_for_callback)
+                          main_step_tuple_for_callback, num_workers_stage2_of_arg)
         else:
             # Standard call for all other passes
             step_func_atr(state, logger)

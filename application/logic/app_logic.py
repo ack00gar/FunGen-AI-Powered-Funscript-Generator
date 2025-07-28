@@ -16,6 +16,7 @@ from application.utils.logger import AppLogger
 from config.constants import *
 from application.utils.write_access import check_write_access
 from application.updater import AutoUpdater
+from application.utils.video_segment import VideoSegment
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -33,6 +34,8 @@ class ApplicationLogic:
 
         # Initialize logging_level_setting before AppLogger uses it indirectly via AppSettings
         self.logging_level_setting = self.app_settings.get("logging_level", "INFO")
+
+        self.cached_class_names: Optional[List[str]] = None
 
         status_log_config = {
             logging.INFO: 3.0, logging.WARNING: 6.0, logging.ERROR: 10.0, logging.CRITICAL: 15.0,
@@ -577,6 +580,9 @@ class ApplicationLogic:
         """
         Clears the path for a given model type and releases it from the tracker.
         """
+        # --- Invalidate cache when models change ---
+        self.cached_class_names = None
+
         if model_type == 'detection':
             self.yolo_detection_model_path_setting = ""
             self.app_settings.set("yolo_det_model_path", "")
@@ -886,6 +892,92 @@ class ApplicationLogic:
             self.logger.info(f"Cleared pending action: {self.pending_action_after_tracking.get('type')}")
         self.pending_action_after_tracking = None
 
+    def on_offline_analysis_completed(self, payload: Dict):
+        """
+        Handles the finalization of a completed offline analysis run (2-Stage or 3-Stage).
+        This includes saving raw and final funscripts, applying post-processing,
+        and handling batch mode tasks.
+        """
+        video_path = payload.get("video_path")
+        chapters_for_save_from_payload = payload.get("video_segments")
+
+        if not video_path:
+            self.logger.warning("Completion event is missing its video path. Cannot save funscripts.")
+            # Still need to signal batch processing to avoid a hang
+            if self.is_batch_processing_active:
+                self.save_and_reset_complete_event.set()
+            return
+
+        # The chapter list is now the single source of truth from funscript_processor,
+        # which was populated by the stage2_results_success event.
+        chapters_for_save = self.funscript_processor.video_chapters
+
+        # 1. SAVE THE RAW FUNSCRIPT
+        self.logger.info("Offline analysis completed. Saving raw funscript before post-processing.")
+        self.file_manager.save_raw_funscripts_after_generation(video_path)
+
+        # 2. PROCEED WITH POST-PROCESSING (if enabled)
+        post_processing_enabled = self.app_settings.get("enable_auto_post_processing", False)
+
+        if self.is_batch_processing_active:
+            self.logger.info("Batch processing active. Auto post-processing decision is handled by batch settings.")
+            post_processing_enabled = self.batch_apply_post_processing
+
+        if post_processing_enabled:
+            self.logger.info("Triggering auto post-processing after completed analysis.")
+            self.funscript_processor.apply_automatic_post_processing()
+            chapters_for_save = self.funscript_processor.video_chapters  # Refresh in case post-proc changed them
+        else:
+            self.logger.info("Auto post-processing disabled for this run, skipping.")
+
+        if self.is_batch_processing_active and self.batch_apply_ultimate_autotune:
+            self.logger.info("Triggering Ultimate Autotune for batch processing.")
+            self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+            chapters_for_save = self.funscript_processor.video_chapters
+
+        # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
+        self.logger.info("Saving final funscripts...")
+        saved_funscript_paths = self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
+
+        # Handle batch mode copy
+        if self.is_batch_processing_active and self.batch_copy_funscript_to_video_location:
+            if saved_funscript_paths and isinstance(saved_funscript_paths, list):
+                video_dir = os.path.dirname(video_path)
+                for source_path in saved_funscript_paths:
+                    if not source_path or not os.path.exists(source_path):
+                        continue
+                    try:
+                        file_basename = os.path.basename(source_path)
+                        destination_path = os.path.join(video_dir, file_basename)
+                        with open(source_path, 'rb') as src_file:
+                            content = src_file.read()
+                        with open(destination_path, 'wb') as dest_file:
+                            dest_file.write(content)
+                        self.logger.info(f"Saved copy of {file_basename} next to video.")
+                    except Exception as e:
+                        self.logger.error(f"Failed to save copy of {os.path.basename(source_path)} next to video: {e}")
+            else:
+                self.logger.warning("save_final_funscripts did not return file paths. Cannot save copy next to video.")
+
+        # 4. SAVE THE PROJECT
+        self.logger.info("Saving project file for completed video...")
+        project_filepath = self.file_manager.get_output_path_for_file(video_path, PROJECT_FILE_EXTENSION)
+        self.project_manager.save_project(project_filepath)
+
+        # 5. Handle simple mode
+        is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
+        is_offline_analysis = self.app_state_ui.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]
+
+        if is_simple_mode and is_offline_analysis:
+            self.logger.info("Simple Mode: Automatically applying Ultimate Autotune with defaults...")
+            self.set_status_message("Analysis complete! Applying auto-enhancements...")
+            self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+
+        # 6. Signal batch loop to continue
+        if self.is_batch_processing_active and hasattr(self, 'save_and_reset_complete_event'):
+            self.logger.debug("Signaling batch loop to continue after offline analysis completion.")
+            self.save_and_reset_complete_event.set()
+
     def on_processing_stopped(self, was_scripting_session: bool = False, scripted_frame_range: Optional[Tuple[int, int]] = None):
         """
         Called when video processing (tracking, playback) stops or completes.
@@ -945,16 +1037,66 @@ class ApplicationLogic:
             else:
                 self.logger.warning("Live session ended, but no video path is available to save the raw funscript.")
 
-    def get_available_tracking_classes(self) -> List[str]:
-        """Gets the list of class names from the loaded YOLO detection model."""
+    def _cache_tracking_classes(self):
+        """
+        Temporarily loads the detection model to get class names, then unloads it.
+        This populates self.cached_class_names. It's a blocking operation.
+        It will first try to get names from an already-loaded tracker model to be efficient.
+        """
+        # If cache is already populated, do nothing.
+        if self.cached_class_names is not None:
+            return
+
+        # If a model is already loaded for active tracking, use its class names.
         if self.tracker and self.tracker.yolo and hasattr(self.tracker.yolo, 'names'):
+            self.logger.info("Model already loaded for tracking, using its class names for cache.")
             model_names = self.tracker.yolo.names
             if isinstance(model_names, dict):
-                return sorted(list(model_names.values()))
+                self.cached_class_names = sorted(list(model_names.values()))
             elif isinstance(model_names, list):
-                return sorted(model_names)
-            self.logger.warning("Tracker model names format not recognized for available classes.")
-        return []
+                self.cached_class_names = sorted(model_names)
+            else:
+                self.logger.warning("Tracker model names format not recognized while caching.")
+            return
+
+        model_path = self.yolo_det_model_path
+        if not model_path or not os.path.exists(model_path):
+            self.logger.info("Cannot cache tracking classes: Detection model path not set or invalid.")
+            self.cached_class_names = []  # Cache as empty to prevent re-attempts.
+            return
+
+        try:
+            self.logger.info(f"Temporarily loading model to cache class names: {os.path.basename(model_path)}")
+            # This is the potentially slow operation that can freeze the UI.
+            temp_model = YOLO(model_path)
+            model_names = temp_model.names
+
+            if isinstance(model_names, dict):
+                self.cached_class_names = sorted(list(model_names.values()))
+            elif isinstance(model_names, list):
+                self.cached_class_names = sorted(model_names)
+            else:
+                self.logger.warning("Model loaded for caching, but names format not recognized.")
+                self.cached_class_names = []  # Cache as empty
+
+            self.logger.info("Class names cached successfully.")
+            del temp_model  # Explicitly release the model object
+
+        except Exception as e:
+            self.logger.error(f"Failed to temporarily load model '{model_path}' to cache class names: {e}", exc_info=True)
+            self.cached_class_names = []  # Cache as empty on failure to prevent retries.
+
+    def get_available_tracking_classes(self) -> List[str]:
+        """
+        Gets the list of class names from the model.
+        It uses a cache to avoid reloading the model repeatedly.
+        """
+        # If cache is not populated, do it now.
+        if self.cached_class_names is None:
+            self._cache_tracking_classes()
+
+        # The cache should be populated now (even if with an empty list on failure).
+        return self.cached_class_names if self.cached_class_names is not None else []
 
     def set_status_message(self, message: str, duration: float = 3.0, level: int = logging.INFO):
         if hasattr(self, 'app_state_ui') and self.app_state_ui is not None:
