@@ -1268,9 +1268,9 @@ class ControlPanelUI:
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
         if is_enabled:
-            imgui.push_style_color(imgui.COLOR_BUTTON, GeneralColors.RED_DARK)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, GeneralColors.RED_LIGHT)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, GeneralColors.RED)
+            imgui.push_style_color(imgui.COLOR_BUTTON, *GeneralColors.RED_DARK)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *GeneralColors.RED_LIGHT)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *GeneralColors.RED)
             button_text = "Disable Refinement Mode"
         else:
             button_text = "Enable Refinement Mode"

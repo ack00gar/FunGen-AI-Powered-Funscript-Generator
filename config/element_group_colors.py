@@ -156,6 +156,8 @@ class GeneralColors:
     GRAY_LIGHT = CurrentTheme.GRAY_LIGHT
     GRAY_DARK = CurrentTheme.GRAY_DARK
     RED = CurrentTheme.RED
+    RED_LIGHT = CurrentTheme.RED_LIGHT
+    RED_DARK = CurrentTheme.RED_DARK
     GREEN = CurrentTheme.GREEN
     BLUE = CurrentTheme.BLUE
     YELLOW = CurrentTheme.YELLOW
