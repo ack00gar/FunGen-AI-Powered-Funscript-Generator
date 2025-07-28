@@ -117,6 +117,9 @@ class AppGUIColors:
     FPS_TARGET_MARKER = RGBColors.FPS_TARGET_MARKER
     FPS_TRACKER_MARKER = RGBColors.FPS_TRACKER_MARKER
     FPS_PROCESSOR_MARKER = RGBColors.FPS_PROCESSOR_MARKER
+    
+    # Additional RGB colors
+    TEAL = RGBColors.TEAL
 
     TRANSPARENT = CurrentTheme.TRANSPARENT
     SEMI_TRANSPARENT = CurrentTheme.SEMI_TRANSPARENT
@@ -148,20 +151,39 @@ class BoxStyleColors:
     EXCLUDED = CurrentTheme.BOX_EXCLUDED
 
 
+class FloatingWidgetColors:
+    """Color constants for floating widget components."""
+    BACKGROUND = CurrentTheme.FLOATING_WIDGET_BG
+    BORDER = CurrentTheme.FLOATING_WIDGET_BORDER
+    TEXT = CurrentTheme.FLOATING_WIDGET_TEXT
+
+
 class GeneralColors:
     """General color constants for common UI elements."""
     WHITE = CurrentTheme.WHITE
+    WHITE_DARK = CurrentTheme.WHITE_DARK
     BLACK = CurrentTheme.BLACK
     GRAY = CurrentTheme.GRAY
     GRAY_LIGHT = CurrentTheme.GRAY_LIGHT
     GRAY_DARK = CurrentTheme.GRAY_DARK
+    GRAY_MEDIUM = CurrentTheme.GRAY_MEDIUM
     RED = CurrentTheme.RED
+    RED_DARK = CurrentTheme.RED_DARK
+    RED_LIGHT = CurrentTheme.RED_LIGHT
     GREEN = CurrentTheme.GREEN
+    GREEN_LIGHT = CurrentTheme.GREEN_LIGHT
+    GREEN_DARK = CurrentTheme.GREEN_DARK
     BLUE = CurrentTheme.BLUE
+    BLUE_LIGHT = CurrentTheme.BLUE_LIGHT
+    BLUE_DARK = CurrentTheme.BLUE_DARK
     YELLOW = CurrentTheme.YELLOW
+    YELLOW_LIGHT = CurrentTheme.YELLOW_LIGHT
+    YELLOW_DARK = CurrentTheme.YELLOW_DARK
     CYAN = CurrentTheme.CYAN
     MAGENTA = CurrentTheme.MAGENTA
     ORANGE = CurrentTheme.ORANGE
+    ORANGE_LIGHT = CurrentTheme.ORANGE_LIGHT
+    ORANGE_DARK = CurrentTheme.ORANGE_DARK
     PURPLE = CurrentTheme.PURPLE
     PINK = CurrentTheme.PINK
     BROWN = CurrentTheme.BROWN 
