@@ -169,6 +169,7 @@ class RGBColors:
     GREY_DARK = (64, 64, 64)
     RED = (255, 0, 0)
     GREEN = (0, 255, 0)
+    GREEN_LIGHT = (128, 255, 128)
     GREEN_DARK = (0, 128, 0)
     BLUE = (0, 0, 255)
     BLUE_DARK = (0, 0, 128)
