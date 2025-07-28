@@ -4,9 +4,9 @@ import shutil
 import urllib.request
 import zipfile
 from typing import Dict, Tuple, TYPE_CHECKING
-
-
-from config.constants import TIMELINE_HEATMAP_COLORS, TIMELINE_COLOR_SPEED_STEP, TIMELINE_COLOR_ALPHA, STATUS_DETECTED, STATUS_SMOOTHED
+from config.constants import STATUS_DETECTED, STATUS_SMOOTHED
+from config.constants_colors import RGBColors
+from config.element_group_colors import BoxStyleColors
 
 if TYPE_CHECKING:
     from application.logic.app_logic import ApplicationLogic
@@ -16,6 +16,11 @@ class AppUtility:
         # app_instance might not be needed if all utility methods are static
         # or don't rely on application state.
         self.app = app_instance
+        self.heatmap_colors_list = RGBColors.TIMELINE_HEATMAP
+        self.step_val = RGBColors.TIMELINE_COLOR_SPEED_STEP
+        self.alpha_val = RGBColors.TIMELINE_COLOR_ALPHA
+
+        self.grey_rgb = RGBColors.GREY
 
     def _download_reporthook(self, block_num, block_size, total_size, progress_callback):
         """Callback for urllib.request.urlretrieve to report progress."""
@@ -41,8 +46,7 @@ class AppUtility:
                 os.remove(destination_path)
             return False
 
-    def process_mac_model_archive(self, downloaded_path: str, destination_dir: str,
-                                  original_filename: str) -> str | None:
+    def process_mac_model_archive(self, downloaded_path: str, destination_dir: str, original_filename: str) -> str | None:
         """
         Processes the downloaded file for a macOS .mlpackage model.
         It handles extraction if it's a zip, or renames it if it's an auto-unzipped package.
@@ -97,57 +101,54 @@ class AppUtility:
         role = box_data.get("role_in_frame", "general_detection")
         status = box_data.get("status", STATUS_DETECTED)
         class_name = box_data.get("class_name", "")
-        color = (0.8, 0.8, 0.8, 0.7)
+        color = BoxStyleColors.GENERAL
         thickness = 1.0
         is_dashed = False
         if role == "pref_penis":
-            color = (0.1, 1.0, 0.1, 0.9)
+            color = BoxStyleColors.PREF_PENIS
             thickness = 2.0
         elif role == "locked_penis_box":
-            color = (0.1, 0.9, 0.9, 0.8)
+            color = BoxStyleColors.LOCKED_PENIS
             thickness = 1.5
         elif role == "tracked_box":
             if class_name == "pussy":
-                color = (1.0, 0.5, 0.8, 0.8)
+                color = BoxStyleColors.PUSSY
             elif class_name == "butt":
-                color = (0.9, 0.6, 0.2, 0.8)
+                color = BoxStyleColors.BUTT
             else:
-                color = (1.0, 1.0, 0.2, 0.8)
+                color = BoxStyleColors.TRACKED
             thickness = 1.5
         elif role.startswith("tracked_box_"):
-            color = (0.7, 0.7, 0.7, 0.7)
+            color = BoxStyleColors.TRACKED_ALT
             thickness = 1.0
         elif role == "general_detection":
-            color = (0.2, 0.5, 1.0, 0.6)
+            color = BoxStyleColors.GENERAL_DETECTION
         if status not in [STATUS_DETECTED, STATUS_SMOOTHED]:
             is_dashed = True
             color = (color[0], color[1], color[2], max(0.4, color[3] * 0.6))
         if box_data.get("is_excluded", False):
-            color = (0.5, 0.1, 0.1, 0.5)
+            color = BoxStyleColors.EXCLUDED
             is_dashed = True
         return color, thickness, is_dashed
 
     def get_speed_color_from_map(self, speed_pps: float) -> tuple:
-        intensity = speed_pps
-        heatmap_colors_list = TIMELINE_HEATMAP_COLORS
-        step_val = TIMELINE_COLOR_SPEED_STEP
-        alpha_val = TIMELINE_COLOR_ALPHA
+        if np.isnan(speed_pps):
+            return (self.grey_rgb, self.alpha_val)  # gray for NaN
 
-        if np.isnan(intensity):
-            return (128 / 255.0, 128 / 255.0, 128 / 255.0, alpha_val)
-        if intensity <= 0:
-            c = heatmap_colors_list[0]
-            return (c[0] / 255, c[1] / 255, c[2] / 255, alpha_val)
-        if intensity > (len(heatmap_colors_list) -1) * step_val:
-            c = heatmap_colors_list[-1]
-            return (c[0] / 255, c[1] / 255, c[2] / 255, alpha_val)
+        max_index = len(self.heatmap_colors_list) - 1
+        max_value = max_index * self.step_val
 
-        index = int(intensity // step_val)
-        index = max(0, min(index, len(heatmap_colors_list) - 2))
+        if speed_pps <= 0:
+            c = self.heatmap_colors_list[0]
+        elif speed_pps >= max_value:
+            c = self.heatmap_colors_list[max_index]
+        else:
+            index = int(speed_pps // self.step_val)
+            t = (speed_pps % self.step_val) / self.step_val
+            c1 = self.heatmap_colors_list[index]
+            c2 = self.heatmap_colors_list[index + 1]
+            c = [c1[i] + (c2[i] - c1[i]) * t for i in range(3)]
 
-        t = max(0.0, min(1.0, (intensity - (index * step_val)) / step_val))
-        c1, c2 = heatmap_colors_list[index], heatmap_colors_list[index + 1]
-        r = (c1[0] + (c2[0] - c1[0]) * t) / 255.0
-        g = (c1[1] + (c2[1] - c1[1]) * t) / 255.0
-        b = (c1[2] + (c2[2] - c1[2]) * t) / 255.0
-        return (r, g, b, alpha_val)
+        r, g, b = (ch / 255.0 for ch in c)
+        return (r, g, b, self.alpha_val)
+

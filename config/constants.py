@@ -1,5 +1,7 @@
 import platform
 import os
+import enum
+from typing import Dict, List, Tuple, Any
 from enum import Enum, auto
 
 # Attempt to import torch for device detection, but fail gracefully if it's not available.
@@ -120,30 +122,8 @@ MAX_HISTORY_DISPLAY = 10  # Max number of actions to show in the Undo/Redo histo
 UI_PREVIEW_UPDATE_INTERVAL_S = 1.0  # Interval for updating graphs during live tracking.
 DEFAULT_CHAPTER_BAR_HEIGHT = 20  # Height in pixels of the chapter bar.
 
-# --- Timeline & Heatmap Colors ---
-TIMELINE_HEATMAP_COLORS = [
-    (30, 144, 255),   # Dodger Blue
-    (34, 139, 34),    # Lime Green
-    (255, 215, 0),    # Gold
-    (220, 20, 60),    # Crimson
-    (147, 112, 219),  # Medium Purple
-    (37, 22, 122)     # Dark Blue (Cap color)
-]
-TIMELINE_COLOR_SPEED_STEP = 250.0  # Speed (pixels/sec) used to step through the color map.
-TIMELINE_COLOR_ALPHA = 0.9
-
-# --- Default Chapter Colors (used in video_segment.py) ---
-DEFAULT_CHAPTER_COLORS = {
-    "BJ": (0.9, 0.4, 0.4, 0.8),
-    "HJ": (0.4, 0.9, 0.4, 0.8),
-    "NR": (0.6, 0.6, 0.6, 0.7),
-    "CG/Miss.": (0.4, 0.4, 0.9, 0.8),
-    "R.CG/Dog.": (0.9, 0.6, 0.2, 0.8),
-    "FootJ": (0.9, 0.9, 0.3, 0.8),
-    "BoobJ": (0.9, 0.3, 0.6, 0.8),
-    "C-Up": (0.7, 0.7, 0.9, 0.8),
-    "default": (0.5, 0.5, 0.5, 0.7)
-}
+# --- Timeline & Heatmap Colors (now imported from constants_colors.py) ---
+# Timeline colors are now managed through constants_colors.py
 
 
 ####################################################################################################
@@ -154,12 +134,6 @@ CLASS_NAMES_TO_IDS = {
     'anus': 6, 'breast': 7, 'navel': 8, 'foot': 9, 'hips center': 10
 }
 CLASS_IDS_TO_NAMES = {v: k for k, v in CLASS_NAMES_TO_IDS.items()}
-CLASS_COLORS = {
-    "penis": (255, 0, 0), "glans": (0, 128, 0), "pussy": (0, 0, 255), "butt": (0, 180, 255),
-    "anus": (128, 0, 128), "breast": (255, 165, 0), "navel": (0, 255, 255),
-    "hand": (255, 0, 255), "face": (0, 255, 0), "foot": (165, 42, 42),
-    "hips center": (0, 0, 0), "locked_penis": (0, 255, 255),
-}
 CLASSES_TO_DISCARD_BY_DEFAULT = ["anus"]
 
 INTERACTION_ZONES = {
@@ -358,8 +332,6 @@ STATUS_GENERATED_RTS = "Generated_RTS"
 SHORT_GAP_THRESHOLD = 2
 LONG_GAP_THRESHOLD = 30
 RTS_WINDOW_PADDING = 20 # Frames to include before start_frame and after end_frame for RTS window
-
-
 
 # --- Constants from new helper scripts ---
 # From smooth_tracked_classes.py

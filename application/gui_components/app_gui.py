@@ -22,6 +22,7 @@ from application.gui_components.generated_file_manager_window import GeneratedFi
 from application.gui_components.autotuner_window import AutotunerWindow
 
 from config import constants
+from config.element_group_colors import AppGUIColors
 
 
 class GUI:
@@ -367,7 +368,7 @@ class GUI:
                             imgui.WINDOW_NO_NAV)
 
             imgui.begin("EnergySaverIndicator", closable=False, flags=window_flags)
-            imgui.text_colored(indicator_text, 0.4, 0.9, 0.4, 1.0)  # Greenish text
+            imgui.text_colored(indicator_text, 0.4, 0.9, 0.4, 1.0)  # TODO: move to theme, green
             imgui.end()
 
     # --- This function now submits a task to the worker thread ---
@@ -431,7 +432,7 @@ class GUI:
             if total_frames > 0:
                 normalized_pos = self.app.processor.current_frame_index / (total_frames - 1.0)
                 marker_x = (canvas_p1_x + style.frame_padding[0]) + (normalized_pos * (current_bar_width_float - style.frame_padding[0] * 2))
-                marker_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.85)
+                marker_color = imgui.get_color_u32_rgba(*AppGUIColors.MARKER)
                 draw_list_marker = imgui.get_window_draw_list()
                 draw_list_marker.add_line(marker_x, canvas_p1_y_offset, marker_x, canvas_p1_y_offset + graph_height, marker_color, 1.0)
 
@@ -528,7 +529,7 @@ class GUI:
         app_state = self.app.app_state_ui
         if not imgui.is_item_visible():
             return
-        marks = [(current_target_fps, (255, 255, 0), "Target"), (tracker_fps, (0, 255, 0), "Tracker"), (processor_fps, (255, 0, 0), "Processor")]
+        marks = [(current_target_fps, AppGUIColors.FPS_TARGET_MARKER, "Target"), (tracker_fps, AppGUIColors.FPS_TRACKER_MARKER, "Tracker"), (processor_fps, AppGUIColors.FPS_PROCESSOR_MARKER, "Processor")]
         slider_x_start, slider_x_end = min_rect.x, max_rect.x
         slider_width = slider_x_end - slider_x_start
         slider_y = (min_rect.y + max_rect.y) / 2
@@ -987,7 +988,7 @@ class GUI:
                 frame_start_time = time.time()
                 glfw.poll_events()
                 if self.impl: self.impl.process_inputs()
-                gl.glClearColor(0.06, 0.06, 0.06, 1)
+                gl.glClearColor(0.06, 0.06, 0.06, 1) # TODO: move to theme, dark gray
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
                 self.render_gui()
                 if self.app.app_settings.get("autosave_enabled", True) and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get("autosave_interval_seconds", 300):

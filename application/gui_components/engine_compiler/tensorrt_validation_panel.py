@@ -1,11 +1,12 @@
 import imgui
 import time
 from application.utils import tensorrt_compiler
+from config.element_group_colors import CompilerToolColors
 
-# Color palette for validation display
-_GREEN = (0.2, 0.8, 0.2, 1.0)  # Success color
-_RED = (0.8, 0.2, 0.2, 1.0)    # Failure color
-_GRAY = (0.7, 0.7, 0.7, 1.0)   # Neutral/unavailable color
+def colored_text_by_success(text: str, success: bool):
+    """Helper function to display colored text based on success status."""
+    color = CompilerToolColors.SUCCESS if success else CompilerToolColors.ERROR
+    imgui.text_colored(text, *color)
 
 class ValidationPanel:
     """Panel for displaying validation results."""
@@ -42,12 +43,13 @@ class ValidationPanel:
     
     def render(self):
         """Render the validation panel."""
-        imgui.begin_child("ValidationPanel", 0, 200, border=True)
+        width, height = 0, 200 # 0 means auto-size
+        imgui.begin_child("ValidationPanel", width, height, border=True)
         imgui.text("Validation Results")
         imgui.separator()
         
         if not self.validation_results:
-            imgui.text_colored("No validation results available", *_GRAY)
+            imgui.text_colored("No validation results available", *CompilerToolColors.INFO)
         else:
             for result in self.validation_results:
                 self._render_validation_item(result)
@@ -56,36 +58,27 @@ class ValidationPanel:
     
     def _render_validation_item(self, result):
         """Render a single validation item."""
-        # Status indicator and color
-        if result.success:
-            imgui.text_colored("[OK]", *_GREEN)
-            imgui.same_line()
-            imgui.text(f"{result.name}:")  # Default white for check labels
-        else:
-            imgui.text_colored("[FAIL]", *_RED)
-            imgui.same_line()
-            imgui.text(f"{result.name}:")  # Default white for check labels
+        # Status indicator
+        status_text = "[OK]" if result.success else "[FAIL]"
+        colored_text_by_success(status_text, result.success)
         
         imgui.same_line()
-        
-        # Version or details - convert to string if needed
+        imgui.text(f"{result.name}:")  # Default white for check labels
+        imgui.same_line()
+
+        # Version, details, or default status
         if result.version:
-            version_str = str(result.version) if result.version else ""
-            color = _GREEN if result.success else _RED
-            imgui.text_colored(version_str, *color)
+            display_text = str(result.version)
         elif result.details:
-            details_str = str(result.details) if result.details else ""
-            color = _GREEN if result.success else _RED
-            imgui.text_colored(details_str, *color)
+            display_text = str(result.details)
         else:
-            if result.success:
-                imgui.text_colored("OK", *_GREEN)
-            else:
-                imgui.text_colored("Failed", *_RED)
+            display_text = "OK" if result.success else "Failed"
+        
+        colored_text_by_success(display_text, result.success)
         
         # File path if available
-        if result.file_path:
-            imgui.text_colored(f"  Path: {result.file_path}", *_GRAY)
+        if hasattr(result, 'file_path') and result.file_path:
+            imgui.text_colored(f"  Path: {result.file_path}", *CompilerToolColors.INFO)
     
     def _refresh_file_status(self, pt_path: str, output_dir: str):
         """Refresh only the file status checks without full validation."""
