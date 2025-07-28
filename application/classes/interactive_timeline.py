@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Tuple
 from bisect import bisect_left, bisect_right
 
 from application.utils.time_format import _format_time
+from config.element_group_colors import TimelineColors
 
 
 class InteractiveFunscriptTimeline:
@@ -1222,9 +1223,7 @@ class InteractiveFunscriptTimeline:
                             self._update_preview('ultimate')
                         imgui.same_line(230);
                         imgui.push_item_width(180)
-                        c, self.ultimate_presmoothing_max_window = imgui.slider_int("Max Window##UltimateSmoothWindow",
-                                                                                    self.ultimate_presmoothing_max_window,
-                                                                                    5, 35)
+                        c, self.ultimate_presmoothing_max_window = imgui.slider_int("Max Window##UltimateSmoothWindow", self.ultimate_presmoothing_max_window, 5, 35)
                         if c:
                             if self.ultimate_presmoothing_max_window % 2 == 0:
                                 self.ultimate_presmoothing_max_window += 1
@@ -1238,8 +1237,7 @@ class InteractiveFunscriptTimeline:
                             self._update_preview('ultimate')
                         imgui.same_line(230);
                         imgui.push_item_width(180)
-                        c, self.ultimate_peaks_prominence = imgui.slider_int("Prominence##UltimateProminence",
-                                                                             self.ultimate_peaks_prominence, 1, 50)
+                        c, self.ultimate_peaks_prominence = imgui.slider_int("Prominence##UltimateProminence", self.ultimate_peaks_prominence, 1, 50)
                         if c:
                             self._update_preview('ultimate')
                         imgui.pop_item_width()
@@ -1285,8 +1283,7 @@ class InteractiveFunscriptTimeline:
                             self._update_preview('ultimate')
                         imgui.same_line(230);
                         imgui.push_item_width(180)
-                        c, self.ultimate_speed_threshold = imgui.slider_float("Speed##UltimateSpeedLimit", self.ultimate_speed_threshold, 100.0,
-                                                                              1000.0, "%.0f")
+                        c, self.ultimate_speed_threshold = imgui.slider_float("Speed##UltimateSpeedLimit", self.ultimate_speed_threshold, 100.0, 1000.0, "%.0f")
                         if c:
                             self._update_preview('ultimate')
                         imgui.pop_item_width()
@@ -1429,16 +1426,11 @@ class InteractiveFunscriptTimeline:
                         ):
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                             # Save settings
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_height",
-                                                      self.peaks_height)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_threshold",
-                                                      self.peaks_threshold)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_distance",
-                                                      self.peaks_distance)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_prominence",
-                                                      self.peaks_prominence)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_width",
-                                                      self.peaks_width)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_height", self.peaks_height)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_threshold", self.peaks_threshold)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_distance", self.peaks_distance)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_prominence", self.peaks_prominence)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_width", self.peaks_width)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
 
                         self.clear_preview()
@@ -1582,7 +1574,7 @@ class InteractiveFunscriptTimeline:
             if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_peaks_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup and not self.show_speed_limiter_popup and not self.show_autotune_popup and not self.show_ultimate_autotune_popup:
                 self.clear_preview()
 
-            imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)
+            imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95) # TODO: change to theme color
             # --- (Drag and drop target for T2 remains the same) ---
             if self.timeline_num == 2:
                 if imgui.begin_drag_drop_target():
@@ -1605,7 +1597,7 @@ class InteractiveFunscriptTimeline:
                 imgui.end()
                 return
 
-            draw_list.add_rect_filled(canvas_abs_pos[0], canvas_abs_pos[1], canvas_abs_pos[0] + canvas_size[0], canvas_abs_pos[1] + canvas_size[1], imgui.get_color_u32_rgba(0.08, 0.08, 0.1, 1))
+            draw_list.add_rect_filled(canvas_abs_pos[0], canvas_abs_pos[1], canvas_abs_pos[0] + canvas_size[0], canvas_abs_pos[1] + canvas_size[1], imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND))
 
             video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
 
@@ -1650,9 +1642,7 @@ class InteractiveFunscriptTimeline:
                 # if can_manual_pan_zoom:
                 time_at_current_center_ms = x_to_time(center_x_marker)
                 scale_factor = self.zoom_action_request
-                app_state.timeline_zoom_factor_ms_per_px = max(0.01,
-                                                               min(app_state.timeline_zoom_factor_ms_per_px * scale_factor,
-                                                                   2000.0))
+                app_state.timeline_zoom_factor_ms_per_px = max(0.01, min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, 2000.0))
                 app_state.timeline_pan_offset_ms = time_at_current_center_ms - (
                             canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
                 app_state.timeline_interaction_active = True
@@ -1832,8 +1822,7 @@ class InteractiveFunscriptTimeline:
 
                     actions_list.sort(key=lambda a: a["at"])
                     # Re-select moved points robustly
-                    self.multi_selected_action_indices = {actions_list.index(obj) for obj in objects_to_move if
-                                                          obj in actions_list}
+                    self.multi_selected_action_indices = {actions_list.index(obj) for obj in objects_to_move if obj in actions_list}
                     self.selected_action_idx = min(
                         self.multi_selected_action_indices) if self.multi_selected_action_indices else -1
                     fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
@@ -1903,8 +1892,7 @@ class InteractiveFunscriptTimeline:
                         )
 
                         # Re-fetch actions and select the new point
-                        actions_list = getattr(target_funscript_instance_for_render, f"{axis_name_for_render}_actions",
-                                               [])
+                        actions_list = getattr(target_funscript_instance_for_render, f"{axis_name_for_render}_actions", [])
                         new_idx = next((idx for idx, act in enumerate(actions_list) if
                                         act['at'] == snapped_time_add_key and act['pos'] == target_pos_val), -1)
                         if new_idx != -1:
@@ -1956,7 +1944,7 @@ class InteractiveFunscriptTimeline:
                 if pan_to_current_frame:
                     app_state.force_timeline_pan_to_current_frame = False
 
-            marker_color_fixed = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.9)
+            marker_color_fixed = imgui.get_color_u32_rgba(*TimelineColors.CENTER_MARKER)
             draw_list.add_line(center_x_marker, canvas_abs_pos[1], center_x_marker, canvas_abs_pos[1] + canvas_size[1], marker_color_fixed, 1.5)
             tri_half_base, tri_height = 5.0, 8.0
 
@@ -1977,18 +1965,18 @@ class InteractiveFunscriptTimeline:
 
             full_time_display_str = f"{time_str_display_main}{frame_str_display}"
             draw_list.add_text(center_x_marker + 5, canvas_abs_pos[1] + tri_height + 5,
-                               imgui.get_color_u32_rgba(1, 1, 1, 0.7), full_time_display_str)
+                               imgui.get_color_u32_rgba(*TimelineColors.TIME_DISPLAY_TEXT), full_time_display_str)
 
             # Grid drawing (Horizontal - Position)
             for i in range(5):  # 0, 25, 50, 75, 100
                 y_grid_h = canvas_abs_pos[1] + (i / 4.0) * canvas_size[1]
-                grid_col = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.8 if i != 2 else 0.9)  # Center line darker
+                grid_col = imgui.get_color_u32_rgba(*TimelineColors.GRID_LINES if i != 2 else TimelineColors.GRID_MAJOR_LINES)  # Center line darker
                 line_thickness = 1.0 if i != 2 else 1.5
                 draw_list.add_line(canvas_abs_pos[0], y_grid_h, canvas_abs_pos[0] + canvas_size[0], y_grid_h, grid_col, line_thickness)
                 pos_val = 100 - int((i / 4.0) * 100)
                 text_y_offset = -imgui.get_text_line_height() - 2 if i == 4 else (
                     2 if i == 0 else -imgui.get_text_line_height() / 2)
-                draw_list.add_text(canvas_abs_pos[0] + 3, y_grid_h + text_y_offset, imgui.get_color_u32_rgba(0.7, 0.7, 0.7, 1), str(pos_val))
+                draw_list.add_text(canvas_abs_pos[0] + 3, y_grid_h + text_y_offset, imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), str(pos_val))
 
             # Grid drawing (Vertical - Time)
             time_per_screen_ms_grid = canvas_size[0] * app_state.timeline_zoom_factor_ms_per_px
@@ -2025,7 +2013,7 @@ class InteractiveFunscriptTimeline:
                         continue
 
                     is_major_tick = (t_ms % (time_step_ms_grid * 5)) == 0
-                    tick_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.9 if is_major_tick else 0.8)
+                    tick_color = imgui.get_color_u32_rgba(*TimelineColors.GRID_MAJOR_LINES if is_major_tick else TimelineColors.GRID_LINES)
                     tick_thickness = 1.5 if is_major_tick else 1.0
 
                     # Draw vertical grid line
@@ -2037,7 +2025,7 @@ class InteractiveFunscriptTimeline:
                     # Optionally draw time label
                     if not video_loaded or (0 <= t_ms <= effective_total_duration_ms + 1e-4):
                         label = f"{t_ms / 1000.0:.1f}s"
-                        label_color = imgui.get_color_u32_rgba(0.7, 0.7, 0.7, 1.0)
+                        label_color = imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS)
                         draw_list.add_text(x_pos + 3, canvas_abs_pos[1] + 3, label_color, label)
 
             # --- Draw Audio Waveform ---
@@ -2067,7 +2055,7 @@ class InteractiveFunscriptTimeline:
                             y_coords_top = canvas_center_y - y_offsets
                             y_coords_bottom = canvas_center_y + y_offsets
 
-                        waveform_color = imgui.get_color_u32_rgba(0.2, 0.35, 0.6, 0.6)
+                        waveform_color = imgui.get_color_u32_rgba(*TimelineColors.AUDIO_WAVEFORM)
                         points_top = list(zip(x_coords, y_coords_top))
                         points_bottom = list(zip(x_coords, y_coords_bottom))
                         draw_list.add_polyline(points_top, waveform_color, False, 1.0)
@@ -2172,16 +2160,16 @@ class InteractiveFunscriptTimeline:
                         is_in_multi_selection = (original_list_idx in self.multi_selected_action_indices)
                         is_being_dragged = (original_list_idx == self.dragging_action_idx)
                         point_radius_draw = app_state.timeline_point_radius
-                        pt_color_tuple = (0.3, 0.9, 0.3, 1)
+                        pt_color_tuple = TimelineColors.POINT_DEFAULT
 
                         if is_being_dragged:
-                            pt_color_tuple = (1.0, 0.2, 0.2, 1.0)
+                            pt_color_tuple = TimelineColors.POINT_DRAGGING
                             point_radius_draw += 1
                         elif is_primary_selected or is_in_multi_selection:
-                            pt_color_tuple = (1.0, 0.0, 0.0, 1.0)
+                            pt_color_tuple = TimelineColors.POINT_SELECTED
                             if is_in_multi_selection and not is_primary_selected: point_radius_draw += 0.5
                         elif is_hovered_pt and imgui.is_window_hovered() and not self.is_marqueeing:
-                            pt_color_tuple = (0.5, 1.0, 0.5, 1.0)
+                            pt_color_tuple = TimelineColors.POINT_HOVER
                             if self.dragging_action_idx == -1:
                                 hovered_action_idx_current_timeline = original_list_idx
 
@@ -2191,12 +2179,12 @@ class InteractiveFunscriptTimeline:
                         draw_list.add_circle_filled(px, py, point_radius_draw, final_pt_color)
 
                         if is_primary_selected and not is_being_dragged:
-                            draw_list.add_circle(px, py, point_radius_draw + 1, imgui.get_color_u32_rgba(0.6, 0.0, 0.0, 1.0), thickness=1.0)
+                            draw_list.add_circle(px, py, point_radius_draw + 1, imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER), thickness=1.0)
 
             # --- Draw Preview Actions on Top ---
             if self.is_previewing and self.preview_actions:
-                preview_line_color = imgui.get_color_u32_rgba(1.0, 0.5, 0.0, 0.9)  # Bright Orange
-                preview_point_color = imgui.get_color_u32_rgba(1.0, 0.5, 0.0, 1.0)
+                preview_line_color = imgui.get_color_u32_rgba(*TimelineColors.PREVIEW_LINES)  # Bright Orange
+                preview_point_color = imgui.get_color_u32_rgba(*TimelineColors.PREVIEW_POINTS)
                 preview_point_radius = app_state.timeline_point_radius
 
                 # Draw preview lines and points using the self.preview_actions list
@@ -2218,8 +2206,8 @@ class InteractiveFunscriptTimeline:
             if self.is_marqueeing and self.marquee_start_screen_pos and self.marquee_end_screen_pos:
                 min_x, max_x = min(self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0]), max(self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0])
                 min_y, max_y = min(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1]), max(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1])
-                draw_list.add_rect_filled(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(0.5, 0.5, 1.0, 0.3))
-                draw_list.add_rect(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(0.8, 0.8, 1.0, 0.7))
+                draw_list.add_rect_filled(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_FILL))
+                draw_list.add_rect(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_BORDER))
 
             # --- Mouse Interactions ---
             # region Mouse

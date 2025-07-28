@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 
 
 import config.constants as constants
+from config.element_group_colors import VideoDisplayColors
 
 
 class VideoDisplayUI:
@@ -244,12 +245,12 @@ class VideoDisplayUI:
 
         # --- Color based on whether this is the dominant pose ---
         if is_dominant:
-            limb_color = imgui.get_color_u32_rgba(0.1, 1.0, 0.1, 0.95)  # Bright Green
-            kpt_color = imgui.get_color_u32_rgba(1.0, 0.5, 0.1, 1.0)  # Bright Orange
+            limb_color = imgui.get_color_u32_rgba(*VideoDisplayColors.DOMINANT_LIMB)  # Bright Green
+            kpt_color = imgui.get_color_u32_rgba(*VideoDisplayColors.DOMINANT_KEYPOINT)  # Bright Orange
             thickness = 2
         else:
-            limb_color = imgui.get_color_u32_rgba(0.2, 0.6, 1, 0.4)  # Muted Cyan
-            kpt_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.5)  # Muted Red
+            limb_color = imgui.get_color_u32_rgba(*VideoDisplayColors.MUTED_LIMB)  # Muted Cyan
+            kpt_color = imgui.get_color_u32_rgba(*VideoDisplayColors.MUTED_KEYPOINT)  # Muted Red
             thickness = 1
 
         skeleton = [[0, 1], [0, 2], [1, 3], [2, 4], [5, 6], [5, 11], [6, 12], [11, 12], [5, 7], [7, 9], [6, 8], [8, 10], [11, 13], [13, 15], [12, 14], [14, 16]]
@@ -275,14 +276,14 @@ class VideoDisplayUI:
         if not motion_mode or motion_mode == 'undetermined':
             return
 
-        mode_color = imgui.get_color_u32_rgba(1, 1, 0, 0.9)
+        mode_color = imgui.get_color_u32_rgba(*VideoDisplayColors.MOTION_UNDETERMINED)
         mode_text = "Undetermined"
 
         if motion_mode == 'thrusting':
             mode_text = "Thrusting"
-            mode_color = imgui.get_color_u32_rgba(0.1, 1.0, 0.1, 0.95)
+            mode_color = imgui.get_color_u32_rgba(*VideoDisplayColors.MOTION_THRUSTING)
         elif motion_mode == 'riding':
-            mode_color = imgui.get_color_u32_rgba(1.0, 0.4, 1.0, 0.95)
+            mode_color = imgui.get_color_u32_rgba(*VideoDisplayColors.MOTION_RIDING)
             if interaction_class == 'face':
                 mode_text = "Blowing"
             elif interaction_class == 'hand':
@@ -406,7 +407,7 @@ class VideoDisplayUI:
                                                 self.user_roi_draw_current_screen_pos[0]),
                                             max(self.user_roi_draw_start_screen_pos[1],
                                                 self.user_roi_draw_current_screen_pos[1]),
-                                            imgui.get_color_u32_rgba(1, 1, 0, 0.7), thickness=2
+                                            imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_DRAWING), thickness=2
                                         )
 
                                     if not io.mouse_down[0] and self.is_drawing_user_roi: # Mouse released
@@ -465,19 +466,19 @@ class VideoDisplayUI:
                             roi_end_screen = self._video_to_screen_coords(urx_vid + urw_vid, ury_vid + urh_vid)
 
                             if roi_start_screen and roi_end_screen:
-                                draw_list.add_rect(roi_start_screen[0],roi_start_screen[1],roi_end_screen[0],roi_end_screen[1],imgui.get_color_u32_rgba(0.1,0.9,0.9,0.8),thickness=2)
+                                draw_list.add_rect(roi_start_screen[0],roi_start_screen[1],roi_end_screen[0],roi_end_screen[1],imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_BORDER),thickness=2)
                             if self.app.tracker.user_roi_tracked_point_relative: # UPDATED TO USE TRACKED POINT
                                 abs_tracked_x_vid = self.app.tracker.user_roi_fixed[0] + int(self.app.tracker.user_roi_tracked_point_relative[0])
                                 abs_tracked_y_vid = self.app.tracker.user_roi_fixed[1] + int(self.app.tracker.user_roi_tracked_point_relative[1])
                                 point_screen_coords = self._video_to_screen_coords(abs_tracked_x_vid,abs_tracked_y_vid)
                                 if point_screen_coords:
-                                    draw_list.add_circle_filled(point_screen_coords[0], point_screen_coords[1], 5, imgui.get_color_u32_rgba(0.2, 1, 0.2, 0.9)) # Green moving dot
+                                    draw_list.add_circle_filled(point_screen_coords[0], point_screen_coords[1], 5, imgui.get_color_u32_rgba(*VideoDisplayColors.TRACKING_POINT)) # Green moving dot
                                     if self.app.tracker.show_flow:
                                         dx_flow_vid, dy_flow_vid = self.app.tracker.user_roi_current_flow_vector
                                         flow_end_vid_x, flow_end_vid_y = abs_tracked_x_vid + int(dx_flow_vid * 10), abs_tracked_y_vid+int(dy_flow_vid*10)
                                         flow_end_screen_coords = self._video_to_screen_coords(flow_end_vid_x,flow_end_vid_y)
                                         if flow_end_screen_coords:
-                                            draw_list.add_line(point_screen_coords[0], point_screen_coords[1], flow_end_screen_coords[0], flow_end_screen_coords[1], imgui.get_color_u32_rgba(1, 0.2, 0.2, 0.9), thickness=2)
+                                            draw_list.add_line(point_screen_coords[0], point_screen_coords[1], flow_end_screen_coords[0], flow_end_screen_coords[1], imgui.get_color_u32_rgba(*VideoDisplayColors.FLOW_VECTOR), thickness=2)
                         self._handle_video_mouse_interaction(app_state)
 
                         if app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map and self.app.processor and \
@@ -682,13 +683,13 @@ class VideoDisplayUI:
 
                 # --- HIERARCHICAL HIGHLIGHTING LOGIC ---
                 if is_refined_track:
-                    color = (0.0, 1.0, 1.0, 1.0)  # Bright Cyan for the persistent refined track
+                    color = VideoDisplayColors.PERSISTENT_REFINED_TRACK  # Bright Cyan for the persistent refined track
                     thickness = 3.0
                 elif is_active_interactor:
-                    color = (1.0, 1.0, 0.0, 1.0)  # Bright Yellow for the ACTIVE interactor
+                    color = VideoDisplayColors.ACTIVE_INTERACTOR  # Bright Yellow for the ACTIVE interactor
                     thickness = 3.0
                 elif is_locked_penis:
-                    color = (0.1, 1.0, 0.1, 0.95)  # Bright Green for LOCKED PENIS
+                    color = VideoDisplayColors.LOCKED_PENIS  # Bright Green for LOCKED PENIS
                     thickness = 2.0
                     # If it's a locked penis and has a visible part, draw the solid fill first.
                     if "visible_bbox" in box and box["visible_bbox"]:
@@ -697,14 +698,14 @@ class VideoDisplayUI:
                         p2_vis = self._video_to_screen_coords(vis_bbox[2], vis_bbox[3])
                         if p1_vis and p2_vis:
                             # Use a semi-transparent fill of the same base color
-                            fill_color = (0.1, 1.0, 0.1, 0.4)
+                            fill_color = VideoDisplayColors.FILL_COLOR
                             fill_color_u32 = imgui.get_color_u32_rgba(*fill_color)
                             draw_list.add_rect_filled(p1_vis[0], p1_vis[1], p2_vis[0], p2_vis[1], fill_color_u32, rounding=2.0)
                 elif is_aligned_candidate:
-                    color = (1.0, 0.5, 0.0, 0.9)  # Orange for ALIGNED FALLBACK candidates
+                    color = VideoDisplayColors.ALIGNED_FALLBACK  # Orange for ALIGNED FALLBACK candidates
                     thickness = 1.5
                 elif is_inferred_status:
-                    color = (0.8, 0.4, 1.0, 0.85) # A distinct purple for inferred boxes
+                    color = VideoDisplayColors.INFERRED_BOX # A distinct purple for inferred boxes
                     thickness = 1.0
                 else:
                     color, thickness, _ = self.app.utility.get_box_style(box)
@@ -725,10 +726,10 @@ class VideoDisplayUI:
                 if is_of_recovered:
                     label += " [OF]"
 
-                draw_list.add_text(p1[0] + 3, p1[1] + 3, imgui.get_color_u32_rgba(1, 1, 1, 1), label)
+                draw_list.add_text(p1[0] + 3, p1[1] + 3, imgui.get_color_u32_rgba(*VideoDisplayColors.BOX_LABEL), label)
 
         if is_occluded:
-            draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 30, imgui.get_color_u32_rgba(1, 0.6, 0, 0.95), "OCCLUSION (FALLBACK)")
+            draw_list.add_text(img_rect['min_x'] + 10, img_rect['max_y'] - 30, imgui.get_color_u32_rgba(*VideoDisplayColors.OCCLUSION_WARNING), "OCCLUSION (FALLBACK)")
 
         motion_mode = frame_overlay_data.get("motion_mode")
         is_vr_video = self.app.processor and self.app.processor.determined_video_type == 'VR'
