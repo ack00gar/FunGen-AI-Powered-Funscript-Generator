@@ -624,8 +624,7 @@ def perform_yolo_analysis(
 
     queue_monitor = Stage1QueueMonitor()
 
-    # --- Preprocessed Video Logic (Now Mandatory) ---
-    process_logger.info("Preprocessed video generation/reuse is mandatory for Stage 1.")
+    # --- Preprocessed Video Logic (Now Optional) ---
     video_path_to_use = video_path_arg
     video_type_to_use = video_type_arg
     is_encoding_preprocessed_video = False
@@ -633,20 +632,24 @@ def perform_yolo_analysis(
     # Default to multiple producers. Only use 1 if we are actively encoding.
     num_producers_effective = num_producers_arg
 
-    if preprocessed_video_path_arg and os.path.exists(preprocessed_video_path_arg):
-        process_logger.info(f"Found existing preprocessed video. Using: {preprocessed_video_path_arg}")
-        video_path_to_use = preprocessed_video_path_arg
-        video_type_to_use = 'flat'  # Preprocessed video is already unwarped
-    elif preprocessed_video_path_arg:
-        process_logger.info(f"No existing preprocessed video found. Will encode to: {preprocessed_video_path_arg}")
-        is_encoding_preprocessed_video = True
-        num_producers_effective = 1  # Force producers to 1 for safe encoding to a single file
-        preprocessed_dir = os.path.dirname(preprocessed_video_path_arg)
-        if preprocessed_dir:
-            os.makedirs(preprocessed_dir, exist_ok=True)
+    if save_preprocessed_video_arg:
+        process_logger.info("Preprocessed video generation/reuse is ENABLED for Stage 1.")
+        if preprocessed_video_path_arg and os.path.exists(preprocessed_video_path_arg):
+            process_logger.info(f"Found existing preprocessed video. Using: {preprocessed_video_path_arg}")
+            video_path_to_use = preprocessed_video_path_arg
+            video_type_to_use = 'flat'
+        elif preprocessed_video_path_arg:
+            process_logger.info(f"No existing preprocessed video found. Will encode to: {preprocessed_video_path_arg}")
+            is_encoding_preprocessed_video = True
+            num_producers_effective = 1  # Force producers to 1 for safe encoding to a single file
+            preprocessed_dir = os.path.dirname(preprocessed_video_path_arg)
+            if preprocessed_dir:
+                os.makedirs(preprocessed_dir, exist_ok=True)
+        else:
+            # This case is a safeguard; the calling function should prevent it.
+            process_logger.warning("Save preprocessed video was enabled, but no output path was provided. Disabling feature for this run.")
     else:
-        process_logger.error("Mandatory preprocessed video path was not provided. Cannot proceed.")
-        return None, 0.0
+        process_logger.info("Preprocessed video generation/reuse is DISABLED for Stage 1.")
 
     class VPAppProxy:
         pass
@@ -689,10 +692,11 @@ def perform_yolo_analysis(
         for i in range(num_producers_effective):
             num_frames = frames_per_producer + (1 if i < extra_frames else 0)
             if num_frames > 0:
+                encoding_path_arg = preprocessed_video_path_arg if is_encoding_preprocessed_video else None
                 p_args = (i, video_path_to_use, yolo_input_size_arg, video_type_to_use, vr_input_format_arg, vr_fov_arg,
                           vr_pitch_arg, current_frame, num_frames, frame_processing_queue, queue_monitor,
                           stop_event_internal, hwaccel_method_arg, hwaccel_avail_list_arg,
-                          fallback_config_for_subprocesses, is_encoding_preprocessed_video, preprocessed_video_path_arg)
+                          fallback_config_for_subprocesses, is_encoding_preprocessed_video, encoding_path_arg)
                 producers_list.append(Process(target=video_processor_producer_proc, args=p_args, daemon=True))
                 current_frame += num_frames
 

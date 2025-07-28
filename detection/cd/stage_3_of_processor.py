@@ -45,7 +45,20 @@ def stage3_worker_proc(
     worker_logger.info(f"Worker {worker_id} started.")
 
     class MockFileManager:
-        def __init__(self, path): self.preprocessed_video_path = path
+        def __init__(self, path: Optional[str]):
+            self.preprocessed_video_path = path
+
+        def get_output_path_for_file(self, video_path: str, extension: str) -> str:
+            """
+            A mock method to satisfy the VideoProcessor's internal check.
+            It returns the pre-determined preprocessed path or an empty string,
+            preventing a TypeError with os.path.exists(None).
+            """
+            if extension == "_preprocessed.mkv":
+                return self.preprocessed_video_path if self.preprocessed_video_path is not None else ""
+            # Return an empty string for any other unexpected request.
+            return ""
+
 
     class VPAppProxy:
         pass

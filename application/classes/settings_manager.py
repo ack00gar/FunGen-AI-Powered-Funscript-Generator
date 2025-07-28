@@ -63,6 +63,7 @@ class AppSettings:
             # Performance & System
             "num_producers_stage1": constants.DEFAULT_S1_NUM_PRODUCERS,
             "num_consumers_stage1": constants.DEFAULT_S1_NUM_CONSUMERS,
+            "num_workers_stage2_of": constants.DEFAULT_S2_OF_WORKERS,
             "hardware_acceleration_method": "auto",
             "ffmpeg_path": "ffmpeg",
 

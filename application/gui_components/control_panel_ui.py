@@ -11,6 +11,52 @@ class ControlPanelUI:
         self.timeline_editor1 = None
         self.timeline_editor2 = None
 
+    # Moved from _render_ai_model_settings to become stable instance methods.
+    def _update_detection_model_path(self, path: str):
+        """Handles updating the detection model path and triggering a reload if necessary."""
+        # Robustly check against the tracker's current path to prevent unnecessary reloads.
+        if not path or (self.app.tracker and path == self.app.tracker.det_model_path):
+            return
+
+        # --- Invalidate cache when models change
+        self.app.cached_class_names = None
+
+        self.app.yolo_detection_model_path_setting = path
+        self.app.app_settings.set("yolo_det_model_path", path)
+        self.app.yolo_det_model_path = path
+        self.app.project_manager.project_dirty = True
+        self.app.logger.info(f"Detection model path updated to: {path}. Reloading models.")
+        if self.app.tracker:
+            self.app.tracker.det_model_path = path
+            self.app.tracker._load_models()
+
+    def _update_pose_model_path(self, path: str):
+        """Handles updating the pose model path and triggering a reload if necessary."""
+        # Robustly check against the tracker's current path.
+        if not path or (self.app.tracker and path == self.app.tracker.pose_model_path):
+            return
+
+        # --- Invalidate cache when models change (though pose models may not have classes)
+        self.app.cached_class_names = None
+
+        self.app.yolo_pose_model_path_setting = path
+        self.app.app_settings.set("yolo_pose_model_path", path)
+        self.app.yolo_pose_model_path = path
+        self.app.project_manager.project_dirty = True
+        self.app.logger.info(f"Pose model path updated to: {path}. Reloading models.")
+        if self.app.tracker:
+            self.app.tracker.pose_model_path = path
+            self.app.tracker._load_models()
+
+    def _update_artifacts_dir_path(self, path: str):
+        """Handles updating the pose model artifacts directory path."""
+        if not path or path == self.app.pose_model_artifacts_dir_setting:
+            return
+        self.app.pose_model_artifacts_dir_setting = path
+        self.app.app_settings.set("pose_model_artifacts_dir", path)
+        self.app.project_manager.project_dirty = True
+        self.app.logger.info(f"Pose Model Artifacts directory updated to: {path}.")
+
     # --- Main Render Method ---
     def render(self, control_panel_w=None, available_height=None):
         app_state = self.app.app_state_ui
@@ -187,24 +233,24 @@ class ControlPanelUI:
                     _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
                     imgui.same_line()
                     _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
-                    # imgui.separator()
-                    # if not hasattr(stage_proc, 'save_preprocessed_video'):
-                    #     stage_proc.save_preprocessed_video = self.app.app_settings.get("save_preprocessed_video", False)
-                    #
-                    # changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
-                    # if changed:
-                    #     stage_proc.save_preprocessed_video = new_val
-                    #     self.app.app_settings.set("save_preprocessed_video", new_val)
-                    #     if new_val:
-                    #         stage_proc.num_producers_stage1 = 1
-                    #         self.app.app_settings.set("num_producers_stage1", 1)
-                    #
-                    # if imgui.is_item_hovered():
-                    #     imgui.set_tooltip(
-                    #         "Applies resizing/cropping and VR unwarping to the video, then saves it.\n"
-                    #         "This preprocessed video is reused in subsequent runs, speeding them up.\n"
-                    #         "Forces the number of Producer threads to 1."
-                    #     )
+                    imgui.separator()
+                    if not hasattr(stage_proc, 'save_preprocessed_video'):
+                        stage_proc.save_preprocessed_video = self.app.app_settings.get("save_preprocessed_video", False)
+
+                    changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
+                    if changed:
+                        stage_proc.save_preprocessed_video = new_val
+                        self.app.app_settings.set("save_preprocessed_video", new_val)
+                        if new_val:
+                            stage_proc.num_producers_stage1 = 1
+                            self.app.app_settings.set("num_producers_stage1", 1)
+
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip(
+                            "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
+                            "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
+                            "Forces the number of Producer threads to 1."
+                        )
                     if disable_combo:
                         imgui.pop_style_var()
                         imgui.internal.pop_item_flag()
@@ -311,8 +357,8 @@ class ControlPanelUI:
 
         # Class filtering is available for all YOLO-based modes.
         if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
-            if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                self._render_class_filtering_content()
+           if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+               self._render_class_filtering_content()
 
         # Fallback message for any mode that has no configuration options.
         modes_with_config = {
@@ -383,6 +429,7 @@ class ControlPanelUI:
 
     def _render_ai_model_settings(self):
         stage_proc = self.app.stage_processor
+        settings = self.app.app_settings
         style = imgui.get_style()
 
         # --- Helper for model file selection ---
@@ -396,35 +443,7 @@ class ControlPanelUI:
                 initial_path=initial_dir
             )
 
-        # --- Callback functions to update the model paths ---
-        def update_detection_model_path(path: str):
-            self.app.yolo_detection_model_path_setting = path
-            self.app.app_settings.set("yolo_det_model_path", path)
-            self.app.yolo_det_model_path = path
-            self.app.project_manager.project_dirty = True
-            self.app.logger.info(f"Detection model path selected: {path}. Setting has been saved.")
-            if self.app.tracker:
-                self.app.tracker.det_model_path = path
-                self.app.tracker._load_models()
-
-        def update_pose_model_path(path: str):
-            self.app.yolo_pose_model_path_setting = path
-            self.app.app_settings.set("yolo_pose_model_path", path)
-            self.app.yolo_pose_model_path = path
-            self.app.project_manager.project_dirty = True
-            self.app.logger.info(f"Pose model path selected: {path}. Setting has been saved.")
-            if self.app.tracker:
-                self.app.tracker.pose_model_path = path
-                self.app.tracker._load_models()
-
-        def update_artifacts_dir_path(path: str):
-            self.app.pose_model_artifacts_dir_setting = path
-            self.app.app_settings.set("pose_model_artifacts_dir", path)
-            self.app.project_manager.project_dirty = True
-            self.app.logger.info(f"Pose Model Artifacts directory selected: {path}. Setting has been saved.")
-
-
-        # --- Define fixed widths for buttons for consistent layout ---
+        # Define fixed widths for buttons for consistent layout
         browse_button_width = imgui.calc_text_size("Browse").x + style.frame_padding.x * 2
         unload_button_width = imgui.calc_text_size("Unload").x + style.frame_padding.x * 2
         total_button_width = browse_button_width + unload_button_width + style.item_spacing.x
@@ -446,7 +465,7 @@ class ControlPanelUI:
                 show_model_file_dialog(
                     title="Select YOLO Detection Model",
                     current_path=self.app.yolo_detection_model_path_setting,
-                    callback=update_detection_model_path
+                    callback=self._update_detection_model_path
                 )
         imgui.same_line()
         if imgui.button("Unload##S1YOLOUnload"):
@@ -468,7 +487,7 @@ class ControlPanelUI:
                 show_model_file_dialog(
                     title="Select YOLO Pose Model",
                     current_path=self.app.yolo_pose_model_path_setting,
-                    callback=update_pose_model_path
+                    callback=self._update_pose_model_path
                 )
         imgui.same_line()
         if imgui.button("Unload##PoseYOLOUnload"):
@@ -493,8 +512,8 @@ class ControlPanelUI:
             if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
                 self.app.gui_instance.file_dialog.show(
                     title="Select Pose Model Artifacts Directory",
-                    callback=update_artifacts_dir_path,
-                    is_folder_dialog=True,  # This tells the dialog to act as a folder picker
+                    callback=self._update_artifacts_dir_path,
+                    is_folder_dialog=True,
                     initial_path=self.app.pose_model_artifacts_dir)
         if imgui.is_item_hovered(): imgui.set_tooltip(
             "Path to the folder containing your trained classifier,\n"
@@ -534,6 +553,19 @@ class ControlPanelUI:
                 "Number of threads for AI model inference. Match to available cores for best performance.")
             imgui.pop_item_width()
 
+            # Stage 2 OF Workers
+            imgui.text("Stage 2 OF Workers")
+            imgui.same_line()
+            imgui.push_item_width(120)
+            current_s2_workers = settings.get("num_workers_stage2_of", constants.DEFAULT_S2_OF_WORKERS)
+            changed, new_s2_workers = imgui.input_int("##S2OFWorkers", current_s2_workers)
+            if changed:
+                settings.set("num_workers_stage2_of", max(1, new_s2_workers))
+            imgui.pop_item_width()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Number of processes for Stage 2 Optical Flow gap recovery. More may be faster on high-core CPUs.")
+
+
     def _render_offline_analysis_settings(self, stage_proc, app_state):
         imgui.text("Stage Reruns:")
         _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
@@ -543,6 +575,7 @@ class ControlPanelUI:
 
     def _render_settings_interface_perf(self):
         energy_saver_mgr = self.app.energy_saver
+        settings = self.app.app_settings
 
         # Font Scale
         imgui.text("Font Scale")
