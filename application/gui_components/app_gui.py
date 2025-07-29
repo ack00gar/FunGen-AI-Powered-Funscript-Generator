@@ -57,7 +57,7 @@ class GUI:
         self.perf_accumulated_times = {}
 
         # Standard Components (owned by GUI)
-        self.file_dialog = ImGuiFileDialog(logger=self.app.logger)
+        self.file_dialog = ImGuiFileDialog(app_logic_instance=self.app)
         self.main_menu = MainMenu(self.app)
         self.gauge_window_ui_t1 = GaugeWindow(self.app, timeline_num=1)
         self.gauge_window_ui_t2 = GaugeWindow(self.app, timeline_num=2)
