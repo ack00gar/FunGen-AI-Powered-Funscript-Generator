@@ -183,6 +183,7 @@ class ApplicationLogic:
         self.event_handlers = AppEventHandlers(self)
         self.calibration = AppCalibration(self)
         self.energy_saver = AppEnergySaver(self)
+        self.utility = AppUtility(self)
 
         # --- Other Managers ---
         self.project_manager = project_manager.ProjectManager(self)
@@ -240,6 +241,12 @@ class ApplicationLogic:
         if getattr(self.app_settings, 'is_first_run', False):
             self.logger.info("First application run detected. Preparing to download default models.")
             self.trigger_first_run_setup()
+
+        # --- Force Oscillation Detector as the default mode on startup ---
+        self.app_state_ui.selected_tracker_mode = TrackerMode.OSCILLATION_DETECTOR
+        if self.tracker:
+            # Also set the tracker's internal mode to match the UI default
+            self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
 
     def trigger_first_run_setup(self):
         """Initiates the first-run model download process in a background thread."""

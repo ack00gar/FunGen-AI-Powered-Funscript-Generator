@@ -178,9 +178,11 @@ class ControlPanelUI:
 
         # --- Tracker Type Selection ---
         tracking_modes_enums = [
-            TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI,
             TrackerMode.OSCILLATION_DETECTOR,
-            TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE
+            TrackerMode.LIVE_YOLO_ROI,
+            TrackerMode.LIVE_USER_ROI,
+            TrackerMode.OFFLINE_2_STAGE,
+            TrackerMode.OFFLINE_3_STAGE
         ]
         tracking_modes_display = [mode.value for mode in tracking_modes_enums]
 
@@ -196,7 +198,12 @@ class ControlPanelUI:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-        current_mode_idx = tracking_modes_enums.index(app_state.selected_tracker_mode)
+        try:
+            current_mode_idx = tracking_modes_enums.index(app_state.selected_tracker_mode)
+        except ValueError:
+            # If the saved mode is invalid or not in the list, default to the first one.
+            current_mode_idx = 0
+            app_state.selected_tracker_mode = tracking_modes_enums[current_mode_idx]
         clicked, new_idx = imgui.combo("Tracker Type##TrackerModeCombo", current_mode_idx, tracking_modes_display)
 
         if disable_combo:
