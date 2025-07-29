@@ -179,6 +179,7 @@ class ControlPanelUI:
         # --- Tracker Type Selection ---
         tracking_modes_enums = [
             TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI,
+            TrackerMode.OSCILLATION_DETECTOR,
             TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE
         ]
         tracking_modes_display = [mode.value for mode in tracking_modes_enums]
@@ -209,6 +210,10 @@ class ControlPanelUI:
             if new_mode == TrackerMode.LIVE_USER_ROI:
                 self.app.tracker.set_tracking_mode("USER_FIXED_ROI")
                 self.app.enter_set_user_roi_mode()
+            elif new_mode == TrackerMode.OSCILLATION_DETECTOR:
+                self.app.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
+            elif new_mode == TrackerMode.LIVE_YOLO_ROI:
+                self.app.tracker.set_tracking_mode("YOLO_ROI")
             else:
                 self.app.tracker.set_tracking_mode("YOLO_ROI")
 
@@ -359,6 +364,11 @@ class ControlPanelUI:
         if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
            if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                self._render_class_filtering_content()
+
+        # --- Dedicated settings for the Oscillation Detector ---
+        if selected_mode == TrackerMode.OSCILLATION_DETECTOR:
+            if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_oscillation_detector_settings()
 
         # Fallback message for any mode that has no configuration options.
         modes_with_config = {
@@ -979,7 +989,7 @@ class ControlPanelUI:
             if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_2_STAGE]:
                 start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
-            elif selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
+            elif selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]:
                 start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
                 handler = event_handlers.handle_start_live_tracker_click
             if imgui.button(start_text, width=button_width):
@@ -1170,6 +1180,49 @@ class ControlPanelUI:
         if disable_axis_controls:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
+
+    def _render_oscillation_detector_settings(self):
+        """Renders configuration options specific to the 2D Oscillation Detector."""
+        settings = self.app.app_settings
+
+        # --- Grid Size Control ---
+        imgui.text("Analysis Grid Size")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Finer grids (higher numbers) are more precise but use more CPU.\n10=Coarse, 20=Balanced, 30=Fine")
+
+        current_grid_size = settings.get("oscillation_detector_grid_size", 20)
+        imgui.push_item_width(200)
+        changed, new_grid_size = imgui.slider_int("##GridSize", current_grid_size, 10, 40)
+        if changed:
+            # Block size must be an integer, so we enforce grid sizes that divide 640.
+            valid_sizes = [10, 16, 20, 32, 40]
+            closest_size = min(valid_sizes, key=lambda x: abs(x - new_grid_size))
+            if closest_size != current_grid_size:
+                settings.set("oscillation_detector_grid_size", closest_size)
+                # No need to tell the tracker; it will read this on the next run.
+        imgui.pop_item_width()
+
+        imgui.separator()
+
+        # --- Live Dynamic Amplification Controls ---
+        imgui.text("Live Signal Amplification")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Stretches the live signal to use the full 0-100 range based on recent motion.")
+
+        current_amp_enabled = settings.get("live_oscillation_dynamic_amp_enabled", True)
+        changed, new_amp_enabled = imgui.checkbox("Enable Dynamic Amplification##EnableLiveAmp", current_amp_enabled)
+        if changed:
+            settings.set("live_oscillation_dynamic_amp_enabled", new_amp_enabled)
+
+        if current_amp_enabled:
+            imgui.text("Analysis Window (ms)")
+            current_win_ms = settings.get("live_oscillation_amp_window_ms", 4000)
+            imgui.push_item_width(200)
+            changed_win, new_win_ms = imgui.slider_int("##LiveAmpWindow", current_win_ms, 1000, 10000)
+            if changed_win:
+                settings.set("live_oscillation_amp_window_ms", new_win_ms)
+            imgui.pop_item_width()
 
     def _render_class_filtering_content(self):
         available_classes = self.app.get_available_tracking_classes()

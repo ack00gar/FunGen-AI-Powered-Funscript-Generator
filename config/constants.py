@@ -60,10 +60,11 @@ YOLO_INPUT_SIZE = 640
 DEFAULT_FALLBACK_CPU_CORES = 4
 
 class TrackerMode(Enum):
-    LIVE_YOLO_ROI = "Live Optical Flow (YOLO ROI)"
-    LIVE_USER_ROI = "Live Optical Flow (User ROI)"
-    OFFLINE_2_STAGE = "YOLO AI (2 Stages, legacy)"
-    OFFLINE_3_STAGE = "YOLO AI + Opt. Flow (3 Stages)"
+    LIVE_YOLO_ROI = "Live - Optical Flow (YOLO auto ROI)"
+    LIVE_USER_ROI = "Live - Optical Flow (User manual ROI)"
+    OSCILLATION_DETECTOR = "Live - Oscillation Detector (Experimental)"
+    OFFLINE_2_STAGE = "Offline - YOLO AI (2 Stages)"
+    OFFLINE_3_STAGE = "Offline - YOLO AI + Opt. Flow (3 Stages)"
 
 
 ####################################################################################################
@@ -301,30 +302,7 @@ MODEL_DOWNLOAD_URLS = {
 }
 
 
-
-# FOR SF
-
-PENIS_INTERPOLATION_MAX_GAP_CONST = 30  # May be replaced by Kalman/RTS params
-LOCKED_PENIS_EXTENDED_INTERPOLATION_MAX_FRAMES_CONST = 180  # May be replaced
-CONTACT_EXTENDED_INTERPOLATION_MAX_FRAMES_CONST = 5  # May be replaced
-CONTACT_OPTICAL_FLOW_MAX_GAP_FRAMES_CONST = 20  # May be replaced
-OPTICAL_FLOW_CALC_ROI_MARGIN_CONST = 20  # Likely unused if optical flow is replaced
-PENIS_OF_ROI_MARGIN_CONST = 5  # Likely unused
-#DIS_PRESET_CONST = cv2.DISOpticalFlow_PRESET_ULTRAFAST  # Likely unused
-PENIS_BASE_Y2_MARGIN_CONST = 5  # May be used in funscript generation
-PENIS_LENGTH_SMOOTHING_WINDOW_CONST = 15  # May be replaced by RTS params
-PENIS_ABSENCE_THRESHOLD_FOR_HEIGHT_RESET_CONST = 180  # Logic replaced by generate_cuts_and_positions
-SMOOTH_MAX_FLICKER_DURATION_CONST = 60  # From original, new smoothing has its own params
-SMOOTH_MAX_SHORT_DURATION_CONST = 180  # From original
-SMOOTH_MIN_BRACKETING_DURATION_CONST = 10  # From original
-SMOOTH_MAX_INTER_GAP_CONST = 1  # From original
-SMOOTH_PRIORITY_ADVANTAGE_FOR_B_TO_RESIST_FLICKER_OVERRIDE_CONST = 2  # From original
-
-#STATUS_DETECTED = "Detected"
-#STATUS_INTERPOLATED = "Interpolated"
-#STATUS_OPTICAL_FLOW = "OpticalFlow"
 STATUS_SYNTHESIZED_KALMAN = "Synthesized_Kalman"
-#STATUS_SMOOTHED = "Smoothed"
 STATUS_GENERATED_PROPAGATED = "Generated_Propagated"
 STATUS_GENERATED_LINEAR = "Generated_Linear"
 STATUS_GENERATED_RTS = "Generated_RTS"
