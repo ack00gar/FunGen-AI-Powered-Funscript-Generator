@@ -96,6 +96,11 @@ class AppSettings:
             "live_tracker_class_amp_multipliers": constants.DEFAULT_CLASS_AMP_MULTIPLIERS,
             "live_tracker_flow_smoothing_window": constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW,
 
+            # --- Settings for the 2D Oscillation Detector ---
+            "oscillation_detector_grid_size": 20,
+            "live_oscillation_dynamic_amp_enabled": True,
+            "live_oscillation_amp_window_ms": 4000,  # 4-second analysis window
+
             # Auto Post-Processing
             "enable_auto_post_processing": False,
             "auto_processing_use_chapter_profiles": True,

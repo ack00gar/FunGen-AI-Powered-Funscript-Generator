@@ -3,7 +3,7 @@ from typing import Tuple
 
 from application.utils.video_segment import VideoSegment
 from application.utils.time_format import _format_time
-from config.constants import DEFAULT_CHAPTER_FPS
+from config.constants import DEFAULT_CHAPTER_FPS, TrackerMode
 
 
 class AppEventHandlers:
@@ -115,11 +115,19 @@ class AppEventHandlers:
         if not self.app._check_model_paths():
             return
         if not self.app.processor or not self.app.file_manager.video_path:
-            self.logger.info("No video loaded for live tracking.", extra={'status_message': False})
+            self.logger.info("No video loaded for live tracking.", extra={'status_message': True})
             return
         if not self.app.tracker:
             self.logger.error("Tracker not initialized for live tracking.")
             return
+
+        selected_mode_from_ui = self.app.app_state_ui.selected_tracker_mode
+        if selected_mode_from_ui == TrackerMode.LIVE_USER_ROI:
+            self.app.tracker.set_tracking_mode("USER_FIXED_ROI")
+        elif selected_mode_from_ui == TrackerMode.OSCILLATION_DETECTOR:
+            self.app.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
+        elif selected_mode_from_ui == TrackerMode.LIVE_YOLO_ROI:
+            self.app.tracker.set_tracking_mode("YOLO_ROI")
 
         current_tracker_mode = self.app.tracker.tracking_mode
 
@@ -142,6 +150,8 @@ class AppEventHandlers:
             self.logger.info("Starting User Defined ROI tracking.")
         elif current_tracker_mode == "YOLO_ROI":
             self.logger.info("Starting Live Tracker (YOLO_ROI mode - if applicable).")
+        elif current_tracker_mode == "OSCILLATION_DETECTOR":
+            self.logger.info("Starting Live Tracker (2D Oscillation Detector mode).")
         else:
             self.logger.error(f"Unknown tracker mode for live start: {current_tracker_mode}");
             return
