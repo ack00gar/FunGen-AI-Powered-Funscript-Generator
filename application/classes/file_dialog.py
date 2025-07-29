@@ -116,8 +116,13 @@ class ImGuiFileDialog:
         imgui.text("Quick Access")
         imgui.spacing()
 
-        # --- Add dynamic directories ---
-        dynamic_dirs_added = False
+        # Show common directories as buttons
+        for name, path in self.common_dirs.items():
+            if imgui.button(name, width=130):
+                if os.path.exists(path):
+                    self.current_dir = path
+                    self.scroll_to_selected = True
+            imgui.spacing()
 
         # 1. Output Directory
         output_dir = self.app.app_settings.get("output_folder_path", "output")
@@ -129,7 +134,6 @@ class ImGuiFileDialog:
             if imgui.is_item_hovered():
                 imgui.set_tooltip(f"Go to the configured output folder:\n{abs_output_dir}")
             imgui.spacing()
-            dynamic_dirs_added = True
 
         # 2. Current Video Directory
         video_path = self.app.file_manager.video_path
@@ -142,15 +146,6 @@ class ImGuiFileDialog:
                 if imgui.is_item_hovered():
                     imgui.set_tooltip(f"Go to the current video's folder:\n{video_dir}")
                 imgui.spacing()
-                dynamic_dirs_added = True
-
-        # Show common directories as buttons
-        for name, path in self.common_dirs.items():
-            if imgui.button(name, width=130):
-                if os.path.exists(path):
-                    self.current_dir = path
-                    self.scroll_to_selected = True
-            imgui.spacing()
 
         imgui.end_child()
 
