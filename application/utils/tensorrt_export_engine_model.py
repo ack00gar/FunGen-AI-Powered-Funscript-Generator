@@ -28,18 +28,15 @@ def export_model(model_path, output_dir):
         print("TensorRT export completed!")
         
         print("Searching for generated engine files...")
-        # Find the exported file
-        engine_files = []
-        for file in os.listdir(output_dir):
-            if file.endswith('.engine'):
-                engine_files.append(os.path.join(output_dir, file))
+        # Find the specific engine file that should have been created
+        model_basename = os.path.splitext(os.path.basename(model_path))[0]
+        expected_engine_path = os.path.join(output_dir, model_basename + ".engine")
         
-        if engine_files:
-            print(f"Found engine file: {engine_files[0]}")
-            # Return the path of the created engine file
+        if os.path.exists(expected_engine_path):
+            print(f"Found engine file: {expected_engine_path}")
             result = {
                 'success': True,
-                'engine_file': engine_files[0]
+                'engine_file': expected_engine_path
             }
         else:
             print("ERROR: No engine file was created!")
