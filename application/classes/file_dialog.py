@@ -1,9 +1,13 @@
 import os
-from typing import Callable, Optional
+import json
+from typing import Callable, Optional, Tuple
 import imgui
 import platform
 import logging
 import string
+
+from config.constants import FUNSCRIPT_METADATA_VERSION # Added
+
 
 
 def get_common_dirs():
@@ -37,7 +41,9 @@ def get_directory_size(path: str) -> int:
 
 
 class ImGuiFileDialog:
-    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
+    def __init__(self, app_logic_instance: "ApplicationLogic") -> None:
+        self.app = app_logic_instance
+        self.logger = self.app.logger
         self.open: bool = False
         self.path: str = ""
         self.selected_file: str = ""
@@ -53,9 +59,32 @@ class ImGuiFileDialog:
         self.extension_groups: list[tuple[str, list[str]]] = []
         self.show_overwrite_confirm: bool = False
         self.overwrite_file_path: str = ""
+        self.video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.webm'] # Added
 
-        if logger:
-            logger.info(f"Current Directory: {self.current_dir}")
+    def _get_funscript_status(self, video_path: str) -> Optional[str]:
+        """Checks for an associated funscript and determines its origin."""
+        funscript_path = os.path.splitext(video_path)[0] + ".funscript"
+        if not os.path.exists(funscript_path):
+            return None
+
+        try:
+            with open(funscript_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            metadata = data.get('metadata', {})
+            author = data.get('author', '')
+            # Ensure metadata is a dict before checking version
+            version = metadata.get('version', '') if isinstance(metadata, dict) else ''
+
+            if author.startswith("FunGen") and version == FUNSCRIPT_METADATA_VERSION:
+                return 'fungen'
+            else:
+                return 'other'
+        except Exception as e:
+            self.logger.warning(f"Could not parse funscript '{os.path.basename(funscript_path)}': {e}")
+            return 'other' # If it exists but is unreadable, still mark it as 'other'.
+
+
 
     def show(
             self,
@@ -86,6 +115,34 @@ class ImGuiFileDialog:
         # Add a header for clarity
         imgui.text("Quick Access")
         imgui.spacing()
+
+        # --- Add dynamic directories ---
+        dynamic_dirs_added = False
+
+        # 1. Output Directory
+        output_dir = self.app.app_settings.get("output_folder_path", "output")
+        if output_dir and os.path.isdir(output_dir):
+            abs_output_dir = os.path.abspath(output_dir)
+            if imgui.button("Output Folder", width=130):
+                self.current_dir = abs_output_dir
+                self.scroll_to_selected = True
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"Go to the configured output folder:\n{abs_output_dir}")
+            imgui.spacing()
+            dynamic_dirs_added = True
+
+        # 2. Current Video Directory
+        video_path = self.app.file_manager.video_path
+        if video_path and os.path.isfile(video_path):
+            video_dir = os.path.dirname(video_path)
+            if os.path.isdir(video_dir):
+                if imgui.button("Curr. Video Folder", width=130):
+                    self.current_dir = video_dir
+                    self.scroll_to_selected = True
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(f"Go to the current video's folder:\n{video_dir}")
+                imgui.spacing()
+                dynamic_dirs_added = True
 
         # Show common directories as buttons
         for name, path in self.common_dirs.items():
@@ -247,14 +304,14 @@ class ImGuiFileDialog:
     def _draw_files(self, files: list[str]) -> None:
         for i, f in enumerate(sorted(files)):
             is_selected = self.selected_file == f
-
-            # Special styling for .mlpackage files
             full_path = os.path.join(self.current_dir, f)
+
             try:
                 if os.path.isdir(full_path) and f.lower().endswith('.mlpackage'):
                     size_bytes = get_directory_size(full_path)
                 else:
                     size_bytes = os.path.getsize(full_path)
+
                 if size_bytes < 1024:
                     size_str = f"{size_bytes} B"
                 elif size_bytes < 1024 * 1024:
@@ -264,20 +321,46 @@ class ImGuiFileDialog:
             except Exception:
                 size_str = "N/A"
 
-            if f.lower().endswith('.mlpackage'):
-                label = f"[ML] {f:<40} {size_str:>8}"
-            else:
-                label = f"[FILE] {f:<40} {size_str:>8}"
+            # Check for funscript status if the file is a video
+            funscript_status = None
+            if any(f.lower().endswith(ext) for ext in self.video_extensions):
+                funscript_status = self._get_funscript_status(full_path)
 
             imgui.push_id(f"file_{i}")
-            if imgui.selectable(label, is_selected, flags=imgui.SELECTABLE_ALLOW_DOUBLE_CLICK):
-                # Handle single-click selection
+
+            # Draw components sequentially to position the indicator correctly
+            if f.lower().endswith('.mlpackage'):
+                imgui.text("[ML]")
+            else:
+                imgui.text("[FILE]")
+
+            imgui.same_line()
+
+            # Draw the funscript indicator or a placeholder for alignment
+            if funscript_status == 'fungen':
+                imgui.text_colored("[FG]", 0.2, 0.9, 0.2, 1.0)  # Green
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Funscript created by this version of FunGen")
+            elif funscript_status == 'other':
+                imgui.text_colored("[FS]", 0.9, 0.9, 0.2, 1.0)  # Yellow
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Funscript exists (unknown or older version)")
+            else:
+                imgui.text("[N/A]")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("No Funscript exists for this video")
+
+            imgui.same_line()
+
+            # The selectable label now only contains the filename and size
+            selectable_label = f"{f:<40} {size_str:>8}"
+            if imgui.selectable(selectable_label, is_selected, flags=imgui.SELECTABLE_ALLOW_DOUBLE_CLICK):
                 if imgui.is_item_hovered() and imgui.is_mouse_clicked(0):
                     self.selected_file = f
-                # Handle double-click to confirm selection
                 if imgui.is_item_hovered() and imgui.is_mouse_double_clicked(0):
                     self.selected_file = f
                     self._handle_file_selection(f)
+
             imgui.pop_id()
 
     def _handle_file_selection(self, file: str) -> None:
