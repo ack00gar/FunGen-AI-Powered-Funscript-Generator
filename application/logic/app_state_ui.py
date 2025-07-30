@@ -158,8 +158,10 @@ class AppStateUI:
         self.timeline_interaction_active = False  # True if user is dragging points/selection box in a timeline
         self.last_synced_frame_index_timeline = -1  # Last video frame index timeline was auto-panned to
         self.force_timeline_pan_to_current_frame = False  # Flag to command timeline to pan to current video frame
-
         self.interactive_refinement_mode_enabled: bool = False
+        
+        # GitHub Token Dialog
+        self.show_github_token_dialog = False
 
     def sync_tracker_ui_flags(self):
         """Ensure AppStateUI flags match the actual tracker state."""
