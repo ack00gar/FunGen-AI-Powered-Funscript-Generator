@@ -932,7 +932,7 @@ class VideoProcessor:
                 self.ffmpeg_process = None
                 return False
 
-    def start_processing(self, start_frame=None, end_frame=None):
+    def start_processing(self, start_frame=None, end_frame=None, cli_progress_callback=None):
         # If we are already processing but are in a paused state, just un-pause.
         if self.is_processing and self.pause_event.is_set():
             self.logger.info("Resuming video processing...")
@@ -948,6 +948,8 @@ class VideoProcessor:
         if not self.video_path or not self.video_info:
             self.logger.warning("Video not loaded.")
             return
+
+        self.cli_progress_callback = cli_progress_callback
 
         effective_start_frame = self.current_frame_index
         # The check for `is_paused` is removed here, as the new block above handles it.
@@ -1088,6 +1090,8 @@ class VideoProcessor:
             self.is_processing = False
             return
 
+        start_time = time.time()  # For calculating FPS and ETA in the callback
+
         loop_ffmpeg_process = self.ffmpeg_process
         next_frame_target_time = time.perf_counter()
         self.last_processed_chapter_id = None
@@ -1158,6 +1162,11 @@ class VideoProcessor:
 
                 self.current_frame_index = self.current_stream_start_frame_abs + self.frames_read_from_current_stream
                 self.frames_read_from_current_stream += 1
+
+                if self.cli_progress_callback:
+                    # Throttle updates to avoid slowing down processing (e.g., update every 10 frames)
+                    if self.current_frame_index % 10 == 0 or self.current_frame_index == self.total_frames - 1:
+                        self.cli_progress_callback(self.current_frame_index, self.total_frames, start_time)
 
                 if self.processing_end_frame_limit != -1 and self.current_frame_index > self.processing_end_frame_limit:
                     self.logger.info(f"Reached GUI end_frame_limit ({self.processing_end_frame_limit}). Stopping.")
