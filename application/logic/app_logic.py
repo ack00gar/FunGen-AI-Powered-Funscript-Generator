@@ -2,6 +2,8 @@ import time
 import logging
 import subprocess
 import os
+import sys
+import math
 import platform
 import threading
 from typing import Optional, Dict, Tuple, List, Any
@@ -27,8 +29,87 @@ from .app_calibration import AppCalibration
 from .app_energy_saver import AppEnergySaver
 from .app_utility import AppUtility
 
+
+def cli_live_video_progress_callback(current_frame, total_frames, start_time):
+    """A simpler progress callback for frame-by-frame video processing."""
+    if total_frames <= 0 or current_frame < 0:
+        return
+
+    progress = float(current_frame + 1) / total_frames
+    bar = _create_cli_progress_bar(progress)
+
+    time_elapsed = time.time() - start_time
+    fps = (current_frame + 1) / time_elapsed if time_elapsed > 0 else 0
+    eta_seconds = ((total_frames - current_frame - 1) / fps) if fps > 0 else 0
+    eta_str = f"{int(eta_seconds // 60):02d}:{int(eta_seconds % 60):02d}" if eta_seconds > 0 else "..."
+
+    status_line = f"\rProcessing Video: {bar} | {int(fps):>3} FPS | ETA: {eta_str}  "
+    sys.stdout.write(status_line)
+    sys.stdout.flush()
+    if current_frame + 1 == total_frames:
+        sys.stdout.write("\n")
+
+def _create_cli_progress_bar(percentage: float, width: int = 40) -> str:
+    """Helper to create a text-based progress bar string."""
+    filled_width = int(percentage * width)
+    bar = '█' * filled_width + '-' * (width - filled_width)
+    return f"|{bar}| {percentage * 100:6.2f}%"
+
+
+def cli_stage1_progress_callback(current, total, message, time_elapsed, avg_fps, instant_fps, eta_seconds):
+    if total <= 0: return
+    progress = float(current) / total
+    bar = _create_cli_progress_bar(progress)
+    eta_str = f"{int(eta_seconds // 3600):02d}:{int((eta_seconds % 3600) // 60):02d}:{int(eta_seconds % 60):02d}" if eta_seconds > 0 else "..."
+
+    status_line = f"\rStage 1: {bar} | {int(avg_fps):>3} FPS | ETA: {eta_str}   "
+    sys.stdout.write(status_line)
+    sys.stdout.flush()
+    if current == total:
+        sys.stdout.write("\n")
+
+
+def cli_stage2_progress_callback(main_info, sub_info, force_update=False):
+    main_current, total_main, main_name = main_info
+    main_progress = float(main_current) / total_main if total_main > 0 else 0
+
+    sub_progress = 0.0
+    if isinstance(sub_info, dict):
+        sub_current = sub_info.get("current", 0)
+        sub_total = sub_info.get("total", 1)
+        sub_progress = float(sub_current) / sub_total if sub_total > 0 else 0
+    elif isinstance(sub_info, tuple) and len(sub_info) == 3:
+        sub_current, sub_total, _ = sub_info
+        sub_progress = float(sub_current) / sub_total if sub_total > 0 else 0
+
+    main_bar = _create_cli_progress_bar(main_progress)
+    status_line = f"\rStage 2: {main_name} ({main_current}/{total_main}) {main_bar} | Sub-task: {int(sub_progress * 100):>3}%  "
+    sys.stdout.write(status_line)
+    sys.stdout.flush()
+    if main_current == total_main:
+        sys.stdout.write("\n")
+
+def cli_stage3_progress_callback(current_chapter_idx, total_chapters, chapter_name, current_chunk_idx, total_chunks, total_frames_processed_overall, total_frames_to_process_overall, processing_fps, time_elapsed, eta_seconds):
+    if total_frames_to_process_overall <= 0: return
+    overall_progress = float(total_frames_processed_overall) / total_frames_to_process_overall
+    bar = _create_cli_progress_bar(overall_progress)
+
+    eta_str = "..."
+    if not (math.isnan(eta_seconds) or math.isinf(eta_seconds)):
+        if eta_seconds > 1:
+            eta_str = f"{int(eta_seconds // 3600):02d}:{int((eta_seconds % 3600) // 60):02d}:{int(eta_seconds % 60):02d}"
+
+    status_line = f"\rStage 3: {bar} | Chapter {current_chapter_idx}/{total_chapters} ({chapter_name}) | {int(processing_fps):>3} FPS | ETA: {eta_str}   "
+    sys.stdout.write(status_line)
+    sys.stdout.flush()
+    if total_frames_processed_overall >= total_frames_to_process_overall:
+        sys.stdout.write("\n")
+
+
+
 class ApplicationLogic:
-    def __init__(self):
+    def __init__(self, is_cli: bool = False):
+        self.is_cli_mode = is_cli # Store the mode
         self.gui_instance = None
         self.app_settings = settings_manager.AppSettings(logger=None)
 
@@ -228,7 +309,8 @@ class ApplicationLogic:
         # --- Final Setup Steps ---
         self._apply_loaded_settings()
         self.funscript_processor._ensure_undo_managers_linked()
-        self._load_last_project_on_startup()
+        if not self.is_cli_mode:
+            self._load_last_project_on_startup()
         self.energy_saver.reset_activity_timer()
 
         # Check for updates on startup only if the setting is enabled
@@ -757,6 +839,9 @@ class ApplicationLogic:
 
                 self.current_batch_video_index = i
                 video_basename = os.path.basename(video_path)
+
+                print(f"\n--- Processing Video {i + 1} of {len(self.batch_video_paths)}: {video_basename} ---")
+
                 self.logger.info(f"Batch processing video {i + 1}/{len(self.batch_video_paths)}: {video_basename}")
 
                 # --- Pre-flight checks for overwrite strategy ---
@@ -801,16 +886,75 @@ class ApplicationLogic:
                 time.sleep(1.0)
                 if self.stop_batch_event.is_set(): break
 
-                self.single_video_analysis_complete_event.clear()
-                self.save_and_reset_complete_event.clear()
-                self.stage_processor.start_full_analysis()
+                selected_mode = self.app_state_ui.selected_tracker_mode
 
-                self.single_video_analysis_complete_event.wait()
-                if self.stop_batch_event.is_set(): break
+                # --- OFFLINE MODES (2-Stage / 3-Stage) ---
+                if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+                    self.single_video_analysis_complete_event.clear()
+                    self.save_and_reset_complete_event.clear()
+                    self.stage_processor.start_full_analysis()
 
-                self.logger.debug("Batch loop: Waiting for save/reset signal from GUI thread...")
-                self.save_and_reset_complete_event.wait(timeout=120)
-                self.logger.debug("Batch loop: Save/reset signal received. Proceeding to next video.")
+                    # Block until the analysis for this single video is done
+                    self.single_video_analysis_complete_event.wait()
+                    if self.stop_batch_event.is_set(): break
+
+                    # --- LOAD RESULTS IN CLI ---
+                    if not self.gui_instance:
+                        self.logger.info("CLI Mode: Loading analysis results into funscript processor.")
+                        results_package = self.stage_processor.last_analysis_result
+                        if results_package and "results_dict" in results_package:
+                            results_dict = results_package.get("results_dict", {})
+                            primary_actions = results_dict.get("primary_actions", [])
+                            secondary_actions = results_dict.get("secondary_actions", [])
+
+                            self.funscript_processor.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (CLI)")
+                            self.funscript_processor.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (CLI)")
+                        else:
+                            self.logger.error("CLI Mode: Analysis finished but no results were found to load.")
+                    # --- END OF ADDED BLOCK ---
+
+                    if not self.gui_instance:
+                        self.on_offline_analysis_completed({"video_path": video_path})
+
+                    # Block until saving and resetting are confirmed complete
+                    self.logger.debug("Batch loop: Waiting for save/reset signal...")
+                    self.save_and_reset_complete_event.wait(timeout=120)
+                    self.logger.debug("Batch loop: Save/reset signal received. Proceeding.")
+
+                # --- LIVE MODES (Oscillation Detector) ---
+                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR:
+                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
+                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
+                    self.tracker.start_tracking()
+                    self.processor.set_tracker_processing_enabled(True)
+
+                    # Process the entire video from start to finish
+                    self.processor.start_processing(
+                        start_frame=0,
+                        end_frame=-1,
+                        cli_progress_callback=cli_live_video_progress_callback
+                    )
+
+                    # Block until the live processing thread finishes
+                    if self.processor.processing_thread and self.processor.processing_thread.is_alive():
+                        self.processor.processing_thread.join()
+
+                    # This call now handles all post-processing AND saving/copying
+                    self.on_processing_stopped(was_scripting_session=True)
+                    # saved_paths = self.file_manager.save_final_funscripts(video_path,
+                    #                                                       chapters=self.funscript_processor.video_chapters)
+                    #
+                    # # Handle copying file next to video if requested
+                    # if self.batch_copy_funscript_to_video_location and saved_paths:
+                    #     video_dir = os.path.dirname(video_path)
+                    #     for source_path in saved_paths:
+                    #         try:
+                    #             dest_path = os.path.join(video_dir, os.path.basename(source_path))
+                    #             with open(source_path, 'rb') as src, open(dest_path, 'wb') as dst:
+                    #                 dst.write(src.read())
+                    #             self.logger.info(f"Saved copy of {os.path.basename(dest_path)} next to video.")
+                    #         except Exception as e:
+                    #             self.logger.error(f"Failed to save copy next to video: {e}")
 
                 if self.stop_batch_event.is_set(): break
         except Exception as e:
@@ -925,46 +1069,49 @@ class ApplicationLogic:
 
         # 2. PROCEED WITH POST-PROCESSING (if enabled)
         post_processing_enabled = self.app_settings.get("enable_auto_post_processing", False)
+        autotune_enabled_for_batch = False # Default to false
 
         if self.is_batch_processing_active:
             self.logger.info("Batch processing active. Auto post-processing decision is handled by batch settings.")
             post_processing_enabled = self.batch_apply_post_processing
+            autotune_enabled_for_batch = self.batch_apply_ultimate_autotune
 
-        if post_processing_enabled:
+        # Only run the old post-processing if it's enabled AND Ultimate Autotune is NOT enabled for the batch.
+        if post_processing_enabled and not autotune_enabled_for_batch:
             self.logger.info("Triggering auto post-processing after completed analysis.")
             self.funscript_processor.apply_automatic_post_processing()
-            chapters_for_save = self.funscript_processor.video_chapters  # Refresh in case post-proc changed them
+            chapters_for_save = self.funscript_processor.video_chapters
         else:
-            self.logger.info("Auto post-processing disabled for this run, skipping.")
+            self.logger.info("Auto post-processing skipped (either disabled or superseded by Ultimate Autotune).")
 
-        if self.is_batch_processing_active and self.batch_apply_ultimate_autotune:
+        if autotune_enabled_for_batch:
             self.logger.info("Triggering Ultimate Autotune for batch processing.")
             self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
             chapters_for_save = self.funscript_processor.video_chapters
 
         # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
         self.logger.info("Saving final funscripts...")
-        saved_funscript_paths = self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
+        self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
 
         # Handle batch mode copy
-        if self.is_batch_processing_active and self.batch_copy_funscript_to_video_location:
-            if saved_funscript_paths and isinstance(saved_funscript_paths, list):
-                video_dir = os.path.dirname(video_path)
-                for source_path in saved_funscript_paths:
-                    if not source_path or not os.path.exists(source_path):
-                        continue
-                    try:
-                        file_basename = os.path.basename(source_path)
-                        destination_path = os.path.join(video_dir, file_basename)
-                        with open(source_path, 'rb') as src_file:
-                            content = src_file.read()
-                        with open(destination_path, 'wb') as dest_file:
-                            dest_file.write(content)
-                        self.logger.info(f"Saved copy of {file_basename} next to video.")
-                    except Exception as e:
-                        self.logger.error(f"Failed to save copy of {os.path.basename(source_path)} next to video: {e}")
-            else:
-                self.logger.warning("save_final_funscripts did not return file paths. Cannot save copy next to video.")
+        # if self.is_batch_processing_active and self.batch_copy_funscript_to_video_location:
+        #     if saved_funscript_paths and isinstance(saved_funscript_paths, list):
+        #         video_dir = os.path.dirname(video_path)
+        #         for source_path in saved_funscript_paths:
+        #             if not source_path or not os.path.exists(source_path):
+        #                 continue
+        #             try:
+        #                 file_basename = os.path.basename(source_path)
+        #                 destination_path = os.path.join(video_dir, file_basename)
+        #                 with open(source_path, 'rb') as src_file:
+        #                     content = src_file.read()
+        #                 with open(destination_path, 'wb') as dest_file:
+        #                     dest_file.write(content)
+        #                 self.logger.info(f"Saved copy of {file_basename} next to video.")
+        #             except Exception as e:
+        #                 self.logger.error(f"Failed to save copy of {os.path.basename(source_path)} next to video: {e}")
+        #     else:
+        #         self.logger.warning("save_final_funscripts did not return file paths. Cannot save copy next to video.")
 
         # 4. SAVE THE PROJECT
         self.logger.info("Saving project file for completed video...")
@@ -984,6 +1131,11 @@ class ApplicationLogic:
         if self.is_batch_processing_active and hasattr(self, 'save_and_reset_complete_event'):
             self.logger.debug("Signaling batch loop to continue after offline analysis completion.")
             self.save_and_reset_complete_event.set()
+
+        # If in CLI mode without a GUI, we must manually reset the project state for the next video
+        if not self.gui_instance and self.is_batch_processing_active:
+            self.logger.info("CLI Mode: Resetting project state for next video in batch.")
+            self.reset_project_state(for_new_project=False)
 
     def on_processing_stopped(self, was_scripting_session: bool = False, scripted_frame_range: Optional[Tuple[int, int]] = None):
         """
@@ -1023,24 +1175,29 @@ class ApplicationLogic:
                 self.file_manager.save_raw_funscripts_after_generation(video_path)
 
                 # 2. PROCEED WITH POST-PROCESSING (if enabled)
-                if self.app_settings.get("enable_auto_post_processing", False):
+                post_processing_enabled = self.app_settings.get("enable_auto_post_processing", False)
+                autotune_enabled = False  # Default to false
+
+                if self.is_batch_processing_active:
+                    post_processing_enabled = self.batch_apply_post_processing
+                    autotune_enabled = self.batch_apply_ultimate_autotune
+
+                if post_processing_enabled and not autotune_enabled:
                     self.logger.info(
                         f"Triggering auto post-processing for live tracking session range: {scripted_frame_range}.")
-                    if hasattr(self, 'funscript_processor') and hasattr(self.funscript_processor, 'apply_automatic_post_processing'):
-                        try:
-                            # Pass the specific frame range to the post-processing function
-                            self.funscript_processor.apply_automatic_post_processing(frame_range=scripted_frame_range)
-
-                            # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
-                            self.logger.info("Saving final (post-processed) funscript.")
-                            # The chapter list from the funscript processor is the most current after post-processing
-                            chapters_for_save = self.funscript_processor.video_chapters
-                            self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
-
-                        except Exception as e_post:
-                            self.logger.error(f"Error during automatic post-processing after live tracking: {e_post}", exc_info=True)
+                    self.funscript_processor.apply_automatic_post_processing(frame_range=scripted_frame_range)
                 else:
-                    self.logger.info("Auto post-processing disabled, skipping.")
+                    self.logger.info("Auto post-processing disabled or superseded by Ultimate Autotune, skipping.")
+
+                if autotune_enabled:
+                    self.logger.info("Triggering Ultimate Autotune for completed live session.")
+                    self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+
+                # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
+                self.logger.info("Saving final (post-processed) funscript.")
+                chapters_for_save = self.funscript_processor.video_chapters
+                self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
+
             else:
                 self.logger.warning("Live session ended, but no video path is available to save the raw funscript.")
 
@@ -1415,6 +1572,93 @@ class ApplicationLogic:
             except:
                 duration_s = 0.0
         return duration_s, total_frames, fps_val
+
+
+    def run_cli(self, args):
+        """
+        Handles the application's command-line interface logic.
+        """
+        console_handler = None
+        original_log_level = None
+        for handler in self.logger.handlers:
+            if isinstance(handler, logging.StreamHandler):
+                console_handler = handler
+                original_log_level = handler.level
+                break
+
+        if console_handler:
+            # Temporarily set the console to only show WARNINGs and above
+            console_handler.setLevel(logging.WARNING)
+
+        try:
+            self.logger.info("Running in Command-Line Interface (CLI) mode.")
+
+            # 1. Resolve input path and find video files
+            input_path = os.path.abspath(args.input_path)
+            if not os.path.exists(input_path):
+                self.logger.error(f"Input path does not exist: {input_path}")
+                return
+
+            video_paths = []
+            if os.path.isfile(input_path):
+                video_paths.append(input_path)
+            elif os.path.isdir(input_path):
+                self.logger.info(f"Scanning folder for videos: {input_path} (Recursive: {args.recursive})")
+                valid_extensions = {".mp4", ".mkv", ".mov", ".avi", ".webm"}
+                if args.recursive:
+                    for root, _, files in os.walk(input_path):
+                        for file in files:
+                            if os.path.splitext(file)[1].lower() in valid_extensions:
+                                video_paths.append(os.path.join(root, file))
+                else:
+                    for file in os.listdir(input_path):
+                        if os.path.splitext(file)[1].lower() in valid_extensions:
+                            video_paths.append(os.path.join(input_path, file))
+
+            if not video_paths:
+                self.logger.error("No video files found at the specified path.")
+                return
+
+            self.logger.info(f"Found {len(video_paths)} video(s) to process.")
+
+            self.logger.info("Redirecting progress callbacks to CLI output.")
+            self.stage_processor.on_stage1_progress = cli_stage1_progress_callback
+            self.stage_processor.on_stage2_progress = cli_stage2_progress_callback
+            self.stage_processor.on_stage3_progress = cli_stage3_progress_callback
+
+            # 2. Configure batch processing from CLI args
+            mode_map = {
+                '2-stage': TrackerMode.OFFLINE_2_STAGE,
+                '3-stage': TrackerMode.OFFLINE_3_STAGE,
+                'oscillation-detector': TrackerMode.OSCILLATION_DETECTOR
+            }
+            self.app_state_ui.selected_tracker_mode = mode_map[args.mode]
+            self.logger.info(f"Processing Mode: {args.mode}")
+
+            # Overwrite mode: 2 for overwrite, 1 for skip if missing (default), 0 process all except own matching.
+            self.batch_overwrite_mode = 2 if args.overwrite else 1
+            self.batch_apply_ultimate_autotune = args.autotune
+            self.batch_copy_funscript_to_video_location = args.copy
+            self.batch_apply_post_processing = True  # Assume always on for CLI
+            self.batch_generate_roll_file = (args.mode == '3-stage')
+
+            self.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
+
+            # 3. Set up and run the batch processing
+            self.batch_video_paths = video_paths
+            self.is_batch_processing_active = True
+            self.current_batch_video_index = -1
+            self.stop_batch_event.clear()
+
+            # For CLI, we run the batch process in the main thread.
+            self._run_batch_processing_thread()
+
+            self.logger.info("CLI processing has finished.")
+
+        finally:
+            if console_handler and original_log_level is not None:
+                # Restore the original logging level to the console
+                console_handler.setLevel(original_log_level)
 
     def shutdown_app(self):
         """Gracefully shuts down application components."""
