@@ -29,11 +29,10 @@ class MainMenu:
             imgui.separator()
 
             # --- FIX: Assign the boolean return value to a single variable ---
-            if imgui.radio_button("Timeline 1 is the Reference", app_state.timeline_comparison_reference_num == 1):
-                app_state.timeline_comparison_reference_num = 1
-
-            if imgui.radio_button("Timeline 2 is the Reference", app_state.timeline_comparison_reference_num == 2):
-                app_state.timeline_comparison_reference_num = 2
+            for i in range(1, 3):
+                if imgui.radio_button(f"Timeline {i} is the Reference", app_state.timeline_comparison_reference_num == i):
+                    app_state.timeline_comparison_reference_num = i
+                    break
             # --- END FIX ---
 
             imgui.separator()
@@ -501,6 +500,19 @@ class MainMenu:
                     if imgui.is_item_hovered():
                         imgui.set_tooltip("If suppressed, only the menu bar indicator will be shown.")
 
+                    imgui.separator()
+
+                    # GitHub Token setting
+                    if imgui.menu_item("Set GitHub Token...")[0]:
+                        self.app.app_state_ui.show_github_token_dialog = True
+                    if imgui.is_item_hovered():
+                        current_token = self.app.updater.token_manager.get_token()
+                        if current_token:
+                            masked_token = self.app.updater.token_manager.get_masked_token()
+                            imgui.set_tooltip(f"Current token: {masked_token}\nClick to change or remove token.\nToken increases API rate limit from 60 to 5000 requests/hour.")
+                        else:
+                            imgui.set_tooltip("No token set. Click to add GitHub token.\nToken increases API rate limit from 60 to 5000 requests/hour.")
+
                     imgui.end_menu()
 
                 # Manual trigger to apply a pending update
@@ -509,6 +521,14 @@ class MainMenu:
                     self.app.updater.show_update_dialog = True  # Re-opens the confirmation dialog
                 if imgui.is_item_hovered():
                     imgui.set_tooltip("Shows the update dialog if an update has been detected.")
+
+                # Manual trigger for version picker
+                if imgui.menu_item("Choose Specific Commit...")[0]:
+                    self.app.logger.info("Version picker menu item clicked")
+                    self.app.updater.show_version_picker = True
+                    self.app.updater.load_available_versions_async()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Select a specific commit from the current branch to switch to.")
 
                 imgui.end_menu()
 

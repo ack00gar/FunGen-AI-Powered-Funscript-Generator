@@ -895,7 +895,9 @@ class GUI:
             self._render_batch_confirmation_dialog(),
             self.file_dialog.draw() if self.file_dialog.open else None,
             self._render_status_message(app_state),
-            self.app.updater.render_update_dialog()
+            self.app.updater.render_update_dialog(),
+            self.app.updater.render_version_picker_dialog(),
+            self._render_github_token_dialog()
         ))
         self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
 
@@ -971,6 +973,61 @@ class GUI:
             imgui.end()
         elif app_state.status_message:
             app_state.status_message = ""
+
+    def _render_github_token_dialog(self):
+        """Renders the GitHub token configuration dialog."""
+        if self.app.app_state_ui.show_github_token_dialog:
+            imgui.open_popup("GitHub Token")
+            self.app.app_state_ui.show_github_token_dialog = False
+
+        # Initialize buffer if needed
+        if not hasattr(self, '_github_token_buffer'):
+            self._github_token_buffer = self.app.updater.token_manager.get_token()
+
+        if imgui.begin_popup_modal("GitHub Token", True)[0]:
+            imgui.text("GitHub Personal Access Token")
+            imgui.text_wrapped("A GitHub token increases the API rate limit from 60 to 5000 requests per hour.")
+            imgui.separator()
+            
+            current_token = self.app.updater.token_manager.get_token()
+            
+            # Show current token status
+            if current_token:
+                masked_token = self.app.updater.token_manager.get_masked_token()
+                imgui.text(f"Current token: {masked_token}")
+                imgui.text_colored("✓ Token is set", 0.0, 1.0, 0.0, 1.0)
+            else:
+                imgui.text_colored("No token set", 1.0, 0.5, 0.0, 1.0)
+            
+            imgui.separator()
+            
+            # Token input field
+            imgui.text("Enter GitHub Personal Access Token:")
+            imgui.text_wrapped("Get a token from: GitHub → Settings → Developer settings → Personal access tokens")
+            imgui.text_wrapped("Required scope: public_repo (for public repositories)")
+            
+            changed, self._github_token_buffer = imgui.input_text("Token", self._github_token_buffer, 100, imgui.INPUT_TEXT_PASSWORD)
+            
+            imgui.separator()
+            
+            # Buttons
+            if imgui.button("Save Token", width=120):
+                self.app.updater.token_manager.set_token(self._github_token_buffer)
+                imgui.close_current_popup()
+            
+            imgui.same_line()
+            
+            if imgui.button("Remove Token", width=120):
+                self.app.updater.token_manager.remove_token()
+                self._github_token_buffer = ""
+                imgui.close_current_popup()
+            
+            imgui.same_line()
+            
+            if imgui.button("Cancel", width=120):
+                imgui.close_current_popup()
+            
+            imgui.end_popup()
 
     def run(self):
         if not self.init_glfw(): return

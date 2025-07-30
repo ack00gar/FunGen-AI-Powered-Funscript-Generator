@@ -15,7 +15,7 @@ from application.classes import settings_manager, project_manager, shortcut_mana
 from application.utils.logger import AppLogger
 from config.constants import *
 from application.utils.write_access import check_write_access
-from application.updater import AutoUpdater
+from application.utils.updater import AutoUpdater
 from application.utils.video_segment import VideoSegment
 
 from .app_state_ui import AppStateUI
