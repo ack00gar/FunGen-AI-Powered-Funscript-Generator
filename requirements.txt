@@ -1,0 +1,12 @@
+opencv-python
+numpy
+ultralytics
+msgpack
+glfw
+PyOpenGL
+imgui
+scipy
+rdp
+simplification
+orjson
+scenedetect[opencv]

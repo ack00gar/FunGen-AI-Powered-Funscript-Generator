@@ -1,1 +1,0 @@
-BAR_HEIGHT = 20
