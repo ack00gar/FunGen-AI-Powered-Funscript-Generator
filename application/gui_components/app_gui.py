@@ -7,6 +7,8 @@ import cv2
 import time
 import threading
 import queue
+import os
+from typing import Optional, List, Dict
 
 from application.classes.gauge import GaugeWindow
 from application.classes.file_dialog import ImGuiFileDialog
@@ -92,6 +94,14 @@ class GUI:
 
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
+
+        self.batch_videos_data: List[Dict] = []
+        self.batch_overwrite_mode_ui: int = 0  # 0: Skip own, 1: Skip any, 2: Overwrite all
+        self.batch_processing_method_idx_ui: int = 0
+        self.batch_copy_funscript_to_video_location_ui: bool = True
+        self.batch_generate_roll_file_ui: bool = True
+        self.batch_apply_ultimate_autotune_ui: bool = True
+        self.last_overwrite_mode_ui: int = -1 # Used to trigger auto-selection logic
 
         # TODO: Move this to a separate class/error management module
         self.error_popup_active = False
@@ -636,98 +646,111 @@ class GUI:
 
     def _render_batch_confirmation_dialog(self):
         app = self.app
-        if app.show_batch_confirmation_dialog:
-            imgui.open_popup("Batch Confirmation")
-            main_viewport = imgui.get_main_viewport()
-            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+        if not app.show_batch_confirmation_dialog:
+            return
 
-            if imgui.begin_popup_modal("Batch Confirmation", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
-                imgui.text_wrapped(app.batch_confirmation_message)
-                imgui.separator()
-
-                imgui.text("Select Batch Processing Method:")
-                if imgui.radio_button("3-Stage (Detect + Segment + Flow)", self.selected_batch_method_idx_ui == 0):
-                    self.selected_batch_method_idx_ui = 0
-                imgui.same_line()
-                if imgui.radio_button("2-Stage (Detect + Segment Only)", self.selected_batch_method_idx_ui == 1):
-                    self.selected_batch_method_idx_ui = 1
-
-                imgui.separator()
-                imgui.text("File Handling:")
-
-                if imgui.radio_button("Process All Videos (Skips FunGen own matching version)", self.batch_overwrite_mode_ui == 0):
-                    self.batch_overwrite_mode_ui = 0
-                if imgui.radio_button("Process Only if a Funscript is Missing", self.batch_overwrite_mode_ui == 1):
-                    self.batch_overwrite_mode_ui = 1
-                if imgui.radio_button("Process All Videos (Including FunGen own matching version)", self.batch_overwrite_mode_ui == 2):
-                    self.batch_overwrite_mode_ui = 2
-
-                imgui.separator()
-                imgui.text("Output Options:")
-
-                # _, self.batch_apply_post_processing_ui = imgui.checkbox("Apply Auto Post-Processing", self.batch_apply_post_processing_ui)
-                # imgui.same_line()
-                _, self.batch_apply_ultimate_autotune_ui = imgui.checkbox("Apply Ultimate Autotune", self.batch_apply_ultimate_autotune_ui)
-                imgui.same_line()
-
-                is_3_stage = self.selected_batch_method_idx_ui == 0
-                if not is_3_stage:
-                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-                _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file (Timeline 2)", self.batch_generate_roll_file_ui if is_3_stage else False)
-                if not is_3_stage:
-                    imgui.pop_style_var()
-                    imgui.internal.pop_item_flag()
-                imgui.same_line()
-
-                _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video", self.batch_copy_funscript_to_video_location_ui)
-
-                imgui.separator()
-                if imgui.button("Yes", width=100):
-                    app._initiate_batch_processing_from_confirmation(
-                        self.selected_batch_method_idx_ui,
-                        self.batch_apply_post_processing_ui,
-                        self.batch_copy_funscript_to_video_location_ui,
-                        self.batch_overwrite_mode_ui,
-                        self.batch_generate_roll_file_ui,
-                        self.batch_apply_ultimate_autotune_ui
-                    )
-                    imgui.close_current_popup()
-                imgui.same_line()
-                if imgui.button("No", width=100):
-                    app._cancel_batch_processing_from_confirmation()
-                    imgui.close_current_popup()
-                imgui.end_popup()
-
-    def _render_scene_detection_progress_modal(self):
-        stage_proc = self.app.stage_processor
-        if stage_proc.scene_detection_active:
-            imgui.open_popup("Scene Detection Progress")
-
+        imgui.open_popup("Batch Processing Setup")
         main_viewport = imgui.get_main_viewport()
+        imgui.set_next_window_size(main_viewport.size[0] * 0.7, main_viewport.size[1] * 0.8, condition=imgui.APPEARING)
         popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
                      main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5, condition=imgui.APPEARING)
 
-        popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        if imgui.begin_popup_modal("Scene Detection Progress", None, flags=popup_flags)[0]:
-            imgui.text("Detecting Video Scenes...")
-            imgui.text_wrapped(f"Status: {stage_proc.scene_detection_status}")
-            progress = stage_proc.scene_detection_progress
-            if progress > 0.001:
-                imgui.progress_bar(progress, size=(250, 0), overlay=f"{progress * 100:.0f}%")
-            else:
-                spinner_chars = "|/-\\"
-                spinner_index = int(time.time() * 4) % 4
-                imgui.text(f"Processing... {spinner_chars[spinner_index]}")
+        if imgui.begin_popup_modal("Batch Processing Setup", True)[0]:
+            imgui.text(f"Found {len(self.batch_videos_data)} videos for batch processing.")
             imgui.separator()
+
+            imgui.text("Overwrite Strategy:")
+            imgui.same_line()
+            if imgui.radio_button("Skip existing FunGen scripts", self.batch_overwrite_mode_ui == 0): self.batch_overwrite_mode_ui = 0
+            imgui.same_line()
+            if imgui.radio_button("Skip if ANY script exists", self.batch_overwrite_mode_ui == 1): self.batch_overwrite_mode_ui = 1
+            imgui.same_line()
+            if imgui.radio_button("Overwrite all existing scripts", self.batch_overwrite_mode_ui == 2): self.batch_overwrite_mode_ui = 2
+
+            if self.batch_overwrite_mode_ui != self.last_overwrite_mode_ui:
+                for video in self.batch_videos_data:
+                    status = video["funscript_status"]
+                    if self.batch_overwrite_mode_ui == 0: video["selected"] = status != 'fungen'
+                    elif self.batch_overwrite_mode_ui == 1: video["selected"] = status is None
+                    elif self.batch_overwrite_mode_ui == 2: video["selected"] = True
+                self.last_overwrite_mode_ui = self.batch_overwrite_mode_ui
+
+            imgui.separator()
+
+            if imgui.begin_child("VideoList", height=-120):
+                table_flags = imgui.TABLE_BORDERS | imgui.TABLE_SIZING_STRETCH_PROP | imgui.TABLE_SCROLL_Y
+                if imgui.begin_table("BatchVideosTable", 4, flags=table_flags):
+                    imgui.table_setup_column("Process", init_width_or_weight=0.5)
+                    imgui.table_setup_column("Video File", init_width_or_weight=4.0)
+                    imgui.table_setup_column("Detected", init_width_or_weight=1.3)
+                    imgui.table_setup_column("Override", init_width_or_weight=1.5)
+
+                    imgui.table_headers_row()
+
+                    video_format_options = ["Auto (Heuristic)", "2D", "VR (he_sbs)", "VR (he_tb)", "VR (fisheye_sbs)", "VR (fisheye_tb)"]
+
+                    for i, video_data in enumerate(self.batch_videos_data):
+                        imgui.table_next_row()
+                        imgui.table_set_column_index(0); imgui.push_id(f"sel_{i}")
+                        _, video_data["selected"] = imgui.checkbox("##select", video_data["selected"])
+                        imgui.pop_id()
+
+                        imgui.table_set_column_index(1)
+                        status = video_data["funscript_status"]
+                        if status == 'fungen': imgui.text_colored(os.path.basename(video_data["path"]), 0.2, 0.9, 0.2, 1.0)
+                        elif status == 'other': imgui.text_colored(os.path.basename(video_data["path"]), 0.9, 0.9, 0.2, 1.0)
+                        else: imgui.text(os.path.basename(video_data["path"]))
+
+                        if imgui.is_item_hovered():
+                            if status == 'fungen':
+                                imgui.set_tooltip("Funscript created by this version of FunGen")
+                            elif status == 'other':
+                                imgui.set_tooltip("Funscript exists (unknown or older version)")
+                            else:
+                                imgui.set_tooltip("No Funscript exists for this video")
+
+                        imgui.table_set_column_index(2); imgui.text(video_data["detected_format"])
+
+                        imgui.table_set_column_index(3); imgui.push_id(f"ovr_{i}"); imgui.set_next_item_width(-1)
+                        _, video_data["override_format_idx"] = imgui.combo("##override", video_data["override_format_idx"], video_format_options)
+                        imgui.pop_id()
+
+                    imgui.end_table()
+                imgui.end_child()
+
+            imgui.separator()
+            imgui.text("Processing Method:")
+            if imgui.radio_button("3-Stage", self.selected_batch_method_idx_ui == 0):
+                self.selected_batch_method_idx_ui = 0
+            imgui.same_line()
+            if imgui.radio_button("2-Stage", self.selected_batch_method_idx_ui == 1):
+                self.selected_batch_method_idx_ui = 1
+            imgui.same_line()
+            if imgui.radio_button("Oscillation Detector", self.selected_batch_method_idx_ui == 2):
+                self.selected_batch_method_idx_ui = 2
+
+            imgui.text("Output Options:")
+            _, self.batch_apply_ultimate_autotune_ui = imgui.checkbox("Apply Ultimate Autotune", self.batch_apply_ultimate_autotune_ui)
+            imgui.same_line()
+            _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video", self.batch_copy_funscript_to_video_location_ui)
+            imgui.same_line()
+            is_3_stage = self.selected_batch_method_idx_ui == 0
+            if not is_3_stage:
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
+            _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if is_3_stage else False)
+            if not is_3_stage:
+                imgui.pop_style_var(); imgui.internal.pop_item_flag()
+
+            imgui.separator()
+            if imgui.button("Start Batch", width=120):
+                app._initiate_batch_processing_from_confirmation()
+                imgui.close_current_popup()
+            imgui.same_line()
             if imgui.button("Cancel", width=120):
-                stage_proc.stop_stage_event.set()
+                app._cancel_batch_processing_from_confirmation()
                 imgui.close_current_popup()
-            if not stage_proc.scene_detection_active:
-                imgui.close_current_popup()
+
             imgui.end_popup()
 
     def render_gui(self):

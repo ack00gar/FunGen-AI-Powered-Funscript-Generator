@@ -326,7 +326,8 @@ class AppStageProcessor:
         }
         self.gui_event_queue.put(("stage3_progress_update", progress_data, None))
 
-    def start_full_analysis(self, override_producers: Optional[int] = None,
+    def start_full_analysis(self, processing_mode: "TrackerMode",
+                            override_producers: Optional[int] = None,
                             override_consumers: Optional[int] = None,
                             completion_event: Optional[threading.Event] = None,
                             frame_range_override: Optional[Tuple[int, int]] = None,
@@ -352,6 +353,9 @@ class AppStageProcessor:
         self.stop_stage_event.clear()
         self.stage_completion_event = completion_event
         self.frame_range_override = frame_range_override
+
+        # Store the explicitly passed mode for the thread to use
+        self.processing_mode_for_thread = processing_mode
 
         # Store the flag for the thread to use it
         self.is_autotune_run_for_thread = is_autotune_run
@@ -423,7 +427,7 @@ class AppStageProcessor:
         stage1_success = False
 
         # Always use the tracker mode from the UI state, which is the single source of truth.
-        selected_mode = self.app.app_state_ui.selected_tracker_mode
+        selected_mode = self.processing_mode_for_thread
         self.logger.info(f"[Thread] Using processing mode: {selected_mode.name}")
 
         try:

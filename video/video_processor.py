@@ -541,6 +541,48 @@ class VideoProcessor:
                     return self.frame_cache[frame_index_abs]
             return None
 
+    @staticmethod
+    def get_video_type_heuristic(video_path: str) -> str:
+        """
+        A lightweight heuristic to guess the video type (2D/VR) and format (SBS/TB)
+        without fully opening the video. Uses ffprobe for metadata.
+        """
+        if not os.path.exists(video_path):
+            return "Unknown"
+
+        try:
+            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                   '-show_entries', 'stream=width,height', '-of', 'json', video_path]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, timeout=5)
+            data = json.loads(result.stdout)
+            stream_info = data.get('streams', [{}])[0]
+            width = int(stream_info.get('width', 0))
+            height = int(stream_info.get('height', 0))
+        except Exception:
+            return "Unknown"
+
+        if width == 0 or height == 0:
+            return "Unknown"
+
+        is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
+        is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * height
+        upper_video_path = video_path.upper()
+        vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
+        has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
+
+        if not (is_sbs_resolution or is_tb_resolution or has_vr_keyword):
+            return "2D"
+
+        # If VR, guess the specific format
+        suggested_base = 'he'
+        suggested_layout = '_sbs'
+        if is_tb_resolution or any(kw in upper_video_path for kw in ['_TB', 'TB_', 'TOPBOTTOM', 'OVERUNDER', '_OU', 'OU_']):
+            suggested_layout = '_tb'
+        if any(kw in upper_video_path for kw in ['FISHEYE', 'MKX', 'RF52']):
+            suggested_base = 'fisheye'
+
+        return f"VR ({suggested_base}{suggested_layout})"
+
     def _get_video_info(self, filename):
         # TODO: Add ffprobe detection and metadata extraction for YUV videos. Pass metadata to cv2 so it can use the correct decoder. Use metadata + cv2.cvtColor to convert to RGB.
         cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',

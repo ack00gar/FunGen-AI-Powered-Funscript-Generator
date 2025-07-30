@@ -247,16 +247,12 @@ class AppFileManager:
 
         sanitized_actions = [ {'at': int(action['at']), 'pos': int(action['pos'])} for action in actions]
 
-        funscript_data = {
-            "version": "1.0",
-            "author": f"FunGen beta {APP_VERSION}",
-            "inverted": False,
-            "range": 100,
-            "actions": sorted(sanitized_actions, key=lambda x: x["at"]),
-            "metadata": {"chapters": []}  # Default empty metadata
+        metadata = {
+            "version": f"{FUNSCRIPT_METADATA_VERSION}",
+            "chapters": []
         }
 
-        # Add chapter data to metadata if chapters are provided
+        # Add chapter data to the metadata dictionary if chapters are provided
         if chapters:
             current_fps = DEFAULT_CHAPTER_FPS
             if self.app.processor and self.app.processor.video_info and self.app.processor.fps > 0:
@@ -266,11 +262,18 @@ class AppFileManager:
                     f"Video FPS not available for saving chapters in timecode format. Using default FPS: {DEFAULT_CHAPTER_FPS}. Timecodes may be inaccurate.",
                     extra={'status_message': True})
 
-            funscript_data["metadata"] = {
-                "version": f"{FUNSCRIPT_METADATA_VERSION}",
-                "chapters_fps": current_fps,
-                "chapters": [chapter.to_funscript_chapter_dict(current_fps) for chapter in chapters]
-            }
+            metadata["chapters_fps"] = current_fps
+            metadata["chapters"] = [chapter.to_funscript_chapter_dict(current_fps) for chapter in chapters]
+
+        # Construct the final funscript data object
+        funscript_data = {
+            "version": "1.0",
+            "author": f"FunGen beta {APP_VERSION}",
+            "inverted": False,
+            "range": 100,
+            "actions": sorted(sanitized_actions, key=lambda x: x["at"]),
+            "metadata": metadata
+        }
 
         try:
             # Use orjson for high-performance writing
@@ -513,14 +516,16 @@ class AppFileManager:
 
     def handle_drop_event(self, paths: List[str]):
         """
-        Handles dropped files or folders. If a single video is found, it's opened directly.
-        If multiple videos are found, it triggers the batch processing confirmation.
+        Handles dropped files/folders. Scans for videos and prepares them for the
+        new enhanced batch processing dialog.
         """
         if not paths:
             return
 
-        videos_for_batch = []
-        other_files = []
+        from video.video_processor import VideoProcessor # Local import to avoid circular dependency
+        from application.classes.file_dialog import ImGuiFileDialog
+
+        videos_to_process = []
         valid_video_extensions = {".mp4", ".mkv", ".mov", ".avi", ".webm"}
 
         # Categorize all dropped paths
@@ -528,39 +533,58 @@ class AppFileManager:
             if os.path.isdir(path):
                 # If a directory is dropped, scan it and its subfolders for videos
                 self.app.logger.info(f"Scanning dropped folder for videos: {path}")
-                videos_for_batch.extend(self._scan_folder_for_videos(path))
+                videos_to_process.extend(self._scan_folder_for_videos(path))
             elif os.path.splitext(path)[1].lower() in valid_video_extensions:
                 # If a video file is dropped, add it to the list for processing
-                videos_for_batch.append(path)
-            else:
-                # Keep track of other non-video file types
-                other_files.append(path)
+                videos_to_process.append(path)
+            # else:
+            #     # Keep track of other non-video file types
+            #     other_files.append(path)
 
-        # Ensure the list of videos is unique and sorted
-        unique_videos = sorted(list(set(videos_for_batch)))
+        unique_videos = sorted(list(set(videos_to_process)))
 
-        if len(unique_videos) > 1:
-            # If more than one video was found, start the batch processing workflow
-            self.app.start_batch_processing(unique_videos)
-        elif len(unique_videos) == 1:
-            # If exactly one video was found, open it directly without batch confirmation
+        if not unique_videos:
+            self.app.logger.info("No video files found in dropped items.")
+            return
+
+        if len(unique_videos) == 1:
             self.app.logger.info(f"Single video dropped. Opening directly: {os.path.basename(unique_videos[0])}")
             self.open_video_from_path(unique_videos[0])
-        elif other_files:
-            # If no videos were found, fall back to the original logic for handling other file types
-            self.app.logger.info("No videos found for batching, handling as single file drop.")
-            path = other_files[0]
-            ext = os.path.splitext(path)[1].lower()
-            if ext == '.funscript':
-                self.load_funscript_to_timeline(path, 1)
-            elif ext == PROJECT_FILE_EXTENSION:
-                self.app.project_manager.load_project(path)
-            elif ext == '.msgpack':
-                self.load_stage2_overlay_data(path)
-            else:
-                self.last_dropped_files = other_files
-                self.app.logger.warning(f"Unrecognized file type dropped: {os.path.basename(path)}", extra={'status_message': True})
+            return
 
+        # elif other_files:
+        #     # If no videos were found, fall back to the original logic for handling other file types
+        #     self.app.logger.info("No videos found for batching, handling as single file drop.")
+        #     path = other_files[0]
+        #     ext = os.path.splitext(path)[1].lower()
+        #     if ext == '.funscript':
+        #         self.load_funscript_to_timeline(path, 1)
+        #     elif ext == PROJECT_FILE_EXTENSION:
+        #         self.app.project_manager.load_project(path)
+        #     elif ext == '.msgpack':
+        #         self.load_stage2_overlay_data(path)
+        #     else:
+        #         self.last_dropped_files = other_files
+        #         self.app.logger.warning(f"Unrecognized file type dropped: {os.path.basename(path)}", extra={'status_message': True})
+
+        self.app.logger.info(f"Found {len(unique_videos)} videos. Preparing batch dialog...")
+        gui = self.app.gui_instance
+        if not gui:
+            self.app.logger.error("GUI instance not available to show batch dialog.")
+            return
+
+        gui.batch_videos_data.clear()
+        for video_path in unique_videos:
+            gui.batch_videos_data.append({
+                "path": video_path,
+                "selected": False,
+                "funscript_status": ImGuiFileDialog.get_funscript_status(video_path, self.app.logger),
+                "detected_format": VideoProcessor.get_video_type_heuristic(video_path),
+                "override_format_idx": 0, # Index for 'Auto'
+            })
+
+        gui.last_overwrite_mode_ui = -1
+        self.app.show_batch_confirmation_dialog = True
 
     def update_settings_from_app(self):
         """Called by AppLogic to reflect loaded settings or project data."""

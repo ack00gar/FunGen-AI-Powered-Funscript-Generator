@@ -963,7 +963,7 @@ class ControlPanelUI:
             total_videos = len(self.app.batch_video_paths)
             current_idx = self.app.current_batch_video_index
             if 0 <= current_idx < total_videos:
-                current_video_name = os.path.basename(self.app.batch_video_paths[current_idx])
+                current_video_name = os.path.basename(self.app.batch_video_paths[current_idx]["path"])
                 imgui.text_wrapped(f"Processing {current_idx + 1}/{total_videos}:")
                 imgui.text_wrapped(f"{current_video_name}")
             if imgui.button("Abort Batch Process", width=-1):
