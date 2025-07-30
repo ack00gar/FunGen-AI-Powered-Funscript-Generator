@@ -982,7 +982,8 @@ class ControlPanelUI:
                 if self.app.processor.pause_event.is_set():
                     if imgui.button("Resume Tracking", width=button_width):
                         self.app.processor.start_processing()
-                        self.app.tracker.start_tracking()
+                        if not self.app.tracker.tracking_active:
+                            self.app.tracker.start_tracking()
                 else:
                     if imgui.button("Pause Tracking", width=button_width):
                         self.app.processor.pause_processing()
