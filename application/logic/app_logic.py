@@ -325,10 +325,11 @@ class ApplicationLogic:
             self.trigger_first_run_setup()
 
         # --- Force Oscillation Detector as the default mode on startup ---
-        self.app_state_ui.selected_tracker_mode = TrackerMode.OSCILLATION_DETECTOR
-        if self.tracker:
-            # Also set the tracker's internal mode to match the UI default
-            self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
+        if not self.is_cli_mode:
+            self.app_state_ui.selected_tracker_mode = TrackerMode.OSCILLATION_DETECTOR
+            if self.tracker:
+                # Also set the tracker's internal mode to match the UI default
+                self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
 
     def trigger_first_run_setup(self):
         """Initiates the first-run model download process in a background thread."""
@@ -515,6 +516,7 @@ class ApplicationLogic:
                 autotune_frame_range = (start_frame, end_frame)
 
                 self.stage_processor.start_full_analysis(
+                    processing_mode=TrackerMode.OFFLINE_3_STAGE,
                     override_producers=p,
                     override_consumers=c,
                     completion_event=completion_event,
@@ -755,70 +757,58 @@ class ApplicationLogic:
         self.show_batch_confirmation_dialog = True
         self.energy_saver.reset_activity_timer()  # Ensure UI is responsive
 
-    def _initiate_batch_processing_from_confirmation(self, selected_method_idx: int, apply_post_processing: bool,
-                                                     copy_to_video_location: bool, overwrite_mode: int,
-                                                     generate_roll: bool, apply_ultimate_autotune: bool):
+    def _initiate_batch_processing_from_confirmation(self):
         """
-        [Private] Called from the GUI when the user clicks 'Yes' in the confirmation dialog.
-        This method starts the actual batch processing thread.
+        [Private] Called from the GUI. Reads the configured list of videos and
+        settings from the GUI and starts the batch processing thread.
         """
-        if not self._check_model_paths():
-            return
+        if not self._check_model_paths(): return
         if self.is_batch_processing_active: return
-        if not self.batch_confirmation_videos:
-            self.logger.error("Batch confirmation accepted, but no videos were found in the list.")
+        gui = self.gui_instance
+        if not gui or not gui.batch_videos_data:
+            self.logger.error("Batch start requested, but GUI data is missing.")
             self._cancel_batch_processing_from_confirmation()
             return
 
-        # --- Store all user choices from the dialog ---
-        self.batch_processing_method_idx = selected_method_idx
-        self.batch_apply_post_processing = apply_post_processing
-        self.batch_copy_funscript_to_video_location = copy_to_video_location
-        self.batch_overwrite_mode = overwrite_mode
-        self.batch_generate_roll_file = generate_roll
-        self.batch_apply_ultimate_autotune = apply_ultimate_autotune
+        videos_to_process = []
+        video_format_options = ["Auto (Heuristic)", "2D", "VR (he_sbs)", "VR (he_tb)", "VR (fisheye_sbs)", "VR (fisheye_tb)"]
 
-        self.logger.info(
-            f"User confirmed. Starting batch processing with method: {selected_method_idx}, post-proc: {apply_post_processing}, copy: {copy_to_video_location}, overwrite: {overwrite_mode}, gen_roll: {generate_roll}, autotune: {apply_ultimate_autotune}")
+        for video_data in gui.batch_videos_data:
+            if video_data.get("selected", False):
+                override_idx = video_data.get("override_format_idx", 0)
+                override_format = video_format_options[override_idx] if 0 <= override_idx < len(video_format_options) else "Auto (Heuristic)"
+                videos_to_process.append({"path": video_data["path"], "override_format": override_format})
 
+        if not videos_to_process:
+            self.logger.info("No videos selected for batch processing.", extra={'status_message': True})
+            self._cancel_batch_processing_from_confirmation()
+            return
 
-        # Update the main UI state to reflect the chosen batch mode, so the correct progress UI is displayed.
-        batch_mode_map = {
-            0: TrackerMode.OFFLINE_3_STAGE,
-            1: TrackerMode.OFFLINE_2_STAGE
-        }
-        chosen_mode = batch_mode_map.get(selected_method_idx)
-        if chosen_mode:
-            self.app_state_ui.selected_tracker_mode = chosen_mode
-            self.logger.info(f"Control panel UI mode updated to: {chosen_mode.name} for batch processing.")
-        else:
-            self.logger.warning(f"Could not map batch method index {selected_method_idx} to a valid tracker mode.")
+        self.batch_processing_method_idx = gui.selected_batch_method_idx_ui
+        self.batch_apply_ultimate_autotune = gui.batch_apply_ultimate_autotune_ui
+        self.batch_copy_funscript_to_video_location = gui.batch_copy_funscript_to_video_location_ui
+        self.batch_overwrite_mode = gui.batch_overwrite_mode_ui
+        self.batch_generate_roll_file = gui.batch_generate_roll_file_ui
 
-
-        # Set up batch processing state from the confirmed data
-        self.batch_video_paths = list(self.batch_confirmation_videos)
+        self.logger.info(f"User confirmed. Starting batch with {len(videos_to_process)} videos.")
+        self.batch_video_paths = videos_to_process # Now a list of dicts
         self.is_batch_processing_active = True
         self.current_batch_video_index = -1
         self.stop_batch_event.clear()
 
-        # Start the background thread
         self.batch_processing_thread = threading.Thread(target=self._run_batch_processing_thread, daemon=True)
         self.batch_processing_thread.start()
 
-        # Clear the confirmation dialog state
         self.show_batch_confirmation_dialog = False
-        self.batch_confirmation_videos = []
-        self.batch_confirmation_message = ""
+        gui.batch_videos_data.clear()
 
     def _cancel_batch_processing_from_confirmation(self):
-        """
-        [Private] Called from the GUI when the user clicks 'No' in the confirmation dialog.
-        """
+        """[Private] Called from the GUI when the user clicks 'Cancel'."""
         self.logger.info("Batch processing cancelled by user.", extra={'status_message': True})
         # Clear the confirmation dialog state
         self.show_batch_confirmation_dialog = False
-        self.batch_confirmation_videos = []
-        self.batch_confirmation_message = ""
+        if self.gui_instance:
+            self.gui_instance.batch_videos_data.clear()
 
     def abort_batch_processing(self):
         if not self.is_batch_processing_active:
@@ -832,13 +822,28 @@ class ApplicationLogic:
 
     def _run_batch_processing_thread(self):
         try:
-            for i, video_path in enumerate(self.batch_video_paths):
+            for i, video_data in enumerate(self.batch_video_paths):
                 if self.stop_batch_event.is_set():
-                    self.logger.info("Batch processing was aborted by user.")
-                    break
+                    self.logger.info("Batch processing was aborted by user."); break
 
                 self.current_batch_video_index = i
+                video_path = video_data["path"]
+                override_format = video_data["override_format"]
                 video_basename = os.path.basename(video_path)
+
+                # --- Temporarily Apply Format Override ---
+                original_video_type_setting = self.processor.video_type_setting
+                original_vr_format_setting = self.processor.vr_input_format
+                if override_format != "Auto (Heuristic)":
+                    self.logger.info(f"Applying format override: '{override_format}' for '{video_basename}'")
+                    if override_format == "2D":
+                        self.processor.set_active_video_type_setting("2D")
+                    elif override_format.startswith("VR"):
+                        try:
+                            vr_format = override_format.split('(')[1].split(')')[0]
+                            self.processor.set_active_vr_parameters(input_format=vr_format)
+                        except IndexError:
+                            self.logger.error(f"Could not parse VR format from override: '{override_format}'")
 
                 print(f"\n--- Processing Video {i + 1} of {len(self.batch_video_paths)}: {video_basename} ---")
 
@@ -886,13 +891,22 @@ class ApplicationLogic:
                 time.sleep(1.0)
                 if self.stop_batch_event.is_set(): break
 
-                selected_mode = self.app_state_ui.selected_tracker_mode
+                batch_mode_map = {
+                    0: TrackerMode.OFFLINE_3_STAGE,
+                    1: TrackerMode.OFFLINE_2_STAGE,
+                    2: TrackerMode.OSCILLATION_DETECTOR
+                }
+                selected_mode = batch_mode_map.get(self.batch_processing_method_idx)
+
+                if selected_mode is None:
+                    self.logger.error(f"Invalid batch processing method index: {self.batch_processing_method_idx}. Skipping video.")
+                    continue
 
                 # --- OFFLINE MODES (2-Stage / 3-Stage) ---
                 if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
                     self.single_video_analysis_complete_event.clear()
                     self.save_and_reset_complete_event.clear()
-                    self.stage_processor.start_full_analysis()
+                    self.stage_processor.start_full_analysis(processing_mode=selected_mode)
 
                     # Block until the analysis for this single video is done
                     self.single_video_analysis_complete_event.wait()
@@ -941,22 +955,14 @@ class ApplicationLogic:
 
                     # This call now handles all post-processing AND saving/copying
                     self.on_processing_stopped(was_scripting_session=True)
-                    # saved_paths = self.file_manager.save_final_funscripts(video_path,
-                    #                                                       chapters=self.funscript_processor.video_chapters)
-                    #
-                    # # Handle copying file next to video if requested
-                    # if self.batch_copy_funscript_to_video_location and saved_paths:
-                    #     video_dir = os.path.dirname(video_path)
-                    #     for source_path in saved_paths:
-                    #         try:
-                    #             dest_path = os.path.join(video_dir, os.path.basename(source_path))
-                    #             with open(source_path, 'rb') as src, open(dest_path, 'wb') as dst:
-                    #                 dst.write(src.read())
-                    #             self.logger.info(f"Saved copy of {os.path.basename(dest_path)} next to video.")
-                    #         except Exception as e:
-                    #             self.logger.error(f"Failed to save copy next to video: {e}")
 
-                if self.stop_batch_event.is_set(): break
+                self.processor.video_type_setting = original_video_type_setting
+                self.processor.vr_input_format = original_vr_format_setting
+                self.logger.debug("Restored original video format settings for next iteration.")
+
+                if self.stop_batch_event.is_set():
+                    break
+
         except Exception as e:
             self.logger.error(f"An error occurred during the batch process: {e}", exc_info=True)
         finally:
@@ -1627,12 +1633,13 @@ class ApplicationLogic:
             self.stage_processor.on_stage3_progress = cli_stage3_progress_callback
 
             # 2. Configure batch processing from CLI args
-            mode_map = {
-                '2-stage': TrackerMode.OFFLINE_2_STAGE,
-                '3-stage': TrackerMode.OFFLINE_3_STAGE,
-                'oscillation-detector': TrackerMode.OSCILLATION_DETECTOR
+            mode_to_idx_map = {
+                '3-stage': 0,
+                '2-stage': 1,
+                'oscillation-detector': 2
             }
-            self.app_state_ui.selected_tracker_mode = mode_map[args.mode]
+            # Set the batch processing index, which the batch thread now uses
+            self.batch_processing_method_idx = mode_to_idx_map.get(args.mode, 0)
             self.logger.info(f"Processing Mode: {args.mode}")
 
             # Overwrite mode: 2 for overwrite, 1 for skip if missing (default), 0 process all except own matching.
@@ -1645,7 +1652,9 @@ class ApplicationLogic:
             self.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
 
             # 3. Set up and run the batch processing
-            self.batch_video_paths = video_paths
+            self.batch_video_paths = [
+                {"path": path, "override_format": "Auto (Heuristic)"} for path in video_paths
+            ]
             self.is_batch_processing_active = True
             self.current_batch_video_index = -1
             self.stop_batch_event.clear()
