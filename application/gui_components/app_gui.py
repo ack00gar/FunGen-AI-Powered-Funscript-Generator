@@ -330,50 +330,8 @@ class GUI:
         return True
 
     def handle_drop(self, window, paths):
-        if not paths:
-            return
-
-        # Separate files by type
-        project_files = [p for p in paths if p.lower().endswith(constants.PROJECT_FILE_EXTENSION)]
-        funscript_files = [p for p in paths if p.lower().endswith('.funscript')]
-        other_files = [p for p in paths if p not in project_files and p not in funscript_files]
-
-        # 1. Handle Project Files (highest priority)
-        if project_files:
-            project_to_load = project_files[0]
-            self.app.logger.info(f"Project file dropped. Loading: {os.path.basename(project_to_load)}")
-            self.app.project_manager.load_project(project_to_load)
-            # Typically, loading a project handles everything, so we can stop.
-            return
-
-        # 2. Handle Video/Other Files via FileManager
-        if other_files:
-            self.app.logger.info(f"Video/other files dropped. Passing to FileManager: {len(other_files)} files")
-            # This will handle loading the video and preparing the processor
-            self.app.file_manager.handle_drop_event(other_files)
-
-        # 3. Handle Funscript Files
-        if funscript_files:
-            self.app.logger.info(f"Funscript files dropped: {len(funscript_files)} files")
-            # If timeline 1 is empty or has no AI-generated script, load the first funscript there.
-
-            if not self.app.funscript_processor.get_actions('primary'):
-                self.app.logger.info(f"Loading '{os.path.basename(funscript_files[0])}' into Timeline 1.")
-                self.app.file_manager.load_funscript_to_timeline(funscript_files[0], timeline_num=1)
-
-                if len(funscript_files) > 1:
-                    self.app.logger.info(f"Loading '{os.path.basename(funscript_files[1])}' into Timeline 2.")
-                    self.app.file_manager.load_funscript_to_timeline(funscript_files[1], timeline_num=2)
-                    self.app.app_state_ui.show_funscript_interactive_timeline2 = True
-            else:
-                self.app.logger.info(f"Timeline 1 has data. Loading '{os.path.basename(funscript_files[0])}' into Timeline 2.")
-                self.app.file_manager.load_funscript_to_timeline(funscript_files[0], timeline_num=2)
-                self.app.app_state_ui.show_funscript_interactive_timeline2 = True
-
-            # Mark previews as dirty to force a redraw
-            self.app.app_state_ui.funscript_preview_dirty = True
-            self.app.app_state_ui.heatmap_dirty = True
-
+        if not paths: return
+        self.app.file_manager.handle_drop_event(paths)
 
     def update_texture(self, texture_id: int, image: np.ndarray):
         if image is None or image.size == 0: return

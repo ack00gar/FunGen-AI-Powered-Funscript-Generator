@@ -65,6 +65,8 @@ class ROITracker:
         
         # --- Static grid storage for oscillation area ---
         self.oscillation_grid_blocks: List[Tuple[int, int, int, int]] = []  # List of (x, y, w, h) for each grid block
+        # --- Always-available set of active grid blocks ---
+        self.oscillation_active_block_positions: set = set()
 
         self.enable_user_roi_sub_tracking: bool = True
         self.user_roi_tracking_box_size: Tuple[int, int] = (5, 5)
@@ -1630,4 +1632,12 @@ class ROITracker:
                 cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 1)
 
         self.prev_gray_oscillation = current_gray
+
+        # After active_blocks is determined, expose the set of active block positions for UI
+        self.oscillation_active_block_positions = set()
+        if active_blocks:
+            self.oscillation_active_block_positions = set((b['pos'] for b in active_blocks))
+        else:
+            self.oscillation_active_block_positions = set()
+
         return processed_frame, action_log_list if action_log_list else None

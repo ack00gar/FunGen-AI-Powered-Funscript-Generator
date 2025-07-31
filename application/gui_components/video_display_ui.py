@@ -536,9 +536,12 @@ class VideoDisplayUI:
                                 self.app.logger.info("Oscillation area drawing cancelled (mouse released outside video).", extra={'status_message': True})
 
                         # Visualization of active Oscillation Area (even when not setting)
-                        if (self.app.tracker and 
+                        if (
+                            self.app.tracker and 
                             self.app.tracker.oscillation_area_fixed is not None and 
-                            not self.app.is_setting_oscillation_area_mode):
+                            self.app.tracker.oscillation_grid_blocks and
+                            not self.app.is_setting_oscillation_area_mode
+                        ):
                             draw_list = imgui.get_window_draw_list()
                             ax_vid, ay_vid, aw_vid, ah_vid = self.app.tracker.oscillation_area_fixed
 
@@ -546,9 +549,42 @@ class VideoDisplayUI:
                             area_end_screen = self._video_to_screen_coords(ax_vid + aw_vid, ay_vid + ah_vid)
 
                             if area_start_screen and area_end_screen:
-                                draw_list.add_rect(area_start_screen[0], area_start_screen[1], area_end_screen[0], area_end_screen[1], imgui.get_color_u32_rgba(0, 255, 255, 255), thickness=2)  # Cyan color
+                                # Draw blue outline for the area
+                                draw_list.add_rect(area_start_screen[0], area_start_screen[1], area_end_screen[0], area_end_screen[1], imgui.get_color_u32_rgba(0, 128, 255, 255), thickness=2)
                                 # Add label
                                 draw_list.add_text(area_start_screen[0], area_start_screen[1] - 15, imgui.get_color_u32_rgba(0, 255, 255, 255), "Oscillation Area")
+
+                                # Draw the grid blocks
+                                # Get active block positions from tracker if available
+                                active_block_positions = set()
+                                if hasattr(self.app.tracker, 'oscillation_active_block_positions'):
+                                    active_block_positions = set(self.app.tracker.oscillation_active_block_positions)
+                                elif hasattr(self.app.tracker, 'last_active_block_positions'):
+                                    active_block_positions = set(self.app.tracker.last_active_block_positions)
+                                # Fallback: try to get from tracker attribute if exposed
+                                elif hasattr(self.app.tracker, 'get_active_block_positions'):
+                                    active_block_positions = set(self.app.tracker.get_active_block_positions())
+                                # If not available, just draw all as grey
+
+                                # Try to infer grid dimensions
+                                grid_blocks = self.app.tracker.oscillation_grid_blocks
+                                num_blocks = len(grid_blocks)
+                                # Try to get max_blocks_w from tracker if available
+                                max_blocks_w = getattr(self.app.tracker, 'oscillation_max_blocks_w', 0)
+                                if max_blocks_w <= 0:
+                                    # Fallback: estimate as square
+                                    max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
+                                for i, (x, y, w, h) in enumerate(grid_blocks):
+                                    grid_start = self._video_to_screen_coords(x, y)
+                                    grid_end = self._video_to_screen_coords(x + w, y + h)
+                                    if grid_start and grid_end:
+                                        # Compute (r, c) for this block
+                                        r = i // max_blocks_w
+                                        c = i % max_blocks_w
+                                        color = (0, 0, 0, 0.3)  # Faded grey
+                                        if (r, c) in self.app.tracker.oscillation_active_block_positions:
+                                            color = (0, 255, 0, 255)  # Green for active
+                                        draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
 
                         # Visualization of active User Fixed ROI (even when not setting)
                         if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
