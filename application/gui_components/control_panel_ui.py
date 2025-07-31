@@ -982,6 +982,8 @@ class ControlPanelUI:
                 if self.app.processor.pause_event.is_set():
                     if imgui.button("Resume Tracking", width=button_width):
                         self.app.processor.start_processing()
+                        if not self.app.tracker.tracking_active:
+                            self.app.tracker.start_tracking()
                 else:
                     if imgui.button("Pause Tracking", width=button_width):
                         self.app.processor.pause_processing()
@@ -1353,8 +1355,9 @@ class ControlPanelUI:
         if has_roi:
             imgui.same_line()
             if imgui.button("Clear ROI##UserClearROI_RunTab", width=button_width):
-                if self.app.tracker and hasattr(self.app.tracker, 'clear_user_roi'):
-                    self.app.tracker.clear_user_roi()
+                if self.app.tracker and hasattr(self.app.tracker, 'clear_user_defined_roi_and_point'):
+                    self.app.tracker.stop_tracking()
+                    self.app.tracker.clear_user_defined_roi_and_point()
                     self.app.logger.info("User ROI cleared.", extra={'status_message': True})
 
         if set_roi_button_disabled:
