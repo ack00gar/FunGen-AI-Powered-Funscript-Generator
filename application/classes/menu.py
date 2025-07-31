@@ -160,27 +160,21 @@ class MainMenu:
                 can_open_recent = bool(recent_projects)
 
                 if imgui.begin_menu("Open Recent", enabled=can_open_recent):
+                    if not recent_projects:
+                        imgui.menu_item("(No recent projects)", enabled=False)
+                    else:
+                        for project_path in recent_projects:
+                            # Display a shorter, more readable version of the path
+                            try:
+                                # e.g., "my_video/my_video.fgn"
+                                display_name = f"{os.path.basename(os.path.dirname(project_path))}{os.sep}{os.path.basename(project_path)}"
+                            except Exception:
+                                display_name = project_path  # Fallback
 
-                    if imgui.menu_item("Clear Menu")[0]:
-                        # Setting to an empty list and auto-saving via the app_settings.set method
-                        self.app.app_settings.set("recent_projects", [])
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Clear the list of recent projects.")
-
-                    imgui.separator()
-
-                    for project_path in recent_projects:
-                        try:
-                            # e.g., "my_video/my_video.fgn"
-                            display_name = f"{os.path.basename(os.path.dirname(project_path))}{os.sep}{os.path.basename(project_path)}"
-                        except Exception:
-                            display_name = project_path  # Fallback
-
-                        if imgui.menu_item(display_name)[0]:
-                            self.app.project_manager.load_project(project_path)
-                        if imgui.is_item_hovered():
-                            imgui.set_tooltip(project_path)  # Show full path on hover
-
+                            if imgui.menu_item(display_name)[0]:
+                                self.app.project_manager.load_project(project_path)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip(project_path)  # Show full path on hover
                     imgui.end_menu()
 
                 imgui.separator()
