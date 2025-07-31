@@ -278,6 +278,9 @@ class ApplicationLogic:
         # --- State for chapter-specific ROI setting ---
         self.chapter_id_for_roi_setting: Optional[str] = None
 
+        # Oscillation Area Selection
+        self.is_setting_oscillation_area_mode: bool = False
+
         # --- Batch Processing ---
         self.batch_video_paths: List[str] = []
         self.show_batch_confirmation_dialog: bool = False
@@ -1036,6 +1039,50 @@ class ApplicationLogic:
                 self.logger.error("Tracker or Processor not available to set user ROI.", extra={'status_message': True})
 
         self.exit_set_user_roi_mode()
+        self.energy_saver.reset_activity_timer()
+
+    def enter_set_oscillation_area_mode(self):
+        if self.processor and self.processor.is_processing:
+            self.processor.pause_processing()  # Pause if playing/tracking
+            self.logger.info("Video paused to set oscillation area.")
+
+        self.is_setting_oscillation_area_mode = True
+        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):  # Reset drawing state in UI
+            self.gui_instance.video_display_ui.is_drawing_oscillation_area = False
+            self.gui_instance.video_display_ui.drawn_oscillation_area_video_coords = None
+            self.gui_instance.video_display_ui.waiting_for_oscillation_point_click = False
+
+        self.logger.info("Setting Oscillation Area: Draw rectangle on video, then click point inside.", extra={'status_message': True, 'duration': 5.0})
+        self.energy_saver.reset_activity_timer()
+
+    def exit_set_oscillation_area_mode(self):
+        self.is_setting_oscillation_area_mode = False
+        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):
+            self.gui_instance.video_display_ui.is_drawing_oscillation_area = False
+            self.gui_instance.video_display_ui.drawn_oscillation_area_video_coords = None
+            self.gui_instance.video_display_ui.waiting_for_oscillation_point_click = False
+            # Clear drawing position variables to prevent showing both rectangles
+            self.gui_instance.video_display_ui.oscillation_area_draw_start_screen_pos = (0, 0)
+            self.gui_instance.video_display_ui.oscillation_area_draw_current_screen_pos = (0, 0)
+
+    def oscillation_area_and_point_set(self, area_rect_video_coords: Tuple[int, int, int, int], point_video_coords: Tuple[int, int]):
+        if self.tracker and self.processor:
+            current_display_frame = None
+            # We need the raw frame buffer that corresponds to the video_coords.
+            # processor.current_frame is usually the one passed to tracker (e.g. 640x640 BGR)
+            with self.processor.frame_lock:
+                if self.processor.current_frame is not None:
+                    current_display_frame = self.processor.current_frame.copy()
+
+            if current_display_frame is not None:
+                self.tracker.set_oscillation_area_and_point(area_rect_video_coords, point_video_coords, current_display_frame)
+                self.logger.info("Oscillation area and point have been set in the tracker.", extra={'status_message': True})
+            else:
+                self.logger.error("Could not get current frame to set oscillation area patch. Area not set.", extra={'status_message': True})
+        else:
+            self.logger.error("Tracker or Processor not available to set oscillation area.", extra={'status_message': True})
+
+        self.exit_set_oscillation_area_mode()
         self.energy_saver.reset_activity_timer()
 
     def set_pending_action_after_tracking(self, action_type: str, **kwargs):
