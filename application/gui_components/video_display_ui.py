@@ -21,6 +21,13 @@ class VideoDisplayUI:
         self.drawn_user_roi_video_coords: tuple | None = None  # (x,y,w,h) in original video frame pixel space (e.g. 640x640)
         self.waiting_for_point_click: bool = False
 
+        # Oscillation Area Drawing state
+        self.is_drawing_oscillation_area: bool = False
+        self.oscillation_area_draw_start_screen_pos: tuple = (0, 0)  # In ImGui screen space
+        self.oscillation_area_draw_current_screen_pos: tuple = (0, 0)  # In ImGui screen space
+        self.drawn_oscillation_area_video_coords: tuple | None = None  # (x,y,w,h) in original video frame pixel space
+        self.waiting_for_oscillation_point_click: bool = False
+
     def _update_actual_video_image_rect(self, display_w, display_h, cursor_x_offset, cursor_y_offset):
         win_pos_x, win_pos_y = imgui.get_window_position()
         content_region_min_x, content_region_min_y = imgui.get_window_content_region_min()
@@ -456,6 +463,93 @@ class VideoDisplayUI:
                                 self.is_drawing_user_roi = False
                                 self.app.logger.info("ROI drawing cancelled (mouse released outside video).", extra={'status_message': True})
 
+                        # --- Oscillation Area Drawing/Selection Logic ---
+                        if self.app.is_setting_oscillation_area_mode:
+                            draw_list = imgui.get_window_draw_list()
+                            mouse_screen_x, mouse_screen_y = io.mouse_pos
+
+                            if is_hovering_actual_video_image:
+                                if not self.waiting_for_oscillation_point_click: # Area Drawing phase
+                                    if io.mouse_down[0] and not self.is_drawing_oscillation_area: # Left mouse button down
+                                        self.is_drawing_oscillation_area = True
+                                        self.oscillation_area_draw_start_screen_pos = (mouse_screen_x, mouse_screen_y)
+                                        self.oscillation_area_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
+                                        self.drawn_oscillation_area_video_coords = None
+                                        self.app.energy_saver.reset_activity_timer()
+
+                                    if self.is_drawing_oscillation_area:
+                                        self.oscillation_area_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
+                                        draw_list.add_rect(
+                                            min(self.oscillation_area_draw_start_screen_pos[0],
+                                                self.oscillation_area_draw_current_screen_pos[0]),
+                                            min(self.oscillation_area_draw_start_screen_pos[1],
+                                                self.oscillation_area_draw_current_screen_pos[1]),
+                                            max(self.oscillation_area_draw_start_screen_pos[0],
+                                                self.oscillation_area_draw_current_screen_pos[0]),
+                                            max(self.oscillation_area_draw_start_screen_pos[1],
+                                                self.oscillation_area_draw_current_screen_pos[1]),
+                                            imgui.get_color_u32_rgba(0, 255, 255, 255), thickness=2  # Cyan color
+                                        )
+
+                                    if not io.mouse_down[0] and self.is_drawing_oscillation_area: # Mouse released
+                                        self.is_drawing_oscillation_area = False
+                                        start_vid_coords = self._screen_to_video_coords(
+                                            *self.oscillation_area_draw_start_screen_pos)
+                                        end_vid_coords = self._screen_to_video_coords(
+                                            *self.oscillation_area_draw_current_screen_pos)
+
+                                        if start_vid_coords and end_vid_coords:
+                                            vx1, vy1 = start_vid_coords
+                                            vx2, vy2 = end_vid_coords
+                                            area_x, area_y = min(vx1, vx2), min(vy1, vy2)
+                                            area_w, area_h = abs(vx2 - vx1), abs(vy2 - vy1)
+
+                                            if area_w > 5 and area_h > 5: # Minimum area size
+                                                self.drawn_oscillation_area_video_coords = (area_x, area_y, area_w, area_h)
+                                                self.waiting_for_oscillation_point_click = True
+                                                self.app.logger.info("Oscillation area drawn. Setting tracking point to center.", extra={'status_message': True, 'duration': 5.0})
+                                            else:
+                                                self.app.logger.info("Drawn oscillation area is too small. Please redraw.", extra={'status_message': True})
+                                                self.drawn_oscillation_area_video_coords = None
+                                        else:
+                                            self.app.logger.warning(
+                                                "Could not convert oscillation area screen coordinates to video coordinates (likely drawn outside video area).")
+                                            self.drawn_oscillation_area_video_coords = None
+
+                                elif self.waiting_for_oscillation_point_click and self.drawn_oscillation_area_video_coords: # Point selection phase
+                                    # Use center point of the area as the tracking point
+                                    area_x, area_y, area_w, area_h = self.drawn_oscillation_area_video_coords
+                                    center_x = area_x + area_w // 2
+                                    center_y = area_y + area_h // 2
+                                    point_vid_coords = (center_x, center_y)
+                                    
+                                    # Set the oscillation area immediately without requiring point click
+                                    self.app.oscillation_area_and_point_set(self.drawn_oscillation_area_video_coords, point_vid_coords)
+                                    self.waiting_for_oscillation_point_click = False
+                                    self.drawn_oscillation_area_video_coords = None
+                                    # Clear drawing state to prevent showing both rectangles
+                                    self.is_drawing_oscillation_area = False
+                                    self.oscillation_area_draw_start_screen_pos = (0, 0)
+                                    self.oscillation_area_draw_current_screen_pos = (0, 0)
+                            elif self.is_drawing_oscillation_area and not io.mouse_down[0]: # Mouse released outside hovered area while drawing
+                                self.is_drawing_oscillation_area = False
+                                self.app.logger.info("Oscillation area drawing cancelled (mouse released outside video).", extra={'status_message': True})
+
+                        # Visualization of active Oscillation Area (even when not setting)
+                        if (self.app.tracker and 
+                            self.app.tracker.oscillation_area_fixed is not None and 
+                            not self.app.is_setting_oscillation_area_mode):
+                            draw_list = imgui.get_window_draw_list()
+                            ax_vid, ay_vid, aw_vid, ah_vid = self.app.tracker.oscillation_area_fixed
+
+                            area_start_screen = self._video_to_screen_coords(ax_vid, ay_vid)
+                            area_end_screen = self._video_to_screen_coords(ax_vid + aw_vid, ay_vid + ah_vid)
+
+                            if area_start_screen and area_end_screen:
+                                draw_list.add_rect(area_start_screen[0], area_start_screen[1], area_end_screen[0], area_end_screen[1], imgui.get_color_u32_rgba(0, 255, 255, 255), thickness=2)  # Cyan color
+                                # Add label
+                                draw_list.add_text(area_start_screen[0], area_start_screen[1] - 15, imgui.get_color_u32_rgba(0, 255, 255, 255), "Oscillation Area")
+
                         # Visualization of active User Fixed ROI (even when not setting)
                         if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
                                 self.app.tracker.user_roi_fixed and not self.app.is_setting_user_roi_mode:
@@ -582,7 +676,7 @@ class VideoDisplayUI:
         if not is_hovering_video: return
         # If in ROI selection mode, these interactions should be disabled or handled differently.
         # For now, let's disable them if is_setting_user_roi_mode is active to prevent conflict.
-        if self.app.is_setting_user_roi_mode:
+        if self.app.is_setting_user_roi_mode or self.app.is_setting_oscillation_area_mode:
             return
 
         io = imgui.get_io()
