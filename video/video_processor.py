@@ -564,7 +564,7 @@ class VideoProcessor:
             return "Unknown"
 
         is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
-        is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * height
+        is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
         upper_video_path = video_path.upper()
         vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
         has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
@@ -844,12 +844,10 @@ class VideoProcessor:
                 self.logger.debug("Auto-selected 'videotoolbox' for macOS.")
             # [REDUNDANCY REMOVED] - Combined Linux/Windows logic
             elif system in ['linux', 'windows']:
-                if 'nvdec' in available_on_app:
-                    hwaccel_args = ['-hwaccel', 'nvdec', '-hwaccel_output_format', 'cuda']
-                    self.logger.debug(f"Auto-selected 'nvdec' (NVIDIA) for {system.capitalize()}.")
-                elif 'cuda' in available_on_app:
-                    hwaccel_args = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
-                    self.logger.debug(f"Auto-selected 'cuda' (NVIDIA) for {system.capitalize()}.")
+                if 'nvdec' in available_on_app or 'cuda' in available_on_app:
+                    chosen_nvidia_accel = 'nvdec' if 'nvdec' in available_on_app else 'cuda'
+                    hwaccel_args = ['-hwaccel', chosen_nvidia_accel, '-hwaccel_output_format', 'cuda']
+                    self.logger.debug(f"Auto-selected '{chosen_nvidia_accel}' (NVIDIA) for {system.capitalize()}.")
                 elif 'qsv' in available_on_app:
                     hwaccel_args = ['-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv']
                     self.logger.debug(f"Auto-selected 'qsv' (Intel) for {system.capitalize()}.")
@@ -887,12 +885,15 @@ class VideoProcessor:
         Terminate a process safely.
         """
         if process is not None and process.poll() is None:
+            self.logger.debug(f"Terminating {process_name} process (PID: {process.pid}).")
             process.terminate()
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=2.0)
+                self.logger.info(f"{process_name} process terminated gracefully.")
             except subprocess.TimeoutExpired:
+                self.logger.warning(f"{process_name} process did not terminate in time. Killing.")
                 process.kill()
-            self.logger.info(f"{process_name} process terminated.")
+                self.logger.info(f"{process_name} process killed.")
 
     def _terminate_ffmpeg_processes(self):
         """Safely terminates all active FFmpeg processes using the helper."""
@@ -920,11 +921,14 @@ class VideoProcessor:
                 self.logger.error("Cannot construct 10-bit CUDA pipe 1: video height is unknown or invalid.")
                 return False
 
+            # This VF is a generic intermediate step to sanitize the stream.
             pipe1_vf = f"crop={int(video_height_for_crop)}:{int(video_height_for_crop)}:0:0,scale_cuda=1000:1000"
             cmd1 = common_ffmpeg_prefix[:]
             cmd1.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
             if start_time_seconds > 0.001: cmd1.extend(['-ss', str(start_time_seconds)])
             cmd1.extend(['-i', self._active_video_source_path, '-an', '-sn', '-vf', pipe1_vf])
+            if num_frames_to_output_ffmpeg and num_frames_to_output_ffmpeg > 0:
+                 cmd1.extend(['-frames:v', str(num_frames_to_output_ffmpeg)])
             cmd1.extend(['-c:v', 'hevc_nvenc', '-preset', 'fast', '-qp', '0', '-f', 'matroska', 'pipe:1'])
 
             cmd2 = common_ffmpeg_prefix[:]
@@ -1009,7 +1013,12 @@ class VideoProcessor:
         if end_frame is not None and end_frame >= 0:
             self.processing_end_frame_limit = min(end_frame, self.total_frames - 1)
 
-        if not self._start_ffmpeg_process(start_frame_abs_idx=self.processing_start_frame_limit):
+        num_frames_to_process = None
+        if self.processing_end_frame_limit != -1:
+            num_frames_to_process = self.processing_end_frame_limit - self.processing_start_frame_limit + 1
+
+
+        if not self._start_ffmpeg_process(start_frame_abs_idx=self.processing_start_frame_limit, num_frames_to_output_ffmpeg=num_frames_to_process):
             self.logger.error("Failed to start FFmpeg for processing start.")
             return
 
