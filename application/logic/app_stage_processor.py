@@ -371,8 +371,9 @@ class AppStageProcessor:
         full_msgpack_path = fm.get_output_path_for_file(fm.video_path, ".msgpack")
         preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
 
-        # Stage 1 can be skipped only if BOTH the msgpack and preprocessed video exist.
-        full_run_artifacts_exist = os.path.exists(full_msgpack_path) and os.path.exists(preprocessed_video_path)
+        # Stage 1 can be skipped only if BOTH the msgpack and preprocessed video exist and are valid
+        msgpack_valid = os.path.exists(full_msgpack_path) and self._validate_preprocessed_artifacts(full_msgpack_path, preprocessed_video_path)
+        full_run_artifacts_exist = msgpack_valid and os.path.exists(preprocessed_video_path)
 
         if self.frame_range_override:
             start_f_name, end_f_name = self.frame_range_override
@@ -425,6 +426,7 @@ class AppStageProcessor:
         fm = self.app.file_manager
         fs_proc = self.app.funscript_processor
         stage1_success = False
+        preprocessed_path_for_s3 = None  # Initialize to prevent UnboundLocalError
 
         # Always use the tracker mode from the UI state, which is the single source of truth.
         selected_mode = self.processing_mode_for_thread
@@ -462,6 +464,8 @@ class AppStageProcessor:
                 stage1_success = True
                 self.logger.info(f"[Thread] Stage 1 skipped, using existing artifacts.")
                 self.gui_event_queue.put(("stage1_completed", "00:00:00 (Cached)", "Cached"))
+                # Since we skipped, the preprocessed path is the one that already exists.
+                preprocessed_path_for_s3 = preprocessed_video_path if preprocessed_video_exists else None
             else:
                 stage1_results = self._execute_stage1_logic(
                     frame_range=frame_range_for_s1,
@@ -471,6 +475,8 @@ class AppStageProcessor:
                     is_autotune_run=is_autotune_context
                 )
                 stage1_success = stage1_results.get("success", False)
+                preprocessed_path_for_s3 = stage1_results.get("preprocessed_video_path")
+
                 if stage1_success:
                     max_fps_str = f"{stage1_results.get('max_fps', 0.0):.2f} FPS"
                     # Directly set the final FPS string to avoid the race condition.
@@ -570,7 +576,9 @@ class AppStageProcessor:
                     return
 
                 self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in s2_output_data.get("all_s2_frame_objects_list", [])}
-                preprocessed_path_for_s3 = self.app.file_manager.preprocessed_video_path
+
+                # Store SQLite database path for Stage 3
+                self.app.s2_sqlite_db_path = s2_output_data.get("sqlite_db_path")
 
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 
@@ -640,11 +648,15 @@ class AppStageProcessor:
             if self.stage_completion_event:
                 self.stage_completion_event.set()
 
-            # Clear the large data map from memory
+            # Clear the large data map and SQLite path from memory
             if hasattr(self.app, 's2_frame_objects_map_for_s3'):
                 self.logger.info("[Thread] Clearing Stage 2 data map from memory.")
                 self.app.s2_frame_objects_map_for_s3 = None
-                gc.collect() # Encourage garbage collection
+
+            if hasattr(self.app, 's2_sqlite_db_path'):
+                self.app.s2_sqlite_db_path = None
+
+            gc.collect() # Encourage garbage collection
 
             self.logger.info("[Thread] Full analysis thread finished or exited.")
             if hasattr(self.app, 'single_video_analysis_complete_event'):
@@ -737,14 +749,14 @@ class AppStageProcessor:
                 self.gui_event_queue.put(("stage1_status_update", final_msg, "Done"))
                 self.gui_event_queue.put(("stage1_progress_update", 1.0, {"message": "Done", "current": 1, "total": 1}))
                 self.app.project_manager.project_dirty = True
-                return {"success": True, "max_fps": max_fps}
+                return {"success": True, "max_fps": max_fps, "preprocessed_video_path": preprocessed_video_path if self.save_preprocessed_video else None}
             self.gui_event_queue.put(("stage1_status_update", "S1 Failed (no output file).", "Failed"))
-            return {"success": False, "max_fps": 0.0}
+            return {"success": False, "max_fps": 0.0, "preprocessed_video_path": None}
         except Exception as e:
             self.logger.error(f"Stage 1 execution error in AppLogic: {e}", exc_info=True,
                               extra={'status_message': True})
             self.gui_event_queue.put(("stage1_status_update", f"S1 Error - {str(e)}", "Error"))
-            return {"success": False, "max_fps": 0.0}
+            return {"success": False, "max_fps": 0.0, "preprocessed_video_path": None}
 
     def _execute_stage2_logic(self, s2_overlay_output_path: Optional[str], generate_funscript_actions: bool = True, is_ranged_data_source: bool = False) -> Dict[str, Any]:
         self.gui_event_queue.put(("stage2_status_update", "Running S2...", "Initializing S2..."))
@@ -800,7 +812,8 @@ class AppStageProcessor:
                 scripting_range_start_frame_arg=range_start_frame,
                 scripting_range_end_frame_arg=range_end_frame,
                 is_ranged_data_source=is_ranged_data_source,
-                generate_funscript_actions_arg=generate_funscript_actions
+                generate_funscript_actions_arg=generate_funscript_actions,
+                output_folder_path=os.path.dirname(fm.get_output_path_for_file(fm.video_path, "_dummy.tmp"))
             )
             if self.stop_stage_event.is_set():
                 msg = "S2 Aborted by user."
@@ -896,6 +909,9 @@ class AppStageProcessor:
 
         }
 
+        # Get SQLite database path from app instance
+        sqlite_db_path = getattr(self.app, 's2_sqlite_db_path', None)
+
         s3_results = stage3_module.perform_stage3_analysis(
             video_path=self.app.file_manager.video_path,
             preprocessed_video_path_arg=preprocessed_video_path,
@@ -905,7 +921,8 @@ class AppStageProcessor:
             common_app_config=common_app_config_s3,
             progress_callback=self.on_stage3_progress,  # Use the public attribute
             stop_event=self.stop_stage_event,
-            parent_logger=self.logger
+            parent_logger=self.logger,
+            sqlite_db_path=sqlite_db_path
         )
 
         if self.stop_stage_event.is_set(): return False
@@ -1265,6 +1282,50 @@ class AppStageProcessor:
             "stage2_status_text": self.stage2_status_text,
             "stage3_status_text": self.stage3_status_text,
         }
+
+    def _validate_preprocessed_artifacts(self, msgpack_path: str, video_path: str) -> bool:
+        """
+        Validates that preprocessed artifacts are complete and consistent.
+
+        Args:
+            msgpack_path: Path to the msgpack file
+            video_path: Path to the preprocessed video file
+
+        Returns:
+            True if artifacts are valid and consistent, False otherwise
+        """
+        try:
+            # Import validation functions from stage_1_cd
+            from detection.cd.stage_1_cd import _validate_preprocessed_file_completeness, _validate_preprocessed_video_completeness
+
+            if not self.app.processor or not self.app.processor.video_info:
+                self.logger.warning("Cannot validate preprocessed artifacts: video info not available")
+                return False
+
+            expected_frames = self.app.processor.video_info.get('total_frames', 0)
+            expected_fps = self.app.processor.video_info.get('fps', 30.0)
+
+            if expected_frames <= 0:
+                self.logger.warning("Cannot validate preprocessed artifacts: invalid frame count")
+                return False
+
+            # Validate msgpack file
+            if not _validate_preprocessed_file_completeness(msgpack_path, expected_frames, self.logger):
+                self.logger.warning(f"Preprocessed msgpack validation failed: {os.path.basename(msgpack_path)}")
+                return False
+
+            # Validate video file if it exists
+            if os.path.exists(video_path):
+                if not _validate_preprocessed_video_completeness(video_path, expected_frames, expected_fps, self.logger):
+                    self.logger.warning(f"Preprocessed video validation failed: {os.path.basename(video_path)}")
+                    return False
+
+            self.logger.info("Preprocessed artifacts validation passed")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error validating preprocessed artifacts: {e}")
+            return False
 
     def update_project_specific_settings(self, project_data: Dict):
         self.stage2_status_text = project_data.get("stage2_status_text", "Not run.")

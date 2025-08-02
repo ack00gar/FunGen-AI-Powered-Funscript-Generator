@@ -25,7 +25,8 @@ def stage3_worker_proc(
         preprocessed_video_path: Optional[str],
         tracker_config: Dict[str, Any],
         common_app_config: Dict[str, Any],
-        logger_config: Dict[str, Any]
+        logger_config: Dict[str, Any],
+        use_sqlite: bool = False
 ):
     """
     A worker process that pulls a chunk definition from the task queue,
@@ -69,10 +70,48 @@ def stage3_worker_proc(
     vp_app_proxy.available_ffmpeg_hwaccels = common_app_config.get("available_ffmpeg_hwaccels", [])
     vp_app_proxy.file_manager = MockFileManager(preprocessed_video_path)
 
-    # --- Use the preprocessed path if it exists for VideoProcessor initialization ---
-    video_path_to_use = preprocessed_video_path if preprocessed_video_path and os.path.exists(preprocessed_video_path) else video_path
-    video_type_for_vp = 'flat' if video_path_to_use == preprocessed_video_path else common_app_config.get('video_type', 'auto')
-    worker_logger.info(f"Worker {worker_id} will use video source: {os.path.basename(video_path_to_use)} with type '{video_type_for_vp}'")
+    # --- Use the preprocessed path if it exists and is valid for VideoProcessor initialization ---
+    video_path_to_use = video_path  # Default to original
+    video_type_for_vp = common_app_config.get('video_type', 'auto')
+
+    if preprocessed_video_path and os.path.exists(preprocessed_video_path):
+        # Validate preprocessed video before using it
+        try:
+            from detection.cd.stage_1_cd import _validate_preprocessed_video_completeness
+
+            # Get frame count from original video for validation
+            fps = common_app_config.get('video_fps', 30.0)
+
+            # Try to get accurate frame count from original video
+            try:
+                import subprocess
+                import json
+                cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                       '-show_entries', 'stream=nb_frames', '-of', 'json', video_path]
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    stream_info = data.get('streams', [{}])[0]
+                    nb_frames_str = stream_info.get('nb_frames')
+                    expected_frames = int(nb_frames_str) if nb_frames_str and nb_frames_str != 'N/A' else 10000
+                else:
+                    expected_frames = 10000  # Fallback
+            except Exception:
+                expected_frames = 10000  # Fallback if ffprobe fails
+
+            # Use a reasonable tolerance for Stage 3 (typically works with chunks)
+            tolerance = max(100, expected_frames // 100)  # 1% tolerance, minimum 100 frames
+
+            if _validate_preprocessed_video_completeness(preprocessed_video_path, expected_frames, fps, worker_logger, tolerance_frames=tolerance):
+                video_path_to_use = preprocessed_video_path
+                video_type_for_vp = 'flat'
+                worker_logger.info(f"Worker {worker_id} using validated preprocessed video: {os.path.basename(video_path_to_use)} ({expected_frames} frames)")
+            else:
+                worker_logger.warning(f"Worker {worker_id} preprocessed video validation failed, using original: {os.path.basename(video_path)}")
+        except Exception as e:
+            worker_logger.error(f"Worker {worker_id} error validating preprocessed video: {e}")
+    else:
+        worker_logger.info(f"Worker {worker_id} will use original video source: {os.path.basename(video_path_to_use)} with type '{video_type_for_vp}'")
 
 
     video_processor = VideoProcessor(app_instance=vp_app_proxy,
@@ -113,16 +152,41 @@ def stage3_worker_proc(
         worker_logger.error(f"Failed to initialize ROITracker: {e}", exc_info=True)
         return
 
+    # Initialize SQLite storage for worker if needed
+    worker_sqlite_storage = None
+
     while not stop_event.is_set():
         try:
             task = task_queue.get(timeout=0.5)
             if task is None:
                 break
 
-            # Unpack the smaller data map for this chunk
-            segment_obj, chunk_data_map, chunk_start, chunk_end, output_start, output_end = task
-            worker_logger.info(
-                f"Processing chunk F{chunk_start}-{chunk_end} for Chapter '{segment_obj.major_position}'")
+            # Handle both SQLite and memory-based tasks
+            if use_sqlite and len(task) == 6:
+                # SQLite-based task
+                segment_obj, chunk_start, chunk_end, output_start, output_end, sqlite_db_path = task
+
+                # Initialize SQLite storage for this worker if not already done
+                if worker_sqlite_storage is None:
+                    try:
+                        from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
+                        worker_sqlite_storage = Stage2SQLiteStorage(sqlite_db_path, worker_logger)
+                        worker_logger.info(f"Worker {worker_id} initialized SQLite storage")
+                    except Exception as e:
+                        worker_logger.error(f"Worker {worker_id} failed to initialize SQLite: {e}")
+                        continue
+
+                # Load chunk data from SQLite on-demand
+                chunk_data_map = worker_sqlite_storage.get_frame_objects_range(chunk_start, chunk_end)
+                worker_logger.info(
+                    f"Processing SQLite chunk F{chunk_start}-{chunk_end} ({len(chunk_data_map)} frames) for Chapter '{segment_obj.major_position}'"
+                )
+            else:
+                # Memory-based task (fallback)
+                segment_obj, chunk_data_map, chunk_start, chunk_end, output_start, output_end = task
+                worker_logger.info(
+                    f"Processing memory chunk F{chunk_start}-{chunk_end} for Chapter '{segment_obj.major_position}'"
+                )
 
             chunk_funscript = DualAxisFunscript(logger=worker_logger)
             roi_tracker_instance.start_tracking()
@@ -265,17 +329,53 @@ def perform_stage3_analysis(
         video_path: str,
         preprocessed_video_path_arg: Optional[str],
         atr_segments_list: List[ATRSegment],
-        s2_frame_objects_map: Dict[int, FrameObject],
-        tracker_config: Dict[str, Any],
-        common_app_config: Dict[str, Any],
-        progress_callback: callable,
-        stop_event: Event,
-        parent_logger: logging.Logger,
-        num_workers: int = 4
+        s2_frame_objects_map: Optional[Dict[int, FrameObject]] = None,
+        tracker_config: Dict[str, Any] = None,
+        common_app_config: Dict[str, Any] = None,
+        progress_callback: callable = None,
+        stop_event: Event = None,
+        parent_logger: logging.Logger = None,
+        num_workers: int = 4,
+        sqlite_db_path: Optional[str] = None
 ) -> Dict[str, Any]:
     logger = parent_logger.getChild("S3_Orchestrator")
     logger.info(f"--- Starting Stage 3 Analysis with {num_workers} Workers (Overlapping Chunk Model) ---")
     s3_start_time = time.time()
+
+    # Initialize SQLite storage if available
+    sqlite_storage = None
+    use_sqlite = False
+
+    logger.info(f"Stage 3 received SQLite path: {sqlite_db_path}")
+    logger.info(f"Frame objects map available: {s2_frame_objects_map is not None}")
+
+    if sqlite_db_path is not None:
+        logger.info(f"Checking if SQLite file exists: {sqlite_db_path}")
+        if os.path.exists(sqlite_db_path):
+            logger.info(f"SQLite file found, attempting to initialize storage")
+            try:
+                from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
+                sqlite_storage = Stage2SQLiteStorage(sqlite_db_path, logger)
+                logger.info(f"Using SQLite storage for Stage 3: {sqlite_db_path}")
+
+                # Get frame count and range for memory optimization
+                frame_count = sqlite_storage.get_frame_count()
+                frame_range = sqlite_storage.get_frame_range()
+                logger.info(f"SQLite database contains {frame_count} frames, range: {frame_range}")
+                use_sqlite = True
+
+            except Exception as e:
+                logger.warning(f"Failed to initialize SQLite storage, falling back to memory: {e}")
+                use_sqlite = False
+                sqlite_storage = None
+        else:
+            logger.warning(f"SQLite database file not found: {sqlite_db_path}")
+    else:
+        logger.info("No SQLite database path provided")
+
+    if not use_sqlite and not s2_frame_objects_map:
+        logger.error("No data source available: neither SQLite nor in-memory frame objects map")
+        return {"primary_actions": [], "secondary_actions": [], "video_segments": [s.to_dict() for s in atr_segments_list]}
 
     # Get chunking parameters from the configuration
     CHUNK_SIZE = common_app_config.get("s3_chunk_size", 1000)
@@ -307,30 +407,51 @@ def perform_stage3_analysis(
     # Prepare chunked data for workers before they start
     logger.info("Preparing optimized data chunks for Stage 3 workers...")
     all_tasks = []
-    for segment in relevant_segments:
-        step_size = CHUNK_SIZE - OVERLAP_SIZE
-        for i, start_frame in enumerate(range(segment.start_frame_id, segment.end_frame_id + 1, step_size)):
-            chunk_start = start_frame
-            chunk_end = min(chunk_start + CHUNK_SIZE - 1, segment.end_frame_id)
 
-            # Create the small, targeted data map for this chunk
-            chunk_data_map = {
-                frame_id: s2_frame_objects_map[frame_id]
-                for frame_id in range(chunk_start, chunk_end + 1)
-                if frame_id in s2_frame_objects_map
-            }
+    if use_sqlite:
+        # SQLite-based chunking - no need to preload data
+        for segment in relevant_segments:
+            step_size = CHUNK_SIZE - OVERLAP_SIZE
+            for i, start_frame in enumerate(range(segment.start_frame_id, segment.end_frame_id + 1, step_size)):
+                chunk_start = start_frame
+                chunk_end = min(chunk_start + CHUNK_SIZE - 1, segment.end_frame_id)
 
-            output_start = chunk_start if i == 0 else chunk_start + OVERLAP_SIZE
-            output_end = chunk_end
-            if output_start > output_end: continue
+                output_start = chunk_start if i == 0 else chunk_start + OVERLAP_SIZE
+                output_end = chunk_end
+                if output_start > output_end: continue
 
-            # The new task payload includes the pre-filtered data
-            task = (segment, chunk_data_map, chunk_start, chunk_end, output_start, output_end)
-            all_tasks.append(task)
+                # Task includes frame range, SQLite will load data on-demand
+                task = (segment, chunk_start, chunk_end, output_start, output_end, sqlite_db_path)
+                all_tasks.append(task)
 
-    # The large map is no longer needed in this scope and can be garbage collected
-    del s2_frame_objects_map
-    logger.info(f"Prepared {len(all_tasks)} data chunks. Main S2 data map released from memory.")
+        logger.info(f"Prepared {len(all_tasks)} SQLite-based data chunks.")
+    else:
+        # Memory-based chunking (fallback)
+        for segment in relevant_segments:
+            step_size = CHUNK_SIZE - OVERLAP_SIZE
+            for i, start_frame in enumerate(range(segment.start_frame_id, segment.end_frame_id + 1, step_size)):
+                chunk_start = start_frame
+                chunk_end = min(chunk_start + CHUNK_SIZE - 1, segment.end_frame_id)
+
+                # Create the small, targeted data map for this chunk
+                chunk_data_map = {
+                    frame_id: s2_frame_objects_map[frame_id]
+                    for frame_id in range(chunk_start, chunk_end + 1)
+                    if frame_id in s2_frame_objects_map
+                }
+
+                output_start = chunk_start if i == 0 else chunk_start + OVERLAP_SIZE
+                output_end = chunk_end
+                if output_start > output_end: continue
+
+                # The new task payload includes the pre-filtered data
+                task = (segment, chunk_data_map, chunk_start, chunk_end, output_start, output_end)
+                all_tasks.append(task)
+
+        # The large map is no longer needed in this scope and can be garbage collected
+        if s2_frame_objects_map:
+            del s2_frame_objects_map
+        logger.info(f"Prepared {len(all_tasks)} memory-based data chunks. Main S2 data map released from memory.")
 
     for task in all_tasks:
         task_queue.put(task)
@@ -343,7 +464,7 @@ def perform_stage3_analysis(
         p = Process(target=stage3_worker_proc,
                     args=(i, task_queue, result_queue, stop_event, total_frames_processed_counter, video_path,
                           preprocessed_video_path_arg, tracker_config, common_app_config,
-                          logger_config))
+                          logger_config, use_sqlite))
         processes.append(p)
         p.start()
 
@@ -427,6 +548,22 @@ def perform_stage3_analysis(
 
     logger.info(
         f"Stage 3 complete. Aggregated {len(all_primary_actions)} primary actions from {processed_task_count} chunks.")
+
+    # Clean up SQLite database file if we used it
+    if use_sqlite and sqlite_storage and sqlite_db_path:
+        try:
+            sqlite_storage.close()
+            sqlite_storage.cleanup_temp_files()
+
+            # Optionally keep the database file for debugging
+            cleanup_db_file = common_app_config.get("cleanup_stage2_db", True)
+            if cleanup_db_file and os.path.exists(sqlite_db_path):
+                os.remove(sqlite_db_path)
+                logger.info(f"Cleaned up SQLite database file: {sqlite_db_path}")
+            elif os.path.exists(sqlite_db_path):
+                logger.info(f"Preserved SQLite database file for debugging: {sqlite_db_path}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up SQLite database: {e}")
 
     return {
         "primary_actions": all_primary_actions,

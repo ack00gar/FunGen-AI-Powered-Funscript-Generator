@@ -272,6 +272,7 @@ class ApplicationLogic:
 
         self.project_data_on_load: Optional[Dict] = None
         self.s2_frame_objects_map_for_s3: Optional[Dict[int, Any]] = None
+        self.s2_sqlite_db_path: Optional[str] = None
 
         # User Defined ROI
         self.is_setting_user_roi_mode: bool = False
