@@ -192,20 +192,20 @@ class AutoUpdater:
             return None
 
     def _get_local_commit_hash(self) -> str | None:
-        """Gets the commit hash of the local repository's target branch."""
+        """Gets the commit hash of the current HEAD commit."""
         try:
             if not os.path.isdir('.git'):
                 self.logger.warning("Not a git repository. Skipping update check.")
                 return None
             result = subprocess.run(
-                ['git', 'rev-parse', self.BRANCH],
+                ['git', 'rev-parse', 'HEAD'],
                 capture_output=True, text=True, check=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
             return result.stdout.strip()
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            self.logger.error(f"Could not get local git hash for branch {self.BRANCH}: {e}")
-            self.status_message = f"Could not determine local update for branch {self.BRANCH}."
+            self.logger.error(f"Could not get local git hash for HEAD: {e}")
+            self.status_message = f"Could not determine current commit."
             return None
 
     def _get_remote_commit_hash(self) -> str | None:
@@ -313,17 +313,23 @@ class AutoUpdater:
             
             # Start the new process
             if sys.platform == 'win32':
-                # On Windows, use subprocess.Popen with CREATE_NEW_PROCESS_GROUP
+                # On Windows, use subprocess.Popen with DETACHED_PROCESS to completely detach from console
                 import subprocess
-                subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 1  # SW_SHOW = 1
+                subprocess.Popen(cmd, creationflags=subprocess.DETACHED_PROCESS, startupinfo=startupinfo)
             else:
                 # On Unix-like systems, use subprocess.Popen
                 import subprocess
                 subprocess.Popen(cmd)
             
-            # Exit the current process cleanly
+            # Give the new process a moment to start
+            time.sleep(0.1)
+            
+            # Exit the current process immediately to prevent terminal hanging
             self.logger.info("Restarting application...")
-            sys.exit(0)
+            os._exit(0)
             
         except Exception as e:
             self.logger.error(f"Failed to restart application: {e}")
@@ -438,7 +444,6 @@ class AutoUpdater:
                 imgui.same_line()
 
                 if imgui.button("Later", width=100):
-                    self.update_available = False
                     imgui.close_current_popup()
 
             imgui.end_popup()
