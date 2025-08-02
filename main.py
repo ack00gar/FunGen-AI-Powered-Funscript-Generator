@@ -21,7 +21,6 @@ def run_cli(args):
     core_app.run_cli(args)
     print("--- CLI Task Finished ---")
 
-
 if __name__ == "__main__":
     if platform.system() != "Windows":
         multiprocessing.set_start_method('spawn', force=True)
@@ -33,7 +32,6 @@ if __name__ == "__main__":
     parser.add_argument('--no-autotune', action='store_false', dest='autotune', help='Disable applying the default Ultimate Autotune settings after generation.')
     parser.add_argument('--no-copy', action='store_false', dest='copy', help='Do not save a copy of the final funscript next to the video file (will save to output folder only).')
     parser.add_argument('--recursive', '-r', action='store_true', help='If input_path is a folder, process it recursively.')
-
 
     args = parser.parse_args()
 

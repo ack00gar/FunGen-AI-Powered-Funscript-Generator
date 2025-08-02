@@ -160,8 +160,8 @@ class AppStateUI:
         self.force_timeline_pan_to_current_frame = False  # Flag to command timeline to pan to current video frame
         self.interactive_refinement_mode_enabled: bool = False
         
-        # GitHub Token Dialog
-        self.show_github_token_dialog = False
+        # Update Settings Dialog
+        self.show_update_settings_dialog = False
 
     def sync_tracker_ui_flags(self):
         """Ensure AppStateUI flags match the actual tracker state."""

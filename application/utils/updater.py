@@ -22,7 +22,7 @@ class AutoUpdater:
     - Background async operations to avoid UI blocking
     
     Version Picker Usage:
-    - Access via Tools menu -> "Choose Specific Commit..."
+    - Access via Updates menu -> "Select Update Commit"
     - Shows all available commits from the current branch
     - Highlights current version in green
     - Allows switching to any commit (upgrade or downgrade)
@@ -52,18 +52,15 @@ class AutoUpdater:
         self.update_changelog = []
         self.update_in_progress = False
         
+        # Commit dates for display (cached to avoid repeated API calls)
+        self.local_commit_date = None
+        self.remote_commit_date = None
+        
         # Version picker state
         self.available_versions = []
         self.selected_version = None
-        self.show_version_picker = False
         self.version_picker_loading = False
-        
-        # Changelog dialog state
-        self.show_changelog_dialog = False
-        self.changelog_window_open = False
-        self.changelog_data = []
-        self.changelog_title = ""
-        
+
         # Inline changelog state for each commit
         self.expanded_commits = set()  # Set of commit hashes that are expanded
         self.commit_changelogs = {}    # Cache for commit changelog data
@@ -72,20 +69,20 @@ class AutoUpdater:
         self.token_manager = GitHubTokenManager()
 
     def _get_local_commit_hash(self) -> str | None:
-        """Gets the commit hash of the local repository's HEAD."""
+        """Gets the commit hash of the local repository's target branch (v0.5.0)."""
         try:
             if not os.path.isdir('.git'):
                 self.logger.warning("Not a git repository. Skipping update check.")
                 return None
             result = subprocess.run(
-                ['git', 'rev-parse', 'HEAD'],
+                ['git', 'rev-parse', self.BRANCH],
                 capture_output=True, text=True, check=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
             return result.stdout.strip()
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            self.logger.error(f"Could not get local git hash: {e}")
-            self.status_message = "Could not determine local version (Git not found or not a repo)."
+            self.logger.error(f"Could not get local git hash for branch {self.BRANCH}: {e}")
+            self.status_message = f"Could not determine local version for branch {self.BRANCH}."
             return None
 
     def _get_remote_commit_hash(self) -> str | None:
@@ -124,6 +121,13 @@ class AutoUpdater:
                 headers['Authorization'] = f'token {github_token}'
             
             response = requests.get(compare_url, headers=headers, timeout=10)
+            
+            # Handle 404 errors (usually when comparing commits from different branches)
+            if response.status_code == 404:
+                self.logger.warning(f"Could not compare commits {local_hash[:7]} and {remote_hash[:7]} - they may be from different branches")
+                # Fallback: get recent commits from the target branch
+                return self._get_recent_commits_from_branch()
+            
             response.raise_for_status()
             data = response.json()
             commits = data.get('commits', [])
@@ -136,6 +140,77 @@ class AutoUpdater:
             self.logger.error(f"Failed to fetch commit diff: {e}")
             return ["Could not retrieve update details."]
 
+    def _get_recent_commits_from_branch(self) -> list[str]:
+        """Gets recent commits from the target branch as a fallback when direct comparison fails."""
+        try:
+            commits_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/commits?sha={self.BRANCH}&per_page=10"
+            
+            headers = {
+                'User-Agent': 'FunGen-Updater/1.0',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            github_token = self.token_manager.get_token()
+            if github_token:
+                headers['Authorization'] = f'token {github_token}'
+            
+            response = requests.get(commits_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            commits_data = response.json()
+            
+            changelog = [f"Recent commits from {self.BRANCH} branch:"]
+            for commit in commits_data[:5]:  # Show last 5 commits
+                message = commit.get('commit', {}).get('message', 'No commit message.')
+                # Get the first line of the commit message
+                first_line = message.split('\n')[0]
+                changelog.append(f"- {first_line}")
+            
+            return changelog
+        except requests.RequestException as e:
+            self.logger.error(f"Failed to fetch recent commits: {e}")
+            return ["Could not retrieve recent commit information."]
+
+    def _get_commit_date(self, commit_hash: str) -> str:
+        """Gets the commit date for a given commit hash."""
+        try:
+            commit_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/commits/{commit_hash}"
+            
+            headers = {
+                'User-Agent': 'FunGen-Updater/1.0',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+            
+            github_token = self.token_manager.get_token()
+            if github_token:
+                headers['Authorization'] = f'token {github_token}'
+            
+            response = requests.get(commit_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            commit_data = response.json()
+            
+            # Extract date from commit info
+            commit_info = commit_data.get('commit', {})
+            author_info = commit_info.get('author', {})
+            date_str = author_info.get('date', 'Unknown date')
+            
+            # Parse and format the date
+            try:
+                from datetime import datetime
+                # GitHub dates are in ISO format: 2024-01-15T10:30:00Z
+                date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                # Format as YYYY-MM-DD HH:MM
+                return date_obj.strftime('%Y-%m-%d %H:%M')
+            except ValueError:
+                # If date parsing fails, return the original string
+                return date_str
+            
+        except requests.RequestException as e:
+            self.logger.error(f"Failed to fetch commit date for {commit_hash[:7]}: {e}")
+            return 'Unknown date'
+        except Exception as e:
+            self.logger.error(f"Unexpected error getting commit date: {e}")
+            return 'Unknown date'
+
     def _check_worker(self):
         """Worker thread to check for updates and fetch changelog."""
         self.local_commit_hash = self._get_local_commit_hash()
@@ -143,6 +218,10 @@ class AutoUpdater:
             self.remote_commit_hash = self._get_remote_commit_hash()
 
         if self.local_commit_hash and self.remote_commit_hash:
+            # Cache commit dates to avoid repeated API calls in the UI
+            self.local_commit_date = self._get_commit_date(self.local_commit_hash)
+            self.remote_commit_date = self._get_commit_date(self.remote_commit_hash)
+            
             if self.local_commit_hash != self.remote_commit_hash:
                 self.logger.info("Update available.")
                 self.status_message = "A new update is available!"
@@ -199,18 +278,24 @@ class AutoUpdater:
             imgui.open_popup("Update Available")
             self.show_update_dialog = False
 
-        main_viewport = imgui.get_main_viewport()
-        popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                     main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-
-        # Set popup position and optional minimum width constraint
-        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+        # Set initial position for first time
+        if not hasattr(self, '_update_dialog_pos'):
+            main_viewport = imgui.get_main_viewport()
+            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
+                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
+            self._update_dialog_pos = (popup_pos[0] - 250, popup_pos[1] - 150)  # Center the window
 
         # Allow width to grow/shrink but keep a minimum width; let height be auto
         imgui.set_next_window_size_constraints((500, 0), (float("inf"), float("inf")))
+        imgui.set_next_window_position(*self._update_dialog_pos, condition=imgui.ONCE)
 
         # Begin popup modal (still with auto-resize flag for height)
         if imgui.begin_popup_modal("Update Available", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+            # Save window position for persistence
+            window_pos = imgui.get_window_position()
+            if window_pos[0] > 0 and window_pos[1] > 0:
+                self._update_dialog_pos = window_pos
+            
             if self.update_in_progress:
                 imgui.text(self.status_message)
                 spinner_chars = "|/-\\"
@@ -233,18 +318,16 @@ class AutoUpdater:
                         imgui.text_wrapped(self.clean_text(f"- {message}"))
                     imgui.end_child()
 
-                imgui.text_wrapped(f"Your Version: {self.local_commit_hash[:7] if self.local_commit_hash else 'N/A'}")
+                # Use cached commit dates to avoid repeated API calls
+                local_date = self.local_commit_date if self.local_commit_date else 'N/A'
+                remote_date = self.remote_commit_date if self.remote_commit_date else 'N/A'
+                
+                imgui.text_wrapped(f"Your Version: {self.local_commit_hash[:7] if self.local_commit_hash else 'N/A'} ({local_date})")
                 imgui.text_wrapped(
-                    f"Latest Version: {self.remote_commit_hash[:7] if self.remote_commit_hash else 'N/A'}")
+                    f"Latest Version: {self.remote_commit_hash[:7] if self.remote_commit_hash else 'N/A'} ({remote_date})")
                 imgui.separator()
                 if imgui.button("Update and Restart", width=200):
                     self.apply_update_and_restart()
-                imgui.same_line()
-                if imgui.button("Choose Version", width=150):
-                    self.show_version_picker = True
-                    self.load_available_versions_async()
-                    imgui.close_current_popup()
-
                 imgui.same_line()
 
                 if imgui.button("Later", width=100):
@@ -252,8 +335,6 @@ class AutoUpdater:
                     imgui.close_current_popup()
 
             imgui.end_popup()
-
-
 
     def _get_current_branch_name(self) -> str:
         """Gets the current branch name from git."""
@@ -273,16 +354,16 @@ class AutoUpdater:
             return self.BRANCH  # Fallback to default
 
     def _get_available_versions(self) -> List[Dict]:
-        """Fetches available commits from the current branch only."""
+        """Fetches available commits from the configured branch (v0.5.0)."""
         versions = []
 
         try:
-            # Get current branch name
-            current_branch = self._get_current_branch_name()
-            self.logger.info(f"Fetching versions from branch: {current_branch}")
+            # Use the configured branch instead of current branch
+            target_branch = self.BRANCH
+            self.logger.info(f"Fetching versions from branch: {target_branch}")
             
-            # Fetch commits from the current branch
-            commits_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/commits?sha={current_branch}"
+            # Fetch commits from the configured branch
+            commits_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/commits?sha={target_branch}"
             
             # Add headers for better rate limit handling
             headers = {
@@ -503,120 +584,4 @@ class AutoUpdater:
             self.status_message = "An unexpected error occurred. See logs."
             self.update_in_progress = False
 
-    def render_version_picker_dialog(self):
-        """Renders the ImGui popup for version selection with inline expandable changelogs."""
-        if self.show_version_picker:
-            imgui.open_popup("Select Commit")
-            self.show_version_picker = False
-
-        main_viewport = imgui.get_main_viewport()
-        popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                     main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-
-        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-        imgui.set_next_window_size_constraints((700, 500), (900, 700))
-
-        if imgui.begin_popup_modal("Select Commit", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_HORIZONTAL_SCROLLING_BAR)[0]:
-            if self.version_picker_loading:
-                imgui.text("Loading available commits...")
-                spinner_chars = "|/-\\"
-                spinner_index = int(time.time() * 4) % 4
-                imgui.text(f"Please wait... {spinner_chars[spinner_index]}")
-            elif self.update_in_progress:
-                imgui.text(self.status_message)
-                spinner_chars = "|/-\\"
-                spinner_index = int(time.time() * 4) % 4
-                imgui.text(f"Processing... {spinner_chars[spinner_index]}")
-            else:
-                current_branch = self._get_current_branch_name()
-                imgui.text(f"Select a commit from branch '{current_branch}' to switch to:")
-                imgui.separator()
-
-                # Version list with inline changelogs
-                child_width = imgui.get_content_region_available()[0]
-                child_height = 400
-                imgui.begin_child("VersionList", child_width, child_height, border=True, flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
-
-                current_hash = self._get_local_commit_hash()
-                
-                for version in self.available_versions:
-                    commit_hash = version['commit_hash']
-                    is_expanded = commit_hash in self.expanded_commits
-                    
-                    # Highlight current version
-                    is_current = current_hash and commit_hash.startswith(current_hash[:7])
-                    
-                    if is_current:
-                        imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 1.0, 0.0, 1.0)  # Green
-                    
-                    # Create expand/collapse button
-                    expand_icon = "▼" if is_expanded else "▶"
-                    button_text = f"{expand_icon} {commit_hash[:7]}"
-                    if imgui.button(button_text, width=80):
-                        if is_expanded:
-                            self.expanded_commits.discard(commit_hash)
-                        else:
-                            self.expanded_commits.add(commit_hash)
-                            # Load changelog if not cached
-                            if commit_hash not in self.commit_changelogs:
-                                try:
-                                    changelog = self._get_version_diff(commit_hash)
-                                    self.commit_changelogs[commit_hash] = changelog
-                                except Exception as e:
-                                    self.logger.error(f"Error loading changelog for {commit_hash[:7]}: {e}")
-                                    self.commit_changelogs[commit_hash] = [f"Error loading changelog: {str(e)}"]
-                    
-                    imgui.same_line()
-                    
-                    # Version display - show commit message and hash
-                    commit_msg = version['name']
-                    if len(commit_msg) > 60:
-                        commit_msg = commit_msg[:57] + "..."
-                    
-                    version_text = f"{commit_msg} - {commit_hash[:7]}"
-                    if imgui.selectable(version_text, self.selected_version == version)[0]:
-                        self.selected_version = version
-                    
-                    if is_current:
-                        imgui.pop_style_color()
-                        imgui.same_line()
-                        imgui.text("(Current)")
-                    
-                    # Show inline changelog if expanded
-                    if is_expanded:
-                        imgui.indent(30)
-                        imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)  # Gray text
-                        
-                        changelog = self.commit_changelogs.get(commit_hash, [])
-                        if not changelog:
-                            imgui.text_wrapped("Loading changelog...")
-                        else:
-                            for line in changelog:
-                                imgui.text_wrapped(self.clean_text(line))
-                        
-                        imgui.pop_style_color()
-                        imgui.unindent(30)
-                        imgui.separator()
-
-                imgui.end_child()
-                imgui.separator()
-
-                # Action buttons
-                imgui.separator()
-                
-                # Left side - Switch button (only enabled if a commit is selected)
-                if self.selected_version:
-                    if imgui.button("Switch to Commit", width=200):
-                        self.apply_version_change(self.selected_version['commit_hash'], self.selected_version['name'])
-                else:
-                    imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
-                    imgui.button("Switch to Commit", width=200)
-                    imgui.pop_style_var()
-                
-                imgui.same_line()
-                
-                # Right side - Close button
-                if imgui.button("Close", width=100):
-                    self.selected_version = None
-                    imgui.close_current_popup()
-            imgui.end_popup() 
+ 
