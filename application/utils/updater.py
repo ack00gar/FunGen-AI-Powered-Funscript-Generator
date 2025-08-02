@@ -562,3 +562,312 @@ class AutoUpdater:
             self.logger.error(f"An unexpected error occurred during version change: {e}")
             self.status_message = "An unexpected error occurred. See logs."
             self.update_in_progress = False
+
+    def render_update_settings_dialog(self):
+        """Renders the combined update commit & GitHub token dialog with tabs."""
+        if self.app.app_state_ui.show_update_settings_dialog:
+            imgui.open_popup("Updates & GitHub Token")
+            self.app.app_state_ui.show_update_settings_dialog = False
+            # Load versions when dialog opens
+            self.load_available_versions_async()
+
+        # Initialize buffers if needed
+        if not hasattr(self, '_github_token_buffer'):
+            self._github_token_buffer = self.token_manager.get_token()
+        if not hasattr(self, '_updates_active_tab'):
+            self._updates_active_tab = 0  # 0 = Version, 1 = Token
+
+        # Set initial size and make resizable
+        if not hasattr(self, '_update_settings_window_size'):
+            self._update_settings_window_size = (800, 600)
+        
+        # Set initial position for first time
+        if not hasattr(self, '_update_settings_window_pos'):
+            main_viewport = imgui.get_main_viewport()
+            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
+                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
+            self._update_settings_window_pos = (popup_pos[0] - 400, popup_pos[1] - 300)  # Center the window
+        
+        imgui.set_next_window_size(*self._update_settings_window_size, condition=imgui.ONCE)
+        imgui.set_next_window_size_constraints((600, 400), (1200, 800))
+        imgui.set_next_window_position(*self._update_settings_window_pos, condition=imgui.ONCE)
+
+        if imgui.begin_popup_modal("Updates & GitHub Token", True)[0]:
+            # Save window size and position for persistence
+            window_size = imgui.get_window_size()
+            window_pos = imgui.get_window_position()
+            if window_size[0] > 0 and window_size[1] > 0:
+                self._update_settings_window_size = window_size
+            if window_pos[0] > 0 and window_pos[1] > 0:
+                self._update_settings_window_pos = window_pos
+            
+            # Tab bar
+            if imgui.begin_tab_bar("Updates & GitHub Token Tabs"):
+                # Version Selection Tab
+                if imgui.begin_tab_item("Choose FunGen Version")[0]:
+                    self._updates_active_tab = 0
+                    imgui.end_tab_item()
+                
+                # GitHub Token Tab
+                if imgui.begin_tab_item("GitHub Token")[0]:
+                    self._updates_active_tab = 1
+                    imgui.end_tab_item()
+                
+                imgui.end_tab_bar()
+
+            # Tab content
+            if self._updates_active_tab == 0:
+                # Version Selection Tab
+                self._render_version_picker_content()
+            else:
+                # GitHub Token Tab
+                self._render_github_token_content()
+
+            imgui.separator()
+            
+            # Close button positioned at bottom right
+            close_button_width = 80
+            imgui.set_cursor_pos_x(imgui.get_window_width() - close_button_width - 10)  # Position from right edge
+            if imgui.button("Close", width=close_button_width):
+                imgui.close_current_popup()
+
+            imgui.end_popup()
+
+    def _render_version_picker_content(self):
+        """Renders the version picker content within the tabbed dialog."""
+        if self.version_picker_loading:
+            imgui.text("Loading available commits...")
+            spinner_chars = "|/-\\"
+            spinner_index = int(time.time() * 4) % 4
+            imgui.text(f"Please wait... {spinner_chars[spinner_index]}")
+        elif self.update_in_progress:
+            imgui.text(self.status_message)
+            spinner_chars = "|/-\\"
+            spinner_index = int(time.time() * 4) % 4
+            imgui.text(f"Processing... {spinner_chars[spinner_index]}")
+        else:
+            target_branch = self.BRANCH
+            imgui.text(f"Select a commit from branch '{target_branch}' to switch to:")
+            imgui.separator()
+
+            # Version list with inline changelogs
+            child_width = imgui.get_content_region_available()[0]
+            child_height = 400
+            imgui.begin_child("VersionList", child_width, child_height, border=True, flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
+
+            current_hash = self._get_local_commit_hash()
+            
+            for version in self.available_versions:
+                commit_hash = version['commit_hash']
+                is_expanded = commit_hash in self.expanded_commits
+                
+                # Highlight current version
+                is_current = current_hash and commit_hash.startswith(current_hash[:7])
+                
+                if is_current:
+                    from config.element_group_colors import AppGUIColors
+                    imgui.push_style_color(imgui.COLOR_TEXT, *AppGUIColors.VERSION_CURRENT_HIGHLIGHT)
+                
+                # Create expand/collapse button
+                expand_icon = "▼" if is_expanded else "▶"
+                button_text = f"{expand_icon} {commit_hash[:7]}"
+                if imgui.button(button_text, width=80):
+                    if is_expanded:
+                        self.expanded_commits.discard(commit_hash)
+                    else:
+                        self.expanded_commits.add(commit_hash)
+                        # Load changelog if not cached
+                        if commit_hash not in self.commit_changelogs:
+                            try:
+                                changelog = self._get_version_diff(commit_hash)
+                                self.commit_changelogs[commit_hash] = changelog
+                            except Exception as e:
+                                self.logger.error(f"Error loading changelog for {commit_hash[:7]}: {e}")
+                                self.commit_changelogs[commit_hash] = [f"Error loading changelog: {str(e)}"]
+                
+                imgui.same_line()
+
+                # Add commit date between hash and title
+                commit_date = version.get('date', 'Unknown date')
+                if commit_date != 'Unknown date':
+                    try:
+                        from datetime import datetime
+                        # Parse GitHub date format and format as date only
+                        date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+                        commit_date = date_obj.strftime('%Y-%m-%d')
+                    except:
+                        commit_date = 'Unknown date'
+
+                imgui.text(f"({commit_date})")
+                imgui.same_line()
+                
+                # Commit message
+                commit_msg = version['name']
+                if len(commit_msg) > 60:
+                    commit_msg = commit_msg[:57] + "..."
+                
+                # Calculate space for checkbox on the right
+                window_width = imgui.get_window_width()
+                checkbox_width = 20
+                text_width = window_width - 200 - checkbox_width  # Leave space for button and checkbox
+                
+                if imgui.selectable(commit_msg, self.selected_version == version, flags=imgui.SELECTABLE_SPAN_ALL_COLUMNS)[0]:
+                    self.selected_version = version
+                
+                # Add (Current) indicator after commit message
+                if is_current:
+                    imgui.same_line()
+                    imgui.text("(Current)")
+                    imgui.pop_style_color()
+                
+                # Add checkbox on the right (with proper positioning)
+                imgui.same_line()
+                # Position checkbox at the right edge with proper spacing
+                checkbox_x = imgui.get_window_width() - 110  # pixels from right edge
+                imgui.set_cursor_pos_x(checkbox_x)
+                
+                # Initialize ignored state if not present
+                if 'ignored' not in version:
+                    version['ignored'] = False
+                
+                # Make checkbox interactive
+                changed, version['ignored'] = imgui.checkbox("##checkbox_" + commit_hash[:7], version['ignored'])
+                imgui.same_line()
+                imgui.text(f"Ignore")
+
+                # Show inline changelog if expanded
+                if is_expanded:
+                    imgui.indent(30)
+                    from config.element_group_colors import AppGUIColors
+                    imgui.push_style_color(imgui.COLOR_TEXT, *AppGUIColors.VERSION_CHANGELOG_TEXT)
+                    
+                    changelog = self.commit_changelogs.get(commit_hash, [])
+                    if not changelog:
+                        imgui.text_wrapped("Loading changelog...")
+                    else:
+                        for line in changelog:
+                            imgui.text_wrapped(self.clean_text(line))
+                    
+                    imgui.pop_style_color()
+                    imgui.unindent(30)
+                    imgui.separator()
+
+            imgui.end_child()
+            imgui.separator()
+
+            # Action buttons and commit count controls
+            if self.selected_version:
+                if imgui.button("Switch to Commit", width=200):
+                    self.apply_version_change(self.selected_version['commit_hash'], self.selected_version['name'])
+            else:
+                imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
+                imgui.button("Switch to Commit", width=160)
+                imgui.pop_style_var()
+            
+            # Add commit count controls on the same line, aligned to the right
+            imgui.same_line()
+            imgui.set_cursor_pos_x(imgui.get_window_width() - 235)
+            
+            imgui.text("Fetch commits:")
+            imgui.same_line()
+            
+            # Initialize custom commit count if not set
+            if not hasattr(self, '_custom_commit_count'):
+                from config.constants import DEFAULT_COMMIT_FETCH_COUNT
+                self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
+            
+            # Input for custom commit count (narrow width)
+            imgui.push_item_width(30)  # Set a narrow width for the input
+            changed, self._custom_commit_count = imgui.input_text("##commit_count", self._custom_commit_count, 3, imgui.INPUT_TEXT_CHARS_DECIMAL)
+            imgui.pop_item_width()
+            imgui.same_line()
+            
+            if imgui.button("Apply", width=80):
+                try:
+                    count = int(self._custom_commit_count)
+                    if count > 0 and count <= 100:  # Reasonable limits
+                        self.load_available_versions_async(count)
+                    else:
+                        # Reset to default if invalid
+                        from config.constants import DEFAULT_COMMIT_FETCH_COUNT
+                        self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
+                except ValueError:
+                    # Reset to default if invalid
+                    from config.constants import DEFAULT_COMMIT_FETCH_COUNT
+                    self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
+
+    def _render_github_token_content(self):
+        """Renders the GitHub token content within the tabbed dialog."""
+        imgui.text("GitHub Personal Access Token")
+        imgui.text_wrapped("A GitHub token increases the API rate limit from 60 to 5000 requests per hour.")
+        imgui.separator()
+        
+        current_token = self.token_manager.get_token()
+        
+        # Show current token status
+        if current_token:
+            masked_token = self.token_manager.get_masked_token()
+            imgui.text(f"Current token: {masked_token}")
+            from config.element_group_colors import UpdateSettingsColors
+            imgui.text_colored("✓ Token is set", *UpdateSettingsColors.TOKEN_SET)
+        else:
+            from config.element_group_colors import UpdateSettingsColors
+            imgui.text_colored("No token set", *UpdateSettingsColors.TOKEN_NOT_SET)
+        
+        imgui.separator()
+        
+        # Token input field
+        imgui.text("Enter GitHub Personal Access Token:")
+        imgui.text_wrapped("Get a token from: GitHub → Settings → Developer settings → Personal access tokens")
+        imgui.text_wrapped("Required scope: public_repo (for public repositories)")
+        
+        changed, self._github_token_buffer = imgui.input_text("Token", self._github_token_buffer, 100, imgui.INPUT_TEXT_PASSWORD)
+        
+        imgui.separator()
+        
+        # Buttons
+        if imgui.button("Save Token", width=120):
+            self.token_manager.set_token(self._github_token_buffer)
+        
+        imgui.same_line()
+        
+        if imgui.button("Test Token", width=120):
+            # Test the current token in the buffer
+            test_token = self._github_token_buffer if self._github_token_buffer else self.token_manager.get_token()
+            validation_result = self.token_manager.validate_token(test_token)
+            
+            if validation_result['valid']:
+                imgui.open_popup("Token Validation")
+                self._token_validation_result = validation_result
+            else:
+                imgui.open_popup("Token Validation")
+                self._token_validation_result = validation_result
+        
+        imgui.same_line()
+        
+        if imgui.button("Remove Token", width=120):
+            self.token_manager.remove_token()
+            self._github_token_buffer = ""
+        
+        # Token validation result popup
+        if hasattr(self, '_token_validation_result'):
+            if imgui.begin_popup_modal("Token Validation", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+                result = self._token_validation_result
+                
+                if result['valid']:
+                    from config.element_group_colors import UpdateSettingsColors
+                    imgui.text_colored("Token is valid!", *UpdateSettingsColors.TOKEN_VALID)
+                    if result['user_info']:
+                        imgui.text(f"Username: {result['user_info'].get('login', 'Unknown')}")
+                else:
+                    from config.element_group_colors import UpdateSettingsColors
+                    imgui.text_colored("✗ Token validation failed", *UpdateSettingsColors.TOKEN_INVALID)
+                    imgui.text(result['message'])
+                
+                imgui.separator()
+                
+                if imgui.button("OK", width=100):
+                    imgui.close_current_popup()
+                    delattr(self, '_token_validation_result')
+                
+                imgui.end_popup()
