@@ -7,7 +7,8 @@ import imgui
 import time
 import unicodedata
 import re
-from typing import List, Dict, Optional
+import json
+from typing import List, Dict, Optional, Set
 from datetime import datetime
 from application.utils.github_token_manager import GitHubTokenManager
 from config.constants import DEFAULT_COMMIT_FETCH_COUNT
@@ -133,9 +134,45 @@ class AutoUpdater:
 
         self.expanded_commits = set()
         self.commit_changelogs = {}
+        self.skipped_commits = set()  # Set of commit hashes to skip
+        self.skip_updates_file = "skip_updates.json"
         
         self.token_manager = GitHubTokenManager()
         self.github_api = GitHubAPIClient(self.REPO_OWNER, self.REPO_NAME, self.token_manager)
+        
+        # Load saved skip settings
+        self._load_skip_updates()
+    
+    def _load_skip_updates(self):
+        """Load skipped commit hashes from file."""
+        try:
+            if os.path.exists(self.skip_updates_file):
+                with open(self.skip_updates_file, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self.skipped_commits = set(data)
+                    else:
+                        self.skipped_commits = set()
+            else:
+                self.skipped_commits = set()
+        except (json.JSONDecodeError, IOError, OSError) as e:
+            self.logger.warning(f"Failed to load skip settings: {e}")
+            self.skipped_commits = set()
+    
+    def _save_skip_updates(self):
+        """Save skipped commit hashes to file."""
+        try:
+            with open(self.skip_updates_file, 'w') as f:
+                json.dump(list(self.skipped_commits), f)
+        except (IOError, OSError) as e:
+            self.logger.error(f"Failed to save skip settings: {e}")
+    
+    def _update_skip_state(self, commit_hash: str, skipped: bool):
+        """Update the skip state for a commit hash."""
+        if skipped:
+            self.skipped_commits.add(commit_hash)
+        else:
+            self.skipped_commits.discard(commit_hash)
 
     def _get_local_commit_hash(self) -> str | None:
         """Gets the commit hash of the local repository's target branch."""
@@ -595,7 +632,10 @@ class AutoUpdater:
         imgui.set_next_window_size_constraints((600, 400), (1200, 800))
         imgui.set_next_window_position(*self._update_settings_window_pos, condition=imgui.ONCE)
 
-        if imgui.begin_popup_modal("Updates & GitHub Token", True)[0]:
+        # Track if popup is open
+        popup_open = imgui.begin_popup_modal("Updates & GitHub Token", True)[0]
+        
+        if popup_open:
             # Save window size and position for persistence
             window_size = imgui.get_window_size()
             window_pos = imgui.get_window_position()
@@ -635,6 +675,9 @@ class AutoUpdater:
                 imgui.close_current_popup()
 
             imgui.end_popup()
+            
+            # Save settings when popup closes (works for both X button and Close button)
+            self._save_skip_updates()
 
     def _render_update_picker_content(self):
         """Renders the update picker content within the tabbed dialog."""
@@ -688,13 +731,8 @@ class AutoUpdater:
                 imgui.text(f"({commit_date})")
                 imgui.same_line()
                 
-                # Initialize skipped update state if not present
-                if 'skipped_commit' not in update:
-                    update['skipped_commit'] = False
-                
-                # Ensure the state is properly initialized as boolean
-                if not isinstance(update['skipped_commit'], bool):
-                    update['skipped_commit'] = bool(update['skipped_commit'])
+                # Initialize skipped update state from persistent storage
+                is_skipped = commit_hash in self.skipped_commits
                 
                 # Position checkbox and label at the right edge first (before selectable)
                 imgui.same_line()
@@ -702,7 +740,14 @@ class AutoUpdater:
                 
                 # Make checkbox interactive with unique ID
                 checkbox_id = f"##skip_update_{commit_hash[:7]}"
-                changed, update['skipped_commit'] = imgui.checkbox(checkbox_id, update['skipped_commit'])
+                changed, is_skipped = imgui.checkbox(checkbox_id, is_skipped)
+                
+                # Update persistent skip state if changed
+                if changed:
+                    self._update_skip_state(commit_hash, is_skipped)
+                    # Save settings immediately when checkbox changes
+                    self._save_skip_updates()
+                
                 imgui.same_line()
                 imgui.text("Skip")
                 
