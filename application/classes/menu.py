@@ -510,14 +510,14 @@ class MainMenu:
                 imgui.separator()
 
                 # Combined Update Commit & GitHub Token dialog
-                if imgui.menu_item("Select Update Commit")[0]:
-                    self.app.app_state_ui.show_update_settings_dialog = True
-                if imgui.is_item_hovered():
-                    current_token = self.app.updater.token_manager.get_token()
-                    if current_token:
-                        imgui.set_tooltip(f"GitHub token and version selection.")
-                    else:
-                        imgui.set_tooltip("GitHub token and version selection.\nNo token set.")
+                # if imgui.menu_item("Select Update Commit")[0]:
+                #     self.app.app_state_ui.show_update_settings_dialog = True
+                # if imgui.is_item_hovered():
+                #     current_token = self.app.updater.token_manager.get_token()
+                #     if current_token:
+                #         imgui.set_tooltip(f"GitHub token and version selection.")
+                #     else:
+                #         imgui.set_tooltip("GitHub token and version selection.\nNo token set.")
 
                 # Manual trigger to apply a pending update
                 can_apply_update = self.app.updater.update_available and not self.app.updater.update_in_progress

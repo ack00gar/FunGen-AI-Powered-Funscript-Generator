@@ -73,11 +73,11 @@ class GitHubAPIClient:
         """Get detailed information for a specific commit."""
         return self._make_request(f"/commits/{commit_hash}")
     
-    def get_commits_list(self, branch: str, per_page: int = None) -> Optional[List[Dict]]:
+    def get_commits_list(self, branch: str, per_page: int = None, page: int = 1) -> Optional[List[Dict]]:
         """Get a list of commits for a branch."""
         if per_page is None:
             per_page = DEFAULT_COMMIT_FETCH_COUNT
-        return self._make_request(f"/commits?sha={branch}&per_page={per_page}")
+        return self._make_request(f"/commits?sha={branch}&per_page={per_page}&page={page}")
     
     def compare_commits(self, base_hash: str, head_hash: str) -> Optional[Dict]:
         """Compare two commits."""
@@ -174,6 +174,22 @@ class AutoUpdater:
         else:
             self.skipped_commits.discard(commit_hash)
 
+    def _get_current_branch(self) -> str | None:
+        """Gets the current branch name."""
+        try:
+            if not os.path.isdir('.git'):
+                self.logger.warning("Not a git repository.")
+                return None
+            result = subprocess.run(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                capture_output=True, text=True, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            self.logger.error(f"Could not get current branch: {e}")
+            return None
+
     def _get_local_commit_hash(self) -> str | None:
         """Gets the commit hash of the local repository's target branch."""
         try:
@@ -248,16 +264,23 @@ class AutoUpdater:
             self.remote_commit_date = self._get_commit_date(self.remote_commit_hash)
             
             if self.local_commit_hash != self.remote_commit_hash:
-                self.logger.info("Update available.")
-                self.status_message = "A new update is available!"
-                self.update_available = True
-                # Fetch the changelog
-                self.update_changelog = self._get_commit_diff(self.local_commit_hash, self.remote_commit_hash)
-                if self.update_changelog is None:
-                    # Failed to fetch changelog - show error popup
-                    self.show_update_error_dialog = True
-                elif not self.app.app_settings.get("updater_suppress_popup", False):
-                    self.show_update_dialog = True
+                # Check if the remote commit is in the skip list
+                if self.remote_commit_hash in self.skipped_commits:
+                    self.logger.info(f"Update {self.remote_commit_hash[:7]} is marked as skipped, ignoring.")
+                    self.status_message = "You are on the latest update (skipped updates ignored)."
+                    self.update_available = False
+                    self.update_changelog = []
+                else:
+                    self.logger.info("Update available.")
+                    self.status_message = "A new update is available!"
+                    self.update_available = True
+                    # Fetch the changelog
+                    self.update_changelog = self._get_commit_diff(self.local_commit_hash, self.remote_commit_hash)
+                    if self.update_changelog is None:
+                        # Failed to fetch changelog - show error popup
+                        self.show_update_error_dialog = True
+                    elif not self.app.app_settings.get("updater_suppress_popup", False):
+                        self.show_update_dialog = True
             else:
                 self.logger.info("Application is up to date.")
                 self.status_message = "You are on the latest update."
@@ -417,49 +440,80 @@ class AutoUpdater:
             imgui.end_popup()
 
     def _get_available_updates(self, custom_count: int = None) -> List[Dict]:
-        """Fetches available commits from the configured branch (v0.5.0)."""
+        """Fetches available merge commits from the configured branch (v0.5.0)."""
         updates = []
 
         try:
             # Use the configured branch instead of current branch
             target_branch = self.BRANCH
-            self.logger.info(f"Fetching updates from branch: {target_branch}")
+            self.logger.info(f"Fetching merge commits from branch: {target_branch}")
             
-            commits_data = self.github_api.get_commits_list(target_branch, per_page=custom_count)
+            target_merge_count = custom_count if custom_count else DEFAULT_COMMIT_FETCH_COUNT
+            page = 1
+            per_page = 30  # GitHub API default
             
-            if commits_data is None:
-                self.logger.error("Failed to fetch commits from GitHub API")
-                return [{'name': 'Failed to fetch commits. Check network connection or GitHub token.', 'commit_hash': 'error', 'type': 'error', 'date': '', 'full_message': ''}]
-            
-            for commit in commits_data:
-                try:
-                    sha = commit.get('sha')
-                    if not sha:
+            while len(updates) < target_merge_count:
+                # Fetch a page of commits
+                commits_data = self.github_api.get_commits_list(target_branch, per_page=per_page, page=page)
+                
+                if commits_data is None:
+                    self.logger.error("Failed to fetch commits from GitHub API")
+                    return [{'name': 'Failed to fetch commits. Check network connection or GitHub token.', 'commit_hash': 'error', 'type': 'error', 'date': '', 'full_message': ''}]
+                
+                # If no more commits available, break
+                if not commits_data:
+                    break
+                
+                for commit in commits_data:
+                    try:
+                        sha = commit.get('sha')
+                        if not sha:
+                            continue
+                        
+                        # Get commit details
+                        commit_info = commit.get('commit', {})
+                        author_info = commit_info.get('author', {})
+                        date = author_info.get('date')
+                        message = commit_info.get('message', 'No commit message')
+                        
+                        # Check if this is a merge commit (has multiple parents)
+                        parents = commit.get('parents', [])
+                        is_merge = len(parents) > 1
+                        
+                        # Only include merge commits
+                        if is_merge:
+                            # Get first line of commit message for display
+                            first_line = message.split('\n')[0] if message else 'No commit message'
+                            
+                            if sha and date:
+                                updates.append({
+                                    'name': first_line,
+                                    'commit_hash': sha,
+                                    'type': 'merge',
+                                    'date': date,
+                                    'full_message': message,
+                                    'is_merge': True
+                                })
+                                
+                                # Stop when we have enough merge commits
+                                if len(updates) >= target_merge_count:
+                                    break
+                    except (KeyError, TypeError) as e:
+                        self.logger.warning(f"Skipping malformed commit data: {e}")
                         continue
-                    
-                    # Get commit details
-                    commit_info = commit.get('commit', {})
-                    author_info = commit_info.get('author', {})
-                    date = author_info.get('date')
-                    message = commit_info.get('message', 'No commit message')
-                    
-                    # Get first line of commit message for display
-                    first_line = message.split('\n')[0] if message else 'No commit message'
-                    
-                    if sha and date:
-                        updates.append({
-                            'name': first_line,
-                            'commit_hash': sha,
-                            'type': 'commit',
-                            'date': date,
-                            'full_message': message
-                        })
-                except (KeyError, TypeError) as e:
-                    self.logger.warning(f"Skipping malformed commit data: {e}")
-                    continue
+                
+                # Move to next page
+                page += 1
+                
+                # Safety check to prevent infinite loops
+                if page > 50:  # Maximum 50 pages
+                    self.logger.warning(f"Reached maximum page limit. Found {len(updates)} merge commits, requested {target_merge_count}")
+                    break
             
             # Sort by date (newest first)
             updates.sort(key=lambda x: x.get('date', 'Unknown'), reverse=True)
+            
+            self.logger.info(f"Found {len(updates)} merge commits out of {target_merge_count} requested")
             
         except Exception as e:
             self.logger.error(f"Failed to fetch available updates: {e}")
@@ -476,19 +530,39 @@ class AutoUpdater:
                 return False
             
             # Fetch latest changes first
-            subprocess.run(
+            self.logger.info("Fetching latest changes from origin...")
+            fetch_result = subprocess.run(
                 ['git', 'fetch', 'origin'],
-                check=True, capture_output=True, text=True,
+                capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
+            if fetch_result.returncode != 0:
+                self.logger.error(f"Failed to fetch from origin: {fetch_result.stderr}")
+                return False
+            
+            # Check if the commit exists
+            self.logger.info(f"Verifying commit {commit_hash} exists...")
+            verify_result = subprocess.run(
+                ['git', 'rev-parse', '--verify', commit_hash],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            if verify_result.returncode != 0:
+                self.logger.error(f"Commit {commit_hash} does not exist: {verify_result.stderr}")
+                return False
             
             # Checkout the specific commit
-            subprocess.run(
+            self.logger.info(f"Checking out commit {commit_hash}...")
+            checkout_result = subprocess.run(
                 ['git', 'checkout', commit_hash],
-                check=True, capture_output=True, text=True,
+                capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
+            if checkout_result.returncode != 0:
+                self.logger.error(f"Failed to checkout commit {commit_hash}: {checkout_result.stderr}")
+                return False
             
+            self.logger.info(f"Successfully checked out commit {commit_hash}")
             return True
             
         except subprocess.CalledProcessError as e:
@@ -496,6 +570,9 @@ class AutoUpdater:
             return False
         except FileNotFoundError:
             self.logger.error("Git not found. Please ensure Git is installed and in PATH.")
+            return False
+        except Exception as e:
+            self.logger.error(f"Unexpected error during checkout: {e}")
             return False
 
     def clean_text(self, s: str) -> str:
@@ -578,7 +655,7 @@ class AutoUpdater:
         """Worker thread to load available updates."""
         self.logger.info("Loading updates in worker thread")
         self.available_updates = self._get_available_updates(custom_count)
-        self.logger.info(f"Loaded {len(self.available_updates)} updates")
+        self.logger.info(f"Loaded {len(self.available_updates)} merge commits")
         self.update_picker_loading = False
 
     def apply_update_change(self, commit_hash: str, commit_message: str):
@@ -586,6 +663,17 @@ class AutoUpdater:
         self.update_in_progress = True
         self.status_message = f"Switching to commit: {commit_message[:50]}..."
         self.logger.info(f"Attempting to checkout commit {commit_hash}")
+
+        # Check if we're in test mode (not on main branch)
+        current_branch = self._get_current_branch()
+        is_test_mode = current_branch != self.BRANCH
+        
+        if is_test_mode:
+            self.logger.info(f"Running in test mode (current branch: {current_branch}, target branch: {self.BRANCH})")
+            self.status_message = f"TEST MODE: Would switch to commit {commit_hash[:7]} ({commit_message[:30]}...)"
+            time.sleep(2)
+            self.update_in_progress = False
+            return
 
         try:
             success = self._checkout_update(commit_hash)
@@ -610,6 +698,9 @@ class AutoUpdater:
             self.app.app_state_ui.show_update_settings_dialog = False
             # Load updates when dialog opens
             self.load_available_updates_async()
+            # Initialize commit count to default if not set
+            if not hasattr(self, '_custom_commit_count'):
+                self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
 
         # Initialize buffers if needed
         if not hasattr(self, '_github_token_buffer'):
@@ -760,6 +851,7 @@ class AutoUpdater:
                 if len(commit_msg) > 60:
                     commit_msg = commit_msg[:57] + "..."
                 
+                # All commits shown are merge commits, so all are selectable
                 if imgui.selectable(commit_msg, self.selected_update == update)[0]:
                     self.selected_update = update
                 
@@ -801,7 +893,7 @@ class AutoUpdater:
             imgui.same_line()
             imgui.set_cursor_pos_x(imgui.get_window_width() - 280)
             
-            imgui.text("Fetch commits:")
+            imgui.text("Fetch merge commits:")
             imgui.same_line()
             
             # Initialize custom commit count if not set
