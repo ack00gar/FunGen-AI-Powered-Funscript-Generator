@@ -6,7 +6,7 @@ import shlex
 import numpy as np
 import cv2
 import platform
-from typing import Optional, Iterator, Tuple, List, Dict
+from typing import Optional, Iterator, Tuple, List, Dict, Any
 import logging
 import os
 
@@ -234,24 +234,28 @@ class VideoProcessor:
                 self.app.file_manager.preprocessed_video_path = preprocessed_path
 
         if preprocessed_path:
-            # If loading from a project, we can be more stringent about validation.
-            if from_project_load:
-                self.logger.info(f"Found potential preprocessed file: {os.path.basename(preprocessed_path)}. Verifying...")
-                preprocessed_info = self._get_video_info(preprocessed_path)
+            # Always validate the preprocessed file before using it
+            self.logger.info(f"Found potential preprocessed file: {os.path.basename(preprocessed_path)}. Verifying...")
 
-                original_frames = self.video_info.get("total_frames", 0)
-                preprocessed_frames = preprocessed_info.get("total_frames", -1) if preprocessed_info else -1
+            # Basic validation first
+            preprocessed_info = self._get_video_info(preprocessed_path)
+            original_frames = self.video_info.get("total_frames", 0)
+            original_fps = self.video_info.get("fps", 30.0)
+            preprocessed_frames = preprocessed_info.get("total_frames", -1) if preprocessed_info else -1
 
-                if preprocessed_frames >= original_frames > 0:
-                    self._active_video_source_path = preprocessed_path
-                else:
-                    self.logger.warning(
-                        f"Preprocessed file is incomplete or invalid ({preprocessed_frames}/{original_frames} frames). "
-                        f"Falling back to original video. Re-run Stage 1 with 'Save Preprocessed Video' enabled to fix."
-                    )
-            else:
-                # If not loading from a project (e.g., just opened a video where a preprocessed file exists), assume it's valid.
+            # Use comprehensive validation
+            is_valid_preprocessed = self._validate_preprocessed_video(preprocessed_path, original_frames, original_fps)
+
+            if is_valid_preprocessed and preprocessed_frames >= original_frames > 0:
                 self._active_video_source_path = preprocessed_path
+                self.logger.info(f"Preprocessed video validation passed. Using as active source.")
+            else:
+                self.logger.warning(
+                    f"Preprocessed file is incomplete or invalid ({preprocessed_frames}/{original_frames} frames). "
+                    f"Falling back to original video. Re-run Stage 1 with 'Save Preprocessed Video' enabled to fix."
+                )
+                # Clean up the invalid preprocessed file
+                self._cleanup_invalid_preprocessed_file(preprocessed_path)
 
         if self._active_video_source_path == preprocessed_path:
             self.logger.info(f"VideoProcessor will use preprocessed video as its active source.")
@@ -274,8 +278,10 @@ class VideoProcessor:
             reset_reason = "project_load_preserve_actions" if from_project_load else None
             self.tracker.reset(reason=reset_reason)
 
+        active_source_name = os.path.basename(self._active_video_source_path)
+        source_type = "preprocessed" if self._active_video_source_path != video_path else "original"
         self.logger.info(
-            f"Opened: {os.path.basename(video_path)} ({self.determined_video_type}, "
+            f"Opened: {active_source_name} ({source_type}, {self.determined_video_type}, "
             f"format: {self.vr_input_format if self.determined_video_type == 'VR' else 'N/A'}), "
             f"{self.total_frames}fr, {self.fps:.2f}fps, {self.video_info.get('bit_depth', 'N/A')}bit)")
         return True
@@ -360,9 +366,10 @@ class VideoProcessor:
         self.stop_processing()
         self._clear_cache()
 
+        # [REDUNDANCY REMOVED] - Call the new helper method
         self._update_video_parameters()
 
-        self.logger.info(f"Fetching frame {stored_frame_index} with new pitch settings.")
+        self.logger.info(f"Attempting to fetch frame {stored_frame_index} with new settings.")
         new_frame = self._get_specific_frame(stored_frame_index)
         if new_frame is not None:
             with self.frame_lock:
@@ -1384,3 +1391,94 @@ class VideoProcessor:
         if self.app and hasattr(self.app, 'on_processing_stopped'):
             self.app.on_processing_stopped(was_scripting_session=False, scripted_frame_range=None)
         self.logger.info("VideoProcessor reset complete.")
+
+    def _validate_preprocessed_video(self, video_path: str, expected_frames: int, expected_fps: float) -> bool:
+        """
+        Validates that a preprocessed video is complete and usable.
+
+        Args:
+            video_path: Path to the preprocessed video
+            expected_frames: Expected number of frames
+            expected_fps: Expected FPS
+
+        Returns:
+            True if video is valid, False otherwise
+        """
+        try:
+            # Import validation function from stage_1_cd
+            from detection.cd.stage_1_cd import _validate_preprocessed_video_completeness
+            return _validate_preprocessed_video_completeness(video_path, expected_frames, expected_fps, self.logger)
+        except Exception as e:
+            self.logger.error(f"Error validating preprocessed video: {e}")
+            return False
+
+    def _cleanup_invalid_preprocessed_file(self, file_path: str) -> None:
+        """
+        Safely removes an invalid preprocessed file and notifies the user.
+
+        Args:
+            file_path: Path to the invalid file
+        """
+        try:
+            from detection.cd.stage_1_cd import _cleanup_incomplete_file
+            _cleanup_incomplete_file(file_path, self.logger)
+
+            # Update app state to reflect that preprocessed file is no longer available
+            if self.app and hasattr(self.app, 'file_manager'):
+                if self.app.file_manager.preprocessed_video_path == file_path:
+                    self.app.file_manager.preprocessed_video_path = None
+
+            # Notify user about the cleanup
+            if hasattr(self.app, 'set_status_message'):
+                self.app.set_status_message(f"Removed invalid preprocessed file: {os.path.basename(file_path)}", level=logging.WARNING)
+
+        except Exception as e:
+            self.logger.error(f"Error cleaning up invalid preprocessed file: {e}")
+
+    def get_preprocessed_video_status(self) -> Dict[str, Any]:
+        """
+        Returns the status of the preprocessed video for the current video.
+
+        Returns:
+            Dictionary with status information about preprocessed video availability
+        """
+        status = {
+            "exists": False,
+            "valid": False,
+            "path": None,
+            "using_preprocessed": False,
+            "frame_count": 0,
+            "expected_frames": 0
+        }
+
+        if not self.video_path or not self.video_info:
+            return status
+
+        try:
+            if self.app and hasattr(self.app, 'file_manager'):
+                preprocessed_path = self.app.file_manager.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
+
+                if os.path.exists(preprocessed_path):
+                    status["exists"] = True
+                    status["path"] = preprocessed_path
+
+                    expected_frames = self.video_info.get("total_frames", 0)
+                    expected_fps = self.video_info.get("fps", 30.0)
+                    status["expected_frames"] = expected_frames
+
+                    # Validate the file
+                    if self._validate_preprocessed_video(preprocessed_path, expected_frames, expected_fps):
+                        status["valid"] = True
+
+                        # Get actual frame count
+                        preprocessed_info = self._get_video_info(preprocessed_path)
+                        if preprocessed_info:
+                            status["frame_count"] = preprocessed_info.get("total_frames", 0)
+
+                    # Check if we're currently using it
+                    status["using_preprocessed"] = (self._active_video_source_path == preprocessed_path)
+
+        except Exception as e:
+            self.logger.error(f"Error getting preprocessed video status: {e}")
+
+        return status

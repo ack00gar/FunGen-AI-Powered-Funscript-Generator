@@ -62,7 +62,7 @@ class ROITracker:
         self.oscillation_area_initial_point_relative: Optional[Tuple[float, float]] = None
         self.oscillation_area_tracked_point_relative: Optional[Tuple[float, float]] = None
         self.prev_gray_oscillation_area_patch: Optional[np.ndarray] = None
-        
+
         # --- Static grid storage for oscillation area ---
         self.oscillation_grid_blocks: List[Tuple[int, int, int, int]] = []  # List of (x, y, w, h) for each grid block
         # --- Always-available set of active grid blocks ---
@@ -97,6 +97,9 @@ class ROITracker:
         self.class_specific_amplification_multipliers = class_specific_amplification_multipliers if class_specific_amplification_multipliers is not None else constants.DEFAULT_CLASS_AMP_MULTIPLIERS
         self.logger.info(f"Base Amplification: {self.base_amplification_factor}x")
         self.logger.info(f"Class Specific Amp Multipliers: {self.class_specific_amplification_multipliers}")
+
+        # Track video source information for user feedback
+        self._last_video_source_status: Optional[Dict[str, Any]] = None
 
         # Ensure these are initialized regardless of self.app
         self.output_delay_frames: int = self.app.tracker.output_delay_frames if self.app and hasattr(self.app, 'tracker') else 0
@@ -180,7 +183,7 @@ class ROITracker:
         self.oscillation_last_known_pos: float = 50.0
         self.oscillation_ema_alpha: float = 0.3 # Smoothing factor for the final signal
         self.oscillation_history_max_len: int = 60
-        
+
         # --- Oscillation sensitivity control ---
         self.oscillation_sensitivity: float = self.app.app_settings.get("oscillation_detector_sensitivity", 1.0) if self.app else 1.0
 
@@ -551,7 +554,7 @@ class ROITracker:
             )
         else:
             self.oscillation_area_initial_point_relative = (float(point_x_frame - ax), float(point_y_frame - ay))
-        
+
         self.oscillation_area_tracked_point_relative = self.oscillation_area_initial_point_relative
         self.logger.info(f"Oscillation area set to: {self.oscillation_area_fixed}")
         self.logger.info(f"Oscillation initial/tracked point (relative to area): {self.oscillation_area_initial_point_relative}")
@@ -579,24 +582,24 @@ class ROITracker:
         """Calculates and stores the static grid layout for the oscillation area."""
         if not self.oscillation_area_fixed:
             return
-            
+
         ax, ay, aw, ah = self.oscillation_area_fixed
         ax_c, ay_c = max(0, ax), max(0, ay)
         aw_c = min(aw, 640 - ax_c)  # Assuming 640x640 frame
         ah_c = min(ah, 640 - ay_c)
-        
+
         if aw_c <= 0 or ah_c <= 0:
             return
-            
+
         # Calculate grid layout similar to the analysis
         effective_grid_size = min(self.oscillation_grid_size, min(ah_c, aw_c) // 8)
         adjusted_block_size = min(ah_c // effective_grid_size, aw_c // effective_grid_size)
         if adjusted_block_size < 8:
             adjusted_block_size = 8
-            
+
         max_blocks_h = ah_c // adjusted_block_size
         max_blocks_w = aw_c // adjusted_block_size
-        
+
         # Store the grid blocks
         self.oscillation_grid_blocks = []
         for r in range(max_blocks_h):
@@ -606,7 +609,7 @@ class ROITracker:
                 x2 = x1 + adjusted_block_size
                 y2 = y1 + adjusted_block_size
                 self.oscillation_grid_blocks.append((x1, y1, x2 - x1, y2 - y1))
-        
+
         self.logger.info(f"Calculated static grid layout: {len(self.oscillation_grid_blocks)} blocks")
 
     def clear_oscillation_area_and_point(self):
@@ -901,7 +904,8 @@ class ROITracker:
             base_primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
             secondary_pos = int(np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
 
-        primary_pos = base_primary_pos if self.motion_mode == "riding" else 100 - base_primary_pos
+        # Fix inversion logic: thrusting should be normal (base_primary_pos), riding should be inverted
+        primary_pos = base_primary_pos if self.motion_mode == "thrusting" else 100 - base_primary_pos
 
         # Visualization logic (only if self.app is present, for live mode)
         if self.app and self.roi and self.show_flow:
@@ -1261,10 +1265,13 @@ class ROITracker:
     def start_tracking(self):
         self.tracking_active = True
         self.start_time_tracking = time.time() * 1000
+
+        # Check and report video source status when tracking starts
+        self._check_and_report_video_source_status()
         if self.tracking_mode == "OSCILLATION_DETECTOR":
             # Update grid size from settings before starting
             self.update_oscillation_grid_size()
-            
+
             fps = self.app.processor.fps if self.app and self.app.processor and self.app.processor.fps > 0 else 30.0
 
             # --- Dynamically resize history buffer for live amplification when tracking starts ---
@@ -1375,6 +1382,79 @@ class ROITracker:
 
         self.logger.info(f"Tracker reset complete (reason: {reason}). Tracking is now inactive.")
 
+        # Clear video source status on reset
+        self._last_video_source_status = None
+
+    def _check_and_report_video_source_status(self) -> None:
+        """
+        Checks the current video source status and reports changes to the user.
+        This helps users understand when preprocessed videos are being used.
+        """
+        if not self.app or not hasattr(self.app, 'processor'):
+            return
+
+        try:
+            current_status = self.app.processor.get_preprocessed_video_status()
+
+            # Only report if status has changed
+            if current_status != self._last_video_source_status:
+                if current_status.get("using_preprocessed", False):
+                    if current_status.get("valid", False):
+                        self.logger.info(f"Live tracking using preprocessed video: {os.path.basename(current_status.get('path', 'unknown'))} "
+                                       f"({current_status.get('frame_count', 0)} frames)", extra={'status_message': True})
+                    else:
+                        self.logger.warning("Live tracking: preprocessed video detected but invalid, using original video",
+                                          extra={'status_message': True})
+                else:
+                    if current_status.get("exists", False):
+                        self.logger.info("Live tracking using original video (preprocessed video available but not used)",
+                                       extra={'status_message': True})
+                    else:
+                        self.logger.info("Live tracking using original video (no preprocessed video available)",
+                                       extra={'status_message': True})
+
+                self._last_video_source_status = current_status.copy()
+
+        except Exception as e:
+            self.logger.error(f"Error checking video source status: {e}")
+
+    def get_video_source_info(self) -> Dict[str, Any]:
+        """
+        Returns information about the current video source being used for tracking.
+
+        Returns:
+            Dictionary with video source information
+        """
+        info = {
+            "using_preprocessed": False,
+            "preprocessed_available": False,
+            "preprocessed_valid": False,
+            "source_description": "Unknown"
+        }
+
+        if self.app and hasattr(self.app, 'processor'):
+            try:
+                status = self.app.processor.get_preprocessed_video_status()
+                info["using_preprocessed"] = status.get("using_preprocessed", False)
+                info["preprocessed_available"] = status.get("exists", False)
+                info["preprocessed_valid"] = status.get("valid", False)
+
+                if info["using_preprocessed"]:
+                    info["source_description"] = f"Preprocessed video ({status.get('frame_count', 0)} frames)"
+                elif info["preprocessed_available"]:
+                    if info["preprocessed_valid"]:
+                        info["source_description"] = "Original video (preprocessed available but not used)"
+                    else:
+                        info["source_description"] = "Original video (preprocessed invalid)"
+                else:
+                    info["source_description"] = "Original video (no preprocessed available)"
+
+            except Exception as e:
+                self.logger.error(f"Error getting video source info: {e}")
+                info["source_description"] = "Error retrieving source info"
+
+        return info
+
     def process_frame_for_oscillation(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
         """
         [V3] Processes a frame to detect rhythmic oscillations. Culls black bars, uses a configurable
@@ -1409,7 +1489,7 @@ class ROITracker:
             ax_c, ay_c = max(0, ax), max(0, ay)
             aw_c = min(aw, current_gray.shape[1] - ax_c)
             ah_c = min(ah, current_gray.shape[0] - ay_c)
-            
+
             if aw_c > 0 and ah_c > 0:
                 # Use only the selected oscillation area
                 current_gray = current_gray[ay_c:ay_c + ah_c, ax_c:ax_c + aw_c]
@@ -1430,45 +1510,45 @@ class ROITracker:
 
         # Analyze flow in grid blocks
         block_motions = []
-        
+
         # When using oscillation area, we need to adjust the grid analysis for the cropped area
         if use_oscillation_area:
             # The flow is now calculated on the cropped area, so we need to adjust grid size for the smaller area
             cropped_h, cropped_w = current_gray.shape[:2]
-            
+
             # Use a smaller effective grid size for oscillation area to maintain reasonable block sizes and performance
             effective_grid_size = min(self.oscillation_grid_size, min(cropped_h, cropped_w) // 8)  # Ensure blocks are at least 8x8 pixels
             adjusted_block_size = min(cropped_h // effective_grid_size, cropped_w // effective_grid_size)
             if adjusted_block_size < 8:  # Minimum block size for performance
                 adjusted_block_size = 8
-            
+
             # Calculate how many blocks fit in the cropped area
             max_blocks_h = cropped_h // adjusted_block_size
             max_blocks_w = cropped_w // adjusted_block_size
-            
+
             # Store the adjusted block size for consistent visualization
             self.oscillation_adjusted_block_size = adjusted_block_size
             self.oscillation_max_blocks_h = max_blocks_h
             self.oscillation_max_blocks_w = max_blocks_w
-            
+
             self.logger.debug(f"Oscillation area grid: {max_blocks_h}x{max_blocks_w} blocks, block size: {adjusted_block_size}, effective grid size: {effective_grid_size}")
-            
+
             for r in range(max_blocks_h):
                 for c in range(max_blocks_w):
                     y_start = r * adjusted_block_size
                     x_start = c * adjusted_block_size
-                    
+
                     # Ensure we don't go out of bounds
                     y_end = min(y_start + adjusted_block_size, cropped_h)
                     x_end = min(x_start + adjusted_block_size, cropped_w)
-                    
+
                     block_flow = flow[y_start:y_end, x_start:x_end]
-                    
+
                     if block_flow.size > 0:
                         dx, dy = np.median(block_flow[..., 0]), np.median(block_flow[..., 1])
                         mag = np.sqrt(dx ** 2 + dy ** 2)
                         block_motions.append({'dx': dx, 'dy': dy, 'mag': mag, 'pos': (r, c)})
-                        
+
                         block_pos = (r, c)
                         if block_pos not in self.oscillation_history:
                             self.oscillation_history[block_pos] = deque(maxlen=self.oscillation_history_max_len)
@@ -1499,7 +1579,7 @@ class ROITracker:
                         if block_pos not in self.oscillation_history:
                             self.oscillation_history[block_pos] = deque(maxlen=self.oscillation_history_max_len)
                         self.oscillation_history[block_pos].append({'dy': dy, 'mag': mag})
-            
+
             self.logger.debug(f"Processed {len(block_motions)} blocks in oscillation area")
 
         is_camera_motion = False
@@ -1600,21 +1680,21 @@ class ROITracker:
         if use_oscillation_area and self.oscillation_grid_blocks:
             # Use static grid layout for oscillation area
             active_block_positions = {b['pos'] for b in active_blocks}
-            
+
             # Draw all grid blocks with motion detection colors
             for i, (x1, y1, w, h) in enumerate(self.oscillation_grid_blocks):
                 # Determine color based on motion detection
                 color = (100, 100, 100)  # Default gray
-                
+
                 # Check if this block corresponds to an active motion block
                 block_r = i // self.oscillation_max_blocks_w if hasattr(self, 'oscillation_max_blocks_w') else 0
                 block_c = i % self.oscillation_max_blocks_w if hasattr(self, 'oscillation_max_blocks_w') else 0
-                
+
                 if is_camera_motion:
                     color = (0, 165, 255)  # Orange for camera motion
                 elif (block_r, block_c) in active_block_positions:
                     color = (0, 255, 0)  # Green for active motion
-                
+
                 cv2.rectangle(processed_frame, (x1, y1), (x1 + w, y1 + h), color, 1)
         else:
             # Original full-frame visualization
@@ -1623,7 +1703,7 @@ class ROITracker:
                 r, c = motion['pos']
                 x1, y1 = c * self.oscillation_block_size, r * self.oscillation_block_size
                 x2, y2 = x1 + self.oscillation_block_size, y1 + self.oscillation_block_size
-                
+
                 color = (100, 100, 100)
                 if is_camera_motion:
                     color = (0, 165, 255)
