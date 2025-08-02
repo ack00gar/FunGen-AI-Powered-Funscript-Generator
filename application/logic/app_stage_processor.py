@@ -65,6 +65,11 @@ class AppStageProcessor:
         self.refinement_thread: Optional[threading.Thread] = None
 
         self.frame_range_override: Optional[Tuple[int, int]] = None
+        self.last_analysis_result: Optional[Dict] = None
+
+        self.on_stage1_progress = self._stage1_progress_callback
+        self.on_stage2_progress = self._stage2_progress_callback
+        self.on_stage3_progress = self._stage3_progress_callback
 
     def start_interactive_refinement_analysis(self, chapter, track_id):
         if self.full_analysis_active or self.refinement_analysis_active:
@@ -321,7 +326,8 @@ class AppStageProcessor:
         }
         self.gui_event_queue.put(("stage3_progress_update", progress_data, None))
 
-    def start_full_analysis(self, override_producers: Optional[int] = None,
+    def start_full_analysis(self, processing_mode: "TrackerMode",
+                            override_producers: Optional[int] = None,
                             override_consumers: Optional[int] = None,
                             completion_event: Optional[threading.Event] = None,
                             frame_range_override: Optional[Tuple[int, int]] = None,
@@ -347,6 +353,9 @@ class AppStageProcessor:
         self.stop_stage_event.clear()
         self.stage_completion_event = completion_event
         self.frame_range_override = frame_range_override
+
+        # Store the explicitly passed mode for the thread to use
+        self.processing_mode_for_thread = processing_mode
 
         # Store the flag for the thread to use it
         self.is_autotune_run_for_thread = is_autotune_run
@@ -418,7 +427,7 @@ class AppStageProcessor:
         stage1_success = False
 
         # Always use the tracker mode from the UI state, which is the single source of truth.
-        selected_mode = self.app.app_state_ui.selected_tracker_mode
+        selected_mode = self.processing_mode_for_thread
         self.logger.info(f"[Thread] Using processing mode: {selected_mode.name}")
 
         try:
@@ -531,6 +540,8 @@ class AppStageProcessor:
                         "was_ranged": is_s1_data_source_ranged,
                         "range_frames": frame_range_for_s1 or (range_start_frame, range_end_frame)
                     }
+                    self.last_analysis_result = packaged_data
+
                     self.gui_event_queue.put(("stage2_results_success", packaged_data, s2_overlay_path))
 
                 completion_payload = {
@@ -563,10 +574,18 @@ class AppStageProcessor:
 
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 
-                stage3_success = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
+                s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
+                stage3_success = s3_results_dict is not None
 
                 if stage3_success:
                     self.gui_event_queue.put(("stage3_completed", self.stage3_time_elapsed_str, self.stage3_processing_fps_str))
+
+                    packaged_data = {
+                        "results_dict": s3_results_dict,
+                        "was_ranged": effective_range_is_active,
+                        "range_frames": (effective_start_frame, effective_end_frame)
+                    }
+                    self.last_analysis_result = packaged_data
 
                 if self.stop_stage_event.is_set():
                     return
@@ -688,7 +707,7 @@ class AppStageProcessor:
                 yolo_model_path_arg=self.app.yolo_det_model_path,
                 yolo_pose_model_path_arg=self.app.yolo_pose_model_path,
                 confidence_threshold=self.app.tracker.confidence_threshold,
-                progress_callback=self._stage1_progress_callback,
+                progress_callback=self.on_stage1_progress, # Use the public attribute
                 stop_event_external=self.stop_stage_event,
                 num_producers_arg=num_producers,
                 num_consumers_arg=num_consumers,
@@ -763,7 +782,8 @@ class AppStageProcessor:
                 video_path_arg=fm.video_path,
                 msgpack_file_path_arg=fm.stage1_output_msgpack_path,
                 preprocessed_video_path_arg=preprocessed_video_path_for_s2,
-                progress_callback=self._stage2_progress_callback,
+                progress_callback=self.on_stage2_progress, # Use the public attribute
+
                 stop_event=self.stop_stage_event,
                 ml_model_dir_path_arg=self.app.pose_model_artifacts_dir,
                 output_overlay_msgpack_path=s2_overlay_output_path,
@@ -883,7 +903,7 @@ class AppStageProcessor:
             s2_frame_objects_map=self.app.s2_frame_objects_map_for_s3,
             tracker_config=tracker_config_s3,
             common_app_config=common_app_config_s3,
-            progress_callback=self._stage3_progress_callback,
+            progress_callback=self.on_stage3_progress,  # Use the public attribute
             stop_event=self.stop_stage_event,
             parent_logger=self.logger
         )
@@ -920,12 +940,12 @@ class AppStageProcessor:
                     fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
                 self.app.app_state_ui.heatmap_dirty = True
                 self.app.app_state_ui.funscript_preview_dirty = True
-            return True
+            return s3_results
         else:
             error_msg = s3_results.get("error", "Unknown S3 failure") if s3_results else "S3 returned None."
             self.logger.error(f"Stage 3 execution failed: {error_msg}")
             self.gui_event_queue.put(("stage3_status_update", f"S3 Failed: {error_msg}", "Failed"))
-            return False
+            return None
 
     def abort_stage_processing(self):
         if self.full_analysis_active and self.stage_thread and self.stage_thread.is_alive():
