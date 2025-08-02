@@ -961,6 +961,7 @@ class GUI:
             self.file_dialog.draw() if self.file_dialog.open else None,
             self._render_status_message(app_state),
             self.app.updater.render_update_dialog(),
+            self.app.updater.render_update_error_dialog(),
             self.app.updater.render_update_settings_dialog()
         ))
         self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
