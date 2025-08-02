@@ -12,6 +12,7 @@ from multiprocessing import Pool
 import multiprocessing
 import psutil
 import time
+import tempfile
 
 from video.video_processor import VideoProcessor
 from config import constants
@@ -397,11 +398,31 @@ class AppStateContainer:
     def __init__(self, video_info: Dict, yolo_input_size: int, vr_filter: bool, all_frames_raw_data: list,
                  logger: Optional[logging.Logger], discarded_classes_runtime_arg: Optional[List[str]] = None,
                  scripting_range_active: bool = False, scripting_range_start_frame: Optional[int] = None,
-                 scripting_range_end_frame: Optional[int] = None, is_ranged_data_source: bool = False):
+                 scripting_range_end_frame: Optional[int] = None, is_ranged_data_source: bool = False,
+                 use_sqlite: bool = True):
         self.video_info = video_info
         self.yolo_input_size = yolo_input_size
         self.vr_vertical_third_filter = vr_filter  # This is the general VR filter for non-penis boxes
         self.frames: List[FrameObject] = []
+        self.logger = logger
+        self.use_sqlite = use_sqlite
+        self.sqlite_storage = None
+        self.sqlite_db_path = None
+
+        # Initialize SQLite storage if enabled
+        if self.use_sqlite:
+            # Generate SQLite database path in output folder
+            self.sqlite_db_path = None
+            try:
+                from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
+                self.sqlite_storage = Stage2SQLiteStorage(None, logger)  # Will be set later
+                if logger:
+                    logger.info("SQLite storage module loaded successfully")
+            except ImportError as e:
+                if logger:
+                    logger.warning(f"SQLite storage not available, falling back to memory: {e}")
+                self.use_sqlite = False
+
         FrameObject._id_counter = 0
 
         self.effective_discard_classes = set(constants.CLASSES_TO_DISCARD_BY_DEFAULT)
@@ -427,6 +448,52 @@ class AppStateContainer:
         self.funscript_frames: List[int] = []
         self.funscript_distances: List[int] = []
         self.funscript_distances_lr: List[int] = []
+
+    def store_frames_to_sqlite(self, batch_size: int = 2000):
+        """Store frame objects to SQLite database in batches."""
+        if not self.use_sqlite or not self.sqlite_storage or not self.frames:
+            return
+
+        self.sqlite_storage.store_frame_objects_batch(self.frames, batch_size)
+        if self.logger:
+            self.logger.info(f"Stored {len(self.frames)} frame objects to SQLite")
+
+    def store_segments_to_sqlite(self):
+        """Store ATR segments to SQLite database."""
+        if not self.use_sqlite or not self.sqlite_storage or not self.atr_segments:
+            return
+
+        self.sqlite_storage.store_atr_segments(self.atr_segments)
+        if self.logger:
+            self.logger.info(f"Stored {len(self.atr_segments)} ATR segments to SQLite")
+
+    def clear_memory_frames(self):
+        """Clear frame objects from memory after storing to SQLite."""
+        if self.use_sqlite and self.sqlite_storage:
+            original_count = len(self.frames)
+            self.frames.clear()
+            if self.logger:
+                self.logger.info(f"Cleared {original_count} frame objects from memory")
+
+    def cleanup_sqlite(self, remove_db_file: bool = True):
+        """Clean up SQLite resources."""
+        if self.sqlite_storage:
+            self.sqlite_storage.close()
+            self.sqlite_storage.cleanup_temp_files()
+            if remove_db_file and self.sqlite_db_path and os.path.exists(self.sqlite_db_path):
+                try:
+                    os.remove(self.sqlite_db_path)
+                    if self.logger:
+                        self.logger.info(f"Removed SQLite database file: {self.sqlite_db_path}")
+                except OSError:
+                    pass
+
+    def __del__(self):
+        """Cleanup when object is destroyed - but preserve DB file for Stage 3."""
+        # Don't remove the database file during garbage collection
+        # Stage 3 will clean it up when it's done
+        if self.sqlite_storage:
+            self.sqlite_storage.close()
 
 
 # --- Kalman Smoother Helpers ---
@@ -2394,6 +2461,23 @@ def _recover_gap_worker(args: dict) -> Tuple[List[BoxRecord], int]:
             self.hardware_acceleration_method = 'none'
             self.available_ffmpeg_hwaccels = ['none']
 
+    # Create a logger for validation
+    worker_logger = logging.getLogger(f"S2_OF_Worker_{os.getpid()}")
+
+    # Validate preprocessed video before using it
+    try:
+        from detection.cd.stage_1_cd import _validate_preprocessed_video_completeness
+        # Use gap info to get frame count and estimated fps
+        expected_frames = gap_info["end_frame"] - gap_info["start_frame"] + 1
+        estimated_fps = args.get('fps', 30.0)  # Get fps from args or use default
+
+        if not _validate_preprocessed_video_completeness(preprocessed_video_path, expected_frames, estimated_fps, worker_logger):
+            worker_logger.warning(f"Preprocessed video validation failed in OF worker: {os.path.basename(preprocessed_video_path)}")
+            return [], 0
+    except Exception as e:
+        worker_logger.error(f"Error validating preprocessed video in OF worker: {e}")
+        return [], 0
+
     vp = VideoProcessor(app_instance=DummyAppForVP(), yolo_input_size=yolo_input_size)
     if not vp.open_video(preprocessed_video_path):
         return [], 0
@@ -2463,6 +2547,23 @@ def atr_pass_1c_recover_lost_tracks_with_of(
     if not preprocessed_video_path_arg or not os.path.exists(preprocessed_video_path_arg):
         message = "Skipped - Preprocessed file not found."
         logger.warning(f"Optical flow recovery: {message} Path: {preprocessed_video_path_arg}")
+        if progress_callback: progress_callback(main_step_info, {"message": message, "current": 1, "total": 1}, True)
+        return
+
+    # Validate preprocessed video before using it
+    try:
+        from detection.cd.stage_1_cd import _validate_preprocessed_video_completeness
+        expected_frames = len(state.frames) if state.frames else 0
+        fps = state.video_info.get('fps', 30.0)
+
+        if expected_frames > 0 and not _validate_preprocessed_video_completeness(preprocessed_video_path_arg, expected_frames, fps, logger):
+            message = "Skipped - Preprocessed video validation failed."
+            logger.warning(f"Optical flow recovery: {message} Path: {preprocessed_video_path_arg}")
+            if progress_callback: progress_callback(main_step_info, {"message": message, "current": 1, "total": 1}, True)
+            return
+    except Exception as e:
+        logger.error(f"Error validating preprocessed video in Stage 2: {e}")
+        message = "Skipped - Preprocessed video validation error."
         if progress_callback: progress_callback(main_step_info, {"message": message, "current": 1, "total": 1}, True)
         return
 
@@ -2538,7 +2639,8 @@ def atr_pass_1c_recover_lost_tracks_with_of(
     worker_args = [{
         'gap_info': gap,
         'preprocessed_video_path': preprocessed_video_path_arg,
-        'yolo_input_size': state.yolo_input_size
+        'yolo_input_size': state.yolo_input_size,
+        'fps': fps
     } for gap in gaps_to_recover]
 
     total_frames_to_recover = sum(g['end_frame'] - g['start_frame'] + 1 for g in gaps_to_recover)
@@ -2596,7 +2698,9 @@ def perform_contact_analysis(
         scripting_range_end_frame_arg: Optional[int] = None,
         generate_funscript_actions_arg: bool = True,
         is_ranged_data_source: bool = False,
-        num_workers_stage2_of_arg: int = constants.DEFAULT_S2_OF_WORKERS
+        num_workers_stage2_of_arg: int = constants.DEFAULT_S2_OF_WORKERS,
+        use_sqlite_storage: bool = True,
+        output_folder_path: Optional[str] = None
 ):
     global _of_debug_prints_stage2
     _of_debug_prints_stage2 = enable_of_debug_prints
@@ -2666,7 +2770,7 @@ def perform_contact_analysis(
         logger.info(f"Adjusted raw detections to {len(all_raw_detections)} frames (ATR S2).")
     if not all_raw_detections: return {"error": "No detection data after adjustment (ATR S2)."}
 
-    # 3. Initialize AppStateContainer
+    # 3. Initialize AppStateContainer with SQLite storage
     try:
         state = AppStateContainer(video_info_dict, yolo_input_size_arg, vr_vertical_third_filter_arg,
                                   all_raw_detections, logger,
@@ -2674,7 +2778,20 @@ def perform_contact_analysis(
                                   scripting_range_active=scripting_range_active_arg,
                                   scripting_range_start_frame=scripting_range_start_frame_arg,
                                   scripting_range_end_frame=scripting_range_end_frame_arg,
-                                  is_ranged_data_source=is_ranged_data_source)
+                                  is_ranged_data_source=is_ranged_data_source,
+                                  use_sqlite=use_sqlite_storage)
+
+        # Initialize SQLite database path in output folder if enabled
+        if state.use_sqlite and state.sqlite_storage and output_folder_path:
+            # Generate database filename based on video name
+            video_filename = os.path.splitext(os.path.basename(video_path_arg))[0]
+            db_filename = f"{video_filename}_stage2_data.db"
+            state.sqlite_db_path = os.path.join(output_folder_path, db_filename)
+
+            # Set the database path and initialize
+            state.sqlite_storage.set_db_path(state.sqlite_db_path)
+            logger.info(f"SQLite storage initialized in output folder: {state.sqlite_db_path}")
+
     except Exception as e:
         logger.error(f"Error creating AppStateContainer (ATR S2): {e}", exc_info=True)
         return {"error": f"AppStateContainer init failed (ATR S2): {e}"}
@@ -2728,6 +2845,32 @@ def perform_contact_analysis(
         if step_func_atr != atr_pass_1c_recover_lost_tracks_with_of:
 
             atr_progress_wrapper(main_step_tuple_for_callback, (1, 1, "Completed"), True)
+
+    # --- Prepare overlay data BEFORE clearing frames from memory ---
+    all_frames_overlay_data = []
+    if output_overlay_msgpack_path:
+        logger.info("Preparing overlay data before memory optimization...")
+        all_frames_overlay_data = [frame.to_overlay_dict() for frame in state.frames if not stop_event.is_set()]
+        if stop_event.is_set(): return {"error": "Processing stopped during overlay data prep (ATR S2)."}
+
+    # --- Store processed data to SQLite for Stage 3 memory optimization ---
+    if state.use_sqlite and state.sqlite_storage:
+        logger.info("Storing processed frame data to SQLite database...")
+        try:
+            # Store frame objects to database
+            state.store_frames_to_sqlite(batch_size=2000)
+
+            # Store ATR segments to database
+            state.store_segments_to_sqlite()
+
+            # Clear frames from memory to save RAM for Stage 3
+            state.clear_memory_frames()
+
+            logger.info("Successfully stored Stage 2 data to SQLite and cleared memory")
+        except Exception as e:
+            logger.error(f"Error storing data to SQLite: {e}", exc_info=True)
+            # Continue with in-memory processing as fallback
+            state.use_sqlite = False
 
     # --- Funscript Data Population from ATR results ---
     if state.funscript_frames:
@@ -2806,15 +2949,13 @@ def perform_contact_analysis(
         "primary_actions": primary_actions_final,
         "secondary_actions": secondary_actions_final,
         "atr_segments_objects": state.atr_segments,
-        "all_s2_frame_objects_list": state.frames
+        "all_s2_frame_objects_list": state.frames,
+        "sqlite_db_path": getattr(state, 'sqlite_db_path', None)  # Include SQLite path if available
     }
 
-    if output_overlay_msgpack_path:
-        logger.info(f"Preparing to save ATR Stage 2 overlay data to: {output_overlay_msgpack_path}")
+    if output_overlay_msgpack_path and all_frames_overlay_data:
+        logger.info(f"Saving ATR Stage 2 overlay data to: {output_overlay_msgpack_path}")
         try:
-            all_frames_overlay_data = [frame.to_overlay_dict() for frame in state.frames if not stop_event.is_set()]
-            if stop_event.is_set(): return {"error": "Processing stopped during overlay data prep (ATR S2)."}
-
             def numpy_default_handler(obj):
                 if isinstance(obj, np.integer):
                     return int(obj)
@@ -2834,4 +2975,3 @@ def perform_contact_analysis(
 
     logger.info(f"--- ATR-based Stage 2 Analysis Finished. Segments: {len(final_video_segments)} ---")
     return return_dict
-
