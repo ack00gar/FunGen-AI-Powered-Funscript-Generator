@@ -301,6 +301,11 @@ MODEL_DOWNLOAD_URLS = {
     "pose_pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.pt"
 }
 
+####################################################################################################
+# UPDATER & GITHUB
+####################################################################################################
+DEFAULT_COMMIT_FETCH_COUNT = 15
+
 
 STATUS_SYNTHESIZED_KALMAN = "Synthesized_Kalman"
 STATUS_GENERATED_PROPAGATED = "Generated_Propagated"

@@ -123,6 +123,14 @@ class AppGUIColors:
 
     TRANSPARENT = CurrentTheme.TRANSPARENT
     SEMI_TRANSPARENT = CurrentTheme.SEMI_TRANSPARENT
+    
+    # Extended app GUI colors
+    ENERGY_SAVER_INDICATOR = CurrentTheme.ENERGY_SAVER_INDICATOR
+    VERSION_CURRENT_HIGHLIGHT = CurrentTheme.VERSION_CURRENT_HIGHLIGHT
+    VERSION_CHANGELOG_TEXT = CurrentTheme.VERSION_CHANGELOG_TEXT
+    VIDEO_STATUS_FUNGEN = CurrentTheme.VIDEO_STATUS_FUNGEN
+    VIDEO_STATUS_OTHER = CurrentTheme.VIDEO_STATUS_OTHER
+    BACKGROUND_CLEAR = CurrentTheme.BACKGROUND_CLEAR
 
 
 class SegmentColors:
@@ -186,4 +194,15 @@ class GeneralColors:
     ORANGE_DARK = CurrentTheme.ORANGE_DARK
     PURPLE = CurrentTheme.PURPLE
     PINK = CurrentTheme.PINK
-    BROWN = CurrentTheme.BROWN 
+    BROWN = CurrentTheme.BROWN
+
+
+class UpdateSettingsColors:
+    """Color constants for update settings dialog components."""
+    TOKEN_VALID = CurrentTheme.UPDATE_TOKEN_VALID
+    TOKEN_INVALID = CurrentTheme.UPDATE_TOKEN_INVALID
+    TOKEN_WARNING = CurrentTheme.UPDATE_TOKEN_WARNING
+    TOKEN_SET = CurrentTheme.UPDATE_TOKEN_SET
+    TOKEN_NOT_SET = CurrentTheme.UPDATE_TOKEN_NOT_SET
+    DIALOG_TEXT = CurrentTheme.UPDATE_DIALOG_TEXT
+    DIALOG_GRAY_TEXT = CurrentTheme.UPDATE_DIALOG_GRAY_TEXT

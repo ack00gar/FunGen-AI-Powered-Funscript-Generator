@@ -112,6 +112,74 @@ You can use Start windows.bat to launch the gui on windows.
 
 -----
 
+## GitHub Token Setup (Optional)
+
+FunGen includes an update system that allows you to download and switch between different versions of the application. To use this feature, you'll need to set up a GitHub Personal Access Token.
+
+### Why a GitHub Token?
+
+GitHub's API has rate limits:
+- **Without a token**: 60 requests per hour
+- **With a token**: 5,000 requests per hour
+
+This allows FunGen to fetch commit information, changelogs, and version data without hitting rate limits.
+
+### How to Get a GitHub Token
+
+1. **Go to GitHub Settings**:
+   - Visit [GitHub Settings](https://github.com/settings)
+   - Sign in to your GitHub account
+
+2. **Navigate to Developer Settings**:
+   - Click your GitHub avatar (top right) → "Settings"
+   - Scroll down to the bottom left of the Settings page
+   - Click "Developer settings" in the left menu list
+
+3. **Create a Personal Access Token**:
+   - Click "Personal access tokens" → "Tokens (classic)"
+   - Click "Generate new token" → "Generate new token (classic)"
+
+4. **Confirm Access**
+   - If you created a 2FA you will be prompted to eter it
+   - If you have _not_ yet created a 2FA you will be prompted to do so
+
+5. **Configure the Token**:
+   - **Note**: Give it a descriptive name like "FunGen Updates"
+   - **Expiration**: Choose an appropriate expiration (30 days, 60 days, etc.)
+   - **Scopes**: Select only these scopes:
+     - `public_repo` (to read public repository information)
+     - `read:user` (to read your user information for validation)
+
+6. **Generate and Copy**:
+   - Click "Generate token"
+   - **Important**: Copy the token immediately - you won't be able to see it again!
+
+### Setting the Token in FunGen
+
+1. **Open FunGen** and go to the **Updates** menu
+2. **Click "Select Update Commit"**
+3. **Go to the "GitHub Token" tab**
+4. **Paste your token** in the text field
+5. **Click "Test Token"** to verify it works
+6. **Click "Save Token"** to store it
+
+### What the Token is Used For
+
+The GitHub token enables these features in FunGen:
+- **Version Selection**: Browse and download specific commits from the `v0.5.0` branch
+- **Changelog Display**: View detailed changes between versions
+- **Update Notifications**: Check for new versions and updates
+- **Rate Limit Management**: Avoid hitting GitHub's API rate limits
+
+### Security Notes
+
+- The token is stored locally in `github_token.ini`
+- Only `public_repo` and `read:user` permissions are required
+- The token is used only for reading public repository data
+- You can revoke the token anytime from your GitHub settings
+
+-----
+
 # Command Line Usage
 
 FunGen can be run in two modes: a graphical user interface (GUI) or a command-line interface (CLI) for automation and batch processing.
