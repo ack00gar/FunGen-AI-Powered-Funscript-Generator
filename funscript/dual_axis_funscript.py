@@ -90,7 +90,7 @@ class DualAxisFunscript:
                 # No timestamp change, so cache is still valid
         else:
             can_insert = True
-            if idx > 0:
+            if idx > 0 and len(actions_target_list) > 0:
                 prev_action = actions_target_list[idx - 1]
                 if timestamp_ms - prev_action["at"] < min_interval_ms:
                     can_insert = False
