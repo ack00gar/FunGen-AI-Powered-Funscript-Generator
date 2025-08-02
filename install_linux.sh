@@ -106,10 +106,8 @@ if ! "$CONDA_EXE" env list | grep -q "^$ENV_NAME\s"; then
         fi
         echo "Activating environment to install requirements..."
         source "$CONDA_ACTIVATE_SCRIPT" "$ENV_NAME"
-        if [ -f "requirements.txt" ]; then
-            echo "Installing dependencies from requirements.txt..."
-            pip install -r requirements.txt
-        fi
+        pip install uv
+        uv sync
         echo "Attempting to install FFmpeg via Conda..."
         conda install -c conda-forge ffmpeg -y
         conda deactivate
