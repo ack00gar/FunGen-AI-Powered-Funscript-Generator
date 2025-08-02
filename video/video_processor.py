@@ -360,10 +360,9 @@ class VideoProcessor:
         self.stop_processing()
         self._clear_cache()
 
-        # [REDUNDANCY REMOVED] - Call the new helper method
         self._update_video_parameters()
 
-        self.logger.info(f"Attempting to fetch frame {stored_frame_index} with new settings.")
+        self.logger.info(f"Fetching frame {stored_frame_index} with new pitch settings.")
         new_frame = self._get_specific_frame(stored_frame_index)
         if new_frame is not None:
             with self.frame_lock:

@@ -8,7 +8,7 @@ import time
 import threading
 import queue
 import os
-from typing import Optional, List, Dict
+from typing import List, Dict
 
 from application.classes.gauge import GaugeWindow
 from application.classes.file_dialog import ImGuiFileDialog
@@ -420,7 +420,7 @@ class GUI:
                             imgui.WINDOW_NO_NAV)
 
             imgui.begin("EnergySaverIndicator", closable=False, flags=window_flags)
-            imgui.text_colored(indicator_text, 0.4, 0.9, 0.4, 1.0)  # TODO: move to theme, green
+            imgui.text_colored(indicator_text, *AppGUIColors.ENERGY_SAVER_INDICATOR)
             imgui.end()
 
     # --- This function now submits a task to the worker thread ---
@@ -740,8 +740,8 @@ class GUI:
 
                         imgui.table_set_column_index(1)
                         status = video_data["funscript_status"]
-                        if status == 'fungen': imgui.text_colored(os.path.basename(video_data["path"]), 0.2, 0.9, 0.2, 1.0)
-                        elif status == 'other': imgui.text_colored(os.path.basename(video_data["path"]), 0.9, 0.9, 0.2, 1.0)
+                        if status == 'fungen': imgui.text_colored(os.path.basename(video_data["path"]), *AppGUIColors.VIDEO_STATUS_FUNGEN)
+                        elif status == 'other': imgui.text_colored(os.path.basename(video_data["path"]), *AppGUIColors.VIDEO_STATUS_OTHER)
                         else: imgui.text(os.path.basename(video_data["path"]))
 
                         if imgui.is_item_hovered():
@@ -960,7 +960,9 @@ class GUI:
             self._render_batch_confirmation_dialog(),
             self.file_dialog.draw() if self.file_dialog.open else None,
             self._render_status_message(app_state),
-            self.app.updater.render_update_dialog()
+            self.app.updater.render_update_dialog(),
+            self.app.updater.render_update_error_dialog(),
+            self.app.updater.render_update_settings_dialog()
         ))
         self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
 
@@ -1037,6 +1039,8 @@ class GUI:
         elif app_state.status_message:
             app_state.status_message = ""
 
+
+
     def run(self):
         if not self.init_glfw(): return
         target_normal_fps = self.app.energy_saver.main_loop_normal_fps_target
@@ -1053,7 +1057,7 @@ class GUI:
                 frame_start_time = time.time()
                 glfw.poll_events()
                 if self.impl: self.impl.process_inputs()
-                gl.glClearColor(0.06, 0.06, 0.06, 1) # TODO: move to theme, dark gray
+                gl.glClearColor(*AppGUIColors.BACKGROUND_CLEAR)
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
                 self.render_gui()
                 if self.app.app_settings.get("autosave_enabled", True) and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get("autosave_interval_seconds", 300):

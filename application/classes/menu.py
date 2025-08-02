@@ -29,11 +29,10 @@ class MainMenu:
             imgui.separator()
 
             # --- FIX: Assign the boolean return value to a single variable ---
-            if imgui.radio_button("Timeline 1 is the Reference", app_state.timeline_comparison_reference_num == 1):
-                app_state.timeline_comparison_reference_num = 1
-
-            if imgui.radio_button("Timeline 2 is the Reference", app_state.timeline_comparison_reference_num == 2):
-                app_state.timeline_comparison_reference_num = 2
+            for i in range(1, 3):
+                if imgui.radio_button(f"Timeline {i} is the Reference", app_state.timeline_comparison_reference_num == i):
+                    app_state.timeline_comparison_reference_num = i
+                    break
             # --- END FIX ---
 
             imgui.separator()
@@ -484,30 +483,41 @@ class MainMenu:
                         self.app.tensorrt_compiler_window._reset_state()
                         self.app.tensorrt_compiler_window.is_open = True
 
+                imgui.end_menu()
 
-                # --- Update Controls Sub-Menu ---
-                if imgui.begin_menu("Update Settings..."):
-                    # Toggle for checking on startup
-                    check_startup = self.app.app_settings.get("updater_check_on_startup", True)
-                    clicked, new_val_startup = imgui.menu_item("Check for Updates on Startup", selected=check_startup)
-                    if clicked:
-                        self.app.app_settings.set("updater_check_on_startup", new_val_startup)
+            # --- UPDATES MENU ---
+            if imgui.begin_menu("Updates", True):
+                # Toggle for checking on startup
+                check_startup = self.app.app_settings.get("updater_check_on_startup", True)
+                clicked, new_val_startup = imgui.menu_item("Check for Updates on Startup", selected=check_startup)
+                if clicked:
+                    self.app.app_settings.set("updater_check_on_startup", new_val_startup)
 
-                    # Toggle for periodic background checks
-                    check_periodic = self.app.app_settings.get("updater_check_periodically", True)
-                    clicked, new_val_periodic = imgui.menu_item("Check Periodically in Background (Hourly)", selected=check_periodic)
-                    if clicked:
-                        self.app.app_settings.set("updater_check_periodically", new_val_periodic)
+                # Toggle for periodic background checks
+                check_periodic = self.app.app_settings.get("updater_check_periodically", True)
+                clicked, new_val_periodic = imgui.menu_item("Check Periodically in Background (Hourly)", selected=check_periodic)
+                if clicked:
+                    self.app.app_settings.set("updater_check_periodically", new_val_periodic)
 
-                    # Toggle for suppressing the update popup
-                    suppress_popup = self.app.app_settings.get("updater_suppress_popup", False)
-                    clicked, new_val_suppress = imgui.menu_item("Suppress Update Notification Popup", selected=suppress_popup)
-                    if clicked:
-                        self.app.app_settings.set("updater_suppress_popup", new_val_suppress)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("If suppressed, only the menu bar indicator will be shown.")
+                # Toggle for suppressing the update popup
+                suppress_popup = self.app.app_settings.get("updater_suppress_popup", False)
+                clicked, new_val_suppress = imgui.menu_item("Suppress Update Notification Popup", selected=suppress_popup)
+                if clicked:
+                    self.app.app_settings.set("updater_suppress_popup", new_val_suppress)
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("If suppressed, only the menu bar indicator will be shown.")
 
-                    imgui.end_menu()
+                imgui.separator()
+
+                # Combined Update Commit & GitHub Token dialog
+                # if imgui.menu_item("Select Update Commit")[0]:
+                #     self.app.app_state_ui.show_update_settings_dialog = True
+                # if imgui.is_item_hovered():
+                #     current_token = self.app.updater.token_manager.get_token()
+                #     if current_token:
+                #         imgui.set_tooltip(f"GitHub token and version selection.")
+                #     else:
+                #         imgui.set_tooltip("GitHub token and version selection.\nNo token set.")
 
                 # Manual trigger to apply a pending update
                 can_apply_update = self.app.updater.update_available and not self.app.updater.update_in_progress
@@ -526,7 +536,7 @@ class MainMenu:
                 rect_min = imgui.get_item_rect_min()
                 rect_max = imgui.get_item_rect_max()
                 if imgui.is_mouse_hovering_rect(rect_min[0], rect_min[1], rect_max[0], rect_max[1]):
-                    imgui.set_tooltip("A new version is available! Find options in the Tools menu.")
+                    imgui.set_tooltip("A new version is available! Find options in the Updates menu.")
 
                 # Make the text clickable to re-open the dialog
                 if imgui.button("Update Available!"):
