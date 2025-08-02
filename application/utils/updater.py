@@ -688,15 +688,32 @@ class AutoUpdater:
                 imgui.text(f"({commit_date})")
                 imgui.same_line()
                 
+                # Initialize skipped update state if not present
+                if 'skipped_commit' not in update:
+                    update['skipped_commit'] = False
+                
+                # Ensure the state is properly initialized as boolean
+                if not isinstance(update['skipped_commit'], bool):
+                    update['skipped_commit'] = bool(update['skipped_commit'])
+                
+                # Position checkbox and label at the right edge first (before selectable)
+                imgui.same_line()
+                imgui.set_cursor_pos_x(imgui.get_window_width() - 90)
+                
+                # Make checkbox interactive with unique ID
+                checkbox_id = f"##skip_update_{commit_hash[:7]}"
+                changed, update['skipped_commit'] = imgui.checkbox(checkbox_id, update['skipped_commit'])
+                imgui.same_line()
+                imgui.text("Skip")
+                
+                # Now render the selectable commit message (after checkbox to avoid overlap)
+                imgui.same_line()
+                imgui.set_cursor_pos_x(190)  # Position after the expand button and date with more space
+                
                 # Commit message
                 commit_msg = update['name']
                 if len(commit_msg) > 60:
                     commit_msg = commit_msg[:57] + "..."
-                
-                # Calculate space for checkbox on the right
-                window_width = imgui.get_window_width()
-                checkbox_width = 20
-                text_width = window_width - 200 - checkbox_width  # Leave space for button and checkbox
                 
                 if imgui.selectable(commit_msg, self.selected_update == update)[0]:
                     self.selected_update = update
@@ -706,22 +723,6 @@ class AutoUpdater:
                     imgui.same_line()
                     imgui.text("(Current)")
                     imgui.pop_style_color()
-                
-                imgui.same_line()
-                # Initialize skipped update state if not present
-                if 'skipped_commit' not in update:
-                    update['skipped_commit'] = False
-                
-                # Position checkbox and label at the right edge with better spacing
-                window_width = imgui.get_window_width()
-                checkbox_x = window_width - 90  # Leave space for checkbox and "Skip Update" text
-                imgui.set_cursor_pos_x(checkbox_x)
-                
-                # Make checkbox interactive with unique ID
-                checkbox_id = f"##skip_update_{commit_hash[:7]}"
-                changed, update['skipped_commit'] = imgui.checkbox(checkbox_id, update['skipped_commit'] == True)
-                imgui.same_line()
-                imgui.text("Skip")
 
                 # Show inline changelog if expanded
                 if is_expanded:
@@ -775,16 +776,16 @@ class AutoUpdater:
                     self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
             
             # Input for custom commit count
-            imgui.push_item_width(50)
+            imgui.push_item_width(30)
             changed, self._custom_commit_count = imgui.input_text("##commit_count", self._custom_commit_count, 3, imgui.INPUT_TEXT_CHARS_DECIMAL)
             imgui.pop_item_width()
             
             imgui.same_line()
-            if imgui.button("-", width=20):
+            if imgui.button("-", width=15):
                 adjust_commit_count(-1)
             
             imgui.same_line()
-            if imgui.button("+", width=20):
+            if imgui.button("+", width=15):
                 adjust_commit_count(1)
             
             imgui.same_line()
@@ -809,7 +810,7 @@ class AutoUpdater:
         if current_token:
             masked_token = self.token_manager.get_masked_token()
             imgui.text(f"Current token: {masked_token}")
-            imgui.text_colored("✓ Token is set", *UpdateSettingsColors.TOKEN_SET)
+            imgui.text_colored("Token is set", *UpdateSettingsColors.TOKEN_SET)
         else:
             imgui.text_colored("No token set", *UpdateSettingsColors.TOKEN_NOT_SET)
 
