@@ -47,13 +47,18 @@ class DarkTheme:
 
     TRANSPARENT = (0, 0, 0, 0)
     SEMI_TRANSPARENT = (0, 0, 0, 0.4)
-
     
     # App GUI Colors
     APP_MARKER = (*RED[:3], 0.85)  # Red marker for app GUI
     FLOATING_WIDGET_BG = (0.1, 0.1, 0.1, 1.0) # dark gray
     FLOATING_WIDGET_BORDER = GRAY_MEDIUM
     FLOATING_WIDGET_TEXT = WHITE_DARK
+    ENERGY_SAVER_INDICATOR = GREEN
+    VERSION_CURRENT_HIGHLIGHT = GREEN
+    VERSION_CHANGELOG_TEXT = GRAY
+    VIDEO_STATUS_FUNGEN = GREEN
+    VIDEO_STATUS_OTHER = YELLOW
+    BACKGROUND_CLEAR = (0.06, 0.06, 0.06, 1.0)  # Dark gray background
 
     # Gauge-specific colors
     GAUGE_BG = FLOATING_WIDGET_BG
@@ -156,6 +161,17 @@ class DarkTheme:
     CONTROL_PANEL_ACTIVE_PROGRESS = (0.2, 0.6, 1.0, 1.0) # blue
     CONTROL_PANEL_COMPLETED_PROGRESS = (0.2, 0.7, 0.2, 1.0) # green
     CONTROL_PANEL_SUB_PROGRESS = (0.3, 0.7, 1.0, 1.0) # cyan
+
+    # Update Settings Dialog Colors
+    UPDATE_TOKEN_VALID = GREEN
+    UPDATE_TOKEN_INVALID = RED
+    UPDATE_TOKEN_WARNING = ORANGE
+    UPDATE_TOKEN_SET = GREEN
+    UPDATE_TOKEN_NOT_SET = ORANGE
+    UPDATE_DIALOG_TEXT = WHITE
+    UPDATE_DIALOG_GRAY_TEXT = GRAY
+
+
 
 # Current theme (default to dark)
 CurrentTheme = DarkTheme

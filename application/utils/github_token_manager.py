@@ -1,6 +1,7 @@
 import os
 import configparser
 import logging
+import requests
 
 
 class GitHubTokenManager:
@@ -60,4 +61,77 @@ class GitHubTokenManager:
             return ""
         if len(token) <= 8:
             return "***"
-        return token[:4] + "*" * (len(token) - 8) + token[-4:] 
+        return token[:4] + "*" * (len(token) - 8) + token[-4:]
+    
+    def validate_token(self, token: str = None) -> dict:
+        """
+        Validate a GitHub token by making a test API call.
+        
+        Args:
+            token: The token to validate. If None, uses the stored token.
+            
+        Returns:
+            dict: {
+                'valid': bool,
+                'message': str,
+                'user_info': dict or None
+            }
+        """
+        if token is None:
+            token = self.get_token()
+        
+        if not token:
+            return {
+                'valid': False,
+                'message': 'No token provided',
+                'user_info': None
+            }
+        
+        try:
+            headers = {
+                'User-Agent': 'FunGen-Updater/1.0',
+                'Accept': 'application/vnd.github.v3+json',
+                'Authorization': f'token {token}'
+            }
+            
+            # Make a simple API call to get user info
+            response = requests.get('https://api.github.com/user', headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                user_info = response.json()
+                return {
+                    'valid': True,
+                    'message': f'Token is valid: {user_info.get("login", "Unknown")}',
+                    'user_info': user_info
+                }
+            elif response.status_code == 401:
+                return {
+                    'valid': False,
+                    'message': 'Invalid token - unauthorized',
+                    'user_info': None
+                }
+            elif response.status_code == 403:
+                return {
+                    'valid': False,
+                    'message': 'Token lacks required permissions',
+                    'user_info': None
+                }
+            else:
+                return {
+                    'valid': False,
+                    'message': f'Token validation failed (HTTP {response.status_code})',
+                    'user_info': None
+                }
+                
+        except requests.RequestException as e:
+            return {
+                'valid': False,
+                'message': f'Network error: {str(e)}',
+                'user_info': None
+            }
+        except Exception as e:
+            return {
+                'valid': False,
+                'message': f'Validation error: {str(e)}',
+                'user_info': None
+            } 
