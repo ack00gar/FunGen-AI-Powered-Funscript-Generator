@@ -17,6 +17,154 @@ from config import constants
 
 log_vid = logging.getLogger(__name__)
 
+def _validate_preprocessed_file_completeness(file_path: str, expected_frames: int, logger: logging.Logger, tolerance_frames: int = 5) -> bool:
+    """
+    Validates that a preprocessed msgpack file contains the expected number of frames within tolerance.
+
+    Args:
+        file_path: Path to the msgpack file
+        expected_frames: Expected number of frames
+        logger: Logger instance
+        tolerance_frames: Acceptable frame count difference
+
+    Returns:
+        True if file is complete and valid, False otherwise
+    """
+    try:
+        if not os.path.exists(file_path):
+            logger.warning(f"Preprocessed file does not exist: {file_path}")
+            return False
+
+        # Check file size - empty files are definitely invalid
+        if os.path.getsize(file_path) < 100:  # Minimum reasonable size
+            logger.warning(f"Preprocessed file is too small (likely empty): {file_path}")
+            return False
+
+        # Load and validate the msgpack content
+        with open(file_path, 'rb') as f:
+            data = msgpack.unpackb(f.read(), raw=False)
+
+        if not isinstance(data, list):
+            logger.warning(f"Preprocessed file has invalid format (not a list): {file_path}")
+            return False
+
+        actual_frames = len(data)
+        frame_diff = abs(actual_frames - expected_frames)
+
+        if frame_diff > tolerance_frames:
+            logger.warning(f"Preprocessed file frame count mismatch: expected {expected_frames}, got {actual_frames} (diff: {frame_diff})")
+            return False
+
+        # Check that frames have valid structure
+        valid_frames = 0
+        for frame_data in data:
+            if isinstance(frame_data, dict) and ('detections' in frame_data or 'poses' in frame_data):
+                valid_frames += 1
+
+        if valid_frames < (actual_frames * 0.8):  # At least 80% should be valid
+            logger.warning(f"Preprocessed file has too many invalid frames: {valid_frames}/{actual_frames}")
+            return False
+
+        logger.info(f"Preprocessed file validation passed: {actual_frames} frames (expected {expected_frames})")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error validating preprocessed file {file_path}: {e}")
+        return False
+
+def _validate_preprocessed_video_completeness(video_path: str, expected_frames: int, expected_fps: float, logger: logging.Logger, tolerance_frames: int = 5) -> bool:
+    """
+    Validates that a preprocessed video has the expected duration and frame count.
+
+    Args:
+        video_path: Path to the video file
+        expected_frames: Expected number of frames
+        expected_fps: Expected FPS
+        logger: Logger instance
+        tolerance_frames: Acceptable frame count difference
+
+    Returns:
+        True if video is complete and valid, False otherwise
+    """
+    try:
+        if not os.path.exists(video_path):
+            logger.warning(f"Preprocessed video does not exist: {video_path}")
+            return False
+
+        # Check file size - very small files are likely corrupted
+        file_size = os.path.getsize(video_path)
+        if file_size < 1000000:  # Less than 1MB is suspicious for any video
+            logger.warning(f"Preprocessed video is suspiciously small: {file_size} bytes")
+            return False
+
+        # Use ffprobe to get video info
+        import subprocess
+        import json
+
+        cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+               '-show_entries', 'stream=nb_frames,duration,r_frame_rate',
+               '-of', 'json', video_path]
+
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        if result.returncode != 0:
+            logger.warning(f"ffprobe failed for preprocessed video: {video_path}")
+            return False
+
+        data = json.loads(result.stdout)
+        stream_info = data.get('streams', [{}])[0]
+
+        # Check frame count
+        nb_frames_str = stream_info.get('nb_frames')
+        if nb_frames_str and nb_frames_str != 'N/A':
+            actual_frames = int(nb_frames_str)
+            frame_diff = abs(actual_frames - expected_frames)
+
+            if frame_diff > tolerance_frames:
+                logger.warning(f"Preprocessed video frame count mismatch: expected {expected_frames}, got {actual_frames}")
+                return False
+        else:
+            # Fallback: check duration
+            duration_str = stream_info.get('duration')
+            if duration_str:
+                duration = float(duration_str)
+                expected_duration = expected_frames / expected_fps
+                duration_diff = abs(duration - expected_duration)
+
+                if duration_diff > (tolerance_frames / expected_fps):
+                    logger.warning(f"Preprocessed video duration mismatch: expected {expected_duration:.2f}s, got {duration:.2f}s")
+                    return False
+
+        logger.info(f"Preprocessed video validation passed: {video_path}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error validating preprocessed video {video_path}: {e}")
+        return False
+
+def _cleanup_incomplete_file(file_path: str, logger: logging.Logger) -> None:
+    """
+    Safely removes an incomplete/corrupted preprocessed file.
+
+    Args:
+        file_path: Path to the file to remove
+        logger: Logger instance
+    """
+    try:
+        if os.path.exists(file_path):
+            # Create a backup with timestamp before deletion
+            backup_path = f"{file_path}.incomplete.{int(time.time())}"
+            os.rename(file_path, backup_path)
+            logger.info(f"Moved incomplete file to: {os.path.basename(backup_path)}")
+    except Exception as e:
+        logger.error(f"Failed to cleanup incomplete file {file_path}: {e}")
+        # Try direct deletion as fallback
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Deleted incomplete file: {os.path.basename(file_path)}")
+        except Exception as e2:
+            logger.error(f"Failed to delete incomplete file {file_path}: {e2}")
+
 def _determine_actual_hwaccel(selected_method: str, available_methods: List[str]) -> str:
     """Determines the best HW accel method based on user selection, platform, and availability."""
     system = platform.system().lower()
@@ -517,6 +665,10 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
         with open(output_file_local, 'wb') as f:
             f.write(msgpack.packb(ordered_results, use_bin_type=True))
         parent_logger.info(f"Save complete. Wrote {len(ordered_results)} entries to {output_file_local}.")
+
+        # Validate the saved file
+        if not _validate_preprocessed_file_completeness(output_file_local, expected_frames, parent_logger):
+            parent_logger.warning(f"Preprocessed file validation failed. File may be incomplete: {output_file_local}")
     except Exception as e:
         parent_logger.error(f"Error writing output file '{output_file_local}': {e}", exc_info=True)
 
@@ -768,7 +920,26 @@ def perform_yolo_analysis(
         final_max_fps = max_fps_container[0]
         process_logger.info(f"Stage 1 analysis completed. Final Max FPS: {final_max_fps:.2f}")
 
-        return (result_file_local, final_max_fps) if os.path.exists(result_file_local) else (None, 0.0)
+        # Final validation of both preprocessed video and msgpack file
+        result_success = True
+        if os.path.exists(result_file_local):
+            if not _validate_preprocessed_file_completeness(result_file_local, total_frames_to_process, process_logger):
+                process_logger.error(f"Stage 1 msgpack file validation failed: {result_file_local}")
+                _cleanup_incomplete_file(result_file_local, process_logger)
+                result_success = False
+        else:
+            result_success = False
+
+        # Validate preprocessed video if it was created
+        if is_encoding_preprocessed_video and preprocessed_video_path_arg:
+            if os.path.exists(preprocessed_video_path_arg):
+                if not _validate_preprocessed_video_completeness(preprocessed_video_path_arg, total_frames_to_process, main_vp_for_info.video_info.get('fps', 30.0), process_logger):
+                    process_logger.error(f"Preprocessed video validation failed: {preprocessed_video_path_arg}")
+                    _cleanup_incomplete_file(preprocessed_video_path_arg, process_logger)
+                    # Don't fail the entire stage if just the preprocessed video is bad
+                    # result_success = False
+
+        return (result_file_local, final_max_fps) if result_success else (None, 0.0)
 
 
     except Exception as e:

@@ -3,7 +3,7 @@ import json
 import orjson
 import msgpack
 import time
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Any
 
 from application.utils.video_segment import VideoSegment
 from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, FUNSCRIPT_METADATA_VERSION
@@ -352,8 +352,18 @@ class AppFileManager:
         # This check now runs for ALL video loads, ensuring the app is always aware of the preprocessed file.
         potential_preprocessed_path = self.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
         if os.path.exists(potential_preprocessed_path):
-            self.preprocessed_video_path = potential_preprocessed_path
-            self.logger.info(f"Found existing preprocessed video: {os.path.basename(potential_preprocessed_path)}")
+            # Validate the preprocessed file before using it
+            preprocessed_status = self._get_preprocessed_file_status(potential_preprocessed_path)
+
+            if preprocessed_status["valid"]:
+                self.preprocessed_video_path = potential_preprocessed_path
+                self.logger.info(f"Found valid preprocessed video: {os.path.basename(potential_preprocessed_path)} "
+                               f"({preprocessed_status['frame_count']}/{preprocessed_status['expected_frames']} frames)")
+            else:
+                self.preprocessed_video_path = None
+                self.logger.warning(f"Found invalid preprocessed video: {os.path.basename(potential_preprocessed_path)} "
+                                  f"({preprocessed_status['frame_count']}/{preprocessed_status['expected_frames']} frames) - "
+                                  f"will be cleaned up automatically")
         else:
             self.preprocessed_video_path = None
 
@@ -653,3 +663,75 @@ class AppFileManager:
                 # Do not add this to saved_paths to avoid double copying
 
         return saved_paths
+
+    def _get_preprocessed_file_status(self, preprocessed_path: str) -> Dict[str, Any]:
+        """
+        Gets the status of a preprocessed file, including validation.
+
+        Args:
+            preprocessed_path: Path to the preprocessed file
+
+        Returns:
+            Dictionary with status information
+        """
+        status = {
+            "exists": False,
+            "valid": False,
+            "frame_count": 0,
+            "expected_frames": 0,
+            "file_size": 0
+        }
+
+        try:
+            if not os.path.exists(preprocessed_path):
+                return status
+
+            status["exists"] = True
+            status["file_size"] = os.path.getsize(preprocessed_path)
+
+            # Get expected frame count from current video
+            if self.app.processor and self.app.processor.video_info:
+                expected_frames = self.app.processor.video_info.get("total_frames", 0)
+                expected_fps = self.app.processor.video_info.get("fps", 30.0)
+                status["expected_frames"] = expected_frames
+
+                if expected_frames > 0:
+                    # Import validation function
+                    from detection.cd.stage_1_cd import _validate_preprocessed_video_completeness
+
+                    # Validate the preprocessed video
+                    status["valid"] = _validate_preprocessed_video_completeness(
+                        preprocessed_path, expected_frames, expected_fps, self.logger
+                    )
+
+                    # Get actual frame count
+                    if self.app.processor:
+                        preprocessed_info = self.app.processor._get_video_info(preprocessed_path)
+                        if preprocessed_info:
+                            status["frame_count"] = preprocessed_info.get("total_frames", 0)
+
+        except Exception as e:
+            self.logger.error(f"Error getting preprocessed file status: {e}")
+
+        return status
+
+    def get_preprocessed_status_summary(self) -> str:
+        """
+        Returns a human-readable summary of the preprocessed video status.
+
+        Returns:
+            Status summary string
+        """
+        if not self.video_path:
+            return "No video loaded"
+
+        preprocessed_path = self.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
+        status = self._get_preprocessed_file_status(preprocessed_path)
+
+        if not status["exists"]:
+            return "No preprocessed video available"
+        elif not status["valid"]:
+            return f"Invalid preprocessed video ({status['frame_count']}/{status['expected_frames']} frames)"
+        else:
+            size_mb = status["file_size"] / (1024 * 1024)
+            return f"Valid preprocessed video ({status['frame_count']} frames, {size_mb:.1f} MB)"
