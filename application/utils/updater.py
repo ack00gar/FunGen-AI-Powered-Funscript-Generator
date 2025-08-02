@@ -136,6 +136,7 @@ class AutoUpdater:
         self.commit_changelogs = {}
         self.skipped_commits = set()  # Set of commit hashes to skip
         self.skip_updates_file = "skip_updates.json"
+        self.test_mode_enabled = False  # Manual test mode toggle
         
         self.token_manager = GitHubTokenManager()
         self.github_api = GitHubAPIClient(self.REPO_OWNER, self.REPO_NAME, self.token_manager)
@@ -440,19 +441,19 @@ class AutoUpdater:
             imgui.end_popup()
 
     def _get_available_updates(self, custom_count: int = None) -> List[Dict]:
-        """Fetches available merge commits from the configured branch (v0.5.0)."""
+        """Fetches available commits (merge commits and direct pushes) from the configured branch (v0.5.0)."""
         updates = []
 
         try:
             # Use the configured branch instead of current branch
             target_branch = self.BRANCH
-            self.logger.info(f"Fetching merge commits from branch: {target_branch}")
+            self.logger.info(f"Fetching commits from branch: {target_branch}")
             
-            target_merge_count = custom_count if custom_count else DEFAULT_COMMIT_FETCH_COUNT
+            target_commit_count = custom_count if custom_count else DEFAULT_COMMIT_FETCH_COUNT
             page = 1
             per_page = 30  # GitHub API default
             
-            while len(updates) < target_merge_count:
+            while len(updates) < target_commit_count:
                 # Fetch a page of commits
                 commits_data = self.github_api.get_commits_list(target_branch, per_page=per_page, page=page)
                 
@@ -476,12 +477,12 @@ class AutoUpdater:
                         date = author_info.get('date')
                         message = commit_info.get('message', 'No commit message')
                         
-                        # Check if this is a merge commit (has multiple parents)
+                        # Check if this is a merge commit (has multiple parents) or direct push
                         parents = commit.get('parents', [])
                         is_merge = len(parents) > 1
                         
-                        # Only include merge commits
-                        if is_merge:
+                        # Include both merge commits and direct branch pushes
+                        if is_merge or len(parents) == 1:
                             # Get first line of commit message for display
                             first_line = message.split('\n')[0] if message else 'No commit message'
                             
@@ -495,8 +496,8 @@ class AutoUpdater:
                                     'is_merge': True
                                 })
                                 
-                                # Stop when we have enough merge commits
-                                if len(updates) >= target_merge_count:
+                                # Stop when we have enough commits
+                                if len(updates) >= target_commit_count:
                                     break
                     except (KeyError, TypeError) as e:
                         self.logger.warning(f"Skipping malformed commit data: {e}")
@@ -507,13 +508,13 @@ class AutoUpdater:
                 
                 # Safety check to prevent infinite loops
                 if page > 50:  # Maximum 50 pages
-                    self.logger.warning(f"Reached maximum page limit. Found {len(updates)} merge commits, requested {target_merge_count}")
+                    self.logger.warning(f"Reached maximum page limit. Found {len(updates)} commits, requested {target_commit_count}")
                     break
             
             # Sort by date (newest first)
             updates.sort(key=lambda x: x.get('date', 'Unknown'), reverse=True)
             
-            self.logger.info(f"Found {len(updates)} merge commits out of {target_merge_count} requested")
+            self.logger.info(f"Found {len(updates)} commits (merge + direct pushes) out of {target_commit_count} requested")
             
         except Exception as e:
             self.logger.error(f"Failed to fetch available updates: {e}")
@@ -664,11 +665,9 @@ class AutoUpdater:
         self.status_message = f"Switching to commit: {commit_message[:50]}..."
         self.logger.info(f"Attempting to checkout commit {commit_hash}")
 
-        # Check if we're in test mode (not on main branch)
-        current_branch = self._get_current_branch()
-        is_test_mode = current_branch != self.BRANCH
-        
-        if is_test_mode:
+        # Check if test mode is manually enabled
+        if self.test_mode_enabled:
+            current_branch = self._get_current_branch()
             self.logger.info(f"Running in test mode (current branch: {current_branch}, target branch: {self.BRANCH})")
             self.status_message = f"TEST MODE: Would switch to commit {commit_hash[:7]} ({commit_message[:30]}...)"
             time.sleep(2)
@@ -880,20 +879,31 @@ class AutoUpdater:
             imgui.end_child()
             imgui.separator()
 
+            # Test mode toggle
+            imgui.text("Test Mode:")
+            imgui.same_line()
+            changed, self.test_mode_enabled = imgui.checkbox("Enable Test Mode", self.test_mode_enabled)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("When enabled, commit switching will only simulate the action without actually changing commits. Useful for testing the update system.")
+            
+            imgui.separator()
+
             # Action buttons and commit count controls
             if self.selected_update:
-                if imgui.button("Switch to Commit", width=200):
+                button_text = "Switch to Commit" if not self.test_mode_enabled else "Test Switch to Commit"
+                if imgui.button(button_text, width=200):
                     self.apply_update_change(self.selected_update['commit_hash'], self.selected_update['name'])
             else:
                 imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
-                imgui.button("Switch to Commit", width=160)
+                button_text = "Switch to Commit" if not self.test_mode_enabled else "Test Switch to Commit"
+                imgui.button(button_text, width=160)
                 imgui.pop_style_var()
             
             # Add commit count controls on the same line, aligned to the right
             imgui.same_line()
             imgui.set_cursor_pos_x(imgui.get_window_width() - 280)
             
-            imgui.text("Fetch merge commits:")
+            imgui.text("Fetch commits:")
             imgui.same_line()
             
             # Initialize custom commit count if not set
