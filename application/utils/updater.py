@@ -292,6 +292,44 @@ class AutoUpdater:
 
         self.update_check_complete = True
 
+    def _restart_application(self):
+        """Restarts the application with proper cleanup to prevent zombie processes."""
+        try:
+            # Always restart using the main.py entry point
+            main_script = "main.py"
+            
+            # Verify main.py exists
+            if not os.path.exists(main_script):
+                self.logger.error(f"Main script {main_script} not found")
+                return
+            
+            # Create the command to restart the application
+            cmd = [sys.executable, main_script]
+            
+            # Add any original arguments that aren't the script name
+            original_args = sys.argv[1:]
+            if original_args:
+                cmd.extend(original_args)
+            
+            # Start the new process
+            if sys.platform == 'win32':
+                # On Windows, use subprocess.Popen with CREATE_NEW_PROCESS_GROUP
+                import subprocess
+                subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+            else:
+                # On Unix-like systems, use subprocess.Popen
+                import subprocess
+                subprocess.Popen(cmd)
+            
+            # Exit the current process cleanly
+            self.logger.info("Restarting application...")
+            sys.exit(0)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to restart application: {e}")
+            # Fallback to os.execl if the proper restart fails
+            os.execl(sys.executable, sys.executable, *sys.argv)
+
     def check_for_updates_async(self):
         """Starts the update check in a background thread and updates the timestamp."""
         self.last_check_time = time.time() # Update time when a check is initiated
@@ -315,8 +353,8 @@ class AutoUpdater:
             # Give a moment for the message to be seen
             time.sleep(2)
 
-            # Restart the application
-            os.execl(sys.executable, sys.executable, *sys.argv)
+            # Restart the application with proper cleanup
+            self._restart_application()
 
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Update failed during 'git pull': {e.stderr}")
@@ -680,7 +718,7 @@ class AutoUpdater:
                 self.logger.info(f"Successfully checked out commit {commit_hash}")
                 self.status_message = "Update change complete. Restarting..."
                 time.sleep(2)
-                os.execl(sys.executable, sys.executable, *sys.argv)
+                self._restart_application()
             else:
                 self.status_message = "Update change failed. Please check console."
                 self.update_in_progress = False
