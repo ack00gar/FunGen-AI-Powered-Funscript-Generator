@@ -7,8 +7,88 @@ import imgui
 import time
 import unicodedata
 import re
-from typing import List, Dict
+from typing import List, Dict, Optional
 from application.utils.github_token_manager import GitHubTokenManager
+from config.constants import DEFAULT_COMMIT_FETCH_COUNT
+
+
+class GitHubAPIClient:
+    """Centralized GitHub API client to reduce code duplication."""
+    
+    def __init__(self, repo_owner: str, repo_name: str, token_manager: GitHubTokenManager):
+        self.repo_owner = repo_owner
+        self.repo_name = repo_name
+        self.token_manager = token_manager
+        self.base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+        
+    def _get_headers(self) -> Dict[str, str]:
+        """Get common headers for GitHub API requests."""
+        headers = {
+            'User-Agent': 'FunGen-Updater/1.0',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        github_token = self.token_manager.get_token()
+        if github_token:
+            headers['Authorization'] = f'token {github_token}'
+            
+        return headers
+    
+    def _make_request(self, endpoint: str, timeout: int = 10) -> Optional[Dict]:
+        """Make a GitHub API request with common error handling."""
+        try:
+            url = f"{self.base_url}{endpoint}"
+            response = requests.get(url, headers=self._get_headers(), timeout=timeout)
+            
+            # Check rate limit headers
+            remaining = response.headers.get('X-RateLimit-Remaining')
+            limit = response.headers.get('X-RateLimit-Limit')
+            reset_time = response.headers.get('X-RateLimit-Reset')
+            
+            # Log rate limit info for debugging
+            if remaining and limit:
+                print(f"GitHub API: {remaining}/{limit} requests remaining")
+            
+            # Handle rate limiting properly
+            if response.status_code == 403:
+                if remaining == '0':
+                    # Rate limit truly exceeded
+                    reset_timestamp = int(reset_time) if reset_time else None
+                    if reset_timestamp:
+                        from datetime import datetime
+                        reset_time_str = datetime.fromtimestamp(reset_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                        error_msg = f"GitHub API rate limit exceeded. Reset at {reset_time_str}"
+                    else:
+                        error_msg = "GitHub API rate limit exceeded"
+                    raise requests.RequestException(error_msg)
+                else:
+                    # 403 but not rate limit - could be other issues
+                    raise requests.RequestException(f"GitHub API 403 error: {response.text}")
+            
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.RequestException as e:
+            # Log error but don't raise - let caller handle None return
+            return None
+    
+    def get_branch_commit(self, branch: str) -> Optional[Dict]:
+        """Get the latest commit for a specific branch."""
+        return self._make_request(f"/commits/{branch}")
+    
+    def get_commit_details(self, commit_hash: str) -> Optional[Dict]:
+        """Get detailed information for a specific commit."""
+        return self._make_request(f"/commits/{commit_hash}")
+    
+    def get_commits_list(self, branch: str, per_page: int = None) -> Optional[List[Dict]]:
+        """Get a list of commits for a branch."""
+        if per_page is None:
+            per_page = DEFAULT_COMMIT_FETCH_COUNT
+        return self._make_request(f"/commits?sha={branch}&per_page={per_page}")
+    
+    def compare_commits(self, base_hash: str, head_hash: str) -> Optional[Dict]:
+        """Compare two commits."""
+        return self._make_request(f"/compare/{base_hash}...{head_hash}")
 
 
 class AutoUpdater:
@@ -37,7 +117,6 @@ class AutoUpdater:
     REPO_OWNER = "ack00gar"
     REPO_NAME = "FunGen-AI-Powered-Funscript-Generator"
     BRANCH = "v0.5.0"
-    API_URL = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits/{BRANCH}"
 
     def __init__(self, app_logic):
         self.app = app_logic
@@ -65,8 +144,9 @@ class AutoUpdater:
         self.expanded_commits = set()  # Set of commit hashes that are expanded
         self.commit_changelogs = {}    # Cache for commit changelog data
         
-        # GitHub token manager
+        # GitHub token manager and API client
         self.token_manager = GitHubTokenManager()
+        self.github_api = GitHubAPIClient(self.REPO_OWNER, self.REPO_NAME, self.token_manager)
 
     def _get_local_commit_hash(self) -> str | None:
         """Gets the commit hash of the local repository's target branch (v0.5.0)."""
@@ -87,129 +167,72 @@ class AutoUpdater:
 
     def _get_remote_commit_hash(self) -> str | None:
         """Gets the latest commit hash from the remote repository via GitHub API."""
-        try:
-            headers = {
-                'User-Agent': 'FunGen-Updater/1.0',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            github_token = self.token_manager.get_token()
-            if github_token:
-                headers['Authorization'] = f'token {github_token}'
-            
-            response = requests.get(self.API_URL, headers=headers, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data.get('sha')
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to fetch remote version: {e}")
+        commit_data = self.github_api.get_branch_commit(self.BRANCH)
+        if commit_data:
+            return commit_data.get('sha')
+        else:
+            self.logger.error("Failed to fetch remote version")
             self.status_message = "Could not connect to check for updates."
             return None
 
     def _get_commit_diff(self, local_hash: str, remote_hash: str) -> list[str]:
         """Gets commit messages between local and remote versions."""
-        compare_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/compare/{local_hash}...{remote_hash}"
-        changelog = []
-        try:
-            headers = {
-                'User-Agent': 'FunGen-Updater/1.0',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            github_token = self.token_manager.get_token()
-            if github_token:
-                headers['Authorization'] = f'token {github_token}'
-            
-            response = requests.get(compare_url, headers=headers, timeout=10)
-            
+        compare_data = self.github_api.compare_commits(local_hash, remote_hash)
+        
+        if compare_data is None:
             # Handle 404 errors (usually when comparing commits from different branches)
-            if response.status_code == 404:
-                self.logger.warning(f"Could not compare commits {local_hash[:7]} and {remote_hash[:7]} - they may be from different branches")
-                # Fallback: get recent commits from the target branch
-                return self._get_recent_commits_from_branch()
-            
-            response.raise_for_status()
-            data = response.json()
-            commits = data.get('commits', [])
-            for commit_data in commits:
-                message = commit_data.get('commit', {}).get('message', 'No commit message.')
-                # Get the first line of the commit message for brevity
-                changelog.append(message)
-            return changelog
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to fetch commit diff: {e}")
-            return ["Could not retrieve update details."]
+            self.logger.warning(f"Could not compare commits {local_hash[:7]} and {remote_hash[:7]} - they may be from different branches")
+            # Fallback: get recent commits from the target branch
+            return self._get_recent_commits_from_branch()
+
+        changelog = []
+        commits = compare_data.get('commits', [])
+        for commit_data in commits:
+            message = commit_data.get('commit', {}).get('message', 'No commit message.')
+            # Get the first line of the commit message for brevity
+            changelog.append(message)
+        return changelog
 
     def _get_recent_commits_from_branch(self) -> list[str]:
         """Gets recent commits from the target branch as a fallback when direct comparison fails."""
-        try:
-            commits_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/commits?sha={self.BRANCH}&per_page=10"
-            
-            headers = {
-                'User-Agent': 'FunGen-Updater/1.0',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            github_token = self.token_manager.get_token()
-            if github_token:
-                headers['Authorization'] = f'token {github_token}'
-            
-            response = requests.get(commits_url, headers=headers, timeout=10)
-            response.raise_for_status()
-            commits_data = response.json()
-            
-            changelog = [f"Recent commits from {self.BRANCH} branch:"]
-            for commit in commits_data[:5]:  # Show last 5 commits
-                message = commit.get('commit', {}).get('message', 'No commit message.')
-                # Get the first line of the commit message
-                first_line = message.split('\n')[0]
-                changelog.append(f"- {first_line}")
-            
-            return changelog
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to fetch recent commits: {e}")
+        commits_data = self.github_api.get_commits_list(self.BRANCH, per_page=DEFAULT_COMMIT_FETCH_COUNT)
+        
+        if commits_data is None:
+            self.logger.error("Failed to fetch recent commits")
             return ["Could not retrieve recent commit information."]
+        
+        changelog = [f"Recent commits from {self.BRANCH} branch:"]
+        for commit in commits_data[:5]:  # Show last 5 commits
+            message = commit.get('commit', {}).get('message', 'No commit message.')
+            # Get the first line of the commit message
+            first_line = message.split('\n')[0]
+            changelog.append(f"- {first_line}")
+        
+        return changelog
 
     def _get_commit_date(self, commit_hash: str) -> str:
         """Gets the commit date for a given commit hash."""
+        commit_data = self.github_api.get_commit_details(commit_hash)
+        
+        if commit_data is None:
+            self.logger.error(f"Failed to fetch commit date for {commit_hash[:7]}")
+            return 'Unknown date'
+        
+        # Extract date from commit info
+        commit_info = commit_data.get('commit', {})
+        author_info = commit_info.get('author', {})
+        date_str = author_info.get('date', 'Unknown date')
+        
+        # Parse and format the date
         try:
-            commit_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/commits/{commit_hash}"
-            
-            headers = {
-                'User-Agent': 'FunGen-Updater/1.0',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            github_token = self.token_manager.get_token()
-            if github_token:
-                headers['Authorization'] = f'token {github_token}'
-            
-            response = requests.get(commit_url, headers=headers, timeout=10)
-            response.raise_for_status()
-            commit_data = response.json()
-            
-            # Extract date from commit info
-            commit_info = commit_data.get('commit', {})
-            author_info = commit_info.get('author', {})
-            date_str = author_info.get('date', 'Unknown date')
-            
-            # Parse and format the date
-            try:
-                from datetime import datetime
-                # GitHub dates are in ISO format: 2024-01-15T10:30:00Z
-                date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                # Format as YYYY-MM-DD HH:MM
-                return date_obj.strftime('%Y-%m-%d %H:%M')
-            except ValueError:
-                # If date parsing fails, return the original string
-                return date_str
-            
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to fetch commit date for {commit_hash[:7]}: {e}")
-            return 'Unknown date'
-        except Exception as e:
-            self.logger.error(f"Unexpected error getting commit date: {e}")
-            return 'Unknown date'
+            from datetime import datetime
+            # GitHub dates are in ISO format: 2024-01-15T10:30:00Z
+            date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            # Format as YYYY-MM-DD HH:MM
+            return date_obj.strftime('%Y-%m-%d %H:%M')
+        except ValueError:
+            # If date parsing fails, return the original string
+            return date_str
 
     def _check_worker(self):
         """Worker thread to check for updates and fetch changelog."""
@@ -353,7 +376,7 @@ class AutoUpdater:
             self.logger.error(f"Could not get current branch: {e}")
             return self.BRANCH  # Fallback to default
 
-    def _get_available_versions(self) -> List[Dict]:
+    def _get_available_versions(self, custom_count: int = None) -> List[Dict]:
         """Fetches available commits from the configured branch (v0.5.0)."""
         versions = []
 
@@ -362,29 +385,11 @@ class AutoUpdater:
             target_branch = self.BRANCH
             self.logger.info(f"Fetching versions from branch: {target_branch}")
             
-            # Fetch commits from the configured branch
-            commits_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/commits?sha={target_branch}"
+            commits_data = self.github_api.get_commits_list(target_branch, per_page=custom_count)
             
-            # Add headers for better rate limit handling
-            headers = {
-                'User-Agent': 'FunGen-Updater/1.0',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            # Check if we have a GitHub token for higher rate limits
-            github_token = self.token_manager.get_token()
-            if github_token:
-                headers['Authorization'] = f'token {github_token}'
-            
-            response = requests.get(commits_url, headers=headers, timeout=10)
-            
-            # Handle rate limiting
-            if response.status_code == 403 and 'rate limit exceeded' in response.text.lower():
-                self.logger.error("GitHub API rate limit exceeded")
-                return [{'name': 'Rate limit exceeded. Please set GitHub token in Settings.', 'commit_hash': 'rate_limit', 'type': 'error', 'date': '', 'full_message': ''}]
-            
-            response.raise_for_status()
-            commits_data = response.json()
+            if commits_data is None:
+                self.logger.error("Failed to fetch commits from GitHub API")
+                return [{'name': 'Failed to fetch commits. Check network connection or GitHub token.', 'commit_hash': 'error', 'type': 'error', 'date': '', 'full_message': ''}]
             
             for commit in commits_data:
                 try:
@@ -416,7 +421,7 @@ class AutoUpdater:
             # Sort by date (newest first)
             versions.sort(key=lambda x: x.get('date', 'Unknown'), reverse=True)
             
-        except requests.RequestException as e:
+        except Exception as e:
             self.logger.error(f"Failed to fetch available versions: {e}")
             return []
 
@@ -479,7 +484,6 @@ class AutoUpdater:
 
         return cleaned.strip()
 
-
     def _get_version_diff(self, target_hash: str) -> List[str]:
         """Gets commit details for the specified commit hash."""
         current_hash = self._get_local_commit_hash()
@@ -487,78 +491,53 @@ class AutoUpdater:
             return ["Could not determine current version."]
         
         # Get the selected commit details (even if it's the current commit)
-        try:
-            commit_url = f"https://api.github.com/repos/{self.REPO_OWNER}/{self.REPO_NAME}/commits/{target_hash}"
-            
-            # Add headers for better rate limit handling
-            headers = {
-                'User-Agent': 'FunGen-Updater/1.0',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            # Check if we have a GitHub token for higher rate limits
-            github_token = self.token_manager.get_token()
-            if github_token:
-                headers['Authorization'] = f'token {github_token}'
-            
-            response = requests.get(commit_url, headers=headers, timeout=10)
-            
-            # Handle rate limiting
-            if response.status_code == 403 and 'rate limit exceeded' in response.text.lower():
-                return ["GitHub API rate limit exceeded. Please wait or set GitHub token in Settings."]
-            
-            response.raise_for_status()
-            commit_data = response.json()
+        commit_data = self.github_api.get_commit_details(target_hash)
+        
+        if commit_data is None:
+            return ["Failed to fetch commit details. Check network connection or GitHub token."]
 
-            # Get author info - prefer GitHub username, fallback to commit author name
-            author_data = commit_data.get('author')
-            commit_info = commit_data.get('commit', {})
-            commit_author = commit_info.get('author', {})
-            
-            # Use GitHub username if available, otherwise use commit author name
-            author = author_data.get('login') if author_data else commit_author.get('name', 'Unknown')
-            
-            message = commit_info.get('message', 'No commit message')
-            date = commit_author.get('date', 'Unknown date')
+        # Get author info - prefer GitHub username, fallback to commit author name
+        author_data = commit_data.get('author')
+        commit_info = commit_data.get('commit', {})
+        commit_author = commit_info.get('author', {})
+        
+        # Use GitHub username if available, otherwise use commit author name
+        author = author_data.get('login') if author_data else commit_author.get('name', 'Unknown')
+        
+        message = commit_info.get('message', 'No commit message')
+        date = commit_author.get('date', 'Unknown date')
 
-            # Split message into lines and format nicely
-            message_lines = message.split('\n')
-            changelog = []
-            
-            # Add current version indicator if this is the current commit
-            if current_hash == target_hash:
-                changelog.append("*** CURRENT VERSION ***")
-                changelog.append("")
-            
-            changelog.append(f"Commit: {target_hash[:7]}")
-            changelog.append(f"Author: {self.clean_text(author)}")
-            changelog.append(f"Date:   {date}")
+        # Split message into lines and format nicely
+        message_lines = message.split('\n')
+        changelog = []
+        
+        # Add current version indicator if this is the current commit
+        if current_hash == target_hash:
+            changelog.append("*** CURRENT VERSION ***")
             changelog.append("")
-            changelog.append("Message: ")
-            for line in message_lines:
-                cleaned_line = self.clean_text(line)
-                if cleaned_line.strip():
-                    changelog.append(f"  {cleaned_line}")
+        
+        changelog.append(f"Commit: {target_hash[:7]}")
+        changelog.append(f"Author: {self.clean_text(author)}")
+        changelog.append(f"Date:   {date}")
+        changelog.append("")
+        changelog.append("Message: ")
+        for line in message_lines:
+            cleaned_line = self.clean_text(line)
+            if cleaned_line.strip():
+                changelog.append(f"  {cleaned_line}")
 
-            return changelog
-            
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to fetch commit details: {e}")
-            return [f"Could not retrieve commit details: {str(e)}"]
-        except Exception as e:
-            self.logger.error(f"Unexpected error in _get_version_diff: {e}")
-            return [f"Error retrieving commit details: {str(e)}"]
+        return changelog
 
-    def load_available_versions_async(self):
+    def load_available_versions_async(self, custom_count: int = None):
         """Loads available versions in a background thread."""
         self.logger.info("Starting async version loading")
         self.version_picker_loading = True
-        threading.Thread(target=self._load_versions_worker, daemon=True).start()
+        threading.Thread(target=self._load_versions_worker, args=(custom_count,), daemon=True).start()
 
-    def _load_versions_worker(self):
+    def _load_versions_worker(self, custom_count: int = None):
         """Worker thread to load available versions."""
         self.logger.info("Loading versions in worker thread")
-        self.available_versions = self._get_available_versions()
+        self.available_versions = self._get_available_versions(custom_count)
         self.logger.info(f"Loaded {len(self.available_versions)} versions")
         self.version_picker_loading = False
 
@@ -583,5 +562,3 @@ class AutoUpdater:
             self.logger.error(f"An unexpected error occurred during version change: {e}")
             self.status_message = "An unexpected error occurred. See logs."
             self.update_in_progress = False
-
- 

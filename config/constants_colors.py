@@ -172,7 +172,6 @@ class DarkTheme:
     UPDATE_DIALOG_GRAY_TEXT = GRAY
 
 
-
 # Current theme (default to dark)
 CurrentTheme = DarkTheme
 
