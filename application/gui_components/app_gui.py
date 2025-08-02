@@ -8,7 +8,7 @@ import time
 import threading
 import queue
 import os
-from typing import Optional, List, Dict
+from typing import List, Dict
 
 from application.classes.gauge import GaugeWindow
 from application.classes.file_dialog import ImGuiFileDialog
@@ -1101,8 +1101,9 @@ class GUI:
             imgui.separator()
             
             # Close button positioned at bottom right
-            imgui.set_cursor_pos_x(imgui.get_window_width() - 130)  # Position from right edge
-            if imgui.button("Close", width=120):
+            close_button_width = 80
+            imgui.set_cursor_pos_x(imgui.get_window_width() - close_button_width - 10)  # Position from right edge
+            if imgui.button("Close", width=close_button_width):
                 imgui.close_current_popup()
 
             imgui.end_popup()
@@ -1159,21 +1160,55 @@ class GUI:
                                 self.app.updater.commit_changelogs[commit_hash] = [f"Error loading changelog: {str(e)}"]
                 
                 imgui.same_line()
+
+                # Add commit date between hash and title
+                commit_date = version.get('date', 'Unknown date')
+                if commit_date != 'Unknown date':
+                    try:
+                        from datetime import datetime
+                        # Parse GitHub date format and format as date only
+                        date_obj = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+                        commit_date = date_obj.strftime('%Y-%m-%d')
+                    except:
+                        commit_date = 'Unknown date'
+
+                imgui.text(f"({commit_date})")
+                imgui.same_line()
                 
-                # Version display - show commit message and hash
+                # Commit message
                 commit_msg = version['name']
                 if len(commit_msg) > 60:
                     commit_msg = commit_msg[:57] + "..."
                 
-                version_text = f"{commit_msg} - {commit_hash[:7]}"
-                if imgui.selectable(version_text, self.app.updater.selected_version == version)[0]:
+                # Calculate space for checkbox on the right
+                window_width = imgui.get_window_width()
+                checkbox_width = 20
+                text_width = window_width - 200 - checkbox_width  # Leave space for button and checkbox
+                
+                if imgui.selectable(commit_msg, self.app.updater.selected_version == version, flags=imgui.SELECTABLE_SPAN_ALL_COLUMNS)[0]:
                     self.app.updater.selected_version = version
                 
+                # Add (Current) indicator after commit message
                 if is_current:
-                    imgui.pop_style_color()
                     imgui.same_line()
                     imgui.text("(Current)")
+                    imgui.pop_style_color()
                 
+                # Add checkbox on the right (with proper positioning)
+                imgui.same_line()
+                # Position checkbox at the right edge with proper spacing
+                checkbox_x = imgui.get_window_width() - 110  # pixels from right edge
+                imgui.set_cursor_pos_x(checkbox_x)
+                
+                # Initialize ignored state if not present
+                if 'ignored' not in version:
+                    version['ignored'] = False
+                
+                # Make checkbox interactive
+                changed, version['ignored'] = imgui.checkbox("##checkbox_" + commit_hash[:7], version['ignored'])
+                imgui.same_line()
+                imgui.text(f"Ignore")
+
                 # Show inline changelog if expanded
                 if is_expanded:
                     imgui.indent(30)
@@ -1193,14 +1228,43 @@ class GUI:
             imgui.end_child()
             imgui.separator()
 
-            # Action buttons
+            # Action buttons and commit count controls
             if self.app.updater.selected_version:
                 if imgui.button("Switch to Commit", width=200):
                     self.app.updater.apply_version_change(self.app.updater.selected_version['commit_hash'], self.app.updater.selected_version['name'])
             else:
                 imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
-                imgui.button("Switch to Commit", width=200)
+                imgui.button("Switch to Commit", width=160)
                 imgui.pop_style_var()
+            
+            # Add commit count controls on the same line, aligned to the right
+            imgui.same_line()
+            imgui.set_cursor_pos_x(imgui.get_window_width() - 235)
+            
+            imgui.text("Fetch commits:")
+            imgui.same_line()
+            
+            # Initialize custom commit count if not set
+            if not hasattr(self, '_custom_commit_count'):
+                self._custom_commit_count = str(constants.DEFAULT_COMMIT_FETCH_COUNT)
+            
+            # Input for custom commit count (narrow width)
+            imgui.push_item_width(30)  # Set a narrow width for the input
+            changed, self._custom_commit_count = imgui.input_text("##commit_count", self._custom_commit_count, 3, imgui.INPUT_TEXT_CHARS_DECIMAL)
+            imgui.pop_item_width()
+            imgui.same_line()
+            
+            if imgui.button("Apply", width=80):
+                try:
+                    count = int(self._custom_commit_count)
+                    if count > 0 and count <= 100:  # Reasonable limits
+                        self.app.updater.load_available_versions_async(count)
+                    else:
+                        # Reset to default if invalid
+                        self._custom_commit_count = str(constants.DEFAULT_COMMIT_FETCH_COUNT)
+                except ValueError:
+                    # Reset to default if invalid
+                    self._custom_commit_count = str(constants.DEFAULT_COMMIT_FETCH_COUNT)
 
     def _render_github_token_content(self):
         """Renders the GitHub token content within the tabbed dialog."""

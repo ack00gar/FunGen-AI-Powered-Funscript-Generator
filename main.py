@@ -1,7 +1,6 @@
 import multiprocessing
 import platform
 import argparse
-import os
 
 from application.logic.app_logic import ApplicationLogic
 from application.gui_components.app_gui import GUI
