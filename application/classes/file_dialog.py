@@ -1,5 +1,6 @@
 import os
 import json
+import orjson
 from typing import Callable, Optional, Tuple
 import imgui
 import platform
@@ -61,19 +62,20 @@ class ImGuiFileDialog:
         self.overwrite_file_path: str = ""
         self.video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.webm'] # Added
 
-    def _get_funscript_status(self, video_path: str) -> Optional[str]:
+    @staticmethod
+    def get_funscript_status(video_path: str, logger: logging.Logger) -> Optional[str]:
         """Checks for an associated funscript and determines its origin."""
         funscript_path = os.path.splitext(video_path)[0] + ".funscript"
         if not os.path.exists(funscript_path):
             return None
 
         try:
+            # Reverted to original, working method: text mode with standard json library
             with open(funscript_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
             metadata = data.get('metadata', {})
             author = data.get('author', '')
-            # Ensure metadata is a dict before checking version
             version = metadata.get('version', '') if isinstance(metadata, dict) else ''
 
             if author.startswith("FunGen") and version == FUNSCRIPT_METADATA_VERSION:
@@ -81,9 +83,12 @@ class ImGuiFileDialog:
             else:
                 return 'other'
         except Exception as e:
-            self.logger.warning(f"Could not parse funscript '{os.path.basename(funscript_path)}': {e}")
-            return 'other' # If it exists but is unreadable, still mark it as 'other'.
+            logger.warning(f"Could not parse funscript '{os.path.basename(funscript_path)}': {e}")
+            return 'other'
 
+    def _get_funscript_status(self, video_path: str) -> Optional[str]:
+        """Instance method wrapper for the static funscript status checker."""
+        return ImGuiFileDialog.get_funscript_status(video_path, self.logger)
 
 
     def show(

@@ -963,7 +963,7 @@ class ControlPanelUI:
             total_videos = len(self.app.batch_video_paths)
             current_idx = self.app.current_batch_video_index
             if 0 <= current_idx < total_videos:
-                current_video_name = os.path.basename(self.app.batch_video_paths[current_idx])
+                current_video_name = os.path.basename(self.app.batch_video_paths[current_idx]["path"])
                 imgui.text_wrapped(f"Processing {current_idx + 1}/{total_videos}:")
                 imgui.text_wrapped(f"{current_video_name}")
             if imgui.button("Abort Batch Process", width=-1):
@@ -982,6 +982,8 @@ class ControlPanelUI:
                 if self.app.processor.pause_event.is_set():
                     if imgui.button("Resume Tracking", width=button_width):
                         self.app.processor.start_processing()
+                        if not self.app.tracker.tracking_active:
+                            self.app.tracker.start_tracking()
                 else:
                     if imgui.button("Pause Tracking", width=button_width):
                         self.app.processor.pause_processing()
@@ -1196,19 +1198,71 @@ class ControlPanelUI:
         imgui.text("Analysis Grid Size")
         if imgui.is_item_hovered():
             imgui.set_tooltip(
-                "Finer grids (higher numbers) are more precise but use more CPU.\n10=Coarse, 20=Balanced, 30=Fine")
+                "Finer grids (higher numbers) are more precise but use more CPU.\n8=Very Coarse, 20=Balanced, 40=Fine, 80=Very Fine")
 
         current_grid_size = settings.get("oscillation_detector_grid_size", 20)
         imgui.push_item_width(200)
-        changed, new_grid_size = imgui.slider_int("##GridSize", current_grid_size, 10, 40)
+        changed, new_grid_size = imgui.slider_int("##GridSize", current_grid_size, 8, 80)
         if changed:
             # Block size must be an integer, so we enforce grid sizes that divide 640.
-            valid_sizes = [10, 16, 20, 32, 40]
+            valid_sizes = [8, 10, 16, 20, 32, 40, 64, 80]
             closest_size = min(valid_sizes, key=lambda x: abs(x - new_grid_size))
             if closest_size != current_grid_size:
                 settings.set("oscillation_detector_grid_size", closest_size)
-                # No need to tell the tracker; it will read this on the next run.
+                # Update the tracker immediately with the new grid size
+                if self.app and self.app.tracker:
+                    self.app.tracker.update_oscillation_grid_size()
         imgui.pop_item_width()
+
+        # --- Sensitivity Control ---
+        imgui.text("Detection Sensitivity")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Adjusts how sensitive the oscillation detector is to motion.\nLower values = less sensitive, Higher values = more sensitive")
+
+        current_sensitivity = settings.get("oscillation_detector_sensitivity", 1.0)
+        imgui.push_item_width(200)
+        changed_sens, new_sensitivity = imgui.slider_float("##Sensitivity", current_sensitivity, 0.1, 3.0, "%.2f")
+        if changed_sens:
+            settings.set("oscillation_detector_sensitivity", new_sensitivity)
+            # Update the tracker immediately with the new sensitivity
+            if self.app and self.app.tracker:
+                self.app.tracker.update_oscillation_sensitivity()
+        imgui.pop_item_width()
+
+        imgui.separator()
+
+        # --- Oscillation Area Selection Controls ---
+        imgui.text("Oscillation Area Selection")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Select a specific area for oscillation detection instead of the full frame.")
+
+        has_oscillation_area = self.app.tracker and self.app.tracker.oscillation_area_fixed
+        button_count = 2 if has_oscillation_area else 1
+        available_width = imgui.get_content_region_available_width()
+        button_width = (available_width - imgui.get_style().item_spacing.x * (button_count - 1)) / button_count if button_count > 1 else -1
+
+        set_oscillation_area_text = "Cancel Set Oscillation Area" if self.app.is_setting_oscillation_area_mode else "Set Oscillation Area"
+        if imgui.button(f"{set_oscillation_area_text}##SetOscillationArea", width=button_width):
+            if self.app.is_setting_oscillation_area_mode:
+                self.app.exit_set_oscillation_area_mode()
+            else:
+                self.app.enter_set_oscillation_area_mode()
+
+        if has_oscillation_area:
+            if imgui.button("Clear Oscillation Area##ClearOscillationArea", width=button_width):
+                self.app.tracker.clear_oscillation_area_and_point()
+                # Force UI state reset
+                if hasattr(self.app, 'is_setting_oscillation_area_mode'):
+                    self.app.is_setting_oscillation_area_mode = False
+                # Clear drawing state in video display UI
+                if hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance, 'video_display_ui'):
+                    video_ui = self.app.gui_instance.video_display_ui
+                    video_ui.is_drawing_oscillation_area = False
+                    video_ui.drawn_oscillation_area_video_coords = None
+                    video_ui.waiting_for_oscillation_point_click = False
+                    video_ui.oscillation_area_draw_start_screen_pos = (0, 0)
+                    video_ui.oscillation_area_draw_current_screen_pos = (0, 0)
+                self.app.logger.info("Oscillation area cleared.", extra={'status_message': True})
 
         imgui.separator()
 
@@ -1301,8 +1355,9 @@ class ControlPanelUI:
         if has_roi:
             imgui.same_line()
             if imgui.button("Clear ROI##UserClearROI_RunTab", width=button_width):
-                if self.app.tracker and hasattr(self.app.tracker, 'clear_user_roi'):
-                    self.app.tracker.clear_user_roi()
+                if self.app.tracker and hasattr(self.app.tracker, 'clear_user_defined_roi_and_point'):
+                    self.app.tracker.stop_tracking()
+                    self.app.tracker.clear_user_defined_roi_and_point()
                     self.app.logger.info("User ROI cleared.", extra={'status_message': True})
 
         if set_roi_button_disabled:

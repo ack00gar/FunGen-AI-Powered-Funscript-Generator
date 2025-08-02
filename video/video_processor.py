@@ -541,6 +541,48 @@ class VideoProcessor:
                     return self.frame_cache[frame_index_abs]
             return None
 
+    @staticmethod
+    def get_video_type_heuristic(video_path: str) -> str:
+        """
+        A lightweight heuristic to guess the video type (2D/VR) and format (SBS/TB)
+        without fully opening the video. Uses ffprobe for metadata.
+        """
+        if not os.path.exists(video_path):
+            return "Unknown"
+
+        try:
+            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                   '-show_entries', 'stream=width,height', '-of', 'json', video_path]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, timeout=5)
+            data = json.loads(result.stdout)
+            stream_info = data.get('streams', [{}])[0]
+            width = int(stream_info.get('width', 0))
+            height = int(stream_info.get('height', 0))
+        except Exception:
+            return "Unknown"
+
+        if width == 0 or height == 0:
+            return "Unknown"
+
+        is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
+        is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * height
+        upper_video_path = video_path.upper()
+        vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
+        has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
+
+        if not (is_sbs_resolution or is_tb_resolution or has_vr_keyword):
+            return "2D"
+
+        # If VR, guess the specific format
+        suggested_base = 'he'
+        suggested_layout = '_sbs'
+        if is_tb_resolution or any(kw in upper_video_path for kw in ['_TB', 'TB_', 'TOPBOTTOM', 'OVERUNDER', '_OU', 'OU_']):
+            suggested_layout = '_tb'
+        if any(kw in upper_video_path for kw in ['FISHEYE', 'MKX', 'RF52']):
+            suggested_base = 'fisheye'
+
+        return f"VR ({suggested_base}{suggested_layout})"
+
     def _get_video_info(self, filename):
         # TODO: Add ffprobe detection and metadata extraction for YUV videos. Pass metadata to cv2 so it can use the correct decoder. Use metadata + cv2.cvtColor to convert to RGB.
         cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
@@ -932,7 +974,7 @@ class VideoProcessor:
                 self.ffmpeg_process = None
                 return False
 
-    def start_processing(self, start_frame=None, end_frame=None):
+    def start_processing(self, start_frame=None, end_frame=None, cli_progress_callback=None):
         # If we are already processing but are in a paused state, just un-pause.
         if self.is_processing and self.pause_event.is_set():
             self.logger.info("Resuming video processing...")
@@ -948,6 +990,8 @@ class VideoProcessor:
         if not self.video_path or not self.video_info:
             self.logger.warning("Video not loaded.")
             return
+
+        self.cli_progress_callback = cli_progress_callback
 
         effective_start_frame = self.current_frame_index
         # The check for `is_paused` is removed here, as the new block above handles it.
@@ -1088,6 +1132,8 @@ class VideoProcessor:
             self.is_processing = False
             return
 
+        start_time = time.time()  # For calculating FPS and ETA in the callback
+
         loop_ffmpeg_process = self.ffmpeg_process
         next_frame_target_time = time.perf_counter()
         self.last_processed_chapter_id = None
@@ -1158,6 +1204,11 @@ class VideoProcessor:
 
                 self.current_frame_index = self.current_stream_start_frame_abs + self.frames_read_from_current_stream
                 self.frames_read_from_current_stream += 1
+
+                if self.cli_progress_callback:
+                    # Throttle updates to avoid slowing down processing (e.g., update every 10 frames)
+                    if self.current_frame_index % 10 == 0 or self.current_frame_index == self.total_frames - 1:
+                        self.cli_progress_callback(self.current_frame_index, self.total_frames, start_time)
 
                 if self.processing_end_frame_limit != -1 and self.current_frame_index > self.processing_end_frame_limit:
                     self.logger.info(f"Reached GUI end_frame_limit ({self.processing_end_frame_limit}). Stopping.")
