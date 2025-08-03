@@ -8,7 +8,7 @@ import time
 import threading
 import queue
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from application.classes.gauge import GaugeWindow
 from application.classes.file_dialog import ImGuiFileDialog
@@ -24,6 +24,7 @@ from application.gui_components.generated_file_manager_window import GeneratedFi
 from application.gui_components.autotuner_window import AutotunerWindow
 
 from application.utils.time_format import _format_time
+from application.utils.processing_thread_manager import ProcessingThreadManager, TaskType, TaskPriority
 
 from config import constants
 from config.element_group_colors import AppGUIColors
@@ -42,12 +43,23 @@ class GUI:
         self.heatmap_texture_id = 0
         self.funscript_preview_texture_id = 0
 
-        # --- Threading for asynchronous preview generation ---
+        # --- Advanced Threading Architecture ---
+        # Legacy preview threading (keep for now for compatibility)
         self.preview_task_queue = queue.Queue()
         self.preview_results_queue = queue.Queue()
         self.shutdown_event = threading.Event()
         self.preview_worker_thread = threading.Thread(target=self._preview_generation_worker, daemon=True)
         self.preview_worker_thread.start()
+        
+        # New ProcessingThreadManager for GPU-intensive operations
+        self.processing_thread_manager = ProcessingThreadManager(
+            max_worker_threads=2,
+            logger=self.app.logger
+        )
+        
+        # Progress tracking for threaded operations
+        self.active_threaded_operations: Dict[str, Dict] = {}
+        self.processing_thread_manager.set_global_progress_callback(self._handle_threaded_progress)
 
         # --- State for incremental texture generation ---
         self.last_submitted_action_count_timeline: int = 0
@@ -173,6 +185,81 @@ class GUI:
             pass  # No results to process
         except Exception as e:
             self.app.logger.error(f"Error processing preview results: {e}", exc_info=True)
+
+    def _handle_threaded_progress(self, task_id: str, progress: float, message: str):
+        """Handle progress updates from threaded operations."""
+        if task_id in self.active_threaded_operations:
+            self.active_threaded_operations[task_id].update({
+                'progress': progress,
+                'message': message,
+                'last_update': time.time()
+            })
+            
+            # Update UI status if this is a high-priority operation
+            operation_info = self.active_threaded_operations[task_id]
+            if operation_info.get('show_in_status', False):
+                status_msg = f"{operation_info.get('name', 'Processing')}: {message} ({progress*100:.1f}%)"
+                self.app.set_status_message(status_msg, duration=1.0)
+
+    def submit_async_processing_task(
+        self,
+        task_id: str,
+        task_type: TaskType,
+        function,
+        args=(),
+        kwargs=None,
+        priority: TaskPriority = TaskPriority.NORMAL,
+        name: str = "Processing",
+        show_in_status: bool = True
+    ):
+        """
+        Submit a processing task to run asynchronously without blocking the UI.
+        
+        Args:
+            task_id: Unique identifier for the task
+            task_type: Type of processing task
+            function: Function to execute
+            args: Function arguments
+            kwargs: Function keyword arguments
+            priority: Task priority
+            name: Human-readable name for progress display
+            show_in_status: Whether to show progress in status bar
+        """
+        # Track the operation
+        self.active_threaded_operations[task_id] = {
+            'name': name,
+            'show_in_status': show_in_status,
+            'progress': 0.0,
+            'message': 'Starting...',
+            'started_time': time.time()
+        }
+        
+        # Submit to processing thread manager
+        def completion_callback(result):
+            # Clean up tracking
+            if task_id in self.active_threaded_operations:
+                del self.active_threaded_operations[task_id]
+            self.app.logger.info(f"Async task {task_id} completed successfully")
+        
+        def error_callback(error):
+            # Clean up tracking and show error
+            if task_id in self.active_threaded_operations:
+                del self.active_threaded_operations[task_id]
+            self.app.logger.error(f"Async task {task_id} failed: {error}")
+            self.app.set_status_message(f"Error in {name}: {str(error)}", duration=5.0)
+        
+        self.processing_thread_manager.submit_task(
+            task_id=task_id,
+            task_type=task_type,
+            function=function,
+            args=args,
+            kwargs=kwargs or {},
+            priority=priority,
+            completion_callback=completion_callback,
+            error_callback=error_callback
+        )
+        
+        self.app.logger.info(f"Submitted async task: {task_id} ({name})")
 
     # --- Extracted CPU-intensive drawing logic for timeline ---
     def _generate_funscript_preview_data(self, target_width, target_height, total_duration_s, actions):
@@ -1173,9 +1260,14 @@ class GUI:
         finally:
             self.app.shutdown_app()
 
-            # --- Cleanly shut down the worker thread ---
+            # --- Cleanly shut down all worker threads ---
             self.shutdown_event.set()
-            # Unblock the queue in case the worker is waiting
+            
+            # Shutdown ProcessingThreadManager first
+            self.app.logger.info("Shutting down ProcessingThreadManager...")
+            self.processing_thread_manager.shutdown(timeout=3.0)
+            
+            # Shutdown legacy preview worker thread
             try:
                 self.preview_task_queue.put_nowait({'type': 'shutdown'})
             except queue.Full:
