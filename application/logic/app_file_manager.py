@@ -361,9 +361,9 @@ class AppFileManager:
                                f"({preprocessed_status['frame_count']}/{preprocessed_status['expected_frames']} frames)")
             else:
                 self.preprocessed_video_path = None
-                self.logger.warning(f"Found invalid preprocessed video: {os.path.basename(potential_preprocessed_path)} "
-                                  f"({preprocessed_status['frame_count']}/{preprocessed_status['expected_frames']} frames) - "
-                                  f"will be cleaned up automatically")
+                #self.logger.warning(f"Found invalid preprocessed video: {os.path.basename(potential_preprocessed_path)} "
+                #                  f"({preprocessed_status['frame_count']}/{preprocessed_status['expected_frames']} frames) - "
+                #                  f"will be cleaned up automatically")
         else:
             self.preprocessed_video_path = None
 

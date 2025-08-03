@@ -76,12 +76,13 @@ class VideoNavigationUI:
 
         if should_render:
             actual_content_width = imgui.get_content_region_available()[0]
-            stage_proc = self.app.stage_processor
-            file_mgr = self.app.file_manager
             fs_proc = self.app.funscript_processor
 
-            self._render_seek_bar(stage_proc, file_mgr, self.app.event_handlers, actual_content_width)
-            imgui.spacing()
+            eff_duration_s, _, _ = self.app.get_effective_video_duration_params()
+            if app_state.show_funscript_timeline:
+                imgui.push_item_width(actual_content_width)
+                self._render_funscript_timeline_preview(eff_duration_s, app_state.funscript_preview_draw_height)
+                imgui.pop_item_width()
 
             total_frames_for_bars = 0
             if self.app.processor and self.app.processor.video_info and self.app.processor.video_info.get(
@@ -95,12 +96,6 @@ class VideoNavigationUI:
             self._render_chapter_bar(fs_proc, total_frames_for_bars, actual_content_width, chapter_bar_h)
             imgui.spacing()
 
-            eff_duration_s, _, _ = self.app.get_effective_video_duration_params()
-            if app_state.show_funscript_timeline:
-                imgui.push_item_width(actual_content_width)
-                self._render_funscript_timeline_preview(eff_duration_s, app_state.funscript_preview_draw_height)
-                imgui.pop_item_width()
-                imgui.spacing()
             if app_state.show_heatmap:
                 self._render_funscript_heatmap_preview(eff_duration_s, actual_content_width, app_state.timeline_heatmap_height)
                 imgui.spacing()
@@ -153,43 +148,6 @@ class VideoNavigationUI:
             imgui.pop_font()
 
         imgui.end()
-
-    def _render_seek_bar(self, stage_proc, file_mgr, event_handlers, nav_content_width):
-        style = imgui.get_style()
-        controls_disabled_nav = stage_proc.full_analysis_active or not file_mgr.video_path
-        button_h_ref = imgui.get_frame_height()
-
-        if controls_disabled_nav:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
-
-        # Seek bar takes up the full available navigation content width.
-        # nav_content_width is assumed to be the usable width.
-        seek_bar_width = max(50.0, nav_content_width)  # Changed from subtracting padding
-
-        imgui.push_item_width(seek_bar_width)
-        eff_duration_s, total_frames, fps_val = self.app.get_effective_video_duration_params()
-        has_video = self.app.processor and self.app.processor.video_info and total_frames > 0
-        has_funscript_actions = len(self.app.funscript_processor.get_actions('primary')) > 0
-
-        if has_video and total_frames > 1:
-            current_frame = self.app.processor.current_frame_index
-            current_time_s = current_frame / fps_val if fps_val > 0 else 0
-            seek_max_frame = max(0, total_frames - 1)
-            if current_frame > seek_max_frame: current_frame = seek_max_frame
-
-            seek_format = f"F:{current_frame}/{seek_max_frame} T:{_format_time(self.app, current_time_s)}/{_format_time(self.app, eff_duration_s)}"
-            changed, seek_frame = imgui.slider_int("##FrameSeek", current_frame, 0, seek_max_frame, format=seek_format)
-            if changed: event_handlers.handle_seek_bar_drag(seek_frame)
-        elif has_funscript_actions and not has_video:
-            imgui.text_disabled(f"Script: {_format_time(self.app, eff_duration_s)}")
-        else:
-            imgui.dummy(seek_bar_width, button_h_ref)
-        imgui.pop_item_width()
-
-        if controls_disabled_nav:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
 
     def _render_chapter_bar(self, fs_proc, total_video_frames: int, bar_width: float, bar_height: float):
         ###########################################################################################
@@ -315,7 +273,11 @@ class VideoNavigationUI:
                 if imgui.is_mouse_double_clicked(0):
                     action_on_segment_this_frame = True
                     if self.app.processor:
-                        self.app.processor.seek_video(segment.start_frame_id)
+                        io = imgui.get_io()
+                        if io.key_alt:
+                            self.app.processor.seek_video(segment.end_frame_id)
+                        else:
+                            self.app.processor.seek_video(segment.start_frame_id)
                 elif imgui.is_item_clicked(0):
                     action_on_segment_this_frame = True
                     io = imgui.get_io()
@@ -348,8 +310,11 @@ class VideoNavigationUI:
 
                 elif imgui.is_item_clicked(1):
                     action_on_segment_this_frame = True
+                    if segment not in self.context_selected_chapters:
+                        self.context_selected_chapters.clear()
+                        self.context_selected_chapters.append(segment)
                     self.app.logger.debug(
-                        f"Right clicked on chapter {segment.unique_id}. Current selection (unmodified by this right-click): {[s.unique_id for s in self.context_selected_chapters]}. Opening context menu: {self.chapter_bar_popup_id}")
+                        f"Right clicked on chapter {segment.unique_id}. Current selection: {[s.unique_id for s in self.context_selected_chapters]}. Opening context menu: {self.chapter_bar_popup_id}")
                     imgui.open_popup(self.chapter_bar_popup_id)
 
         if self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0 and total_video_frames > 0:
@@ -715,7 +680,7 @@ class VideoNavigationUI:
             can_split = False
             split_frame = self.app.processor.current_frame_index if self.app.processor else None
             split_pos_key = None
-            if can_select_one and self.context_selected_chapters:
+            if num_selected == 1 and self.context_selected_chapters:
                 chapter = self.context_selected_chapters[0]
                 if split_frame is not None and chapter.start_frame_id < split_frame < chapter.end_frame_id:
                     # Find the key in POSITION_INFO_MAPPING whose short_name matches the chapter's position_short_name

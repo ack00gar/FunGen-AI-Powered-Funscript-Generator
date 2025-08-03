@@ -23,6 +23,8 @@ from application.gui_components.info_graphs_ui import InfoGraphsUI
 from application.gui_components.generated_file_manager_window import GeneratedFileManagerWindow
 from application.gui_components.autotuner_window import AutotunerWindow
 
+from application.utils.time_format import _format_time
+
 from config import constants
 from config.element_group_colors import AppGUIColors
 
@@ -472,11 +474,28 @@ class GUI:
                 self.last_preview_update_time_timeline = time.time()
 
         # --- Rendering Logic (uses the existing texture until a new one is ready) ---
-        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 5)
+        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 20)
         canvas_p1_x = imgui.get_cursor_screen_pos()[0]
         canvas_p1_y_offset = imgui.get_cursor_screen_pos()[1]
 
         imgui.image(self.funscript_preview_texture_id, current_bar_width_float, graph_height, uv0=(0, 0), uv1=(1, 1))
+
+        # --- Add seeking capability to the funscript preview bar ---
+        if imgui.is_item_hovered():
+            mouse_x = imgui.get_mouse_pos()[0] - canvas_p1_x
+            normalized_pos = np.clip(mouse_x / current_bar_width_float, 0.0, 1.0)
+            if self.app.processor and self.app.processor.video_info:
+                total_frames = self.app.processor.video_info.get('total_frames', 0)
+                if total_frames > 0:
+                    if (imgui.is_mouse_dragging(0) or imgui.is_mouse_down(0)):
+                        seek_frame = int(normalized_pos * (total_frames - 1))
+                        self.app.event_handlers.handle_seek_bar_drag(seek_frame)
+                    else:
+                        # Show tooltip with time
+                        total_duration = self.app.processor.video_info.get('duration_s', 0)
+                        if total_duration > 0:
+                            hover_time_s = normalized_pos * total_duration
+                            imgui.set_tooltip(f"{_format_time(self.app, hover_time_s)} / {_format_time(self.app, total_duration)}")
 
         # Draw playback marker over the image
         if self.app.file_manager.video_path and self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0:
@@ -486,51 +505,28 @@ class GUI:
                 marker_x = (canvas_p1_x + style.frame_padding[0]) + (normalized_pos * (current_bar_width_float - style.frame_padding[0] * 2))
                 marker_color = imgui.get_color_u32_rgba(*AppGUIColors.MARKER)
                 draw_list_marker = imgui.get_window_draw_list()
+
+                # Draw triangle
+                triangle_p1 = (marker_x - 5, canvas_p1_y_offset)
+                triangle_p2 = (marker_x + 5, canvas_p1_y_offset)
+                triangle_p3 = (marker_x, canvas_p1_y_offset + 5)
+                draw_list_marker.add_triangle_filled(triangle_p1[0], triangle_p1[1], triangle_p2[0], triangle_p2[1], triangle_p3[0], triangle_p3[1], marker_color)
+
+                # Draw line
                 draw_list_marker.add_line(marker_x, canvas_p1_y_offset, marker_x, canvas_p1_y_offset + graph_height, marker_color, 1.0)
 
-        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 5)
-
-    # --- This function now submits a task to the worker thread ---
-    def render_funscript_heatmap_preview(self, total_video_duration_s: float, bar_width_float: float, bar_height_float: float):
-        app_state = self.app.app_state_ui
-        current_bar_width_int = int(round(bar_width_float))
-        if current_bar_width_int <= 0 or app_state.heatmap_texture_fixed_height <= 0 or not self.heatmap_texture_id:
-            imgui.dummy(bar_width_float, bar_height_float)
-            return
-
-        current_action_count = len(self.app.funscript_processor.get_actions('primary'))
-        is_live_tracking = self.app.processor and self.app.processor.tracker and self.app.processor.tracker.tracking_active
-
-        full_redraw_needed = (
-            app_state.heatmap_dirty
-            or current_bar_width_int != app_state.last_heatmap_bar_width
-            or abs(total_video_duration_s - app_state.last_heatmap_video_duration_s) > 0.01)
-
-        incremental_update_needed = current_action_count != self.last_submitted_action_count_heatmap
-
-        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (time.time() - self.last_preview_update_time_heatmap >= self.preview_update_interval_seconds)))
-
-        if needs_regen and self.preview_task_queue.empty():
-            actions_copy = self.app.funscript_processor.get_actions('primary').copy()
-            task = {
-                'type': 'heatmap',
-                'target_width': current_bar_width_int,
-                'target_height': app_state.heatmap_texture_fixed_height,
-                'total_duration_s': total_video_duration_s,
-                'actions': actions_copy
-            }
-            self.preview_task_queue.put(task)
-
-            # Update state after submission
-            app_state.heatmap_dirty = False
-            app_state.last_heatmap_bar_width = current_bar_width_int
-            app_state.last_heatmap_video_duration_s = total_video_duration_s
-            self.last_submitted_action_count_heatmap = current_action_count
-            if is_live_tracking and incremental_update_needed:
-                self.last_preview_update_time_heatmap = time.time()
-
-        # Render the existing texture
-        imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
+                # Draw text
+                current_frame = self.app.processor.current_frame_index
+                current_time_s = self.app.processor.current_frame_index / self.app.processor.video_info.get('fps', 30.0)
+                text = f"{_format_time(self.app, current_time_s)} ({current_frame})"
+                text_size = imgui.calc_text_size(text)
+                text_pos_x = marker_x - text_size[0] / 2
+                if text_pos_x < canvas_p1_x:
+                    text_pos_x = canvas_p1_x
+                if text_pos_x + text_size[0] > canvas_p1_x + current_bar_width_float:
+                    text_pos_x = canvas_p1_x + current_bar_width_float - text_size[0]
+                text_pos = (text_pos_x, canvas_p1_y_offset - text_size[1] - 2)
+                draw_list_marker.add_text(text_pos[0], text_pos[1], imgui.get_color_u32_rgba(1, 1, 1, 1), text)
 
     def _render_first_run_setup_popup(self):
         app = self.app
