@@ -62,6 +62,7 @@ class ROITracker:
         self.oscillation_area_initial_point_relative: Optional[Tuple[float, float]] = None
         self.oscillation_area_tracked_point_relative: Optional[Tuple[float, float]] = None
         self.prev_gray_oscillation_area_patch: Optional[np.ndarray] = None
+        self.oscillation_ema_alpha: float = 0.3
 
         # --- Static grid storage for oscillation area ---
         self.oscillation_grid_blocks: List[Tuple[int, int, int, int]] = []  # List of (x, y, w, h) for each grid block
@@ -170,6 +171,9 @@ class ROITracker:
         self.motion_mode_history_window: int = 30  # Buffer size, e.g., 1s at 30fps
         self.motion_inversion_threshold: float = 1.2  # Motion in one region must be 20% greater than the other to trigger a change
 
+        self.oscillation_cell_persistence = {}  # Tracks active cells over time
+        self.OSCILLATION_PERSISTENCE_FRAMES = 4  # A cell stays active for 4 frames without motion
+
         # --- Attributes for Oscillation Detector ---
         self.oscillation_grid_size: int = self.app.app_settings.get("oscillation_detector_grid_size", 20) if self.app else 20
         self.oscillation_block_size: int = constants.YOLO_INPUT_SIZE // self.oscillation_grid_size
@@ -181,6 +185,9 @@ class ROITracker:
         # --- Initialize deque with a default maxlen. It will be resized in start_tracking. ---
         self.oscillation_position_history = deque(maxlen=120) # Default to 4 seconds @ 30fps
         self.oscillation_last_known_pos: float = 50.0
+        self.oscillation_last_known_secondary_pos = 50.0
+        self.oscillation_last_active_time = 0
+        self.oscillation_hold_duration_ms = 250  # Hold for 250ms before decaying
         self.oscillation_ema_alpha: float = 0.3 # Smoothing factor for the final signal
         self.oscillation_history_max_len: int = 60
 
@@ -1457,8 +1464,11 @@ class ROITracker:
 
     def process_frame_for_oscillation(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
         """
-        [V3] Processes a frame to detect rhythmic oscillations. Culls black bars, uses a configurable
-        grid, and employs cohesion, frequency weighting, and EMA smoothing for a natural signal.
+        [V8 - Final] CPU-Optimized oscillation detection with corrected action logging.
+        - Single Flow Calculation: Uses DISOpticalFlow ONCE per frame for high performance.
+        - Masked Sampling: A motion mask determines which parts of the flow field to analyze.
+        - Cell Persistence: Reduces signal jerkiness by keeping cells active through brief pauses.
+        - Robust Scoring: Works immediately without needing a long history.
         """
         processed_frame = self.preprocess_frame(frame)
         current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
@@ -1472,309 +1482,144 @@ class ROITracker:
             self.logger.warning("Dense optical flow not available for oscillation detection.")
             return processed_frame, None
 
-        # --- Detect active video area to ignore black bars ---
-        active_area_rect = (0, 0, current_gray.shape[1], current_gray.shape[0])
-        if np.any(current_gray):
-            rows = np.any(current_gray, axis=1)
-            cols = np.any(current_gray, axis=0)
-            if np.any(rows) and np.any(cols):
-                y_min, y_max = np.where(rows)[0][[0, -1]]
-                x_min, x_max = np.where(cols)[0][[0, -1]]
-                active_area_rect = (x_min, y_min, x_max, y_max)
-
-        # --- Apply oscillation area selection AFTER black bar detection ---
-        use_oscillation_area = self.oscillation_area_fixed is not None
-        if use_oscillation_area:
-            ax, ay, aw, ah = self.oscillation_area_fixed
-            ax_c, ay_c = max(0, ax), max(0, ay)
-            aw_c = min(aw, current_gray.shape[1] - ax_c)
-            ah_c = min(ah, current_gray.shape[0] - ay_c)
-
-            if aw_c > 0 and ah_c > 0:
-                # Use only the selected oscillation area
-                current_gray = current_gray[ay_c:ay_c + ah_c, ax_c:ax_c + aw_c]
-                if self.prev_gray_oscillation is not None:
-                    self.prev_gray_oscillation = self.prev_gray_oscillation[ay_c:ay_c + ah_c, ax_c:ax_c + aw_c]
-                self.logger.debug(f"Using oscillation area: {ax_c},{ay_c},{aw_c},{ah_c}, cropped size: {current_gray.shape}")
-            else:
-                self.logger.warning("Oscillation area has zero size, falling back to full frame.")
-                use_oscillation_area = False
-
-        prev_gray_cont = np.ascontiguousarray(self.prev_gray_oscillation)
-        current_gray_cont = np.ascontiguousarray(current_gray)
-        flow = self.flow_dense.calc(prev_gray_cont, current_gray_cont, None)
-
+        # Step 1: Calculate Optical Flow ONCE for the entire frame
+        flow = self.flow_dense.calc(self.prev_gray_oscillation, current_gray, None)
         if flow is None:
             self.prev_gray_oscillation = current_gray
             return processed_frame, None
 
-        # Analyze flow in grid blocks
+        # Step 2: Update Active Cells using Motion Mask and Persistence
+        min_motion_threshold = 15  # Tuned threshold
+        min_cell_activation_pixels = (self.oscillation_block_size ** 2) * 0.05
+
+        frame_diff = cv2.absdiff(current_gray, self.prev_gray_oscillation)
+        _, motion_mask = cv2.threshold(frame_diff, min_motion_threshold, 255, cv2.THRESH_BINARY)
+
+        newly_active_cells = set()
+        for r in range(self.oscillation_grid_size):
+            for c in range(self.oscillation_grid_size):
+                y_start = r * self.oscillation_block_size
+                x_start = c * self.oscillation_block_size
+                mask_roi = motion_mask[y_start:y_start + self.oscillation_block_size, x_start:x_start + self.oscillation_block_size]
+                if cv2.countNonZero(mask_roi) > min_cell_activation_pixels:
+                    newly_active_cells.add((r, c))
+
+        # Update persistence counters
+        # Add newly active cells or reset their timers
+        for cell_pos in newly_active_cells:
+            self.oscillation_cell_persistence[cell_pos] = self.OSCILLATION_PERSISTENCE_FRAMES
+
+        # Decrement and remove expired cells
+        expired_cells = []
+        for cell_pos, timer in self.oscillation_cell_persistence.items():
+            self.oscillation_cell_persistence[cell_pos] = timer - 1
+            if self.oscillation_cell_persistence[cell_pos] <= 0:
+                expired_cells.append(cell_pos)
+
+        for cell_pos in expired_cells:
+            del self.oscillation_cell_persistence[cell_pos]
+
+        # The "truly" active cells are those still in the persistence dictionary
+        persistent_active_cells = list(self.oscillation_cell_persistence.keys())
+
+        # Step 3: Analyze Motion in Persistently Active Cells
         block_motions = []
+        max_magnitude = 0.0
+        for r, c in persistent_active_cells:
+            y_start = r * self.oscillation_block_size
+            x_start = c * self.oscillation_block_size
 
-        # When using oscillation area, we need to adjust the grid analysis for the cropped area
-        if use_oscillation_area:
-            # The flow is now calculated on the cropped area, so we need to adjust grid size for the smaller area
-            cropped_h, cropped_w = current_gray.shape[:2]
+            # Sample the pre-computed flow field for this cell's ROI
+            flow_patch = flow[y_start:y_start + self.oscillation_block_size, x_start:x_start + self.oscillation_block_size]
 
-            # Use a smaller effective grid size for oscillation area to maintain reasonable block sizes and performance
-            effective_grid_size = min(self.oscillation_grid_size, min(cropped_h, cropped_w) // 8)  # Ensure blocks are at least 8x8 pixels
-            adjusted_block_size = min(cropped_h // effective_grid_size, cropped_w // effective_grid_size)
-            if adjusted_block_size < 8:  # Minimum block size for performance
-                adjusted_block_size = 8
+            if flow_patch.size > 0:
+                # Your global motion cancellation can be added here if needed
+                dx, dy = np.median(flow_patch[..., 0]), np.median(flow_patch[..., 1])
+                mag = np.sqrt(dx ** 2 + dy ** 2)
+                if mag > max_magnitude:
+                    max_magnitude = mag
+                block_motions.append({'dx': dx, 'dy': dy, 'mag': mag, 'pos': (r, c)})
 
-            # Calculate how many blocks fit in the cropped area
-            max_blocks_h = cropped_h // adjusted_block_size
-            max_blocks_w = cropped_w // adjusted_block_size
+                # Update history for this block
+                if (r, c) not in self.oscillation_history:
+                    self.oscillation_history[(r, c)] = deque(maxlen=self.oscillation_history_max_len)
+                self.oscillation_history[(r, c)].append({'dx': dx, 'dy': dy, 'mag': mag})
 
-            # Store the adjusted block size for consistent visualization
-            self.oscillation_adjusted_block_size = adjusted_block_size
-            self.oscillation_max_blocks_h = max_blocks_h
-            self.oscillation_max_blocks_w = max_blocks_w
-
-            self.logger.debug(f"Oscillation area grid: {max_blocks_h}x{max_blocks_w} blocks, block size: {adjusted_block_size}, effective grid size: {effective_grid_size}")
-
-            for r in range(max_blocks_h):
-                for c in range(max_blocks_w):
-                    y_start = r * adjusted_block_size
-                    x_start = c * adjusted_block_size
-
-                    # Ensure we don't go out of bounds
-                    y_end = min(y_start + adjusted_block_size, cropped_h)
-                    x_end = min(x_start + adjusted_block_size, cropped_w)
-
-                    block_flow = flow[y_start:y_end, x_start:x_end]
-
-                    if block_flow.size > 0:
-                        dx, dy = np.median(block_flow[..., 0]), np.median(block_flow[..., 1])
-                        mag = np.sqrt(dx ** 2 + dy ** 2)
-                        block_motions.append({'dx': dx, 'dy': dy, 'mag': mag, 'pos': (r, c)})
-
-                        block_pos = (r, c)
-                        if block_pos not in self.oscillation_history:
-                            self.oscillation_history[block_pos] = deque(maxlen=self.oscillation_history_max_len)
-                        self.oscillation_history[block_pos].append({'dx': dx, 'dy': dy, 'mag': mag})
-        else:
-            # Original full-frame analysis with black bar detection
-            ax_min, ay_min, ax_max, ay_max = active_area_rect
-            for r in range(self.oscillation_grid_size):
-                for c in range(self.oscillation_grid_size):
-                    y_start, x_start = r * self.oscillation_block_size, c * self.oscillation_block_size
-
-                    # --- Skip blocks in black bar areas ---
-                    block_center_x = x_start + self.oscillation_block_size / 2
-                    block_center_y = y_start + self.oscillation_block_size / 2
-
-                    if not (ax_min < block_center_x < ax_max and ay_min < block_center_y < ay_max):
-                        continue  # Skip blocks in padded areas
-
-                    block_flow = flow[y_start:y_start + self.oscillation_block_size,
-                                 x_start:x_start + self.oscillation_block_size]
-
-                    if block_flow.size > 0:
-                        dx, dy = np.median(block_flow[..., 0]), np.median(block_flow[..., 1])
-                        mag = np.sqrt(dx ** 2 + dy ** 2)
-                        block_motions.append({'dx': dx, 'dy': dy, 'mag': mag, 'pos': (r, c)})
-
-                        block_pos = (r, c)
-                        if block_pos not in self.oscillation_history:
-                            self.oscillation_history[block_pos] = deque(maxlen=self.oscillation_history_max_len)
-                        self.oscillation_history[block_pos].append({'dx': dx, 'dy': dy, 'mag': mag})
-
-            self.logger.debug(f"Processed {len(block_motions)} blocks in oscillation area")
-
-        is_camera_motion = False
-        median_dx, median_dy = (np.median([m['dx'] for m in block_motions]),
-                                np.median([m['dy'] for m in block_motions])) if block_motions else (0, 0)
-        if np.sqrt(median_dx ** 2 + median_dy ** 2) > 1.0:
-            coherent_blocks = 0
-            vec_median = np.array([median_dx, median_dy])
-            for motion in block_motions:
-                vec_block = np.array([motion['dx'], motion['dy']])
-                if np.linalg.norm(vec_block) > 0.5:
-                    cosine_sim = np.dot(vec_block, vec_median) / (np.linalg.norm(vec_block) * np.linalg.norm(vec_median) + 1e-6)
-                    if cosine_sim > 0.8:
-                        coherent_blocks += 1
-            if block_motions and (coherent_blocks / len(block_motions)) > 0.85:
-                is_camera_motion = True
-
+        # Step 4: Robust Scoring
         active_blocks = []
-        if not is_camera_motion:
-            # --- Cohesion Analysis to find natural motion clusters ---
+        if block_motions:
             candidate_blocks = []
-            for pos, history in self.oscillation_history.items():
-                if len(history) < self.oscillation_history_max_len * 0.8: continue
-                mags, dys, dxs = [h['mag'] for h in history], [h['dy'] for h in history], [h['dx'] for h in history]
-                mean_mag, std_dev_dy = np.mean(mags), np.std(dys)
-                if mean_mag < 0.5 or (mean_mag > 0 and std_dev_dy / mean_mag < 0.5):
-                    continue  # --- Filter non-oscillating motion
-
-                smoothed_dys = np.convolve(dys, np.ones(5) / 5, mode='valid')
-                if len(smoothed_dys) < 2: continue
-                freq = (len(np.where(np.diff(np.sign(smoothed_dys)))[0]) / 2) / self.oscillation_history_seconds
-
-                # --- Adaptive Frequency Weighting (bell curve centered at 2.5Hz) ---
-                if 0.5 <= freq <= 7.0:
-                    freq_weight = np.exp(-((freq - 2.5) ** 2) / (2 * (1.5 ** 2)))  # Gaussian weight
-                    score = mean_mag * freq * freq_weight
-                    candidate_blocks.append({'pos': pos, 'score': score, 'dy': history[-1]['dy'], 'dx': history[-1]['dx'], 'mag': history[-1]['mag']})
+            for motion in block_motions:
+                if motion['mag'] > 0.25:  # Tuned magnitude threshold
+                    score = motion['mag']
+                    candidate_blocks.append({'pos': motion['pos'], 'score': score, 'dy': motion['dy'], 'dx': motion['dx']})
 
             if candidate_blocks:
-                candidate_pos = {b['pos'] for b in candidate_blocks}
-                for block in candidate_blocks:
-                    r, c = block['pos']
-                    cohesion_boost = 1.0
-                    for dr in [-1, 0, 1]:
-                        for dc in [-1, 0, 1]:
-                            if dr == 0 and dc == 0: continue
-                            if (r + dr, c + dc) in candidate_pos:
-                                cohesion_boost += 0.2  # Boost score by 20% for each active neighbor
-                    block['score'] *= cohesion_boost
-
                 max_score = max(b['score'] for b in candidate_blocks)
-                active_blocks = [b for b in candidate_blocks if b['score'] > max_score * 0.6]  # 60% threshold
+                # Take any block that has at least 40% of the max score.
+                active_blocks = [b for b in candidate_blocks if b['score'] >= max_score * 0.4]
 
+        # Step 5: Signal Generation
         if active_blocks:
             total_weight = sum(b['score'] for b in active_blocks)
-            final_dy = sum(b['dy'] * b['score'] for b in active_blocks) / total_weight
-            final_dx = sum(b['dx'] * b['score'] for b in active_blocks) / total_weight
-            final_mag = sum(b['mag'] * b['score'] for b in active_blocks) / total_weight
+            if total_weight > 0:
+                # Calculate the raw, unsmoothed position for this frame
+                final_dy = sum(b['dy'] * b['score'] for b in active_blocks) / total_weight
+                final_dx = sum(b['dx'] * b['score'] for b in active_blocks) / total_weight
 
-            amplitude_scaler = np.clip(final_mag / 4.0, 0.7, 1.5)
-            max_deviation = 50 * amplitude_scaler * self.oscillation_sensitivity
-            
-            # Compute vertical position (primary)
-            scaled_dy = np.clip(final_dy * -10 * self.oscillation_sensitivity, -max_deviation, max_deviation)
-            new_raw_primary_pos = np.clip(50 + scaled_dy, 0, 100)
-            
-            # Compute horizontal position (secondary) - similar logic to vertical
-            scaled_dx = np.clip(final_dx * 10 * self.oscillation_sensitivity, -max_deviation, max_deviation)  # Note: positive scaling for dx
-            new_raw_secondary_pos = np.clip(50 + scaled_dx, 0, 100)
+                max_deviation = 49 * self.oscillation_sensitivity
+                new_raw_primary_pos = 50 + np.clip(final_dy * -10, -max_deviation, max_deviation)
+                new_raw_secondary_pos = 50 + np.clip(final_dx * 10, -max_deviation, max_deviation)
+
+                # --- Apply EMA Smoothing Filter ---
+                alpha = self.oscillation_ema_alpha
+                self.oscillation_last_known_pos = self.oscillation_last_known_pos * (1 - alpha) + new_raw_primary_pos * alpha
+                self.oscillation_last_known_secondary_pos = self.oscillation_last_known_secondary_pos * (1 - alpha) + new_raw_secondary_pos * alpha
+
+                self.oscillation_last_active_time = frame_time_ms
         else:
-            new_raw_primary_pos = self.oscillation_last_known_pos * 0.95 + 50 * 0.05
-            new_raw_secondary_pos = getattr(self, 'oscillation_last_known_secondary_pos', 50) * 0.95 + 50 * 0.05
+            # This part handles the decay when no motion is detected and has its own smoothing
+            time_since_last_active = frame_time_ms - self.oscillation_last_active_time
+            if time_since_last_active > self.oscillation_hold_duration_ms:
+                # Decay towards center after hold duration expires.
+                decay_factor = 0.95
+                self.oscillation_last_known_pos = self.oscillation_last_known_pos * decay_factor + 50 * (1 - decay_factor)
+                self.oscillation_last_known_secondary_pos = self.oscillation_last_known_secondary_pos * decay_factor + 50 * (1 - decay_factor)
 
-        # --- Live Dynamic Amplification Stage ---
-        self.oscillation_position_history.append(new_raw_primary_pos)
-        if not hasattr(self, 'oscillation_secondary_position_history'):
-            self.oscillation_secondary_position_history = deque(maxlen=self.oscillation_position_history.maxlen)
-        self.oscillation_secondary_position_history.append(new_raw_secondary_pos)
-        
-        final_primary_pos = new_raw_primary_pos
-        final_secondary_pos = new_raw_secondary_pos
-
-        if self.live_amp_enabled and len(self.oscillation_position_history) > self.oscillation_position_history.maxlen * 0.5:
-            # Amplify primary axis (vertical)
-            p10_primary = np.percentile(self.oscillation_position_history, 10)
-            p90_primary = np.percentile(self.oscillation_position_history, 90)
-            effective_range_primary = p90_primary - p10_primary
-
-            if effective_range_primary > 15: # Only amplify if there is significant motion
-                normalized_primary_pos = (new_raw_primary_pos - p10_primary) / effective_range_primary
-                final_primary_pos = np.clip(normalized_primary_pos * 100, 0, 100)
-            
-            # Amplify secondary axis (horizontal)
-            if len(self.oscillation_secondary_position_history) > self.oscillation_secondary_position_history.maxlen * 0.5:
-                p10_secondary = np.percentile(self.oscillation_secondary_position_history, 10)
-                p90_secondary = np.percentile(self.oscillation_secondary_position_history, 90)
-                effective_range_secondary = p90_secondary - p10_secondary
-
-                if effective_range_secondary > 15: # Only amplify if there is significant motion
-                    normalized_secondary_pos = (new_raw_secondary_pos - p10_secondary) / effective_range_secondary
-                    final_secondary_pos = np.clip(normalized_secondary_pos * 100, 0, 100)
-
-        # Apply EMA smoothing to both positions
-        self.oscillation_last_known_pos = self.oscillation_last_known_pos * (1 - self.oscillation_ema_alpha) + final_primary_pos * self.oscillation_ema_alpha
-        if not hasattr(self, 'oscillation_last_known_secondary_pos'):
-            self.oscillation_last_known_secondary_pos = 50.0
-        self.oscillation_last_known_secondary_pos = self.oscillation_last_known_secondary_pos * (1 - self.oscillation_ema_alpha) + final_secondary_pos * self.oscillation_ema_alpha
-        
+        # The final funscript position is now based on the smoothed value
         self.oscillation_funscript_pos = int(round(self.oscillation_last_known_pos))
         self.oscillation_funscript_secondary_pos = int(round(self.oscillation_last_known_secondary_pos))
 
+        # Step 6: Action Logging
         if self.tracking_active:
-            # Apply axis and timeline selection logic (same as regular tracker)
+            # This block now correctly saves the generated signal
             current_tracking_axis_mode = self.app.tracking_axis_mode
             current_single_axis_output = self.app.single_axis_output_target
             primary_to_write, secondary_to_write = None, None
-            
-            # The oscillation detector now generates both vertical and horizontal signals
-            final_primary_pos = self.oscillation_funscript_pos
-            final_secondary_pos = self.oscillation_funscript_secondary_pos
-            
+
             if current_tracking_axis_mode == "both":
-                primary_to_write, secondary_to_write = final_primary_pos, final_secondary_pos
+                primary_to_write, secondary_to_write = self.oscillation_funscript_pos, self.oscillation_funscript_secondary_pos
             elif current_tracking_axis_mode == "vertical":
                 if current_single_axis_output == "primary":
-                    primary_to_write = final_primary_pos
+                    primary_to_write = self.oscillation_funscript_pos
                 else:
-                    secondary_to_write = final_primary_pos
+                    secondary_to_write = self.oscillation_funscript_pos
             elif current_tracking_axis_mode == "horizontal":
                 if current_single_axis_output == "primary":
-                    primary_to_write = final_secondary_pos
+                    primary_to_write = self.oscillation_funscript_secondary_pos
                 else:
-                    secondary_to_write = final_secondary_pos
-            
-            self.funscript.add_action(timestamp_ms=frame_time_ms, primary_pos=primary_to_write, secondary_pos=secondary_to_write)
-            action_log_list.append({
-                "at": frame_time_ms, 
-                "pos": primary_to_write, 
-                "secondary_pos": secondary_to_write,
-                "mode": current_tracking_axis_mode,
-                "target": current_single_axis_output if current_tracking_axis_mode != "both" else "N/A"
-            })
+                    secondary_to_write = self.oscillation_funscript_secondary_pos
 
-        # --- Visualization for oscillation area and grid ---
-        if use_oscillation_area and self.oscillation_area_fixed:
-            # Draw the oscillation area rectangle
-            ax, ay, aw, ah = self.oscillation_area_fixed
-            ax_c, ay_c = max(0, ax), max(0, ay)
-            aw_c = min(aw, processed_frame.shape[1] - ax_c)
-            ah_c = min(ah, processed_frame.shape[0] - ay_c)
-            cv2.rectangle(processed_frame, (ax_c, ay_c), (ax_c + aw_c, ay_c + ah_c), (0, 255, 255), 2)  # Cyan rectangle
-            cv2.putText(processed_frame, "Oscillation Area", (ax_c, ay_c - 5), cv2.FONT_HERSHEY_PLAIN, 0.7, (0, 255, 255), 1)
+            self.funscript.add_action(timestamp_ms=frame_time_ms, primary_pos=primary_to_write,
+                                      secondary_pos=secondary_to_write)
+            action_log_list.append({"at": frame_time_ms, "pos": primary_to_write, "secondary_pos": secondary_to_write})
 
-        # --- Visualization for grid and motion detection ---
-        if use_oscillation_area and self.oscillation_grid_blocks:
-            # Use static grid layout for oscillation area
-            active_block_positions = {b['pos'] for b in active_blocks}
-
-            # Draw all grid blocks with motion detection colors
-            for i, (x1, y1, w, h) in enumerate(self.oscillation_grid_blocks):
-                # Determine color based on motion detection
-                color = (100, 100, 100)  # Default gray
-
-                # Check if this block corresponds to an active motion block
-                block_r = i // self.oscillation_max_blocks_w if hasattr(self, 'oscillation_max_blocks_w') else 0
-                block_c = i % self.oscillation_max_blocks_w if hasattr(self, 'oscillation_max_blocks_w') else 0
-
-                if is_camera_motion:
-                    color = (0, 165, 255)  # Orange for camera motion
-                elif (block_r, block_c) in active_block_positions:
-                    color = (0, 255, 0)  # Green for active motion
-
-                cv2.rectangle(processed_frame, (x1, y1), (x1 + w, y1 + h), color, 1)
-        else:
-            # Original full-frame visualization
-            active_block_positions = {b['pos'] for b in active_blocks}
-            for motion in block_motions:
-                r, c = motion['pos']
-                x1, y1 = c * self.oscillation_block_size, r * self.oscillation_block_size
-                x2, y2 = x1 + self.oscillation_block_size, y1 + self.oscillation_block_size
-
-                color = (100, 100, 100)
-                if is_camera_motion:
-                    color = (0, 165, 255)
-                elif (r, c) in active_block_positions:
-                    color = (0, 255, 0)
-                cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 1)
+        # Step 7: Visualization
+        active_block_positions = {b['pos'] for b in active_blocks}
+        for r,c in self.oscillation_cell_persistence.keys():
+            x1, y1 = c * self.oscillation_block_size, r * self.oscillation_block_size
+            color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
+            cv2.rectangle(processed_frame, (x1, y1), (x1 + self.oscillation_block_size, y1 + self.oscillation_block_size), color, 1)
 
         self.prev_gray_oscillation = current_gray
-
-        # After active_blocks is determined, expose the set of active block positions for UI
-        self.oscillation_active_block_positions = set()
-        if active_blocks:
-            self.oscillation_active_block_positions = set((b['pos'] for b in active_blocks))
-        else:
-            self.oscillation_active_block_positions = set()
-
         return processed_frame, action_log_list if action_log_list else None

@@ -10,6 +10,42 @@ class ControlPanelUI:
         self.app = app
         self.timeline_editor1 = None
         self.timeline_editor2 = None
+    
+    def _help_tooltip(self, text: str):
+        """Displays a consistent help tooltip when the previous item is hovered."""
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(text)
+    
+    def _section_header(self, text: str, help_text: str = None):
+        """Displays a consistent section header with optional help text."""
+        imgui.spacing()
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.9, 0.9, 1.0)  # Light gray
+        imgui.text(text)
+        imgui.pop_style_color()
+        if help_text:
+            self._help_tooltip(help_text)
+        imgui.separator()
+    
+    def _status_indicator(self, text: str, status: str, help_text: str = None):
+        """Displays a status indicator with colored text."""
+        if status == "ready":
+            color = (0.2, 0.8, 0.2, 1.0)  # Green
+            icon = "[OK]"
+        elif status == "warning":  
+            color = (0.9, 0.7, 0.1, 1.0)  # Orange
+            icon = "[!]"
+        elif status == "error":
+            color = (0.9, 0.2, 0.2, 1.0)  # Red
+            icon = "[X]"
+        else:  # info
+            color = (0.4, 0.7, 0.9, 1.0)  # Blue
+            icon = "[i]"
+        
+        imgui.push_style_color(imgui.COLOR_TEXT, *color)
+        imgui.text(f"{icon} {text}")
+        imgui.pop_style_color()
+        if help_text:
+            self._help_tooltip(help_text)
 
     # Moved from _render_ai_model_settings to become stable instance methods.
     def _update_detection_model_path(self, path: str):
@@ -135,10 +171,42 @@ class ControlPanelUI:
         imgui.begin("FunGen Simple##SimpleControlPanel", flags=window_flags)
 
         imgui.text("FunGen Simple Workflow")
-        imgui.text_wrapped("1. Drag & drop a video onto the window.")
+        
+        # Show advanced mode indicator
+        if self.app.app_state_ui.show_advanced_options:
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.8, 0.6, 0.2, 1.0)  # Orange text
+            imgui.text("[ADV] Advanced Options Enabled")
+            imgui.pop_style_color()
+            imgui.same_line()
+            imgui.text_disabled("(View menu > Show Advanced Options)")
+            
+        # Show current status
+        processor = self.app.processor
+        if processor and processor.video_info:
+            self._status_indicator("Video loaded", "ready", 
+                                 f"Loaded: {os.path.basename(processor.video_path or 'Unknown')}")
+        else:
+            self._status_indicator("Drag & drop a video onto the window", "info",
+                                 "Supported formats: MP4, AVI, MOV, MKV")
+        
         imgui.text_wrapped("2. Choose an analysis method below.")
         imgui.text_wrapped("3. Click Start.")
-        imgui.separator()
+        
+        self._section_header(">> Step 2: Choose Analysis Method", 
+                            "Select the best analysis method for your video content type")
+        
+        # Show analysis progress
+        stage_proc = self.app.stage_processor
+        if stage_proc.full_analysis_active:
+            self._status_indicator("Analysis in progress...", "info", 
+                                 "Processing your video. Please wait.")
+        elif self.app.funscript_processor.get_actions('primary'):
+            actions_count = len(self.app.funscript_processor.get_actions('primary'))
+            self._status_indicator(f"Analysis complete - {actions_count} points generated", "ready",
+                                 "Ultimate Autotune preview is visible in timeline. Ready for next step.")
+        else:
+            self._status_indicator("Ready to analyze", "info", 
+                                 "Click Start when you're ready to begin analysis")
 
         # Simplified Tracker Type Selection
         tracking_modes_display = ["Live Oscillation Detector", "Offline AI Analysis (3-Stage)", "Live Tracking (YOLO ROI)"]
@@ -153,6 +221,11 @@ class ControlPanelUI:
         imgui.push_item_width(-1)
         clicked, new_idx = imgui.combo("Analysis Method##SimpleTrackerMode", current_mode_idx, tracking_modes_display)
         imgui.pop_item_width()
+        self._help_tooltip(
+            "Live Oscillation Detector: Fast & simple, best for rhythmic motion\n"
+            "Offline AI Analysis: High quality, uses AI for object detection\n"
+            "Live Tracking: Real-time AI tracking with immediate preview"
+        )
 
         if clicked and new_idx != current_mode_idx:
             app_state.selected_tracker_mode = tracking_modes_enums[new_idx]
@@ -173,8 +246,8 @@ class ControlPanelUI:
         app_state = self.app.app_state_ui
         event_handlers = self.app.event_handlers
 
-        imgui.text("Select mode, configure axes, and run.")
-        imgui.spacing()
+        self._section_header(">> Analysis Method", 
+                            "Choose how the application will analyze your video")
 
         # --- Tracker Type Selection ---
         tracking_modes_enums = [
@@ -205,6 +278,14 @@ class ControlPanelUI:
             current_mode_idx = 0
             app_state.selected_tracker_mode = tracking_modes_enums[current_mode_idx]
         clicked, new_idx = imgui.combo("Tracker Type##TrackerModeCombo", current_mode_idx, tracking_modes_display)
+        self._help_tooltip(
+            "Choose analysis method:\n"
+            "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion\n"
+            "• Live YOLO ROI: AI-powered object detection with real-time tracking\n" 
+            "• Live User ROI: Manual region selection for custom tracking\n"
+            "• Offline 2-Stage: GPU-accelerated batch processing\n"
+            "• Offline 3-Stage: Full pipeline with advanced post-processing"
+        )
 
         if disable_combo:
             imgui.pop_style_var()
@@ -224,48 +305,50 @@ class ControlPanelUI:
             else:
                 self.app.tracker.set_tracking_mode("YOLO_ROI")
 
-        # --- Tracking Axes ---
+        self._section_header(">> Output Configuration", 
+                            "Configure which movement axes to track and output")
         self._render_tracking_axes_mode(stage_proc)
-        imgui.separator()
 
         # --- Analysis Range and Rerun Options ---
         if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE, TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]:
-            if imgui.collapsing_header("Analysis Options##RunControlAnalysisOptions", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                # --- Range Selection ---
-                imgui.text("Analysis Range")
-                self._render_range_selection(self.app.stage_processor, self.app.funscript_processor, self.app.event_handlers)
+            # Only show detailed analysis options in advanced mode
+            if app_state.show_advanced_options:
+                if imgui.collapsing_header("Analysis Options##RunControlAnalysisOptions", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                    # --- Range Selection ---
+                    imgui.text("Analysis Range")
+                    self._render_range_selection(self.app.stage_processor, self.app.funscript_processor, self.app.event_handlers)
 
-                # --- Force Rerun (CONDITIONAL) ---
-                if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
-                    imgui.separator()
-                    imgui.text("Stage Reruns:")
-                    if disable_combo:
-                        imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                        imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-                    _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
-                    imgui.same_line()
-                    _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
-                    imgui.separator()
-                    if not hasattr(stage_proc, 'save_preprocessed_video'):
-                        stage_proc.save_preprocessed_video = self.app.app_settings.get("save_preprocessed_video", False)
+                    # --- Force Rerun (CONDITIONAL) ---
+                    if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+                        imgui.separator()
+                        imgui.text("Stage Reruns:")
+                        if disable_combo:
+                            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                        _, stage_proc.force_rerun_stage1 = imgui.checkbox("Force Re-run Stage 1##ForceRerunS1", stage_proc.force_rerun_stage1)
+                        imgui.same_line()
+                        _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox("Force Re-run S2 Chapter Creation##ForceRerunS2", stage_proc.force_rerun_stage2_segmentation)
+                        imgui.separator()
+                        if not hasattr(stage_proc, 'save_preprocessed_video'):
+                            stage_proc.save_preprocessed_video = self.app.app_settings.get("save_preprocessed_video", False)
 
-                    changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
-                    if changed:
-                        stage_proc.save_preprocessed_video = new_val
-                        self.app.app_settings.set("save_preprocessed_video", new_val)
-                        if new_val:
-                            stage_proc.num_producers_stage1 = 1
-                            self.app.app_settings.set("num_producers_stage1", 1)
+                        changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
+                        if changed:
+                            stage_proc.save_preprocessed_video = new_val
+                            self.app.app_settings.set("save_preprocessed_video", new_val)
+                            if new_val:
+                                stage_proc.num_producers_stage1 = 1
+                                self.app.app_settings.set("num_producers_stage1", 1)
 
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip(
-                            "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
-                            "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
-                            "Forces the number of Producer threads to 1."
-                        )
-                    if disable_combo:
-                        imgui.pop_style_var()
-                        imgui.internal.pop_item_flag()
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip(
+                                "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
+                                "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
+                                "Forces the number of Producer threads to 1."
+                            )
+                        if disable_combo:
+                            imgui.pop_style_var()
+                            imgui.internal.pop_item_flag()
             imgui.separator()
 
         # --- Execution Buttons ---
@@ -358,23 +441,23 @@ class ControlPanelUI:
 
         # AI Models & Inference settings are shown for any mode that uses them.
         if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
-            if imgui.collapsing_header("AI Models & Inference##ConfigAIModels", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+            if imgui.collapsing_header("AI Models & Inference##ConfigAIModels")[0]:
                 self._render_ai_model_settings()
             imgui.separator()
 
-        # Live-specific settings are shown for live modes.
-        if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
+        # Live-specific settings are shown for live modes (only in advanced mode).
+        if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI] and self.app.app_state_ui.show_advanced_options:
             self._render_live_tracker_settings()
             imgui.separator()
 
-        # Class filtering is available for all YOLO-based modes.
-        if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
-           if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+        # Class filtering is available for all YOLO-based modes (only in advanced mode).
+        if selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE] and self.app.app_state_ui.show_advanced_options:
+           if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
                self._render_class_filtering_content()
 
         # --- Dedicated settings for the Oscillation Detector ---
         if selected_mode == TrackerMode.OSCILLATION_DETECTOR:
-            if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+            if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector")[0]:
                 self._render_oscillation_detector_settings()
 
         # Fallback message for any mode that has no configuration options.
@@ -400,13 +483,14 @@ class ControlPanelUI:
             self._render_settings_file_output()
         imgui.separator()
 
-        if imgui.collapsing_header("Logging & Autosave##SettingsMenuLogging", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_settings_logging_autosave()
-        imgui.separator()
+        if self.app.app_state_ui.show_advanced_options:
+            if imgui.collapsing_header("Logging & Autosave##SettingsMenuLogging")[0]:
+                self._render_settings_logging_autosave()
+            imgui.separator()
 
-        if imgui.collapsing_header("View/Edit Hotkeys##FSHotkeysMenuSettingsDetail", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_settings_hotkeys()
-        imgui.separator()
+            if imgui.collapsing_header("View/Edit Hotkeys##FSHotkeysMenuSettingsDetail")[0]:
+                self._render_settings_hotkeys()
+            imgui.separator()
 
         imgui.spacing()
 
@@ -441,7 +525,7 @@ class ControlPanelUI:
             self._render_funscript_processing_tools(self.app.funscript_processor, self.app.event_handlers)
         imgui.separator()
 
-        if imgui.collapsing_header("Automated Post-Processing##PostProcAuto", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+        if imgui.collapsing_header("Automated Post-Processing##PostProcAuto")[0]:
             self._render_automatic_post_processing_new(self.app.funscript_processor)
 
     def _render_ai_model_settings(self):
@@ -793,7 +877,7 @@ class ControlPanelUI:
         tracker_instance = self.app.tracker
         settings = self.app.app_settings
 
-        if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu", flags=imgui.TREE_NODE_DEFAULT_OPEN):
+        if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu"):
             # Confidence Threshold
             current_conf = settings.get("live_tracker_confidence_threshold")
             changed, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", current_conf, 0.1, 0.95, "%.2f")
@@ -832,7 +916,7 @@ class ControlPanelUI:
                 settings.set("live_tracker_roi_persistence_frames", new_persistence)
                 tracker_instance.max_frames_for_roi_persistence = new_persistence
 
-        if imgui.collapsing_header("Optical Flow##ROIFlowTrackerMenu", flags=imgui.TREE_NODE_DEFAULT_OPEN):
+        if imgui.collapsing_header("Optical Flow##ROIFlowTrackerMenu"):
             # Use Sparse Flow
             current_sparse_flow = settings.get("live_tracker_use_sparse_flow")
             changed, new_sparse_flow = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu", current_sparse_flow)
@@ -870,7 +954,7 @@ class ControlPanelUI:
                 imgui.pop_style_var()
                 imgui.internal.pop_item_flag()
 
-            if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu", flags=imgui.TREE_NODE_DEFAULT_OPEN):
+            if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu"):
                 # Output Sensitivity
                 current_sensitivity = settings.get("live_tracker_sensitivity")
                 changed, new_sensitivity = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu", current_sensitivity, 0.0, 100.0, "%.1f")

@@ -115,7 +115,12 @@ class InteractiveFunscriptTimeline:
         self.context_menu_point_idx: int = -1
 
         # --- Persistent Ultimate Autotune Preview ---
-        self.show_ultimate_autotune_preview = self.app.app_settings.get(f"timeline{self.timeline_num}_show_ultimate_preview", True)
+        # In simple mode, always enable ultimate autotune preview
+        is_simple_mode = getattr(self.app.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
+        if is_simple_mode:
+            self.show_ultimate_autotune_preview = True
+        else:
+            self.show_ultimate_autotune_preview = self.app.app_settings.get(f"timeline{self.timeline_num}_show_ultimate_preview", True)
         self.ultimate_autotune_preview_actions: Optional[List[Dict]] = None
         self._ultimate_preview_dirty: bool = True
 
@@ -1016,16 +1021,18 @@ class InteractiveFunscriptTimeline:
                     imgui.internal.pop_item_flag()
                 imgui.same_line()
 
-                # --- Ultimate Autotune Preview Checkbox ---
-                imgui.same_line()
-                changed, self.show_ultimate_autotune_preview = imgui.checkbox(f"Show Ultimate Preview##UltimatePreviewCheckbox{window_id_suffix}", self.show_ultimate_autotune_preview)
-                if changed:
-                    self.app.app_settings.set(f"timeline{self.timeline_num}_show_ultimate_preview", self.show_ultimate_autotune_preview)
-                    if self.show_ultimate_autotune_preview:
-                        self.invalidate_ultimate_preview()  # Make it re-render on next frame
-                    else:
-                        self.ultimate_autotune_preview_actions = None  # Clear immediately
-                imgui.same_line()
+                # --- Ultimate Autotune Preview Checkbox (hidden in Simple Mode) ---
+                view_mode = getattr(self.app.app_state_ui, 'ui_view_mode', 'expert')
+                if view_mode != 'simple':  # Only show in Expert mode
+                    imgui.same_line()
+                    changed, self.show_ultimate_autotune_preview = imgui.checkbox(f"Show Ultimate Preview##UltimatePreviewCheckbox{window_id_suffix}", self.show_ultimate_autotune_preview)
+                    if changed:
+                        self.app.app_settings.set(f"timeline{self.timeline_num}_show_ultimate_preview", self.show_ultimate_autotune_preview)
+                        if self.show_ultimate_autotune_preview:
+                            self.invalidate_ultimate_preview()  # Make it re-render on next frame
+                        else:
+                            self.ultimate_autotune_preview_actions = None  # Clear immediately
+                    imgui.same_line()
 
                 # endregion
 
@@ -1263,7 +1270,7 @@ class InteractiveFunscriptTimeline:
                 if not self.is_previewing:
                     self._update_preview('ultimate')
 
-                imgui.set_next_window_size(420, 0, condition=imgui.APPEARING)
+                imgui.set_next_window_size(480, 0, condition=imgui.APPEARING)
                 window_expanded, self.show_ultimate_autotune_popup = imgui.begin(
                     ultimate_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
 

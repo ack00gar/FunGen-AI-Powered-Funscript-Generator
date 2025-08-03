@@ -56,6 +56,7 @@ class AppSettings:
             "show_lr_dial_graph": True,
             "show_chapter_list_window": False,
             "show_timeline_editor_buttons": False,
+            "show_advanced_options": False,
 
             # File Handling & Output
             "autosave_final_funscript_to_video_location": True,

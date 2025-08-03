@@ -1244,6 +1244,16 @@ class ApplicationLogic:
                 if autotune_enabled:
                     self.logger.info("Triggering Ultimate Autotune for completed live session.")
                     self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+                
+                # Handle Simple Mode auto ultimate autotune for live sessions
+                is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
+                is_live_mode = self.app_state_ui.selected_tracker_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]
+                has_actions = bool(self.funscript_processor.get_actions('primary'))
+                
+                if is_simple_mode and is_live_mode and has_actions and not autotune_enabled:
+                    self.logger.info("Simple Mode: Automatically applying Ultimate Autotune to live session...")
+                    self.set_status_message("Live tracking complete! Applying auto-enhancements...")
+                    self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
 
                 # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
                 self.logger.info("Saving final (post-processed) funscript.")
