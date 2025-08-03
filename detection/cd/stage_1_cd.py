@@ -240,7 +240,7 @@ class FFmpegEncoder:
 
     def _get_encoder_args(self) -> List[str]:
         """
-        Chooses the best available hardware encoder (prefers VideoToolbox on macOS).
+        Chooses the best available hardware encoder with a more robust priority.
         Falls back to software libx265 if none is available.
         """
         try:
@@ -249,19 +249,27 @@ class FFmpegEncoder:
             log_vid.warning(f"Failed to query FFmpeg encoders: {e}")
             output = ""
 
+        # macOS is a special case
         if "hevc_videotoolbox" in output:
             log_vid.info("Using H.265 Apple VideoToolbox for hardware encoding.")
             return ["-c:v", "hevc_videotoolbox", "-q:v", "20", "-pix_fmt", "yuv420p", "-b:v", "0"]
+
+        # For Windows/Linux, establish a more robust priority.
+        # Intel QSV is very common, so we check for it first.
+        if "hevc_qsv" in output:
+            log_vid.info("Using H.265 Intel QSV for hardware encoding.")
+            return ["-c:v", "hevc_qsv", "-preset", "fast", "-global_quality", "26", "-pix_fmt", "yuv420p"]
 
         elif "hevc_nvenc" in output:
             log_vid.info("Using H.265 NVENC for hardware encoding.")
             return ["-c:v", "hevc_nvenc", "-preset", "fast", "-qp", "26", "-pix_fmt", "yuv420p"]
 
-        elif "hevc_qsv" in output:
-            log_vid.info("Using H.265 Intel QSV for hardware encoding.")
-            return ["-c:v", "hevc_qsv", "-preset", "fast", "-global_quality", "26", "-pix_fmt", "yuv420p"]
+        # Add a check for AMD's AMF encoder
+        elif "hevc_amf" in output:
+            log_vid.info("Using H.265 AMD AMF for hardware encoding.")
+            return ["-c:v", "hevc_amf", "-quality", "quality", "-qp_i", "26", "-qp_p", "26", "-pix_fmt", "yuv420p"]
 
-        elif "hevc_vaapi" in output:
+        elif "hevc_vaapi" in output: # Primarily for Linux
             log_vid.info("Using H.265 VAAPI for hardware encoding.")
             return ["-c:v", "hevc_vaapi", "-qp", "26", "-pix_fmt", "yuv420p"]
 
