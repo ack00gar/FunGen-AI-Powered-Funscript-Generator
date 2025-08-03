@@ -180,6 +180,8 @@ class GUI:
         Performs the numpy/cv2 operations to create the timeline image.
         This is called by the worker thread.
         """
+        use_simplified_preview = self.app.app_settings.get("use_simplified_funscript_preview", False)
+
         # Create background
         bg_color_cv_bgra = (int(0.15 * 255), int(0.12 * 255), int(0.12 * 255), 255)
         image_data = np.full((target_height, target_width, 4), bg_color_cv_bgra, dtype=np.uint8)
@@ -187,30 +189,86 @@ class GUI:
         cv2.line(image_data, (0, center_y_px), (target_width - 1, center_y_px),
                  (int(0.3 * 255), int(0.3 * 255), int(0.3 * 255), int(0.7 * 255)), 1)
 
-        # Draw funscript lines
-        if len(actions) > 1 and total_duration_s > 0.001:
+        if not actions or total_duration_s <= 0.001:
+            return image_data
+
+        if use_simplified_preview:
+            if len(actions) < 2: return image_data
+
+            # --- Simplified Min/Max Envelope Drawing ---
+            min_vals = np.full(target_width, target_height, dtype=np.int32)
+            max_vals = np.full(target_width, -1, dtype=np.int32)
+
+            # Pre-calculate x coordinates and values
+            times_s = np.array([a['at'] for a in actions]) / 1000.0
+            positions = np.array([a['pos'] for a in actions])
+            x_coords = np.round((times_s / total_duration_s) * (target_width - 1)).astype(np.int32)
+            y_coords = np.round((1.0 - positions / 100.0) * (target_height - 1)).astype(np.int32)
+
+            # Find min/max y for each x
             for i in range(len(actions) - 1):
-                p1_action, p2_action = actions[i], actions[i + 1]
-                time1_s, pos1_norm = p1_action["at"] / 1000.0, p1_action["pos"] / 100.0
-                px1, py1 = int(round((time1_s / total_duration_s) * target_width)), int(
-                    round((1.0 - pos1_norm) * target_height))
-                time2_s, pos2_norm = p2_action["at"] / 1000.0, p2_action["pos"] / 100.0
-                px2, py2 = int(round((time2_s / total_duration_s) * target_width)), int(
-                    round((1.0 - pos2_norm) * target_height))
+                x1, x2 = x_coords[i], x_coords[i+1]
+                y1, y2 = y_coords[i], y_coords[i+1]
 
-                px1, py1 = np.clip(px1, 0, target_width - 1), np.clip(py1, 0, target_height - 1)
-                px2, py2 = np.clip(px2, 0, target_width - 1), np.clip(py2, 0, target_height - 1)
-                if px1 == px2 and py1 == py2: continue
+                if x1 == x2:
+                    min_vals[x1] = min(min_vals[x1], y1, y2)
+                    max_vals[x1] = max(max_vals[x1], y1, y2)
+                else:
+                    # Interpolate for line segments
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    for x in range(x1, x2 + 1):
+                        y = y1 + dy * (x - x1) / dx
+                        y_int = int(round(y))
+                        min_vals[x] = min(min_vals[x], y_int)
+                        max_vals[x] = max(max_vals[x], y_int)
 
-                delta_pos = abs(p2_action["pos"] - p1_action["pos"])
-                delta_time_ms = p2_action["at"] - p1_action["at"]
-                speed_pps = delta_pos / (delta_time_ms / 1000.0) if delta_time_ms > 0 else 0.0
-                segment_color_float_rgba = self.app.utility.get_speed_color_from_map(speed_pps)
-                segment_color_cv_bgra = (
-                    int(segment_color_float_rgba[2] * 255), int(segment_color_float_rgba[1] * 255),
-                    int(segment_color_float_rgba[0] * 255), int(segment_color_float_rgba[3] * 255)
-                )
-                cv2.line(image_data, (px1, py1), (px2, py2), segment_color_cv_bgra, thickness=1)
+            # Create polygon points
+            min_points = []
+            max_points_rev = []
+            for x in range(target_width):
+                if max_vals[x] != -1: # Only add points where there is data
+                    min_points.append([x, min_vals[x]])
+                    max_points_rev.append([x, max_vals[x]])
+
+            if not min_points: return image_data
+
+            # Combine to form a closed polygon
+            poly_points = np.array(min_points + max_points_rev[::-1], dtype=np.int32)
+
+            # Draw the semi-transparent polygon
+            overlay = image_data.copy()
+            envelope_color_rgba = self.app.utility.get_speed_color_from_map(500) # Use a mid-range speed color
+            envelope_color_bgra = (int(envelope_color_rgba[2] * 255), int(envelope_color_rgba[1] * 255),
+                                   int(envelope_color_rgba[0] * 255), 100) # 100 for alpha
+            cv2.fillPoly(overlay, [poly_points], envelope_color_bgra)
+            cv2.addWeighted(overlay, 0.5, image_data, 0.5, 0, image_data) # Blend with background
+
+        else:
+            # --- Detailed, Speed-Colored Line Drawing (Original Logic) ---
+            if len(actions) > 1:
+                for i in range(len(actions) - 1):
+                    p1_action, p2_action = actions[i], actions[i + 1]
+                    time1_s, pos1_norm = p1_action["at"] / 1000.0, p1_action["pos"] / 100.0
+                    px1, py1 = int(round((time1_s / total_duration_s) * target_width)), int(
+                        round((1.0 - pos1_norm) * target_height))
+                    time2_s, pos2_norm = p2_action["at"] / 1000.0, p2_action["pos"] / 100.0
+                    px2, py2 = int(round((time2_s / total_duration_s) * target_width)), int(
+                        round((1.0 - pos2_norm) * target_height))
+
+                    px1, py1 = np.clip(px1, 0, target_width - 1), np.clip(py1, 0, target_height - 1)
+                    px2, py2 = np.clip(px2, 0, target_width - 1), np.clip(py2, 0, target_height - 1)
+                    if px1 == px2 and py1 == py2: continue
+
+                    delta_pos = abs(p2_action["pos"] - p1_action["pos"])
+                    delta_time_ms = p2_action["at"] - p1_action["at"]
+                    speed_pps = delta_pos / (delta_time_ms / 1000.0) if delta_time_ms > 0 else 0.0
+                    segment_color_float_rgba = self.app.utility.get_speed_color_from_map(speed_pps)
+                    segment_color_cv_bgra = (
+                        int(segment_color_float_rgba[2] * 255), int(segment_color_float_rgba[1] * 255),
+                        int(segment_color_float_rgba[0] * 255), int(segment_color_float_rgba[3] * 255)
+                    )
+                    cv2.line(image_data, (px1, py1), (px2, py2), segment_color_cv_bgra, thickness=1)
 
         return image_data
 

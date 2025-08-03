@@ -94,6 +94,7 @@ class DarkTheme:
     TIMELINE_POINT_DRAGGING = RED
     TIMELINE_POINT_SELECTED = (1.0, 0.0, 0.0, 1.0) # dark red
     TIMELINE_POINT_HOVER = (0.5, 1.0, 0.5, 1.0) # light green
+    ULTIMATE_AUTOTUNE_PREVIEW = (0.2, 1.0, 0.5, 0.5)  # A semi-transparent green
 
     # Compiler Colors
     COMPILER_SUCCESS = GREEN
