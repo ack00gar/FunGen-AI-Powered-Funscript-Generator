@@ -1464,11 +1464,8 @@ class ROITracker:
 
     def process_frame_for_oscillation(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
         """
-        [V8 - Final] CPU-Optimized oscillation detection with corrected action logging.
-        - Single Flow Calculation: Uses DISOpticalFlow ONCE per frame for high performance.
-        - Masked Sampling: A motion mask determines which parts of the flow field to analyze.
-        - Cell Persistence: Reduces signal jerkiness by keeping cells active through brief pauses.
-        - Robust Scoring: Works immediately without needing a long history.
+        [V9 - Advanced Filtering] Implements global motion cancellation, advanced oscillation scoring,
+        and a VR-specific focus on the central third of the frame.
         """
         processed_frame = self.preprocess_frame(frame)
         current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
@@ -1482,24 +1479,36 @@ class ROITracker:
             self.logger.warning("Dense optical flow not available for oscillation detection.")
             return processed_frame, None
 
-        # Step 1: Calculate Optical Flow ONCE for the entire frame
+        # --- Step 1: Calculate Global Optical Flow & Global Motion Vector ---
         flow = self.flow_dense.calc(self.prev_gray_oscillation, current_gray, None)
         if flow is None:
             self.prev_gray_oscillation = current_gray
             return processed_frame, None
 
-        # Step 2: Update Active Cells using Motion Mask and Persistence
-        min_motion_threshold = 15  # Tuned threshold
-        min_cell_activation_pixels = (self.oscillation_block_size ** 2) * 0.05
+        # Calculate Global Motion to cancel out camera pans/shakes
+        global_dx = np.median(flow[..., 0])
+        global_dy = np.median(flow[..., 1])
+
+        # --- Step 2: Identify Active Cells & Apply VR Focus ---
+        min_motion_threshold = 15
+        min_cell_activation_pixels = (self.oscillation_block_size**2) * 0.05
 
         frame_diff = cv2.absdiff(current_gray, self.prev_gray_oscillation)
         _, motion_mask = cv2.threshold(frame_diff, min_motion_threshold, 255, cv2.THRESH_BINARY)
 
+        # Check if the video is VR to apply the focus rule
+        is_vr = self._is_vr_video()
+        vr_central_third_start = self.oscillation_grid_size // 3
+        vr_central_third_end = 2 * self.oscillation_grid_size // 3
+
         newly_active_cells = set()
         for r in range(self.oscillation_grid_size):
             for c in range(self.oscillation_grid_size):
-                y_start = r * self.oscillation_block_size
-                x_start = c * self.oscillation_block_size
+                # If VR, skip cells outside the central third
+                if is_vr and (c < vr_central_third_start or c > vr_central_third_end):
+                    continue
+
+                y_start, x_start = r * self.oscillation_block_size, c * self.oscillation_block_size
                 mask_roi = motion_mask[y_start:y_start + self.oscillation_block_size, x_start:x_start + self.oscillation_block_size]
                 if cv2.countNonZero(mask_roi) > min_cell_activation_pixels:
                     newly_active_cells.add((r, c))
@@ -1509,20 +1518,16 @@ class ROITracker:
         for cell_pos in newly_active_cells:
             self.oscillation_cell_persistence[cell_pos] = self.OSCILLATION_PERSISTENCE_FRAMES
 
-        # Decrement and remove expired cells
-        expired_cells = []
-        for cell_pos, timer in self.oscillation_cell_persistence.items():
-            self.oscillation_cell_persistence[cell_pos] = timer - 1
-            if self.oscillation_cell_persistence[cell_pos] <= 0:
-                expired_cells.append(cell_pos)
-
+        expired_cells = [pos for pos, timer in self.oscillation_cell_persistence.items() if timer <= 1]
         for cell_pos in expired_cells:
             del self.oscillation_cell_persistence[cell_pos]
 
-        # The "truly" active cells are those still in the persistence dictionary
+        for cell_pos in self.oscillation_cell_persistence:
+            self.oscillation_cell_persistence[cell_pos] -= 1
+
         persistent_active_cells = list(self.oscillation_cell_persistence.keys())
 
-        # Step 3: Analyze Motion in Persistently Active Cells
+        # --- Step 3: Analyze Localized Motion in Active Cells ---
         block_motions = []
         max_magnitude = 0.0
         for r, c in persistent_active_cells:
@@ -1533,26 +1538,44 @@ class ROITracker:
             flow_patch = flow[y_start:y_start + self.oscillation_block_size, x_start:x_start + self.oscillation_block_size]
 
             if flow_patch.size > 0:
-                # Your global motion cancellation can be added here if needed
-                dx, dy = np.median(flow_patch[..., 0]), np.median(flow_patch[..., 1])
-                mag = np.sqrt(dx ** 2 + dy ** 2)
-                if mag > max_magnitude:
-                    max_magnitude = mag
-                block_motions.append({'dx': dx, 'dy': dy, 'mag': mag, 'pos': (r, c)})
+                # Subtract global motion to get true local motion
+                local_dx = np.median(flow_patch[..., 0]) - global_dx
+                local_dy = np.median(flow_patch[..., 1]) - global_dy
 
-                # Update history for this block
+                mag = np.sqrt(local_dx**2 + local_dy**2)
+                block_motions.append({'dx': local_dx, 'dy': local_dy, 'mag': mag, 'pos': (r, c)})
                 if (r, c) not in self.oscillation_history:
                     self.oscillation_history[(r, c)] = deque(maxlen=self.oscillation_history_max_len)
-                self.oscillation_history[(r, c)].append({'dx': dx, 'dy': dy, 'mag': mag})
+                self.oscillation_history[(r, c)].append({'dx': local_dx, 'dy': local_dy, 'mag': mag})
 
-        # Step 4: Robust Scoring
+        # --- Step 4: Advanced Oscillation Scoring ---
         active_blocks = []
         if block_motions:
             candidate_blocks = []
             for motion in block_motions:
-                if motion['mag'] > 0.25:  # Tuned magnitude threshold
-                    score = motion['mag']
-                    candidate_blocks.append({'pos': motion['pos'], 'score': score, 'dy': motion['dy'], 'dx': motion['dx']})
+                history = self.oscillation_history.get(motion['pos'])
+                # Only consider blocks with some history and current motion
+                if history and len(history) > 10 and motion['mag'] > 0.2:
+
+                    # 1. Get stats from history
+                    recent_dy = [h['dy'] for h in history]
+                    mean_mag = np.mean([h['mag'] for h in history])
+
+                    # 2. Calculate a "frequency score" (higher is better)
+                    # This proxy for frequency counts direction changes
+                    zero_crossings = np.sum(np.diff(np.sign(recent_dy)) != 0)
+                    frequency_score = (zero_crossings / len(recent_dy)) * 10.0
+
+                    # 3. Calculate "variance score" (higher is better)
+                    # A high standard deviation means the motion isn't linear
+                    variance_score = np.std(recent_dy)
+
+                    # 4. Combine into a final oscillation score
+                    # This rewards blocks that are strong, frequent, and non-linear
+                    oscillation_score = mean_mag * (1 + frequency_score) * (1 + variance_score)
+
+                    if oscillation_score > 0.5: # Filter out low-scoring blocks
+                        candidate_blocks.append({'pos': motion['pos'], 'score': oscillation_score, 'dy': motion['dy'], 'dx': motion['dx']})
 
             if candidate_blocks:
                 max_score = max(b['score'] for b in candidate_blocks)
