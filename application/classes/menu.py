@@ -396,6 +396,11 @@ class MainMenu:
                 if clicked: 
                     self.app.app_settings.set("show_timeline_editor_buttons", app_state.show_timeline_editor_buttons)
                     self.app.project_manager.project_dirty = True
+                
+                clicked, app_state.show_advanced_options = imgui.menu_item("Show Advanced Options", selected=app_state.show_advanced_options)
+                if clicked:
+                    self.app.app_settings.set("show_advanced_options", app_state.show_advanced_options)
+                    self.app.project_manager.project_dirty = True
 
                 imgui.unindent()
                 imgui.separator()
