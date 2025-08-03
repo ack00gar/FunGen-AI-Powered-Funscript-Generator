@@ -28,7 +28,7 @@ class AppStateUI:
         self.status_message: str = ""
         self.status_message_time: float = 0.0
 
-        self.selected_tracker_mode: TrackerMode = TrackerMode.LIVE_YOLO_ROI
+        self.selected_tracker_mode: TrackerMode = TrackerMode.OSCILLATION_DETECTOR
 
         # UI visibility states
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))

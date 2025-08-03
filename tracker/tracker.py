@@ -1552,7 +1552,7 @@ class ROITracker:
                         block_pos = (r, c)
                         if block_pos not in self.oscillation_history:
                             self.oscillation_history[block_pos] = deque(maxlen=self.oscillation_history_max_len)
-                        self.oscillation_history[block_pos].append({'dy': dy, 'mag': mag})
+                        self.oscillation_history[block_pos].append({'dx': dx, 'dy': dy, 'mag': mag})
         else:
             # Original full-frame analysis with black bar detection
             ax_min, ay_min, ax_max, ay_max = active_area_rect
@@ -1578,7 +1578,7 @@ class ROITracker:
                         block_pos = (r, c)
                         if block_pos not in self.oscillation_history:
                             self.oscillation_history[block_pos] = deque(maxlen=self.oscillation_history_max_len)
-                        self.oscillation_history[block_pos].append({'dy': dy, 'mag': mag})
+                        self.oscillation_history[block_pos].append({'dx': dx, 'dy': dy, 'mag': mag})
 
             self.logger.debug(f"Processed {len(block_motions)} blocks in oscillation area")
 
@@ -1603,7 +1603,7 @@ class ROITracker:
             candidate_blocks = []
             for pos, history in self.oscillation_history.items():
                 if len(history) < self.oscillation_history_max_len * 0.8: continue
-                mags, dys = [h['mag'] for h in history], [h['dy'] for h in history]
+                mags, dys, dxs = [h['mag'] for h in history], [h['dy'] for h in history], [h['dx'] for h in history]
                 mean_mag, std_dev_dy = np.mean(mags), np.std(dys)
                 if mean_mag < 0.5 or (mean_mag > 0 and std_dev_dy / mean_mag < 0.5):
                     continue  # --- Filter non-oscillating motion
@@ -1616,7 +1616,7 @@ class ROITracker:
                 if 0.5 <= freq <= 7.0:
                     freq_weight = np.exp(-((freq - 2.5) ** 2) / (2 * (1.5 ** 2)))  # Gaussian weight
                     score = mean_mag * freq * freq_weight
-                    candidate_blocks.append({'pos': pos, 'score': score, 'dy': history[-1]['dy'], 'mag': history[-1]['mag']})
+                    candidate_blocks.append({'pos': pos, 'score': score, 'dy': history[-1]['dy'], 'dx': history[-1]['dx'], 'mag': history[-1]['mag']})
 
             if candidate_blocks:
                 candidate_pos = {b['pos'] for b in candidate_blocks}
@@ -1636,35 +1636,92 @@ class ROITracker:
         if active_blocks:
             total_weight = sum(b['score'] for b in active_blocks)
             final_dy = sum(b['dy'] * b['score'] for b in active_blocks) / total_weight
+            final_dx = sum(b['dx'] * b['score'] for b in active_blocks) / total_weight
             final_mag = sum(b['mag'] * b['score'] for b in active_blocks) / total_weight
 
             amplitude_scaler = np.clip(final_mag / 4.0, 0.7, 1.5)
             max_deviation = 50 * amplitude_scaler * self.oscillation_sensitivity
+            
+            # Compute vertical position (primary)
             scaled_dy = np.clip(final_dy * -10 * self.oscillation_sensitivity, -max_deviation, max_deviation)
-            new_raw_pos = np.clip(50 + scaled_dy, 0, 100)
+            new_raw_primary_pos = np.clip(50 + scaled_dy, 0, 100)
+            
+            # Compute horizontal position (secondary) - similar logic to vertical
+            scaled_dx = np.clip(final_dx * 10 * self.oscillation_sensitivity, -max_deviation, max_deviation)  # Note: positive scaling for dx
+            new_raw_secondary_pos = np.clip(50 + scaled_dx, 0, 100)
         else:
-            new_raw_pos = self.oscillation_last_known_pos * 0.95 + 50 * 0.05
+            new_raw_primary_pos = self.oscillation_last_known_pos * 0.95 + 50 * 0.05
+            new_raw_secondary_pos = getattr(self, 'oscillation_last_known_secondary_pos', 50) * 0.95 + 50 * 0.05
 
         # --- Live Dynamic Amplification Stage ---
-        self.oscillation_position_history.append(new_raw_pos)
-        final_pos = new_raw_pos
+        self.oscillation_position_history.append(new_raw_primary_pos)
+        if not hasattr(self, 'oscillation_secondary_position_history'):
+            self.oscillation_secondary_position_history = deque(maxlen=self.oscillation_position_history.maxlen)
+        self.oscillation_secondary_position_history.append(new_raw_secondary_pos)
+        
+        final_primary_pos = new_raw_primary_pos
+        final_secondary_pos = new_raw_secondary_pos
 
         if self.live_amp_enabled and len(self.oscillation_position_history) > self.oscillation_position_history.maxlen * 0.5:
-            p10 = np.percentile(self.oscillation_position_history, 10)
-            p90 = np.percentile(self.oscillation_position_history, 90)
-            effective_range = p90 - p10
+            # Amplify primary axis (vertical)
+            p10_primary = np.percentile(self.oscillation_position_history, 10)
+            p90_primary = np.percentile(self.oscillation_position_history, 90)
+            effective_range_primary = p90_primary - p10_primary
 
-            if effective_range > 15: # Only amplify if there is significant motion
-                normalized_pos = (new_raw_pos - p10) / effective_range
-                final_pos = np.clip(normalized_pos * 100, 0, 100)
+            if effective_range_primary > 15: # Only amplify if there is significant motion
+                normalized_primary_pos = (new_raw_primary_pos - p10_primary) / effective_range_primary
+                final_primary_pos = np.clip(normalized_primary_pos * 100, 0, 100)
+            
+            # Amplify secondary axis (horizontal)
+            if len(self.oscillation_secondary_position_history) > self.oscillation_secondary_position_history.maxlen * 0.5:
+                p10_secondary = np.percentile(self.oscillation_secondary_position_history, 10)
+                p90_secondary = np.percentile(self.oscillation_secondary_position_history, 90)
+                effective_range_secondary = p90_secondary - p10_secondary
 
-        # Apply EMA smoothing to the final calculated position
-        self.oscillation_last_known_pos = self.oscillation_last_known_pos * (1 - self.oscillation_ema_alpha) + final_pos * self.oscillation_ema_alpha
+                if effective_range_secondary > 15: # Only amplify if there is significant motion
+                    normalized_secondary_pos = (new_raw_secondary_pos - p10_secondary) / effective_range_secondary
+                    final_secondary_pos = np.clip(normalized_secondary_pos * 100, 0, 100)
+
+        # Apply EMA smoothing to both positions
+        self.oscillation_last_known_pos = self.oscillation_last_known_pos * (1 - self.oscillation_ema_alpha) + final_primary_pos * self.oscillation_ema_alpha
+        if not hasattr(self, 'oscillation_last_known_secondary_pos'):
+            self.oscillation_last_known_secondary_pos = 50.0
+        self.oscillation_last_known_secondary_pos = self.oscillation_last_known_secondary_pos * (1 - self.oscillation_ema_alpha) + final_secondary_pos * self.oscillation_ema_alpha
+        
         self.oscillation_funscript_pos = int(round(self.oscillation_last_known_pos))
+        self.oscillation_funscript_secondary_pos = int(round(self.oscillation_last_known_secondary_pos))
 
         if self.tracking_active:
-            self.funscript.add_action(timestamp_ms=frame_time_ms, primary_pos=self.oscillation_funscript_pos, secondary_pos=50)
-            action_log_list.append({"at": frame_time_ms, "pos": self.oscillation_funscript_pos})
+            # Apply axis and timeline selection logic (same as regular tracker)
+            current_tracking_axis_mode = self.app.tracking_axis_mode
+            current_single_axis_output = self.app.single_axis_output_target
+            primary_to_write, secondary_to_write = None, None
+            
+            # The oscillation detector now generates both vertical and horizontal signals
+            final_primary_pos = self.oscillation_funscript_pos
+            final_secondary_pos = self.oscillation_funscript_secondary_pos
+            
+            if current_tracking_axis_mode == "both":
+                primary_to_write, secondary_to_write = final_primary_pos, final_secondary_pos
+            elif current_tracking_axis_mode == "vertical":
+                if current_single_axis_output == "primary":
+                    primary_to_write = final_primary_pos
+                else:
+                    secondary_to_write = final_primary_pos
+            elif current_tracking_axis_mode == "horizontal":
+                if current_single_axis_output == "primary":
+                    primary_to_write = final_secondary_pos
+                else:
+                    secondary_to_write = final_secondary_pos
+            
+            self.funscript.add_action(timestamp_ms=frame_time_ms, primary_pos=primary_to_write, secondary_pos=secondary_to_write)
+            action_log_list.append({
+                "at": frame_time_ms, 
+                "pos": primary_to_write, 
+                "secondary_pos": secondary_to_write,
+                "mode": current_tracking_axis_mode,
+                "target": current_single_axis_output if current_tracking_axis_mode != "both" else "N/A"
+            })
 
         # --- Visualization for oscillation area and grid ---
         if use_oscillation_area and self.oscillation_area_fixed:

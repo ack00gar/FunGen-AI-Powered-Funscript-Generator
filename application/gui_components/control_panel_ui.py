@@ -141,14 +141,14 @@ class ControlPanelUI:
         imgui.separator()
 
         # Simplified Tracker Type Selection
-        tracking_modes_display = ["Offline AI Analysis (3-Stage)", "Live Tracking (YOLO ROI)"]
-        tracking_modes_enums = [TrackerMode.OFFLINE_3_STAGE, TrackerMode.LIVE_YOLO_ROI]
+        tracking_modes_display = ["Live Oscillation Detector", "Offline AI Analysis (3-Stage)", "Live Tracking (YOLO ROI)"]
+        tracking_modes_enums = [TrackerMode.OSCILLATION_DETECTOR, TrackerMode.OFFLINE_3_STAGE, TrackerMode.LIVE_YOLO_ROI]
 
         try:
             current_mode_idx = tracking_modes_enums.index(app_state.selected_tracker_mode)
         except ValueError:
-            current_mode_idx = 0 # Default to Offline
-            app_state.selected_tracker_mode = TrackerMode.OFFLINE_3_STAGE
+            current_mode_idx = 0 # Default to Live Oscillation Detector
+            app_state.selected_tracker_mode = TrackerMode.OSCILLATION_DETECTOR
 
         imgui.push_item_width(-1)
         clicked, new_idx = imgui.combo("Analysis Method##SimpleTrackerMode", current_mode_idx, tracking_modes_display)
