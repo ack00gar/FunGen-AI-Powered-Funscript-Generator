@@ -933,7 +933,7 @@ def perform_yolo_analysis(
         # Validate preprocessed video if it was created
         if is_encoding_preprocessed_video and preprocessed_video_path_arg:
             if os.path.exists(preprocessed_video_path_arg):
-                if not _validate_preprocessed_video_completeness(preprocessed_video_path_arg, total_frames_to_process, main_vp_for_info.video_info.get('fps', 30.0), process_logger):
+                if not _validate_preprocessed_video_completeness(preprocessed_video_path_arg, total_frames_to_process, video_fps, process_logger):
                     process_logger.error(f"Preprocessed video validation failed: {preprocessed_video_path_arg}")
                     _cleanup_incomplete_file(preprocessed_video_path_arg, process_logger)
                     # Don't fail the entire stage if just the preprocessed video is bad

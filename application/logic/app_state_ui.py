@@ -80,7 +80,7 @@ class AppStateUI:
         self.show_auto_post_processing_section = True
 
         # Preview/Heatmap constants and state for re-render checks by GUI
-        self.funscript_preview_draw_height = 30  # For legacy funscript preview bar
+        self.funscript_preview_draw_height = 50  # For legacy funscript preview bar
         self.timeline_heatmap_height = 15  # For heatmap below interactive timeline
         self.heatmap_texture_fixed_height = self.timeline_heatmap_height
         self.funscript_preview_texture_fixed_height = self.funscript_preview_draw_height
@@ -96,10 +96,8 @@ class AppStateUI:
         self.last_funscript_preview_action_count = -1
 
         # Gauge Window Attributes
-        self.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1",
-                                                                 defaults.get("show_gauge_window_timeline1", True))
-        self.show_gauge_window_timeline2 = self.app_settings.get("show_gauge_window_timeline2",
-                                                                 defaults.get("show_gauge_window_timeline2", False))
+        self.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1", defaults.get("show_gauge_window_timeline1", True))
+        self.show_gauge_window_timeline2 = self.app_settings.get("show_gauge_window_timeline2", defaults.get("show_gauge_window_timeline2", False))
 
         default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
         default_gauge_h = self.app_settings.get("gauge_window_size_h", defaults.get("gauge_window_size_h", 220))
