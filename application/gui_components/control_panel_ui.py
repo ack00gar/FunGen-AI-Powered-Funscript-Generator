@@ -229,7 +229,7 @@ class ControlPanelUI:
         imgui.separator()
 
         # --- Analysis Range and Rerun Options ---
-        if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE, TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
+        if app_state.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE, TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]:
             if imgui.collapsing_header("Analysis Options##RunControlAnalysisOptions", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 # --- Range Selection ---
                 imgui.text("Analysis Range")
