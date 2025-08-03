@@ -671,7 +671,7 @@ class ApplicationLogic:
         fs_proc._record_timeline_action(timeline_num, op_desc)
 
         # 2. Run the non-destructive pipeline to get the result
-        new_actions = funscript_instance.apply_ultimate_autotune(axis_name, params)
+        new_actions = funscript_instance.apply_custom_autotune_pipeline(axis_name, params)
 
         # 3. Apply the result and finalize the Undo action
         if new_actions is not None:
