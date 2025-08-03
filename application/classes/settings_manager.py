@@ -49,11 +49,13 @@ class AppSettings:
             "show_funscript_interactive_timeline2": False,
             "show_funscript_timeline": True,
             "show_heatmap": True,
+            "use_simplified_funscript_preview": False,
             "show_stage2_overlay": True,
             "show_gauge_window_timeline1": True,
             "show_gauge_window_timeline2": False,
             "show_lr_dial_graph": True,
             "show_chapter_list_window": False,
+            "show_timeline_editor_buttons": False,
 
             # File Handling & Output
             "autosave_final_funscript_to_video_location": True,

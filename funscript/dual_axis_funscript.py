@@ -551,17 +551,93 @@ class DualAxisFunscript:
 
             self.add_actions_batch(batch_data)
 
-    def apply_ultimate_autotune(self, axis: str, params: Dict) -> Optional[List[Dict]]:
+    # Legacy method
+    # def apply_ultimate_autotune(self, axis: str, params: Dict) -> Optional[List[Dict]]:
+    #     """
+    #     Applies a comprehensive, multi-stage enhancement pipeline by calling existing
+    #     methods on a temporary, isolated Funscript object.
+    #     This method is NON-DESTRUCTIVE and returns a new list of actions.
+    #     """
+    #     actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+    #     if not actions_list_ref or len(actions_list_ref) < 3:
+    #         return copy.deepcopy(actions_list_ref)
+    #
+    #     self.logger.info("Starting Ultimate Autotune pipeline...")
+    #
+    #     # Create a temporary, isolated Funscript object to work with.
+    #     temp_fs = DualAxisFunscript(logger=self.logger)
+    #     if axis == 'primary':
+    #         temp_fs.primary_actions = copy.deepcopy(actions_list_ref)
+    #     else:
+    #         temp_fs.secondary_actions = copy.deepcopy(actions_list_ref)
+    #
+    #     # === NEW STEP 1: PRE-SMOOTHING ===
+    #     p = params.get('presmoothing', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (1) Pre-smoothing script.")
+    #         # Reuse the existing auto_tune_sg_filter on the temp object
+    #         temp_fs.auto_tune_sg_filter(
+    #             axis,
+    #             max_window_size=p.get('max_window_size', 15),
+    #             # Use sensible defaults for other params in this context
+    #             saturation_low=1,
+    #             saturation_high=99,
+    #             polyorder=2
+    #         )
+    #
+    #     # === STEP 2: CORE MOTION EXTRACTION ===
+    #     p = params.get('peaks', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (2) Extracting Core Motion.")
+    #         temp_fs.find_peaks_and_valleys(axis, prominence=p.get('prominence', 10), distance=p.get('distance', 1))
+    #
+    #     if len(getattr(temp_fs, f"{axis}_actions")) < 2:
+    #         self.logger.warning("Ultimate Autotune: Core motion extraction filtered all points.")
+    #         return getattr(temp_fs, f"{axis}_actions")
+    #
+    #     # === STEP 3: MISSING STROKE RECOVERY ===
+    #     p = params.get('recovery', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (3) Recovering Missing Strokes.")
+    #         temp_fs.recover_missing_strokes(axis, original_actions=actions_list_ref,
+    #                                         threshold_factor=p.get('threshold_factor', 1.8))
+    #         # Re-run peak finding to clean up after stroke recovery
+    #         temp_fs.find_peaks_and_valleys(axis, prominence=1)
+    #
+    #     # === STEP 4: DYNAMIC RANGE NORMALIZATION ===
+    #     p = params.get('normalization', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (4) Normalizing Dynamic Range.")
+    #         temp_fs.scale_points_to_range(axis, output_min=0, output_max=100)
+    #
+    #     # === STEP 5: SMOOTH STROKE REGENERATION ===
+    #     # p = params.get('regeneration', {})
+    #     # if p.get('enabled', True):
+    #     #     self.logger.debug("Ultimate Autotune: (5) Regenerating Smooth Strokes.")
+    #     #     temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=p.get('resample_rate_ms', 40))
+    #
+    #     # === STEP 6: SPEED LIMITER ===
+    #     p = params.get('speed_limiter', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (6) Applying Speed Limit.")
+    #         temp_fs.apply_speed_limiter(axis, min_interval=20, vibe_amount=0,
+    #                                     speed_threshold=p.get('speed_threshold', 500.0))
+    #
+    #     final_actions = getattr(temp_fs, f"{axis}_actions")
+    #     self.logger.info(
+    #         f"Ultimate Autotune pipeline finished. Points: {len(actions_list_ref)} -> {len(final_actions)}.")
+    #     return final_actions
+
+    def apply_custom_autotune_pipeline(self, axis: str, params: Dict) -> Optional[List[Dict]]:
         """
-        Applies a comprehensive, multi-stage enhancement pipeline by calling existing
-        methods on a temporary, isolated Funscript object.
+        Applies a new, specific multi-stage enhancement pipeline.
         This method is NON-DESTRUCTIVE and returns a new list of actions.
         """
         actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
-        if not actions_list_ref or len(actions_list_ref) < 3:
+        if not actions_list_ref or len(actions_list_ref) < 2:
             return copy.deepcopy(actions_list_ref)
 
-        self.logger.info("Starting Ultimate Autotune pipeline...")
+        self.logger.info("Starting Custom Autotune pipeline...")
 
         # Create a temporary, isolated Funscript object to work with.
         temp_fs = DualAxisFunscript(logger=self.logger)
@@ -570,61 +646,55 @@ class DualAxisFunscript:
         else:
             temp_fs.secondary_actions = copy.deepcopy(actions_list_ref)
 
-        # === NEW STEP 1: PRE-SMOOTHING ===
-        p = params.get('presmoothing', {})
-        if p.get('enabled', True):
-            self.logger.debug("Ultimate Autotune: (1) Pre-smoothing script.")
-            # Reuse the existing auto_tune_sg_filter on the temp object
-            temp_fs.auto_tune_sg_filter(
-                axis,
-                max_window_size=p.get('max_window_size', 15),
-                # Use sensible defaults for other params in this context
-                saturation_low=1,
-                saturation_high=99,
-                polyorder=2
-            )
+        # === STEP 1: Custom Speed Limiter (Remove high-speed points) ===
+        self.logger.debug("Custom Pipeline: (1) Removing high-speed points.")
+        actions = getattr(temp_fs, f"{axis}_actions")
+        if len(actions) > 2:
+            actions_to_keep = [actions[0]]  # Always keep the first point
+            for i in range(1, len(actions) - 1):
+                p_prev, p_curr, p_next = actions[i - 1], actions[i], actions[i + 1]
 
-        # === STEP 2: CORE MOTION EXTRACTION ===
-        p = params.get('peaks', {})
-        if p.get('enabled', True):
-            self.logger.debug("Ultimate Autotune: (2) Extracting Core Motion.")
-            temp_fs.find_peaks_and_valleys(axis, prominence=p.get('prominence', 10), distance=p.get('distance', 1))
+                # Calculate in-speed
+                in_dt = p_curr['at'] - p_prev['at']
+                in_speed = abs(p_curr['pos'] - p_prev['pos']) / (in_dt / 1000.0) if in_dt > 0 else float('inf')
 
-        if len(getattr(temp_fs, f"{axis}_actions")) < 2:
-            self.logger.warning("Ultimate Autotune: Core motion extraction filtered all points.")
-            return getattr(temp_fs, f"{axis}_actions")
+                # Calculate out-speed
+                out_dt = p_next['at'] - p_curr['at']
+                out_speed = abs(p_next['pos'] - p_curr['pos']) / (out_dt / 1000.0) if out_dt > 0 else float('inf')
 
-        # === STEP 3: MISSING STROKE RECOVERY ===
-        p = params.get('recovery', {})
-        if p.get('enabled', True):
-            self.logger.debug("Ultimate Autotune: (3) Recovering Missing Strokes.")
-            temp_fs.recover_missing_strokes(axis, original_actions=actions_list_ref,
-                                            threshold_factor=p.get('threshold_factor', 1.8))
-            # Re-run peak finding to clean up after stroke recovery
-            temp_fs.find_peaks_and_valleys(axis, prominence=1)
+                if not (in_speed > 1000 and out_speed > 1000):
+                    actions_to_keep.append(p_curr)
+            
+            actions_to_keep.append(actions[-1]) # Always keep the last point
+            setattr(temp_fs, f"{axis}_actions", actions_to_keep)
 
-        # === STEP 4: DYNAMIC RANGE NORMALIZATION ===
-        p = params.get('normalization', {})
-        if p.get('enabled', True):
-            self.logger.debug("Ultimate Autotune: (4) Normalizing Dynamic Range.")
-            temp_fs.scale_points_to_range(axis, output_min=0, output_max=100)
+        # === STEP 2: Resample ===
+        self.logger.debug("Custom Pipeline: (2) Resampling.")
+        temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=50)
 
-        # === STEP 5: SMOOTH STROKE REGENERATION ===
-        # p = params.get('regeneration', {})
-        # if p.get('enabled', True):
-        #     self.logger.debug("Ultimate Autotune: (5) Regenerating Smooth Strokes.")
-        #     temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=p.get('resample_rate_ms', 40))
+        # === STEP 3: Smooth SG (11, 7) ===
+        self.logger.debug("Custom Pipeline: (3) Applying SG Filter.")
+        temp_fs.apply_savitzky_golay(axis, window_length=11, polyorder=7)
 
-        # === STEP 6: SPEED LIMITER ===
-        p = params.get('speed_limiter', {})
-        if p.get('enabled', True):
-            self.logger.debug("Ultimate Autotune: (6) Applying Speed Limit.")
-            temp_fs.apply_speed_limiter(axis, min_interval=20, vibe_amount=0,
-                                        speed_threshold=p.get('speed_threshold', 500.0))
+        # === STEP 4: Resample ===
+        self.logger.debug("Custom Pipeline: (4) Resampling.")
+        temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=50)
+
+        # === STEP 5: Amplify (1.25, 50) ===
+        self.logger.debug("Custom Pipeline: (5) Amplifying.")
+        temp_fs.amplify_points_values(axis, scale_factor=1.25, center_value=50)
+
+        # === STEP 6: Resample ===
+        self.logger.debug("Custom Pipeline: (6) Resampling.")
+        temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=50)
+
+        # === STEP 7: Keyframes (10, 50) ===
+        self.logger.debug("Custom Pipeline: (7) Simplifying to Keyframes.")
+        temp_fs.simplify_to_keyframes(axis, position_tolerance=10, time_tolerance_ms=50)
 
         final_actions = getattr(temp_fs, f"{axis}_actions")
         self.logger.info(
-            f"Ultimate Autotune pipeline finished. Points: {len(actions_list_ref)} -> {len(final_actions)}.")
+            f"Custom Autotune pipeline finished. Points: {len(actions_list_ref)} -> {len(final_actions)}.")
         return final_actions
 
     def simplify_rdp(self, axis: str, epsilon: float,

@@ -433,6 +433,12 @@ class AppFunscriptProcessor:
     def _finalize_action_and_update_ui(self, timeline_num: int, change_description: str):
         self.update_funscript_stats_for_timeline(timeline_num, change_description)
         self.app.project_manager.project_dirty = True
+
+        # Invalidate the ultimate autotune preview for the affected timeline
+        timeline_instance = self.app.get_timeline(timeline_num)
+        if timeline_instance:
+            timeline_instance.invalidate_ultimate_preview()
+
         if timeline_num == 1:
             self.app.app_state_ui.heatmap_dirty = True
             self.app.app_state_ui.funscript_preview_dirty = True
@@ -585,29 +591,12 @@ class AppFunscriptProcessor:
         if merged_actions:
             unique_final_actions.append(merged_actions[0])
             for i in range(1, len(merged_actions)):
-                # Only add if the timestamp is strictly greater, effectively removing exact duplicates.
-                # If timestamps were identical, the one from `processed_new_actions` would typically be kept if
-                # it was correctly placed by the sort due to its value.
                 if merged_actions[i]['at'] > merged_actions[i - 1]['at']:
                     unique_final_actions.append(merged_actions[i])
                 else:  # Timestamps are the same, potentially overwrite previous with this one if different pos.
-                    # This simple filter just takes the first one for a given timestamp.
-                    # A more sophisticated merge might be needed if identical timestamps with different values are common.
-                    # For funscript, unique 'at' is typical.
-                    # If `merged_actions[i]` came from `processed_new_actions` and `merged_actions[i-1]`
-                    # was an original point at the exact same ms, `processed_new_actions` effectively replaces it here.
                     if unique_final_actions and unique_final_actions[-1]['at'] == merged_actions[i]['at']:
-                        unique_final_actions[-1] = merged_actions[
-                            i]  # Replace with the later one in sorted list (favors new if at same 'at')
-                    # This else block might need refinement if identical 'at' values from 'before'/'after' vs 'new' are a concern.
-                    # Safest: build a dict keyed by 'at', favoring new_actions, then sort.
-                    # Alternative for unique_final_actions:
-                    # temp_dict = {}
-                    # for action in actions_before_range: temp_dict[action['at']] = action
-                    # for action in processed_new_actions: temp_dict[action['at']] = action # Overwrites if 'at' is same
-                    # for action in actions_after_range:
-                    #    if action['at'] not in temp_dict: temp_dict[action['at']] = action
-                    # unique_final_actions = sorted(list(temp_dict.values()), key=lambda x: x['at'])
+                        unique_final_actions[-1] = merged_actions[i]
+
 
         # Update the actual live list in the funscript object
         live_actions_list_ref = getattr(target_funscript, live_actions_list_attr_name)
@@ -866,12 +855,6 @@ class AppFunscriptProcessor:
     def request_create_new_chapter(self):
         # This would typically open a dialog. For now, just log.
         self.logger.info("Request to create a new chapter received (UI Dialog Needed).")
-        # Placeholder: Add a default chapter for demonstration if needed
-        # default_start = self.app.processor.current_frame_index if self.app.processor else 0
-        # default_end = default_start + (self.app.processor.video_info.get('fps', 30) * 5) # 5 seconds
-        # new_chapter = VideoSegment(start_frame_id=default_start, end_frame_id=default_end, ...)
-        # self.video_chapters.append(new_chapter)
-        # self.app.project_manager.project_dirty = True
         self.app.set_status_message("Create New Chapter: Not fully implemented (needs UI dialog).")
 
     def request_edit_chapter(self, chapter_to_edit: VideoSegment):

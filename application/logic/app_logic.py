@@ -29,6 +29,11 @@ from .app_calibration import AppCalibration
 from .app_energy_saver import AppEnergySaver
 from .app_utility import AppUtility
 
+# Import InteractiveFunscriptTimeline for type hinting
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from application.classes.interactive_timeline import InteractiveFunscriptTimeline
+
 
 def cli_live_video_progress_callback(current_frame, total_frames, start_time):
     """A simpler progress callback for frame-by-frame video processing."""
@@ -334,6 +339,17 @@ class ApplicationLogic:
             if self.tracker:
                 # Also set the tracker's internal mode to match the UI default
                 self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
+
+    def get_timeline(self, timeline_num: int) -> Optional['InteractiveFunscriptTimeline']:
+        """
+        Retrieves the interactive timeline instance for the given timeline number.
+        """
+        if timeline_num == 1:
+            # Since this is a forward reference, we might need to get it from the GUI instance if not directly available
+            return getattr(self, 'interactive_timeline1', None)
+        elif timeline_num == 2:
+            return getattr(self, 'interactive_timeline2', None)
+        return None
 
     def trigger_first_run_setup(self):
         """Initiates the first-run model download process in a background thread."""
@@ -1135,8 +1151,10 @@ class ApplicationLogic:
             self.logger.info("Triggering auto post-processing after completed analysis.")
             self.funscript_processor.apply_automatic_post_processing()
             chapters_for_save = self.funscript_processor.video_chapters
+        elif autotune_enabled_for_batch:
+            self.logger.info("Auto post-processing skipped as Ultimate Autotune is enabled for this batch.")
         else:
-            self.logger.info("Auto post-processing skipped (either disabled or superseded by Ultimate Autotune).")
+            self.logger.info("Auto post-processing skipped (disabled in settings).")
 
         if autotune_enabled_for_batch:
             self.logger.info("Triggering Ultimate Autotune for batch processing.")
@@ -1146,26 +1164,6 @@ class ApplicationLogic:
         # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
         self.logger.info("Saving final funscripts...")
         self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
-
-        # Handle batch mode copy
-        # if self.is_batch_processing_active and self.batch_copy_funscript_to_video_location:
-        #     if saved_funscript_paths and isinstance(saved_funscript_paths, list):
-        #         video_dir = os.path.dirname(video_path)
-        #         for source_path in saved_funscript_paths:
-        #             if not source_path or not os.path.exists(source_path):
-        #                 continue
-        #             try:
-        #                 file_basename = os.path.basename(source_path)
-        #                 destination_path = os.path.join(video_dir, file_basename)
-        #                 with open(source_path, 'rb') as src_file:
-        #                     content = src_file.read()
-        #                 with open(destination_path, 'wb') as dest_file:
-        #                     dest_file.write(content)
-        #                 self.logger.info(f"Saved copy of {file_basename} next to video.")
-        #             except Exception as e:
-        #                 self.logger.error(f"Failed to save copy of {os.path.basename(source_path)} next to video: {e}")
-        #     else:
-        #         self.logger.warning("save_final_funscripts did not return file paths. Cannot save copy next to video.")
 
         # 4. SAVE THE PROJECT
         self.logger.info("Saving project file for completed video...")

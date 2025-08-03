@@ -383,6 +383,20 @@ class MainMenu:
                 if clicked: self.app.project_manager.project_dirty = True
                 clicked, app_state.show_heatmap = imgui.menu_item("Heatmap", selected=app_state.show_heatmap)
                 if clicked: self.app.project_manager.project_dirty = True
+
+                use_simplified = self.app.app_settings.get("use_simplified_funscript_preview", False)
+                clicked, new_simplified_val = imgui.menu_item("Use Simplified Funscript Preview", selected=use_simplified)
+                if clicked:
+                    self.app.app_settings.set("use_simplified_funscript_preview", new_simplified_val)
+                    # Mark the preview as dirty to force a redraw with the new style
+                    self.app.app_state_ui.funscript_preview_dirty = True
+
+                imgui.separator()
+                clicked, app_state.show_timeline_editor_buttons = imgui.menu_item("Show Timeline Editor Buttons", selected=app_state.show_timeline_editor_buttons)
+                if clicked: 
+                    self.app.app_settings.set("show_timeline_editor_buttons", app_state.show_timeline_editor_buttons)
+                    self.app.project_manager.project_dirty = True
+
                 imgui.unindent()
                 imgui.separator()
 
