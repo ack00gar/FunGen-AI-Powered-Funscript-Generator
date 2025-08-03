@@ -11,6 +11,7 @@ from funscript.dual_axis_funscript import DualAxisFunscript
 from config import constants
 from config.constants_colors import RGBColors
 from config.element_group_colors import AppGUIColors
+from application.utils.model_pool import ModelPool
 
 
 class ROITracker:
@@ -76,14 +77,17 @@ class ROITracker:
         self.det_model_path = tracker_model_path
         self.pose_model_path = pose_model_path
 
-        # Initialize model holders
+        # Initialize ModelPool for efficient memory management
+        self.model_pool = ModelPool(max_gpu_memory_ratio=0.8, logger=self.logger)
+        
+        # Legacy model holders (kept for compatibility but will be None)
         self.yolo: Optional[YOLO] = None
         self.yolo_pose: Optional[YOLO] = None
         self.classes = []
 
-        # Conditionally load models
-        if load_models_on_init:
-            self._load_models()
+        # Load class names if detection model is available
+        if load_models_on_init and self.det_model_path and os.path.exists(self.det_model_path):
+            self._load_class_names()
 
         self.confidence_threshold = confidence_threshold
         self.roi: Optional[Tuple[int, int, int, int]] = None
@@ -209,50 +213,47 @@ class ROITracker:
             return self.app.processor.determined_video_type == 'VR'
         return False
 
-    def _load_models(self):
-        """Loads or reloads the detection and pose models based on stored paths."""
-        self.unload_detection_model()
-        self.unload_pose_model()
-
+    def _load_class_names(self):
+        """Load class names from detection model for compatibility."""
         if self.det_model_path and os.path.exists(self.det_model_path):
             try:
-                self.yolo = YOLO(self.det_model_path, task='detect')
-                self.classes = self.yolo.names
-                self.logger.info(f"Object detection model loaded from {self.det_model_path}")
+                with self.model_pool.get_model(self.det_model_path, 'detect') as model:
+                    self.classes = model.names
+                self.logger.info(f"Loaded class names from detection model: {self.det_model_path}")
             except Exception as e:
-                self.logger.error(f"Could not load YOLO object model from {self.det_model_path}: {e}")
-                self.yolo = None
+                self.logger.error(f"Could not load class names from {self.det_model_path}: {e}")
                 self.classes = []
         else:
             self.logger.warning("Detection model path not set or file does not exist.")
-            self.yolo = None
             self.classes = []
 
-        if self.pose_model_path and os.path.exists(self.pose_model_path):
-            try:
-                self.yolo_pose = YOLO(self.pose_model_path)
-                self.logger.info(f"Pose estimation model loaded from {self.pose_model_path}")
-            except Exception as e:
-                self.logger.warning(f"Could not load YOLO pose model from {self.pose_model_path}: {e}")
-                self.yolo_pose = None
-        else:
-            self.logger.info("Pose model path not set or file does not exist. Pose features will be unavailable.")
-            self.yolo_pose = None
+    def _load_models(self):
+        """Legacy method - now just loads class names for compatibility."""
+        self.logger.warning("_load_models() is deprecated. Models are now loaded on-demand via ModelPool.")
+        self._load_class_names()
 
     def unload_detection_model(self):
         """Unloads the detection model to free up memory."""
-        if self.yolo:
-            del self.yolo
-            self.yolo = None
-            self.classes = []
-            self.logger.info("Tracker: Detection model released.")
+        # Legacy compatibility - ModelPool handles this automatically
+        self.yolo = None
+        self.logger.info("Tracker: Detection model reference cleared.")
 
     def unload_pose_model(self):
         """Unloads the pose model to free up memory."""
-        if self.yolo_pose:
-            del self.yolo_pose
-            self.yolo_pose = None
-            self.logger.info("Tracker: Pose model released.")
+        # Legacy compatibility - ModelPool handles this automatically
+        self.yolo_pose = None
+        self.logger.info("Tracker: Pose model reference cleared.")
+    
+    def unload_all_models(self):
+        """Unload all models and clear GPU memory."""
+        self.model_pool.clear_all_models()
+        self.yolo = None
+        self.yolo_pose = None
+        self.logger.info("Tracker: All models unloaded and GPU memory cleared.")
+    
+    def get_memory_stats(self) -> Dict[str, Any]:
+        """Get current memory usage statistics from the model pool."""
+        return self.model_pool.get_memory_stats()
 
     def histogram_calculate_flow_in_sub_regions(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray]) \
             -> Tuple[float, float, float, float, Optional[np.ndarray]]:
@@ -661,22 +662,40 @@ class ROITracker:
 
     def detect_objects(self, frame: np.ndarray) -> List[Dict]:
         detections = []
-        if not self.yolo: return detections
+        
+        # Check if detection model is available
+        if not self.det_model_path or not os.path.exists(self.det_model_path):
+            return detections
+        
         # Determine discarded classes based on self.app context if available
         discarded_classes_runtime = []
         if self.app and hasattr(self.app, 'discarded_tracking_classes'):
             discarded_classes_runtime = self.app.discarded_tracking_classes
 
-        results = self.yolo(frame, device=constants.DEVICE,  verbose=False, conf=self.confidence_threshold)
-        for result in results:
-            for box in result.boxes:
-                conf = float(box.conf[0])
-                class_id = int(box.cls[0])
-                class_name = self.classes[class_id]
-                if class_name in discarded_classes_runtime: # Use runtime list
-                    continue
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                detections.append({"box": (x1, y1, x2 - x1, y2 - y1), "class_id": class_id, "class_name": class_name, "confidence": conf})
+        # Use ModelPool for efficient model management
+        try:
+            with self.model_pool.get_model(self.det_model_path, 'detect') as model:
+                results = model(frame, device=constants.DEVICE, verbose=False, conf=self.confidence_threshold)
+                
+                for result in results:
+                    for box in result.boxes:
+                        conf = float(box.conf[0])
+                        class_id = int(box.cls[0])
+                        class_name = self.classes[class_id] if class_id < len(self.classes) else f"class_{class_id}"
+                        
+                        if class_name in discarded_classes_runtime:
+                            continue
+                            
+                        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                        detections.append({
+                            "box": (x1, y1, x2 - x1, y2 - y1),
+                            "class_id": class_id,
+                            "class_name": class_name,
+                            "confidence": conf
+                        })
+        except Exception as e:
+            self.logger.error(f"Object detection failed: {e}")
+            
         return detections
 
     def _update_penis_tracking(self, penis_box_xywh: Tuple[int, int, int, int]):
