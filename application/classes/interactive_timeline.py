@@ -1263,99 +1263,26 @@ class InteractiveFunscriptTimeline:
                 if not self.is_previewing:
                     self._update_preview('ultimate')
 
-                imgui.set_next_window_size(480, 0, condition=imgui.APPEARING)
+                imgui.set_next_window_size(420, 0, condition=imgui.APPEARING)
                 window_expanded, self.show_ultimate_autotune_popup = imgui.begin(
                     ultimate_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
 
                 if window_expanded:
                     imgui.text_wrapped(
-                        "A one-click pipeline to enhance and clean your script. Changes are previewed live.")
+                        "The Ultimate Autotune will process the script to enhance and clean it. The result is previewed on the timeline with an orange line.")
                     imgui.separator()
+                    imgui.text_wrapped("Do you want to replace the current script with this previewed version?")
+                    imgui.dummy(0, 10)
 
-                    # --- Pipeline Steps UI ---
-                    if imgui.tree_node("Stage 1: Cleanup & Analysis"):
-                        # Step 1
-                        c, self.ultimate_presmoothing_enabled = imgui.checkbox(
-                            "1. Pre-Smooth (Auto-SG)##UltimateSmooth", self.ultimate_presmoothing_enabled)
-                        if c:
-                            self._update_preview('ultimate')
-                        imgui.same_line(230);
-                        imgui.push_item_width(180)
-                        c, self.ultimate_presmoothing_max_window = imgui.slider_int("Max Window##UltimateSmoothWindow", self.ultimate_presmoothing_max_window, 5, 35)
-                        if c:
-                            if self.ultimate_presmoothing_max_window % 2 == 0:
-                                self.ultimate_presmoothing_max_window += 1
-                            self._update_preview('ultimate')
-                        imgui.pop_item_width()
+                    button_width = (imgui.get_content_region_available_width() - imgui.get_style().item_spacing[0]) / 2.0
 
-                        # Step 2
-                        c, self.ultimate_peaks_enabled = imgui.checkbox("2. Extract Core Motion##UltimatePeaks",
-                                                                        self.ultimate_peaks_enabled)
-                        if c:
-                            self._update_preview('ultimate')
-                        imgui.same_line(230);
-                        imgui.push_item_width(180)
-                        c, self.ultimate_peaks_prominence = imgui.slider_int("Prominence##UltimateProminence", self.ultimate_peaks_prominence, 1, 50)
-                        if c:
-                            self._update_preview('ultimate')
-                        imgui.pop_item_width()
-
-                        # Step 3
-                        c, self.ultimate_recovery_enabled = imgui.checkbox(
-                            "3. Recover Missing Strokes##UltimateRecovery", self.ultimate_recovery_enabled)
-                        if c:
-                            self._update_preview('ultimate')
-                        imgui.same_line(230);
-                        imgui.push_item_width(180)
-                        c, self.ultimate_recovery_threshold = imgui.slider_float(
-                            "Rhythm Factor##UltimateRecoveryThresh", self.ultimate_recovery_threshold, 1.1, 3.0,
-                            "%.1f x")
-                        if c:
-                            self._update_preview('ultimate')
-                        imgui.pop_item_width()
-                        imgui.tree_pop()
-
-                    if imgui.tree_node("Stage 2: Polish & Finalize"):
-                        # Step 4
-                        c, self.ultimate_normalization_enabled = imgui.checkbox(
-                            "4. Normalize Dynamic Range##UltimateNorm", self.ultimate_normalization_enabled)
-                        if c:
-                            self._update_preview('ultimate')
-
-                        # Step 5
-                        # c, self.ultimate_regeneration_enabled = imgui.checkbox(
-                        #     "5. Regenerate Smooth Strokes##UltimateRegen", self.ultimate_regeneration_enabled)
-                        # if c:
-                        #     self._update_preview('ultimate')
-                        # imgui.same_line(230);
-                        # imgui.push_item_width(180)
-                        # c, self.ultimate_resample_rate = imgui.slider_int("Interval (ms)##UltimateInterval",
-                        #                                                   self.ultimate_resample_rate, 20, 100)
-                        # if c:
-                        #     self._update_preview('ultimate')
-                        # imgui.pop_item_width()
-
-                        # Step 6
-                        c, self.ultimate_speed_limit_enabled = imgui.checkbox("5. Apply Speed Limit##UltimateSpeed", self.ultimate_speed_limit_enabled)
-                        if c:
-                            self._update_preview('ultimate')
-                        imgui.same_line(230);
-                        imgui.push_item_width(180)
-                        c, self.ultimate_speed_threshold = imgui.slider_float("Speed##UltimateSpeedLimit", self.ultimate_speed_threshold, 100.0, 1000.0, "%.0f")
-                        if c:
-                            self._update_preview('ultimate')
-                        imgui.pop_item_width()
-                        imgui.tree_pop()
-
-                    imgui.separator()
-                    if imgui.button("Apply Changes##UltimateApply",
-                                    width=imgui.get_content_region_available_width() - 80):
+                    if imgui.button("Apply and Replace##UltimateApply", width=button_width):
                         self._perform_ultimate_autotune()
                         self.clear_preview()
                         self.show_ultimate_autotune_popup = False
 
                     imgui.same_line()
-                    if imgui.button("Cancel##UltimateCancel", width=-1):
+                    if imgui.button("Cancel##UltimateCancel", width=button_width):
                         self.clear_preview()
                         self.show_ultimate_autotune_popup = False
 
