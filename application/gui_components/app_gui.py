@@ -528,6 +528,50 @@ class GUI:
                 text_pos = (text_pos_x, canvas_p1_y_offset - text_size[1] - 2)
                 draw_list_marker.add_text(text_pos[0], text_pos[1], imgui.get_color_u32_rgba(1, 1, 1, 1), text)
 
+
+
+    # --- This function now submits a task to the worker thread ---
+    def render_funscript_heatmap_preview(self, total_video_duration_s: float, bar_width_float: float, bar_height_float: float):
+        app_state = self.app.app_state_ui
+        current_bar_width_int = int(round(bar_width_float))
+        if current_bar_width_int <= 0 or app_state.heatmap_texture_fixed_height <= 0 or not self.heatmap_texture_id:
+            imgui.dummy(bar_width_float, bar_height_float)
+            return
+
+        current_action_count = len(self.app.funscript_processor.get_actions('primary'))
+        is_live_tracking = self.app.processor and self.app.processor.tracker and self.app.processor.tracker.tracking_active
+
+        full_redraw_needed = (
+            app_state.heatmap_dirty
+            or current_bar_width_int != app_state.last_heatmap_bar_width
+            or abs(total_video_duration_s - app_state.last_heatmap_video_duration_s) > 0.01)
+
+        incremental_update_needed = current_action_count != self.last_submitted_action_count_heatmap
+
+        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (time.time() - self.last_preview_update_time_heatmap >= self.preview_update_interval_seconds)))
+
+        if needs_regen and self.preview_task_queue.empty():
+            actions_copy = self.app.funscript_processor.get_actions('primary').copy()
+            task = {
+                'type': 'heatmap',
+                'target_width': current_bar_width_int,
+                'target_height': app_state.heatmap_texture_fixed_height,
+                'total_duration_s': total_video_duration_s,
+                'actions': actions_copy
+            }
+            self.preview_task_queue.put(task)
+
+            # Update state after submission
+            app_state.heatmap_dirty = False
+            app_state.last_heatmap_bar_width = current_bar_width_int
+            app_state.last_heatmap_video_duration_s = total_video_duration_s
+            self.last_submitted_action_count_heatmap = current_action_count
+            if is_live_tracking and incremental_update_needed:
+                self.last_preview_update_time_heatmap = time.time()
+
+        # Render the existing texture
+        imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
+
     def _render_first_run_setup_popup(self):
         app = self.app
         if app.show_first_run_setup_popup:
