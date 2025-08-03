@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from application.utils.time_format import _format_time
-from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS
+from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS, TrackerMode
 from application.utils.video_segment import VideoSegment
 from config.element_group_colors import VideoNavigationColors
 from config.constants_colors import CurrentTheme
@@ -518,6 +518,65 @@ class VideoNavigationUI:
                 if imgui.menu_item("On Both Timelines")[0]:
                     if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
                         self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='both')
+                imgui.end_menu()
+
+            # --- Analysis submenu ---
+            can_analyze = num_selected == 1
+            if imgui.begin_menu("Chapter Analysis", enabled=can_analyze):
+                if can_analyze and self.context_selected_chapters:
+                    selected_chapter = self.context_selected_chapters[0]
+                    
+                    if imgui.menu_item("Live Oscillation Detector")[0]:
+                        # Set tracker mode to oscillation detector
+                        self.app.app_state_ui.selected_tracker_mode = TrackerMode.OSCILLATION_DETECTOR
+                        # Set scripting range to the selected chapter
+                        if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
+                            self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
+                            # Start live tracking
+                            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
+                                self.app.event_handlers.handle_start_live_tracker_click()
+                                self.app.logger.info(f"Started Live Oscillation Detector analysis for chapter: {selected_chapter.position_short_name}")
+                            else:
+                                self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                        else:
+                            self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
+                        self.context_selected_chapters.clear()
+                        imgui.close_current_popup()
+                    
+                    if imgui.menu_item("Live Tracking (YOLO ROI)")[0]:
+                        # Set tracker mode to YOLO ROI
+                        self.app.app_state_ui.selected_tracker_mode = TrackerMode.LIVE_YOLO_ROI
+                        # Set scripting range to the selected chapter
+                        if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
+                            self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
+                            # Start live tracking
+                            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
+                                self.app.event_handlers.handle_start_live_tracker_click()
+                                self.app.logger.info(f"Started Live Tracking (YOLO ROI) analysis for chapter: {selected_chapter.position_short_name}")
+                            else:
+                                self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                        else:
+                            self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
+                        self.context_selected_chapters.clear()
+                        imgui.close_current_popup()
+                    
+                    if imgui.menu_item("Live Tracking (User ROI)")[0]:
+                        # Set tracker mode to User ROI
+                        self.app.app_state_ui.selected_tracker_mode = TrackerMode.LIVE_USER_ROI
+                        # Set scripting range to the selected chapter
+                        if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
+                            self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
+                            # Start live tracking
+                            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
+                                self.app.event_handlers.handle_start_live_tracker_click()
+                                self.app.logger.info(f"Started Live Tracking (User ROI) analysis for chapter: {selected_chapter.position_short_name}")
+                            else:
+                                self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                        else:
+                            self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
+                        self.context_selected_chapters.clear()
+                        imgui.close_current_popup()
+                
                 imgui.end_menu()
 
             imgui.separator()
