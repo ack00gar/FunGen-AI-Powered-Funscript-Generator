@@ -400,20 +400,17 @@ class ControlPanelUI:
                             )
                         
                         # Database Retention Option
-                        retain_database = self.app.app_settings.get("retain_stage2_database", True)
-                        changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
-                        if changed_db:
-                            self.app.app_settings.set("retain_stage2_database", new_db_val)
+                        with _DisabledScope(disable_combo):
+                            retain_database = self.app.app_settings.get("retain_stage2_database", True)
+                            changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
+                            if changed_db:
+                                self.app.app_settings.set("retain_stage2_database", new_db_val)
                         if imgui.is_item_hovered():
                             imgui.set_tooltip(
                                 "Keep the Stage 2 database file after processing completes.\n"
                                 "Disable to save disk space (database is automatically deleted).\n" 
                                 "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
                             )
-                        
-                        if disable_combo:
-                            imgui.pop_style_var()
-                            imgui.internal.pop_item_flag()
             imgui.separator()
 
         self._render_start_stop_buttons(stage_proc, fs_proc, events)
@@ -1174,13 +1171,13 @@ class ControlPanelUI:
             
             # Check for resumable tasks
             resumable_checkpoint = None
-            if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_2_STAGE] and self.app.file_manager.video_path:
+            if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_2_STAGE] and self.app.file_manager.video_path:
                 resumable_checkpoint = stage_proc.can_resume_video(self.app.file_manager.video_path)
             
-            if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_2_STAGE]:
+            if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_2_STAGE]:
                 start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
-            elif selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]:
+            elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR]:
                 start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
                 handler = event_handlers.handle_start_live_tracker_click
             
@@ -1225,8 +1222,8 @@ class ControlPanelUI:
         is_analysis_running = stage_proc.full_analysis_active
         selected_mode = self.app.app_state_ui.selected_tracker_mode
 
-        active_progress_color = ControlPanelColors.ACTIVE_PROGRESS # Vibrant blue for active
-        completed_progress_color = ControlPanelColors.COMPLETED_PROGRESS # Vibrant green for completed
+        active_progress_color = self.ControlPanelColors.ACTIVE_PROGRESS # Vibrant blue for active
+        completed_progress_color = self.ControlPanelColors.COMPLETED_PROGRESS # Vibrant green for completed
 
         # Stage 1
         imgui.text("Stage 1: YOLO Object Detection")
@@ -1240,7 +1237,7 @@ class ControlPanelUI:
             imgui.pop_style_color()
 
             frame_q_size = stage_proc.stage1_frame_queue_size
-            frame_q_max = constants.STAGE1_FRAME_QUEUE_MAXSIZE
+            frame_q_max = self.constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
             suggestion_message, bar_color = "", (0.2, 0.8, 0.2) # TODO: move to theme, green
             if frame_q_fraction > 0.9:
@@ -1282,7 +1279,7 @@ class ControlPanelUI:
         imgui.separator()
 
         # Stage 2
-        s2_title = "Stage 2: Contact Analysis & Funscript" if selected_mode == TrackerMode.OFFLINE_2_STAGE else "Stage 2: Segmentation"
+        s2_title = "Stage 2: Contact Analysis & Funscript" if selected_mode == self.TrackerMode.OFFLINE_2_STAGE else "Stage 2: Segmentation"
         imgui.text(s2_title)
         if is_analysis_running and stage_proc.current_analysis_stage == 2:
             imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
@@ -1299,7 +1296,7 @@ class ControlPanelUI:
                 if stage_proc.stage2_sub_time_elapsed_str:
                     imgui.text(f"Time: {stage_proc.stage2_sub_time_elapsed_str} | ETA: {stage_proc.stage2_sub_eta_str} | Speed: {stage_proc.stage2_sub_processing_fps_str}")
 
-                sub_progress_color = ControlPanelColors.SUB_PROGRESS
+                sub_progress_color = self.ControlPanelColors.SUB_PROGRESS
                 imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *sub_progress_color)
 
                 # Construct the overlay text with a percentage.
@@ -1317,7 +1314,7 @@ class ControlPanelUI:
         imgui.separator()
 
         # Stage 3
-        if selected_mode == TrackerMode.OFFLINE_3_STAGE:
+        if selected_mode == self.TrackerMode.OFFLINE_3_STAGE:
             imgui.text("Stage 3: Per-Segment Optical Flow")
             if is_analysis_running and stage_proc.current_analysis_stage == 3:
                 imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
