@@ -3,6 +3,7 @@ import msgpack
 import time
 from multiprocessing import Process, Queue, Event, Value, freeze_support
 import platform
+import sys
 from threading import Thread as PyThread
 from queue import Empty, Full
 from ultralytics import YOLO
@@ -93,7 +94,7 @@ def _validate_preprocessed_video_completeness(video_path: str, expected_frames: 
 
         # Check file size - very small files are likely corrupted
         file_size = os.path.getsize(video_path)
-        if file_size < 1000000:  # Less than 1MB is suspicious for any video
+        if file_size < 500000:  # Less than 500kb is suspicious for any video
             logger.warning(f"Preprocessed video is suspiciously small: {file_size} bytes")
             return False
 
@@ -105,7 +106,8 @@ def _validate_preprocessed_video_completeness(video_path: str, expected_frames: 
                '-show_entries', 'stream=nb_frames,duration,r_frame_rate',
                '-of', 'json', video_path]
 
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10, creationflags=creation_flags)
         if result.returncode != 0:
             logger.warning(f"ffprobe failed for preprocessed video: {video_path}")
             return False
@@ -203,7 +205,9 @@ class FFmpegEncoder:
             self.output_file, "-loglevel", "error"
         ]
         log_vid.info(f"Encoder command: {' '.join(encoder_cmd)}")
-        self.encoder_process = subprocess.Popen(encoder_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Windows fix: prevent terminal windows from spawning
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        self.encoder_process = subprocess.Popen(encoder_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
         self.stderr_thread = PyThread(target=self._read_stderr, daemon=True)
         self.stderr_thread.start()
 
@@ -238,44 +242,105 @@ class FFmpegEncoder:
         self.encoder_process = None
         log_vid.info("Encoder process stopped.")
 
+    def _test_encoder(self, encoder_args: List[str]) -> bool:
+        """Test if an encoder actually works by trying to encode a small test."""
+        try:
+            # Create a minimal test command
+            test_cmd = [
+                self.ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=duration=0.1:size=32x32:rate=1",
+                *encoder_args,
+                "-frames:v", "1", "-f", "null", "-"
+            ]
+            
+            # Windows fix: prevent terminal windows from spawning during tests
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            result = subprocess.run(test_cmd, capture_output=True, timeout=10, creationflags=creation_flags)
+            success = result.returncode == 0
+            
+            # Additional validation for nvenc on Windows - check for specific error messages
+            if not success and 'nvenc' in ' '.join(encoder_args).lower():
+                stderr_output = result.stderr.decode('utf-8', errors='ignore').lower() if result.stderr else ''
+                # Sometimes nvenc fails with driver/capability errors but encoder is actually available
+                if any(err in stderr_output for err in ['no nvenc capable', 'driver version', 'cuda error']):
+                    log_vid.warning(f"NVENC test failed but may be due to test conditions: {stderr_output[:200]}")
+                    # Try a simpler test for nvenc availability
+                    simple_test_cmd = [self.ffmpeg_path, '-hide_banner', '-f', 'lavfi', '-i', 'color=black:size=32x32:duration=0.01', '-c:v'] + [arg for arg in encoder_args if arg.startswith(('hevc_nvenc', 'h264_nvenc'))][0:1] + ['-f', 'null', '-']
+                    try:
+                        simple_result = subprocess.run(simple_test_cmd, capture_output=True, timeout=5, creationflags=creation_flags)
+                        if simple_result.returncode == 0:
+                            log_vid.info("NVENC simple test passed, considering encoder available")
+                            return True
+                    except Exception:
+                        pass
+            
+            return success
+        except Exception:
+            return False
+
     def _get_encoder_args(self) -> List[str]:
         """
-        Chooses the best available hardware encoder with a more robust priority.
-        Falls back to software libx265 if none is available.
+        Chooses the best available hardware encoder with runtime validation.
+        Falls back to software libx265 if hardware encoders fail.
         """
         try:
-            output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True)
+            # Windows fix: prevent terminal windows from spawning
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True, creationflags=creation_flags)
         except Exception as e:
             log_vid.warning(f"Failed to query FFmpeg encoders: {e}")
             output = ""
 
-        # macOS is a special case
+        # Define encoder candidates in priority order
+        encoder_candidates = []
+
+        # macOS VideoToolbox
         if "hevc_videotoolbox" in output:
-            log_vid.info("Using H.265 Apple VideoToolbox for hardware encoding.")
-            return ["-c:v", "hevc_videotoolbox", "-q:v", "20", "-pix_fmt", "yuv420p", "-b:v", "0"]
+            encoder_candidates.append(
+                ("H.265 Apple VideoToolbox", ["-c:v", "hevc_videotoolbox", "-q:v", "20", "-pix_fmt", "yuv420p", "-b:v", "0"])
+            )
 
-        # For Windows/Linux, establish a more robust priority.
-        # Intel QSV is very common, so we check for it first.
+        # Intel QSV
         if "hevc_qsv" in output:
-            log_vid.info("Using H.265 Intel QSV for hardware encoding.")
-            return ["-c:v", "hevc_qsv", "-preset", "fast", "-global_quality", "26", "-pix_fmt", "yuv420p"]
+            encoder_candidates.append(
+                ("H.265 Intel QSV", ["-c:v", "hevc_qsv", "-preset", "fast", "-global_quality", "26", "-pix_fmt", "yuv420p"])
+            )
 
-        elif "hevc_nvenc" in output:
-            log_vid.info("Using H.265 NVENC for hardware encoding.")
-            return ["-c:v", "hevc_nvenc", "-preset", "fast", "-qp", "26", "-pix_fmt", "yuv420p"]
+        # NVIDIA NVENC - Enhanced detection for Windows
+        if "hevc_nvenc" in output:
+            # Try different presets for better compatibility
+            nvenc_configs = [
+                (["-c:v", "hevc_nvenc", "-preset", "p1", "-cq", "26", "-pix_fmt", "yuv420p"], "H.265 NVENC (P1 preset)"),
+                (["-c:v", "hevc_nvenc", "-preset", "fast", "-qp", "26", "-pix_fmt", "yuv420p"], "H.265 NVENC (fast preset)"),
+                (["-c:v", "hevc_nvenc", "-preset", "medium", "-crf", "26", "-pix_fmt", "yuv420p"], "H.265 NVENC (medium preset)")
+            ]
+            for args, name in nvenc_configs:
+                encoder_candidates.append((name, args))
 
-        # Add a check for AMD's AMF encoder
-        elif "hevc_amf" in output:
-            log_vid.info("Using H.265 AMD AMF for hardware encoding.")
-            return ["-c:v", "hevc_amf", "-quality", "quality", "-qp_i", "26", "-qp_p", "26", "-pix_fmt", "yuv420p"]
+        # AMD AMF
+        if "hevc_amf" in output:
+            encoder_candidates.append(
+                ("H.265 AMD AMF", ["-c:v", "hevc_amf", "-quality", "quality", "-qp_i", "26", "-qp_p", "26", "-pix_fmt", "yuv420p"])
+            )
 
-        elif "hevc_vaapi" in output: # Primarily for Linux
-            log_vid.info("Using H.265 VAAPI for hardware encoding.")
-            return ["-c:v", "hevc_vaapi", "-qp", "26", "-pix_fmt", "yuv420p"]
+        # VAAPI (Linux)
+        if "hevc_vaapi" in output:
+            encoder_candidates.append(
+                ("H.265 VAAPI", ["-c:v", "hevc_vaapi", "-qp", "26", "-pix_fmt", "yuv420p"])
+            )
 
-        else:
-            log_vid.warning("No hardware encoder available. Falling back to software libx265.")
-            return ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p"]
+        # Test each encoder candidate
+        for encoder_name, encoder_args in encoder_candidates:
+            log_vid.info(f"Testing {encoder_name} encoder...")
+            if self._test_encoder(encoder_args):
+                log_vid.info(f"Using {encoder_name} for hardware encoding.")
+                return encoder_args
+            else:
+                log_vid.warning(f"{encoder_name} encoder test failed, trying next option...")
+
+        # Fallback to software encoder
+        log_vid.warning("No working hardware encoder found. Falling back to software libx265.")
+        return ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p"]
 
 class Stage1QueueMonitor:
     def __init__(self):

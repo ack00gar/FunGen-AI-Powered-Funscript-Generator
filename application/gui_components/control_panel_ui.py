@@ -398,6 +398,22 @@ class ControlPanelUI:
                                 "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
                                 "Forces the number of Producer threads to 1."
                             )
+                        
+                        # Database Retention Option
+                        retain_database = self.app.app_settings.get("retain_stage2_database", True)
+                        changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
+                        if changed_db:
+                            self.app.app_settings.set("retain_stage2_database", new_db_val)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip(
+                                "Keep the Stage 2 database file after processing completes.\n"
+                                "Disable to save disk space (database is automatically deleted).\n" 
+                                "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
+                            )
+                        
+                        if disable_combo:
+                            imgui.pop_style_var()
+                            imgui.internal.pop_item_flag()
             imgui.separator()
 
         self._render_start_stop_buttons(stage_proc, fs_proc, events)
@@ -1090,6 +1106,297 @@ class ControlPanelUI:
                 app.calibration.update_tracker_delay_params()
 
 # ---------------- Oscillation detector ----------------
+
+    def _render_calibration_window(self, calibration_mgr, app_state):
+        """Renders the dedicated latency calibration window."""
+        window_title = "Latency Calibration"
+        flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE
+        if app_state.ui_layout_mode == 'fixed':
+            # In fixed mode, embed it in the main panel area without a title bar
+            imgui.begin("Modular Control Panel##LeftControlsModular", flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE)
+            self._render_latency_calibration(calibration_mgr)
+            imgui.end()
+        else: # Floating mode
+            if imgui.begin(window_title, closable=False, flags=flags):
+                self._render_latency_calibration(calibration_mgr)
+                imgui.end()
+
+    def _render_start_stop_buttons(self, stage_proc, fs_proc, event_handlers):
+        is_batch_mode = self.app.is_batch_processing_active
+        is_analysis_running = stage_proc.full_analysis_active
+
+        # A "Live Tracking" session is only running if the processor is active
+        # AND tracker processing has been explicitly enabled.
+        is_live_tracking_running = (self.app.processor and
+                                    self.app.processor.is_processing and
+                                    self.app.processor.enable_tracker_processing)
+
+        is_setting_roi = self.app.is_setting_user_roi_mode
+        is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi or stage_proc.scene_detection_active
+
+        if is_batch_mode:
+            imgui.text_ansi_colored("--- BATCH PROCESSING ACTIVE ---", 1.0, 0.7, 0.3) # TODO: move to theme, orange
+            total_videos = len(self.app.batch_video_paths)
+            current_idx = self.app.current_batch_video_index
+            if 0 <= current_idx < total_videos:
+                current_video_name = os.path.basename(self.app.batch_video_paths[current_idx]["path"])
+                imgui.text_wrapped(f"Processing {current_idx + 1}/{total_videos}:")
+                imgui.text_wrapped(f"{current_video_name}")
+            if imgui.button("Abort Batch Process", width=-1):
+                self.app.abort_batch_processing()
+            return
+
+        selected_mode = self.app.app_state_ui.selected_tracker_mode
+        button_width = (imgui.get_content_region_available()[0] - imgui.get_style().item_spacing[0]) / 2
+
+        if is_any_process_active:
+            status_text = "Processing..."
+            if is_analysis_running:
+                status_text = "Aborting..." if stage_proc.current_analysis_stage == -1 else f"Stage {stage_proc.current_analysis_stage} Running..."
+            elif is_live_tracking_running:
+                # This logic is now correctly guarded by the new is_live_tracking_running flag
+                if self.app.processor.pause_event.is_set():
+                    if imgui.button("Resume Tracking", width=button_width):
+                        self.app.processor.start_processing()
+                        if not self.app.tracker.tracking_active:
+                            self.app.tracker.start_tracking()
+                else:
+                    if imgui.button("Pause Tracking", width=button_width):
+                        self.app.processor.pause_processing()
+
+                status_text = None
+            elif is_setting_roi:
+                status_text = "Setting ROI..."
+            if status_text: imgui.button(status_text, width=button_width)
+        else:
+            start_text = "Start"
+            handler = None
+            
+            # Check for resumable tasks
+            resumable_checkpoint = None
+            if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_2_STAGE] and self.app.file_manager.video_path:
+                resumable_checkpoint = stage_proc.can_resume_video(self.app.file_manager.video_path)
+            
+            if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_2_STAGE]:
+                start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
+                handler = event_handlers.handle_start_ai_cv_analysis
+            elif selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]:
+                start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
+                handler = event_handlers.handle_start_live_tracker_click
+            
+            # Show resume button if checkpoint exists
+            if resumable_checkpoint:
+                button_width_third = (imgui.get_content_region_available()[0] - 2 * imgui.get_style().item_spacing[0]) / 3
+                
+                # Resume button
+                if imgui.button(f"Resume ({resumable_checkpoint.progress_percentage:.0f}%)", width=button_width_third):
+                    if stage_proc.start_resume_from_checkpoint(resumable_checkpoint):
+                        self.app.logger.info("Resumed processing from checkpoint", extra={'status_message': True})
+                
+                imgui.same_line()
+                
+                # Start fresh button  
+                if imgui.button("Start Fresh", width=button_width_third):
+                    # Delete checkpoint and start fresh
+                    stage_proc.delete_checkpoint_for_video(self.app.file_manager.video_path)
+                    if handler: handler()
+                
+                imgui.same_line()
+                
+                # Delete checkpoint button
+                if imgui.button("Clear Resume", width=button_width_third):
+                    stage_proc.delete_checkpoint_for_video(self.app.file_manager.video_path)
+                    
+            else:
+                # Normal start button
+                if imgui.button(start_text, width=button_width):
+                    if handler: handler()
+
+        imgui.same_line()
+        if not is_any_process_active:
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+        if imgui.button("Abort/Stop Process##AbortGeneral", width=button_width): event_handlers.handle_abort_process_click()
+        if not is_any_process_active:
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
+
+    def _render_stage_progress_ui(self, stage_proc):
+        is_analysis_running = stage_proc.full_analysis_active
+        selected_mode = self.app.app_state_ui.selected_tracker_mode
+
+        active_progress_color = ControlPanelColors.ACTIVE_PROGRESS # Vibrant blue for active
+        completed_progress_color = ControlPanelColors.COMPLETED_PROGRESS # Vibrant green for completed
+
+        # Stage 1
+        imgui.text("Stage 1: YOLO Object Detection")
+        if is_analysis_running and stage_proc.current_analysis_stage == 1:
+            imgui.text(f"Time: {stage_proc.stage1_time_elapsed_str} | ETA: {stage_proc.stage1_eta_str} | Avg Speed:  {stage_proc.stage1_processing_fps_str}")
+            imgui.text_wrapped(f"Progress: {stage_proc.stage1_progress_label}")
+
+            # Apply active color
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
+            imgui.progress_bar(stage_proc.stage1_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage1_progress_value * 100:.0f}% | {stage_proc.stage1_instant_fps_str}" if stage_proc.stage1_progress_value >= 0 else "")
+            imgui.pop_style_color()
+
+            frame_q_size = stage_proc.stage1_frame_queue_size
+            frame_q_max = constants.STAGE1_FRAME_QUEUE_MAXSIZE
+            frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
+            suggestion_message, bar_color = "", (0.2, 0.8, 0.2) # TODO: move to theme, green
+            if frame_q_fraction > 0.9:
+                bar_color, suggestion_message = (0.9, 0.3, 0.3), "Suggestion: Add consumer if resources allow" # TODO: move to theme, red
+            elif frame_q_fraction > 0.2:
+                bar_color, suggestion_message = (1.0, 0.5, 0.0), "Balanced" # TODO: move to theme, yellow
+            else:
+                bar_color, suggestion_message = (0.2, 0.8, 0.2), "Suggestion: Lessen consumers or add producer" # TODO: move to theme, green
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *bar_color)
+            imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
+            imgui.pop_style_color()
+            if suggestion_message: imgui.text(suggestion_message)
+
+            if getattr(stage_proc, 'save_preprocessed_video', False):
+                # The encoding queue (OS pipe buffer) isn't directly measurable.
+                # However, its fill rate is entirely dependent on the producer, which is
+                # throttled by the main frame queue. Therefore, the main frame queue's
+                # size is an excellent proxy for the encoding backpressure.
+                encoding_q_fraction = frame_q_fraction # Use the same fraction
+                encoding_bar_color = bar_color # Use the same color logic
+
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *encoding_bar_color)
+                imgui.progress_bar(encoding_q_fraction, size=(-1, 0), overlay=f"Encoding Queue: ~{frame_q_size}/{frame_q_max}")
+                imgui.pop_style_color()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "This is an estimate of the video encoding buffer.\n"
+                        "It is based on the main analysis frame queue, which acts as a throttle for the encoder."
+                    )
+
+            imgui.text(f"Result Queue Size: ~{stage_proc.stage1_result_queue_size}")
+        elif stage_proc.stage1_final_elapsed_time_str:
+            imgui.text_wrapped(f"Last Run: {stage_proc.stage1_final_elapsed_time_str} | Avg Speed: {stage_proc.stage1_final_fps_str or 'N/A'}")
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
+            imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+            imgui.pop_style_color()
+        else:
+            imgui.text_wrapped(f"Status: {stage_proc.stage1_status_text}")
+        imgui.separator()
+
+        # Stage 2
+        s2_title = "Stage 2: Contact Analysis & Funscript" if selected_mode == TrackerMode.OFFLINE_2_STAGE else "Stage 2: Segmentation"
+        imgui.text(s2_title)
+        if is_analysis_running and stage_proc.current_analysis_stage == 2:
+            imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
+
+            # Apply active color
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
+            imgui.progress_bar(stage_proc.stage2_main_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage2_main_progress_value * 100:.0f}%" if stage_proc.stage2_main_progress_value >= 0 else "")
+            imgui.pop_style_color()
+
+            # Show this bar only when a sub-task is actively reporting progress.
+            is_sub_task_active = stage_proc.stage2_sub_progress_value > 0.0 and stage_proc.stage2_sub_progress_value < 1.0
+            if is_sub_task_active:
+                # Add timing gauges if the data is available
+                if stage_proc.stage2_sub_time_elapsed_str:
+                    imgui.text(f"Time: {stage_proc.stage2_sub_time_elapsed_str} | ETA: {stage_proc.stage2_sub_eta_str} | Speed: {stage_proc.stage2_sub_processing_fps_str}")
+
+                sub_progress_color = ControlPanelColors.SUB_PROGRESS
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *sub_progress_color)
+
+                # Construct the overlay text with a percentage.
+                overlay_text = f"{stage_proc.stage2_sub_progress_value * 100:.0f}%"
+                imgui.progress_bar(stage_proc.stage2_sub_progress_value, size=(-1, 0), overlay=overlay_text)
+                imgui.pop_style_color()
+
+        elif stage_proc.stage2_final_elapsed_time_str:
+            imgui.text_wrapped(f"Status: Completed in {stage_proc.stage2_final_elapsed_time_str}")
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
+            imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+            imgui.pop_style_color()
+        else:
+            imgui.text_wrapped(f"Status: {stage_proc.stage2_status_text}")
+        imgui.separator()
+
+        # Stage 3
+        if selected_mode == TrackerMode.OFFLINE_3_STAGE:
+            imgui.text("Stage 3: Per-Segment Optical Flow")
+            if is_analysis_running and stage_proc.current_analysis_stage == 3:
+                imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
+
+                # Display chapter and chunk progress on separate lines for clarity
+                imgui.text_wrapped(stage_proc.stage3_current_segment_label) # e.g., "Chapter: 1/5 (Cowgirl)"
+                imgui.text_wrapped(stage_proc.stage3_overall_progress_label) # e.g., "Overall Task: Chunk 12/240"
+
+                # Apply active color to both S3 progress bars
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
+
+                # Overall Progress bar remains tied to total frames processed
+                overlay_text = f"{stage_proc.stage3_overall_progress_value * 100:.0f}%"
+                imgui.progress_bar(stage_proc.stage3_overall_progress_value, size=(-1, 0), overlay=overlay_text)
+
+                imgui.pop_style_color()
+
+            elif stage_proc.stage3_final_elapsed_time_str:
+                imgui.text_wrapped(f"Last Run: {stage_proc.stage3_final_elapsed_time_str} | Avg Speed: {stage_proc.stage3_final_fps_str or 'N/A'}")
+                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
+                imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
+                imgui.pop_style_color()
+            else:
+                imgui.text_wrapped(f"Status: {stage_proc.stage3_status_text}")
+        imgui.spacing()
+
+    def _render_tracking_axes_mode(self, stage_proc):
+        """Renders UI elements for tracking axis mode."""
+        axis_modes = ["Both Axes (Up/Down + Left/Right)", "Up/Down Only (Vertical)", "Left/Right Only (Horizontal)"]
+        current_axis_mode_idx = 0
+        if self.app.tracking_axis_mode == "vertical":
+            current_axis_mode_idx = 1
+        elif self.app.tracking_axis_mode == "horizontal":
+            current_axis_mode_idx = 2
+
+        processor = self.app.processor
+        disable_axis_controls = (
+            stage_proc.full_analysis_active
+            or self.app.is_setting_user_roi_mode
+            or (
+                processor and processor.is_processing and not processor.pause_event.is_set() and not self._is_normal_playback_mode()
+            )
+        )
+        if disable_axis_controls:
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+        axis_mode_changed, new_axis_mode_idx = imgui.combo("Tracking Axes##TrackingAxisModeComboGlobal", current_axis_mode_idx, axis_modes)
+        if axis_mode_changed:
+            old_mode = self.app.tracking_axis_mode
+            if new_axis_mode_idx == 0:
+                self.app.tracking_axis_mode = "both"
+            elif new_axis_mode_idx == 1:
+                self.app.tracking_axis_mode = "vertical"
+            else:
+                self.app.tracking_axis_mode = "horizontal"
+            if old_mode != self.app.tracking_axis_mode:
+                self.app.project_manager.project_dirty = True
+                self.app.logger.info(f"Tracking axis mode set to: {self.app.tracking_axis_mode}", extra={'status_message': True})
+                self.app.app_settings.set("tracking_axis_mode", self.app.tracking_axis_mode) # Auto-save
+                self.app.energy_saver.reset_activity_timer()
+
+        if self.app.tracking_axis_mode != "both":
+            imgui.text("Output Single Axis To:")
+            output_targets = ["Timeline 1 (Primary)", "Timeline 2 (Secondary)"]
+            current_output_target_idx = 1 if self.app.single_axis_output_target == "secondary" else 0
+
+            output_target_changed, new_output_target_idx = imgui.combo("##SingleAxisOutputComboGlobal", current_output_target_idx, output_targets)
+            if output_target_changed:
+                old_target = self.app.single_axis_output_target
+                self.app.single_axis_output_target = "secondary" if new_output_target_idx == 1 else "primary"
+                if old_target != self.app.single_axis_output_target:
+                    self.app.project_manager.project_dirty = True
+                    self.app.logger.info(f"Single axis output target set to: {self.app.single_axis_output_target}", extra={'status_message': True})
+                    self.app.app_settings.set("single_axis_output_target", self.app.single_axis_output_target) # Auto-save
+                    self.app.energy_saver.reset_activity_timer()
+        if disable_axis_controls:
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
 
     def _render_oscillation_detector_settings(self):
         app = self.app

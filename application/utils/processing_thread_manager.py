@@ -74,6 +74,10 @@ class ProcessingTask:
     created_time: float = None
     started_time: Optional[float] = None
     completed_time: Optional[float] = None
+    # Checkpoint support
+    checkpoint_manager: Optional[Any] = None
+    video_path: Optional[str] = None
+    enable_checkpoints: bool = False
     
     def __post_init__(self):
         if self.kwargs is None:
@@ -196,6 +200,84 @@ class ProcessingThreadManager:
                 finally:
                     del self.thread_gpu_contexts[thread_name]
     
+    def _manage_gpu_memory_pressure(self, task: ProcessingTask, thread_name: str):
+        """Proactively manage GPU memory pressure before task execution."""
+        if not self.gpu_available:
+            return
+        
+        # GPU-intensive task types that benefit from proactive memory management
+        gpu_intensive_tasks = {
+            TaskType.OBJECT_DETECTION,
+            TaskType.STAGE_PROCESSING,
+            TaskType.LIVE_TRACKING
+        }
+        
+        if task.task_type in gpu_intensive_tasks:
+            try:
+                # Only check memory every 10th task to reduce overhead
+                if not hasattr(self, '_gpu_check_counter'):
+                    self._gpu_check_counter = 0
+                self._gpu_check_counter += 1
+                
+                if self._gpu_check_counter % 10 != 0:
+                    return
+                
+                # Check current GPU memory usage
+                memory_stats = torch.cuda.memory_stats() if torch.cuda.is_available() else {}
+                allocated_memory = memory_stats.get('allocated_bytes.all.current', 0)
+                reserved_memory = memory_stats.get('reserved_bytes.all.current', 0)
+                
+                if reserved_memory > 0:
+                    memory_usage_ratio = allocated_memory / reserved_memory
+                    
+                    # Raise threshold to 90% to be less aggressive
+                    if memory_usage_ratio > 0.9:
+                        self.logger.info(f"[{thread_name}] High GPU memory usage detected "
+                                       f"({memory_usage_ratio:.1%}), performing cleanup")
+                        torch.cuda.empty_cache()
+                        
+                        # Force garbage collection
+                        import gc
+                        gc.collect()
+                        
+                        # Log memory improvement
+                        new_stats = torch.cuda.memory_stats()
+                        new_allocated = new_stats.get('allocated_bytes.all.current', 0)
+                        memory_saved = allocated_memory - new_allocated
+                        if memory_saved > 0:
+                            self.logger.debug(f"[{thread_name}] Freed {memory_saved / 1024**2:.1f}MB GPU memory")
+                
+            except Exception as e:
+                self.logger.warning(f"[{thread_name}] Error managing GPU memory pressure: {e}")
+    
+    def _post_task_gpu_cleanup(self, task: ProcessingTask, thread_name: str):
+        """Perform GPU cleanup after memory-intensive tasks."""
+        if not self.gpu_available:
+            return
+        
+        # Tasks that typically leave GPU memory allocated
+        cleanup_required_tasks = {
+            TaskType.OBJECT_DETECTION,
+            TaskType.STAGE_PROCESSING,
+            TaskType.LIVE_TRACKING,
+            TaskType.VIDEO_ANALYSIS
+        }
+        
+        if task.task_type in cleanup_required_tasks:
+            try:
+                # Only do post-task cleanup every 20th task to reduce overhead
+                if not hasattr(self, '_post_cleanup_counter'):
+                    self._post_cleanup_counter = 0
+                self._post_cleanup_counter += 1
+                
+                if self._post_cleanup_counter % 20 == 0:
+                    # Clear GPU cache to prevent memory accumulation
+                    torch.cuda.empty_cache()
+                    self.logger.debug(f"[{thread_name}] Post-task GPU cleanup completed for {task.task_type.value}")
+                
+            except Exception as e:
+                self.logger.warning(f"[{thread_name}] Error in post-task GPU cleanup: {e}")
+    
     def _worker_thread_loop(self):
         """Main loop for worker threads."""
         thread_name = threading.current_thread().name
@@ -238,6 +320,9 @@ class ProcessingThreadManager:
             
             self.logger.info(f"[{thread_name}] Starting task {task_id} ({task.task_type.value})")
             
+            # Proactive GPU memory management before task execution
+            self._manage_gpu_memory_pressure(task, thread_name)
+            
             # Setup progress callback wrapper
             def progress_wrapper(progress: float, message: str = ""):
                 self._report_progress(task_id, progress, message)
@@ -268,6 +353,9 @@ class ProcessingThreadManager:
                 self.completed_tasks[task_id] = task
                 if task_id in self.active_tasks:
                     del self.active_tasks[task_id]
+            
+            # Post-task GPU cleanup for memory-intensive tasks
+            self._post_task_gpu_cleanup(task, thread_name)
             
             self.logger.info(f"[{thread_name}] Completed task {task_id} in {task_duration:.2f}s")
             
@@ -315,7 +403,10 @@ class ProcessingThreadManager:
         priority: TaskPriority = TaskPriority.NORMAL,
         progress_callback: Optional[Callable[[float, str], None]] = None,
         completion_callback: Optional[Callable[[Any], None]] = None,
-        error_callback: Optional[Callable[[Exception], None]] = None
+        error_callback: Optional[Callable[[Exception], None]] = None,
+        checkpoint_manager: Optional[Any] = None,
+        video_path: Optional[str] = None,
+        enable_checkpoints: bool = False
     ) -> str:
         """
         Submit a task for processing.
@@ -330,6 +421,9 @@ class ProcessingThreadManager:
             progress_callback: Optional progress reporting callback
             completion_callback: Optional completion callback
             error_callback: Optional error callback
+            checkpoint_manager: Optional checkpoint manager for resume capability
+            video_path: Optional video path for checkpoint association
+            enable_checkpoints: Whether to enable automatic checkpointing
             
         Returns:
             Task ID for tracking
@@ -347,7 +441,10 @@ class ProcessingThreadManager:
             kwargs=kwargs or {},
             progress_callback=progress_callback,
             completion_callback=completion_callback,
-            error_callback=error_callback
+            error_callback=error_callback,
+            checkpoint_manager=checkpoint_manager,
+            video_path=video_path,
+            enable_checkpoints=enable_checkpoints
         )
         
         # Add to queue with priority (lower number = higher priority)
