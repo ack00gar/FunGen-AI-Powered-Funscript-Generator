@@ -5,9 +5,8 @@ import msgpack
 import time
 from typing import List, Optional, Dict, Tuple, Any
 
-from application.utils.video_segment import VideoSegment
+from application.utils import VideoSegment, check_write_access
 from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, FUNSCRIPT_METADATA_VERSION
-from application.utils.write_access import check_write_access
 
 class AppFileManager:
     def __init__(self, app_logic_instance):
@@ -532,8 +531,8 @@ class AppFileManager:
         if not paths:
             return
 
-        from video.video_processor import VideoProcessor # Local import to avoid circular dependency
-        from application.classes.file_dialog import ImGuiFileDialog
+        from video import VideoProcessor # Local import to avoid circular dependency
+        from application.classes import ImGuiFileDialog
 
         videos_to_process = []
         valid_video_extensions = {".mp4", ".mkv", ".mov", ".avi", ".webm"}

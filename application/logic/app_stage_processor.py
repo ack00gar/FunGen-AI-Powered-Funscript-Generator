@@ -17,7 +17,7 @@ import detection.cd.stage_3_of_processor as stage3_module
 
 from config import constants
 from config.constants import TrackerMode
-from application.utils.video_segment import VideoSegment
+from application.utils import VideoSegment
 
 
 class AppStageProcessor:

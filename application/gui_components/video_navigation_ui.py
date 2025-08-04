@@ -2,9 +2,8 @@ import imgui
 import logging
 from typing import Optional
 
-from application.utils.time_format import _format_time
+from application.utils import _format_time, VideoSegment
 from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS, TrackerMode
-from application.utils.video_segment import VideoSegment
 from config.element_group_colors import VideoNavigationColors
 from config.constants_colors import CurrentTheme
 

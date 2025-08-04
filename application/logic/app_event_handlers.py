@@ -1,8 +1,7 @@
 from typing import Tuple
 
 
-from application.utils.video_segment import VideoSegment
-from application.utils.time_format import _format_time
+from application.utils import VideoSegment, _format_time
 from config.constants import DEFAULT_CHAPTER_FPS, TrackerMode
 
 

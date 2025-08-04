@@ -10,15 +10,12 @@ from typing import Optional, Dict, Tuple, List, Any
 from datetime import datetime, timedelta
 from ultralytics import YOLO
 
-from video.video_processor import VideoProcessor
-from tracker.tracker import ROITracker as Tracker
+from video import VideoProcessor
+from tracker import ROITracker as Tracker
 
-from application.classes import settings_manager, project_manager, shortcut_manager, undo_redo_manager
-from application.utils.logger import AppLogger
+from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
+from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
 from config.constants import *
-from application.utils.write_access import check_write_access
-from application.utils.updater import AutoUpdater
-from application.utils.video_segment import VideoSegment
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -115,7 +112,7 @@ class ApplicationLogic:
     def __init__(self, is_cli: bool = False):
         self.is_cli_mode = is_cli # Store the mode
         self.gui_instance = None
-        self.app_settings = settings_manager.AppSettings(logger=None)
+        self.app_settings = AppSettings(logger=None)
 
         # Initialize logging_level_setting before AppLogger uses it indirectly via AppSettings
         self.logging_level_setting = self.app_settings.get("logging_level", "INFO")
@@ -240,8 +237,8 @@ class ApplicationLogic:
         self.yolo_input_size = 640
 
         # --- Undo/Redo Managers ---
-        self.undo_manager_t1: Optional[undo_redo_manager.UndoRedoManager] = None
-        self.undo_manager_t2: Optional[undo_redo_manager.UndoRedoManager] = None
+        self.undo_manager_t1: Optional[UndoRedoManager] = None
+        self.undo_manager_t2: Optional[UndoRedoManager] = None
 
         # --- Initialize Tracker ---
         self.tracker = Tracker(
@@ -271,8 +268,8 @@ class ApplicationLogic:
         self.utility = AppUtility(self)
 
         # --- Other Managers ---
-        self.project_manager = project_manager.ProjectManager(self)
-        self.shortcut_manager = shortcut_manager.ShortcutManager(self)
+        self.project_manager = ProjectManager(self)
+        self.shortcut_manager = ShortcutManager(self)
 
         self.project_data_on_load: Optional[Dict] = None
         self.s2_frame_objects_map_for_s3: Optional[Dict[int, Any]] = None

@@ -10,25 +10,23 @@ import queue
 import os
 from typing import List, Dict
 
-from config import constants, element_group_colors
-from classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu
-from gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow
-
-from utils.time_format import _format_time
-from utils.processing_thread_manager import ProcessingThreadManager, TaskType, TaskPriority
+from config import constants
+from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu
+from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow
+from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
 
 
 class GUI:
     def __init__(self, app_logic):
-        self.app = app_logic  # app_logic is ApplicationLogic instance
+        self.app = app = app_logic
         self.window = None
         self.impl = None
-        self.window_width = self.app.app_settings.get("window_width", 1800)
-        self.window_height = self.app.app_settings.get("window_height", 1000)
+        self.window_width = app.app_settings.get("window_width", 1800)
+        self.window_height = app.app_settings.get("window_height", 1000)
         self.main_menu_bar_height = 0
 
         self.constants = constants
-        self.colors = element_group_colors.AppGUIColors
+        self.colors = self.constants.element_group_colors.AppGUIColors
 
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
@@ -45,7 +43,7 @@ class GUI:
         # New ProcessingThreadManager for GPU-intensive operations
         self.processing_thread_manager = ProcessingThreadManager(
             max_worker_threads=2,
-            logger=self.app.logger
+            logger=app.logger
         )
         
         # Progress tracking for threaded operations
@@ -64,23 +62,23 @@ class GUI:
         self.perf_accumulated_times = {}
 
         # Standard Components (owned by GUI)
-        self.file_dialog = ImGuiFileDialog(app_logic_instance=self.app)
-        self.main_menu = MainMenu(self.app)
-        self.gauge_window_ui_t1 = GaugeWindow(self.app, timeline_num=1)
-        self.gauge_window_ui_t2 = GaugeWindow(self.app, timeline_num=2)
-        self.lr_dial_window_ui = LRDialWindow(self.app)
+        self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
+        self.main_menu = MainMenu(app)
+        self.gauge_window_ui_t1 = GaugeWindow(app, timeline_num=1)
+        self.gauge_window_ui_t2 = GaugeWindow(app, timeline_num=2)
+        self.lr_dial_window_ui = LRDialWindow(app)
 
-        self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=self.app, timeline_num=1)
-        self.timeline_editor2 = InteractiveFunscriptTimeline(app_instance=self.app, timeline_num=2)
+        self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=1)
+        self.timeline_editor2 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=2)
 
         # Modularized UI Panel Components
-        self.control_panel_ui = ControlPanelUI(self.app)
-        self.video_display_ui = VideoDisplayUI(self.app, self)  # Pass self for texture updates
-        self.video_navigation_ui = VideoNavigationUI(self.app, self)  # Pass self for texture methods
-        self.info_graphs_ui = InfoGraphsUI(self.app)
-        self.chapter_list_window_ui = ChapterListWindow(self.app, nav_ui=self.video_navigation_ui)
-        self.generated_file_manager_ui = GeneratedFileManagerWindow(self.app)
-        self.autotuner_window_ui = AutotunerWindow(self.app)
+        self.control_panel_ui = ControlPanelUI(app)
+        self.video_display_ui = VideoDisplayUI(app, self)  # Pass self for texture updates
+        self.video_navigation_ui = VideoNavigationUI(app, self)  # Pass self for texture methods
+        self.info_graphs_ui = InfoGraphsUI(app)
+        self.chapter_list_window_ui = ChapterListWindow(app, nav_ui=self.video_navigation_ui)
+        self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
+        self.autotuner_window_ui = AutotunerWindow(app)
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -317,8 +315,7 @@ class GUI:
             # Draw the semi-transparent polygon
             overlay = image_data.copy()
             envelope_color_rgba = self.app.utility.get_speed_color_from_map(500) # Use a mid-range speed color
-            envelope_color_bgra = (int(envelope_color_rgba[2] * 255), int(envelope_color_rgba[1] * 255),
-                                   int(envelope_color_rgba[0] * 255), 100) # 100 for alpha
+            envelope_color_bgra = (int(envelope_color_rgba[2] * 255), int(envelope_color_rgba[1] * 255), int(envelope_color_rgba[0] * 255), 100) # 100 for alpha
             cv2.fillPoly(overlay, [poly_points], envelope_color_bgra)
             cv2.addWeighted(overlay, 0.5, image_data, 0.5, 0, image_data) # Blend with background
 

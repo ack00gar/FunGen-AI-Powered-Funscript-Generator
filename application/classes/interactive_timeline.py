@@ -7,7 +7,7 @@ import copy
 from typing import Optional, List, Dict, Tuple
 from bisect import bisect_left, bisect_right
 
-from application.utils.time_format import _format_time
+from application.utils import _format_time
 from config.element_group_colors import TimelineColors
 
 

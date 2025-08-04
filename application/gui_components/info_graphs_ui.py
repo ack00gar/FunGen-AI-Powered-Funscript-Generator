@@ -1,7 +1,7 @@
 import imgui
 import os
 import threading
-from application.utils.time_format import _format_time
+from application.utils import _format_time
 
 
 class InfoGraphsUI:

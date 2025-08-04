@@ -12,7 +12,7 @@ from typing import Optional, Tuple, List
 import subprocess
 from queue import Queue as StdLibQueue
 
-from video.video_processor import VideoProcessor
+from video import VideoProcessor
 from config import constants
 
 log_vid = logging.getLogger(__name__)
