@@ -108,6 +108,9 @@ class InfoGraphsUI:
             if imgui.begin_tab_item("History")[0]:
                 tab_selected = "history"
                 imgui.end_tab_item()
+            if imgui.begin_tab_item("Performance")[0]:
+                tab_selected = "performance"
+                imgui.end_tab_item()
             imgui.end_tab_bar()
 
         avail = imgui.get_content_region_available()
@@ -133,6 +136,10 @@ class InfoGraphsUI:
             imgui.spacing()
             if imgui.collapsing_header("Undo-Redo History##UndoRedoSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 self._render_content_undo_redo_history()
+        elif tab_selected == "performance":
+            imgui.spacing()
+            if imgui.collapsing_header("Performance Monitor##PerformanceSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_content_performance()
         imgui.end_child()
 
     def _get_k_resolution_label(self, width, height):
@@ -410,3 +417,79 @@ class InfoGraphsUI:
             imgui.columns(1)
 
         imgui.end_child()
+
+    def _render_content_performance(self):
+        """Render performance information with sorting and total time."""
+        app = self.app
+        gui = app.gui_instance if hasattr(app, 'gui_instance') else None
+        if not gui:
+            imgui.text_disabled("Performance data not available.")
+            return
+
+        # Sorting state
+        if not hasattr(self, '_perf_sort_mode'):
+            self._perf_sort_mode = 0  # 0: slowest→fastest, 1: fastest→slowest, 2: alphabetical
+        sort_modes = ["Slowest→Fastest", "Fastest→Slowest", "A→Z"]
+        if imgui.button(f"Sort: {sort_modes[self._perf_sort_mode]}"):
+            self._perf_sort_mode = (self._perf_sort_mode + 1) % 3
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Click to cycle sort order for the list below.")
+        imgui.spacing()
+
+        # Prepare data
+        stats = list(gui.component_render_times.items())
+        if self._perf_sort_mode == 0:
+            stats.sort(key=lambda x: x[1], reverse=True)  # slowest→fastest
+        elif self._perf_sort_mode == 1:
+            stats.sort(key=lambda x: x[1])  # fastest→slowest
+        else:
+            stats.sort(key=lambda x: x[0].lower())  # alphabetical
+
+        # Display stats
+        imgui.text("Frame Render Times (ms):")
+        total = 0.0
+        for component, render_time in stats:
+            color = (0.0, 1.0, 0.0, 1.0) if render_time < 16.67 else (1.0, 1.0, 0.0, 1.0)
+            imgui.text_colored(f"  {component}: {render_time:.2f}", *color)
+            total += render_time
+        if not stats:
+            imgui.text_disabled("  No render data available")
+        imgui.separator()
+        imgui.text(f"Total: {total:.2f} ms")
+        imgui.spacing()
+
+        # Show average performance if available
+        if gui.perf_accumulated_times and gui.perf_frame_count > 0:
+            imgui.text("Average Times (ms):")
+            avg_stats = list(gui.perf_accumulated_times.items())
+            if self._perf_sort_mode == 0:
+                avg_stats.sort(key=lambda x: x[1]/gui.perf_frame_count, reverse=True)
+            elif self._perf_sort_mode == 1:
+                avg_stats.sort(key=lambda x: x[1]/gui.perf_frame_count)
+            else:
+                avg_stats.sort(key=lambda x: x[0].lower())
+            avg_total = 0.0
+            for component, total_time in avg_stats:
+                avg_time = total_time / gui.perf_frame_count
+                color = (0.0, 1.0, 0.0, 1.0) if avg_time < 16.67 else (1.0, 1.0, 0.0, 1.0)
+                imgui.text_colored(f"  {component}: {avg_time:.2f}", *color)
+                avg_total += avg_time
+            if not avg_stats:
+                imgui.text_disabled("  No average data available")
+            imgui.separator()
+            imgui.text(f"Total: {avg_total:.2f} ms")
+            imgui.spacing()
+
+        # Show frame count and timing info
+        if gui.perf_frame_count > 0:
+            imgui.text(f"Frames tracked: {gui.perf_frame_count}")
+            import time
+            time_since_log = time.time() - gui.last_perf_log_time
+            imgui.text(f"Next log in: {gui.perf_log_interval - time_since_log:.1f}s")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Shows real-time frame render times for GUI components.\n"
+                "Green: < 16.67ms (60+ FPS)\n"
+                "Yellow: ≥ 16.67ms (< 60 FPS)\n"
+                "Data is logged every 5 seconds to debug output."
+            )

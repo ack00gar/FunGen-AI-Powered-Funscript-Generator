@@ -128,6 +128,28 @@ DEFAULT_CHAPTER_BAR_HEIGHT = 20  # Height in pixels of the chapter bar.
 
 
 ####################################################################################################
+# INTERFACE PERFORMANCE SETTINGS
+####################################################################################################
+# --- Font Scale Options ---
+FONT_SCALE_LABELS = ["70%", "80%", "90%", "100%", "110%", "125%", "150%", "175%", "200%"]
+FONT_SCALE_VALUES = [0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
+DEFAULT_FONT_SCALE = 1.0
+
+# --- Timeline Pan Speed ---
+TIMELINE_PAN_SPEED_MIN = 1
+TIMELINE_PAN_SPEED_MAX = 50
+DEFAULT_TIMELINE_PAN_SPEED = 5
+
+# --- Energy Saver Settings ---
+ENERGY_SAVER_NORMAL_FPS_MIN = 10
+ENERGY_SAVER_THRESHOLD_MIN = 10
+ENERGY_SAVER_IDLE_FPS_MIN = 1
+DEFAULT_ENERGY_SAVER_NORMAL_FPS = 60
+DEFAULT_ENERGY_SAVER_THRESHOLD_SECONDS = 30.0
+DEFAULT_ENERGY_SAVER_IDLE_FPS = 10
+
+
+####################################################################################################
 # OBJECT DETECTION & CLASSES
 ####################################################################################################
 CLASS_NAMES_TO_IDS = {
