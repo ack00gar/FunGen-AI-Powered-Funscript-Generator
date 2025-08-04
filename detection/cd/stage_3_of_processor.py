@@ -7,9 +7,9 @@ from typing import Optional, List, Dict, Any, Tuple
 from multiprocessing import Process, Queue, Event, Value
 from queue import Empty
 
-from funscript.dual_axis_funscript import DualAxisFunscript
-from video.video_processor import VideoProcessor
-from tracker.tracker import ROITracker
+from funscript import DualAxisFunscript
+from video import VideoProcessor
+from tracker import ROITracker
 from detection.cd.stage_2_cd import ATRSegment, FrameObject
 from config import constants
 

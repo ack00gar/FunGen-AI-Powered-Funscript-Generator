@@ -1,6 +1,6 @@
-import imgui
 import os
-import config
+import imgui
+from config.element_group_colors import MenuColors
 
 def _center_popup(width, height):
     mv = imgui.get_main_viewport()
@@ -36,7 +36,7 @@ class MainMenu:
 
     def __init__(self, app_instance):
         self.app = app_instance
-        self.FRAME_OFFSET = config.MenuColors.FRAME_OFFSET
+        self.FRAME_OFFSET = MenuColors.FRAME_OFFSET
 
     # ------------------------- POPUPS -------------------------
 

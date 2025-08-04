@@ -7,11 +7,11 @@ from ultralytics import YOLO
 import logging
 import os
 
-from funscript.dual_axis_funscript import DualAxisFunscript
+from funscript import DualAxisFunscript
 from config import constants
 from config.constants_colors import RGBColors
 from config.element_group_colors import AppGUIColors
-from application.utils.model_pool import ModelPool
+from application.utils import ModelPool
 
 
 class ROITracker:

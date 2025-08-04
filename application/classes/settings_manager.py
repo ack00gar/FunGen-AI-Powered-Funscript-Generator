@@ -2,21 +2,20 @@ import json
 import os
 import logging
 from typing import Optional
-
 from config import constants
 
 
 class AppSettings:
     def __init__(self, settings_file_path=constants.SETTINGS_FILE, logger: Optional[logging.Logger] = None):
+        self.constants = constants
         self.settings_file = settings_file_path
         self.data = {}
-        # Logger setup
         if logger:
             self.logger = logger
         else:
             self.logger = logging.getLogger(__name__ + '_AppSettings_fallback')
             if not self.logger.handlers:
-                handler = logging.StreamHandler()  # Default to console for fallback
+                handler = logging.StreamHandler()
                 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
                 handler.setFormatter(formatter)
                 self.logger.addHandler(handler)
@@ -27,6 +26,7 @@ class AppSettings:
         self.load_settings()
 
     def get_default_settings(self):
+        constants = self.constants
         shortcuts = constants.DEFAULT_SHORTCUTS
 
         defaults = {
@@ -128,15 +128,16 @@ class AppSettings:
 
     def load_settings(self):
         defaults = self.get_default_settings()
+        settings_file = self.settings_file
+
         try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r') as f:
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r') as f:
                     loaded_settings = json.load(f)
 
                 # Migration for old setting name
                 if "show_gauge_window" in loaded_settings:
                     loaded_settings["show_gauge_window_timeline1"] = loaded_settings.pop("show_gauge_window")
-
 
                 # Merge defaults with loaded settings, ensuring all keys from defaults are present
                 self.data = defaults.copy()  # Start with defaults
@@ -157,17 +158,17 @@ class AppSettings:
                 self.data = defaults
                 self.save_settings()  # Save defaults if no settings file exists
         except Exception as e:
-            self.logger.error(f"Error loading settings from '{self.settings_file}': {e}. Using default settings.",
-                              exc_info=True)
+            self.logger.error(f"Error loading settings from '{settings_file}': {e}. Using default settings.", exc_info=True)
             self.data = defaults
 
     def save_settings(self):
+        settings_file = self.settings_file
         try:
-            with open(self.settings_file, 'w') as f:
+            with open(settings_file, 'w') as f:
                 json.dump(self.data, f, indent=4)
-            self.logger.info(f"Settings saved to {self.settings_file}.")
+            self.logger.info(f"Settings saved to {settings_file}.")
         except Exception as e:
-            self.logger.error(f"Error saving settings to '{self.settings_file}': {e}", exc_info=True)
+            self.logger.error(f"Error saving settings to '{settings_file}': {e}", exc_info=True)
 
     def get(self, key, default=None):
         # Ensure that if a key is missing from self.data (e.g. new setting added),
