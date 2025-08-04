@@ -1,8 +1,7 @@
 from typing import Tuple
 
 
-from application.utils.video_segment import VideoSegment
-from application.utils.time_format import _format_time
+from application.utils import VideoSegment, _format_time
 from config.constants import DEFAULT_CHAPTER_FPS, TrackerMode
 
 
@@ -92,8 +91,7 @@ class AppEventHandlers:
         if stage_processor.full_analysis_active:
             stage_processor.abort_stage_processing()
             self.app.on_processing_stopped() # If aborting stage proc should also check pending app logic actions
-        elif stage_processor.scene_detection_active:
-            stage_processor.abort_stage_processing()
+
         elif self.app.processor and self.app.processor.is_processing:
             self.app.processor.stop_processing()
         elif self.app.is_setting_user_roi_mode:  # Abort ROI selection

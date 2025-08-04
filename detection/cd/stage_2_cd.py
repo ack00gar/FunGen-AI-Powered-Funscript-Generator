@@ -14,7 +14,7 @@ import psutil
 import time
 import tempfile
 
-from video.video_processor import VideoProcessor
+from video import VideoProcessor
 from config import constants
 
 # --- Global Debug Flag ---
