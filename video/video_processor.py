@@ -1312,34 +1312,76 @@ class VideoProcessor:
 
     def _start_ffmpeg_for_segment_streaming(self, start_frame_abs_idx: int,
                                             num_frames_to_stream_hint: Optional[int] = None) -> bool:
-        self.logger.warning("Segment streaming currently does not use the 2-pipe 10-bit CUDA optimization.")
         self._terminate_ffmpeg_processes()
 
         if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0:
             self.logger.warning("Cannot start FFmpeg for segment: no video/invalid FPS.")
             return False
+
         start_time_seconds = start_frame_abs_idx / self.video_info['fps']
-        hwaccel_cmd_list = self._get_ffmpeg_hwaccel_args()
-        ffmpeg_cmd_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
-        ffmpeg_input_options = hwaccel_cmd_list[:]
-        if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
-        ffmpeg_cmd = ffmpeg_cmd_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
-        effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
-        ffmpeg_cmd.extend(['-vf', effective_vf])
+        common_ffmpeg_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
 
-        if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
-            ffmpeg_cmd.extend(['-frames:v', str(num_frames_to_stream_hint)])
+        if self._is_10bit_cuda_pipe_needed():
+            self.logger.info("Using 2-pipe FFmpeg command for 10-bit CUDA segment streaming.")
+            video_height_for_crop = self.video_info.get('height', 0)
+            if video_height_for_crop <= 0:
+                self.logger.error("Cannot construct 10-bit CUDA pipe 1 for segment: video height is unknown.")
+                return False
 
-        ffmpeg_cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
-        self.logger.info(f"Segment CMD (single pipe only): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
-        try:
-            self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                   bufsize=self.frame_size_bytes * 20)
-            return True
-        except Exception as e:
-            self.logger.warning(f"Failed to start FFmpeg for segment: {e}", exc_info=True)
-            self.ffmpeg_process = None
-            return False
+            pipe1_vf = f"crop={int(video_height_for_crop)}:{int(video_height_for_crop)}:0:0,scale_cuda=1000:1000"
+            cmd1 = common_ffmpeg_prefix[:]
+            cmd1.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
+            if start_time_seconds > 0.001: cmd1.extend(['-ss', str(start_time_seconds)])
+            cmd1.extend(['-i', self._active_video_source_path, '-an', '-sn', '-vf', pipe1_vf])
+            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
+                cmd1.extend(['-frames:v', str(num_frames_to_stream_hint)])
+            cmd1.extend(['-c:v', 'hevc_nvenc', '-preset', 'fast', '-qp', '0', '-f', 'matroska', 'pipe:1'])
+
+            cmd2 = common_ffmpeg_prefix[:]
+            cmd2.extend(['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn'])
+            effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            cmd2.extend(['-vf', effective_vf_pipe2])
+            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
+                cmd2.extend(['-frames:v', str(num_frames_to_stream_hint)])
+            cmd2.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
+
+            self.logger.info(f"Segment Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
+            self.logger.info(f"Segment Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
+            try:
+                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if self.ffmpeg_pipe1_process.stdout is None:
+                    raise IOError("Segment Pipe 1 stdout is None.")
+                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout,
+                                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                                       bufsize=self.frame_size_bytes * 20)
+                self.ffmpeg_pipe1_process.stdout.close()
+                return True
+            except Exception as e:
+                self.logger.error(f"Failed to start 2-pipe FFmpeg for segment: {e}", exc_info=True)
+                self._terminate_ffmpeg_processes()
+                return False
+        else:
+            # Standard single FFmpeg process for 8-bit or non-CUDA accelerated video
+            hwaccel_cmd_list = self._get_ffmpeg_hwaccel_args()
+            ffmpeg_input_options = hwaccel_cmd_list[:]
+            if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
+            ffmpeg_cmd = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
+            effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            ffmpeg_cmd.extend(['-vf', effective_vf])
+
+            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
+                ffmpeg_cmd.extend(['-frames:v', str(num_frames_to_stream_hint)])
+
+            ffmpeg_cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
+            self.logger.info(f"Segment CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
+            try:
+                self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                                       bufsize=self.frame_size_bytes * 20)
+                return True
+            except Exception as e:
+                self.logger.warning(f"Failed to start FFmpeg for segment: {e}", exc_info=True)
+                self.ffmpeg_process = None
+                return False
 
     def stream_frames_for_segment(self, start_frame_abs_idx: int, num_frames_to_read: int, stop_event: Optional[threading.Event] = None) -> Iterator[Tuple[int, np.ndarray]]:
         if num_frames_to_read <= 0:
