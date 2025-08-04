@@ -107,6 +107,9 @@ class AppSettings:
 
             # Auto Post-Processing
             "enable_auto_post_processing": False,
+            
+            # Database Management
+            "retain_stage2_database": True,  # Keep SQLite database after processing (default: True for GUI, False for CLI)
             "auto_processing_use_chapter_profiles": True,
             "auto_post_proc_final_rdp_enabled": False,
             "auto_post_proc_final_rdp_epsilon": 10.0,

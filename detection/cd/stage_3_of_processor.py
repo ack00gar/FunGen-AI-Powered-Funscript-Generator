@@ -321,8 +321,41 @@ def stage3_worker_proc(
                 stop_event.set()
             break
 
-    video_processor.reset(close_video=True)
-    worker_logger.info(f"Worker {worker_id} finished.")
+    # Clean up resources before worker termination
+    try:
+        # Clean up ROI tracker and its ModelPool
+        if 'roi_tracker_instance' in locals() and roi_tracker_instance is not None:
+            # Clean up ModelPool if it exists
+            if hasattr(roi_tracker_instance, 'model_pool') and roi_tracker_instance.model_pool is not None:
+                roi_tracker_instance.model_pool.cleanup()
+                worker_logger.debug(f"Worker {worker_id}: ModelPool cleaned up")
+            
+            # Clear any OpenCV objects that might hold GPU memory
+            roi_tracker_instance.prev_gray_main_roi = None
+            roi_tracker_instance.prev_gray_user_roi_patch = None
+            roi_tracker_instance.prev_gray_oscillation_area_patch = None
+            worker_logger.debug(f"Worker {worker_id}: ROI tracker GPU resources cleared")
+        
+        # Clean up video processor
+        video_processor.reset(close_video=True)
+        
+        # Force garbage collection to ensure cleanup
+        import gc
+        gc.collect()
+        
+        # Clear GPU cache if available
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                worker_logger.debug(f"Worker {worker_id}: GPU cache cleared")
+        except ImportError:
+            pass  # torch not available
+            
+    except Exception as cleanup_error:
+        worker_logger.warning(f"Worker {worker_id}: Error during cleanup: {cleanup_error}")
+    
+    worker_logger.info(f"Worker {worker_id} finished with resource cleanup.")
 
 
 def perform_stage3_analysis(

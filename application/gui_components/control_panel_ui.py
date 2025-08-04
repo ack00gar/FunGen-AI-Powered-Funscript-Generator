@@ -346,6 +346,19 @@ class ControlPanelUI:
                                 "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
                                 "Forces the number of Producer threads to 1."
                             )
+                        
+                        # Database Retention Option
+                        retain_database = self.app.app_settings.get("retain_stage2_database", True)
+                        changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
+                        if changed_db:
+                            self.app.app_settings.set("retain_stage2_database", new_db_val)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip(
+                                "Keep the Stage 2 database file after processing completes.\n"
+                                "Disable to save disk space (database is automatically deleted).\n" 
+                                "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
+                            )
+                        
                         if disable_combo:
                             imgui.pop_style_var()
                             imgui.internal.pop_item_flag()
@@ -1079,14 +1092,46 @@ class ControlPanelUI:
         else:
             start_text = "Start"
             handler = None
+            
+            # Check for resumable tasks
+            resumable_checkpoint = None
+            if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_2_STAGE] and self.app.file_manager.video_path:
+                resumable_checkpoint = stage_proc.can_resume_video(self.app.file_manager.video_path)
+            
             if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_2_STAGE]:
                 start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
             elif selected_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]:
                 start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
                 handler = event_handlers.handle_start_live_tracker_click
-            if imgui.button(start_text, width=button_width):
-                if handler: handler()
+            
+            # Show resume button if checkpoint exists
+            if resumable_checkpoint:
+                button_width_third = (imgui.get_content_region_available()[0] - 2 * imgui.get_style().item_spacing[0]) / 3
+                
+                # Resume button
+                if imgui.button(f"Resume ({resumable_checkpoint.progress_percentage:.0f}%)", width=button_width_third):
+                    if stage_proc.start_resume_from_checkpoint(resumable_checkpoint):
+                        self.app.logger.info("Resumed processing from checkpoint", extra={'status_message': True})
+                
+                imgui.same_line()
+                
+                # Start fresh button  
+                if imgui.button("Start Fresh", width=button_width_third):
+                    # Delete checkpoint and start fresh
+                    stage_proc.delete_checkpoint_for_video(self.app.file_manager.video_path)
+                    if handler: handler()
+                
+                imgui.same_line()
+                
+                # Delete checkpoint button
+                if imgui.button("Clear Resume", width=button_width_third):
+                    stage_proc.delete_checkpoint_for_video(self.app.file_manager.video_path)
+                    
+            else:
+                # Normal start button
+                if imgui.button(start_text, width=button_width):
+                    if handler: handler()
 
         imgui.same_line()
         if not is_any_process_active:
