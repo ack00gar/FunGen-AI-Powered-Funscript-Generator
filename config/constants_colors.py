@@ -60,6 +60,9 @@ class DarkTheme:
     VIDEO_STATUS_OTHER = YELLOW
     BACKGROUND_CLEAR = (0.06, 0.06, 0.06, 1.0)  # Dark gray background
 
+    # Menu Colors
+    FRAME_OFFSET = YELLOW
+
     # Gauge-specific colors
     GAUGE_BG = FLOATING_WIDGET_BG
     GAUGE_BORDER = FLOATING_WIDGET_BORDER

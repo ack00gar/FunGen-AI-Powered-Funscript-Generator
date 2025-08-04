@@ -133,6 +133,10 @@ class AppGUIColors:
     VIDEO_STATUS_OTHER = CurrentTheme.VIDEO_STATUS_OTHER
     BACKGROUND_CLEAR = CurrentTheme.BACKGROUND_CLEAR
 
+class MenuColors:
+    """Color constants for menu components."""
+    FRAME_OFFSET = CurrentTheme.FRAME_OFFSET
+
 
 class SegmentColors:
     """Color constants for video segment components."""
