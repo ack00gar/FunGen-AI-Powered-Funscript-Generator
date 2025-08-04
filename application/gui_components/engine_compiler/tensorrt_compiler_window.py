@@ -2,8 +2,8 @@ import imgui
 import logging
 import os
 import time
-from tensorrt_validation_panel import ValidationPanel
-from logic.tensorrt_compiler_logic import TensorRTCompilerLogic
+from application.gui_components.engine_compiler.tensorrt_validation_panel import ValidationPanel
+from application.logic.tensorrt_compiler_logic import TensorRTCompilerLogic
 from config.constants import TENSORRT_OUTPUT_DISPLAY_HEIGHT
 from config.element_group_colors import CompilerToolColors
 

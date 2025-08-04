@@ -531,7 +531,7 @@ class MainMenu:
                 app.tensorrt_compiler_window = None
 
             if _menu_item_simple("Compile YOLO Model to TensorRT (.engine)..."):
-                from gui_components.engine_compiler.tensorrt_compiler_window import (  # noqa: E501
+                from application.gui_components.engine_compiler.tensorrt_compiler_window import (  # noqa: E501
                     TensorRTCompilerWindow,
                 )
 
