@@ -219,6 +219,7 @@ class RGBColors:
         (37, 22, 122)     # Dark Blue (Cap color)
     ]
     TIMELINE_COLOR_SPEED_STEP = 250.0  # Speed (pixels/sec) used to step through the color map.
+    TIMELINE_HEATMAP_BACKGROUND = (20, 20, 25, 255)
     TIMELINE_COLOR_ALPHA = 0.9 # alpha value for the timeline heatmap
 
     # General Slider Colors
