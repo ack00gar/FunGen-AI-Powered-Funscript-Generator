@@ -16,7 +16,7 @@ import detection.cd.stage_2_cd as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
 
 from config import constants
-from config.constants import TrackerMode, SCENE_DETECTION_DEFAULT_THRESHOLD
+from config.constants import TrackerMode
 from application.utils.video_segment import VideoSegment
 
 
@@ -41,14 +41,7 @@ class AppStageProcessor:
         # --- Status and Progress Tracking ---
         self.reset_stage_status(stages=("stage1", "stage2", "stage3"))
 
-        # --- State for Scene Detection ---
-        self.scene_detection_active: bool = False
-        self.scene_detection_status: str = "Idle"
-        self.scene_detection_thread: Optional[threading.Thread] = None
 
-        self.scene_detection_time_elapsed_str: str = "00:00:00"
-        self.scene_detection_processing_fps_str: str = "0 FPS"
-        self.scene_detection_eta_str: str = "N/A"
 
         # --- Rerun Flags ---
         self.force_rerun_stage1: bool = False
@@ -245,39 +238,7 @@ class AppStageProcessor:
             self.stage3_final_elapsed_time_str = ""
             self.stage3_final_fps_str = ""
 
-    # --- Thread target for running scene detection ---
-    def _run_scene_detection_thread(self, threshold=SCENE_DETECTION_DEFAULT_THRESHOLD):
-        try:
-            # 1. Run detection in the background
-            scene_list = self.app.processor.detect_scenes(threshold=threshold)  # Use the threshold from the UI
 
-            # 2. Check if the task was aborted
-            if self.stop_stage_event.is_set() or not scene_list:
-                return
-
-            # 3. Create chapters from the results on the main thread via the queue
-            self.gui_event_queue.put(("scene_detection_finished", scene_list, "Creating chapters..."))
-
-        except Exception as e:
-            self.logger.error(f"Scene detection thread failed: {e}", exc_info=True)
-        finally:
-            self.scene_detection_active = False
-
-    # --- Public method to start the process from the UI ---
-    def start_scene_detection_analysis(self, threshold=SCENE_DETECTION_DEFAULT_THRESHOLD):
-        if self.full_analysis_active or self.scene_detection_active:
-            self.logger.warning("Another analysis is already running.", extra={'status_message': True})
-            return
-        if not self.app.processor or not self.app.processor.is_video_open():
-            self.logger.error("Cannot start scene detection: No video loaded.")
-            return
-
-        self.scene_detection_active = True
-        self.scene_detection_status = "Starting..."
-        self.stop_stage_event.clear()
-
-        self.scene_detection_thread = threading.Thread(target=self._run_scene_detection_thread, args=(threshold,), daemon=True)
-        self.scene_detection_thread.start()
 
     def _stage1_progress_callback(self, current, total, message="Processing...", time_elapsed=0.0, avg_fps=0.0, instant_fps=0.0, eta_seconds=0.0):
         progress = float(current) / total if total > 0 else -1.0
@@ -969,22 +930,13 @@ class AppStageProcessor:
             self.logger.info("Aborting current analysis stage(s)...", extra={'status_message': True})
             self.stop_stage_event.set()
             self.current_analysis_stage = -1  # Mark as aborting
-        elif self.scene_detection_active and self.scene_detection_thread and self.scene_detection_thread.is_alive():
-            self.logger.info("Aborting scene detection...", extra={'status_message': True})
-            self.stop_stage_event.set()
-            # Call scene_manager.stop() if available for fast abort
-            if hasattr(self.app.processor, '_active_scene_manager') and self.app.processor._active_scene_manager is not None:
-                try:
-                    self.app.processor._active_scene_manager.stop()
-                    self.logger.info("Called scene_manager.stop() to abort scene detection.")
-                except Exception as e:
-                    self.logger.warning(f"Failed to call scene_manager.stop(): {e}")
+
         else:
             self.logger.info("No analysis pipeline running to abort.", extra={'status_message': False})
         self.app.energy_saver.reset_activity_timer()
 
     def process_gui_events(self):
-        if self.full_analysis_active or self.scene_detection_active or self.refinement_analysis_active:
+        if self.full_analysis_active or self.refinement_analysis_active:
             if hasattr(self.app, 'energy_saver'):
                 self.app.energy_saver.reset_activity_timer()
 
@@ -998,26 +950,7 @@ class AppStageProcessor:
 
                 event_type, data1, data2 = queue_item[0], queue_item[1], queue_item[2] if len(queue_item) > 2 else None
 
-                if event_type == "scene_detection_finished":
-                    scene_list, status_text = data1, data2
-                    if status_text is None:
-                        status_text = "Chapters created."
-                    self.scene_detection_status = status_text
-                    fs_proc.video_chapters.clear()
-                    default_pos_key = next(iter(constants.POSITION_INFO_MAPPING), "Default")
-                    for start_frame, end_frame in scene_list:
-                        fs_proc.create_new_chapter_from_data({
-                            "start_frame_str": str(start_frame),
-                            "end_frame_str": str(end_frame - 1),
-                            "position_short_name_key": default_pos_key,
-                            "segment_type": "Scene",
-                            "source": "scene_detection"})
-                    self.app.logger.info(f"Created {len(scene_list)} chapters from detected scenes.")
-                    self.app.project_manager.project_dirty = True
-                    self.app.app_state_ui.heatmap_dirty = True
-                    self.app.app_state_ui.funscript_preview_dirty = True
-                    self.scene_detection_status = "Completed"
-                elif event_type == "stage1_progress_update":
+                if event_type == "stage1_progress_update":
                     prog_val, prog_data = data1, data2
                     if isinstance(prog_data, dict):
                         self.stage1_progress_value = prog_val if prog_val != -1.0 else self.stage1_progress_value

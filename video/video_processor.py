@@ -13,7 +13,7 @@ import os
 from collections import OrderedDict
 from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
-from config.constants import SCENE_DETECTION_DEFAULT_THRESHOLD
+
 
 
 try:
@@ -112,45 +112,6 @@ class VideoProcessor:
         self.frame_cache_lock = threading.Lock()
         self.batch_fetch_size = 50
 
-    # --- Scene Detection Method ---
-    def detect_scenes(self, threshold: float = SCENE_DETECTION_DEFAULT_THRESHOLD) -> List[Tuple[int, int]]:
-        """
-        Uses PySceneDetect's built-in detect_scenes for fast scene cut detection with support for responsive aborts via scene_manager.stop().
-        Returns a list of (start_frame, end_frame) tuples for each scene.
-        """
-        if not self.video_path:
-            self.logger.error("Cannot detect scenes: No video loaded.")
-            return []
-
-        self.logger.info("Starting scene detection with PySceneDetect's built-in method...")
-        if hasattr(self.app, 'set_status_message'):
-            self.app.set_status_message("Detecting scenes...")
-
-        try:
-            video = open_video(self.video_path)
-
-            self._active_scene_manager = SceneManager()
-            self._active_scene_manager.add_detector(ContentDetector(threshold=threshold))
-
-            self._active_scene_manager.detect_scenes(frame_source=video)
-
-            scene_list_raw = self._active_scene_manager.get_scene_list()
-
-            if not scene_list_raw:
-                self.logger.warning("No scenes detected by PySceneDetect.")
-
-            scene_list_frames = [(s[0].get_frames(), s[1].get_frames()) for s in scene_list_raw]
-            self.logger.info(f"Scene detection complete. Found {len(scene_list_frames)} scenes.")
-            return scene_list_frames
-
-        except Exception as e:
-            self.logger.error(f"An error occurred during scene detection: {e}", exc_info=True)
-            if hasattr(self.app, 'set_status_message'):
-                self.app.set_status_message("Error during scene detection.", level=logging.ERROR)
-            return []
-        finally:
-            self._active_scene_manager = None
-
     def _clear_cache(self):
         with self.frame_cache_lock:
             if self.frame_cache is not None:
@@ -182,8 +143,7 @@ class VideoProcessor:
             self.logger.info(f"YOLO input size changed to: {self.yolo_input_size}.")
             self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
 
-    def set_active_vr_parameters(self, fov: Optional[int] = None, pitch: Optional[int] = None,
-                                 input_format: Optional[str] = None):
+    def set_active_vr_parameters(self, fov: Optional[int] = None, pitch: Optional[int] = None, input_format: Optional[str] = None):
         changed = False
         if fov is not None and self.vr_fov != fov:
             self.vr_fov = fov

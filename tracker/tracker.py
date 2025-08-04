@@ -456,7 +456,6 @@ class ROITracker:
                 # DO NOT STOP TRACKING. This allows for seamless transitions.
                 # Instead, clear the state relevant to the new mode.
                 if mode == "YOLO_ROI":
-                    self.clear_user_defined_roi_and_point()
                     # Also clear YOLO-specific state for a clean transition
                     self.prev_gray_main_roi, self.prev_features_main_roi = None, None
                     self.roi = None

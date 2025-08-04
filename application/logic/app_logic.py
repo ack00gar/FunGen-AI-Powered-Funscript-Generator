@@ -111,7 +111,6 @@ def cli_stage3_progress_callback(current_chapter_idx, total_chapters, chapter_na
         sys.stdout.write("\n")
 
 
-
 class ApplicationLogic:
     def __init__(self, is_cli: bool = False):
         self.is_cli_mode = is_cli # Store the mode
@@ -329,9 +328,10 @@ class ApplicationLogic:
         #self.updater.check_for_updates_async()
 
         # --- First Run Model Setup ---
-        if getattr(self.app_settings, 'is_first_run', False):
-            self.logger.info("First application run detected. Preparing to download default models.")
-            self.trigger_first_run_setup()
+        # Disabled automatic model downloading - now handled manually via AI menu
+        # if getattr(self.app_settings, 'is_first_run', False):
+        #     self.logger.info("First application run detected. Preparing to download default models.")
+        #     self.trigger_first_run_setup()
 
         # --- Force Oscillation Detector as the default mode on startup ---
         if not self.is_cli_mode:
@@ -370,71 +370,85 @@ class ApplicationLogic:
             self.first_run_status_message = f"Created directory: {models_dir}"
             self.logger.info(self.first_run_status_message)
 
-            # 2. Determine which models to download based on OS
+            # 2. Check if user has already selected models
+            user_has_detection_model = (self.yolo_detection_model_path_setting and 
+                                      os.path.exists(self.yolo_detection_model_path_setting))
+            user_has_pose_model = (self.yolo_pose_model_path_setting and 
+                                 os.path.exists(self.yolo_pose_model_path_setting))
+
+            # 3. Determine which models to download based on OS
             is_mac_arm = platform.system() == "Darwin" and platform.processor() == 'arm'
 
-            # --- Download and Process Detection Model ---
-            det_url = MODEL_DOWNLOAD_URLS["detection_pt"]
-            det_filename_pt = os.path.basename(det_url)
-            det_model_path_pt = os.path.join(models_dir, det_filename_pt)
-            self.first_run_status_message = f"Downloading Detection Model: {det_filename_pt}..."
-            success = self.utility.download_file_with_progress(det_url, det_model_path_pt, self._update_first_run_progress)
+            # --- Download and Process Detection Model (only if user hasn't selected one) ---
+            if not user_has_detection_model:
+                det_url = MODEL_DOWNLOAD_URLS["detection_pt"]
+                det_filename_pt = os.path.basename(det_url)
+                det_model_path_pt = os.path.join(models_dir, det_filename_pt)
+                self.first_run_status_message = f"Downloading Detection Model: {det_filename_pt}..."
+                success = self.utility.download_file_with_progress(det_url, det_model_path_pt, self._update_first_run_progress)
 
-            if not success:
-                self.first_run_status_message = "Detection model download failed."
-                time.sleep(3)
-                return
-
-            final_det_model_path = det_model_path_pt
-            if is_mac_arm:
-                self.first_run_status_message = "Converting detection model to CoreML format..."
-                self.logger.info(f"Running on macOS ARM. Converting {det_filename_pt} to .mlpackage")
-                try:
-                    model = YOLO(det_model_path_pt)
-                    model.export(format="coreml")
-                    final_det_model_path = det_model_path_pt.replace('.pt', '.mlpackage')
-                    self.logger.info(f"Successfully converted detection model to {final_det_model_path}")
-                except Exception as e:
-                    self.logger.error(f"Failed to convert detection model to CoreML: {e}", exc_info=True)
-                    self.first_run_status_message = "Detection model conversion to CoreML failed."
+                if not success:
+                    self.first_run_status_message = "Detection model download failed."
                     time.sleep(3)
-                    # Continue with the .pt file if conversion fails
+                    return
 
-            self.app_settings.set("yolo_det_model_path", final_det_model_path)
-            self.yolo_detection_model_path_setting = final_det_model_path
-            self.yolo_det_model_path = final_det_model_path
+                final_det_model_path = det_model_path_pt
+                if is_mac_arm:
+                    self.first_run_status_message = "Converting detection model to CoreML format..."
+                    self.logger.info(f"Running on macOS ARM. Converting {det_filename_pt} to .mlpackage")
+                    try:
+                        model = YOLO(det_model_path_pt)
+                        model.export(format="coreml")
+                        final_det_model_path = det_model_path_pt.replace('.pt', '.mlpackage')
+                        self.logger.info(f"Successfully converted detection model to {final_det_model_path}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to convert detection model to CoreML: {e}", exc_info=True)
+                        self.first_run_status_message = "Detection model conversion to CoreML failed."
+                        time.sleep(3)
+                        # Continue with the .pt file if conversion fails
 
-            # --- Download and Process Pose Model ---
-            self.first_run_progress = 0
-            pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
-            pose_filename_pt = os.path.basename(pose_url)
-            pose_model_path_pt = os.path.join(models_dir, pose_filename_pt)
-            self.first_run_status_message = f"Downloading Pose Model: {pose_filename_pt}..."
-            success = self.utility.download_file_with_progress(pose_url, pose_model_path_pt, self._update_first_run_progress)
+                self.app_settings.set("yolo_det_model_path", final_det_model_path)
+                self.yolo_detection_model_path_setting = final_det_model_path
+                self.yolo_det_model_path = final_det_model_path
+                self.logger.info(f"Detection model set to: {final_det_model_path}")
+            else:
+                self.logger.info(f"User already has detection model selected: {self.yolo_detection_model_path_setting}")
 
-            if not success:
-                self.first_run_status_message = "Pose model download failed."
-                time.sleep(3)
-                return
+            # --- Download and Process Pose Model (only if user hasn't selected one) ---
+            if not user_has_pose_model:
+                self.first_run_progress = 0
+                pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
+                pose_filename_pt = os.path.basename(pose_url)
+                pose_model_path_pt = os.path.join(models_dir, pose_filename_pt)
+                self.first_run_status_message = f"Downloading Pose Model: {pose_filename_pt}..."
+                success = self.utility.download_file_with_progress(pose_url, pose_model_path_pt, self._update_first_run_progress)
 
-            final_pose_model_path = pose_model_path_pt
-            if is_mac_arm:
-                self.first_run_status_message = "Converting pose model to CoreML format..."
-                self.logger.info(f"Running on macOS ARM. Converting {pose_filename_pt} to .mlpackage")
-                try:
-                    model = YOLO(pose_model_path_pt)
-                    model.export(format="coreml")
-                    final_pose_model_path = pose_model_path_pt.replace('.pt', '.mlpackage')
-                    self.logger.info(f"Successfully converted pose model to {final_pose_model_path}")
-                except Exception as e:
-                    self.logger.error(f"Failed to convert pose model to CoreML: {e}", exc_info=True)
-                    self.first_run_status_message = "Pose model conversion to CoreML failed."
+                if not success:
+                    self.first_run_status_message = "Pose model download failed."
                     time.sleep(3)
-                    # Continue with the .pt file if conversion fails
+                    return
 
-            self.app_settings.set("yolo_pose_model_path", final_pose_model_path)
-            self.yolo_pose_model_path_setting = final_pose_model_path
-            self.yolo_pose_model_path = final_pose_model_path
+                final_pose_model_path = pose_model_path_pt
+                if is_mac_arm:
+                    self.first_run_status_message = "Converting pose model to CoreML format..."
+                    self.logger.info(f"Running on macOS ARM. Converting {pose_filename_pt} to .mlpackage")
+                    try:
+                        model = YOLO(pose_model_path_pt)
+                        model.export(format="coreml")
+                        final_pose_model_path = pose_model_path_pt.replace('.pt', '.mlpackage')
+                        self.logger.info(f"Successfully converted pose model to {final_pose_model_path}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to convert pose model to CoreML: {e}", exc_info=True)
+                        self.first_run_status_message = "Pose model conversion to CoreML failed."
+                        time.sleep(3)
+                        # Continue with the .pt file if conversion fails
+
+                self.app_settings.set("yolo_pose_model_path", final_pose_model_path)
+                self.yolo_pose_model_path_setting = final_pose_model_path
+                self.yolo_pose_model_path = final_pose_model_path
+                self.logger.info(f"Pose model set to: {final_pose_model_path}")
+            else:
+                self.logger.info(f"User already has pose model selected: {self.yolo_pose_model_path_setting}")
 
             self.first_run_status_message = "Setup complete! Please restart the application."
             self.logger.info("Default model setup complete.")
@@ -1747,3 +1761,82 @@ class ApplicationLogic:
         # self.app_settings.save_settings() # Settings usually saved explicitly by user or before critical changes
 
         self.logger.info("Application logic shutdown complete.")
+
+    def download_default_models(self):
+        """Manually download default models if they don't exist."""
+        try:
+            # Create models directory
+            models_dir = DEFAULT_MODELS_DIR
+            os.makedirs(models_dir, exist_ok=True)
+            self.logger.info(f"Checking for default models in: {models_dir}")
+
+            # Determine OS for model format
+            is_mac_arm = platform.system() == "Darwin" and platform.processor() == 'arm'
+            downloaded_models = []
+
+            # Check and download detection model
+            det_url = MODEL_DOWNLOAD_URLS["detection_pt"]
+            det_filename_pt = os.path.basename(det_url)
+            det_model_path_pt = os.path.join(models_dir, det_filename_pt)
+            det_model_path_mlpackage = det_model_path_pt.replace('.pt', '.mlpackage')
+            
+            # Check if either .pt or .mlpackage version exists
+            if not os.path.exists(det_model_path_pt) and not os.path.exists(det_model_path_mlpackage):
+                self.logger.info(f"Downloading detection model: {det_filename_pt}")
+                success = self.utility.download_file_with_progress(det_url, det_model_path_pt, None)
+                if success:
+                    downloaded_models.append(f"Detection model: {det_filename_pt}")
+                    
+                    # Convert to CoreML if on macOS ARM
+                    if is_mac_arm:
+                        try:
+                            model = YOLO(det_model_path_pt)
+                            model.export(format="coreml")
+                            self.logger.info(f"Converted detection model to CoreML: {det_model_path_mlpackage}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to convert detection model to CoreML: {e}")
+                else:
+                    self.logger.error("Failed to download detection model")
+            else:
+                self.logger.info("Detection model already exists")
+
+            # Check and download pose model
+            pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
+            pose_filename_pt = os.path.basename(pose_url)
+            pose_model_path_pt = os.path.join(models_dir, pose_filename_pt)
+            pose_model_path_mlpackage = pose_model_path_pt.replace('.pt', '.mlpackage')
+            
+            # Check if either .pt or .mlpackage version exists
+            if not os.path.exists(pose_model_path_pt) and not os.path.exists(pose_model_path_mlpackage):
+                self.logger.info(f"Downloading pose model: {pose_filename_pt}")
+                success = self.utility.download_file_with_progress(pose_url, pose_model_path_pt, None)
+                if success:
+                    downloaded_models.append(f"Pose model: {pose_filename_pt}")
+                    
+                    # Convert to CoreML if on macOS ARM
+                    if is_mac_arm:
+                        try:
+                            model = YOLO(pose_model_path_pt)
+                            model.export(format="coreml")
+                            self.logger.info(f"Converted pose model to CoreML: {pose_model_path_mlpackage}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to convert pose model to CoreML: {e}")
+                else:
+                    self.logger.error("Failed to download pose model")
+            else:
+                self.logger.info("Pose model already exists")
+
+            # Report results
+            if downloaded_models:
+                message = f"Downloaded models: {', '.join(downloaded_models)}"
+                self.set_status_message(message, duration=5.0)
+                self.logger.info(message)
+            else:
+                message = "All default models already exist"
+                self.set_status_message(message, duration=3.0)
+                self.logger.info(message)
+
+        except Exception as e:
+            error_msg = f"Error downloading models: {e}"
+            self.set_status_message(error_msg, duration=5.0)
+            self.logger.error(error_msg, exc_info=True)
