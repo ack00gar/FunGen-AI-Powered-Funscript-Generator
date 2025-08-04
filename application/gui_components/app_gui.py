@@ -10,7 +10,7 @@ import queue
 import os
 from typing import List, Dict
 
-from config import constants
+from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
@@ -26,7 +26,7 @@ class GUI:
         self.main_menu_bar_height = 0
 
         self.constants = constants
-        self.colors = self.constants.element_group_colors.AppGUIColors
+        self.colors = element_group_colors.AppGUIColors
 
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
@@ -259,11 +259,9 @@ class GUI:
         use_simplified_preview = self.app.app_settings.get("use_simplified_funscript_preview", False)
 
         # Create background
-        bg_color_cv_bgra = (int(0.15 * 255), int(0.12 * 255), int(0.12 * 255), 255)
-        image_data = np.full((target_height, target_width, 4), bg_color_cv_bgra, dtype=np.uint8)
+        image_data = np.full((target_height, target_width, 4), (38, 31, 31, 255), dtype=np.uint8)
         center_y_px = target_height // 2
-        cv2.line(image_data, (0, center_y_px), (target_width - 1, center_y_px),
-                 (int(0.3 * 255), int(0.3 * 255), int(0.3 * 255), int(0.7 * 255)), 1)
+        cv2.line(image_data, (0, center_y_px), (target_width - 1, center_y_px), (77, 77, 77, 179), 1)
 
         if not actions or total_duration_s <= 0.001:
             return image_data
@@ -353,8 +351,9 @@ class GUI:
         Performs the numpy/cv2 operations to create the heatmap image.
         This is called by the worker thread.
         """
-        bg_color_heatmap_texture_rgba255 = (int(0.08 * 255), int(0.08 * 255), int(0.10 * 255), 255)
-        image_data = np.full((target_height, target_width, 4), bg_color_heatmap_texture_rgba255, dtype=np.uint8)
+
+        colors = self.colors
+        image_data = np.full((target_height, target_width, 4), (colors.HEATMAP_BACKGROUND), dtype=np.uint8)
 
         if len(actions) > 1 and total_duration_s > 0.001:
             for i in range(len(actions) - 1):
@@ -664,7 +663,7 @@ class GUI:
                 if text_pos_x + text_size[0] > canvas_p1_x + current_bar_width_float:
                     text_pos_x = canvas_p1_x + current_bar_width_float - text_size[0]
                 text_pos = (text_pos_x, canvas_p1_y_offset - text_size[1] - 2)
-                draw_list_marker.add_text(text_pos[0], text_pos[1], imgui.get_color_u32_rgba(1, 1, 1, 1), text)
+                draw_list_marker.add_text(text_pos[0], text_pos[1], imgui.get_color_u32_rgba(*colors.WHITE), text)
 
 
     # --- This function now submits a task to the worker thread ---
