@@ -92,8 +92,7 @@ class AppEventHandlers:
         if stage_processor.full_analysis_active:
             stage_processor.abort_stage_processing()
             self.app.on_processing_stopped() # If aborting stage proc should also check pending app logic actions
-        elif stage_processor.scene_detection_active:
-            stage_processor.abort_stage_processing()
+
         elif self.app.processor and self.app.processor.is_processing:
             self.app.processor.stop_processing()
         elif self.app.is_setting_user_roi_mode:  # Abort ROI selection

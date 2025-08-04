@@ -1,7 +1,7 @@
 import imgui
 import os
 from config import constants
-from config.constants import TrackerMode, SCENE_DETECTION_DEFAULT_THRESHOLD, AI_MODEL_EXTENSIONS_FILTER, AI_MODEL_TOOLTIP_EXTENSIONS
+from config.constants import TrackerMode, AI_MODEL_EXTENSIONS_FILTER, AI_MODEL_TOOLTIP_EXTENSIONS
 import time
 from config.element_group_colors import ControlPanelColors, GeneralColors
 
@@ -264,7 +264,7 @@ class ControlPanelUI:
             stage_proc.full_analysis_active
             or self.app.is_setting_user_roi_mode
             or (
-                processor and processor.is_processing and not processor.pause_event.is_set() and not self._is_normal_playback_mode()
+                processor and processor.is_processing and not processor.pause_event.is_set()
             )
         )
         if disable_combo:
@@ -297,7 +297,7 @@ class ControlPanelUI:
 
             if new_mode == TrackerMode.LIVE_USER_ROI:
                 self.app.tracker.set_tracking_mode("USER_FIXED_ROI")
-                self.app.enter_set_user_roi_mode()
+                # Don't auto-trigger ROI selection - user must click the explicit button
             elif new_mode == TrackerMode.OSCILLATION_DETECTOR:
                 self.app.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
             elif new_mode == TrackerMode.LIVE_YOLO_ROI:
@@ -305,8 +305,7 @@ class ControlPanelUI:
             else:
                 self.app.tracker.set_tracking_mode("YOLO_ROI")
 
-        self._section_header(">> Output Configuration", 
-                            "Configure which movement axes to track and output")
+        self._section_header(">> Output Configuration", "Configure which movement axes to track and output")
         self._render_tracking_axes_mode(stage_proc)
 
         # --- Analysis Range and Rerun Options ---
@@ -356,7 +355,7 @@ class ControlPanelUI:
         imgui.separator()
 
         video_loaded = self.app.processor and self.app.processor.is_video_open()
-        processing_active = stage_proc.full_analysis_active or stage_proc.scene_detection_active
+        processing_active = stage_proc.full_analysis_active
         button_should_be_disabled = not video_loaded or processing_active
 
         if button_should_be_disabled:
@@ -369,31 +368,6 @@ class ControlPanelUI:
 
         # --- Interactive Refinement (conditionally visible) ---
         self._render_interactive_refinement_controls()
-
-        # Blinking button text when scene detection is active.
-        # This is not part of the analysis pipeline so it doesn't affect the detection speed.
-        # It's just a visual indicator that the scene detection is running for the user.
-        if stage_proc.scene_detection_active:
-            blink_on = int(time.time()) % 2 == 0
-            detect_scenes_text = "Detecting Scenes..." if blink_on else ""
-        else:
-            detect_scenes_text = "Detect Scenes & Create Chapters"
-        if imgui.button(detect_scenes_text, width=-1):
-            if not button_should_be_disabled:
-                threshold = getattr(self, '_scene_detection_threshold', SCENE_DETECTION_DEFAULT_THRESHOLD)
-                stage_proc.start_scene_detection_analysis(threshold=threshold)
-
-        # --- Scene Detection Threshold Input ---
-        if not hasattr(self, '_scene_detection_threshold'):
-            self._scene_detection_threshold = self.app.app_settings.get('scene_detection_threshold',
-                                                                        SCENE_DETECTION_DEFAULT_THRESHOLD)
-        imgui.push_item_width(100)
-        changed, new_threshold = imgui.input_float("Scene & Chapter Detection Threshold",
-                                                   self._scene_detection_threshold, 0.5, 1.0, "%.2f")
-        imgui.pop_item_width()
-        if changed:
-            self._scene_detection_threshold = new_threshold
-            self.app.app_settings.set('scene_detection_threshold', new_threshold)
 
         # --- Clear Chapters Button (only if chapters exist) ---
         chapters = getattr(self.app.funscript_processor, 'video_chapters', [])
@@ -1040,7 +1014,7 @@ class ControlPanelUI:
                                     self.app.processor.enable_tracker_processing)
 
         is_setting_roi = self.app.is_setting_user_roi_mode
-        is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi or stage_proc.scene_detection_active
+        is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi
 
         if is_batch_mode:
             imgui.text_ansi_colored("--- BATCH PROCESSING ACTIVE ---", 1.0, 0.7, 0.3) # TODO: move to theme, orange

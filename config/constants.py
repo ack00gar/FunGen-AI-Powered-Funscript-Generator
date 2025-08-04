@@ -151,7 +151,7 @@ POSE_STABILITY_THRESHOLD = 2.5
 ####################################################################################################
 # FUNSCRIPT & CHAPTERS
 ####################################################################################################
-SCENE_DETECTION_DEFAULT_THRESHOLD = 27.0
+
 DEFAULT_CHAPTER_FPS = 30.0
 POSITION_INFO_MAPPING = {
     "NR": {"long_name": "Not Relevant", "short_name": "NR"},
