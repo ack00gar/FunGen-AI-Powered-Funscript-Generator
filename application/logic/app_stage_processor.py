@@ -10,6 +10,11 @@ from bisect import bisect_left, bisect_right
 import multiprocessing
 import gc
 
+from application.utils.checkpoint_manager import (
+    CheckpointManager, ProcessingStage, CheckpointData,
+    get_checkpoint_manager, initialize_checkpoint_manager
+)
+
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
 #import detection.stage_2_orchestrator as stage2_module
@@ -30,6 +35,11 @@ class AppStageProcessor:
         self.update_settings_from_app()
 
         self.stage_completion_event: Optional[threading.Event] = None
+        
+        # --- Checkpoint Management ---
+        self.checkpoint_manager = get_checkpoint_manager()
+        self.current_checkpoint_id: Optional[str] = None
+        self.resume_data: Optional[CheckpointData] = None
 
         # --- Analysis State ---
         self.full_analysis_active: bool = False
@@ -63,6 +73,165 @@ class AppStageProcessor:
         self.on_stage1_progress = self._stage1_progress_callback
         self.on_stage2_progress = self._stage2_progress_callback
         self.on_stage3_progress = self._stage3_progress_callback
+    
+    def check_resumable_tasks(self) -> List[Tuple[str, CheckpointData]]:
+        """Check for tasks that can be resumed from checkpoints."""
+        return self.checkpoint_manager.get_resumable_tasks()
+    
+    def can_resume_video(self, video_path: str) -> Optional[CheckpointData]:
+        """Check if a specific video has resumable progress."""
+        return self.checkpoint_manager.find_latest_checkpoint(video_path)
+    
+    def start_resume_from_checkpoint(self, checkpoint_data: CheckpointData) -> bool:
+        """Resume processing from a checkpoint."""
+        try:
+            if self.full_analysis_active:
+                self.logger.warning("Cannot resume: Analysis already running.", extra={'status_message': True})
+                return False
+                
+            if not os.path.exists(checkpoint_data.video_path):
+                self.logger.error(f"Cannot resume: Video file not found: {checkpoint_data.video_path}", 
+                                extra={'status_message': True})
+                return False
+            
+            self.resume_data = checkpoint_data
+            self.logger.info(f"Resuming {checkpoint_data.processing_stage.value} from {checkpoint_data.progress_percentage:.1f}%", 
+                           extra={'status_message': True})
+            
+            # Load the video first
+            if self.app.file_manager.video_path != checkpoint_data.video_path:
+                # Would need to trigger video loading through the app
+                # For now, assume video is already loaded
+                pass
+            
+            # Resume based on the stage
+            if checkpoint_data.processing_stage == ProcessingStage.STAGE_1_OBJECT_DETECTION:
+                return self._resume_stage1(checkpoint_data)
+            elif checkpoint_data.processing_stage == ProcessingStage.STAGE_2_OPTICAL_FLOW:
+                return self._resume_stage2(checkpoint_data)
+            elif checkpoint_data.processing_stage == ProcessingStage.STAGE_3_FUNSCRIPT_GENERATION:
+                return self._resume_stage3(checkpoint_data)
+            else:
+                self.logger.error(f"Cannot resume: Unknown stage {checkpoint_data.processing_stage}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Failed to resume from checkpoint: {e}", exc_info=True)
+            return False
+    
+    def _resume_stage1(self, checkpoint_data: CheckpointData) -> bool:
+        """Resume Stage 1 processing from checkpoint."""
+        # For Stage 1, we typically need to restart as it's difficult to resume YOLO processing
+        # But we can use the checkpoint to restore settings and show progress
+        settings = checkpoint_data.processing_settings
+        self.logger.info("Stage 1 resume: Restarting with original settings")
+        
+        # Restore settings and start fresh
+        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        return self._start_full_analysis_with_settings(processing_mode, settings)
+    
+    def _resume_stage2(self, checkpoint_data: CheckpointData) -> bool:
+        """Resume Stage 2 processing from checkpoint."""
+        # Stage 2 can potentially resume from intermediate data
+        settings = checkpoint_data.processing_settings
+        stage_data = checkpoint_data.stage_data
+        
+        self.logger.info(f"Stage 2 resume: Continuing from {checkpoint_data.progress_percentage:.1f}%")
+        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        return self._start_full_analysis_with_settings(processing_mode, settings)
+    
+    def _resume_stage3(self, checkpoint_data: CheckpointData) -> bool:
+        """Resume Stage 3 processing from checkpoint."""
+        # Stage 3 can resume from segment data
+        settings = checkpoint_data.processing_settings
+        stage_data = checkpoint_data.stage_data
+        
+        self.logger.info(f"Stage 3 resume: Continuing from segment {stage_data.get('current_segment', 0)}")
+        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        return self._start_full_analysis_with_settings(processing_mode, settings)
+    
+    def _start_full_analysis_with_settings(self, processing_mode: "TrackerMode", settings: Dict[str, Any]) -> bool:
+        """Start full analysis with restored settings from checkpoint."""
+        try:
+            # Restore settings
+            override_producers = settings.get('num_producers_override')
+            override_consumers = settings.get('num_consumers_override')
+            frame_range_override = settings.get('frame_range_override')
+            
+            # Start the analysis
+            self.start_full_analysis(
+                processing_mode=processing_mode,
+                override_producers=override_producers,
+                override_consumers=override_consumers,
+                frame_range_override=frame_range_override,
+                is_autotune_run=settings.get('is_autotune_run', False)
+            )
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start analysis with restored settings: {e}")
+            return False
+    
+    def delete_checkpoint_for_video(self, video_path: str) -> bool:
+        """Delete all checkpoints for a specific video."""
+        try:
+            count = self.checkpoint_manager.delete_video_checkpoints(video_path)
+            if count > 0:
+                self.logger.info(f"Deleted {count} checkpoints for video", extra={'status_message': True})
+            return count > 0
+        except Exception as e:
+            self.logger.error(f"Failed to delete checkpoints: {e}")
+            return False
+    
+    def _create_checkpoint_if_needed(self, stage: ProcessingStage, frame_index: int, 
+                                   total_frames: int, stage_data: Dict[str, Any]) -> None:
+        """Create a checkpoint if enough time has passed."""
+        if not self.app.file_manager.video_path:
+            return
+            
+        if not self.checkpoint_manager.should_create_checkpoint(self.app.file_manager.video_path):
+            return
+        
+        try:
+            progress_percentage = (frame_index / total_frames * 100) if total_frames > 0 else 0
+            
+            processing_settings = {
+                'processing_mode': getattr(self, 'processing_mode_for_thread', TrackerMode.OFFLINE_3_STAGE).value,
+                'num_producers_override': getattr(self, 'override_producers', None),
+                'num_consumers_override': getattr(self, 'override_consumers', None),
+                'frame_range_override': getattr(self, 'frame_range_override', None),
+                'is_autotune_run': getattr(self, 'is_autotune_run_for_thread', False),
+                'yolo_det_model_path': self.app.yolo_det_model_path,
+                'yolo_pose_model_path': self.app.yolo_pose_model_path,
+                'confidence_threshold': self.app.tracker.confidence_threshold if self.app.tracker else 0.4,
+                'yolo_input_size': self.app.yolo_input_size
+            }
+            
+            checkpoint_id = self.checkpoint_manager.create_checkpoint(
+                video_path=self.app.file_manager.video_path,
+                stage=stage,
+                progress_percentage=progress_percentage,
+                frame_index=frame_index,
+                total_frames=total_frames,
+                stage_data=stage_data,
+                processing_settings=processing_settings
+            )
+            
+            if checkpoint_id:
+                self.current_checkpoint_id = checkpoint_id
+                
+        except Exception as e:
+            self.logger.error(f"Failed to create checkpoint: {e}")
+    
+    def _cleanup_checkpoints_on_completion(self):
+        """Clean up checkpoints when processing completes successfully."""
+        if self.app.file_manager.video_path:
+            try:
+                # Keep the final checkpoint but remove intermediate ones
+                self.checkpoint_manager.delete_video_checkpoints(self.app.file_manager.video_path)
+                self.current_checkpoint_id = None
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup checkpoints: {e}")
 
     def start_interactive_refinement_analysis(self, chapter, track_id):
         if self.full_analysis_active or self.refinement_analysis_active:
@@ -247,6 +416,15 @@ class AppStageProcessor:
             "time_elapsed": time_elapsed, "avg_fps": avg_fps, "instant_fps": instant_fps, "eta": eta_seconds
         }
         self.gui_event_queue.put(("stage1_progress_update", progress, progress_data))
+        
+        # Create checkpoint if needed
+        stage_data = {
+            "current_frame": current,
+            "message": message,
+            "avg_fps": avg_fps,
+            "time_elapsed": time_elapsed
+        }
+        self._create_checkpoint_if_needed(ProcessingStage.STAGE_1_OBJECT_DETECTION, current, total, stage_data)
 
     def _stage2_progress_callback(self, main_info_from_module, sub_info_from_module, force_update=False):
         """A simplified callback to directly pass progress data to the GUI queue."""
@@ -264,6 +442,38 @@ class AppStageProcessor:
 
         # Directly put the validated/corrected data onto the queue.
         self.gui_event_queue.put(("stage2_dual_progress", main_info_from_module, sub_info_from_module))
+        
+        # Create checkpoint if needed (use main progress for frame tracking)
+        try:
+            main_current, main_total, main_name = main_info_from_module
+            if isinstance(sub_info_from_module, dict):
+                sub_current = sub_info_from_module.get("current", 0)
+                stage_data = {
+                    "main_step": main_current,
+                    "main_total": main_total,
+                    "main_name": main_name,
+                    "sub_current": sub_current,
+                    "sub_info": sub_info_from_module
+                }
+            else:
+                sub_current, sub_total, sub_name = sub_info_from_module
+                stage_data = {
+                    "main_step": main_current,
+                    "main_total": main_total,
+                    "main_name": main_name,
+                    "sub_current": sub_current,
+                    "sub_total": sub_total,
+                    "sub_name": sub_name
+                }
+            
+            # Use a composite frame index for Stage 2
+            composite_frame = main_current * 1000 + (sub_current if isinstance(sub_current, int) else 0)
+            composite_total = main_total * 1000
+            self._create_checkpoint_if_needed(ProcessingStage.STAGE_2_OPTICAL_FLOW, composite_frame, composite_total, stage_data)
+            
+        except Exception as e:
+            # Don't let checkpoint errors interrupt processing
+            pass
 
     def _stage3_progress_callback(self, current_chapter_idx: int, total_chapters: int, chapter_name: str, current_chunk_idx: int, total_chunks: int, total_frames_processed_overall, total_frames_to_process_overall, processing_fps = 0.0, time_elapsed = 0.0, eta_seconds = 0.0):
         # REFACTORED for readability and maintainability
@@ -286,6 +496,19 @@ class AppStageProcessor:
             "eta": eta_seconds
         }
         self.gui_event_queue.put(("stage3_progress_update", progress_data, None))
+        
+        # Create checkpoint if needed
+        stage_data = {
+            "current_chapter": current_chapter_idx,
+            "total_chapters": total_chapters,
+            "chapter_name": chapter_name,
+            "current_chunk": current_chunk_idx,
+            "total_chunks": total_chunks,
+            "processing_fps": processing_fps,
+            "time_elapsed": time_elapsed
+        }
+        self._create_checkpoint_if_needed(ProcessingStage.STAGE_3_FUNSCRIPT_GENERATION, 
+                                        total_frames_processed_overall, total_frames_to_process_overall, stage_data)
 
     def start_full_analysis(self, processing_mode: "TrackerMode",
                             override_producers: Optional[int] = None,
@@ -427,6 +650,21 @@ class AppStageProcessor:
                 self.gui_event_queue.put(("stage1_completed", "00:00:00 (Cached)", "Cached"))
                 # Since we skipped, the preprocessed path is the one that already exists.
                 preprocessed_path_for_s3 = preprocessed_video_path if preprocessed_video_exists else None
+                
+                # IMPORTANT: Load preprocessed video when Stage 1 is skipped too
+                if preprocessed_path_for_s3 and os.path.exists(preprocessed_path_for_s3) and getattr(self, 'save_preprocessed_video', False):
+                    fm.preprocessed_video_path = preprocessed_path_for_s3
+                    
+                    # CRITICAL: Update video processor to use preprocessed video for display and processing
+                    if self.app.processor:
+                        self.app.processor.set_active_video_source(preprocessed_path_for_s3)
+                    
+                    self.logger.info(f"Stage 1 skipped: Using existing preprocessed video for subsequent stages: {os.path.basename(preprocessed_path_for_s3)}")
+                    # Notify GUI that we're working with preprocessed video
+                    self.gui_event_queue.put(("preprocessed_video_loaded", {
+                        "path": preprocessed_path_for_s3,
+                        "message": f"Using cached preprocessed video: {os.path.basename(preprocessed_path_for_s3)}"
+                    }, None))
             else:
                 stage1_results = self._execute_stage1_logic(
                     frame_range=frame_range_for_s1,
@@ -444,6 +682,39 @@ class AppStageProcessor:
                     # The autotuner reads this value immediately after the completion event is set.
                     self.stage1_final_fps_str = max_fps_str
                     self.gui_event_queue.put(("stage1_completed", self.stage1_time_elapsed_str, max_fps_str))
+                    
+                    # IMPORTANT: Update file manager to use preprocessed video if it was created
+                    # This ensures subsequent stages (Stage 2 and 3) process the preprocessed file, not the original
+                    if preprocessed_path_for_s3 and os.path.exists(preprocessed_path_for_s3) and getattr(self, 'save_preprocessed_video', False):
+                        # Validate the preprocessed video before loading it
+                        try:
+                            from detection.cd.stage_1_cd import _validate_preprocessed_video_completeness
+                            expected_frames = len(fm.stage1_output_msgpack_path) if hasattr(fm, 'stage1_output_msgpack_path') else 0
+                            if self.app.processor and self.app.processor.video_info:
+                                expected_frames = self.app.processor.video_info.get('frame_count', 0)
+                                fps = self.app.processor.video_info.get('fps', 30.0)
+                                
+                                if _validate_preprocessed_video_completeness(preprocessed_path_for_s3, expected_frames, fps, self.logger):
+                                    # Successfully validated - update file manager to use preprocessed video
+                                    fm.preprocessed_video_path = preprocessed_path_for_s3
+                                    
+                                    # CRITICAL: Update video processor to use preprocessed video for display and processing
+                                    if self.app.processor:
+                                        self.app.processor.set_active_video_source(preprocessed_path_for_s3)
+                                    
+                                    self.logger.info(f"Stage 1 completed: Now using preprocessed video for subsequent stages: {os.path.basename(preprocessed_path_for_s3)}")
+                                    
+                                    # Notify GUI that we're now working with preprocessed video
+                                    self.gui_event_queue.put(("preprocessed_video_loaded", {
+                                        "path": preprocessed_path_for_s3,
+                                        "message": f"Now using preprocessed video: {os.path.basename(preprocessed_path_for_s3)}"
+                                    }, None))
+                                else:
+                                    self.logger.warning(f"Preprocessed video validation failed after Stage 1: {preprocessed_path_for_s3}")
+                        except Exception as e:
+                            self.logger.error(f"Error updating file manager with preprocessed video after Stage 1: {e}")
+                    elif getattr(self, 'save_preprocessed_video', False):
+                        self.logger.warning("Save/Reuse Preprocessed Video is enabled but no valid preprocessed video was created after Stage 1")
 
             if self.stop_stage_event.is_set() or not stage1_success:
                 self.logger.info("[Thread] Exiting after Stage 1 due to stop event or failure.")
@@ -609,13 +880,69 @@ class AppStageProcessor:
             if self.stage_completion_event:
                 self.stage_completion_event.set()
 
-            # Clear the large data map and SQLite path from memory
-            if hasattr(self.app, 's2_frame_objects_map_for_s3'):
-                self.logger.info("[Thread] Clearing Stage 2 data map from memory.")
+            # Clean up checkpoints on successful completion
+            if stage1_success and stage2_success and (selected_mode == TrackerMode.OFFLINE_2_STAGE or stage3_success):
+                self._cleanup_checkpoints_on_completion()
+
+            # Clear the large data map and SQLite path from memory (if not already cleared)
+            if hasattr(self.app, 's2_frame_objects_map_for_s3') and self.app.s2_frame_objects_map_for_s3 is not None:
+                self.logger.info("[Thread] Clearing remaining Stage 2 data map from memory.")
                 self.app.s2_frame_objects_map_for_s3 = None
 
-            if hasattr(self.app, 's2_sqlite_db_path'):
-                self.app.s2_sqlite_db_path = None
+            if hasattr(self.app, 's2_sqlite_db_path') and self.app.s2_sqlite_db_path:
+                # Check if we should retain the database
+                retain_database = self.app_settings.get("retain_stage2_database", True)
+                
+                # CRITICAL: Never delete database during 3-stage pipeline until Stage 3 completes
+                # Stage 3 depends on the Stage 2 database for processing
+                is_3_stage_pipeline = selected_mode == TrackerMode.OFFLINE_3_STAGE
+                stage3_completed = stage3_success if is_3_stage_pipeline else True
+                
+                if not retain_database and stage3_completed:
+                    # Only clean up the database file if:
+                    # 1. User has disabled database retention, AND
+                    # 2. We're not in a 3-stage pipeline OR Stage 3 has completed successfully
+                    try:
+                        from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
+                        temp_storage = Stage2SQLiteStorage(self.app.s2_sqlite_db_path, self.logger)
+                        temp_storage.cleanup_database(remove_main_db=True)
+                        self.logger.info("Stage 2 database file removed (retain_stage2_database=False)")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to clean up Stage 2 database: {e}")
+                elif not retain_database and is_3_stage_pipeline and not stage3_completed:
+                    # In 3-stage pipeline, keep database until Stage 3 completes
+                    self.logger.info(f"Stage 2 database retained for Stage 3 processing: {self.app.s2_sqlite_db_path}")
+                else:
+                    self.logger.info(f"Stage 2 database retained at: {self.app.s2_sqlite_db_path}")
+                
+                # Only clear the path reference if we're not in a 3-stage pipeline or Stage 3 completed
+                if stage3_completed:
+                    self.app.s2_sqlite_db_path = None
+
+            # Clean up Stage 2 overlay file using same retention logic as database
+            if fm.video_path:
+                try:
+                    s2_overlay_path = fm.get_output_path_for_file(fm.video_path, "_stage2_overlay.msgpack")
+                    if os.path.exists(s2_overlay_path):
+                        retain_database = self.app_settings.get("retain_stage2_database", True)
+                        
+                        # Use same logic as database cleanup
+                        is_3_stage_pipeline = selected_mode == TrackerMode.OFFLINE_3_STAGE
+                        stage3_completed = stage3_success if is_3_stage_pipeline else True
+                        
+                        if not retain_database and stage3_completed:
+                            # Clean up overlay file when database retention is disabled and safe to do so
+                            try:
+                                os.unlink(s2_overlay_path)
+                                self.logger.info("Stage 2 overlay file removed (retain_stage2_database=False)")
+                            except Exception as e:
+                                self.logger.warning(f"Failed to remove Stage 2 overlay file: {e}")
+                        elif not retain_database and is_3_stage_pipeline and not stage3_completed:
+                            self.logger.info(f"Stage 2 overlay file retained for Stage 3 processing: {s2_overlay_path}")
+                        else:
+                            self.logger.info(f"Stage 2 overlay file retained at: {s2_overlay_path}")
+                except Exception as e:
+                    self.logger.warning(f"Error handling Stage 2 overlay file cleanup: {e}")
 
             gc.collect() # Encourage garbage collection
 
@@ -885,6 +1212,17 @@ class AppStageProcessor:
             parent_logger=self.logger,
             sqlite_db_path=sqlite_db_path
         )
+        
+        # Clear Stage 2 memory map immediately after Stage 3 starts processing
+        # Stage 3 has already consumed the data it needs
+        if hasattr(self.app, 's2_frame_objects_map_for_s3') and self.app.s2_frame_objects_map_for_s3:
+            map_size = len(self.app.s2_frame_objects_map_for_s3)
+            self.app.s2_frame_objects_map_for_s3 = None
+            self.logger.info(f"[Memory] Cleared Stage 2 data map ({map_size} frames) early to reduce memory pressure")
+            
+            # Force garbage collection to ensure immediate memory release
+            import gc
+            gc.collect()
 
         if self.stop_stage_event.is_set(): return False
 
@@ -973,6 +1311,16 @@ class AppStageProcessor:
                     self.stage1_final_fps_str = str(data2)
                     self.stage1_status_text = "Completed"
                     self.stage1_progress_value = 1.0
+                elif event_type == "preprocessed_video_loaded":
+                    # Handle the event when preprocessed video is loaded after Stage 1
+                    if isinstance(data1, dict):
+                        preprocessed_info = data1
+                        message = preprocessed_info.get("message", "Preprocessed video loaded")
+                        # Update status message and log info
+                        self.app.logger.info(message, extra={'status_message': True})
+                        # Update UI info panel if available
+                        if hasattr(self.app, 'set_status_message'):
+                            self.app.set_status_message(message)
                 elif event_type == "stage1_queue_update":
                     queue_data = data1
                     if isinstance(queue_data, dict):

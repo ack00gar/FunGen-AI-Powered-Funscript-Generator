@@ -1664,3 +1664,37 @@ class ROITracker:
 
         self.prev_gray_oscillation = current_gray
         return processed_frame, action_log_list if action_log_list else None
+    
+    def cleanup(self):
+        """Explicit cleanup method for resource management."""
+        try:
+            # Clean up ModelPool if it exists
+            if hasattr(self, 'model_pool') and self.model_pool is not None:
+                self.model_pool.cleanup()
+                self.logger.debug("ROITracker: ModelPool cleaned up")
+            
+            # Clear OpenCV objects that might hold memory
+            self.prev_gray_main_roi = None
+            self.prev_gray_user_roi_patch = None
+            self.prev_gray_oscillation_area_patch = None
+            self.prev_gray_oscillation = None
+            
+            # Clear optical flow objects
+            self.flow_dense = None
+            self.flow_sparse_features = None
+            
+            # Clear large data structures
+            self.oscillation_cell_persistence.clear()
+            self.oscillation_active_block_positions.clear()
+            
+            self.logger.debug("ROITracker: Resources cleaned up")
+            
+        except Exception as e:
+            self.logger.warning(f"ROITracker cleanup error: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure resource cleanup."""
+        try:
+            self.cleanup()
+        except Exception:
+            pass  # Avoid errors during destruction

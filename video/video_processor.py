@@ -6,6 +6,7 @@ import shlex
 import numpy as np
 import cv2
 import platform
+import sys
 from typing import Optional, Iterator, Tuple, List, Dict, Any
 import logging
 import os
@@ -169,7 +170,33 @@ class VideoProcessor:
             self.enable_tracker_processing = False
         else:
             self.enable_tracker_processing = enable
-            self.logger.info(f"Tracker processing {'enabled' if enable else 'disabled'}.")
+    
+    def set_active_video_source(self, video_source_path: str):
+        """
+        Update the active video source path (e.g., to switch to preprocessed video).
+        
+        Args:
+            video_source_path: Path to the video file to use as the active source
+        """
+        if not os.path.exists(video_source_path):
+            self.logger.warning(f"Cannot set active video source: file does not exist: {video_source_path}")
+            return
+            
+        old_source = self._active_video_source_path
+        self._active_video_source_path = video_source_path
+        
+        # Update the FFmpeg filter string since preprocessed videos don't need filtering
+        self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+        
+        source_type = "preprocessed" if self._is_using_preprocessed_video() else "original"
+        self.logger.info(f"Active video source updated: {os.path.basename(video_source_path)} ({source_type})")
+        
+        # Notify about the change
+        if old_source != video_source_path:
+            if self._is_using_preprocessed_video():
+                self.logger.info("Now using preprocessed video - filters disabled for optimal performance")
+            else:
+                self.logger.info("Now using original video - filters will be applied on-the-fly")
 
     def open_video(self, video_path: str, from_project_load: bool = False) -> bool:
         self.stop_processing()
@@ -389,12 +416,15 @@ class VideoProcessor:
                 self.logger.debug(f"get_frames_batch Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
                 self.logger.debug(f"get_frames_batch Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
 
-                local_p1_proc = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                # Windows fix: prevent terminal windows from spawning
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                local_p1_proc = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if local_p1_proc.stdout is None: raise IOError("get_frames_batch: Pipe 1 stdout is None.")
 
                 local_p2_proc = subprocess.Popen(cmd2, stdin=local_p1_proc.stdout,
                                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20))
+                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20),
+                                                 creationflags=creation_flags)
                 local_p1_proc.stdout.close()
 
             else:  # Standard single FFmpeg process
@@ -411,8 +441,10 @@ class VideoProcessor:
                 cmd_single.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
                 self.logger.debug(
                     f"get_frames_batch CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in cmd_single)}")
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 local_p2_proc = subprocess.Popen(cmd_single, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20))
+                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20),
+                                                 creationflags=creation_flags)
 
             if not local_p2_proc or local_p2_proc.stdout is None:
                 self.logger.error("get_frames_batch: Output FFmpeg process or its stdout is None.")
@@ -519,7 +551,8 @@ class VideoProcessor:
         try:
             cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                    '-show_entries', 'stream=width,height', '-of', 'json', video_path]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, timeout=5)
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, timeout=5, creationflags=creation_flags)
             data = json.loads(result.stdout)
             stream_info = data.get('streams', [{}])[0]
             width = int(stream_info.get('width', 0))
@@ -556,7 +589,8 @@ class VideoProcessor:
                'stream=width,height,r_frame_rate,nb_frames,avg_frame_rate,duration,codec_type,pix_fmt,bits_per_raw_sample',
                '-show_entries', 'format=duration,size,bit_rate', '-of', 'json', filename]
         try:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, creationflags=creation_flags)
             data = json.loads(result.stdout)
             stream_info = data.get('streams', [{}])[0]
             format_info = data.get('format', {})
@@ -586,8 +620,9 @@ class VideoProcessor:
             cmd_audio_check = ['ffprobe', '-v', 'error', '-select_streams', 'a:0',
                                '-show_entries', 'stream=codec_type', '-of', 'json', filename]
             try:
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 result_audio = subprocess.run(cmd_audio_check, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                              check=True, text=True)
+                                              check=True, text=True, creationflags=creation_flags)
                 audio_data = json.loads(result_audio.stdout)
                 if audio_data.get('streams') and audio_data['streams'][0].get('codec_type') == 'audio':
                     has_audio_ffprobe = True
@@ -654,7 +689,8 @@ class VideoProcessor:
             ]
             self.logger.info(f"Extracting audio for waveform via memory pipe: {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
 
-            process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
             raw_audio, stderr = process.communicate(timeout=60)
 
             if process.returncode != 0:
@@ -708,83 +744,85 @@ class VideoProcessor:
             return True
         return False
 
-    def _build_ffmpeg_filter_string(self) -> str:
-        # --- Check if we are using the preprocessed file ---
+    def _is_using_preprocessed_video(self) -> bool:
+        """Checks if the active video source is a preprocessed file."""
         is_using_preprocessed_by_path_diff = self._active_video_source_path != self.video_path
         is_preprocessed_by_name = self._active_video_source_path.endswith("_preprocessed.mkv")
+        return is_using_preprocessed_by_path_diff or is_preprocessed_by_name
 
-        if is_using_preprocessed_by_path_diff or is_preprocessed_by_name:
-            self.logger.info(f"Using preprocessed video source ('{os.path.basename(self._active_video_source_path)}'). No FFmpeg filters will be applied.")
-            return "" # Return an empty filter string
+    def _needs_hw_download(self) -> bool:
+        """Determines if the FFmpeg filter chain requires a 'hwdownload' filter."""
+        current_hw_args = self._get_ffmpeg_hwaccel_args()
+        if '-hwaccel_output_format' in current_hw_args:
+            try:
+                idx = current_hw_args.index('-hwaccel_output_format')
+                hw_output_format = current_hw_args[idx + 1]
+                # These formats are on the GPU and need to be downloaded for CPU-based filters.
+                if hw_output_format in ['cuda', 'nv12', 'p010le', 'qsv', 'vaapi', 'd3d11va', 'dxva2_vld']:
+                    return True
+            except (ValueError, IndexError):
+                self.logger.warning("Could not properly parse -hwaccel_output_format from hw_args.")
+        return False
 
-        # If not using preprocessed, build the filter string as before
+    def _get_2d_video_filters(self) -> List[str]:
+        """Builds the list of FFmpeg filter segments for standard 2D video."""
+        return [
+            f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
+            f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
+        ]
+
+    def _get_vr_video_filters(self) -> List[str]:
+        """Builds the list of FFmpeg filter segments for VR video, including cropping and v360."""
         if not self.video_info:
-            return ''
+            return []
 
         original_width = self.video_info.get('width', 0)
         original_height = self.video_info.get('height', 0)
         v_h_FOV = 90  # Default vertical and horizontal FOV for the output projection
 
-        current_hw_args = self._get_ffmpeg_hwaccel_args()
-        needs_hw_download = False
-        hw_output_format_for_log = "N/A"
+        vr_filters = []
+        is_sbs_format = '_sbs' in self.vr_input_format
+        is_tb_format = '_tb' in self.vr_input_format
 
-        if '-hwaccel_output_format' in current_hw_args:
-            try:
-                idx = current_hw_args.index('-hwaccel_output_format')
-                hw_output_format = current_hw_args[idx + 1]
-                hw_output_format_for_log = hw_output_format
-                if hw_output_format in ['cuda', 'nv12', 'p010le', 'qsv', 'vaapi', 'd3d11va', 'dxva2_vld']:
-                    needs_hw_download = True
-            except (ValueError, IndexError):
-                self.logger.warning("Could not properly parse -hwaccel_output_format from hw_args.")
+        if is_sbs_format and original_width > 0 and original_height > 0:
+            crop_w = original_width / 2
+            crop_h = original_height
+            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
+            self.logger.info(f"Applying SBS pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
+        elif is_tb_format and original_width > 0 and original_height > 0:
+            crop_w = original_width
+            crop_h = original_height / 2
+            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
+            self.logger.info(f"Applying TB pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
 
-        self.logger.info(
-            f"Hardware acceleration check for filter string: needs_hw_download={needs_hw_download} "
-            f"(detected output format: {hw_output_format_for_log}). Determined video type: {self.determined_video_type}."
+        base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
+        v360_filter_core = (
+            f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
+            f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
+            f"d_fov={self.vr_fov}:"
+            f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
+            f"pitch={self.vr_pitch}:yaw=0:roll=0:"
+            f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=lanczos"
         )
+        vr_filters.append(v360_filter_core)
+        return vr_filters
+
+    def _build_ffmpeg_filter_string(self) -> str:
+        if self._is_using_preprocessed_video():
+            self.logger.info(f"Using preprocessed video source ('{os.path.basename(self._active_video_source_path)}'). No FFmpeg filters will be applied.")
+            return ""
+
+        if not self.video_info:
+            return ''
 
         software_filter_segments = []
-
         if self.determined_video_type == '2D':
-            software_filter_segments.append(
-                f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease"
-            )
-            software_filter_segments.append(
-                f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-            )
+            software_filter_segments = self._get_2d_video_filters()
         elif self.determined_video_type == 'VR':
-            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
-            is_sbs_format = '_sbs' in self.vr_input_format
-            is_tb_format = '_tb' in self.vr_input_format
-
-            pre_v360_filters_temp = []
-
-            if is_sbs_format and original_width > 0 and original_height > 0:
-                crop_w = original_width / 2
-                crop_h = original_height
-                pre_v360_filters_temp.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
-                self.logger.info(f"Applying SBS pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
-            elif is_tb_format and original_width > 0 and original_height > 0:
-                crop_w = original_width
-                crop_h = original_height / 2
-                pre_v360_filters_temp.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
-                self.logger.info(f"Applying TB pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
-
-            software_filter_segments.extend(pre_v360_filters_temp)
-
-            v360_filter_core = (
-                f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
-                f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
-                f"d_fov={self.vr_fov}:"
-                f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
-                f"pitch={self.vr_pitch}:yaw=0:roll=0:"
-                f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=lanczos"
-            )
-            software_filter_segments.append(v360_filter_core)
+            software_filter_segments = self._get_vr_video_filters()
 
         final_filter_chain_parts = []
-        if needs_hw_download and software_filter_segments:
+        if self._needs_hw_download() and software_filter_segments:
             final_filter_chain_parts.extend(["hwdownload", "format=nv12"])
             self.logger.info("Prepending 'hwdownload,format=nv12' to the software filter chain.")
 
@@ -909,12 +947,14 @@ class VideoProcessor:
             self.logger.info(f"Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
             self.logger.info(f"Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
             try:
-                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if self.ffmpeg_pipe1_process.stdout is None:
                     raise IOError("Pipe 1 stdout is None.")
                 self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout,
                                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 5)
+                                                       bufsize=self.frame_size_bytes * 5,
+                                                       creationflags=creation_flags)
                 self.ffmpeg_pipe1_process.stdout.close()
                 return True
             except Exception as e:
@@ -936,8 +976,10 @@ class VideoProcessor:
 
             self.logger.info(f"Single Pipe CMD: {' '.join(shlex.quote(str(x)) for x in cmd)}")
             try:
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 self.ffmpeg_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 5)
+                                                       bufsize=self.frame_size_bytes * 5,
+                                                       creationflags=creation_flags)
                 return True
             except Exception as e:
                 self.logger.error(f"Failed to start FFmpeg: {e}", exc_info=True)
@@ -1244,34 +1286,80 @@ class VideoProcessor:
 
     def _start_ffmpeg_for_segment_streaming(self, start_frame_abs_idx: int,
                                             num_frames_to_stream_hint: Optional[int] = None) -> bool:
-        self.logger.warning("Segment streaming currently does not use the 2-pipe 10-bit CUDA optimization.")
         self._terminate_ffmpeg_processes()
 
         if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0:
             self.logger.warning("Cannot start FFmpeg for segment: no video/invalid FPS.")
             return False
+
         start_time_seconds = start_frame_abs_idx / self.video_info['fps']
-        hwaccel_cmd_list = self._get_ffmpeg_hwaccel_args()
-        ffmpeg_cmd_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
-        ffmpeg_input_options = hwaccel_cmd_list[:]
-        if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
-        ffmpeg_cmd = ffmpeg_cmd_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
-        effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
-        ffmpeg_cmd.extend(['-vf', effective_vf])
+        common_ffmpeg_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
 
-        if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
-            ffmpeg_cmd.extend(['-frames:v', str(num_frames_to_stream_hint)])
+        if self._is_10bit_cuda_pipe_needed():
+            self.logger.info("Using 2-pipe FFmpeg command for 10-bit CUDA segment streaming.")
+            video_height_for_crop = self.video_info.get('height', 0)
+            if video_height_for_crop <= 0:
+                self.logger.error("Cannot construct 10-bit CUDA pipe 1 for segment: video height is unknown.")
+                return False
 
-        ffmpeg_cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
-        self.logger.info(f"Segment CMD (single pipe only): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
-        try:
-            self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                   bufsize=self.frame_size_bytes * 20)
-            return True
-        except Exception as e:
-            self.logger.warning(f"Failed to start FFmpeg for segment: {e}", exc_info=True)
-            self.ffmpeg_process = None
-            return False
+            pipe1_vf = f"crop={int(video_height_for_crop)}:{int(video_height_for_crop)}:0:0,scale_cuda=1000:1000"
+            cmd1 = common_ffmpeg_prefix[:]
+            cmd1.extend(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'])
+            if start_time_seconds > 0.001: cmd1.extend(['-ss', str(start_time_seconds)])
+            cmd1.extend(['-i', self._active_video_source_path, '-an', '-sn', '-vf', pipe1_vf])
+            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
+                cmd1.extend(['-frames:v', str(num_frames_to_stream_hint)])
+            cmd1.extend(['-c:v', 'hevc_nvenc', '-preset', 'fast', '-qp', '0', '-f', 'matroska', 'pipe:1'])
+
+            cmd2 = common_ffmpeg_prefix[:]
+            cmd2.extend(['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn'])
+            effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            cmd2.extend(['-vf', effective_vf_pipe2])
+            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
+                cmd2.extend(['-frames:v', str(num_frames_to_stream_hint)])
+            cmd2.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
+
+            self.logger.info(f"Segment Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
+            self.logger.info(f"Segment Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
+            try:
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
+                if self.ffmpeg_pipe1_process.stdout is None:
+                    raise IOError("Segment Pipe 1 stdout is None.")
+                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout,
+                                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                                       bufsize=self.frame_size_bytes * 20,
+                                                       creationflags=creation_flags)
+                self.ffmpeg_pipe1_process.stdout.close()
+                return True
+            except Exception as e:
+                self.logger.error(f"Failed to start 2-pipe FFmpeg for segment: {e}", exc_info=True)
+                self._terminate_ffmpeg_processes()
+                return False
+        else:
+            # Standard single FFmpeg process for 8-bit or non-CUDA accelerated video
+            hwaccel_cmd_list = self._get_ffmpeg_hwaccel_args()
+            ffmpeg_input_options = hwaccel_cmd_list[:]
+            if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
+            ffmpeg_cmd = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
+            effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            ffmpeg_cmd.extend(['-vf', effective_vf])
+
+            if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
+                ffmpeg_cmd.extend(['-frames:v', str(num_frames_to_stream_hint)])
+
+            ffmpeg_cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
+            self.logger.info(f"Segment CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
+            try:
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                                       bufsize=self.frame_size_bytes * 20,
+                                                       creationflags=creation_flags)
+                return True
+            except Exception as e:
+                self.logger.warning(f"Failed to start FFmpeg for segment: {e}", exc_info=True)
+                self.ffmpeg_process = None
+                return False
 
     def stream_frames_for_segment(self, start_frame_abs_idx: int, num_frames_to_read: int, stop_event: Optional[threading.Event] = None) -> Iterator[Tuple[int, np.ndarray]]:
         if num_frames_to_read <= 0:

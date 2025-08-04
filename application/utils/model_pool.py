@@ -225,6 +225,10 @@ class ModelPool:
         
         return stats
     
+    def cleanup(self):
+        """Explicit cleanup method for external resource management."""
+        self.clear_all_models()
+    
     def __del__(self):
         """Cleanup when pool is destroyed."""
         try:
