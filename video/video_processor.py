@@ -6,6 +6,7 @@ import shlex
 import numpy as np
 import cv2
 import platform
+import sys
 from typing import Optional, Iterator, Tuple, List, Dict, Any
 import logging
 import os
@@ -455,12 +456,15 @@ class VideoProcessor:
                 self.logger.debug(f"get_frames_batch Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
                 self.logger.debug(f"get_frames_batch Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
 
-                local_p1_proc = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                # Windows fix: prevent terminal windows from spawning
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                local_p1_proc = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if local_p1_proc.stdout is None: raise IOError("get_frames_batch: Pipe 1 stdout is None.")
 
                 local_p2_proc = subprocess.Popen(cmd2, stdin=local_p1_proc.stdout,
                                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20))
+                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20),
+                                                 creationflags=creation_flags)
                 local_p1_proc.stdout.close()
 
             else:  # Standard single FFmpeg process
@@ -477,8 +481,10 @@ class VideoProcessor:
                 cmd_single.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
                 self.logger.debug(
                     f"get_frames_batch CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in cmd_single)}")
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 local_p2_proc = subprocess.Popen(cmd_single, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20))
+                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20),
+                                                 creationflags=creation_flags)
 
             if not local_p2_proc or local_p2_proc.stdout is None:
                 self.logger.error("get_frames_batch: Output FFmpeg process or its stdout is None.")
@@ -585,7 +591,8 @@ class VideoProcessor:
         try:
             cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                    '-show_entries', 'stream=width,height', '-of', 'json', video_path]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, timeout=5)
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, timeout=5, creationflags=creation_flags)
             data = json.loads(result.stdout)
             stream_info = data.get('streams', [{}])[0]
             width = int(stream_info.get('width', 0))
@@ -622,7 +629,8 @@ class VideoProcessor:
                'stream=width,height,r_frame_rate,nb_frames,avg_frame_rate,duration,codec_type,pix_fmt,bits_per_raw_sample',
                '-show_entries', 'format=duration,size,bit_rate', '-of', 'json', filename]
         try:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, creationflags=creation_flags)
             data = json.loads(result.stdout)
             stream_info = data.get('streams', [{}])[0]
             format_info = data.get('format', {})
@@ -652,8 +660,9 @@ class VideoProcessor:
             cmd_audio_check = ['ffprobe', '-v', 'error', '-select_streams', 'a:0',
                                '-show_entries', 'stream=codec_type', '-of', 'json', filename]
             try:
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 result_audio = subprocess.run(cmd_audio_check, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                              check=True, text=True)
+                                              check=True, text=True, creationflags=creation_flags)
                 audio_data = json.loads(result_audio.stdout)
                 if audio_data.get('streams') and audio_data['streams'][0].get('codec_type') == 'audio':
                     has_audio_ffprobe = True
@@ -720,7 +729,8 @@ class VideoProcessor:
             ]
             self.logger.info(f"Extracting audio for waveform via memory pipe: {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
 
-            process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
             raw_audio, stderr = process.communicate(timeout=60)
 
             if process.returncode != 0:
@@ -977,12 +987,14 @@ class VideoProcessor:
             self.logger.info(f"Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
             self.logger.info(f"Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
             try:
-                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if self.ffmpeg_pipe1_process.stdout is None:
                     raise IOError("Pipe 1 stdout is None.")
                 self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout,
                                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 5)
+                                                       bufsize=self.frame_size_bytes * 5,
+                                                       creationflags=creation_flags)
                 self.ffmpeg_pipe1_process.stdout.close()
                 return True
             except Exception as e:
@@ -1004,8 +1016,10 @@ class VideoProcessor:
 
             self.logger.info(f"Single Pipe CMD: {' '.join(shlex.quote(str(x)) for x in cmd)}")
             try:
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 self.ffmpeg_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 5)
+                                                       bufsize=self.frame_size_bytes * 5,
+                                                       creationflags=creation_flags)
                 return True
             except Exception as e:
                 self.logger.error(f"Failed to start FFmpeg: {e}", exc_info=True)
@@ -1348,12 +1362,14 @@ class VideoProcessor:
             self.logger.info(f"Segment Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
             self.logger.info(f"Segment Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
             try:
-                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if self.ffmpeg_pipe1_process.stdout is None:
                     raise IOError("Segment Pipe 1 stdout is None.")
                 self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout,
                                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 20)
+                                                       bufsize=self.frame_size_bytes * 20,
+                                                       creationflags=creation_flags)
                 self.ffmpeg_pipe1_process.stdout.close()
                 return True
             except Exception as e:
@@ -1375,8 +1391,10 @@ class VideoProcessor:
             ffmpeg_cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
             self.logger.info(f"Segment CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
             try:
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 20)
+                                                       bufsize=self.frame_size_bytes * 20,
+                                                       creationflags=creation_flags)
                 return True
             except Exception as e:
                 self.logger.warning(f"Failed to start FFmpeg for segment: {e}", exc_info=True)

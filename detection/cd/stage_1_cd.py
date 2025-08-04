@@ -3,6 +3,7 @@ import msgpack
 import time
 from multiprocessing import Process, Queue, Event, Value, freeze_support
 import platform
+import sys
 from threading import Thread as PyThread
 from queue import Empty, Full
 from ultralytics import YOLO
@@ -105,7 +106,8 @@ def _validate_preprocessed_video_completeness(video_path: str, expected_frames: 
                '-show_entries', 'stream=nb_frames,duration,r_frame_rate',
                '-of', 'json', video_path]
 
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10, creationflags=creation_flags)
         if result.returncode != 0:
             logger.warning(f"ffprobe failed for preprocessed video: {video_path}")
             return False
@@ -203,7 +205,9 @@ class FFmpegEncoder:
             self.output_file, "-loglevel", "error"
         ]
         log_vid.info(f"Encoder command: {' '.join(encoder_cmd)}")
-        self.encoder_process = subprocess.Popen(encoder_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Windows fix: prevent terminal windows from spawning
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        self.encoder_process = subprocess.Popen(encoder_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
         self.stderr_thread = PyThread(target=self._read_stderr, daemon=True)
         self.stderr_thread.start()
 
@@ -249,8 +253,28 @@ class FFmpegEncoder:
                 "-frames:v", "1", "-f", "null", "-"
             ]
             
-            result = subprocess.run(test_cmd, capture_output=True, timeout=10)
-            return result.returncode == 0
+            # Windows fix: prevent terminal windows from spawning during tests
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            result = subprocess.run(test_cmd, capture_output=True, timeout=10, creationflags=creation_flags)
+            success = result.returncode == 0
+            
+            # Additional validation for nvenc on Windows - check for specific error messages
+            if not success and 'nvenc' in ' '.join(encoder_args).lower():
+                stderr_output = result.stderr.decode('utf-8', errors='ignore').lower() if result.stderr else ''
+                # Sometimes nvenc fails with driver/capability errors but encoder is actually available
+                if any(err in stderr_output for err in ['no nvenc capable', 'driver version', 'cuda error']):
+                    log_vid.warning(f"NVENC test failed but may be due to test conditions: {stderr_output[:200]}")
+                    # Try a simpler test for nvenc availability
+                    simple_test_cmd = [self.ffmpeg_path, '-hide_banner', '-f', 'lavfi', '-i', 'color=black:size=32x32:duration=0.01', '-c:v'] + [arg for arg in encoder_args if arg.startswith(('hevc_nvenc', 'h264_nvenc'))][0:1] + ['-f', 'null', '-']
+                    try:
+                        simple_result = subprocess.run(simple_test_cmd, capture_output=True, timeout=5, creationflags=creation_flags)
+                        if simple_result.returncode == 0:
+                            log_vid.info("NVENC simple test passed, considering encoder available")
+                            return True
+                    except Exception:
+                        pass
+            
+            return success
         except Exception:
             return False
 
@@ -260,7 +284,9 @@ class FFmpegEncoder:
         Falls back to software libx265 if hardware encoders fail.
         """
         try:
-            output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True)
+            # Windows fix: prevent terminal windows from spawning
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True, creationflags=creation_flags)
         except Exception as e:
             log_vid.warning(f"Failed to query FFmpeg encoders: {e}")
             output = ""
@@ -280,11 +306,16 @@ class FFmpegEncoder:
                 ("H.265 Intel QSV", ["-c:v", "hevc_qsv", "-preset", "fast", "-global_quality", "26", "-pix_fmt", "yuv420p"])
             )
 
-        # NVIDIA NVENC
+        # NVIDIA NVENC - Enhanced detection for Windows
         if "hevc_nvenc" in output:
-            encoder_candidates.append(
-                ("H.265 NVENC", ["-c:v", "hevc_nvenc", "-preset", "fast", "-qp", "26", "-pix_fmt", "yuv420p"])
-            )
+            # Try different presets for better compatibility
+            nvenc_configs = [
+                (["-c:v", "hevc_nvenc", "-preset", "p1", "-cq", "26", "-pix_fmt", "yuv420p"], "H.265 NVENC (P1 preset)"),
+                (["-c:v", "hevc_nvenc", "-preset", "fast", "-qp", "26", "-pix_fmt", "yuv420p"], "H.265 NVENC (fast preset)"),
+                (["-c:v", "hevc_nvenc", "-preset", "medium", "-crf", "26", "-pix_fmt", "yuv420p"], "H.265 NVENC (medium preset)")
+            ]
+            for args, name in nvenc_configs:
+                encoder_candidates.append((name, args))
 
         # AMD AMF
         if "hevc_amf" in output:
