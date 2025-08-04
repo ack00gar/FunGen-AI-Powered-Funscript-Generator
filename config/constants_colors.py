@@ -165,6 +165,15 @@ class DarkTheme:
     CONTROL_PANEL_ACTIVE_PROGRESS = (0.2, 0.6, 1.0, 1.0) # blue
     CONTROL_PANEL_COMPLETED_PROGRESS = (0.2, 0.7, 0.2, 1.0) # green
     CONTROL_PANEL_SUB_PROGRESS = (0.3, 0.7, 1.0, 1.0) # cyan
+    
+    # Control Panel Status Indicator Colors
+    CONTROL_PANEL_STATUS_READY = GREEN
+    CONTROL_PANEL_STATUS_WARNING = ORANGE
+    CONTROL_PANEL_STATUS_ERROR = RED
+    CONTROL_PANEL_STATUS_INFO = BLUE_LIGHT
+    
+    # Control Panel Section Header Colors
+    CONTROL_PANEL_SECTION_HEADER = WHITE_DARK
 
     # Update Settings Dialog Colors
     UPDATE_TOKEN_VALID = GREEN

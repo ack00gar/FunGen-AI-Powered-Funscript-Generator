@@ -96,6 +96,15 @@ class ControlPanelColors:
     ACTIVE_PROGRESS = CurrentTheme.CONTROL_PANEL_ACTIVE_PROGRESS
     COMPLETED_PROGRESS = CurrentTheme.CONTROL_PANEL_COMPLETED_PROGRESS
     SUB_PROGRESS = CurrentTheme.CONTROL_PANEL_SUB_PROGRESS
+    
+    # Status indicator colors
+    STATUS_READY = CurrentTheme.CONTROL_PANEL_STATUS_READY
+    STATUS_WARNING = CurrentTheme.CONTROL_PANEL_STATUS_WARNING
+    STATUS_ERROR = CurrentTheme.CONTROL_PANEL_STATUS_ERROR
+    STATUS_INFO = CurrentTheme.CONTROL_PANEL_STATUS_INFO
+    
+    # Section header colors
+    SECTION_HEADER = CurrentTheme.CONTROL_PANEL_SECTION_HEADER
 
 
 class VideoNavigationColors:
