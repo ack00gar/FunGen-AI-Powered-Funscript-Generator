@@ -209,7 +209,33 @@ class VideoProcessor:
             self.enable_tracker_processing = False
         else:
             self.enable_tracker_processing = enable
-            self.logger.info(f"Tracker processing {'enabled' if enable else 'disabled'}.")
+    
+    def set_active_video_source(self, video_source_path: str):
+        """
+        Update the active video source path (e.g., to switch to preprocessed video).
+        
+        Args:
+            video_source_path: Path to the video file to use as the active source
+        """
+        if not os.path.exists(video_source_path):
+            self.logger.warning(f"Cannot set active video source: file does not exist: {video_source_path}")
+            return
+            
+        old_source = self._active_video_source_path
+        self._active_video_source_path = video_source_path
+        
+        # Update the FFmpeg filter string since preprocessed videos don't need filtering
+        self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+        
+        source_type = "preprocessed" if self._is_using_preprocessed_video() else "original"
+        self.logger.info(f"Active video source updated: {os.path.basename(video_source_path)} ({source_type})")
+        
+        # Notify about the change
+        if old_source != video_source_path:
+            if self._is_using_preprocessed_video():
+                self.logger.info("Now using preprocessed video - filters disabled for optimal performance")
+            else:
+                self.logger.info("Now using original video - filters will be applied on-the-fly")
 
     def open_video(self, video_path: str, from_project_load: bool = False) -> bool:
         self.stop_processing()
@@ -748,83 +774,85 @@ class VideoProcessor:
             return True
         return False
 
-    def _build_ffmpeg_filter_string(self) -> str:
-        # --- Check if we are using the preprocessed file ---
+    def _is_using_preprocessed_video(self) -> bool:
+        """Checks if the active video source is a preprocessed file."""
         is_using_preprocessed_by_path_diff = self._active_video_source_path != self.video_path
         is_preprocessed_by_name = self._active_video_source_path.endswith("_preprocessed.mkv")
+        return is_using_preprocessed_by_path_diff or is_preprocessed_by_name
 
-        if is_using_preprocessed_by_path_diff or is_preprocessed_by_name:
-            self.logger.info(f"Using preprocessed video source ('{os.path.basename(self._active_video_source_path)}'). No FFmpeg filters will be applied.")
-            return "" # Return an empty filter string
+    def _needs_hw_download(self) -> bool:
+        """Determines if the FFmpeg filter chain requires a 'hwdownload' filter."""
+        current_hw_args = self._get_ffmpeg_hwaccel_args()
+        if '-hwaccel_output_format' in current_hw_args:
+            try:
+                idx = current_hw_args.index('-hwaccel_output_format')
+                hw_output_format = current_hw_args[idx + 1]
+                # These formats are on the GPU and need to be downloaded for CPU-based filters.
+                if hw_output_format in ['cuda', 'nv12', 'p010le', 'qsv', 'vaapi', 'd3d11va', 'dxva2_vld']:
+                    return True
+            except (ValueError, IndexError):
+                self.logger.warning("Could not properly parse -hwaccel_output_format from hw_args.")
+        return False
 
-        # If not using preprocessed, build the filter string as before
+    def _get_2d_video_filters(self) -> List[str]:
+        """Builds the list of FFmpeg filter segments for standard 2D video."""
+        return [
+            f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
+            f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
+        ]
+
+    def _get_vr_video_filters(self) -> List[str]:
+        """Builds the list of FFmpeg filter segments for VR video, including cropping and v360."""
         if not self.video_info:
-            return ''
+            return []
 
         original_width = self.video_info.get('width', 0)
         original_height = self.video_info.get('height', 0)
         v_h_FOV = 90  # Default vertical and horizontal FOV for the output projection
 
-        current_hw_args = self._get_ffmpeg_hwaccel_args()
-        needs_hw_download = False
-        hw_output_format_for_log = "N/A"
+        vr_filters = []
+        is_sbs_format = '_sbs' in self.vr_input_format
+        is_tb_format = '_tb' in self.vr_input_format
 
-        if '-hwaccel_output_format' in current_hw_args:
-            try:
-                idx = current_hw_args.index('-hwaccel_output_format')
-                hw_output_format = current_hw_args[idx + 1]
-                hw_output_format_for_log = hw_output_format
-                if hw_output_format in ['cuda', 'nv12', 'p010le', 'qsv', 'vaapi', 'd3d11va', 'dxva2_vld']:
-                    needs_hw_download = True
-            except (ValueError, IndexError):
-                self.logger.warning("Could not properly parse -hwaccel_output_format from hw_args.")
+        if is_sbs_format and original_width > 0 and original_height > 0:
+            crop_w = original_width / 2
+            crop_h = original_height
+            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
+            self.logger.info(f"Applying SBS pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
+        elif is_tb_format and original_width > 0 and original_height > 0:
+            crop_w = original_width
+            crop_h = original_height / 2
+            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
+            self.logger.info(f"Applying TB pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
 
-        self.logger.info(
-            f"Hardware acceleration check for filter string: needs_hw_download={needs_hw_download} "
-            f"(detected output format: {hw_output_format_for_log}). Determined video type: {self.determined_video_type}."
+        base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
+        v360_filter_core = (
+            f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
+            f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
+            f"d_fov={self.vr_fov}:"
+            f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
+            f"pitch={self.vr_pitch}:yaw=0:roll=0:"
+            f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=lanczos"
         )
+        vr_filters.append(v360_filter_core)
+        return vr_filters
+
+    def _build_ffmpeg_filter_string(self) -> str:
+        if self._is_using_preprocessed_video():
+            self.logger.info(f"Using preprocessed video source ('{os.path.basename(self._active_video_source_path)}'). No FFmpeg filters will be applied.")
+            return ""
+
+        if not self.video_info:
+            return ''
 
         software_filter_segments = []
-
         if self.determined_video_type == '2D':
-            software_filter_segments.append(
-                f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease"
-            )
-            software_filter_segments.append(
-                f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-            )
+            software_filter_segments = self._get_2d_video_filters()
         elif self.determined_video_type == 'VR':
-            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
-            is_sbs_format = '_sbs' in self.vr_input_format
-            is_tb_format = '_tb' in self.vr_input_format
-
-            pre_v360_filters_temp = []
-
-            if is_sbs_format and original_width > 0 and original_height > 0:
-                crop_w = original_width / 2
-                crop_h = original_height
-                pre_v360_filters_temp.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
-                self.logger.info(f"Applying SBS pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
-            elif is_tb_format and original_width > 0 and original_height > 0:
-                crop_w = original_width
-                crop_h = original_height / 2
-                pre_v360_filters_temp.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
-                self.logger.info(f"Applying TB pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
-
-            software_filter_segments.extend(pre_v360_filters_temp)
-
-            v360_filter_core = (
-                f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
-                f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
-                f"d_fov={self.vr_fov}:"
-                f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
-                f"pitch={self.vr_pitch}:yaw=0:roll=0:"
-                f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=lanczos"
-            )
-            software_filter_segments.append(v360_filter_core)
+            software_filter_segments = self._get_vr_video_filters()
 
         final_filter_chain_parts = []
-        if needs_hw_download and software_filter_segments:
+        if self._needs_hw_download() and software_filter_segments:
             final_filter_chain_parts.extend(["hwdownload", "format=nv12"])
             self.logger.info("Prepending 'hwdownload,format=nv12' to the software filter chain.")
 
