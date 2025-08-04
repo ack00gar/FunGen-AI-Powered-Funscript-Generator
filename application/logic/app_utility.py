@@ -3,13 +3,11 @@ import os
 import shutil
 import urllib.request
 import zipfile
-from typing import Dict, Tuple, TYPE_CHECKING
+from typing import Dict, Tuple
 from config.constants import STATUS_DETECTED, STATUS_SMOOTHED
 from config.constants_colors import RGBColors
 from config.element_group_colors import BoxStyleColors
 
-if TYPE_CHECKING:
-    from application.logic.app_logic import ApplicationLogic
 
 class AppUtility:
     def __init__(self, app_instance=None):

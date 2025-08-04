@@ -1,15 +1,14 @@
 import orjson
 import os
 import time
-import datetime
 import numpy as np
 from typing import TYPE_CHECKING, Optional, Dict, Tuple
 
 from config.constants import AUTOSAVE_FILE, PROJECT_FILE_EXTENSION, APP_VERSION
-from application.utils.write_access import check_write_access
+from utils.write_access import check_write_access
 
 if TYPE_CHECKING:
-    from application.logic.app_logic import ApplicationLogic
+    from logic import ApplicationLogic
 
 # Add a handler to convert NumPy types to standard Python types for JSON serialization
 def numpy_default_handler(obj):

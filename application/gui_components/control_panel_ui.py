@@ -1,7 +1,6 @@
 import imgui
 import os
 import config
-import time
 
 def _tooltip_if_hovered(text):
     if imgui.is_item_hovered():

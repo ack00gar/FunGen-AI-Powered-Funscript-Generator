@@ -8,26 +8,14 @@ import time
 import threading
 import queue
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict
 
-from application.classes.gauge import GaugeWindow
-from application.classes.file_dialog import ImGuiFileDialog
-from application.classes.interactive_timeline import InteractiveFunscriptTimeline
-from application.classes.lr_dial import LRDialWindow
-from application.classes.menu import MainMenu
+from config import constants, element_group_colors
+from classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu
+from gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow
 
-from application.gui_components.control_panel_ui import ControlPanelUI
-from application.gui_components.video_display_ui import VideoDisplayUI
-from application.gui_components.video_navigation_ui import VideoNavigationUI, ChapterListWindow
-from application.gui_components.info_graphs_ui import InfoGraphsUI
-from application.gui_components.generated_file_manager_window import GeneratedFileManagerWindow
-from application.gui_components.autotuner_window import AutotunerWindow
-
-from application.utils.time_format import _format_time
-from application.utils.processing_thread_manager import ProcessingThreadManager, TaskType, TaskPriority
-
-from config import constants
-from config.element_group_colors import AppGUIColors
+from utils.time_format import _format_time
+from utils.processing_thread_manager import ProcessingThreadManager, TaskType, TaskPriority
 
 
 class GUI:
@@ -38,6 +26,9 @@ class GUI:
         self.window_width = self.app.app_settings.get("window_width", 1800)
         self.window_height = self.app.app_settings.get("window_height", 1000)
         self.main_menu_bar_height = 0
+
+        self.constants = constants
+        self.colors = element_group_colors.AppGUIColors
 
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
@@ -67,7 +58,7 @@ class GUI:
 
         # Performance monitoring
         self.component_render_times = {}
-        self.perf_log_interval = 5  # Log performance every 5 seconds
+        self.perf_log_interval = 10  # Log performance every 10 seconds
         self.last_perf_log_time = time.time()
         self.perf_frame_count = 0
         self.perf_accumulated_times = {}
@@ -424,6 +415,7 @@ class GUI:
         self.last_perf_log_time = time.time()
 
     def init_glfw(self) -> bool:
+        constants = self.constants
         if not glfw.init():
             self.app.logger.error("Could not initialize GLFW")
             return False
@@ -479,6 +471,8 @@ class GUI:
     def handle_drop(self, window, paths):
         if not paths:
             return
+
+        constants = self.constants
 
         # Separate files by type
         project_files = [p for p in paths if p.lower().endswith(constants.PROJECT_FILE_EXTENSION)]
@@ -547,6 +541,7 @@ class GUI:
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
     def _render_energy_saver_indicator(self):
+        colors = self.colors
         """Renders a constant indicator when energy saver mode is active."""
         if self.app.energy_saver.energy_saver_active:
             indicator_text = "⚡ Energy Saver Active"
@@ -567,12 +562,13 @@ class GUI:
                             imgui.WINDOW_NO_NAV)
 
             imgui.begin("EnergySaverIndicator", closable=False, flags=window_flags)
-            imgui.text_colored(indicator_text, *AppGUIColors.ENERGY_SAVER_INDICATOR)
+            imgui.text_colored(indicator_text, *colors.ENERGY_SAVER_INDICATOR)
             imgui.end()
 
     # --- This function now submits a task to the worker thread ---
     def render_funscript_timeline_preview(self, total_duration_s: float, graph_height: int):
         app_state = self.app.app_state_ui
+        colors = self.colors
         style = imgui.get_style()
 
         current_bar_width_float = imgui.get_content_region_available()[0]
@@ -648,7 +644,7 @@ class GUI:
             if total_frames > 0:
                 normalized_pos = self.app.processor.current_frame_index / (total_frames - 1.0)
                 marker_x = (canvas_p1_x + style.frame_padding[0]) + (normalized_pos * (current_bar_width_float - style.frame_padding[0] * 2))
-                marker_color = imgui.get_color_u32_rgba(*AppGUIColors.MARKER)
+                marker_color = imgui.get_color_u32_rgba(*colors.MARKER)
                 draw_list_marker = imgui.get_window_draw_list()
 
                 # Draw triangle
@@ -672,7 +668,6 @@ class GUI:
                     text_pos_x = canvas_p1_x + current_bar_width_float - text_size[0]
                 text_pos = (text_pos_x, canvas_p1_y_offset - text_size[1] - 2)
                 draw_list_marker.add_text(text_pos[0], text_pos[1], imgui.get_color_u32_rgba(1, 1, 1, 1), text)
-
 
 
     # --- This function now submits a task to the worker thread ---
@@ -765,10 +760,12 @@ class GUI:
     # for completeness, except for the `run` method's `finally` block which now handles thread shutdown.
 
     def _draw_fps_marks_on_slider(self, draw_list, min_rect, max_rect, current_target_fps, tracker_fps, processor_fps):
-        app_state = self.app.app_state_ui
         if not imgui.is_item_visible():
             return
-        marks = [(current_target_fps, AppGUIColors.FPS_TARGET_MARKER, "Target"), (tracker_fps, AppGUIColors.FPS_TRACKER_MARKER, "Tracker"), (processor_fps, AppGUIColors.FPS_PROCESSOR_MARKER, "Processor")]
+
+        app_state = self.app.app_state_ui
+        colors = self.colors
+        marks = [(current_target_fps, colors.FPS_TARGET_MARKER, "Target"), (tracker_fps, colors.FPS_TRACKER_MARKER, "Tracker"), (processor_fps, colors.FPS_PROCESSOR_MARKER, "Processor")]
         slider_x_start, slider_x_end = min_rect.x, max_rect.x
         slider_width = slider_x_end - slider_x_start
         slider_y = (min_rect.y + max_rect.y) / 2
@@ -878,6 +875,7 @@ class GUI:
         if not app.show_batch_confirmation_dialog:
             return
 
+        colors = self.colors
         imgui.open_popup("Batch Processing Setup")
         main_viewport = imgui.get_main_viewport()
         imgui.set_next_window_size(main_viewport.size[0] * 0.7, main_viewport.size[1] * 0.8, condition=imgui.APPEARING)
@@ -927,8 +925,8 @@ class GUI:
 
                         imgui.table_set_column_index(1)
                         status = video_data["funscript_status"]
-                        if status == 'fungen': imgui.text_colored(os.path.basename(video_data["path"]), *AppGUIColors.VIDEO_STATUS_FUNGEN)
-                        elif status == 'other': imgui.text_colored(os.path.basename(video_data["path"]), *AppGUIColors.VIDEO_STATUS_OTHER)
+                        if status == 'fungen': imgui.text_colored(os.path.basename(video_data["path"]), *colors.VIDEO_STATUS_FUNGEN)
+                        elif status == 'other': imgui.text_colored(os.path.basename(video_data["path"]), *colors.VIDEO_STATUS_OTHER)
                         else: imgui.text(os.path.basename(video_data["path"]))
 
                         if imgui.is_item_hovered():
@@ -1229,6 +1227,7 @@ class GUI:
 
 
     def run(self):
+        colors = self.colors
         if not self.init_glfw(): return
         target_normal_fps = self.app.energy_saver.main_loop_normal_fps_target
         target_energy_fps = self.app.energy_saver.energy_saver_fps
@@ -1244,7 +1243,7 @@ class GUI:
                 frame_start_time = time.time()
                 glfw.poll_events()
                 if self.impl: self.impl.process_inputs()
-                gl.glClearColor(*AppGUIColors.BACKGROUND_CLEAR)
+                gl.glClearColor(*colors.BACKGROUND_CLEAR)
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
                 self.render_gui()
                 if self.app.app_settings.get("autosave_enabled", True) and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get("autosave_interval_seconds", 300):

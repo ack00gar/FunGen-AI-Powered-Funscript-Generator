@@ -3,8 +3,7 @@ from typing import Optional, TYPE_CHECKING
 import imgui
 
 if TYPE_CHECKING:
-    from application.logic.app_logic import ApplicationLogic
-
+    from logic import ApplicationLogic
 
 
 class ShortcutManager:
