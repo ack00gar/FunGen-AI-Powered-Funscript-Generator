@@ -10,7 +10,7 @@ import re
 import json
 from typing import List, Dict, Optional, Set
 from datetime import datetime
-from application.utils.github_token_manager import GitHubTokenManager
+from application.utils import GitHubTokenManager
 from config.constants import DEFAULT_COMMIT_FETCH_COUNT
 from config.element_group_colors import AppGUIColors, UpdateSettingsColors
 

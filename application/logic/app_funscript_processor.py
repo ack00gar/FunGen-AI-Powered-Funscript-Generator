@@ -6,9 +6,8 @@ from bisect import bisect_left, bisect_right
 import numpy as np
 from scipy.signal import correlate, find_peaks
 
-from application.utils.video_segment import VideoSegment
-from funscript.dual_axis_funscript import DualAxisFunscript
-from application.utils.time_format import _format_time
+from application.utils import VideoSegment, _format_time
+from funscript import DualAxisFunscript
 from config import constants
 
 
@@ -218,7 +217,7 @@ class AppFunscriptProcessor:
 
         funscript_obj = self.app.processor.tracker.funscript
         if self.app.undo_manager_t1 is None:
-            from application.classes.undo_redo_manager import UndoRedoManager  # Corrected import path
+            from application.classes import UndoRedoManager  # Corrected import path
             self.app.undo_manager_t1 = UndoRedoManager(max_history=50)
             self.logger.info("UndoManager T1 created dynamically.")
         if self.app.undo_manager_t1._actions_list_reference is not funscript_obj.primary_actions:
@@ -226,7 +225,7 @@ class AppFunscriptProcessor:
             # self.logger.debug("UndoManager T1 re-linked to primary_actions.")
 
         if self.app.undo_manager_t2 is None:
-            from application.classes.undo_redo_manager import UndoRedoManager  # Corrected import path
+            from application.classes import UndoRedoManager  # Corrected import path
             self.app.undo_manager_t2 = UndoRedoManager(max_history=50)
             self.logger.info("UndoManager T2 created dynamically.")
         if self.app.undo_manager_t2._actions_list_reference is not funscript_obj.secondary_actions:

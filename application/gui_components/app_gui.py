@@ -8,36 +8,25 @@ import time
 import threading
 import queue
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict
 
-from application.classes.gauge import GaugeWindow
-from application.classes.file_dialog import ImGuiFileDialog
-from application.classes.interactive_timeline import InteractiveFunscriptTimeline
-from application.classes.lr_dial import LRDialWindow
-from application.classes.menu import MainMenu
-
-from application.gui_components.control_panel_ui import ControlPanelUI
-from application.gui_components.video_display_ui import VideoDisplayUI
-from application.gui_components.video_navigation_ui import VideoNavigationUI, ChapterListWindow
-from application.gui_components.info_graphs_ui import InfoGraphsUI
-from application.gui_components.generated_file_manager_window import GeneratedFileManagerWindow
-from application.gui_components.autotuner_window import AutotunerWindow
-
-from application.utils.time_format import _format_time
-from application.utils.processing_thread_manager import ProcessingThreadManager, TaskType, TaskPriority
-
-from config import constants
-from config.element_group_colors import AppGUIColors
+from config import constants, element_group_colors
+from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu
+from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow
+from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
 
 
 class GUI:
     def __init__(self, app_logic):
-        self.app = app_logic  # app_logic is ApplicationLogic instance
+        self.app = app = app_logic
         self.window = None
         self.impl = None
-        self.window_width = self.app.app_settings.get("window_width", 1800)
-        self.window_height = self.app.app_settings.get("window_height", 1000)
+        self.window_width = app.app_settings.get("window_width", 1800)
+        self.window_height = app.app_settings.get("window_height", 1000)
         self.main_menu_bar_height = 0
+
+        self.constants = constants
+        self.colors = element_group_colors.AppGUIColors
 
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
@@ -54,7 +43,7 @@ class GUI:
         # New ProcessingThreadManager for GPU-intensive operations
         self.processing_thread_manager = ProcessingThreadManager(
             max_worker_threads=2,
-            logger=self.app.logger
+            logger=app.logger
         )
         
         # Progress tracking for threaded operations
@@ -67,29 +56,29 @@ class GUI:
 
         # Performance monitoring
         self.component_render_times = {}
-        self.perf_log_interval = 5  # Log performance every 5 seconds
+        self.perf_log_interval = 10  # Log performance every 10 seconds
         self.last_perf_log_time = time.time()
         self.perf_frame_count = 0
         self.perf_accumulated_times = {}
 
         # Standard Components (owned by GUI)
-        self.file_dialog = ImGuiFileDialog(app_logic_instance=self.app)
-        self.main_menu = MainMenu(self.app)
-        self.gauge_window_ui_t1 = GaugeWindow(self.app, timeline_num=1)
-        self.gauge_window_ui_t2 = GaugeWindow(self.app, timeline_num=2)
-        self.lr_dial_window_ui = LRDialWindow(self.app)
+        self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
+        self.main_menu = MainMenu(app)
+        self.gauge_window_ui_t1 = GaugeWindow(app, timeline_num=1)
+        self.gauge_window_ui_t2 = GaugeWindow(app, timeline_num=2)
+        self.lr_dial_window_ui = LRDialWindow(app)
 
-        self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=self.app, timeline_num=1)
-        self.timeline_editor2 = InteractiveFunscriptTimeline(app_instance=self.app, timeline_num=2)
+        self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=1)
+        self.timeline_editor2 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=2)
 
         # Modularized UI Panel Components
-        self.control_panel_ui = ControlPanelUI(self.app)
-        self.video_display_ui = VideoDisplayUI(self.app, self)  # Pass self for texture updates
-        self.video_navigation_ui = VideoNavigationUI(self.app, self)  # Pass self for texture methods
-        self.info_graphs_ui = InfoGraphsUI(self.app)
-        self.chapter_list_window_ui = ChapterListWindow(self.app, nav_ui=self.video_navigation_ui)
-        self.generated_file_manager_ui = GeneratedFileManagerWindow(self.app)
-        self.autotuner_window_ui = AutotunerWindow(self.app)
+        self.control_panel_ui = ControlPanelUI(app)
+        self.video_display_ui = VideoDisplayUI(app, self)  # Pass self for texture updates
+        self.video_navigation_ui = VideoNavigationUI(app, self)  # Pass self for texture methods
+        self.info_graphs_ui = InfoGraphsUI(app)
+        self.chapter_list_window_ui = ChapterListWindow(app, nav_ui=self.video_navigation_ui)
+        self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
+        self.autotuner_window_ui = AutotunerWindow(app)
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -270,11 +259,9 @@ class GUI:
         use_simplified_preview = self.app.app_settings.get("use_simplified_funscript_preview", False)
 
         # Create background
-        bg_color_cv_bgra = (int(0.15 * 255), int(0.12 * 255), int(0.12 * 255), 255)
-        image_data = np.full((target_height, target_width, 4), bg_color_cv_bgra, dtype=np.uint8)
+        image_data = np.full((target_height, target_width, 4), (38, 31, 31, 255), dtype=np.uint8)
         center_y_px = target_height // 2
-        cv2.line(image_data, (0, center_y_px), (target_width - 1, center_y_px),
-                 (int(0.3 * 255), int(0.3 * 255), int(0.3 * 255), int(0.7 * 255)), 1)
+        cv2.line(image_data, (0, center_y_px), (target_width - 1, center_y_px), (77, 77, 77, 179), 1)
 
         if not actions or total_duration_s <= 0.001:
             return image_data
@@ -326,8 +313,7 @@ class GUI:
             # Draw the semi-transparent polygon
             overlay = image_data.copy()
             envelope_color_rgba = self.app.utility.get_speed_color_from_map(500) # Use a mid-range speed color
-            envelope_color_bgra = (int(envelope_color_rgba[2] * 255), int(envelope_color_rgba[1] * 255),
-                                   int(envelope_color_rgba[0] * 255), 100) # 100 for alpha
+            envelope_color_bgra = (int(envelope_color_rgba[2] * 255), int(envelope_color_rgba[1] * 255), int(envelope_color_rgba[0] * 255), 100) # 100 for alpha
             cv2.fillPoly(overlay, [poly_points], envelope_color_bgra)
             cv2.addWeighted(overlay, 0.5, image_data, 0.5, 0, image_data) # Blend with background
 
@@ -365,8 +351,9 @@ class GUI:
         Performs the numpy/cv2 operations to create the heatmap image.
         This is called by the worker thread.
         """
-        bg_color_heatmap_texture_rgba255 = (int(0.08 * 255), int(0.08 * 255), int(0.10 * 255), 255)
-        image_data = np.full((target_height, target_width, 4), bg_color_heatmap_texture_rgba255, dtype=np.uint8)
+
+        colors = self.colors
+        image_data = np.full((target_height, target_width, 4), (colors.HEATMAP_BACKGROUND), dtype=np.uint8)
 
         if len(actions) > 1 and total_duration_s > 0.001:
             for i in range(len(actions) - 1):
@@ -424,6 +411,7 @@ class GUI:
         self.last_perf_log_time = time.time()
 
     def init_glfw(self) -> bool:
+        constants = self.constants
         if not glfw.init():
             self.app.logger.error("Could not initialize GLFW")
             return False
@@ -479,6 +467,8 @@ class GUI:
     def handle_drop(self, window, paths):
         if not paths:
             return
+
+        constants = self.constants
 
         # Separate files by type
         project_files = [p for p in paths if p.lower().endswith(constants.PROJECT_FILE_EXTENSION)]
@@ -547,6 +537,7 @@ class GUI:
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
     def _render_energy_saver_indicator(self):
+        colors = self.colors
         """Renders a constant indicator when energy saver mode is active."""
         if self.app.energy_saver.energy_saver_active:
             indicator_text = "⚡ Energy Saver Active"
@@ -567,12 +558,13 @@ class GUI:
                             imgui.WINDOW_NO_NAV)
 
             imgui.begin("EnergySaverIndicator", closable=False, flags=window_flags)
-            imgui.text_colored(indicator_text, *AppGUIColors.ENERGY_SAVER_INDICATOR)
+            imgui.text_colored(indicator_text, *colors.ENERGY_SAVER_INDICATOR)
             imgui.end()
 
     # --- This function now submits a task to the worker thread ---
     def render_funscript_timeline_preview(self, total_duration_s: float, graph_height: int):
         app_state = self.app.app_state_ui
+        colors = self.colors
         style = imgui.get_style()
 
         current_bar_width_float = imgui.get_content_region_available()[0]
@@ -648,7 +640,7 @@ class GUI:
             if total_frames > 0:
                 normalized_pos = self.app.processor.current_frame_index / (total_frames - 1.0)
                 marker_x = (canvas_p1_x + style.frame_padding[0]) + (normalized_pos * (current_bar_width_float - style.frame_padding[0] * 2))
-                marker_color = imgui.get_color_u32_rgba(*AppGUIColors.MARKER)
+                marker_color = imgui.get_color_u32_rgba(*colors.MARKER)
                 draw_list_marker = imgui.get_window_draw_list()
 
                 # Draw triangle
@@ -671,8 +663,7 @@ class GUI:
                 if text_pos_x + text_size[0] > canvas_p1_x + current_bar_width_float:
                     text_pos_x = canvas_p1_x + current_bar_width_float - text_size[0]
                 text_pos = (text_pos_x, canvas_p1_y_offset - text_size[1] - 2)
-                draw_list_marker.add_text(text_pos[0], text_pos[1], imgui.get_color_u32_rgba(1, 1, 1, 1), text)
-
+                draw_list_marker.add_text(text_pos[0], text_pos[1], imgui.get_color_u32_rgba(*colors.WHITE), text)
 
 
     # --- This function now submits a task to the worker thread ---
@@ -718,37 +709,39 @@ class GUI:
         imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
 
     def _render_first_run_setup_popup(self):
-        app = self.app
-        if app.show_first_run_setup_popup:
-            imgui.open_popup("First-Time Setup")
-            main_viewport = imgui.get_main_viewport()
-            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+        # Disabled automatic model downloading - now handled manually via AI menu
+        pass
+        # app = self.app
+        # if app.show_first_run_setup_popup:
+        #     imgui.open_popup("First-Time Setup")
+        #     main_viewport = imgui.get_main_viewport()
+        #     popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
+        #                  main_viewport.pos[1] + main_viewport.size[1] * 0.5)
+        #     imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
 
-            # Make the popup non-closable by the user until setup is done or fails.
-            closable = "complete" in app.first_run_status_message or "failed" in app.first_run_status_message
-            popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE | (0 if not closable else imgui.WINDOW_CLOSABLE)
+        #     # Make the popup non-closable by the user until setup is done or fails.
+        #     closable = "complete" in app.first_run_status_message or "failed" in app.first_run_status_message
+        #     popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE | (0 if not closable else imgui.WINDOW_CLOSABLE)
 
-            if imgui.begin_popup_modal("First-Time Setup", closable, flags=popup_flags)[0]:
-                imgui.text("Welcome to FunGen!")
-                imgui.text_wrapped("For the application to work, some default AI models need to be downloaded.")
-                imgui.separator()
+        #     if imgui.begin_popup_modal("First-Time Setup", closable, flags=popup_flags)[0]:
+        #         imgui.text("Welcome to FunGen!")
+        #         imgui.text_wrapped("For the application to work, some default AI models need to be downloaded.")
+        #         imgui.separator()
 
-                imgui.text_wrapped(f"Status: {app.first_run_status_message}")
+        #         imgui.text_wrapped(f"Status: {app.first_run_status_message}")
 
-                # Progress Bar
-                progress_percent = app.first_run_progress / 100.0
-                imgui.progress_bar(progress_percent, size=(350, 0), overlay=f"{app.first_run_progress:.1f}%")
+        #         # Progress Bar
+        #         progress_percent = app.first_run_progress / 100.0
+        #         imgui.progress_bar(progress_percent, size=(350, 0), overlay=f"{app.first_run_progress:.1f}%")
 
-                imgui.separator()
+        #         imgui.separator()
 
-                if closable:
-                    if imgui.button("Close", width=120):
-                        app.show_first_run_setup_popup = False
-                        imgui.close_current_popup()
+        #         if closable:
+        #             if imgui.button("Close", width=120):
+        #                 app.show_first_run_setup_popup = False
+        #                 imgui.close_current_popup()
 
-                imgui.end_popup()
+        #         imgui.end_popup()
 
 
     # TODO: Move this to a separate class/error management module
@@ -763,10 +756,12 @@ class GUI:
     # for completeness, except for the `run` method's `finally` block which now handles thread shutdown.
 
     def _draw_fps_marks_on_slider(self, draw_list, min_rect, max_rect, current_target_fps, tracker_fps, processor_fps):
-        app_state = self.app.app_state_ui
         if not imgui.is_item_visible():
             return
-        marks = [(current_target_fps, AppGUIColors.FPS_TARGET_MARKER, "Target"), (tracker_fps, AppGUIColors.FPS_TRACKER_MARKER, "Tracker"), (processor_fps, AppGUIColors.FPS_PROCESSOR_MARKER, "Processor")]
+
+        app_state = self.app.app_state_ui
+        colors = self.colors
+        marks = [(current_target_fps, colors.FPS_TARGET_MARKER, "Target"), (tracker_fps, colors.FPS_TRACKER_MARKER, "Tracker"), (processor_fps, colors.FPS_PROCESSOR_MARKER, "Processor")]
         slider_x_start, slider_x_end = min_rect.x, max_rect.x
         slider_width = slider_x_end - slider_x_start
         slider_y = (min_rect.y + max_rect.y) / 2
@@ -876,6 +871,7 @@ class GUI:
         if not app.show_batch_confirmation_dialog:
             return
 
+        colors = self.colors
         imgui.open_popup("Batch Processing Setup")
         main_viewport = imgui.get_main_viewport()
         imgui.set_next_window_size(main_viewport.size[0] * 0.7, main_viewport.size[1] * 0.8, condition=imgui.APPEARING)
@@ -925,8 +921,8 @@ class GUI:
 
                         imgui.table_set_column_index(1)
                         status = video_data["funscript_status"]
-                        if status == 'fungen': imgui.text_colored(os.path.basename(video_data["path"]), *AppGUIColors.VIDEO_STATUS_FUNGEN)
-                        elif status == 'other': imgui.text_colored(os.path.basename(video_data["path"]), *AppGUIColors.VIDEO_STATUS_OTHER)
+                        if status == 'fungen': imgui.text_colored(os.path.basename(video_data["path"]), *colors.VIDEO_STATUS_FUNGEN)
+                        elif status == 'other': imgui.text_colored(os.path.basename(video_data["path"]), *colors.VIDEO_STATUS_OTHER)
                         else: imgui.text(os.path.basename(video_data["path"]))
 
                         if imgui.is_item_hovered():
@@ -1227,6 +1223,7 @@ class GUI:
 
 
     def run(self):
+        colors = self.colors
         if not self.init_glfw(): return
         target_normal_fps = self.app.energy_saver.main_loop_normal_fps_target
         target_energy_fps = self.app.energy_saver.energy_saver_fps
@@ -1242,7 +1239,7 @@ class GUI:
                 frame_start_time = time.time()
                 glfw.poll_events()
                 if self.impl: self.impl.process_inputs()
-                gl.glClearColor(*AppGUIColors.BACKGROUND_CLEAR)
+                gl.glClearColor(*colors.BACKGROUND_CLEAR)
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
                 self.render_gui()
                 if self.app.app_settings.get("autosave_enabled", True) and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get("autosave_interval_seconds", 300):

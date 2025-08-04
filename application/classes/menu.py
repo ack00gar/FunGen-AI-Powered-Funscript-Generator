@@ -1,112 +1,142 @@
-import imgui
 import os
-import time
-import glfw
+import imgui
+from config.element_group_colors import MenuColors
 
+def _center_popup(width, height):
+    mv = imgui.get_main_viewport()
+    # Avoid tuple creation and repeated attr lookups
+    main_viewport_pos_x, main_viewport_pos_y = mv.pos[0], mv.pos[1]
+    main_viewport_w, main_viewport_h = mv.size[0], mv.size[1]
+    pos_x = main_viewport_pos_x + (main_viewport_w - width) * 0.5
+    pos_y = main_viewport_pos_y + (main_viewport_h - height) * 0.5
+    imgui.set_next_window_position(pos_x, pos_y, condition=imgui.APPEARING)
+    # height=0 -> auto-resize vertical; we still set width for consistent centering
+    imgui.set_next_window_size(width, 0, condition=imgui.APPEARING)
+
+def _begin_modal_popup(name, width, height):
+    imgui.open_popup(name)
+    _center_popup(width, height)
+    opened, _ = imgui.begin_popup_modal(
+        name, True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE
+    )
+    return opened
+
+def _menu_item_simple(label, enabled=True):
+    clicked, _ = imgui.menu_item(label, enabled=enabled)
+    return clicked
+
+def _radio_line(label, is_selected):
+    # Cheaper than f-strings in hot loops
+    if imgui.radio_button(label, is_selected):
+        return True
+    return False
 
 class MainMenu:
+    __slots__ = ("app", "FRAME_OFFSET")
+
     def __init__(self, app_instance):
         self.app = app_instance
+        self.FRAME_OFFSET = MenuColors.FRAME_OFFSET
+
+    # ------------------------- POPUPS -------------------------
 
     def _render_timeline_selection_popup(self):
-        """Renders a popup to select the reference timeline for comparison."""
-        app_state = self.app.app_state_ui
+        app = self.app
+        app_state = app.app_state_ui
         if not app_state.show_timeline_selection_popup:
             return
 
-        imgui.open_popup("Select Reference Timeline##TimelineSelectPopup")
-
-        main_viewport = imgui.get_main_viewport()
-        popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 450) * 0.5
-        popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 220) * 0.5
-        imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
-        imgui.set_next_window_size(450, 0, condition=imgui.APPEARING)
-
-        if imgui.begin_popup_modal("Select Reference Timeline##TimelineSelectPopup", True,
-                                   flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+        name = "Select Reference Timeline##TimelineSelectPopup"
+        # 450x220 used for centering; height auto
+        if _begin_modal_popup(name, 450, 220):
             imgui.text("Which timeline has the correct timing?")
-            imgui.text_wrapped("The offset will be calculated for the other timeline and applied to it.")
+            imgui.text_wrapped(
+                "The offset will be calculated for the other timeline "
+                "and applied to it."
+            )
             imgui.separator()
 
-            # --- FIX: Assign the boolean return value to a single variable ---
-            for i in range(1, 3):
-                if imgui.radio_button(f"Timeline {i} is the Reference", app_state.timeline_comparison_reference_num == i):
-                    app_state.timeline_comparison_reference_num = i
-                    break
-            # --- END FIX ---
-
+            ref_num = app_state.timeline_comparison_reference_num
+            # Fixed range (1..2)
+            if _radio_line("Timeline 1 is the Reference", ref_num == 1):
+                app_state.timeline_comparison_reference_num = 1
+            if _radio_line("Timeline 2 is the Reference", ref_num == 2):
+                app_state.timeline_comparison_reference_num = 2
             imgui.separator()
 
             if imgui.button("Compare", width=120):
-                self.app.run_and_display_comparison_results(app_state.timeline_comparison_reference_num)
+                app.run_and_display_comparison_results(
+                    app_state.timeline_comparison_reference_num
+                )
                 app_state.show_timeline_selection_popup = False
                 imgui.close_current_popup()
 
             imgui.same_line()
-
             if imgui.button("Cancel", width=120):
                 app_state.show_timeline_selection_popup = False
                 imgui.close_current_popup()
-
             imgui.end_popup()
 
     def _render_timeline_comparison_results_popup(self):
-        """Renders the popup showing the comparison results."""
-        app_state = self.app.app_state_ui
+        app = self.app
+        app_state = app.app_state_ui
         if not app_state.show_timeline_comparison_results_popup:
             return
 
-        imgui.open_popup("Timeline Comparison Results##TimelineResultsPopup")
-
-        main_viewport = imgui.get_main_viewport()
-        popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 400) * 0.5
-        popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 240) * 0.5  # Increased height slightly
-        imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
-        imgui.set_next_window_size(400, 0, condition=imgui.APPEARING)
-
-        if imgui.begin_popup_modal("Timeline Comparison Results##TimelineResultsPopup", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+        name = "Timeline Comparison Results##TimelineResultsPopup"
+        if _begin_modal_popup(name, 400, 240): # 400x240 used for centering; height auto
             results = app_state.timeline_comparison_results
             if results:
+                # Localize lookups
                 offset_ms = results.get("calculated_offset_ms", 0)
+                target_num = results.get("target_timeline_num", "N/A")
                 ref_strokes = results.get("ref_stroke_count", 0)
                 target_strokes = results.get("target_stroke_count", 0)
-                target_timeline_num = results.get("target_timeline_num", "N/A")
-                ref_timeline_num = 1 if target_timeline_num == 2 else 2
+                ref_num = 1 if target_num == 2 else 2
 
-                # --- Get FPS and calculate frame offset ---
                 fps = 0
-                if self.app.processor and self.app.processor.fps > 0:
-                    fps = self.app.processor.fps
+                processor = app.processor
+                if processor:
+                    fps = processor.fps
+                    if fps > 0:
+                        # Use int conversion instead of round+format for speed
+                        frames = int((offset_ms / 1000.0) * fps + 0.5)
+                        frame_suffix = " (approx. %d frames)" % frames
+                    else:
+                        frame_suffix = ""
 
-                frame_offset_str = ""
-                if fps > 0:
-                    frame_offset = round((offset_ms / 1000.0) * fps)
-                    frame_offset_str = f" (approx. {frame_offset:.0f} frames)"
-
-                imgui.text(f"Reference: Timeline {ref_timeline_num} ({ref_strokes} strokes)")
-                imgui.text(f"Target:    Timeline {target_timeline_num} ({target_strokes} strokes)")
+                imgui.text("Reference: Timeline %d (%d strokes)" % (ref_num, ref_strokes))
+                imgui.text("Target:    Timeline %s (%d strokes)" % (str(target_num), target_strokes))
                 imgui.separator()
 
                 imgui.text_wrapped(
-                    f"The Target (T{target_timeline_num}) appears to be delayed relative to the Reference (T{ref_timeline_num}) by:")
-                imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 0.0, 1.0) # TODO: move to theme, yellow
-                imgui.text(f"  {offset_ms} milliseconds{frame_offset_str}")
+                    "The Target (T%s) appears to be delayed relative to the "
+                    "Reference (T%d) by:" % (str(target_num), ref_num)
+                )
+                imgui.push_style_color(imgui.COLOR_TEXT, self.FRAME_OFFSET)
+                imgui.text("  %d milliseconds%s" % (offset_ms, frame_suffix))
                 imgui.pop_style_color()
-
                 imgui.separator()
 
-                if imgui.button(f"Apply Offset to Timeline {target_timeline_num}", width=-1):
-                    fs_proc = self.app.funscript_processor
-                    op_desc = f"Apply Timeline Offset ({offset_ms}ms)"
+                if imgui.button(
+                    "Apply Offset to Timeline %s" % str(target_num), width=-1
+                ):
+                    fs_proc = app.funscript_processor
+                    op_desc = "Apply Timeline Offset (%dms)" % offset_ms
 
-                    fs_proc._record_timeline_action(target_timeline_num, op_desc)
-                    funscript_obj, axis_name = fs_proc._get_target_funscript_object_and_axis(target_timeline_num)
+                    fs_proc._record_timeline_action(target_num, op_desc)
+                    funscript_obj, axis_name = fs_proc._get_target_funscript_object_and_axis(
+                        target_num
+                    )
 
                     if funscript_obj and axis_name:
-                        # Apply a NEGATIVE offset to shift the target script EARLIER to match the reference
+                        # Negative => shift earlier to match reference
                         funscript_obj.shift_points_time(axis=axis_name, time_delta_ms=-offset_ms)
-                        fs_proc._finalize_action_and_update_ui(target_timeline_num, op_desc)
-                        self.app.logger.info(f"Applied {offset_ms}ms offset to Timeline {target_timeline_num}.", extra={'status_message': True})
+                        fs_proc._finalize_action_and_update_ui(target_num, op_desc)
+                        app.logger.info(
+                            "Applied %dms offset to Timeline %s." % (offset_ms, str(target_num)),
+                            extra={"status_message": True},
+                        )
 
                     app_state.show_timeline_comparison_results_popup = False
                     imgui.close_current_popup()
@@ -114,470 +144,460 @@ class MainMenu:
             if imgui.button("Close", width=-1):
                 app_state.show_timeline_comparison_results_popup = False
                 imgui.close_current_popup()
-
             imgui.end_popup()
 
+    # ------------------------- MAIN RENDER -------------------------
+
     def render(self):
+        app = self.app
+        app_state = app.app_state_ui
+        file_mgr = app.file_manager
+        stage_proc = app.stage_processor
 
         if imgui.begin_main_menu_bar():
-            # Cache frequently accessed sub-modules
-            app_state = self.app.app_state_ui
-            file_mgr = self.app.file_manager
-            fs_proc = self.app.funscript_processor
-            stage_proc = self.app.stage_processor
-
-            # --- FILE MENU ---
-            if imgui.begin_menu("File", True):
-
-                # --- Project Creation ---
-                if imgui.menu_item("New Project")[0]:
-                    self.app.project_manager.new_project()
-                if imgui.is_item_hovered(): imgui.set_tooltip("Create a new, empty project.")
-                imgui.separator()
-
-                # --- Open Sub-Menu ---
-                if imgui.begin_menu("Open..."):
-                    if imgui.menu_item("Project...")[0]:
-                        self.app.project_manager.open_project_dialog()
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Open an existing project file (.fgnproj).")
-
-                    if imgui.menu_item("Video...")[0]:
-                        initial_video_dir = os.path.dirname(file_mgr.video_path) if file_mgr.video_path else None
-                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(
-                                self.app.gui_instance, 'file_dialog'):
-                            self.app.gui_instance.file_dialog.show(
-                                title="Open Video File", is_save=False,
-                                callback=lambda fp: file_mgr.open_video_from_path(fp),
-                                extension_filter="Video Files (*.mp4 *.mkv *.avi *.mov),*.mp4;*.mkv;*.avi;*.mov|All files (*.*),*.*",
-                                initial_path=initial_video_dir
-                            )
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Open a new video file for processing.")
-                    imgui.end_menu()
-
-                # --- Open Recent Sub-Menu ---
-                recent_projects = self.app.app_settings.get("recent_projects", [])
-                can_open_recent = bool(recent_projects)
-
-                if imgui.begin_menu("Open Recent", enabled=can_open_recent):
-
-                    if imgui.menu_item("Clear Menu")[0]:
-                        # Setting to an empty list and auto-saving via the app_settings.set method
-                        self.app.app_settings.set("recent_projects", [])
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Clear the list of recent projects.")
-
-                    imgui.separator()
-
-                    for project_path in recent_projects:
-                        try:
-                            # e.g., "my_video/my_video.fgn"
-                            display_name = f"{os.path.basename(os.path.dirname(project_path))}{os.sep}{os.path.basename(project_path)}"
-                        except Exception:
-                            display_name = project_path  # Fallback
-
-                        if imgui.menu_item(display_name)[0]:
-                            self.app.project_manager.load_project(project_path)
-                        if imgui.is_item_hovered():
-                            imgui.set_tooltip(project_path)  # Show full path on hover
-
-                    imgui.end_menu()
-
-                imgui.separator()
-
-                # --- Close and Save ---
-                if imgui.menu_item("Close Project")[0]:
-                    self.app.project_manager.new_project()
-                if imgui.is_item_hovered(): imgui.set_tooltip("Close the current project and return to a clean state.")
-                imgui.separator()
-
-                can_save_project = self.app.project_manager.project_dirty or not self.app.project_manager.project_file_path
-                if imgui.menu_item("Save Project", enabled=can_save_project)[0]:
-                    self.app.project_manager.save_project_dialog()
-                if imgui.is_item_hovered(): imgui.set_tooltip("Save the current project state.")
-
-                if imgui.menu_item("Save Project As...")[0]:
-                    self.app.project_manager.save_project_dialog(save_as=True)
-                if imgui.is_item_hovered(): imgui.set_tooltip("Save the current project to a new file.")
-                imgui.separator()
-
-                # --- Import Sub-Menu ---
-                if imgui.begin_menu("Import..."):
-                    if imgui.menu_item("Funscript to Timeline 1...")[0]:
-                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
-                            initial_dir = os.path.dirname(file_mgr.video_path) if file_mgr.video_path else None
-                            self.app.gui_instance.file_dialog.show(
-                                title="Import Funscript to Timeline 1", is_save=False,
-                                callback=lambda fp: file_mgr.load_funscript_to_timeline(fp, timeline_num=1),
-                                extension_filter="Funscript Files (*.funscript),*.funscript|All files (*.*),*.*",
-                                initial_path=initial_dir
-                            )
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Load a .funscript file into the primary timeline.")
-
-                    if imgui.menu_item("Funscript to Timeline 2...")[0]:
-                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
-                            initial_dir = os.path.dirname(file_mgr.video_path) if file_mgr.video_path else None
-                            self.app.gui_instance.file_dialog.show(
-                                title="Import Funscript to Timeline 2", is_save=False,
-                                callback=lambda fp: file_mgr.load_funscript_to_timeline(fp, timeline_num=2),
-                                extension_filter="Funscript Files (*.funscript),*.funscript|All files (*.*),*.*",
-                                initial_path=initial_dir
-                            )
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Load a .funscript file into the secondary timeline.")
-
-                    imgui.separator()
-                    if imgui.menu_item("Stage 2 Overlay Data...")[0]:
-                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
-                            initial_dir = None
-                            if file_mgr.stage2_output_msgpack_path:
-                                initial_dir = os.path.dirname(file_mgr.stage2_output_msgpack_path)
-                            elif file_mgr.video_path:
-                                path_in_output = file_mgr.get_output_path_for_file(file_mgr.video_path, "_stage2_overlay.msgpack")
-                                initial_dir = os.path.dirname(path_in_output)
-                            self.app.gui_instance.file_dialog.show(
-                                title="Load Stage 2 Overlay Data", is_save=False,
-                                callback=lambda fp: file_mgr.load_stage2_overlay_data(fp),
-                                extension_filter="MsgPack Files (*.msgpack),*.msgpack|All files (*.*),*.*",
-                                initial_path=initial_dir
-                            )
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Load pre-computed Stage 2 analysis data for display.")
-                    imgui.end_menu()
-
-                # --- Export Sub-Menu ---
-                if imgui.begin_menu("Export..."):
-                    if imgui.menu_item("Funscript from Timeline 1...")[0]:
-                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
-                            suggested_filename = "output.funscript"
-                            initial_dir = None
-                            if file_mgr.video_path:
-                                path_in_output = file_mgr.get_output_path_for_file(file_mgr.video_path, ".funscript")
-                                suggested_filename = os.path.basename(path_in_output)
-                                initial_dir = os.path.dirname(path_in_output)
-                            self.app.gui_instance.file_dialog.show(
-                                title="Export Funscript from Timeline 1", is_save=True,
-                                callback=lambda fp: file_mgr.save_funscript_from_timeline(fp, timeline_num=1),
-                                extension_filter="Funscript Files (*.funscript),*.funscript|All files (*.*),*.*",
-                                initial_filename=suggested_filename,
-                                initial_path=initial_dir
-                            )
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Save the primary timeline as a .funscript file.")
-
-                    if imgui.menu_item("Funscript from Timeline 2...")[0]:
-                        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and hasattr(self.app.gui_instance, 'file_dialog'):
-                            suggested_filename = "output.roll.funscript"
-                            initial_dir = None
-                            if file_mgr.video_path:
-                                path_in_output = file_mgr.get_output_path_for_file(file_mgr.video_path, ".roll.funscript")
-                                suggested_filename = os.path.basename(path_in_output)
-                                initial_dir = os.path.dirname(path_in_output)
-                            self.app.gui_instance.file_dialog.show(
-                                title="Export Funscript from Timeline 2", is_save=True,
-                                callback=lambda fp: file_mgr.save_funscript_from_timeline(fp, timeline_num=2),
-                                extension_filter="Funscript Files (*.funscript),*.funscript|All files (*.*),*.*",
-                                initial_filename=suggested_filename,
-                                initial_path=initial_dir
-                            )
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Save the secondary timeline as a .funscript file.")
-                    imgui.end_menu()
-                imgui.separator()
-
-                # --- Exit ---
-                if imgui.menu_item("Exit")[0]:
-                    if hasattr(self.app, 'gui_instance') and self.app.gui_instance.window:
-                        glfw.set_window_should_close(self.app.gui_instance.window, True)
-                if imgui.is_item_hovered(): imgui.set_tooltip("Exit the application.")
-
-                imgui.end_menu()
-
-            # --- EDIT MENU ---
-            if imgui.begin_menu("Edit", True):
-                manager_t1 = fs_proc._get_undo_manager(1)
-                can_undo_t1 = manager_t1.can_undo() if manager_t1 else False
-                if imgui.menu_item("Undo T1 Change", "Ctrl+Z", selected=False, enabled=can_undo_t1)[0]:
-                    fs_proc.perform_undo_redo(1, 'undo')
-
-                can_redo_t1 = manager_t1.can_redo() if manager_t1 else False
-                if imgui.menu_item("Redo T1 Change", "Ctrl+Y", selected=False, enabled=can_redo_t1)[0]:
-                    fs_proc.perform_undo_redo(1, 'redo')
-                imgui.separator()
-
-                if app_state.show_funscript_interactive_timeline2:
-                    manager_t2 = fs_proc._get_undo_manager(2)
-                    can_undo_t2 = manager_t2.can_undo() if manager_t2 else False
-                    if imgui.menu_item("Undo T2 Change", "Alt+Ctrl+Z", selected=False, enabled=can_undo_t2)[0]:
-                        fs_proc.perform_undo_redo(2, 'undo')
-
-                    can_redo_t2 = manager_t2.can_redo() if manager_t2 else False
-                    if imgui.menu_item("Redo T2 Change", "Alt+Ctrl+Y", selected=False, enabled=can_redo_t2)[0]:
-                        fs_proc.perform_undo_redo(2, 'redo')
-                else:
-                    imgui.text_disabled("Timeline 2 Undo/Redo (Timeline 2 not visible)")
-
-                imgui.end_menu()
-
-            # --- VIEW MENU (Simplified) ---
-            if imgui.begin_menu("View", True):
-
-                imgui.text("UI Mode")
-                imgui.indent()
-                is_expert_mode = app_state.ui_view_mode == 'expert'
-                if imgui.radio_button("Expert Mode##UIModeExpert", is_expert_mode):
-                    if not is_expert_mode:
-                        app_state.ui_view_mode = 'expert'
-                        self.app.app_settings.set("ui_view_mode", "expert")
-
-                is_simple_mode = app_state.ui_view_mode == 'simple'
-                if imgui.radio_button("Simple Mode##UIModeSimple", is_simple_mode):
-                    if not is_simple_mode:
-                        app_state.ui_view_mode = 'simple'
-                        self.app.app_settings.set("ui_view_mode", "simple")
-                imgui.unindent()
-                imgui.separator()
-
-                imgui.text("UI Layout Mode")
-                imgui.indent()
-                is_fixed_mode = app_state.ui_layout_mode == 'fixed'
-                if imgui.radio_button("Fixed Panels##UILayoutModeFixed", is_fixed_mode):
-                    if not is_fixed_mode: app_state.ui_layout_mode = 'fixed'; self.app.project_manager.project_dirty = True
-                is_floating_mode = app_state.ui_layout_mode == 'floating'
-                if imgui.radio_button("Floating Windows##UILayoutModeFloating", is_floating_mode):
-                    if not is_floating_mode: app_state.ui_layout_mode = 'floating'; app_state.just_switched_to_floating = True; self.app.project_manager.project_dirty = True
-                imgui.unindent()
-                imgui.separator()
-
-                imgui.text("Layout Options")
-                imgui.indent()
-                if not hasattr(app_state, 'full_width_nav'):
-                    app_state.full_width_nav = False
-                clicked, app_state.full_width_nav = imgui.menu_item("Full-Width Navigation Bar", selected=app_state.full_width_nav, enabled=is_fixed_mode)
-                if clicked: self.app.project_manager.project_dirty = True
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Only available in 'Fixed Panels' layout mode.")
-                imgui.unindent()
-                imgui.separator()
-
-                # --- Main Window Toggles (for Floating Mode) ---
-                imgui.text("Main Panels")
-                imgui.indent()
-                if app_state.ui_layout_mode == 'floating':
-                    clicked, app_state.show_control_panel_window = imgui.menu_item("Control Panel", selected=app_state.show_control_panel_window)
-                    if clicked: self.app.project_manager.project_dirty = True
-                    clicked, app_state.show_info_graphs_window = imgui.menu_item("Info & Graphs", selected=app_state.show_info_graphs_window)
-                    if clicked: self.app.project_manager.project_dirty = True
-                    clicked, app_state.show_video_display_window = imgui.menu_item("Video Display", selected=app_state.show_video_display_window)
-                    if clicked: self.app.project_manager.project_dirty = True
-                    clicked, app_state.show_video_navigation_window = imgui.menu_item("Video Navigation", selected=app_state.show_video_navigation_window)
-                    if clicked: self.app.project_manager.project_dirty = True
-                else:
-                    imgui.text_disabled("Window toggles are for Floating Mode.")
-                imgui.unindent()
-                imgui.separator()
-
-                imgui.text("Timeline Editors & Previews")
-                imgui.indent()
-                clicked, app_state.show_funscript_interactive_timeline = imgui.menu_item("Interactive Timeline 1", selected=app_state.show_funscript_interactive_timeline)
-                if clicked: self.app.project_manager.project_dirty = True
-                clicked, app_state.show_funscript_interactive_timeline2 = imgui.menu_item("Interactive Timeline 2", selected=app_state.show_funscript_interactive_timeline2)
-                if clicked: self.app.project_manager.project_dirty = True
-                imgui.separator()
-                clicked, app_state.show_funscript_timeline = imgui.menu_item("Funscript Preview Bar", selected=app_state.show_funscript_timeline)
-                if clicked: self.app.project_manager.project_dirty = True
-                clicked, app_state.show_heatmap = imgui.menu_item("Heatmap", selected=app_state.show_heatmap)
-                if clicked: self.app.project_manager.project_dirty = True
-
-                use_simplified = self.app.app_settings.get("use_simplified_funscript_preview", False)
-                clicked, new_simplified_val = imgui.menu_item("Use Simplified Funscript Preview", selected=use_simplified)
-                if clicked:
-                    self.app.app_settings.set("use_simplified_funscript_preview", new_simplified_val)
-                    # Mark the preview as dirty to force a redraw with the new style
-                    self.app.app_state_ui.funscript_preview_dirty = True
-
-                imgui.separator()
-                clicked, app_state.show_timeline_editor_buttons = imgui.menu_item("Show Timeline Editor Buttons", selected=app_state.show_timeline_editor_buttons)
-                if clicked: 
-                    self.app.app_settings.set("show_timeline_editor_buttons", app_state.show_timeline_editor_buttons)
-                    self.app.project_manager.project_dirty = True
-                
-                clicked, app_state.show_advanced_options = imgui.menu_item("Show Advanced Options", selected=app_state.show_advanced_options)
-                if clicked:
-                    self.app.app_settings.set("show_advanced_options", app_state.show_advanced_options)
-                    self.app.project_manager.project_dirty = True
-
-                imgui.unindent()
-                imgui.separator()
-
-                imgui.text("Overlays & Aux Windows")
-                imgui.indent()
-
-                # Gauge T1
-                clicked, current_val_t1 = imgui.menu_item("Script Gauge (Timeline 1)", selected=app_state.show_gauge_window_timeline1)
-                if clicked:
-                    app_state.show_gauge_window_timeline1 = current_val_t1
-                    self.app.project_manager.project_dirty = True
-
-                # Gauge T2
-                clicked, current_val_t2 = imgui.menu_item("Script Gauge (Timeline 2)", selected=app_state.show_gauge_window_timeline2)
-                if clicked:
-                    app_state.show_gauge_window_timeline2 = current_val_t2
-                    self.app.project_manager.project_dirty = True
-
-                clicked, app_state.show_lr_dial_graph = imgui.menu_item("L/R Dial Graph", selected=app_state.show_lr_dial_graph)
-                if clicked: self.app.project_manager.project_dirty = True
-
-                # Added defensive hasattr check
-                if not hasattr(app_state, 'show_chapter_list_window'):
-                    app_state.show_chapter_list_window = False
-                clicked, app_state.show_chapter_list_window = imgui.menu_item("Chapter List", selected=app_state.show_chapter_list_window)
-                if clicked: self.app.project_manager.project_dirty = True
-
-                imgui.separator()
-                if self.app.tracker:
-                    clicked, current_val = imgui.menu_item("Show Detections/Masks", selected=app_state.ui_show_masks)
-                    if clicked: app_state.set_tracker_ui_flag("show_masks", current_val)
-                    clicked, current_val = imgui.menu_item("Show Optical Flow", selected=app_state.ui_show_flow)
-                    if clicked: app_state.set_tracker_ui_flag("show_flow", current_val)
-                can_show_s2 = stage_proc.stage2_overlay_data is not None
-                clicked, current_val = imgui.menu_item("Show Stage 2 Overlay", selected=app_state.show_stage2_overlay,
-                                                       enabled=can_show_s2)
-                if clicked:
-                    app_state.show_stage2_overlay = current_val
-                    self.app.project_manager.project_dirty = True
-
-                clicked, _ = imgui.menu_item("Audio Waveform", selected=app_state.show_audio_waveform)
-                if clicked:
-                    self.app.toggle_waveform_visibility()
-                    self.app.project_manager.project_dirty = True
-                imgui.unindent()
-                imgui.end_menu()
-
-            # --- TOOLS MENU ---
-            if imgui.begin_menu("Tools", True):
-                # The menu item is enabled only when a video is loaded.
-                can_calibrate = file_mgr.video_path is not None
-                if imgui.menu_item("Start Latency Calibration...", enabled=can_calibrate)[0]:
-                    # Call the robust start method which includes its own checks
-                    if hasattr(self.app, 'calibration'):
-                        self.app.calibration.start_latency_calibration()
-                if imgui.is_item_hovered():
-                    tooltip = "Calibrate latency. Requires a video to be loaded and points on Timeline 1."
-                    if not can_calibrate:
-                        tooltip = "Please load a video to enable calibration."
-                    imgui.set_tooltip(tooltip)
-
-                # --- Generated File Manager ---
-                clicked, selected = imgui.menu_item("Manage Generated Files...", selected=app_state.show_generated_file_manager)
-                if clicked:
-                    self.app.toggle_file_manager_window()
-
-                # --- Autotuner Tool ---
-                if not hasattr(app_state, 'show_autotuner_window'):
-                    app_state.show_autotuner_window = False
-                clicked, selected = imgui.menu_item("Performance Autotuner...", selected=app_state.show_autotuner_window)
-                if clicked:
-                    app_state.show_autotuner_window = not app_state.show_autotuner_window
-
-                # --- Timeline Comparison Tool ---
-                # The menu item is enabled only if both timelines have actions to compare.
-                can_compare = (
-                    hasattr(self.app, 'funscript_processor') and
-                    self.app.funscript_processor.get_actions('primary') and
-                    self.app.funscript_processor.get_actions('secondary')
-                )
-                if imgui.menu_item("Compare Timelines...", enabled=can_compare)[0]:
-                    if hasattr(self.app, 'trigger_timeline_comparison'):
-                        self.app.trigger_timeline_comparison()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Compares the signals on Timeline 1 and Timeline 2 to calculate the optimal time offset.")
-
-                # --- TensorRT Compiler Tool ---
-                if not hasattr(self.app, 'tensorrt_compiler_window'):
-                    self.app.tensorrt_compiler_window = None
-                if imgui.menu_item("Compile YOLO Model to TensorRT (.engine)...")[0]:
-                    from application.gui_components.engine_compiler.tensorrt_compiler_window import TensorRTCompilerWindow
-                    def on_close():
-                        self.app.tensorrt_compiler_window = None
-                    if self.app.tensorrt_compiler_window is None:
-                        self.app.tensorrt_compiler_window = TensorRTCompilerWindow(self.app, on_close_callback=on_close)
-                    else:
-                        # Reset state if window already exists
-                        self.app.tensorrt_compiler_window._reset_state()
-                        self.app.tensorrt_compiler_window.is_open = True
-
-                imgui.end_menu()
-
-            # --- UPDATES MENU ---
-            if imgui.begin_menu("Updates", True):
-                # Toggle for checking on startup
-                check_startup = self.app.app_settings.get("updater_check_on_startup", True)
-                clicked, new_val_startup = imgui.menu_item("Check for Updates on Startup", selected=check_startup)
-                if clicked:
-                    self.app.app_settings.set("updater_check_on_startup", new_val_startup)
-
-                # Toggle for periodic background checks
-                check_periodic = self.app.app_settings.get("updater_check_periodically", True)
-                clicked, new_val_periodic = imgui.menu_item("Check Periodically in Background (Hourly)", selected=check_periodic)
-                if clicked:
-                    self.app.app_settings.set("updater_check_periodically", new_val_periodic)
-
-                # Toggle for suppressing the update popup
-                suppress_popup = self.app.app_settings.get("updater_suppress_popup", False)
-                clicked, new_val_suppress = imgui.menu_item("Suppress Update Notification Popup", selected=suppress_popup)
-                if clicked:
-                    self.app.app_settings.set("updater_suppress_popup", new_val_suppress)
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("If suppressed, only the menu bar indicator will be shown.")
-
-                imgui.separator()
-
-                # Combined Update Commit & GitHub Token dialog
-                if imgui.menu_item("Select Update Commit")[0]:
-                    self.app.app_state_ui.show_update_settings_dialog = True
-                if imgui.is_item_hovered():
-                    current_token = self.app.updater.token_manager.get_token()
-                    if current_token:
-                        imgui.set_tooltip(f"GitHub token and version selection.")
-                    else:
-                        imgui.set_tooltip("GitHub token and version selection.\nNo token set.")
-
-                # Manual trigger to apply a pending update
-                can_apply_update = self.app.updater.update_available and not self.app.updater.update_in_progress
-                if imgui.menu_item("Apply Pending Update...", enabled=can_apply_update)[0]:
-                    self.app.updater.show_update_dialog = True  # Re-opens the confirmation dialog
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Shows the update dialog if an update has been detected.")
-
-                imgui.end_menu()
-
-            # --- UPDATE INDICATOR ---
-            # This is now a non-interactive, colored text label placed after the menus.
-            if self.app.updater.update_available and not self.app.updater.update_in_progress:
-                imgui.same_line()
-                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + 15) # Add some padding
-                rect_min = imgui.get_item_rect_min()
-                rect_max = imgui.get_item_rect_max()
-                if imgui.is_mouse_hovering_rect(rect_min[0], rect_min[1], rect_max[0], rect_max[1]):
-                    imgui.set_tooltip("A new version is available! Find options in the Updates menu.")
-
-                # Make the text clickable to re-open the dialog
-                if imgui.button("Update Available!"):
-                    self.app.updater.show_update_dialog = True
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Click to see update details and apply.")
-
-            # --- STATUS MESSAGE ---
-            if app_state.status_message and time.time() < app_state.status_message_time:
-                text_size_status = imgui.calc_text_size(app_state.status_message)
-                menu_bar_width = imgui.get_window_width()
-                cursor_x_after_menus = imgui.get_cursor_pos_x()
-                padding_needed = menu_bar_width - cursor_x_after_menus - text_size_status[0] - \
-                                 imgui.get_style().item_spacing[0] * 2
-                if padding_needed > 0:
-                    imgui.same_line(cursor_x_after_menus + padding_needed)
-                imgui.text_colored(app_state.status_message, 0.9, 0.9, 0.3, 1.0) # TODO: move to theme, yellow
-            elif app_state.status_message:
-                app_state.status_message = ""
-
+            self._render_file_menu(app_state, file_mgr)
+            self._render_edit_menu(app_state)
+            self._render_view_menu(app_state, stage_proc)
+            self._render_tools_menu(app_state, file_mgr)
+            self._render_ai_menu()
+            self._render_updates_menu()
             imgui.end_main_menu_bar()
 
-            # --- RENDER POPUPS MANAGED BY THIS CLASS ---
-            self._render_timeline_selection_popup()
-            self._render_timeline_comparison_results_popup()
+        self._render_timeline_selection_popup()
+        self._render_timeline_comparison_results_popup()
+
+    # ------------------------- MENUS -------------------------
+
+    def _render_file_menu(self, app_state, file_mgr):
+        app = self.app
+        pm = app.project_manager
+        settings = app.app_settings
+        fm = app.file_manager
+
+        if imgui.begin_menu("File", True):
+            # New/Project/Video/Open
+            if _menu_item_simple("New Project"):
+                app.reset_project_state(for_new_project=True)
+                pm.project_dirty = True
+
+            if _menu_item_simple("Project..."):
+                fm.open_project_dialog()
+
+            if _menu_item_simple("Video..."):
+                fm.open_video_dialog()
+
+            if _menu_item_simple("Close Project"):
+                app.reset_project_state(for_new_project=True)
+
+            # Open Recent
+            recent = settings.get("recent_projects", [])
+            can_open_recent = bool(recent)
+
+            if imgui.begin_menu("Open Recent", enabled=can_open_recent):
+                if _menu_item_simple("Clear Menu"):
+                    settings.set("recent_projects", [])
+                if recent:
+                    imgui.separator()
+                    for project_path in recent:
+                        display_name = os.path.basename(project_path)
+                        if _menu_item_simple(display_name):
+                            fm.load_project(project_path)
+                imgui.end_menu()
+            imgui.separator()
+
+            # Save options
+            can_save = pm.project_file_path is not None
+
+            if _menu_item_simple("Save Project", enabled=can_save):
+                pm.save_project_dialog()
+            if _menu_item_simple("Save Project As...", enabled=True):
+                pm.save_project_dialog(save_as=True)
+            imgui.separator()
+
+            # Import/Export
+            if imgui.begin_menu("Import..."):
+                if _menu_item_simple("Funscript to Timeline 1..."):
+                    fm.import_funscript_to_timeline(1)
+                if _menu_item_simple("Funscript to Timeline 2..."):
+                    fm.import_funscript_to_timeline(2)
+                if _menu_item_simple("Stage 2 Overlay Data..."):
+                    fm.import_stage2_overlay_data()
+                imgui.end_menu()
+
+            if imgui.begin_menu("Export..."):
+                if _menu_item_simple("Funscript from Timeline 1..."):
+                    fm.export_funscript_from_timeline(1)
+                if _menu_item_simple("Funscript from Timeline 2..."):
+                    fm.export_funscript_from_timeline(2)
+                imgui.end_menu()
+            imgui.separator()
+
+            if _menu_item_simple("Exit"):
+                app.shutdown_app()
+            imgui.end_menu()
+
+    def _render_edit_menu(self, app_state):
+        app = self.app
+        fs_proc = app.funscript_processor
+
+        if imgui.begin_menu("Edit", True):
+            # T1
+            undo1 = fs_proc._get_undo_manager(1)
+            can_undo1 = undo1.can_undo() if undo1 else False
+            can_redo1 = undo1.can_redo() if undo1 else False
+            if imgui.menu_item(
+                "Undo T1 Change", "Ctrl+Z", selected=False, enabled=can_undo1
+            )[0]:
+                fs_proc.perform_undo_redo(1, "undo")
+            if imgui.menu_item(
+                "Redo T1 Change", "Ctrl+Y", selected=False, enabled=can_redo1
+            )[0]:
+                fs_proc.perform_undo_redo(1, "redo")
+            imgui.separator()
+
+            # T2
+            undo2 = fs_proc._get_undo_manager(2)
+            can_undo2 = undo2.can_undo() if undo2 else False
+            can_redo2 = undo2.can_redo() if undo2 else False
+            if imgui.menu_item(
+                "Undo T2 Change", "Alt+Ctrl+Z", selected=False, enabled=can_undo2
+            )[0]:
+                fs_proc.perform_undo_redo(2, "undo")
+            if imgui.menu_item(
+                "Redo T2 Change", "Alt+Ctrl+Y", selected=False, enabled=can_redo2
+            )[0]:
+                fs_proc.perform_undo_redo(2, "redo")
+            imgui.end_menu()
+
+    def _render_view_menu(self, app_state, stage_proc):
+        if imgui.begin_menu("View", True):
+            self._render_ui_mode_section(app_state)
+            imgui.separator()
+            self._render_ui_layout_section(app_state)
+            imgui.separator()
+            self._render_panels_submenu(app_state)
+            imgui.separator()
+            self._render_layout_options_section(app_state)
+            imgui.separator()
+            self._render_timeline_editors_section(app_state)
+            imgui.separator()
+            self._render_overlays_section(app_state, stage_proc)
+            imgui.end_menu()
+
+    def _render_ui_mode_section(self, app_state):
+        settings = self.app.app_settings
+        imgui.text("UI Mode")
+        imgui.indent()
+
+        current = app_state.ui_view_mode
+        if _radio_line("Expert Mode##UIModeExpertMode", current == "expert"):
+            if current != "expert":
+                app_state.ui_view_mode = "expert"
+                settings.set("ui_view_mode", "expert")
+        if _radio_line("Simple Mode##UIModeSimpleMode", current == "simple"):
+            if current != "simple":
+                app_state.ui_view_mode = "simple"
+                settings.set("ui_view_mode", "simple")
+        imgui.unindent()
+
+    def _render_ui_layout_section(self, app_state):
+        imgui.text("UI Layout Mode")
+        imgui.indent()
+
+        current = app_state.ui_layout_mode
+        if _radio_line("Fixed Panels##UILayoutModeFixedPanels", current == "fixed"):
+            if current != "fixed":
+                app_state.ui_layout_mode = "fixed"
+                self.app.project_manager.project_dirty = True
+
+        if _radio_line("Floating Windows##UILayoutModeFloatingWindows", current == "floating"):
+            if current != "floating":
+                app_state.ui_layout_mode = "floating"
+                app_state.just_switched_to_floating = True
+                self.app.project_manager.project_dirty = True
+        imgui.unindent()
+
+    def _render_panels_submenu(self, app_state):
+        pm = self.app.project_manager
+        is_floating = app_state.ui_layout_mode == "floating"
+
+        if imgui.begin_menu("Panels", enabled=is_floating):
+            # Using getattr/setattr has minor overhead; acceptable given low count.
+            for label, attr in (
+                ("Control Panel", "show_control_panel_window"),
+                ("Info & Graphs", "show_info_graphs_window"),
+                ("Video Display", "show_video_display_window"),
+                ("Video Navigation", "show_video_navigation_window"),
+            ):
+                cur = getattr(app_state, attr)
+                clicked, val = imgui.menu_item(label, selected=cur)
+                if clicked:
+                    setattr(app_state, attr, val)
+                    pm.project_dirty = True
+            imgui.end_menu()
+
+        # Tooltip only computed if hovered
+        if imgui.is_item_hovered() and not is_floating:
+            imgui.set_tooltip("Window toggles are for floating mode.")
+
+    def _render_layout_options_section(self, app_state):
+        pm = self.app.project_manager
+        imgui.text("Layout Options")
+        imgui.indent()
+
+        if not hasattr(app_state, "full_width_nav"):
+            app_state.full_width_nav = False
+
+        is_fixed = app_state.ui_layout_mode == "fixed"
+        clicked, selected = imgui.menu_item(
+            "Full-Width Navigation Bar",
+            selected=app_state.full_width_nav,
+            enabled=is_fixed,
+        )
+        if clicked:
+            app_state.full_width_nav = selected
+            pm.project_dirty = True
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Only available in 'Fixed Panels' layout mode.")
+        imgui.unindent()
+
+    def _render_timeline_editors_section(self, app_state):
+        app = self.app
+        pm = app.project_manager
+        settings = app.app_settings
+
+        imgui.text("Timeline Editors & Previews")
+        imgui.indent()
+
+        # Editors
+        for label, attr in (
+            ("Interactive Timeline 1", "show_funscript_interactive_timeline"),
+            ("Interactive Timeline 2", "show_funscript_interactive_timeline2"),
+        ):
+            cur = getattr(app_state, attr)
+            clicked, val = imgui.menu_item(label, selected=cur)
+            if clicked:
+                setattr(app_state, attr, val)
+                pm.project_dirty = True
+        imgui.separator()
+
+        # Previews
+        for label, attr in (
+            ("Funscript Preview Bar", "show_funscript_timeline"),
+            ("Heatmap", "show_heatmap"),
+        ):
+            cur = getattr(app_state, attr)
+            clicked, val = imgui.menu_item(label, selected=cur)
+            if clicked:
+                setattr(app_state, attr, val)
+                pm.project_dirty = True
+
+        use_simplified = settings.get("use_simplified_funscript_preview", False)
+        clicked, new_val = imgui.menu_item(
+            "Use Simplified Funscript Preview", selected=use_simplified
+        )
+        if clicked and new_val != use_simplified:
+            settings.set("use_simplified_funscript_preview", new_val)
+            app.app_state_ui.funscript_preview_dirty = True
+        imgui.separator()
+
+        for label, attr, key in (
+            ("Show Timeline Editor Buttons", "show_timeline_editor_buttons", "show_timeline_editor_buttons"),
+            ("Show Advanced Options", "show_advanced_options", "show_advanced_options"),
+        ):
+            cur = getattr(app_state, attr)
+            clicked, val = imgui.menu_item(label, selected=cur)
+            if clicked:
+                setattr(app_state, attr, val)
+                settings.set(key, val)
+                pm.project_dirty = True
+        imgui.unindent()
+
+    def _render_overlays_section(self, app_state, stage_proc):
+        pm = self.app.project_manager
+        app = self.app
+
+        imgui.text("Overlays & Aux Windows")
+        imgui.indent()
+
+        for label, attr in (
+            ("Script Gauge (Timeline 1)", "show_gauge_window_timeline1"),
+            ("Script Gauge (Timeline 2)", "show_gauge_window_timeline2"),
+        ):
+            cur = getattr(app_state, attr)
+            clicked, val = imgui.menu_item(label, selected=cur)
+            if clicked:
+                setattr(app_state, attr, val)
+                pm.project_dirty = True
+
+        label = "L/R Dial Graph"
+        cur = getattr(app_state, "show_lr_dial_graph")
+        clicked, val = imgui.menu_item(label, selected=cur)
+        if clicked:
+            setattr(app_state, "show_lr_dial_graph", val)
+            pm.project_dirty = True
+
+        if not hasattr(app_state, "show_chapter_list_window"):
+            app_state.show_chapter_list_window = False
+
+        clicked, val = imgui.menu_item(
+            "Chapter List", selected=app_state.show_chapter_list_window
+        )
+        if clicked:
+            app_state.show_chapter_list_window = val
+            pm.project_dirty = True
+        imgui.separator()
+
+        # Tracker flags
+        tracker = app.tracker
+        if tracker:
+            for label, flag in (
+                ("Show Detections/Masks", "ui_show_masks"),
+                ("Show Optical Flow", "ui_show_flow"),
+            ):
+                cur = getattr(app_state, flag)
+                clicked, val = imgui.menu_item(label, selected=cur)
+                if clicked:
+                    app_state.set_tracker_ui_flag(flag.replace("ui_", ""), val)
+
+        can_show_s2 = stage_proc.stage2_overlay_data is not None
+        clicked, val = imgui.menu_item(
+            "Show Stage 2 Overlay",
+            selected=app_state.show_stage2_overlay,
+            enabled=can_show_s2,
+        )
+        if clicked:
+            app_state.show_stage2_overlay = val
+            pm.project_dirty = True
+
+        clicked, _ = imgui.menu_item(
+            "Audio Waveform", selected=app_state.show_audio_waveform
+        )
+        if clicked:
+            app.toggle_waveform_visibility()
+            pm.project_dirty = True
+        imgui.unindent()
+
+    def _render_tools_menu(self, app_state, file_mgr):
+        app = self.app
+
+        if imgui.begin_menu("Tools", True):
+            can_calibrate = file_mgr.video_path is not None
+            if _menu_item_simple("Start Latency Calibration...", enabled=can_calibrate):
+                calibration = getattr(app, "calibration", None)
+                if calibration:
+                    calibration.start_latency_calibration()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Calibrate latency. Requires a video to be loaded and points "
+                    "on Timeline 1."
+                    if can_calibrate
+                    else "Please load a video to enable calibration."
+                )
+
+            clicked, _ = imgui.menu_item(
+                "Manage Generated Files...",
+                selected=app_state.show_generated_file_manager,
+            )
+            if clicked:
+                app.toggle_file_manager_window()
+
+            if not hasattr(app_state, "show_autotuner_window"):
+                app_state.show_autotuner_window = False
+            clicked, _ = imgui.menu_item(
+                "Performance Autotuner...",
+                selected=app_state.show_autotuner_window,
+            )
+            if clicked:
+                app_state.show_autotuner_window = not app_state.show_autotuner_window
+
+            fs_proc = getattr(app, "funscript_processor", None)
+            can_compare = (
+                fs_proc is not None
+                and fs_proc.get_actions("primary")
+                and fs_proc.get_actions("secondary")
+            )
+            if _menu_item_simple("Compare Timelines...", enabled=can_compare):
+                trigger = getattr(app, "trigger_timeline_comparison", None)
+                if trigger:
+                    trigger()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Compares the signals on Timeline 1 and Timeline 2 to "
+                    "calculate the optimal time offset."
+                )
+
+            if not hasattr(app, "tensorrt_compiler_window"):
+                app.tensorrt_compiler_window = None
+
+            if _menu_item_simple("Compile YOLO Model to TensorRT (.engine)..."):
+                from gui_components.engine_compiler.tensorrt_compiler_window import (  # noqa: E501
+                    TensorRTCompilerWindow,
+                )
+
+                def on_close():
+                    app.tensorrt_compiler_window = None
+
+                tw = app.tensorrt_compiler_window
+                if tw is None:
+                    app.tensorrt_compiler_window = TensorRTCompilerWindow(
+                        app, on_close_callback=on_close
+                    )
+                else:
+                    tw._reset_state()
+                    tw.is_open = True
+            imgui.end_menu()
+
+    def _render_ai_menu(self):
+        app = self.app
+        if imgui.begin_menu("AI", True):
+            if _menu_item_simple("Download Default Models"):
+                dl = getattr(app, "download_default_models", None)
+                if dl:
+                    dl()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Download default AI models if they don't already exist."
+                )
+            imgui.end_menu()
+
+    def _render_updates_menu(self):
+        app = self.app
+        settings = app.app_settings
+        updater = app.updater
+
+        if imgui.begin_menu("Updates", True):
+            # settings toggles
+            for key, label, default in (
+                ("updater_check_on_startup", "Check for Updates on Startup", True),
+                ("updater_check_periodically", "Check Periodically in Background (Hourly)", True),  # noqa: E501
+                ("updater_suppress_popup", "Suppress Update Notification Popup", False),
+            ):
+                cur = settings.get(key, default)
+                clicked, new_val = imgui.menu_item(label, selected=cur)
+                if clicked and new_val != cur:
+                    settings.set(key, new_val)
+                if key == "updater_suppress_popup" and imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "If suppressed, only the menu bar indicator will be shown."
+                    )
+            imgui.separator()
+
+            if _menu_item_simple("Select Update Commit"):
+                app.app_state_ui.show_update_settings_dialog = True
+            if imgui.is_item_hovered():
+                token = updater.token_manager.get_token()
+                imgui.set_tooltip(
+                    "GitHub token and version selection."
+                    if token
+                    else "GitHub token and version selection.\nNo token set."
+                )
+
+            can_apply = updater.update_available and not updater.update_in_progress
+            if _menu_item_simple("Apply Pending Update...", enabled=can_apply):
+                updater.show_update_dialog = True
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Shows the update dialog if an update has been detected."
+                )
+            imgui.end_menu()

@@ -60,6 +60,9 @@ class DarkTheme:
     VIDEO_STATUS_OTHER = YELLOW
     BACKGROUND_CLEAR = (0.06, 0.06, 0.06, 1.0)  # Dark gray background
 
+    # Menu Colors
+    FRAME_OFFSET = YELLOW
+
     # Gauge-specific colors
     GAUGE_BG = FLOATING_WIDGET_BG
     GAUGE_BORDER = FLOATING_WIDGET_BORDER
@@ -162,6 +165,15 @@ class DarkTheme:
     CONTROL_PANEL_ACTIVE_PROGRESS = (0.2, 0.6, 1.0, 1.0) # blue
     CONTROL_PANEL_COMPLETED_PROGRESS = (0.2, 0.7, 0.2, 1.0) # green
     CONTROL_PANEL_SUB_PROGRESS = (0.3, 0.7, 1.0, 1.0) # cyan
+    
+    # Control Panel Status Indicator Colors
+    CONTROL_PANEL_STATUS_READY = GREEN
+    CONTROL_PANEL_STATUS_WARNING = ORANGE
+    CONTROL_PANEL_STATUS_ERROR = RED
+    CONTROL_PANEL_STATUS_INFO = BLUE_LIGHT
+    
+    # Control Panel Section Header Colors
+    CONTROL_PANEL_SECTION_HEADER = WHITE_DARK
 
     # Update Settings Dialog Colors
     UPDATE_TOKEN_VALID = GREEN
@@ -207,6 +219,7 @@ class RGBColors:
         (37, 22, 122)     # Dark Blue (Cap color)
     ]
     TIMELINE_COLOR_SPEED_STEP = 250.0  # Speed (pixels/sec) used to step through the color map.
+    TIMELINE_HEATMAP_BACKGROUND = (20, 20, 25, 255)
     TIMELINE_COLOR_ALPHA = 0.9 # alpha value for the timeline heatmap
 
     # General Slider Colors

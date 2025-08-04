@@ -96,6 +96,15 @@ class ControlPanelColors:
     ACTIVE_PROGRESS = CurrentTheme.CONTROL_PANEL_ACTIVE_PROGRESS
     COMPLETED_PROGRESS = CurrentTheme.CONTROL_PANEL_COMPLETED_PROGRESS
     SUB_PROGRESS = CurrentTheme.CONTROL_PANEL_SUB_PROGRESS
+    
+    # Status indicator colors
+    STATUS_READY = CurrentTheme.CONTROL_PANEL_STATUS_READY
+    STATUS_WARNING = CurrentTheme.CONTROL_PANEL_STATUS_WARNING
+    STATUS_ERROR = CurrentTheme.CONTROL_PANEL_STATUS_ERROR
+    STATUS_INFO = CurrentTheme.CONTROL_PANEL_STATUS_INFO
+    
+    # Section header colors
+    SECTION_HEADER = CurrentTheme.CONTROL_PANEL_SECTION_HEADER
 
 
 class VideoNavigationColors:
@@ -118,10 +127,25 @@ class AppGUIColors:
     FPS_TARGET_MARKER = RGBColors.FPS_TARGET_MARKER
     FPS_TRACKER_MARKER = RGBColors.FPS_TRACKER_MARKER
     FPS_PROCESSOR_MARKER = RGBColors.FPS_PROCESSOR_MARKER
-    
+
+    # Timeline Preview Colors
+    # PREVIEW_BACKGROUND = CurrentTheme.TIMELINE_PREVIEW_BACKGROUND
+    # PREVIEW_CENTER_LINE = CurrentTheme.TIMELINE_PREVIEW_CENTER_LINE
+    # PREVIEW_ENVELOPE_ALPHA = CurrentTheme.TIMELINE_PREVIEW_ENVELOPE_ALPHA
+    HEATMAP_BACKGROUND = RGBColors.TIMELINE_HEATMAP_BACKGROUND
+
     # Additional RGB colors
     TEAL = RGBColors.TEAL
 
+    WHITE = CurrentTheme.WHITE
+    BLACK = CurrentTheme.BLACK
+    GRAY = CurrentTheme.GRAY
+    GRAY_LIGHT = CurrentTheme.GRAY_LIGHT
+    GRAY_DARK = CurrentTheme.GRAY_DARK
+    GRAY_MEDIUM = CurrentTheme.GRAY_MEDIUM
+    RED = CurrentTheme.RED
+    RED_LIGHT = CurrentTheme.RED_LIGHT
+    RED_DARK = CurrentTheme.RED_DARK
     TRANSPARENT = CurrentTheme.TRANSPARENT
     SEMI_TRANSPARENT = CurrentTheme.SEMI_TRANSPARENT
     
@@ -132,6 +156,10 @@ class AppGUIColors:
     VIDEO_STATUS_FUNGEN = CurrentTheme.VIDEO_STATUS_FUNGEN
     VIDEO_STATUS_OTHER = CurrentTheme.VIDEO_STATUS_OTHER
     BACKGROUND_CLEAR = CurrentTheme.BACKGROUND_CLEAR
+
+class MenuColors:
+    """Color constants for menu components."""
+    FRAME_OFFSET = CurrentTheme.FRAME_OFFSET
 
 
 class SegmentColors:
