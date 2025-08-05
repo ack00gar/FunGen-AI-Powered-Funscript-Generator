@@ -456,6 +456,7 @@ class ROITracker:
                 # DO NOT STOP TRACKING. This allows for seamless transitions.
                 # Instead, clear the state relevant to the new mode.
                 if mode == "YOLO_ROI":
+                    self.clear_user_defined_roi_and_point()
                     # Also clear YOLO-specific state for a clean transition
                     self.prev_gray_main_roi, self.prev_features_main_roi = None, None
                     self.roi = None
@@ -550,7 +551,29 @@ class ROITracker:
         self.oscillation_area_fixed = area_abs_coords
         ax, ay, aw, ah = area_abs_coords
         point_x_frame, point_y_frame = point_abs_coords_in_frame
-
+        # Set the fixed oscillation area
+        self.oscillation_area_fixed = area_abs_coords
+        # Calculate relative point within the area
+        area_x, area_y, area_w, area_h = area_abs_coords
+        point_x, point_y = point_abs_coords_in_frame
+        # Clamp point to area bounds
+        rel_x = max(0, min(area_w - 1, point_x - area_x))
+        rel_y = max(0, min(area_h - 1, point_y - area_y))
+        self.oscillation_area_initial_point_relative = (rel_x, rel_y)
+        # Optionally store the patch for future flow calculations
+        if current_frame_for_patch is not None:
+            # Extract the patch for the selected area
+            self.prev_gray_oscillation_area_patch = current_frame_for_patch[area_y:area_y+area_h, area_x:area_x+area_w].copy()
+        else:
+            self.prev_gray_oscillation_area_patch = None
+        # Recalculate the grid blocks for the new area
+        self._calculate_oscillation_grid_layout()
+        # Reset tracked point and block positions
+        self.oscillation_area_tracked_point_relative = self.oscillation_area_initial_point_relative
+        self.oscillation_active_block_positions = set()
+        # Optionally log
+        if hasattr(self, 'logger') and self.logger:
+            self.logger.info(f"Oscillation area set: {area_abs_coords}, point: {point_abs_coords_in_frame}")
         if not (ax <= point_x_frame < ax + aw and ay <= point_y_frame < ay + ah):
             self.logger.warning(f"Selected point ({point_x_frame},{point_y_frame}) is outside defined oscillation area. Clamping.")
             clamped_point_x_frame = max(ax, min(point_x_frame, ax + aw - 1))
@@ -1481,16 +1504,66 @@ class ROITracker:
         return info
 
     def process_frame_for_oscillation(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
+        import cv2
         """
         [V9 - Advanced Filtering] Implements global motion cancellation, advanced oscillation scoring,
         and a VR-specific focus on the central third of the frame.
         """
-        processed_frame = self.preprocess_frame(frame)
-        current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
+        # --- Use oscillation area for detection if set ---
+        use_oscillation_area = self.oscillation_area_fixed is not None
+        if use_oscillation_area:
+            ax, ay, aw, ah = self.oscillation_area_fixed
+            # Crop frame and gray image to oscillation area
+            processed_frame = self.preprocess_frame(frame)
+            current_gray_full = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
+            # For detection, crop to area
+            processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw].copy()
+            current_gray = current_gray_full[ay:ay+ah, ax:ax+aw].copy()
+        else:
+            processed_frame = self.preprocess_frame(frame)
+            current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
+            processed_frame_area = processed_frame
+            ax, ay = 0, 0
+            aw, ah = processed_frame.shape[1], processed_frame.shape[0]
         action_log_list = []
+        import cv2
+        active_blocks = getattr(self, 'oscillation_active_block_positions', set())
+        is_camera_motion = getattr(self, 'is_camera_motion', False)
+        block_motions = getattr(self, 'block_motions', [])
 
+        # --- Visualization for grid and motion detection ---
+        if use_oscillation_area and self.oscillation_grid_blocks:
+            active_block_positions = set(active_blocks)
+            max_blocks_w = getattr(self, 'oscillation_max_blocks_w', 0)
+            if max_blocks_w <= 0:
+                num_blocks = len(self.oscillation_grid_blocks)
+                max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
+            for i, (x1, y1, w, h) in enumerate(self.oscillation_grid_blocks):
+                color = (100, 100, 100)
+                block_r = i // max_blocks_w
+                block_c = i % max_blocks_w
+                if is_camera_motion:
+                    color = (0, 165, 255)
+                elif (block_r, block_c) in active_block_positions:
+                    color = (0, 255, 0)
+                # Draw grid block relative to full frame
+                cv2.rectangle(processed_frame, (x1 + ax, y1 + ay), (x1 + ax + w, y1 + ay + h), color, 1)
+        else:
+            active_block_positions = set(active_blocks)
+            for motion in block_motions:
+                r, c = motion['pos']
+                x1, y1 = c * self.oscillation_block_size, r * self.oscillation_block_size
+                x2, y2 = x1 + self.oscillation_block_size, y1 + self.oscillation_block_size
+                color = (100, 100, 100)
+                if is_camera_motion:
+                    color = (0, 165, 255)
+                elif (r, c) in active_block_positions:
+                    color = (0, 255, 0)
+                cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 1)
+
+        # --- Detection logic: operate only on area ---
         if self.prev_gray_oscillation is None or self.prev_gray_oscillation.shape != current_gray.shape:
-            self.prev_gray_oscillation = current_gray
+            self.prev_gray_oscillation = current_gray.copy()
             return processed_frame, None
 
         if not self.flow_dense:
@@ -1500,7 +1573,7 @@ class ROITracker:
         # --- Step 1: Calculate Global Optical Flow & Global Motion Vector ---
         flow = self.flow_dense.calc(self.prev_gray_oscillation, current_gray, None)
         if flow is None:
-            self.prev_gray_oscillation = current_gray
+            self.prev_gray_oscillation = current_gray.copy()
             return processed_frame, None
 
         # Calculate Global Motion to cancel out camera pans/shakes
@@ -1658,11 +1731,11 @@ class ROITracker:
         # Step 7: Visualization
         active_block_positions = {b['pos'] for b in active_blocks}
         for r,c in self.oscillation_cell_persistence.keys():
-            x1, y1 = c * self.oscillation_block_size, r * self.oscillation_block_size
+            x1, y1 = c * self.oscillation_block_size + ax, r * self.oscillation_block_size + ay
             color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
             cv2.rectangle(processed_frame, (x1, y1), (x1 + self.oscillation_block_size, y1 + self.oscillation_block_size), color, 1)
 
-        self.prev_gray_oscillation = current_gray
+        self.prev_gray_oscillation = current_gray.copy()
         return processed_frame, action_log_list if action_log_list else None
     
     def cleanup(self):
