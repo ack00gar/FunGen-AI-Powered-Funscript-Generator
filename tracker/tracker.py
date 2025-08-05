@@ -1294,8 +1294,9 @@ class ROITracker:
         # Check and report video source status when tracking starts
         self._check_and_report_video_source_status()
         if self.tracking_mode == "OSCILLATION_DETECTOR":
-            # Update grid size from settings before starting
+            # Update grid size and sensitivity from settings before starting
             self.update_oscillation_grid_size()
+            self.update_oscillation_sensitivity()
 
             fps = self.app.processor.fps if self.app and self.app.processor and self.app.processor.fps > 0 else 30.0
 

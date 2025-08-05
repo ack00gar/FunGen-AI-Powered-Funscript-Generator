@@ -1164,7 +1164,9 @@ class AppStageProcessor:
             "class_specific_amplification_multipliers": self.app_settings.get('tracker_class_specific_multipliers', constants.DEFAULT_CLASS_AMP_MULTIPLIERS),
             "y_offset": self.app_settings.get('tracker_y_offset', constants.DEFAULT_LIVE_TRACKER_Y_OFFSET),
             "x_offset": self.app_settings.get('tracker_x_offset', constants.DEFAULT_LIVE_TRACKER_X_OFFSET),
-            "sensitivity": self.app_settings.get('tracker_sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY)
+            "sensitivity": self.app_settings.get('tracker_sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY),
+            "oscillation_grid_size": self.app_settings.get('oscillation_detector_grid_size', 20),
+            "oscillation_sensitivity": self.app_settings.get('oscillation_detector_sensitivity', 1.0)
         }
 
         video_fps_s3 = 30.0
