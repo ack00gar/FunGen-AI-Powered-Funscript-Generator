@@ -282,6 +282,8 @@ class ApplicationLogic:
 
         # Oscillation Area Selection
         self.is_setting_oscillation_area_mode: bool = False
+        self.oscillation_grid_size = self.app_settings.get("oscillation_detector_grid_size")
+        self.oscillation_sensitivity = self.app_settings.get("oscillation_detector_sensitivity")
 
         # --- Batch Processing ---
         self.batch_video_paths: List[str] = []

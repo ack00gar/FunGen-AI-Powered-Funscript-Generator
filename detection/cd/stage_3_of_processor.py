@@ -138,18 +138,45 @@ def stage3_worker_proc(
             dis_flow_preset=tracker_config.get('dis_flow_preset', "ULTRAFAST"),
             adaptive_flow_scale=tracker_config.get('adaptive_flow_scale', True),
             use_sparse_flow=tracker_config.get('use_sparse_flow', False),
-            logger=worker_logger.getChild("ROITracker"),
+            logger=worker_logger.getChild("OscillationDetector"),
             video_type_override=determined_video_type
         )
-        # Manually set tracker properties from the config dictionaries
+        # Set tracker properties for oscillation detector
         roi_tracker_instance.y_offset = tracker_config.get('y_offset', constants.DEFAULT_LIVE_TRACKER_Y_OFFSET)
         roi_tracker_instance.x_offset = tracker_config.get('x_offset', constants.DEFAULT_LIVE_TRACKER_X_OFFSET)
         roi_tracker_instance.sensitivity = tracker_config.get('sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY)
         roi_tracker_instance.output_delay_frames = common_app_config.get('output_delay_frames', 0)
         roi_tracker_instance.current_video_fps_for_delay = common_app_config.get('video_fps', 30.0)
-        roi_tracker_instance.tracking_mode = "YOLO_ROI"
+        # Configure for oscillation detector mode
+        roi_tracker_instance.tracking_mode = "OSCILLATION_DETECTOR"
+        roi_tracker_instance.oscillation_grid_size = tracker_config.get('oscillation_grid_size', 20)
+        roi_tracker_instance.oscillation_sensitivity = tracker_config.get('oscillation_sensitivity', 1.0)
+        
+        # Create a mock app instance for oscillation detector settings
+        class MockApp:
+            def __init__(self):
+                self.tracking_axis_mode = common_app_config.get("tracking_axis_mode", "both")
+                self.single_axis_output_target = common_app_config.get("single_axis_output_target", "primary")
+                # Mock app_settings
+                self.app_settings = {
+                    "oscillation_detector_grid_size": tracker_config.get('oscillation_grid_size', 20),
+                    "oscillation_detector_sensitivity": tracker_config.get('oscillation_sensitivity', 1.0),
+                    "live_oscillation_dynamic_amp_enabled": True,
+                    "live_oscillation_amp_window_ms": 4000
+                }
+                # Mock processor for VR detection
+                class MockProcessor:
+                    def __init__(self):
+                        self.determined_video_type = determined_video_type
+                        self.fps = common_app_config.get('video_fps', 30.0)
+                
+                self.processor = MockProcessor()
+                self.discarded_tracking_classes = []
+        
+        mock_app = MockApp()
+        roi_tracker_instance.app = mock_app
     except Exception as e:
-        worker_logger.error(f"Failed to initialize ROITracker: {e}", exc_info=True)
+        worker_logger.error(f"Failed to initialize OscillationDetector: {e}", exc_info=True)
         return
 
     # Initialize SQLite storage for worker if needed
@@ -188,7 +215,8 @@ def stage3_worker_proc(
                     f"Processing memory chunk F{chunk_start}-{chunk_end} for Chapter '{segment_obj.major_position}'"
                 )
 
-            chunk_funscript = DualAxisFunscript(logger=worker_logger)
+            # Initialize funscript for oscillation detector
+            roi_tracker_instance.funscript = DualAxisFunscript(logger=worker_logger)
             roi_tracker_instance.start_tracking()
             roi_tracker_instance.main_interaction_class = segment_obj.major_position
 
@@ -202,114 +230,32 @@ def stage3_worker_proc(
                 if stop_event.is_set(): break
                 if frame_image is None: continue
 
-                processed_frame = roi_tracker_instance.preprocess_frame(frame_image)
-                current_frame_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
                 frame_time_ms = int(round((frame_id / common_app_config.get('video_fps', 30.0)) * 1000.0))
 
-                # Use the small, pre-filtered chunk_data_map
-                frame_obj_s2 = chunk_data_map.get(frame_id, FrameObject(frame_id, common_app_config.get('yolo_input_size', 640)))
-
-                # ROI Definition Logic (uses segment_obj for context)
-                run_roi_definition = (roi_tracker_instance.roi is None) or (
-                            roi_tracker_instance.roi_update_interval > 0 and roi_tracker_instance.internal_frame_counter % roi_tracker_instance.roi_update_interval == 0)
-                if run_roi_definition:
-                    candidate_roi_xywh: Optional[Tuple[int, int, int, int]] = None
-                    if frame_obj_s2.atr_locked_penis_state.active and frame_obj_s2.atr_locked_penis_state.box:
-                        lp_box_coords_xyxy = frame_obj_s2.atr_locked_penis_state.box
-                        lp_x1, lp_y1, lp_x2, lp_y2 = lp_box_coords_xyxy
-                        current_penis_box_for_roi_calc = (lp_x1, lp_y1, lp_x2 - lp_x1, lp_y2 - lp_y1)
-                        interacting_objects_for_roi_calc = []
-                        relevant_classes_for_pos = []
-
-                        if segment_obj.major_position == "Cowgirl / Missionary":
-                            relevant_classes_for_pos = ["pussy"]
-                        elif segment_obj.major_position == "Rev. Cowgirl / Doggy":
-                            relevant_classes_for_pos = ["butt"]
-                        elif segment_obj.major_position == "Handjob / Blowjob":
-                            relevant_classes_for_pos = ["face", "hand"]
-                        elif segment_obj.major_position == "Blowjob":
-                            relevant_classes_for_pos = ["face"]
-                        elif segment_obj.major_position == "Handjob":
-                            relevant_classes_for_pos = ["hand"]
-                        elif segment_obj.major_position == "Boobjob":
-                            relevant_classes_for_pos = ["breast", "hand"]
-                        elif segment_obj.major_position == "Footjob":
-                            relevant_classes_for_pos = ["foot"]
-
-                        for contact_dict in frame_obj_s2.atr_detected_contact_boxes:
-                            box_rec = contact_dict.get("box_rec")
-                            if box_rec and contact_dict.get("class_name") in relevant_classes_for_pos:
-                                interacting_objects_for_roi_calc.append({
-                                    "box": (box_rec.x1, box_rec.y1, box_rec.width, box_rec.height),
-                                    "class_name": box_rec.class_name
-                                })
-
-                        if current_penis_box_for_roi_calc[2] > 0 and current_penis_box_for_roi_calc[3] > 0:
-                            candidate_roi_xywh = roi_tracker_instance._calculate_combined_roi(processed_frame.shape[:2],
-                                                                                              current_penis_box_for_roi_calc,
-                                                                                              interacting_objects_for_roi_calc)
-                            if determined_video_type == 'VR' and candidate_roi_xywh:
-                                penis_w = current_penis_box_for_roi_calc[2]
-                                rx, ry, rw, rh = candidate_roi_xywh
-                                new_rw = min(rw, penis_w * 2) if segment_obj.major_position not in ["Handjob", "Blowjob", "Handjob / Blowjob"] else penis_w
-                                if new_rw > 0:
-                                    original_center_x = rx + rw / 2
-                                    new_rx = int(original_center_x - new_rw / 2)
-                                    frame_width = processed_frame.shape[1]
-                                    final_rw = int(min(new_rw, frame_width))
-                                    final_rx = max(0, min(new_rx, frame_width - final_rw))
-                                    candidate_roi_xywh = (final_rx, ry, final_rw, rh)
-
-                    if candidate_roi_xywh:
-                        roi_tracker_instance.roi = roi_tracker_instance._smooth_roi_transition(candidate_roi_xywh)
-
-                # Optical Flow Processing
-                primary_pos, secondary_pos = 50, 50
-                if roi_tracker_instance.roi and roi_tracker_instance.roi[2] > 0 and roi_tracker_instance.roi[3] > 0:
-                    rx, ry, rw, rh = roi_tracker_instance.roi
-                    patch = current_frame_gray[ry:ry + rh, rx:rx + rw]
-                    if patch.size > 0:
-                        primary_pos, secondary_pos, _, _, features_out = roi_tracker_instance.process_main_roi_content(
-                            processed_frame, patch, roi_tracker_instance.prev_gray_main_roi,
-                            roi_tracker_instance.prev_features_main_roi)
-                        roi_tracker_instance.prev_gray_main_roi = patch.copy()
-                        roi_tracker_instance.prev_features_main_roi = features_out
-
-                # Conditional Output for the unique part of the chunk
+                # Process frame using oscillation detector (full-frame processing)
+                processed_frame, action_log = roi_tracker_instance.process_frame_for_oscillation(frame_image, frame_time_ms, frame_id)
+                
+                # Only count frames in the output range for processing counter
                 if output_start <= frame_id <= output_end:
-                    smoothing_window = roi_tracker_instance.flow_history_window_smooth
-                    auto_delay = (smoothing_window - 1) / 2.0 if smoothing_window > 1 else 0.0
-                    total_delay = roi_tracker_instance.output_delay_frames + auto_delay
-                    delay_ms = (
-                                           total_delay / roi_tracker_instance.current_video_fps_for_delay) * 1000.0 if roi_tracker_instance.current_video_fps_for_delay > 0 else 0
-                    adj_time_ms = max(0, int(round(frame_time_ms - delay_ms)))
-
-                    # (Axis mapping logic as in the original file)
-                    primary_to_write, secondary_to_write = None, None
-                    tracking_axis_mode = common_app_config.get("tracking_axis_mode", "both")
-                    single_axis_target = common_app_config.get("single_axis_output_target", "primary")
-                    if tracking_axis_mode == "both":
-                        primary_to_write, secondary_to_write = primary_pos, secondary_pos
-                    elif tracking_axis_mode == "vertical":
-                        if single_axis_target == "primary":
-                            primary_to_write = primary_pos
-                        else:
-                            secondary_to_write = primary_pos
-                    elif tracking_axis_mode == "horizontal":
-                        if single_axis_target == "primary":
-                            primary_to_write = secondary_pos
-                        else:
-                            secondary_to_write = secondary_pos
-
-                    chunk_funscript.add_action(adj_time_ms, primary_to_write, secondary_to_write, False)
                     with total_frames_processed_counter.get_lock():
                         total_frames_processed_counter.value += 1
 
                 roi_tracker_instance.internal_frame_counter += 1
+            
+            # Extract actions from the oscillation detector's funscript, filtering to output range
+            chunk_funscript = roi_tracker_instance.funscript
+            output_start_ms = int(round((output_start / common_app_config.get('video_fps', 30.0)) * 1000.0))
+            output_end_ms = int(round((output_end / common_app_config.get('video_fps', 30.0)) * 1000.0))
+            
+            # Filter actions to only include those in the output time range
+            filtered_primary_actions = [action for action in chunk_funscript.primary_actions 
+                                      if output_start_ms <= action['at'] <= output_end_ms]
+            filtered_secondary_actions = [action for action in chunk_funscript.secondary_actions 
+                                        if output_start_ms <= action['at'] <= output_end_ms]
 
             result_queue.put({
-                "primary_actions": chunk_funscript.primary_actions,
-                "secondary_actions": chunk_funscript.secondary_actions
+                "primary_actions": filtered_primary_actions,
+                "secondary_actions": filtered_secondary_actions
             })
 
         except Empty:

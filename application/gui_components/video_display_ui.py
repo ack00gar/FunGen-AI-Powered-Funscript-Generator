@@ -649,21 +649,20 @@ class VideoDisplayUI:
                         chapter = self.app.funscript_processor.get_chapter_at_frame(current_frame_idx)
                         if not chapter:
                             self.app.logger.info("Cannot refine: Please click within a chapter boundary.", extra={'status_message': True})
-                            return
-
-                        # Find which bounding box was clicked
-                        overlay_data = self.app.stage_processor.stage2_overlay_data_map.get(current_frame_idx)
-                        if overlay_data and "yolo_boxes" in overlay_data:
-                            for box in overlay_data["yolo_boxes"]:
-                                p1 = self._video_to_screen_coords(box["bbox"][0], box["bbox"][1])
-                                p2 = self._video_to_screen_coords(box["bbox"][2], box["bbox"][3])
-                                if p1 and p2 and p1[0] <= mouse_x <= p2[0] and p1[1] <= mouse_y <= p2[1]:
-                                    clicked_track_id = box.get("track_id")
-                                    if clicked_track_id is not None:
-                                        self.app.logger.info(f"Hint received! Refining chapter '{chapter.position_short_name}' "f"to follow object with track_id: {clicked_track_id}", extra={'status_message': True})
-                                        # Trigger the backend process
-                                        self.app.event_handlers.handle_interactive_refinement_click(chapter, clicked_track_id)
-                                        break  # Stop after finding the first clicked box
+                        else:
+                            # Find which bounding box was clicked
+                            overlay_data = self.app.stage_processor.stage2_overlay_data_map.get(current_frame_idx)
+                            if overlay_data and "yolo_boxes" in overlay_data:
+                                for box in overlay_data["yolo_boxes"]:
+                                    p1 = self._video_to_screen_coords(box["bbox"][0], box["bbox"][1])
+                                    p2 = self._video_to_screen_coords(box["bbox"][2], box["bbox"][3])
+                                    if p1 and p2 and p1[0] <= mouse_x <= p2[0] and p1[1] <= mouse_y <= p2[1]:
+                                        clicked_track_id = box.get("track_id")
+                                        if clicked_track_id is not None:
+                                            self.app.logger.info(f"Hint received! Refining chapter '{chapter.position_short_name}' "f"to follow object with track_id: {clicked_track_id}", extra={'status_message': True})
+                                            # Trigger the backend process
+                                            self.app.event_handlers.handle_interactive_refinement_click(chapter, clicked_track_id)
+                                            break  # Stop after finding the first clicked box
                 if not video_frame_available:
                     self._render_drop_video_prompt()
 
