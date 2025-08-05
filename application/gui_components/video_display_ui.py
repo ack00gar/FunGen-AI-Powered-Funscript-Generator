@@ -127,7 +127,12 @@ class VideoDisplayUI:
         stage_proc = self.app.stage_processor
         file_mgr = self.app.file_manager
 
-        controls_disabled = stage_proc.full_analysis_active or not file_mgr.video_path
+        # Check if live tracking is running  
+        is_live_tracking_running = (self.app.processor and
+                                    self.app.processor.is_processing and
+                                    self.app.processor.enable_tracker_processing)
+        
+        controls_disabled = stage_proc.full_analysis_active or is_live_tracking_running or not file_mgr.video_path
 
         ICON_JUMP_START, ICON_PREV_FRAME, ICON_PLAY, ICON_PAUSE, ICON_STOP, ICON_NEXT_FRAME, ICON_JUMP_END = "|<", "<<", ">", "||", "[]", ">>", ">|"
         button_h_ref = imgui.get_frame_height()
@@ -217,7 +222,12 @@ class VideoDisplayUI:
         stage_proc = self.app.stage_processor
         file_mgr = self.app.file_manager
 
-        controls_disabled = stage_proc.full_analysis_active or not file_mgr.video_path
+        # Check if live tracking is running  
+        is_live_tracking_running = (self.app.processor and
+                                    self.app.processor.is_processing and
+                                    self.app.processor.enable_tracker_processing)
+        
+        controls_disabled = stage_proc.full_analysis_active or is_live_tracking_running or not file_mgr.video_path
 
         button_h_ref = imgui.get_frame_height()
         tiny_fps_slider_w = 75.0

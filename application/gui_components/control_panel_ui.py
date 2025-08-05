@@ -2041,9 +2041,14 @@ class ControlPanelUI:
         analysis_active = stage_proc.full_analysis_active
         video_loaded = app.processor and app.processor.is_video_open()
         
+        # Check if live tracking is running
+        is_live_tracking_running = (app.processor and
+                                    app.processor.is_processing and
+                                    app.processor.enable_tracker_processing)
+        
         # Determine button states and availability
-        can_start = video_loaded and not analysis_active and not app.is_setting_user_roi_mode
-        can_stop = analysis_active
+        can_start = video_loaded and not analysis_active and not is_live_tracking_running and not app.is_setting_user_roi_mode
+        can_stop = analysis_active or is_live_tracking_running
         
         # Start button
         with _DisabledScope(not can_start):
@@ -2068,7 +2073,7 @@ class ControlPanelUI:
             if imgui.button("Stop Analysis", width=120):
                 if analysis_active:
                     event_handlers.handle_abort_process_click()
-                elif app.processor and app.processor.is_processing:
+                elif is_live_tracking_running:
                     event_handlers.handle_reset_live_tracker_click()
         
         if not can_stop and imgui.is_item_hovered():
@@ -2078,9 +2083,9 @@ class ControlPanelUI:
         if analysis_active:
             imgui.same_line()
             imgui.text_colored("Analysis Running...", *config.ControlPanelColors.STATUS_READY)
-        elif app.processor and app.processor.is_processing:
+        elif is_live_tracking_running:
             imgui.same_line()
-            imgui.text_colored("Live Processing...", *config.ControlPanelColors.STATUS_INFO)
+            imgui.text_colored("Live Tracking...", *config.ControlPanelColors.STATUS_INFO)
 
     # ---------------- Post-processing manual tools ----------------
 
