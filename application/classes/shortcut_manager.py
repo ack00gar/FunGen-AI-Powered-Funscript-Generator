@@ -1,26 +1,20 @@
 import glfw
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 import imgui
-
-if TYPE_CHECKING:
-    from application.logic.app_logic import ApplicationLogic
-
 
 
 class ShortcutManager:
-    def __init__(self, app: 'ApplicationLogic'):
-        self.app = app
+    def __init__(self, app_instance):
+        self.app = app_instance
         self.is_recording_shortcut_for: Optional[str] = None
-        self._initialize_reverse_key_map() # Call initialization
+        self._initialize_reverse_key_map()
 
     def _initialize_reverse_key_map(self):
         """Initializes a map from key names to GLFW key codes."""
         self._reverse_key_map = {}
-        # Alphanumeric keys
         for i in range(ord('A'), ord('Z') + 1): self._reverse_key_map[chr(i)] = i
         for i in range(ord('0'), ord('9') + 1): self._reverse_key_map[chr(i)] = i
 
-        # Based on the key_map in glfw_key_to_name
         key_map_direct = {
             "SPACE": glfw.KEY_SPACE, "'": glfw.KEY_APOSTROPHE, ",": glfw.KEY_COMMA,
             "-": glfw.KEY_MINUS, ".": glfw.KEY_PERIOD, "/": glfw.KEY_SLASH,

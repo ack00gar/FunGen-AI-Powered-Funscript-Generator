@@ -3,6 +3,7 @@ import msgpack
 import time
 from multiprocessing import Process, Queue, Event, Value, freeze_support
 import platform
+import sys
 from threading import Thread as PyThread
 from queue import Empty, Full
 from ultralytics import YOLO
@@ -12,7 +13,7 @@ from typing import Optional, Tuple, List
 import subprocess
 from queue import Queue as StdLibQueue
 
-from video.video_processor import VideoProcessor
+from video import VideoProcessor
 from config import constants
 
 log_vid = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ def _validate_preprocessed_video_completeness(video_path: str, expected_frames: 
 
         # Check file size - very small files are likely corrupted
         file_size = os.path.getsize(video_path)
-        if file_size < 1000000:  # Less than 1MB is suspicious for any video
+        if file_size < 500000:  # Less than 500kb is suspicious for any video
             logger.warning(f"Preprocessed video is suspiciously small: {file_size} bytes")
             return False
 
@@ -105,7 +106,8 @@ def _validate_preprocessed_video_completeness(video_path: str, expected_frames: 
                '-show_entries', 'stream=nb_frames,duration,r_frame_rate',
                '-of', 'json', video_path]
 
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10, creationflags=creation_flags)
         if result.returncode != 0:
             logger.warning(f"ffprobe failed for preprocessed video: {video_path}")
             return False
@@ -191,7 +193,7 @@ class FFmpegEncoder:
         self.height = height
         self.fps = fps
         self.ffmpeg_path = ffmpeg_path
-        self.hwaccel_method = hwaccel_method # This argument is now unused but kept for compatibility
+        self.hwaccel_method = hwaccel_method
         self.stderr_thread = None
 
     def start(self):
@@ -203,7 +205,9 @@ class FFmpegEncoder:
             self.output_file, "-loglevel", "error"
         ]
         log_vid.info(f"Encoder command: {' '.join(encoder_cmd)}")
-        self.encoder_process = subprocess.Popen(encoder_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Windows fix: prevent terminal windows from spawning
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        self.encoder_process = subprocess.Popen(encoder_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
         self.stderr_thread = PyThread(target=self._read_stderr, daemon=True)
         self.stderr_thread.start()
 
@@ -238,44 +242,93 @@ class FFmpegEncoder:
         self.encoder_process = None
         log_vid.info("Encoder process stopped.")
 
+    def _detect_encoding_devices(self) -> None:
+        """
+        Detects and logs all available hardware encoding devices with their device IDs.
+        This function tests each encoder type and reports availability.
+        """
+        log_vid.info("=== ENCODING DEVICE DETECTION ===")
+        
+        # Define encoder types to test
+        encoder_configs = [
+            ("hevc_nvenc", "NVENC (NVIDIA)"),
+            ("hevc_amf", "AMF (AMD)"),
+            ("hevc_qsv", "QSV (Intel)"),
+            ("hevc_vaapi", "VAAPI (Linux)")
+        ]
+        
+        all_devices = []
+        device_id = 0
+        
+        for encoder_codec, encoder_name in encoder_configs:
+            try:
+                subprocess.check_output([
+                    self.ffmpeg_path, "-hide_banner", "-f", "lavfi", "-i", "testsrc", 
+                    "-c:v", encoder_codec, "-f", "null", "-"
+                ], stderr=subprocess.PIPE, text=True, timeout=5)
+                # If we get here, encoder is available
+                all_devices.append(f"Device {device_id}: {encoder_name}")
+                device_id += 1
+            except subprocess.CalledProcessError as e:
+                if encoder_codec in e.stderr:
+                    # Encoder exists but failed - might be device-specific
+                    all_devices.append(f"Device {device_id}: {encoder_name} - failed")
+                    device_id += 1
+            except Exception:
+                pass
+
+        if all_devices:
+            log_vid.info("Detected encoding devices:")
+            for device in all_devices:
+                log_vid.info(f"  {device}")
+        else:
+            log_vid.info("No hardware encoding devices detected")
+            
+        log_vid.info("=== END ENCODING DEVICE DETECTION ===")
+
     def _get_encoder_args(self) -> List[str]:
         """
         Chooses the best available hardware encoder with a more robust priority.
         Falls back to software libx265 if none is available.
+        Respects the user's hardware acceleration setting.
         """
+
+        self._detect_encoding_devices()
+
+        if self.hwaccel_method == "none":
+            log_vid.info("Using software libx265 encoder (CPU-only mode).")
+            return ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p"]
+
         try:
             output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True)
         except Exception as e:
             log_vid.warning(f"Failed to query FFmpeg encoders: {e}")
             output = ""
 
-        # macOS is a special case
+        # macOS is a special case and usually works well.
         if "hevc_videotoolbox" in output:
             log_vid.info("Using H.265 Apple VideoToolbox for hardware encoding.")
             return ["-c:v", "hevc_videotoolbox", "-q:v", "20", "-pix_fmt", "yuv420p", "-b:v", "0"]
 
-        # For Windows/Linux, establish a more robust priority.
-        # Intel QSV is very common, so we check for it first.
-        if "hevc_qsv" in output:
-            log_vid.info("Using H.265 Intel QSV for hardware encoding.")
-            return ["-c:v", "hevc_qsv", "-preset", "fast", "-global_quality", "26", "-pix_fmt", "yuv420p"]
-
-        elif "hevc_nvenc" in output:
+        if "hevc_nvenc" in output:
             log_vid.info("Using H.265 NVENC for hardware encoding.")
             return ["-c:v", "hevc_nvenc", "-preset", "fast", "-qp", "26", "-pix_fmt", "yuv420p"]
 
-        # Add a check for AMD's AMF encoder
         elif "hevc_amf" in output:
             log_vid.info("Using H.265 AMD AMF for hardware encoding.")
             return ["-c:v", "hevc_amf", "-quality", "quality", "-qp_i", "26", "-qp_p", "26", "-pix_fmt", "yuv420p"]
 
+        elif "hevc_qsv" in output:
+            log_vid.info("Using H.265 Intel QSV for hardware encoding.")
+            return ["-c:v", "hevc_qsv", "-preset", "fast", "-global_quality", "26", "-pix_fmt", "yuv420p"]
+
         elif "hevc_vaapi" in output: # Primarily for Linux
             log_vid.info("Using H.265 VAAPI for hardware encoding.")
             return ["-c:v", "hevc_vaapi", "-qp", "26", "-pix_fmt", "yuv420p"]
-
-        else:
-            log_vid.warning("No hardware encoder available. Falling back to software libx265.")
-            return ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p"]
+        
+        # Fallback to software encoder if no hardware options are found
+        log_vid.warning("No supported hardware encoder found in FFmpeg build. Falling back to software libx265.")
+        return ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p"]
 
 class Stage1QueueMonitor:
     def __init__(self):
@@ -393,7 +446,7 @@ def video_processor_producer_proc(
                 height=height,
                 fps=fps,
                 ffmpeg_path=ffmpeg_path,
-                hwaccel_method='none'
+                hwaccel_method=hwaccel_method_producer
             )
             producer_logger.info(f"Starting FFmpeg encoder for preprocessed video.")
             encoder.start()

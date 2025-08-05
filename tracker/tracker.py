@@ -7,11 +7,11 @@ from ultralytics import YOLO
 import logging
 import os
 
-from funscript.dual_axis_funscript import DualAxisFunscript
+from funscript import DualAxisFunscript
 from config import constants
 from config.constants_colors import RGBColors
 from config.element_group_colors import AppGUIColors
-from application.utils.model_pool import ModelPool
+from application.utils import ModelPool
 
 
 class ROITracker:
@@ -456,7 +456,6 @@ class ROITracker:
                 # DO NOT STOP TRACKING. This allows for seamless transitions.
                 # Instead, clear the state relevant to the new mode.
                 if mode == "YOLO_ROI":
-                    self.clear_user_defined_roi_and_point()
                     # Also clear YOLO-specific state for a clean transition
                     self.prev_gray_main_roi, self.prev_features_main_roi = None, None
                     self.roi = None
@@ -1400,7 +1399,7 @@ class ROITracker:
         self.oscillation_funscript_pos = 50
 
         if self.funscript:  # This funscript is for live tracking
-            if reason != "seek" and reason != "project_load_preserve_actions":
+            if reason not in ["seek", "project_load_preserve_actions", "stop_preserve_funscript"]:
                 self.funscript.clear()
                 self.logger.info(f"Live tracker Funscript cleared (reason: {reason}).")
             else:
@@ -1665,3 +1664,37 @@ class ROITracker:
 
         self.prev_gray_oscillation = current_gray
         return processed_frame, action_log_list if action_log_list else None
+    
+    def cleanup(self):
+        """Explicit cleanup method for resource management."""
+        try:
+            # Clean up ModelPool if it exists
+            if hasattr(self, 'model_pool') and self.model_pool is not None:
+                self.model_pool.cleanup()
+                self.logger.debug("ROITracker: ModelPool cleaned up")
+            
+            # Clear OpenCV objects that might hold memory
+            self.prev_gray_main_roi = None
+            self.prev_gray_user_roi_patch = None
+            self.prev_gray_oscillation_area_patch = None
+            self.prev_gray_oscillation = None
+            
+            # Clear optical flow objects
+            self.flow_dense = None
+            self.flow_sparse_features = None
+            
+            # Clear large data structures
+            self.oscillation_cell_persistence.clear()
+            self.oscillation_active_block_positions.clear()
+            
+            self.logger.debug("ROITracker: Resources cleaned up")
+            
+        except Exception as e:
+            self.logger.warning(f"ROITracker cleanup error: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure resource cleanup."""
+        try:
+            self.cleanup()
+        except Exception:
+            pass  # Avoid errors during destruction

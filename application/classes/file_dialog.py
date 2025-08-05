@@ -1,14 +1,13 @@
 import os
 import json
 import orjson
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 import imgui
 import platform
 import logging
 import string
 
 from config.constants import FUNSCRIPT_METADATA_VERSION # Added
-
 
 
 def get_common_dirs():
@@ -42,7 +41,7 @@ def get_directory_size(path: str) -> int:
 
 
 class ImGuiFileDialog:
-    def __init__(self, app_logic_instance: "ApplicationLogic") -> None:
+    def __init__(self, app_logic_instance) -> None:
         self.app = app_logic_instance
         self.logger = self.app.logger
         self.open: bool = False
@@ -89,7 +88,6 @@ class ImGuiFileDialog:
     def _get_funscript_status(self, video_path: str) -> Optional[str]:
         """Instance method wrapper for the static funscript status checker."""
         return ImGuiFileDialog.get_funscript_status(video_path, self.logger)
-
 
     def show(
             self,
@@ -151,7 +149,6 @@ class ImGuiFileDialog:
                 if imgui.is_item_hovered():
                     imgui.set_tooltip(f"Go to the current video's folder:\n{video_dir}")
                 imgui.spacing()
-
         imgui.end_child()
 
     def _draw_filter_selector(self):
@@ -202,12 +199,11 @@ class ImGuiFileDialog:
         imgui.set_next_window_size(750, 400)
         is_open_current_frame, self.open = imgui.begin(self.title, self.open)
 
-        # If the user closed the window with the X button, just return (do not call callback)
         if not self.open:
             imgui.end()
             return
 
-        if is_open_current_frame: # This means the window is visible and ready for drawing content
+        if is_open_current_frame:
             try:
                 imgui.columns(2, 'main_columns', border=False)
                 imgui.set_column_width(0, 150)
@@ -217,18 +213,16 @@ class ImGuiFileDialog:
                 self._draw_filter_selector()
                 if imgui.begin_child("Files", width=0, height=-75, border=True):
                     self._draw_file_list()
-                    imgui.end_child() # Ensure end_child is called here
+                    imgui.end_child()
                 should_close = self._draw_bottom_bar()
                 if should_close:
-                    self.open = False # Set self.open to False to close the dialog
+                    self.open = False
                 self._draw_overwrite_confirm()
             finally:
-                # Ensure columns are reset before ending the window
                 imgui.columns(1)
                 imgui.end()
 
     def _draw_directory_navigation(self) -> None:
-        # Current directory path display
         current_dir_text = f"{self.current_dir}\n"
         imgui.text(current_dir_text)
 
@@ -270,13 +264,9 @@ class ImGuiFileDialog:
                         (f.lower().endswith('.mlpackage') and "mlpackage" in active_exts)
                     ]
 
-                # Display regular directories first
                 self._draw_directories(directories)
-
-                # Then display selectable files (including .mlpackage folders)
                 if not self.is_folder_dialog:
                     self._draw_files(selectable_files)
-
                 if self.scroll_to_selected:
                     imgui.set_scroll_here_y()
                     self.scroll_to_selected = False
@@ -335,7 +325,6 @@ class ImGuiFileDialog:
                 imgui.text("[FILE]")
 
             imgui.same_line()
-
             # Draw the funscript indicator or a placeholder for alignment
             if funscript_status == 'fungen':
                 imgui.text_colored("[FG]", 0.2, 0.9, 0.2, 1.0)  # Green
@@ -351,7 +340,6 @@ class ImGuiFileDialog:
                     imgui.set_tooltip("No Funscript exists for this video")
 
             imgui.same_line()
-
             # The selectable label now only contains the filename and size
             selectable_label = f"{f:<40} {size_str:>8}"
             if imgui.selectable(selectable_label, is_selected, flags=imgui.SELECTABLE_ALLOW_DOUBLE_CLICK):
@@ -360,7 +348,6 @@ class ImGuiFileDialog:
                 if imgui.is_item_hovered() and imgui.is_mouse_double_clicked(0):
                     self.selected_file = f
                     self._handle_file_selection(f)
-
             imgui.pop_id()
 
     def _handle_file_selection(self, file: str) -> None:
@@ -408,7 +395,6 @@ class ImGuiFileDialog:
                     self.show_overwrite_confirm = False
 
                 imgui.same_line()
-
                 if imgui.button("Cancel", width=100):
                     self.show_overwrite_confirm = False
 
@@ -449,7 +435,6 @@ class ImGuiFileDialog:
             should_close = True
 
         imgui.same_line(0, spacing)
-
         button_text = "Save" if self.is_save_dialog else "Open"
         if self.is_folder_dialog:
             button_text = "Select"

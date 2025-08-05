@@ -20,6 +20,7 @@ dependencies = [
     "scenedetect[opencv]>=0.6.6",
     "rdp>=0.8",
     "send2trash>=1.8.3",
+    "aiosqlite>=0.21.0",
 ]
 
 [project.optional-dependencies]

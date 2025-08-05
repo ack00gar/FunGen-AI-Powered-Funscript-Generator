@@ -1,7 +1,7 @@
 import imgui
 import os
 import logging
-from application.utils.generated_file_manager import GeneratedFileManager
+from application.utils import GeneratedFileManager
 
 # TODO: Comprehansive delete options and settings. by date/days old, extension, size, etc.
 

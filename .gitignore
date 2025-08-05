@@ -187,3 +187,6 @@ settings.json
 autosave.fgnstate
 fungen.log
 skip_updates.json
+*.patch
+checkpoints/
+*.checkpoint
