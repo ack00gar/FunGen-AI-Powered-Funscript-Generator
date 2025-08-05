@@ -1,12 +1,12 @@
 import multiprocessing
 import platform
 import argparse
-
-from application.logic.app_logic import ApplicationLogic
-from application.gui_components.app_gui import GUI
+import sys
 
 def run_gui():
     """Initializes and runs the graphical user interface."""
+    from application.logic.app_logic import ApplicationLogic
+    from application.gui_components.app_gui import GUI
     core_app = ApplicationLogic(is_cli=False)
     gui = GUI(app_logic=core_app)
     core_app.gui_instance = gui
@@ -14,16 +14,36 @@ def run_gui():
 
 def run_cli(args):
     """Runs the application in command-line interface mode."""
+    from application.logic.app_logic import ApplicationLogic
     print("--- FunGen CLI Mode ---")
     core_app = ApplicationLogic(is_cli=True)
     # This new method in ApplicationLogic will handle the CLI workflow
     core_app.run_cli(args)
     print("--- CLI Task Finished ---")
 
-if __name__ == "__main__":
+def main():
+    """
+    Main function to run the application.
+    This function handles dependency checking, argument parsing, and starts either the GUI or CLI.
+    """
+    # Step 1: Perform dependency check before importing anything else
+    try:
+        from application.utils.dependency_checker import check_and_install_dependencies
+        # check_and_install_dependencies()
+        pass
+    except ImportError as e:
+        print(f"Failed to import dependency checker: {e}", file=sys.stderr)
+        print("Please ensure the file 'application/utils/dependency_checker.py' exists.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred during dependency check: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 2: Set platform-specific multiprocessing behavior
     if platform.system() != "Windows":
         multiprocessing.set_start_method('spawn', force=True)
 
+    # Step 3: Parse command-line arguments
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation")
     parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file or a folder of videos. If omitted, GUI will start.')
     parser.add_argument('--mode', choices=['2-stage', '3-stage', 'oscillation-detector'], default='3-stage', help='The processing mode to use for analysis.')
@@ -34,7 +54,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Step 4: Start the appropriate interface
     if args.input_path:
         run_cli(args)
     else:
         run_gui()
+
+if __name__ == "__main__":
+    main()

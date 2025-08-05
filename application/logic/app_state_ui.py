@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Tuple, Optional
-from config.constants import TrackerMode
+from config.constants import TrackerMode, ProcessingSpeedMode
+
 
 class AppStateUI:
     def __init__(self, app_logic_instance):
@@ -29,6 +30,7 @@ class AppStateUI:
         self.status_message_time: float = 0.0
 
         self.selected_tracker_mode: TrackerMode = TrackerMode.OSCILLATION_DETECTOR
+        self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode.REALTIME
 
         # UI visibility states
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
@@ -40,6 +42,7 @@ class AppStateUI:
         self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", defaults.get("show_stage2_overlay", True))
         self.show_timeline_editor_buttons = self.app_settings.get("show_timeline_editor_buttons", defaults.get("show_timeline_editor_buttons", False))
         self.show_advanced_options = self.app_settings.get("show_advanced_options", defaults.get("show_advanced_options", False))
+        self.show_video_feed = self.app_settings.get("show_video_feed", defaults.get("show_video_feed", True))
 
         self.show_generated_file_manager = False
 
@@ -460,6 +463,7 @@ class AppStateUI:
         self.app_settings.set("show_stage2_overlay", self.show_stage2_overlay)
         self.app_settings.set("show_timeline_editor_buttons", self.show_timeline_editor_buttons)
         self.app_settings.set("show_advanced_options", self.show_advanced_options)
+        self.app_settings.set("show_video_feed", self.show_video_feed)
 
         self.app_settings.set("show_gauge_window_timeline1", self.show_gauge_window_timeline1)
         self.app_settings.set("show_gauge_window_timeline2", self.show_gauge_window_timeline2)
