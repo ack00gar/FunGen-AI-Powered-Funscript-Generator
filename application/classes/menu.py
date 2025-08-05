@@ -227,19 +227,49 @@ class MainMenu:
             if imgui.begin_menu("Export..."):
                 if _menu_item_simple("Funscript from Timeline 1..."):
                     if self.app.gui_instance and self.app.gui_instance.file_dialog:
+                        video_path = self.app.file_manager.video_path
+                        output_folder_base = self.app.app_settings.get("output_folder_path", "output")
+                        initial_path = output_folder_base
+                        initial_filename = "timeline1.funscript"
+
+                        if video_path:
+                            video_basename = os.path.splitext(os.path.basename(video_path))[0]
+                            initial_path = os.path.join(output_folder_base, video_basename)
+                            initial_filename = f"{video_basename}.funscript"
+
+                        if not os.path.isdir(initial_path):
+                            os.makedirs(initial_path, exist_ok=True)
+
                         self.app.gui_instance.file_dialog.show(
                             is_save=True,
                             title="Export Funscript from Timeline 1",
                             extension_filter="Funscript Files (*.funscript),*.funscript",
-                            callback=lambda filepath: fm.save_funscript_from_timeline(filepath, 1)
+                            callback=lambda filepath: fm.save_funscript_from_timeline(filepath, 1),
+                            initial_path=initial_path,
+                            initial_filename=initial_filename
                         )
                 if _menu_item_simple("Funscript from Timeline 2..."):
                     if self.app.gui_instance and self.app.gui_instance.file_dialog:
+                        video_path = self.app.file_manager.video_path
+                        output_folder_base = self.app.app_settings.get("output_folder_path", "output")
+                        initial_path = output_folder_base
+                        initial_filename = "timeline2.funscript"
+
+                        if video_path:
+                            video_basename = os.path.splitext(os.path.basename(video_path))[0]
+                            initial_path = os.path.join(output_folder_base, video_basename)
+                            initial_filename = f"{video_basename}_t2.funscript"
+
+                        if not os.path.isdir(initial_path):
+                            os.makedirs(initial_path, exist_ok=True)
+
                         self.app.gui_instance.file_dialog.show(
                             is_save=True,
                             title="Export Funscript from Timeline 2",
                             extension_filter="Funscript Files (*.funscript),*.funscript",
-                            callback=lambda filepath: fm.save_funscript_from_timeline(filepath, 2)
+                            callback=lambda filepath: fm.save_funscript_from_timeline(filepath, 2),
+                            initial_path=initial_path,
+                            initial_filename=initial_filename
                         )
                 imgui.end_menu()
             imgui.separator()
