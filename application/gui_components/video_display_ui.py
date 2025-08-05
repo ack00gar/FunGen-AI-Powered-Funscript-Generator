@@ -508,6 +508,25 @@ class VideoDisplayUI:
                                                 self.drawn_oscillation_area_video_coords = (area_x, area_y, area_w, area_h)
                                                 self.waiting_for_oscillation_point_click = True
                                                 self.app.logger.info("Oscillation area drawn. Setting tracking point to center.", extra={'status_message': True, 'duration': 5.0})
+                                                if hasattr(self.app, 'tracker') and self.app.tracker:
+                                                    current_frame = None
+                                                    if self.app.processor and self.app.processor.current_frame is not None:
+                                                        current_frame = self.app.processor.current_frame.copy()
+                                                    center_x = area_x + area_w // 2
+                                                    center_y = area_y + area_h // 2
+                                                    point_vid_coords = (center_x, center_y)
+                                                    self.app.tracker.set_oscillation_area_and_point(
+                                                        (area_x, area_y, area_w, area_h),
+                                                        point_vid_coords,
+                                                        current_frame
+                                                    )
+                                                # --- FULLY RESET DRAWING STATE AND EXIT MODE ---
+                                                self.waiting_for_oscillation_point_click = False
+                                                self.drawn_oscillation_area_video_coords = None
+                                                self.is_drawing_oscillation_area = False
+                                                self.oscillation_area_draw_start_screen_pos = (0, 0)
+                                                self.oscillation_area_draw_current_screen_pos = (0, 0)
+                                                self.app.is_setting_oscillation_area_mode = False
                                             else:
                                                 self.app.logger.info("Drawn oscillation area is too small. Please redraw.", extra={'status_message': True})
                                                 self.drawn_oscillation_area_video_coords = None
@@ -524,7 +543,15 @@ class VideoDisplayUI:
                                     point_vid_coords = (center_x, center_y)
                                     
                                     # Set the oscillation area immediately without requiring point click
-                                    self.app.oscillation_area_and_point_set(self.drawn_oscillation_area_video_coords, point_vid_coords)
+                                    if hasattr(self.app, 'tracker') and self.app.tracker:
+                                        current_frame = None
+                                        if self.app.processor and self.app.processor.current_frame is not None:
+                                            current_frame = self.app.processor.current_frame.copy()
+                                        self.app.tracker.set_oscillation_area_and_point(
+                                            self.drawn_oscillation_area_video_coords,
+                                            point_vid_coords,
+                                            current_frame
+                                        )
                                     self.waiting_for_oscillation_point_click = False
                                     self.drawn_oscillation_area_video_coords = None
                                     # Clear drawing state to prevent showing both rectangles
@@ -584,7 +611,7 @@ class VideoDisplayUI:
                                         color = (0, 0, 0, 0.3)  # Faded grey
                                         if (r, c) in self.app.tracker.oscillation_active_block_positions:
                                             color = (0, 255, 0, 255)  # Green for active
-                                        draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
+                                        #draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
 
                         # Visualization of active User Fixed ROI (even when not setting)
                         if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
