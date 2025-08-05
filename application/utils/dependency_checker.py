@@ -57,7 +57,7 @@ def _ensure_packages(packages):
                 is_compatible, needs_upgrade = _check_version_compatibility(installed_version, version_spec)
                 if not is_compatible:
                     print(f"Package {package_name} version {installed_version} doesn't satisfy {version_spec}")
-                    to_upgrade.append(package_spec)
+                    #to_upgrade.append(package_spec)
             # else: package exists and no version requirement, keep it
         except PackageNotFoundError:
             missing.append(package_spec)
