@@ -29,7 +29,8 @@ def main():
     # Step 1: Perform dependency check before importing anything else
     try:
         from application.utils.dependency_checker import check_and_install_dependencies
-        check_and_install_dependencies()
+        # check_and_install_dependencies()
+        pass
     except ImportError as e:
         print(f"Failed to import dependency checker: {e}", file=sys.stderr)
         print("Please ensure the file 'application/utils/dependency_checker.py' exists.", file=sys.stderr)
