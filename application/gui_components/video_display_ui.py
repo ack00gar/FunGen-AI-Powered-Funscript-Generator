@@ -177,83 +177,7 @@ class VideoDisplayUI:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
 
-    def _render_fps_slider_controls(self, app_state, button_h_ref, slider_w, reset_button_w, native_fps_val, reset_button_text):
-        # This method is moved from VideoNavigationUI
-        imgui.begin_group()
-        imgui.set_next_item_width(slider_w)
-
-        current_target_fps_setting = self.app.processor.target_fps if self.app.processor else 30.0
-        fps_value_for_slider_display = current_target_fps_setting
-        if self.app.processor and self.app.processor.is_processing and self.app.processor.actual_fps > 0.1:
-            fps_value_for_slider_display = self.app.processor.actual_fps
-        elif self.app.tracker and self.app.tracker.current_fps > 0.1 and not (self.app.processor and self.app.processor.is_processing):
-            fps_value_for_slider_display = self.app.tracker.current_fps
-
-        changed_fps, new_target_value_from_drag = imgui.slider_float(
-            "##TargetFPSTinyOverlay", fps_value_for_slider_display,
-            app_state.fps_slider_min_val, app_state.fps_slider_max_val, "%.0f FPS"
-        )
-        if changed_fps:
-            if self.app.processor:
-                self.app.processor.set_target_fps(new_target_value_from_drag)
-
-        rect_min, rect_max = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        tracker_fps_mark = self.app.tracker.current_fps if self.app.tracker else 0.0
-        processor_fps_mark = self.app.processor.actual_fps if self.app.processor else 0.0
-        self.gui_instance._draw_fps_marks_on_slider(
-            imgui.get_window_draw_list(), rect_min, rect_max,
-            current_target_fps_setting, tracker_fps_mark, processor_fps_mark
-        )
-
-        imgui.same_line(spacing=4)
-        if native_fps_val > 0:
-            if imgui.button(reset_button_text + "##FPSResetTinyOverlay", width=reset_button_w):
-                if self.app.processor:
-                    self.app.processor.set_target_fps(native_fps_val)
-        else:
-            imgui.dummy(reset_button_w, button_h_ref)
-        imgui.end_group()
-
-    def _render_fps_controls_overlay(self):
-        """Manages positioning and parameters for FPS controls overlay."""
-        style = imgui.get_style()
-        event_handlers = self.app.event_handlers
-        app_state = self.app.app_state_ui
-        stage_proc = self.app.stage_processor
-        file_mgr = self.app.file_manager
-
-        # Check if live tracking is running  
-        is_live_tracking_running = (self.app.processor and
-                                    self.app.processor.is_processing and
-                                    self.app.processor.enable_tracker_processing)
-        
-        controls_disabled = stage_proc.full_analysis_active or is_live_tracking_running or not file_mgr.video_path
-
-        button_h_ref = imgui.get_frame_height()
-        tiny_fps_slider_w = 75.0
-        native_fps_str, native_fps_val_for_reset = event_handlers.get_native_fps_info_for_button()
-        tiny_fps_reset_button_text = f"R{native_fps_str}"
-        tiny_fps_reset_button_w = max(button_h_ref * 1.5, imgui.calc_text_size(tiny_fps_reset_button_text)[0] + style.frame_padding[0] * 2 + 5)
-
-        total_fps_controls_width = tiny_fps_slider_w + style.item_spacing[0] + tiny_fps_reset_button_w
-
-        img_rect = self._actual_video_image_rect_on_screen
-        if img_rect['w'] <= 0 or img_rect['h'] <= 0: return
-
-        overlay_x = img_rect['max_x'] - total_fps_controls_width - style.item_spacing[1]
-        overlay_y = img_rect['max_y'] - button_h_ref - style.item_spacing[1] * 2
-        overlay_y = max(img_rect['min_y'] + style.item_spacing[1], overlay_y)
-        overlay_x = max(img_rect['min_x'] + style.item_spacing[1], overlay_x)
-        imgui.set_cursor_screen_pos((overlay_x, overlay_y))
-
-        if controls_disabled:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
-        self._render_fps_slider_controls(app_state, button_h_ref, tiny_fps_slider_w, tiny_fps_reset_button_w,
-                                         native_fps_val_for_reset, tiny_fps_reset_button_text)
-        if controls_disabled:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
+    
 
     def _render_pose_skeleton(self, draw_list, pose_data: dict, is_dominant: bool):
         """Draws the skeleton, highlighting the dominant pose."""
@@ -360,355 +284,361 @@ class VideoDisplayUI:
             should_render_content = True
 
         if should_render_content:
-            # The original content of the render method, which draws the video frame
             stage_proc = self.app.stage_processor
 
-            current_frame_for_texture = None
-            if self.app.processor and self.app.processor.current_frame is not None:
-                with self.app.processor.frame_lock:
-                    if self.app.processor.current_frame is not None:
-                        current_frame_for_texture = self.app.processor.current_frame.copy()
+            # If video feed is disabled, just show the drop prompt if no video is loaded,
+            # otherwise show a blank placeholder and skip all expensive processing.
+            if not app_state.show_video_feed:
+                if not (self.app.processor and self.app.processor.current_frame is not None):
+                    self._render_drop_video_prompt()
+                # Otherwise, do nothing, leaving the panel blank.
+            else:
+                # --- Original logic when video feed is enabled ---
+                current_frame_for_texture = None
+                if self.app.processor and self.app.processor.current_frame is not None:
+                    with self.app.processor.frame_lock:
+                        if self.app.processor.current_frame is not None:
+                            current_frame_for_texture = self.app.processor.current_frame.copy()
 
-            video_frame_available = current_frame_for_texture is not None
+                video_frame_available = current_frame_for_texture is not None
 
-            if video_frame_available:
-                self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
-                available_w_video, available_h_video = imgui.get_content_region_available()
+                if video_frame_available:
+                    self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
+                    available_w_video, available_h_video = imgui.get_content_region_available()
 
-                if available_w_video > 0 and available_h_video > 0:
-                    display_w, display_h, cursor_x_offset, cursor_y_offset = app_state.calculate_video_display_dimensions(available_w_video, available_h_video)
-                    if display_w > 0 and display_h > 0:
-                        self._update_actual_video_image_rect(display_w, display_h, cursor_x_offset, cursor_y_offset)
+                    if available_w_video > 0 and available_h_video > 0:
+                        display_w, display_h, cursor_x_offset, cursor_y_offset = app_state.calculate_video_display_dimensions(available_w_video, available_h_video)
+                        if display_w > 0 and display_h > 0:
+                            self._update_actual_video_image_rect(display_w, display_h, cursor_x_offset, cursor_y_offset)
 
-                        win_content_x, win_content_y = imgui.get_cursor_pos()
-                        imgui.set_cursor_pos((win_content_x + cursor_x_offset, win_content_y + cursor_y_offset))
+                            win_content_x, win_content_y = imgui.get_cursor_pos()
+                            imgui.set_cursor_pos((win_content_x + cursor_x_offset, win_content_y + cursor_y_offset))
 
-                        uv0_x, uv0_y, uv1_x, uv1_y = app_state.get_video_uv_coords()
-                        imgui.image(self.gui_instance.frame_texture_id, display_w, display_h, (uv0_x, uv0_y), (uv1_x, uv1_y))
+                            uv0_x, uv0_y, uv1_x, uv1_y = app_state.get_video_uv_coords()
+                            imgui.image(self.gui_instance.frame_texture_id, display_w, display_h, (uv0_x, uv0_y), (uv1_x, uv1_y))
 
-                        # Store the item rect for overlay positioning, AFTER imgui.image
-                        self._video_display_rect_min = imgui.get_item_rect_min()
-                        self._video_display_rect_max = imgui.get_item_rect_max()
+                            # Store the item rect for overlay positioning, AFTER imgui.image
+                            self._video_display_rect_min = imgui.get_item_rect_min()
+                            self._video_display_rect_max = imgui.get_item_rect_max()
 
-                        #--- User Defined ROI Drawing/Selection Logic ---
-                        io = imgui.get_io()
-                        #  Check hover based on the actual image rect stored by _update_actual_video_image_rect
-                        is_hovering_actual_video_image = imgui.is_mouse_hovering_rect(
-                            self._actual_video_image_rect_on_screen['min_x'],
-                            self._actual_video_image_rect_on_screen['min_y'],
-                            self._actual_video_image_rect_on_screen['max_x'],
-                            self._actual_video_image_rect_on_screen['max_y']
-                        )
+                            #--- User Defined ROI Drawing/Selection Logic ---
+                            io = imgui.get_io()
+                            #  Check hover based on the actual image rect stored by _update_actual_video_image_rect
+                            is_hovering_actual_video_image = imgui.is_mouse_hovering_rect(
+                                self._actual_video_image_rect_on_screen['min_x'],
+                                self._actual_video_image_rect_on_screen['min_y'],
+                                self._actual_video_image_rect_on_screen['max_x'],
+                                self._actual_video_image_rect_on_screen['max_y']
+                            )
 
-                        if self.app.is_setting_user_roi_mode:
-                            draw_list = imgui.get_window_draw_list()
-                            mouse_screen_x, mouse_screen_y = io.mouse_pos
+                            if self.app.is_setting_user_roi_mode:
+                                draw_list = imgui.get_window_draw_list()
+                                mouse_screen_x, mouse_screen_y = io.mouse_pos
 
-                            if is_hovering_actual_video_image:
-                                if not self.waiting_for_point_click: # ROI Drawing phase
-                                    if io.mouse_down[0] and not self.is_drawing_user_roi: # Left mouse button down
-                                        self.is_drawing_user_roi = True
-                                        self.user_roi_draw_start_screen_pos = (mouse_screen_x, mouse_screen_y)
-                                        self.user_roi_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
-                                        self.drawn_user_roi_video_coords = None
-                                        self.app.energy_saver.reset_activity_timer()
-
-                                    if self.is_drawing_user_roi:
-                                        self.user_roi_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
-                                        draw_list.add_rect(
-                                            min(self.user_roi_draw_start_screen_pos[0],
-                                                self.user_roi_draw_current_screen_pos[0]),
-                                            min(self.user_roi_draw_start_screen_pos[1],
-                                                self.user_roi_draw_current_screen_pos[1]),
-                                            max(self.user_roi_draw_start_screen_pos[0],
-                                                self.user_roi_draw_current_screen_pos[0]),
-                                            max(self.user_roi_draw_start_screen_pos[1],
-                                                self.user_roi_draw_current_screen_pos[1]),
-                                            imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_DRAWING), thickness=2
-                                        )
-
-                                    if not io.mouse_down[0] and self.is_drawing_user_roi: # Mouse released
-                                        self.is_drawing_user_roi = False
-                                        start_vid_coords = self._screen_to_video_coords(
-                                            *self.user_roi_draw_start_screen_pos)
-                                        end_vid_coords = self._screen_to_video_coords(
-                                            *self.user_roi_draw_current_screen_pos)
-
-                                        if start_vid_coords and end_vid_coords:
-                                            vx1, vy1 = start_vid_coords
-                                            vx2, vy2 = end_vid_coords
-                                            roi_x, roi_y = min(vx1, vx2), min(vy1, vy2)
-                                            roi_w, roi_h = abs(vx2 - vx1), abs(vy2 - vy1)
-
-                                            if roi_w > 5 and roi_h > 5: # Minimum ROI size
-                                                self.drawn_user_roi_video_coords = (roi_x, roi_y, roi_w, roi_h)
-                                                self.waiting_for_point_click = True
-                                                self.app.logger.info("ROI drawn. Click a point inside the ROI.", extra={'status_message': True, 'duration': 5.0})
-                                            else:
-                                                self.app.logger.info("Drawn ROI is too small. Please redraw.", extra={'status_message': True})
-                                                self.drawn_user_roi_video_coords = None
-                                        else:
-                                            self.app.logger.warning(
-                                                "Could not convert ROI screen coordinates to video coordinates (likely drawn outside video area).")
+                                if is_hovering_actual_video_image:
+                                    if not self.waiting_for_point_click: # ROI Drawing phase
+                                        if io.mouse_down[0] and not self.is_drawing_user_roi: # Left mouse button down
+                                            self.is_drawing_user_roi = True
+                                            self.user_roi_draw_start_screen_pos = (mouse_screen_x, mouse_screen_y)
+                                            self.user_roi_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
                                             self.drawn_user_roi_video_coords = None
+                                            self.app.energy_saver.reset_activity_timer()
 
-                                elif self.waiting_for_point_click and self.drawn_user_roi_video_coords: # Point selection phase
-                                    if imgui.is_mouse_clicked(0): # Left click
-                                        self.app.energy_saver.reset_activity_timer()
-                                        point_vid_coords = self._screen_to_video_coords(mouse_screen_x, mouse_screen_y)
-                                        if point_vid_coords:
-                                            roi_x, roi_y, roi_w, roi_h = self.drawn_user_roi_video_coords
-                                            pt_x, pt_y = point_vid_coords
-                                            if roi_x <= pt_x < roi_x + roi_w and roi_y <= pt_y < roi_y + roi_h:
-                                                self.app.user_roi_and_point_set(self.drawn_user_roi_video_coords, point_vid_coords)
-                                                self.waiting_for_point_click = False
+                                        if self.is_drawing_user_roi:
+                                            self.user_roi_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
+                                            draw_list.add_rect(
+                                                min(self.user_roi_draw_start_screen_pos[0],
+                                                    self.user_roi_draw_current_screen_pos[0]),
+                                                min(self.user_roi_draw_start_screen_pos[1],
+                                                    self.user_roi_draw_current_screen_pos[1]),
+                                                max(self.user_roi_draw_start_screen_pos[0],
+                                                    self.user_roi_draw_current_screen_pos[0]),
+                                                max(self.user_roi_draw_start_screen_pos[1],
+                                                    self.user_roi_draw_current_screen_pos[1]),
+                                                imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_DRAWING), thickness=2
+                                            )
+
+                                        if not io.mouse_down[0] and self.is_drawing_user_roi: # Mouse released
+                                            self.is_drawing_user_roi = False
+                                            start_vid_coords = self._screen_to_video_coords(
+                                                *self.user_roi_draw_start_screen_pos)
+                                            end_vid_coords = self._screen_to_video_coords(
+                                                *self.user_roi_draw_current_screen_pos)
+
+                                            if start_vid_coords and end_vid_coords:
+                                                vx1, vy1 = start_vid_coords
+                                                vx2, vy2 = end_vid_coords
+                                                roi_x, roi_y = min(vx1, vx2), min(vy1, vy2)
+                                                roi_w, roi_h = abs(vx2 - vx1), abs(vy2 - vy1)
+
+                                                if roi_w > 5 and roi_h > 5: # Minimum ROI size
+                                                    self.drawn_user_roi_video_coords = (roi_x, roi_y, roi_w, roi_h)
+                                                    self.waiting_for_point_click = True
+                                                    self.app.logger.info("ROI drawn. Click a point inside the ROI.", extra={'status_message': True, 'duration': 5.0})
+                                                else:
+                                                    self.app.logger.info("Drawn ROI is too small. Please redraw.", extra={'status_message': True})
+                                                    self.drawn_user_roi_video_coords = None
+                                            else:
+                                                self.app.logger.warning(
+                                                    "Could not convert ROI screen coordinates to video coordinates (likely drawn outside video area).")
                                                 self.drawn_user_roi_video_coords = None
+
+                                    elif self.waiting_for_point_click and self.drawn_user_roi_video_coords: # Point selection phase
+                                        if imgui.is_mouse_clicked(0): # Left click
+                                            self.app.energy_saver.reset_activity_timer()
+                                            point_vid_coords = self._screen_to_video_coords(mouse_screen_x, mouse_screen_y)
+                                            if point_vid_coords:
+                                                roi_x, roi_y, roi_w, roi_h = self.drawn_user_roi_video_coords
+                                                pt_x, pt_y = point_vid_coords
+                                                if roi_x <= pt_x < roi_x + roi_w and roi_y <= pt_y < roi_y + roi_h:
+                                                    self.app.user_roi_and_point_set(self.drawn_user_roi_video_coords, point_vid_coords)
+                                                    self.waiting_for_point_click = False
+                                                    self.drawn_user_roi_video_coords = None
+                                                else:
+                                                    self.app.logger.info(
+                                                        "Clicked point is outside the drawn ROI. Please click inside.",
+                                                        extra={'status_message': True})
                                             else:
-                                                self.app.logger.info(
-                                                    "Clicked point is outside the drawn ROI. Please click inside.",
-                                                    extra={'status_message': True})
-                                        else:
-                                            self.app.logger.info("Point click was outside the video content area.", extra={'status_message': True})
-                            elif self.is_drawing_user_roi and not io.mouse_down[0]: # Mouse released outside hovered area while drawing
-                                self.is_drawing_user_roi = False
-                                self.app.logger.info("ROI drawing cancelled (mouse released outside video).", extra={'status_message': True})
+                                                self.app.logger.info("Point click was outside the video content area.", extra={'status_message': True})
+                                elif self.is_drawing_user_roi and not io.mouse_down[0]: # Mouse released outside hovered area while drawing
+                                    self.is_drawing_user_roi = False
+                                    self.app.logger.info("ROI drawing cancelled (mouse released outside video).", extra={'status_message': True})
 
-                        # --- Oscillation Area Drawing/Selection Logic ---
-                        if self.app.is_setting_oscillation_area_mode:
-                            draw_list = imgui.get_window_draw_list()
-                            mouse_screen_x, mouse_screen_y = io.mouse_pos
+                            # --- Oscillation Area Drawing/Selection Logic ---
+                            if self.app.is_setting_oscillation_area_mode:
+                                draw_list = imgui.get_window_draw_list()
+                                mouse_screen_x, mouse_screen_y = io.mouse_pos
 
-                            if is_hovering_actual_video_image:
-                                if not self.waiting_for_oscillation_point_click: # Area Drawing phase
-                                    if io.mouse_down[0] and not self.is_drawing_oscillation_area: # Left mouse button down
-                                        self.is_drawing_oscillation_area = True
-                                        self.oscillation_area_draw_start_screen_pos = (mouse_screen_x, mouse_screen_y)
-                                        self.oscillation_area_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
-                                        self.drawn_oscillation_area_video_coords = None
-                                        self.app.energy_saver.reset_activity_timer()
-
-                                    if self.is_drawing_oscillation_area:
-                                        self.oscillation_area_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
-                                        draw_list.add_rect(
-                                            min(self.oscillation_area_draw_start_screen_pos[0],
-                                                self.oscillation_area_draw_current_screen_pos[0]),
-                                            min(self.oscillation_area_draw_start_screen_pos[1],
-                                                self.oscillation_area_draw_current_screen_pos[1]),
-                                            max(self.oscillation_area_draw_start_screen_pos[0],
-                                                self.oscillation_area_draw_current_screen_pos[0]),
-                                            max(self.oscillation_area_draw_start_screen_pos[1],
-                                                self.oscillation_area_draw_current_screen_pos[1]),
-                                            imgui.get_color_u32_rgba(0, 255, 255, 255), thickness=2  # Cyan color
-                                        )
-
-                                    if not io.mouse_down[0] and self.is_drawing_oscillation_area: # Mouse released
-                                        self.is_drawing_oscillation_area = False
-                                        start_vid_coords = self._screen_to_video_coords(
-                                            *self.oscillation_area_draw_start_screen_pos)
-                                        end_vid_coords = self._screen_to_video_coords(
-                                            *self.oscillation_area_draw_current_screen_pos)
-
-                                        if start_vid_coords and end_vid_coords:
-                                            vx1, vy1 = start_vid_coords
-                                            vx2, vy2 = end_vid_coords
-                                            area_x, area_y = min(vx1, vx2), min(vy1, vy2)
-                                            area_w, area_h = abs(vx2 - vx1), abs(vy2 - vy1)
-
-                                            if area_w > 5 and area_h > 5: # Minimum area size
-                                                self.drawn_oscillation_area_video_coords = (area_x, area_y, area_w, area_h)
-                                                self.waiting_for_oscillation_point_click = True
-                                                self.app.logger.info("Oscillation area drawn. Setting tracking point to center.", extra={'status_message': True, 'duration': 5.0})
-                                            else:
-                                                self.app.logger.info("Drawn oscillation area is too small. Please redraw.", extra={'status_message': True})
-                                                self.drawn_oscillation_area_video_coords = None
-                                        else:
-                                            self.app.logger.warning(
-                                                "Could not convert oscillation area screen coordinates to video coordinates (likely drawn outside video area).")
+                                if is_hovering_actual_video_image:
+                                    if not self.waiting_for_oscillation_point_click: # Area Drawing phase
+                                        if io.mouse_down[0] and not self.is_drawing_oscillation_area: # Left mouse button down
+                                            self.is_drawing_oscillation_area = True
+                                            self.oscillation_area_draw_start_screen_pos = (mouse_screen_x, mouse_screen_y)
+                                            self.oscillation_area_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
                                             self.drawn_oscillation_area_video_coords = None
+                                            self.app.energy_saver.reset_activity_timer()
 
-                                elif self.waiting_for_oscillation_point_click and self.drawn_oscillation_area_video_coords: # Point selection phase
-                                    # Use center point of the area as the tracking point
-                                    area_x, area_y, area_w, area_h = self.drawn_oscillation_area_video_coords
-                                    center_x = area_x + area_w // 2
-                                    center_y = area_y + area_h // 2
-                                    point_vid_coords = (center_x, center_y)
-                                    
-                                    # Set the oscillation area immediately without requiring point click
-                                    self.app.oscillation_area_and_point_set(self.drawn_oscillation_area_video_coords, point_vid_coords)
-                                    self.waiting_for_oscillation_point_click = False
-                                    self.drawn_oscillation_area_video_coords = None
-                                    # Clear drawing state to prevent showing both rectangles
+                                        if self.is_drawing_oscillation_area:
+                                            self.oscillation_area_draw_current_screen_pos = (mouse_screen_x, mouse_screen_y)
+                                            draw_list.add_rect(
+                                                min(self.oscillation_area_draw_start_screen_pos[0],
+                                                    self.oscillation_area_draw_current_screen_pos[0]),
+                                                min(self.oscillation_area_draw_start_screen_pos[1],
+                                                    self.oscillation_area_draw_current_screen_pos[1]),
+                                                max(self.oscillation_area_draw_start_screen_pos[0],
+                                                    self.oscillation_area_draw_current_screen_pos[0]),
+                                                max(self.oscillation_area_draw_start_screen_pos[1],
+                                                    self.oscillation_area_draw_current_screen_pos[1]),
+                                                imgui.get_color_u32_rgba(0, 255, 255, 255), thickness=2  # Cyan color
+                                            )
+
+                                        if not io.mouse_down[0] and self.is_drawing_oscillation_area: # Mouse released
+                                            self.is_drawing_oscillation_area = False
+                                            start_vid_coords = self._screen_to_video_coords(
+                                                *self.oscillation_area_draw_start_screen_pos)
+                                            end_vid_coords = self._screen_to_video_coords(
+                                                *self.oscillation_area_draw_current_screen_pos)
+
+                                            if start_vid_coords and end_vid_coords:
+                                                vx1, vy1 = start_vid_coords
+                                                vx2, vy2 = end_vid_coords
+                                                area_x, area_y = min(vx1, vx2), min(vy1, vy2)
+                                                area_w, area_h = abs(vx2 - vx1), abs(vy2 - vy1)
+
+                                                if area_w > 5 and area_h > 5: # Minimum area size
+                                                    self.drawn_oscillation_area_video_coords = (area_x, area_y, area_w, area_h)
+                                                    self.waiting_for_oscillation_point_click = True
+                                                    self.app.logger.info("Oscillation area drawn. Setting tracking point to center.", extra={'status_message': True, 'duration': 5.0})
+                                                else:
+                                                    self.app.logger.info("Drawn oscillation area is too small. Please redraw.", extra={'status_message': True})
+                                                    self.drawn_oscillation_area_video_coords = None
+                                            else:
+                                                self.app.logger.warning(
+                                                    "Could not convert oscillation area screen coordinates to video coordinates (likely drawn outside video area).")
+                                                self.drawn_oscillation_area_video_coords = None
+
+                                    elif self.waiting_for_oscillation_point_click and self.drawn_oscillation_area_video_coords: # Point selection phase
+                                        # Use center point of the area as the tracking point
+                                        area_x, area_y, area_w, area_h = self.drawn_oscillation_area_video_coords
+                                        center_x = area_x + area_w // 2
+                                        center_y = area_y + area_h // 2
+                                        point_vid_coords = (center_x, center_y)
+                                        
+                                        # Set the oscillation area immediately without requiring point click
+                                        self.app.oscillation_area_and_point_set(self.drawn_oscillation_area_video_coords, point_vid_coords)
+                                        self.waiting_for_oscillation_point_click = False
+                                        self.drawn_oscillation_area_video_coords = None
+                                        # Clear drawing state to prevent showing both rectangles
+                                        self.is_drawing_oscillation_area = False
+                                        self.oscillation_area_draw_start_screen_pos = (0, 0)
+                                        self.oscillation_area_draw_current_screen_pos = (0, 0)
+                                elif self.is_drawing_oscillation_area and not io.mouse_down[0]: # Mouse released outside hovered area while drawing
                                     self.is_drawing_oscillation_area = False
-                                    self.oscillation_area_draw_start_screen_pos = (0, 0)
-                                    self.oscillation_area_draw_current_screen_pos = (0, 0)
-                            elif self.is_drawing_oscillation_area and not io.mouse_down[0]: # Mouse released outside hovered area while drawing
-                                self.is_drawing_oscillation_area = False
-                                self.app.logger.info("Oscillation area drawing cancelled (mouse released outside video).", extra={'status_message': True})
+                                    self.app.logger.info("Oscillation area drawing cancelled (mouse released outside video).", extra={'status_message': True})
 
-                        # Visualization of active Oscillation Area (even when not setting)
-                        if (
-                            self.app.tracker and 
-                            self.app.tracker.oscillation_area_fixed is not None and 
-                            self.app.tracker.oscillation_grid_blocks and
-                            not self.app.is_setting_oscillation_area_mode
-                        ):
-                            draw_list = imgui.get_window_draw_list()
-                            ax_vid, ay_vid, aw_vid, ah_vid = self.app.tracker.oscillation_area_fixed
+                            # Visualization of active Oscillation Area (even when not setting)
+                            if (
+                                self.app.tracker and 
+                                self.app.tracker.oscillation_area_fixed is not None and 
+                                self.app.tracker.oscillation_grid_blocks and
+                                not self.app.is_setting_oscillation_area_mode
+                            ):
+                                draw_list = imgui.get_window_draw_list()
+                                ax_vid, ay_vid, aw_vid, ah_vid = self.app.tracker.oscillation_area_fixed
 
-                            area_start_screen = self._video_to_screen_coords(ax_vid, ay_vid)
-                            area_end_screen = self._video_to_screen_coords(ax_vid + aw_vid, ay_vid + ah_vid)
+                                area_start_screen = self._video_to_screen_coords(ax_vid, ay_vid)
+                                area_end_screen = self._video_to_screen_coords(ax_vid + aw_vid, ay_vid + ah_vid)
 
-                            if area_start_screen and area_end_screen:
-                                # Draw blue outline for the area
-                                draw_list.add_rect(area_start_screen[0], area_start_screen[1], area_end_screen[0], area_end_screen[1], imgui.get_color_u32_rgba(0, 128, 255, 255), thickness=2)
-                                # Add label
-                                draw_list.add_text(area_start_screen[0], area_start_screen[1] - 15, imgui.get_color_u32_rgba(0, 255, 255, 255), "Oscillation Area")
+                                if area_start_screen and area_end_screen:
+                                    # Draw blue outline for the area
+                                    draw_list.add_rect(area_start_screen[0], area_start_screen[1], area_end_screen[0], area_end_screen[1], imgui.get_color_u32_rgba(0, 128, 255, 255), thickness=2)
+                                    # Add label
+                                    draw_list.add_text(area_start_screen[0], area_start_screen[1] - 15, imgui.get_color_u32_rgba(0, 255, 255, 255), "Oscillation Area")
 
-                                # Draw the grid blocks
-                                # Get active block positions from tracker if available
-                                active_block_positions = set()
-                                if hasattr(self.app.tracker, 'oscillation_active_block_positions'):
-                                    active_block_positions = set(self.app.tracker.oscillation_active_block_positions)
-                                elif hasattr(self.app.tracker, 'last_active_block_positions'):
-                                    active_block_positions = set(self.app.tracker.last_active_block_positions)
-                                # Fallback: try to get from tracker attribute if exposed
-                                elif hasattr(self.app.tracker, 'get_active_block_positions'):
-                                    active_block_positions = set(self.app.tracker.get_active_block_positions())
-                                # If not available, just draw all as grey
+                                    # Draw the grid blocks
+                                    # Get active block positions from tracker if available
+                                    active_block_positions = set()
+                                    if hasattr(self.app.tracker, 'oscillation_active_block_positions'):
+                                        active_block_positions = set(self.app.tracker.oscillation_active_block_positions)
+                                    elif hasattr(self.app.tracker, 'last_active_block_positions'):
+                                        active_block_positions = set(self.app.tracker.last_active_block_positions)
+                                    # Fallback: try to get from tracker attribute if exposed
+                                    elif hasattr(self.app.tracker, 'get_active_block_positions'):
+                                        active_block_positions = set(self.app.tracker.get_active_block_positions())
+                                    # If not available, just draw all as grey
 
-                                # Try to infer grid dimensions
-                                grid_blocks = self.app.tracker.oscillation_grid_blocks
-                                num_blocks = len(grid_blocks)
-                                # Try to get max_blocks_w from tracker if available
-                                max_blocks_w = getattr(self.app.tracker, 'oscillation_max_blocks_w', 0)
-                                if max_blocks_w <= 0:
-                                    # Fallback: estimate as square
-                                    max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
-                                for i, (x, y, w, h) in enumerate(grid_blocks):
-                                    grid_start = self._video_to_screen_coords(x, y)
-                                    grid_end = self._video_to_screen_coords(x + w, y + h)
-                                    if grid_start and grid_end:
-                                        # Compute (r, c) for this block
-                                        r = i // max_blocks_w
-                                        c = i % max_blocks_w
-                                        color = (0, 0, 0, 0.3)  # Faded grey
-                                        if (r, c) in self.app.tracker.oscillation_active_block_positions:
-                                            color = (0, 255, 0, 255)  # Green for active
-                                        draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
+                                    # Try to infer grid dimensions
+                                    grid_blocks = self.app.tracker.oscillation_grid_blocks
+                                    num_blocks = len(grid_blocks)
+                                    # Try to get max_blocks_w from tracker if available
+                                    max_blocks_w = getattr(self.app.tracker, 'oscillation_max_blocks_w', 0)
+                                    if max_blocks_w <= 0:
+                                        # Fallback: estimate as square
+                                        max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
+                                    for i, (x, y, w, h) in enumerate(grid_blocks):
+                                        grid_start = self._video_to_screen_coords(x, y)
+                                        grid_end = self._video_to_screen_coords(x + w, y + h)
+                                        if grid_start and grid_end:
+                                            # Compute (r, c) for this block
+                                            r = i // max_blocks_w
+                                            c = i % max_blocks_w
+                                            color = (0, 0, 0, 0.3)  # Faded grey
+                                            if (r, c) in self.app.tracker.oscillation_active_block_positions:
+                                                color = (0, 255, 0, 255)  # Green for active
+                                            draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
 
-                        # Visualization of active User Fixed ROI (even when not setting)
-                        if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
-                                self.app.tracker.user_roi_fixed and not self.app.is_setting_user_roi_mode:
-                            draw_list = imgui.get_window_draw_list()
-                            urx_vid, ury_vid, urw_vid, urh_vid = self.app.tracker.user_roi_fixed
+                            # Visualization of active User Fixed ROI (even when not setting)
+                            if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
+                                    self.app.tracker.user_roi_fixed and not self.app.is_setting_user_roi_mode:
+                                draw_list = imgui.get_window_draw_list()
+                                urx_vid, ury_vid, urw_vid, urh_vid = self.app.tracker.user_roi_fixed
 
-                            roi_start_screen = self._video_to_screen_coords(urx_vid, ury_vid)
-                            roi_end_screen = self._video_to_screen_coords(urx_vid + urw_vid, ury_vid + urh_vid)
+                                roi_start_screen = self._video_to_screen_coords(urx_vid, ury_vid)
+                                roi_end_screen = self._video_to_screen_coords(urx_vid + urw_vid, ury_vid + urh_vid)
 
-                            if roi_start_screen and roi_end_screen:
-                                draw_list.add_rect(roi_start_screen[0],roi_start_screen[1],roi_end_screen[0],roi_end_screen[1],imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_BORDER),thickness=2)
-                            if self.app.tracker.user_roi_tracked_point_relative: # UPDATED TO USE TRACKED POINT
-                                abs_tracked_x_vid = self.app.tracker.user_roi_fixed[0] + int(self.app.tracker.user_roi_tracked_point_relative[0])
-                                abs_tracked_y_vid = self.app.tracker.user_roi_fixed[1] + int(self.app.tracker.user_roi_tracked_point_relative[1])
-                                point_screen_coords = self._video_to_screen_coords(abs_tracked_x_vid,abs_tracked_y_vid)
-                                if point_screen_coords:
-                                    draw_list.add_circle_filled(point_screen_coords[0], point_screen_coords[1], 5, imgui.get_color_u32_rgba(*VideoDisplayColors.TRACKING_POINT)) # Green moving dot
-                                    if self.app.tracker.show_flow:
-                                        dx_flow_vid, dy_flow_vid = self.app.tracker.user_roi_current_flow_vector
-                                        flow_end_vid_x, flow_end_vid_y = abs_tracked_x_vid + int(dx_flow_vid * 10), abs_tracked_y_vid+int(dy_flow_vid*10)
-                                        flow_end_screen_coords = self._video_to_screen_coords(flow_end_vid_x,flow_end_vid_y)
-                                        if flow_end_screen_coords:
-                                            draw_list.add_line(point_screen_coords[0], point_screen_coords[1], flow_end_screen_coords[0], flow_end_screen_coords[1], imgui.get_color_u32_rgba(*VideoDisplayColors.FLOW_VECTOR), thickness=2)
-                        self._handle_video_mouse_interaction(app_state)
+                                if roi_start_screen and roi_end_screen:
+                                    draw_list.add_rect(roi_start_screen[0],roi_start_screen[1],roi_end_screen[0],roi_end_screen[1],imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_BORDER),thickness=2)
+                                if self.app.tracker.user_roi_tracked_point_relative: # UPDATED TO USE TRACKED POINT
+                                    abs_tracked_x_vid = self.app.tracker.user_roi_fixed[0] + int(self.app.tracker.user_roi_tracked_point_relative[0])
+                                    abs_tracked_y_vid = self.app.tracker.user_roi_fixed[1] + int(self.app.tracker.user_roi_tracked_point_relative[1])
+                                    point_screen_coords = self._video_to_screen_coords(abs_tracked_x_vid,abs_tracked_y_vid)
+                                    if point_screen_coords:
+                                        draw_list.add_circle_filled(point_screen_coords[0], point_screen_coords[1], 5, imgui.get_color_u32_rgba(*VideoDisplayColors.TRACKING_POINT)) # Green moving dot
+                                        if self.app.tracker.show_flow:
+                                            dx_flow_vid, dy_flow_vid = self.app.tracker.user_roi_current_flow_vector
+                                            flow_end_vid_x, flow_end_vid_y = abs_tracked_x_vid + int(dx_flow_vid * 10), abs_tracked_y_vid+int(dy_flow_vid*10)
+                                            flow_end_screen_coords = self._video_to_screen_coords(flow_end_vid_x,flow_end_vid_y)
+                                            if flow_end_screen_coords:
+                                                draw_list.add_line(point_screen_coords[0], point_screen_coords[1], flow_end_screen_coords[0], flow_end_screen_coords[1], imgui.get_color_u32_rgba(*VideoDisplayColors.FLOW_VECTOR), thickness=2)
+                            self._handle_video_mouse_interaction(app_state)
 
-                        if app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map and self.app.processor and \
-                                self.app.processor.current_frame_index >= 0:
-                            self._render_stage2_overlay(stage_proc, app_state)
+                            if app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map and self.app.processor and \
+                                    self.app.processor.current_frame_index >= 0:
+                                self._render_stage2_overlay(stage_proc, app_state)
 
-                        # Only show live tracker info if the Stage 2 overlay isn't active
-                        if self.app.tracker and self.app.tracker.tracking_active and not (app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map):
-                            draw_list = imgui.get_window_draw_list()
+                            # Only show live tracker info if the Stage 2 overlay isn't active
+                            if self.app.tracker and self.app.tracker.tracking_active and not (app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map):
+                                draw_list = imgui.get_window_draw_list()
+                                img_rect = self._actual_video_image_rect_on_screen
+                                # Clip rendering to the video display area
+                                draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
+                                self._render_live_tracker_overlay(draw_list)
+                                draw_list.pop_clip_rect()
+
+                            self._render_playback_controls_overlay()
+                            self._render_video_zoom_pan_controls(app_state)
+
+                            # --- Overlay: Top-right buttons for L/R Dial and Gauge ---
+                            def render_overlay_toggle(label, visible_attr):
+                                pushed = False
+                                if not getattr(app_state, visible_attr, False):
+                                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+                                    pushed = True
+                                if imgui.button(label):
+                                    setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
+                                    self.app.project_manager.project_dirty = True
+                                if pushed:
+                                    imgui.pop_style_var()
+
+                            # Position at top right of video frame
+                            btn_labels = ["Gauge T1", "Gauge T2", "Dial T2"]
+                            btn_attrs = ["show_gauge_window_timeline1", "show_gauge_window_timeline2", "show_lr_dial_graph"]
+                            btn_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in btn_labels]
+                            total_btn_width = sum(btn_widths)
+                            # btn_height = imgui.get_frame_height()
                             img_rect = self._actual_video_image_rect_on_screen
-                            # Clip rendering to the video display area
-                            draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
-                            self._render_live_tracker_overlay(draw_list)
-                            draw_list.pop_clip_rect()
+                            top_right_x = img_rect['max_x'] - total_btn_width + 4
+                            top_right_y = img_rect['min_y'] + 8
+                            imgui.set_cursor_screen_pos((top_right_x, top_right_y))
+                            use_small_font = hasattr(self.gui_instance, 'small_font') and self.gui_instance.small_font and getattr(self.gui_instance.small_font, 'is_loaded', lambda: True)()
+                            if use_small_font:
+                                imgui.push_font(self.gui_instance.small_font)
+                            for i, (lbl, attr) in enumerate(zip(btn_labels, btn_attrs)):
+                                render_overlay_toggle(lbl, attr)
+                                if i < len(btn_labels) - 1:
+                                    imgui.same_line(spacing=4)
+                            if use_small_font:
+                                imgui.pop_font()
 
-                        self._render_playback_controls_overlay()
-                        self._render_fps_controls_overlay()
-                        self._render_video_zoom_pan_controls(app_state)
+                # --- Interactive Refinement Overlay and Click Handling ---
+                if self.app.app_state_ui.interactive_refinement_mode_enabled:
+                    # 1. Render the bounding boxes so the user can see what to click.
+                    # We reuse the existing stage 2 overlay logic for this.
+                    if self.app.stage_processor.stage2_overlay_data_map:
+                        self._render_stage2_overlay(self.app.stage_processor, self.app.app_state_ui)
 
-                        # --- Overlay: Top-right buttons for L/R Dial and Gauge ---
-                        def render_overlay_toggle(label, visible_attr):
-                            pushed = False
-                            if not getattr(app_state, visible_attr, False):
-                                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-                                pushed = True
-                            if imgui.button(label):
-                                setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
-                                self.app.project_manager.project_dirty = True
-                            if pushed:
-                                imgui.pop_style_var()
+                    # 2. Handle the mouse click for the "hint".
+                    io = imgui.get_io()
+                    is_hovering_video = imgui.is_mouse_hovering_rect(
+                        self._actual_video_image_rect_on_screen['min_x'], self._actual_video_image_rect_on_screen['min_y'],
+                        self._actual_video_image_rect_on_screen['max_x'], self._actual_video_image_rect_on_screen['max_y'])
 
-                        # Position at top right of video frame
-                        btn_labels = ["Gauge T1", "Gauge T2", "Dial T2"]
-                        btn_attrs = ["show_gauge_window_timeline1", "show_gauge_window_timeline2", "show_lr_dial_graph"]
-                        btn_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in btn_labels]
-                        total_btn_width = sum(btn_widths)
-                        # btn_height = imgui.get_frame_height()
-                        img_rect = self._actual_video_image_rect_on_screen
-                        top_right_x = img_rect['max_x'] - total_btn_width + 4
-                        top_right_y = img_rect['min_y'] + 8
-                        imgui.set_cursor_screen_pos((top_right_x, top_right_y))
-                        use_small_font = hasattr(self.gui_instance, 'small_font') and self.gui_instance.small_font and getattr(self.gui_instance.small_font, 'is_loaded', lambda: True)()
-                        if use_small_font:
-                            imgui.push_font(self.gui_instance.small_font)
-                        for i, (lbl, attr) in enumerate(zip(btn_labels, btn_attrs)):
-                            render_overlay_toggle(lbl, attr)
-                            if i < len(btn_labels) - 1:
-                                imgui.same_line(spacing=4)
-                        if use_small_font:
-                            imgui.pop_font()
+                    if is_hovering_video and imgui.is_mouse_clicked(
+                            0) and not self.app.stage_processor.refinement_analysis_active:
+                        mouse_x, mouse_y = io.mouse_pos
+                        current_frame_idx = self.app.processor.current_frame_index
 
-            # --- Interactive Refinement Overlay and Click Handling ---
-            if self.app.app_state_ui.interactive_refinement_mode_enabled:
-                # 1. Render the bounding boxes so the user can see what to click.
-                # We reuse the existing stage 2 overlay logic for this.
-                if self.app.stage_processor.stage2_overlay_data_map:
-                    self._render_stage2_overlay(self.app.stage_processor, self.app.app_state_ui)
+                        # Find the chapter at the current frame
+                        chapter = self.app.funscript_processor.get_chapter_at_frame(current_frame_idx)
+                        if not chapter:
+                            self.app.logger.info("Cannot refine: Please click within a chapter boundary.", extra={'status_message': True})
+                            return
 
-                # 2. Handle the mouse click for the "hint".
-                io = imgui.get_io()
-                is_hovering_video = imgui.is_mouse_hovering_rect(
-                    self._actual_video_image_rect_on_screen['min_x'], self._actual_video_image_rect_on_screen['min_y'],
-                    self._actual_video_image_rect_on_screen['max_x'], self._actual_video_image_rect_on_screen['max_y'])
-
-                if is_hovering_video and imgui.is_mouse_clicked(
-                        0) and not self.app.stage_processor.refinement_analysis_active:
-                    mouse_x, mouse_y = io.mouse_pos
-                    current_frame_idx = self.app.processor.current_frame_index
-
-                    # Find the chapter at the current frame
-                    chapter = self.app.funscript_processor.get_chapter_at_frame(current_frame_idx)
-                    if not chapter:
-                        self.app.logger.info("Cannot refine: Please click within a chapter boundary.", extra={'status_message': True})
-                        return
-
-                    # Find which bounding box was clicked
-                    overlay_data = self.app.stage_processor.stage2_overlay_data_map.get(current_frame_idx)
-                    if overlay_data and "yolo_boxes" in overlay_data:
-                        for box in overlay_data["yolo_boxes"]:
-                            p1 = self._video_to_screen_coords(box["bbox"][0], box["bbox"][1])
-                            p2 = self._video_to_screen_coords(box["bbox"][2], box["bbox"][3])
-                            if p1 and p2 and p1[0] <= mouse_x <= p2[0] and p1[1] <= mouse_y <= p2[1]:
-                                clicked_track_id = box.get("track_id")
-                                if clicked_track_id is not None:
-                                    self.app.logger.info(f"Hint received! Refining chapter '{chapter.position_short_name}' "f"to follow object with track_id: {clicked_track_id}", extra={'status_message': True})
-                                    # Trigger the backend process
-                                    self.app.event_handlers.handle_interactive_refinement_click(chapter, clicked_track_id)
-                                    break  # Stop after finding the first clicked box
-            if not video_frame_available:
-                self._render_drop_video_prompt()
+                        # Find which bounding box was clicked
+                        overlay_data = self.app.stage_processor.stage2_overlay_data_map.get(current_frame_idx)
+                        if overlay_data and "yolo_boxes" in overlay_data:
+                            for box in overlay_data["yolo_boxes"]:
+                                p1 = self._video_to_screen_coords(box["bbox"][0], box["bbox"][1])
+                                p2 = self._video_to_screen_coords(box["bbox"][2], box["bbox"][3])
+                                if p1 and p2 and p1[0] <= mouse_x <= p2[0] and p1[1] <= mouse_y <= p2[1]:
+                                    clicked_track_id = box.get("track_id")
+                                    if clicked_track_id is not None:
+                                        self.app.logger.info(f"Hint received! Refining chapter '{chapter.position_short_name}' "f"to follow object with track_id: {clicked_track_id}", extra={'status_message': True})
+                                        # Trigger the backend process
+                                        self.app.event_handlers.handle_interactive_refinement_click(chapter, clicked_track_id)
+                                        break  # Stop after finding the first clicked box
+                if not video_frame_available:
+                    self._render_drop_video_prompt()
 
         imgui.end()
         imgui.pop_style_var()
@@ -909,13 +839,25 @@ class VideoDisplayUI:
         pan_buttons_active = app_state.video_zoom_factor > 1.0
         if pan_buttons_active: num_control_lines = 2
         group_height = (button_h_ref * num_control_lines) + (style.item_spacing[1] * (num_control_lines - 1 if num_control_lines > 1 else 0))
-        overlay_ctrl_y = img_rect['max_y'] - group_height - (style.item_spacing[1] * 2)
+        overlay_ctrl_y = img_rect['min_y'] - group_height - (style.item_spacing[1] * 2)
         overlay_ctrl_x = img_rect['min_x'] + style.item_spacing[1]
         overlay_ctrl_y = max(img_rect['min_y'] + style.item_spacing[1], overlay_ctrl_y)
         overlay_ctrl_x = max(img_rect['min_x'] + style.item_spacing[1], overlay_ctrl_x)
         imgui.set_cursor_screen_pos((overlay_ctrl_x, overlay_ctrl_y))
 
         imgui.begin_group()
+
+        # Zoom Settings Block (Z-In, Z-Out, Rst, Text on one line)
+        if imgui.button("Z-In##VidOverZoomIn"):
+            app_state.adjust_video_zoom(1.2)
+        imgui.same_line(spacing=4)
+        if imgui.button("Z-Out##VidOverZoomOut"):
+            app_state.adjust_video_zoom(1 / 1.2)
+        imgui.same_line(spacing=4)
+        if imgui.button("Rst##VidOverZoomReset"):
+            app_state.reset_video_zoom_pan()
+        imgui.same_line(spacing=4)
+        imgui.text(f"{app_state.video_zoom_factor:.1f}x")
 
         if pan_buttons_active:
             # Pan Arrows Block (Left, Right, Up, Down on one line)
@@ -930,18 +872,6 @@ class VideoDisplayUI:
             imgui.same_line(spacing=4)
             if imgui.arrow_button("##VidOverPanDown", imgui.DIRECTION_DOWN):
                 app_state.pan_video_normalized_delta(0, app_state.video_pan_step)
-
-        # Zoom Settings Block (Z-In, Z-Out, Rst, Text on one line)
-        if imgui.button("Z-In##VidOverZoomIn"):
-            app_state.adjust_video_zoom(1.2)
-        imgui.same_line(spacing=4)
-        if imgui.button("Z-Out##VidOverZoomOut"):
-            app_state.adjust_video_zoom(1 / 1.2)
-        imgui.same_line(spacing=4)
-        if imgui.button("Rst##VidOverZoomReset"):
-            app_state.reset_video_zoom_pan()
-        imgui.same_line(spacing=4)
-        imgui.text(f"{app_state.video_zoom_factor:.1f}x")
 
         imgui.end_group()
 

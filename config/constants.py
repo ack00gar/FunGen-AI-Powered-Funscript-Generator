@@ -59,6 +59,12 @@ YOLO_INPUT_SIZE = 640
 # Fallback for determining producer/consumer counts if os.cpu_count() fails.
 DEFAULT_FALLBACK_CPU_CORES = 4
 
+class ProcessingSpeedMode(Enum):
+    REALTIME = "Real Time"
+    SLOW_MOTION = "Slow-mo"
+    MAX_SPEED = "Max Speed"
+
+
 class TrackerMode(Enum):
     OSCILLATION_DETECTOR = "Live - Oscillation Detector (Experimental)"
     LIVE_YOLO_ROI = "Live - Optical Flow (YOLO auto ROI)"
