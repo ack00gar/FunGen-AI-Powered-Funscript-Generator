@@ -726,12 +726,13 @@ class VideoDisplayUI:
             return
 
         io = imgui.get_io()
-        if io.mouse_wheel != 0.0: #Basic check, no item active/hovered needed for wheel on background
-           #Check if an ImGui window is focused and wants scroll, if so, don't zoom video
-           #This is a bit tricky as is_window_hovered(HOVERED_ANY_WINDOW) and is_window_focused(FOCUSED_ANY_WINDOW)
-           #might still allow scroll if mouse is over non-interactive part of a window.
-           #A simpler check for now: if no specific item is active that would take wheel input.
-            if not imgui.is_any_item_active() and not imgui.is_any_item_focused():
+        if io.mouse_wheel != 0.0:
+            # Prevent zoom if any ImGui window is hovered, unless it's this specific video window.
+            # This stops the video from zooming when scrolling over other windows like the file dialog.
+            is_video_window_hovered = imgui.is_window_hovered(
+                imgui.HOVERED_ROOT_WINDOW | imgui.HOVERED_CHILD_WINDOWS
+            )
+            if is_video_window_hovered and not imgui.is_any_item_active():
                 mouse_screen_x, mouse_screen_y = io.mouse_pos
                 view_width_on_screen = img_rect['w']
                 view_height_on_screen = img_rect['h']
