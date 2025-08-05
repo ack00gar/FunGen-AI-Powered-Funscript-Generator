@@ -285,6 +285,40 @@ class ControlPanelUI:
         self._render_execution_progress_display()
         imgui.end()
 
+    def _render_processing_speed_controls(self, app_state):
+        app = self.app
+        processor = app.processor
+        selected_mode = app_state.selected_tracker_mode
+        is_live_mode = selected_mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR)
+        is_playback_active = processor and processor.is_processing and not processor.enable_tracker_processing
+
+        if not (is_live_mode or is_playback_active):
+            return
+
+        if processor:
+            imgui.text(f"Actual FPS: {processor.actual_fps:.1f}")
+
+        if not app_state.show_video_feed:  # video feed not visible
+            app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.MAX_SPEED
+            return
+
+
+        self._section_header(">> Processing Speed", "Control the processing speed for live analysis")
+
+        current_speed_mode = app_state.selected_processing_speed_mode
+        
+        if imgui.radio_button("Real Time", current_speed_mode == config.ProcessingSpeedMode.REALTIME):
+            app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.REALTIME
+        imgui.same_line()
+        if imgui.radio_button("Slow-mo", current_speed_mode == config.ProcessingSpeedMode.SLOW_MOTION):
+            app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.SLOW_MOTION
+        imgui.same_line()
+        if imgui.radio_button("Max Speed", current_speed_mode == config.ProcessingSpeedMode.MAX_SPEED):
+            app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.MAX_SPEED
+
+        #if processor:
+        #    imgui.text(f"Actual FPS: {processor.actual_fps:.1f}")
+
     def _render_run_control_tab(self):
         app = self.app
         app_state = app.app_state_ui
@@ -342,6 +376,8 @@ class ControlPanelUI:
                     tr.set_tracking_mode("OSCILLATION_DETECTOR")
                 else:
                     tr.set_tracking_mode("YOLO_ROI")
+
+        self._render_processing_speed_controls(app_state)
 
         self._section_header(
             ">> Output Configuration", "Configure which movement axes to track and output"

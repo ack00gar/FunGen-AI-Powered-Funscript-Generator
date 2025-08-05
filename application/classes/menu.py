@@ -518,6 +518,14 @@ class MainMenu:
         if clicked:
             app.toggle_waveform_visibility()
             pm.project_dirty = True
+
+        clicked, val = imgui.menu_item(
+            "Show Video Feed", selected=app_state.show_video_feed
+        )
+        if clicked:
+            app_state.show_video_feed = val
+            pm.project_dirty = True
+            
         imgui.unindent()
 
     def _render_tools_menu(self, app_state, file_mgr):
