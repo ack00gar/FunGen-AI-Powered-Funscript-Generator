@@ -4,50 +4,134 @@ import os
 import shutil
 import platform
 from importlib.metadata import version, PackageNotFoundError
+from packaging import version as pkg_version
+from packaging.specifiers import SpecifierSet
+
+def _parse_package_spec(package_spec):
+    """
+    Parses a package specification and returns (name, version_spec).
+    Examples: 'torch~=2.5.1' -> ('torch', '~=2.5.1')
+              'numpy' -> ('numpy', None)
+    """
+    # Split on version operators
+    for op in ['~=', '>=', '<=', '==', '!=', '>', '<']:
+        if op in package_spec:
+            name, spec = package_spec.split(op, 1)
+            return name.strip(), f"{op}{spec.strip()}"
+    return package_spec.strip(), None
+
+def _check_version_compatibility(installed_version, required_spec):
+    """
+    Checks if installed version satisfies the required specification.
+    Returns: (is_compatible, needs_upgrade)
+    """
+    if not required_spec:
+        return True, False
+    
+    try:
+        spec_set = SpecifierSet(required_spec)
+        installed = pkg_version.parse(installed_version)
+        is_compatible = installed in spec_set
+        
+        # Check if we need to upgrade (installed version is too old)
+        needs_upgrade = not is_compatible
+        return is_compatible, needs_upgrade
+    except Exception:
+        # If we can't parse versions, assume compatible
+        return True, False
 
 def _ensure_packages(packages):
     """
-    Checks if essential packages for the checker are installed and installs them if they are not.
+    Checks if essential packages are installed and upgrades them if needed.
+    Returns: True if any packages were installed/upgraded (requiring restart)
     """
     missing = []
+    to_upgrade = []
+    
     for package_spec in packages:
-        package_name = package_spec.split('==')[0].split('~=')[0].split('>')[0].split('<')[0]
+        package_name, version_spec = _parse_package_spec(package_spec)
+        
         try:
-            version(package_name)
+            installed_version = version(package_name)
+            if version_spec:
+                is_compatible, needs_upgrade = _check_version_compatibility(installed_version, version_spec)
+                if not is_compatible:
+                    print(f"Package {package_name} version {installed_version} doesn't satisfy {version_spec}")
+                    to_upgrade.append(package_spec)
+            # else: package exists and no version requirement, keep it
         except PackageNotFoundError:
             missing.append(package_spec)
 
+    packages_changed = False
+    
     if missing:
-        print(f"Installing required packages: {', '.join(missing)}")
-        # Use a fresh subprocess to ensure we use the updated environment
+        print(f"Installing missing packages: {', '.join(missing)}")
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+            packages_changed = True
         except subprocess.CalledProcessError as e:
             print(f"ERROR: Failed to install required packages. Please install them manually and restart.", file=sys.stderr)
             print(e, file=sys.stderr)
             sys.exit(1)
+    
+    if to_upgrade:
+        print(f"Upgrading packages: {', '.join(to_upgrade)}")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", *to_upgrade])
+            packages_changed = True
+        except subprocess.CalledProcessError as e:
+            print(f"ERROR: Failed to upgrade packages. Please upgrade them manually and restart.", file=sys.stderr)
+            print(e, file=sys.stderr)
+            sys.exit(1)
+    
+    return packages_changed
 
 def _ensure_packages_with_args(packages, pip_args):
     """
-    Checks if essential packages are installed and installs them with custom pip arguments.
+    Checks if essential packages are installed and upgrades them with custom pip arguments.
+    Returns: True if any packages were installed/upgraded (requiring restart)
     """
     missing = []
+    to_upgrade = []
+    
     for package_spec in packages:
-        package_name = package_spec.split('==')[0].split('~=')[0].split('>')[0].split('<')[0]
+        package_name, version_spec = _parse_package_spec(package_spec)
+        
         try:
-            version(package_name)
+            installed_version = version(package_name)
+            if version_spec:
+                is_compatible, needs_upgrade = _check_version_compatibility(installed_version, version_spec)
+                if not is_compatible:
+                    print(f"Package {package_name} version {installed_version} doesn't satisfy {version_spec}")
+                    to_upgrade.append(package_spec)
         except PackageNotFoundError:
             missing.append(package_spec)
 
+    packages_changed = False
+    
     if missing:
-        print(f"Installing required packages with custom index: {', '.join(missing)}")
+        print(f"Installing missing packages with custom index: {', '.join(missing)}")
         try:
             cmd = [sys.executable, "-m", "pip", "install"] + pip_args + missing
             subprocess.check_call(cmd)
+            packages_changed = True
         except subprocess.CalledProcessError as e:
             print(f"ERROR: Failed to install required packages. Please install them manually and restart.", file=sys.stderr)
             print(e, file=sys.stderr)
             sys.exit(1)
+    
+    if to_upgrade:
+        print(f"Upgrading packages with custom index: {', '.join(to_upgrade)}")
+        try:
+            cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + pip_args + to_upgrade
+            subprocess.check_call(cmd)
+            packages_changed = True
+        except subprocess.CalledProcessError as e:
+            print(f"ERROR: Failed to upgrade packages. Please upgrade them manually and restart.", file=sys.stderr)
+            print(e, file=sys.stderr)
+            sys.exit(1)
+    
+    return packages_changed
 
 def get_bin_dir():
     """Gets the directory where binaries like ffmpeg should be stored."""
@@ -116,8 +200,8 @@ def check_and_install_dependencies():
     This function is designed to be run before the main application starts.
     """
     # 1. Self-bootstrap: Ensure the checker has its own dependencies
-    _ensure_packages(['requests', 'tqdm'])
-
+    bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging'])
+    
     # Now that we are sure they exist, we can import them.
     import requests
     from tqdm import tqdm
@@ -137,11 +221,13 @@ def check_and_install_dependencies():
         print("ERROR: core.requirements.txt not found.", file=sys.stderr)
         sys.exit(1)
 
+    core_changed = False
     if core_packages:
         print("Installing core packages...")
-        _ensure_packages(core_packages)
+        core_changed = _ensure_packages(core_packages)
 
     # 4. Load and install GPU-specific requirements if needed
+    gpu_changed = False
     if requirements_file != "core.requirements.txt":
         try:
             with open(requirements_file, 'r') as f:
@@ -161,14 +247,24 @@ def check_and_install_dependencies():
                 print(f"Installing GPU-specific packages...")
                 if pip_extra_args:
                     print(f"Using custom index: {' '.join(pip_extra_args)}")
-                    _ensure_packages_with_args(gpu_packages, pip_extra_args)
+                    gpu_changed = _ensure_packages_with_args(gpu_packages, pip_extra_args)
                 else:
-                    _ensure_packages(gpu_packages)
+                    gpu_changed = _ensure_packages(gpu_packages)
                     
         except FileNotFoundError:
             print(f"WARNING: {requirements_file} not found. Continuing with core packages only.", file=sys.stderr)
 
-    print("All required packages are installed.")
+    # Check if we need to restart due to major package changes
+    major_changes = bootstrap_changed or core_changed or gpu_changed
+    
+    if major_changes:
+        print("\n--- Package Installation Complete ---")
+        print("IMPORTANT: Major packages were installed/upgraded.")
+        print("Please restart the application to ensure all changes take effect.")
+        print("--- Exiting for Restart ---")
+        sys.exit(0)  # Clean exit to allow restart
+    
+    print("All required packages are installed and up to date.")
 
     # 5. Verify PyTorch installation
     try:
