@@ -300,6 +300,36 @@ class AppFileManager:
 
         self.app.energy_saver.reset_activity_timer()
 
+    def import_funscript_to_timeline(self, timeline_num: int):
+        """Trigger file dialog to import funscript to specified timeline."""
+        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and self.app.gui_instance.file_dialog:
+            self.app.gui_instance.file_dialog.show(
+                is_save=False,
+                title=f"Import Funscript to Timeline {timeline_num}",
+                extension_filter="Funscript Files (*.funscript),*.funscript",
+                callback=lambda filepath: self.load_funscript_to_timeline(filepath, timeline_num)
+            )
+
+    def import_stage2_overlay_data(self):
+        """Trigger file dialog to import stage 2 overlay data."""
+        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and self.app.gui_instance.file_dialog:
+            self.app.gui_instance.file_dialog.show(
+                is_save=False,
+                title="Import Stage 2 Overlay Data",
+                extension_filter="MessagePack Files (*.msgpack),*.msgpack",
+                callback=lambda filepath: self.load_stage2_overlay_data(filepath)
+            )
+
+    def open_video_dialog(self):
+        """Trigger file dialog to open video file."""
+        if hasattr(self.app, 'gui_instance') and self.app.gui_instance and self.app.gui_instance.file_dialog:
+            self.app.gui_instance.file_dialog.show(
+                is_save=False,
+                title="Open Video",
+                extension_filter="Video Files (*.mp4;*.avi;*.mov;*.mkv;*.wmv;*.flv;*.webm),*.mp4;*.avi;*.mov;*.mkv;*.wmv;*.flv;*.webm",
+                callback=lambda filepath: self.open_video_from_path(filepath)
+            )
+
     def save_funscripts_for_batch(self, video_path: str):
         """
         Automatically saves funscripts next to the video file using the centralized saver.

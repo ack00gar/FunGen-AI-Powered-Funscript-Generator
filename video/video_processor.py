@@ -10,11 +10,9 @@ import sys
 from typing import Optional, Iterator, Tuple, List, Dict, Any
 import logging
 import os
-
 from collections import OrderedDict
-from scenedetect import open_video, SceneManager
-from scenedetect.detectors import ContentDetector
 
+from config import constants
 
 
 try:
@@ -1168,7 +1166,13 @@ class VideoProcessor:
                     break
 
                 # The original logic of the loop continues below
-                target_delay = 1.0 / self.target_fps if self.target_fps > 0 else (1.0 / 30.0)
+                speed_mode = self.app.app_state_ui.selected_processing_speed_mode
+                if speed_mode == constants.ProcessingSpeedMode.REALTIME:
+                    target_delay = 1.0 / self.fps if self.fps > 0 else (1.0 / 30.0)
+                elif speed_mode == constants.ProcessingSpeedMode.SLOW_MOTION:
+                    target_delay = 1.0 / 10.0  # Fixed 10 FPS for slow-mo
+                else:  # Max Speed
+                    target_delay = 0.0
 
                 current_chapter = self.app.funscript_processor.get_chapter_at_frame(self.current_frame_index)
                 current_chapter_id = current_chapter.unique_id if current_chapter else None
@@ -1212,6 +1216,8 @@ class VideoProcessor:
                     self.logger.info(
                         f"End of FFmpeg GUI stream or incomplete frame (read {raw_frame_len}/{self.frame_size_bytes}).")
                     self.is_processing = False
+                    # Clear tracker processing flag when stream ends naturally
+                    self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_end = self.tracker and self.tracker.tracking_active
                         end_range = (self.processing_start_frame_limit, self.current_frame_index)
@@ -1230,6 +1236,8 @@ class VideoProcessor:
                 if self.processing_end_frame_limit != -1 and self.current_frame_index > self.processing_end_frame_limit:
                     self.logger.info(f"Reached GUI end_frame_limit ({self.processing_end_frame_limit}). Stopping.")
                     self.is_processing = False
+                    # Clear tracker processing flag when reaching end frame limit naturally
+                    self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_end_limit = self.tracker and self.tracker.tracking_active
                         end_range_limit = (self.processing_start_frame_limit, self.processing_end_frame_limit)
@@ -1239,6 +1247,8 @@ class VideoProcessor:
                 if self.total_frames > 0 and self.current_frame_index >= self.total_frames:
                     self.logger.info("Reached end of video. Stopping GUI processing.")
                     self.is_processing = False
+                    # Clear tracker processing flag when reaching end of video naturally
+                    self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_eos = self.tracker and self.tracker.tracking_active
                         end_range_eos = (self.processing_start_frame_limit, self.current_frame_index)
