@@ -39,6 +39,8 @@ class AppEventHandlers:
             if is_currently_playing:
                 processor.pause_processing()
             else:
+                # Only start regular video playback, never restart tracking sessions
+                # Tracking sessions should only be started via the control panel
                 processor.start_processing()
             return
         if action_name == "stop":
@@ -174,15 +176,16 @@ class AppEventHandlers:
 
     def handle_reset_live_tracker_click(self):
         if self.app.processor:
-            self.app.processor.reset()  # Stops processing, resets tracker state, seeks
-            # Reset specific tracker states
+            # Stop processing and reset tracker state, but preserve the funscript data
+            self.app.processor.stop_processing(join_thread=True)
+            
+            # Reset tracker state but preserve funscript
             if self.app.tracker:
-                if self.app.tracker.tracking_mode == "USER_FIXED_ROI":
-                    self.app.tracker.clear_user_defined_roi_and_point()
-                    # Optionally switch back to default mode, or let UI combo handle it
-                    # self.app.tracker.set_tracking_mode("YOLO_ROI")
-                # For YOLO_ROI mode, tracker.reset() already handles its specific state.
-            self.app.processor.set_tracker_processing_enabled(True)
+                self.app.tracker.reset(reason="stop_preserve_funscript")
+                
+            # Reset processor frame position to current for potential restart
+            # But don't seek to beginning since user might want to continue from current position
+            self.app.processor.enable_tracker_processing = False
         self.logger.info("Live Tracker reset.", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 

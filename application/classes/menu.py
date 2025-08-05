@@ -181,7 +181,7 @@ class MainMenu:
                 pm.project_dirty = True
 
             if _menu_item_simple("Project..."):
-                fm.open_project_dialog()
+                pm.open_project_dialog()
 
             if _menu_item_simple("Video..."):
                 fm.open_video_dialog()
@@ -226,9 +226,21 @@ class MainMenu:
 
             if imgui.begin_menu("Export..."):
                 if _menu_item_simple("Funscript from Timeline 1..."):
-                    fm.export_funscript_from_timeline(1)
+                    if self.app.gui_instance and self.app.gui_instance.file_dialog:
+                        self.app.gui_instance.file_dialog.show(
+                            is_save=True,
+                            title="Export Funscript from Timeline 1",
+                            extension_filter="Funscript Files (*.funscript),*.funscript",
+                            callback=lambda filepath: fm.save_funscript_from_timeline(filepath, 1)
+                        )
                 if _menu_item_simple("Funscript from Timeline 2..."):
-                    fm.export_funscript_from_timeline(2)
+                    if self.app.gui_instance and self.app.gui_instance.file_dialog:
+                        self.app.gui_instance.file_dialog.show(
+                            is_save=True,
+                            title="Export Funscript from Timeline 2",
+                            extension_filter="Funscript Files (*.funscript),*.funscript",
+                            callback=lambda filepath: fm.save_funscript_from_timeline(filepath, 2)
+                        )
                 imgui.end_menu()
             imgui.separator()
 

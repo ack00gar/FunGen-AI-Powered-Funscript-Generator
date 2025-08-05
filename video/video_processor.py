@@ -12,8 +12,6 @@ import logging
 import os
 
 from collections import OrderedDict
-from scenedetect import open_video, SceneManager
-from scenedetect.detectors import ContentDetector
 
 
 
@@ -1212,6 +1210,8 @@ class VideoProcessor:
                     self.logger.info(
                         f"End of FFmpeg GUI stream or incomplete frame (read {raw_frame_len}/{self.frame_size_bytes}).")
                     self.is_processing = False
+                    # Clear tracker processing flag when stream ends naturally
+                    self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_end = self.tracker and self.tracker.tracking_active
                         end_range = (self.processing_start_frame_limit, self.current_frame_index)
@@ -1230,6 +1230,8 @@ class VideoProcessor:
                 if self.processing_end_frame_limit != -1 and self.current_frame_index > self.processing_end_frame_limit:
                     self.logger.info(f"Reached GUI end_frame_limit ({self.processing_end_frame_limit}). Stopping.")
                     self.is_processing = False
+                    # Clear tracker processing flag when reaching end frame limit naturally
+                    self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_end_limit = self.tracker and self.tracker.tracking_active
                         end_range_limit = (self.processing_start_frame_limit, self.processing_end_frame_limit)
@@ -1239,6 +1241,8 @@ class VideoProcessor:
                 if self.total_frames > 0 and self.current_frame_index >= self.total_frames:
                     self.logger.info("Reached end of video. Stopping GUI processing.")
                     self.is_processing = False
+                    # Clear tracker processing flag when reaching end of video naturally
+                    self.enable_tracker_processing = False
                     if self.app:
                         was_scripting_at_eos = self.tracker and self.tracker.tracking_active
                         end_range_eos = (self.processing_start_frame_limit, self.current_frame_index)

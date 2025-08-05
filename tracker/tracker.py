@@ -1399,7 +1399,7 @@ class ROITracker:
         self.oscillation_funscript_pos = 50
 
         if self.funscript:  # This funscript is for live tracking
-            if reason != "seek" and reason != "project_load_preserve_actions":
+            if reason not in ["seek", "project_load_preserve_actions", "stop_preserve_funscript"]:
                 self.funscript.clear()
                 self.logger.info(f"Live tracker Funscript cleared (reason: {reason}).")
             else:
