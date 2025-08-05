@@ -201,7 +201,7 @@ class MainMenu:
                     for project_path in recent:
                         display_name = os.path.basename(project_path)
                         if _menu_item_simple(display_name):
-                            fm.load_project(project_path)
+                            pm.load_project(project_path)
                 imgui.end_menu()
             imgui.separator()
 
