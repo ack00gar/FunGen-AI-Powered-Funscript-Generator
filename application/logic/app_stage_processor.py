@@ -610,6 +610,8 @@ class AppStageProcessor:
         fm = self.app.file_manager
         fs_proc = self.app.funscript_processor
         stage1_success = False
+        stage2_success = False
+        stage3_success = False
         preprocessed_path_for_s3 = None  # Initialize to prevent UnboundLocalError
 
         # Always use the tracker mode from the UI state, which is the single source of truth.
