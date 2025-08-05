@@ -1547,7 +1547,7 @@ class ROITracker:
                 elif (block_r, block_c) in active_block_positions:
                     color = (0, 255, 0)
                 # Draw grid block relative to full frame
-                cv2.rectangle(processed_frame, (x1 + ax, y1 + ay), (x1 + ax + w, y1 + ay + h), color, 1)
+                #cv2.rectangle(processed_frame, (x1 + ax, y1 + ay), (x1 + ax + w, y1 + ay + h), color, 1)
         else:
             active_block_positions = set(active_blocks)
             for motion in block_motions:
