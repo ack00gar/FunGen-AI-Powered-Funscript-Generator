@@ -27,17 +27,17 @@ def main():
     This function handles dependency checking, argument parsing, and starts either the GUI or CLI.
     """
     # Step 1: Perform dependency check before importing anything else
-    try:
-        from application.utils.dependency_checker import check_and_install_dependencies
-        # check_and_install_dependencies()
-        pass
-    except ImportError as e:
-        print(f"Failed to import dependency checker: {e}", file=sys.stderr)
-        print("Please ensure the file 'application/utils/dependency_checker.py' exists.", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"An unexpected error occurred during dependency check: {e}", file=sys.stderr)
-        sys.exit(1)
+    # try:
+    #     from application.utils.dependency_checker import check_and_install_dependencies
+    #     check_and_install_dependencies()
+    #     pass
+    # except ImportError as e:
+    #     print(f"Failed to import dependency checker: {e}", file=sys.stderr)
+    #     print("Please ensure the file 'application/utils/dependency_checker.py' exists.", file=sys.stderr)
+    #     sys.exit(1)
+    # except Exception as e:
+    #     print(f"An unexpected error occurred during dependency check: {e}", file=sys.stderr)
+    #     sys.exit(1)
 
     # Step 2: Set platform-specific multiprocessing behavior
     if platform.system() != "Windows":
