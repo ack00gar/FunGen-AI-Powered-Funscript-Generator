@@ -10,9 +10,9 @@ import sys
 from typing import Optional, Iterator, Tuple, List, Dict, Any
 import logging
 import os
-
 from collections import OrderedDict
 
+from config import constants
 
 
 try:
@@ -1166,7 +1166,13 @@ class VideoProcessor:
                     break
 
                 # The original logic of the loop continues below
-                target_delay = 1.0 / self.target_fps if self.target_fps > 0 else (1.0 / 30.0)
+                speed_mode = self.app.app_state_ui.selected_processing_speed_mode
+                if speed_mode == constants.ProcessingSpeedMode.REALTIME:
+                    target_delay = 1.0 / self.fps if self.fps > 0 else (1.0 / 30.0)
+                elif speed_mode == constants.ProcessingSpeedMode.SLOW_MOTION:
+                    target_delay = 1.0 / 10.0  # Fixed 10 FPS for slow-mo
+                else:  # Max Speed
+                    target_delay = 0.0
 
                 current_chapter = self.app.funscript_processor.get_chapter_at_frame(self.current_frame_index)
                 current_chapter_id = current_chapter.unique_id if current_chapter else None

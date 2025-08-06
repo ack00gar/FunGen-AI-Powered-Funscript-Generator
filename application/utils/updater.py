@@ -313,12 +313,13 @@ class AutoUpdater:
             
             # Start the new process
             if sys.platform == 'win32':
-                # On Windows, use subprocess.Popen with DETACHED_PROCESS to completely detach from console
+                # On Windows, use subprocess.Popen with inherited console context
+                # This prevents CMD window proliferation while maintaining proper process inheritance
                 import subprocess
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 1  # SW_SHOW = 1
-                subprocess.Popen(cmd, creationflags=subprocess.DETACHED_PROCESS, startupinfo=startupinfo)
+                startupinfo.wShowWindow = 0  # SW_HIDE = 0 (hide console window)
+                subprocess.Popen(cmd, startupinfo=startupinfo)  # Remove DETACHED_PROCESS for better UX
             else:
                 # On Unix-like systems, use subprocess.Popen
                 import subprocess
@@ -335,6 +336,12 @@ class AutoUpdater:
             self.logger.error(f"Failed to restart application: {e}")
             # Fallback to os.execl if the proper restart fails
             os.execl(sys.executable, sys.executable, *sys.argv)
+
+    def test_restart(self):
+        """Test the restart mechanism without making any actual changes.
+        This triggers the exact same restart procedure as a real update."""
+        self.logger.info("Testing restart mechanism (no changes made)...")
+        self._restart_application()
 
     def check_for_updates_async(self):
         """Starts the update check in a background thread and updates the timestamp."""
@@ -928,6 +935,12 @@ class AutoUpdater:
             changed, self.test_mode_enabled = imgui.checkbox("Enable Test Mode", self.test_mode_enabled)
             if imgui.is_item_hovered():
                 imgui.set_tooltip("When enabled, commit switching will only simulate the action without actually changing commits. Useful for testing the update system.")
+            
+            imgui.same_line()
+            if imgui.button("Test Restart", width=120):
+                self.test_restart()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Test the restart mechanism without making any changes. This triggers the exact same restart procedure as a real update.")
             
             imgui.separator()
 

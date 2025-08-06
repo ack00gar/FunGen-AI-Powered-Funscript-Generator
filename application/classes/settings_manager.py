@@ -101,6 +101,7 @@ class AppSettings:
 
             # --- Settings for the 2D Oscillation Detector ---
             "oscillation_detector_grid_size": 20,
+            "oscillation_detector_sensitivity": 1.5,
             
             "live_oscillation_dynamic_amp_enabled": True,
             "live_oscillation_amp_window_ms": 4000,  # 4-second analysis window
