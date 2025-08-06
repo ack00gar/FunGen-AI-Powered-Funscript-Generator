@@ -1505,7 +1505,6 @@ class ROITracker:
         return info
 
     def process_frame_for_oscillation(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
-        import cv2
         """
         [V9 - Advanced Filtering] Implements global motion cancellation, advanced oscillation scoring,
         and a VR-specific focus on the central third of the frame.
@@ -1527,7 +1526,6 @@ class ROITracker:
             ax, ay = 0, 0
             aw, ah = processed_frame.shape[1], processed_frame.shape[0]
         action_log_list = []
-        import cv2
         active_blocks = getattr(self, 'oscillation_active_block_positions', set())
         is_camera_motion = getattr(self, 'is_camera_motion', False)
         block_motions = getattr(self, 'block_motions', [])
