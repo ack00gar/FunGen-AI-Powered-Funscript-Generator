@@ -42,12 +42,82 @@ def main():
     # Step 2: Set platform-specific multiprocessing behavior
     multiprocessing.set_start_method('spawn', force=True)
     
-    # Windows-specific: Configure environment to suppress subprocess console windows
+    # Windows-specific: Configure console window suppression for multiprocessing
     if platform.system() == "Windows":
         import os
+        import subprocess
+        
         # Set environment flag for subprocess calls to use CREATE_NO_WINDOW
-        # This will be checked by subprocess.Popen calls throughout the application
         os.environ['SUBPROCESS_CREATE_NO_WINDOW'] = '1'
+        
+        # Additional Windows configuration to minimize console window creation
+        os.environ['PYTHONHASHSEED'] = '0'  # Ensure reproducible behavior
+        
+        # Try to hide the current console window if it exists and is not being used interactively
+        try:
+            import ctypes
+            from ctypes import wintypes
+            
+            # Get the console window handle
+            kernel32 = ctypes.windll.kernel32
+            user32 = ctypes.windll.user32
+            
+            # Check if we have a console window
+            console_hwnd = kernel32.GetConsoleWindow()
+            if console_hwnd:
+                # Check if the console window is visible and not the main application window
+                is_visible = user32.IsWindowVisible(console_hwnd)
+                if is_visible:
+                    # Get the current foreground window
+                    foreground_hwnd = user32.GetForegroundWindow()
+                    
+                    # Only hide the console if it's not the main foreground window
+                    # This prevents hiding legitimate console usage
+                    if console_hwnd != foreground_hwnd:
+                        # Try to minimize or hide the console window
+                        # SW_MINIMIZE = 6, SW_HIDE = 0
+                        user32.ShowWindow(console_hwnd, 6)  # Minimize instead of hide for safety
+        except Exception:
+            # Silently ignore if console manipulation fails
+            pass
+        
+        # Windows-specific: Configure multiprocessing to suppress console windows
+        try:
+            # Use a more direct approach: patch the underlying subprocess creation
+            import multiprocessing.popen_spawn_win32
+            
+            # Get the original Popen class
+            OriginalPopen = multiprocessing.popen_spawn_win32.Popen
+            
+            class SuppressedPopen(OriginalPopen):
+                def __init__(self, process_obj):
+                    # Patch subprocess.Popen to always use CREATE_NO_WINDOW on Windows
+                    original_subprocess_popen = subprocess.Popen
+                    
+                    def patched_subprocess_popen(*args, **kwargs):
+                        # Always add CREATE_NO_WINDOW for multiprocessing spawned processes
+                        if 'creationflags' in kwargs:
+                            kwargs['creationflags'] |= subprocess.CREATE_NO_WINDOW
+                        else:
+                            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                        return original_subprocess_popen(*args, **kwargs)
+                    
+                    # Temporarily replace subprocess.Popen
+                    subprocess.Popen = patched_subprocess_popen
+                    try:
+                        # Call the original Popen constructor
+                        super().__init__(process_obj)
+                    finally:
+                        # Restore original subprocess.Popen
+                        subprocess.Popen = original_subprocess_popen
+            
+            # Replace the Windows multiprocessing Popen class
+            multiprocessing.popen_spawn_win32.Popen = SuppressedPopen
+            
+        except Exception as e:
+            # If patching fails, continue without it but log the issue
+            print(f"Warning: Failed to configure multiprocessing console suppression: {e}")
+            pass
 
     # Step 3: Parse command-line arguments
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation")
