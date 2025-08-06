@@ -697,6 +697,28 @@ class DualAxisFunscript:
             f"Custom Autotune pipeline finished. Points: {len(actions_list_ref)} -> {len(final_actions)}.")
         return final_actions
 
+    def apply_custom_autotune_pipeline_destructive(self, axis: str):
+        """
+        Applies the custom autotune pipeline destructively to the current funscript.
+        This method integrates with the undo system by using slice assignment to preserve
+        the list reference while replacing its contents.
+        """
+        # Get the processed actions from the non-destructive version
+        processed_actions = self.apply_custom_autotune_pipeline(axis, {})
+        
+        if processed_actions is not None:
+            # Get reference to the original actions list
+            actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+            
+            # Use slice assignment to replace contents while preserving the list object
+            # This is critical for undo system compatibility
+            actions_list_ref[:] = processed_actions
+            
+            self._invalidate_cache(axis)
+            self.logger.info(f"Applied Custom Autotune Pipeline to {axis} axis. Points: {len(actions_list_ref)}")
+        else:
+            raise Exception("Custom Autotune Pipeline failed to produce a result.")
+
     def simplify_rdp(self, axis: str, epsilon: float,
                      start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
                      selected_indices: Optional[List[int]] = None):

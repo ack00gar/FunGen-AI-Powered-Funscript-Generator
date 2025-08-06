@@ -41,6 +41,13 @@ SEND2TRASH_RETRY_DELAY = 2  # Delay in seconds between retry attempts
 # --- TensorRT Compiler UI ---
 TENSORRT_OUTPUT_DISPLAY_HEIGHT = 150  # Height in pixels for subprocess output display
 
+# --- Internet Connection Test ---
+INTERNET_TEST_HOSTS = [
+    ("8.8.8.8", 53),      # Google DNS
+    ("1.1.1.1", 53),      # Cloudflare DNS
+    ("208.67.222.222", 53) # OpenDNS
+]
+
 
 ####################################################################################################
 # SYSTEM & PERFORMANCE
