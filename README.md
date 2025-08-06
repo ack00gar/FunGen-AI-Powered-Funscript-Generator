@@ -50,18 +50,35 @@ pip install -r core.requirements.txt
 ```
 - If you have the original FunGen installed, skip to [Download the YOLO model](#download-the-yolo-model)
 
-### If your GPU supports CUDA (NVIDIA) and is NOT a 50 series
+### NVIDIA GPU Setup (CUDA Required)
+
+**Quick Setup:**
+1. **Install NVIDIA Drivers**: [Download here](https://www.nvidia.com/Download/index.aspx)
+2. **Install CUDA 12.8**: [Download here](https://developer.nvidia.com/cuda-downloads)
+3. **Install cuDNN for CUDA 12.8**: [Download here](https://developer.nvidia.com/cudnn) (requires free NVIDIA account)
+
+**Install Python Packages:**
+
+**For 20xx, 30xx and 40xx-series NVIDIA GPUs:**
 ```bash
 pip install -r cuda.requirements.txt
 pip install tensorrt
 ```
 
-### If you have a 50 series Nvidia GPU
+**For 50xx series NVIDIA GPUs (RTX 5070, 5080, 5090):**
 ```bash
 pip install -r cuda.50series.requirements.txt
 pip install tensorrt
 ```
-- If you accidentally installed the non-50 series requirements file, you will need to run uninstallwrongpytorch.bat and then run the above commands.
+
+**Note:** NVIDIA 10xx series GPUs are not supported.
+
+**Verify Installation:**
+```bash
+nvidia-smi                    # Check GPU and driver
+nvcc --version               # Check CUDA version
+python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
+```
 
 ### If your GPU doesn't support cuda
 ```bash
@@ -102,6 +119,21 @@ In most cases, the app will automatically detect the best model from your models
 
 ### AMD GPU acceleration
 Coming soon
+
+### Troubleshooting CUDA Installation
+
+**Common Issues:**
+- **Driver version mismatch**: Ensure NVIDIA drivers are compatible with your CUDA version
+- **PATH issues**: Make sure CUDA bin directory is in your system PATH
+- **Version conflicts**: Ensure all components (driver, CUDA, cuDNN, PyTorch) are compatible versions
+
+**Verification Commands:**
+```bash
+nvidia-smi                    # Check GPU and driver
+nvcc --version               # Check CUDA version  
+python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
+python -c "import torch; print(torch.backends.cudnn.is_available())"  # Check cuDNN
+```
 
 ## GUI Settings
 Find the settings menu in the app to configure optional option.
