@@ -337,6 +337,12 @@ class AutoUpdater:
             # Fallback to os.execl if the proper restart fails
             os.execl(sys.executable, sys.executable, *sys.argv)
 
+    def test_restart(self):
+        """Test the restart mechanism without making any actual changes.
+        This triggers the exact same restart procedure as a real update."""
+        self.logger.info("Testing restart mechanism (no changes made)...")
+        self._restart_application()
+
     def check_for_updates_async(self):
         """Starts the update check in a background thread and updates the timestamp."""
         self.last_check_time = time.time() # Update time when a check is initiated
@@ -929,6 +935,12 @@ class AutoUpdater:
             changed, self.test_mode_enabled = imgui.checkbox("Enable Test Mode", self.test_mode_enabled)
             if imgui.is_item_hovered():
                 imgui.set_tooltip("When enabled, commit switching will only simulate the action without actually changing commits. Useful for testing the update system.")
+            
+            imgui.same_line()
+            if imgui.button("Test Restart", width=120):
+                self.test_restart()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Test the restart mechanism without making any changes. This triggers the exact same restart procedure as a real update.")
             
             imgui.separator()
 
