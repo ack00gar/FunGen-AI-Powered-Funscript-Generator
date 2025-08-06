@@ -1197,8 +1197,8 @@ class GUI:
             # Fallback: center on window size if viewport not available
             popup_pos = (self.window_width * 0.5, self.window_height * 0.5)
             imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-        popup_width = 480
-        imgui.set_next_window_size(popup_width, 0)  # Normal width, auto height
+        popup_width = 600
+        imgui.set_next_window_size(popup_width, 0)  # Wider width, auto height
         if imgui.begin_popup_modal("ErrorPopup")[0]:
             # Center title
             window_width = imgui.get_window_width()
