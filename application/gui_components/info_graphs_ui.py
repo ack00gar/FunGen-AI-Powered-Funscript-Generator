@@ -1133,27 +1133,32 @@ class InfoGraphsUI:
         imgui.separator()
         imgui.spacing()
 
-        if (
-            hasattr(gui, "perf_accumulated_times")
-            and gui.perf_accumulated_times
-            and hasattr(gui, "perf_frame_count")
-            and gui.perf_frame_count > 0
-        ):
+        # Frontend: Always read from queue for continuous data
+        current_accumulated_times = {}
+        current_frame_count = 0
+        
+        # Get the most recent data from the queue
+        if hasattr(gui, "_frontend_perf_queue") and gui._frontend_perf_queue:
+            latest_data = gui._frontend_perf_queue[-1]  # Get most recent entry
+            current_accumulated_times = latest_data.get('accumulated_times', {})
+            current_frame_count = latest_data.get('frame_count', 0)
+
+        if current_accumulated_times and current_frame_count > 0:
             imgui.text_colored("Average Performance:", 0.8, 0.9, 1.0, 1.0)
             imgui.same_line()
-            imgui.text(f"({gui.perf_frame_count} frames tracked)")
+            imgui.text(f"({current_frame_count} frames tracked)")
 
-            avg_stats = list(gui.perf_accumulated_times.items())
+            avg_stats = list(current_accumulated_times.items())
             avg_total = (
-                sum(total_time / gui.perf_frame_count for _, total_time in avg_stats)
-                if gui.perf_frame_count > 0
+                sum(total_time / current_frame_count for _, total_time in avg_stats)
+                if current_frame_count > 0
                 else 0
             )
 
-            avg_stats_for_expensive = list(gui.perf_accumulated_times.items())
-            if gui.perf_frame_count > 0:
+            avg_stats_for_expensive = list(current_accumulated_times.items())
+            if current_frame_count > 0:
                 avg_stats_for_expensive.sort(
-                    key=lambda x: x[1] / gui.perf_frame_count, reverse=True
+                    key=lambda x: x[1] / current_frame_count, reverse=True
                 )
             else:
                 avg_stats_for_expensive.sort(key=lambda x: x[0].lower())
@@ -1179,7 +1184,7 @@ class InfoGraphsUI:
                 avg_stats_for_expensive[:3]
             ):
                 avg_time = (
-                    total_time / gui.perf_frame_count if gui.perf_frame_count > 0 else 0.0
+                    total_time / current_frame_count if current_frame_count > 0 else 0.0
                 )
                 time_color = (
                     (0.0, 1.0, 0.0, 1.0)
@@ -1206,8 +1211,8 @@ class InfoGraphsUI:
         if (
             current_stats
             and len(current_stats) > 0
-            and hasattr(gui, "perf_accumulated_times")
-            and hasattr(gui, "perf_frame_count")
+            and current_accumulated_times
+            and current_frame_count > 0
         ):
             imgui.text_colored("All Components:", 0.8, 0.9, 1.0, 1.0)
 
@@ -1226,12 +1231,12 @@ class InfoGraphsUI:
             for component, _ in current_stats:
                 all_component_names.add(component)
 
-            if getattr(gui, "perf_frame_count", 0) > 0:
-                for component, total_time in gui.perf_accumulated_times.items():
+            if current_frame_count > 0:
+                for component, total_time in current_accumulated_times.items():
                     all_component_names.add(component)
-                    avg_dict[component] = total_time / gui.perf_frame_count
+                    avg_dict[component] = total_time / current_frame_count
             else:
-                for component in getattr(gui, "perf_accumulated_times", {}).keys():
+                for component in current_accumulated_times.keys():
                     all_component_names.add(component)
                     avg_dict[component] = 0.0
 
