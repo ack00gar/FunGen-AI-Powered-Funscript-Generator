@@ -313,12 +313,13 @@ class AutoUpdater:
             
             # Start the new process
             if sys.platform == 'win32':
-                # On Windows, use subprocess.Popen with DETACHED_PROCESS to completely detach from console
+                # On Windows, use subprocess.Popen with inherited console context
+                # This prevents CMD window proliferation while maintaining proper process inheritance
                 import subprocess
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 1  # SW_SHOW = 1
-                subprocess.Popen(cmd, creationflags=subprocess.DETACHED_PROCESS, startupinfo=startupinfo)
+                startupinfo.wShowWindow = 0  # SW_HIDE = 0 (hide console window)
+                subprocess.Popen(cmd, startupinfo=startupinfo)  # Remove DETACHED_PROCESS for better UX
             else:
                 # On Unix-like systems, use subprocess.Popen
                 import subprocess

@@ -42,6 +42,11 @@ def main():
     # Step 2: Set platform-specific multiprocessing behavior
     if platform.system() != "Windows":
         multiprocessing.set_start_method('spawn', force=True)
+    else:
+        # On Windows, ensure proper console window management for multiprocessing
+        multiprocessing.set_start_method('spawn', force=True)
+        # Note: Windows uses 'spawn' by default, but we ensure it's set explicitly
+        # This helps maintain consistent behavior across different Python versions
 
     # Step 3: Parse command-line arguments
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation")
