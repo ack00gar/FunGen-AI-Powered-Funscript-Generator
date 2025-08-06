@@ -513,13 +513,17 @@ class TensorRTCompiler:
             tuple: (stdout, stderr) - Combined output from the subprocess
         """
         # Start subprocess with unbuffered output
+        # Windows fix: prevent terminal windows from spawning
+        import sys
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
         self._export_process = subprocess.Popen(
             [sys.executable, "-u", export_script, pt_model_path, output_dir],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # Combine stderr into stdout
             text=True,
             bufsize=1,  # Line buffered
-            universal_newlines=True
+            universal_newlines=True,
+            creationflags=creation_flags
         )
 
         # Monitor process and capture output in real-time

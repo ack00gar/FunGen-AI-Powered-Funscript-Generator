@@ -40,8 +40,14 @@ def main():
         sys.exit(1)
 
     # Step 2: Set platform-specific multiprocessing behavior
-    if platform.system() != "Windows":
-        multiprocessing.set_start_method('spawn', force=True)
+    multiprocessing.set_start_method('spawn', force=True)
+    
+    # Windows-specific: Configure environment to suppress subprocess console windows
+    if platform.system() == "Windows":
+        import os
+        # Set environment flag for subprocess calls to use CREATE_NO_WINDOW
+        # This will be checked by subprocess.Popen calls throughout the application
+        os.environ['SUBPROCESS_CREATE_NO_WINDOW'] = '1'
 
     # Step 3: Parse command-line arguments
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation")

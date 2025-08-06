@@ -170,7 +170,9 @@ class TensorRTCompilerLogic:
             
             if system == "Windows":
                 # Windows: use clip command
-                process = subprocess.Popen(['clip'], stdin=subprocess.PIPE, text=True, shell=True)
+                # Windows fix: prevent terminal windows from spawning
+                creation_flags = subprocess.CREATE_NO_WINDOW
+                process = subprocess.Popen(['clip'], stdin=subprocess.PIPE, text=True, shell=True, creationflags=creation_flags)
             elif system == "Darwin":  # macOS
                 # macOS: use pbcopy command
                 process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE, text=True)
