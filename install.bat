@@ -119,11 +119,10 @@ if errorlevel 1 (
             pause
             exit /b 1
         )
-        echo Installing dependencies from requirements.txt if it exists...
+        echo Installing dependencies if it exists...
         call %CONDA_ACTIVATE_SCRIPT% %ENV_NAME%
-        if exist "requirements.txt" (
-            pip install -r requirements.txt
-        )
+        pip install uv
+        uv sync
         echo NOTE: FFmpeg might not be installed if environment.yml was not used.
         echo Consider adding ffmpeg to your requirements or creating an environment.yml.
         call %CONDA_ACTIVATE_SCRIPT% %ENV_NAME% && conda install -c conda-forge ffmpeg -y
