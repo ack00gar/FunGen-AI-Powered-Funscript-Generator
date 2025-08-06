@@ -428,6 +428,7 @@ class GUI:
             return False
         glfw.make_context_current(self.window)
         glfw.set_drop_callback(self.window, self.handle_drop)
+        glfw.set_window_close_callback(self.window, self.handle_window_close)
 
         imgui.create_context()
         self.impl = GlfwRenderer(self.window)
@@ -463,6 +464,11 @@ class GUI:
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, 1, 1, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, dummy_pixel_fs_preview)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         return True
+
+    def handle_window_close(self, window):
+        """Handle window close event (X button clicked)."""
+        self.app.logger.info("Window close requested via window controls")
+        self.app.shutdown_app()
 
     def handle_drop(self, window, paths):
         if not paths:
