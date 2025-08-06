@@ -10,7 +10,7 @@ import re
 import json
 from typing import List, Dict, Optional
 from datetime import datetime
-from application.utils import GitHubTokenManager, format_github_date
+from application.utils import GitHubTokenManager, format_github_date, check_internet_connection
 from config.constants import DEFAULT_COMMIT_FETCH_COUNT
 from config.element_group_colors import AppGUIColors, UpdateSettingsColors
 
@@ -61,7 +61,6 @@ class GitHubAPIClient:
             
             response.raise_for_status()
             return response.json()
-            
         except requests.RequestException as e:
             return None
     
@@ -82,7 +81,6 @@ class GitHubAPIClient:
     def compare_commits(self, base_hash: str, head_hash: str) -> Optional[Dict]:
         """Compare two commits."""
         return self._make_request(f"/compare/{base_hash}...{head_hash}")
-
 
 class AutoUpdater:
     """
@@ -124,6 +122,7 @@ class AutoUpdater:
         self.update_changelog = []
         self.update_in_progress = False
         self.show_update_error_dialog = False
+        self.update_error_message = "Failed to check for updates."
         
         self.local_commit_date = None
         self.remote_commit_date = None
@@ -223,7 +222,6 @@ class AutoUpdater:
         commit_data = self.github_api.get_branch_commit(self.BRANCH)
         if commit_data:
             commit_hash = commit_data.get('sha')
-            # Extract date from the same response
             commit_info = commit_data.get('commit', {})
             author_info = commit_info.get('author', {})
             commit_date = author_info.get('date', 'Unknown date')
@@ -304,6 +302,7 @@ class AutoUpdater:
         self.local_commit_hash = self._get_local_commit_hash()
         if not self.local_commit_hash:
             self.logger.error("Could not determine local commit hash")
+            self.update_error_message = "Could not determine local commit hash."
             self.show_update_error_dialog = True
             self.update_check_complete = True
             return
@@ -311,7 +310,13 @@ class AutoUpdater:
         # Get latest commit hash and date from repo (1 API call)
         self.remote_commit_hash, self.remote_commit_date = self._get_remote_commit_data()
         if not self.remote_commit_hash:
-            self.logger.error("Could not determine remote commit hash")
+            # Check internet connection when GitHub API fails
+            if not check_internet_connection():
+                self.logger.error("No internet connection available")
+                self.update_error_message = "No internet connection available. Please check your network connection."
+            else:
+                self.logger.error("Could not determine remote commit hash")
+                self.update_error_message = "Could not connect to GitHub. Please check your GitHub token."
             self.show_update_error_dialog = True
             self.update_check_complete = True
             return
@@ -339,6 +344,8 @@ class AutoUpdater:
         self.update_changelog, self.local_commit_date = self._get_commit_diff(self.local_commit_hash, self.remote_commit_hash)
         
         if self.update_changelog is None:
+            # Failed to fetch changelog - show error popup with specific error message
+            self.update_error_message = f"Could not compare commits {self.local_commit_hash[:7]} and {self.remote_commit_hash[:7]} - they may be from different branches"
             self.show_update_error_dialog = True
             self.update_check_complete = True
             return
@@ -378,10 +385,8 @@ class AutoUpdater:
     def _restart_application(self):
         """Restarts the application with proper cleanup to prevent zombie processes."""
         try:
-            # Always restart using the main.py entry point
             main_script = "main.py"
             
-            # Verify main.py exists
             if not os.path.exists(main_script):
                 self.logger.error(f"Main script {main_script} not found")
                 return
@@ -408,7 +413,6 @@ class AutoUpdater:
 
             time.sleep(0.1)
 
-            # Exit the current process immediately to prevent terminal hanging
             self.logger.info("Restarting application...")
             os._exit(0)
 
@@ -516,7 +520,6 @@ class AutoUpdater:
         spinner_index = int(time.time() * 4) % 4
         return spinner_chars[spinner_index]
 
-
     def render_update_dialog(self):
         """Renders the ImGui popup for the update confirmation."""
         if self.show_update_dialog:
@@ -591,9 +594,8 @@ class AutoUpdater:
             window_pos = imgui.get_window_position()
             if window_pos[0] > 0 and window_pos[1] > 0:
                 self._update_error_dialog_pos = window_pos
-            
-            imgui.text_wrapped("Failed to check for updates.")
-            imgui.text_wrapped("Please check your internet connection and try again later.")
+
+            imgui.text_wrapped(self.update_error_message)
             
             imgui.separator()
             close_button_width = 80
@@ -737,7 +739,6 @@ class AutoUpdater:
             cleaned_line = self.clean_text(line)
             if cleaned_line.strip():
                 changelog.append(f"  {cleaned_line}")
-
         return changelog
 
     def load_available_updates_async(self, custom_count: int = None):
@@ -752,6 +753,35 @@ class AutoUpdater:
         self.available_updates = self._get_available_updates(custom_count)
         self.logger.info(f"Loaded {len(self.available_updates)} commits")
         self.update_picker_loading = False
+        self._updates_last_loaded = time.time()  # Track when updates were last loaded
+        
+        # Clear caches when update list changes to ensure data consistency
+        self._clear_render_caches()
+    
+    def _clear_render_caches(self):
+        """Clear cached data used for rendering to ensure consistency."""
+        if hasattr(self, '_cached_formatted_dates'):
+            self._cached_formatted_dates.clear()
+        if hasattr(self, '_cached_cleaned_changelogs'):
+            self._cached_cleaned_changelogs.clear()
+        # Clear current hash cache when update list changes
+        if hasattr(self, '_cached_current_hash'):
+            delattr(self, '_cached_current_hash')
+            delattr(self, '_cached_current_hash_time')
+    
+    def _load_changelog_async(self, commit_hash: str):
+        """Load changelog for a commit in a background thread."""
+        try:
+            # Only load if not already cached
+            if commit_hash not in self.commit_changelogs or self.commit_changelogs[commit_hash] == ["Loading changelog..."]:
+                changelog = self._get_update_diff(commit_hash)
+                self.commit_changelogs[commit_hash] = changelog
+                # Clear cleaned changelog cache for this commit to force regeneration
+                if hasattr(self, '_cached_cleaned_changelogs') and commit_hash in self._cached_cleaned_changelogs:
+                    del self._cached_cleaned_changelogs[commit_hash]
+        except Exception as e:
+            self.logger.error(f"Error loading changelog for {commit_hash[:7]}: {e}")
+            self.commit_changelogs[commit_hash] = [f"Error loading changelog: {str(e)}"]
 
     def apply_update_change(self, commit_hash: str, commit_message: str = ""):
         """Applies the selected update change and restarts the application."""
@@ -762,8 +792,9 @@ class AutoUpdater:
         if self.app.app_state_ui.show_update_settings_dialog:
             imgui.open_popup("Updates & GitHub Token")
             self.app.app_state_ui.show_update_settings_dialog = False
-            # Load updates when dialog opens
-            self.load_available_updates_async()
+            # Load updates only if not already loaded or if cache is stale
+            if not hasattr(self, '_updates_last_loaded') or time.time() - self._updates_last_loaded > 300.0:  # 5 minute cache
+                self.load_available_updates_async()
             # Initialize commit count to default if not set
             if not hasattr(self, '_custom_commit_count'):
                 self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
@@ -854,15 +885,23 @@ class AutoUpdater:
             child_height = 400
             imgui.begin_child("UpdateList", child_width, child_height, border=True, flags=imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
 
-            current_hash = self._get_local_commit_hash()
+            # Cache current hash - only refresh when actually needed (commit changes)
+            if not hasattr(self, '_cached_current_hash'):
+                self._cached_current_hash = self._get_local_commit_hash()
+                self._cached_current_hash_time = time.time()
+            
+            current_hash = self._cached_current_hash
+            
+            # Cache formatted dates to avoid repeated formatting
+            if not hasattr(self, '_cached_formatted_dates'):
+                self._cached_formatted_dates = {}
             
             for update in self.available_updates:
                 commit_hash = update['commit_hash']
                 is_expanded = commit_hash in self.expanded_commits
                 
-                # Highlight current update
+                # Highlight current update (use cached hash)
                 is_current = current_hash and commit_hash.startswith(current_hash[:7])
-                
                 if is_current:
                     imgui.push_style_color(imgui.COLOR_TEXT, *AppGUIColors.VERSION_CURRENT_HIGHLIGHT)
                 
@@ -874,22 +913,23 @@ class AutoUpdater:
                         self.expanded_commits.discard(commit_hash)
                     else:
                         self.expanded_commits.add(commit_hash)
-                        # Load changelog if not cached
+                        # Load changelog if not cached (async to avoid blocking UI)
                         if commit_hash not in self.commit_changelogs:
-                            try:
-                                changelog = self._get_update_diff(commit_hash)
-                                self.commit_changelogs[commit_hash] = changelog
-                            except Exception as e:
-                                self.logger.error(f"Error loading changelog for {commit_hash[:7]}: {e}")
-                                self.commit_changelogs[commit_hash] = [f"Error loading changelog: {str(e)}"]
-                
+                            self.commit_changelogs[commit_hash] = ["Loading changelog..."]
+                            threading.Thread(target=self._load_changelog_async, args=(commit_hash,), daemon=True).start()
+
                 imgui.same_line()
-                commit_date = format_github_date(update.get('date', 'Unknown date'), include_time=False)
+                
+                # Cache formatted date
+                date_key = update.get('date', 'Unknown date')
+                if date_key not in self._cached_formatted_dates:
+                    self._cached_formatted_dates[date_key] = format_github_date(date_key, include_time=False)
+                commit_date = self._cached_formatted_dates[date_key]
                 imgui.text(f"({commit_date})")
                 imgui.same_line()
 
                 is_skipped = commit_hash in self.skipped_commits
-                
+
                 # Position checkbox and label at the right edge first (before selectable)
                 imgui.same_line()
                 imgui.set_cursor_pos_x(imgui.get_window_width() - 90)
@@ -904,6 +944,8 @@ class AutoUpdater:
                 imgui.text("Skip")
                 imgui.same_line()
                 imgui.set_cursor_pos_x(190)  # Position after the expand button and date with more space
+                
+                # Cache truncated commit message
                 commit_msg = update['name']
                 if len(commit_msg) > 60:
                     commit_msg = commit_msg[:57] + "..."
@@ -924,8 +966,15 @@ class AutoUpdater:
                     if not changelog:
                         imgui.text_wrapped("Loading changelog...")
                     else:
-                        for line in changelog:
-                            imgui.text_wrapped(self.clean_text(line))
+                        # Cache cleaned changelog lines to avoid repeated cleaning
+                        if not hasattr(self, '_cached_cleaned_changelogs'):
+                            self._cached_cleaned_changelogs = {}
+                        
+                        if commit_hash not in self._cached_cleaned_changelogs:
+                            self._cached_cleaned_changelogs[commit_hash] = [self.clean_text(line) for line in changelog]
+                        
+                        for line in self._cached_cleaned_changelogs[commit_hash]:
+                            imgui.text_wrapped(line)
                     
                     imgui.pop_style_color()
                     imgui.unindent(30)
@@ -949,8 +998,6 @@ class AutoUpdater:
                     imgui.set_tooltip("Test the restart mechanism without making any changes. This triggers the exact same restart procedure as a real update.")
 
             imgui.separator()
-
-            # Action buttons and commit count controls
             if self.selected_update:
                 button_text = "Switch to Commit" if not self.test_mode_enabled else "Test Switch to Commit"
                 if imgui.button(button_text, width=200):
@@ -960,19 +1007,16 @@ class AutoUpdater:
                 button_text = "Switch to Commit" if not self.test_mode_enabled else "Test Switch to Commit"
                 imgui.button(button_text, width=160)
                 imgui.pop_style_var()
-            
-            # Add commit count controls on the same line, aligned to the right
+
             imgui.same_line()
             imgui.set_cursor_pos_x(imgui.get_window_width() - 280)
             
             imgui.text("Fetch commits:")
             imgui.same_line()
-            
-            # Initialize custom commit count if not set
+
             if not hasattr(self, '_custom_commit_count'):
                 self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
-            
-            # Helper function to safely adjust commit count
+
             def adjust_commit_count(delta: int) -> None:
                 try:
                     current_count = int(self._custom_commit_count)
@@ -983,8 +1027,7 @@ class AutoUpdater:
                         self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
                 except ValueError:
                     self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
-            
-            # Input for custom commit count
+
             imgui.push_item_width(30)
             changed, self._custom_commit_count = imgui.input_text("##commit_count", self._custom_commit_count, 3, imgui.INPUT_TEXT_CHARS_DECIMAL)
             imgui.pop_item_width()
