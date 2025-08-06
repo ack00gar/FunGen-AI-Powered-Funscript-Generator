@@ -84,10 +84,10 @@ def main():
         # Windows-specific: Configure multiprocessing to suppress console windows
         try:
             # Use a more direct approach: patch the underlying subprocess creation
-            import multiprocessing.popen_spawn_win32
+            from multiprocessing import popen_spawn_win32
             
             # Get the original Popen class
-            OriginalPopen = multiprocessing.popen_spawn_win32.Popen
+            OriginalPopen = popen_spawn_win32.Popen
             
             class SuppressedPopen(OriginalPopen):
                 def __init__(self, process_obj):
@@ -112,7 +112,7 @@ def main():
                         subprocess.Popen = original_subprocess_popen
             
             # Replace the Windows multiprocessing Popen class
-            multiprocessing.popen_spawn_win32.Popen = SuppressedPopen
+            popen_spawn_win32.Popen = SuppressedPopen
             
         except Exception as e:
             # If patching fails, continue without it but log the issue
