@@ -1,7 +1,92 @@
 import imgui
 import os
 import threading
+import numpy as np
+import time
+from collections import deque
 from application.utils import _format_time
+from application.utils.system_monitor import SystemMonitor
+
+
+class ComponentPerformanceMonitor:
+    """Efficient performance monitoring for UI components with memory management."""
+    
+    def __init__(self, component_name: str, history_size: int = 60):
+        self.component_name = component_name
+        self.history = deque(maxlen=history_size)  # Efficient O(1) append/pop
+        self.start_time = None
+        
+    def start_timing(self):
+        """Start timing a render cycle."""
+        self.start_time = time.perf_counter()
+        
+    def end_timing(self):
+        """End timing and record the measurement."""
+        if self.start_time is not None:
+            render_time_ms = (time.perf_counter() - self.start_time) * 1000
+            self.history.append(render_time_ms)
+            self.start_time = None
+            return render_time_ms
+        return 0.0
+    
+    def get_stats(self):
+        """Get performance statistics."""
+        if not self.history:
+            return {"current": 0.0, "avg": 0.0, "max": 0.0, "min": 0.0, "count": 0}
+        
+        history_list = list(self.history)
+        return {
+            "current": history_list[-1],
+            "avg": sum(history_list) / len(history_list),
+            "max": max(history_list),
+            "min": min(history_list),
+            "count": len(history_list)
+        }
+    
+    def get_status_info(self):
+        """Get color-coded status information."""
+        stats = self.get_stats()
+        current = stats["current"]
+        
+        if current < 1.0:
+            return "[EXCELLENT]", (0.0, 1.0, 0.0, 1.0)  # Bright green
+        elif current < 5.0:
+            return "[VERY GOOD]", (0.2, 0.8, 0.2, 1.0)  # Green
+        elif current < 16.67:
+            return "[GOOD]", (0.4, 0.8, 0.4, 1.0)  # Light green
+        elif current < 33.33:
+            return "[OK]", (1.0, 0.8, 0.2, 1.0)  # Yellow
+        elif current < 50.0:
+            return "[SLOW]", (1.0, 0.5, 0.0, 1.0)  # Orange
+        else:
+            return "[VERY SLOW]", (1.0, 0.2, 0.2, 1.0)  # Red
+    
+    def render_info(self, show_detailed=True):
+        """Render performance information in imgui."""
+        stats = self.get_stats()
+        status_text, status_color = self.get_status_info()
+        
+        if show_detailed:
+            imgui.text_colored(f"{self.component_name} Performance {status_text}", *status_color)
+            imgui.text(f"Current: {stats['current']:.2f}ms | "
+                      f"Avg: {stats['avg']:.2f}ms | "
+                      f"Max: {stats['max']:.2f}ms | "
+                      f"Min: {stats['min']:.2f}ms")
+            
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"{self.component_name} Render Performance:\n"
+                                f"Current frame: {stats['current']:.2f}ms\n"
+                                f"Average ({stats['count']} frames): {stats['avg']:.2f}ms\n"
+                                f"Maximum: {stats['max']:.2f}ms\n"
+                                f"Minimum: {stats['min']:.2f}ms\n\n"
+                                "Performance Targets:\n"
+                                "< 1ms: Excellent\n"
+                                "< 5ms: Very Good\n"
+                                "< 16.67ms: Good (60 FPS)\n"
+                                "< 33.33ms: OK (30 FPS)\n"
+                                "> 33.33ms: Needs optimization")
+        else:
+            imgui.text_colored(f"{self.component_name}: {stats['current']:.1f}ms {status_text}", *status_color)
 
 
 class InfoGraphsUI:
@@ -19,6 +104,20 @@ class InfoGraphsUI:
         # Track slider interaction state
         self.pitch_slider_is_dragging = False
         self.pitch_slider_was_dragging = False
+
+        # System performance monitor - start with less frequent updates, will optimize based on tab visibility
+        self.system_monitor = SystemMonitor(update_interval=3.0, history_size=60)  # Start with 3s, 3min history
+        self.system_monitor.start()
+        
+        # Performance monitoring for different components
+        self.perf_monitor = ComponentPerformanceMonitor("Performance Panel", history_size=60)
+        self.video_info_perf = ComponentPerformanceMonitor("Video Info", history_size=30)
+        self.video_settings_perf = ComponentPerformanceMonitor("Video Settings", history_size=30)
+        self.funscript_info_perf = ComponentPerformanceMonitor("Funscript Info", history_size=30)
+        self.ui_performance_perf = ComponentPerformanceMonitor("UI Performance", history_size=30)
+        
+        # Track tab visibility for optimization
+        self._last_performance_tab_active = False
 
     def _apply_video_render(self, new_pitch):
         """Execute video rendering with the new pitch value after delay"""
@@ -63,6 +162,7 @@ class InfoGraphsUI:
     def cleanup(self):
         """Clean up any pending timers"""
         self._cancel_video_render_timer()
+        self.system_monitor.stop()
 
     def render(self):
         app_state = self.app.app_state_ui
@@ -113,6 +213,17 @@ class InfoGraphsUI:
                 imgui.end_tab_item()
             imgui.end_tab_bar()
 
+        # Update performance tab visibility tracking
+        performance_tab_now_active = (tab_selected == "performance")
+        if performance_tab_now_active != self._last_performance_tab_active:
+            self._last_performance_tab_active = performance_tab_now_active
+            # Optionally adjust system monitor update interval based on visibility
+            if hasattr(self, 'system_monitor'):
+                if performance_tab_now_active:
+                    self.system_monitor.update_interval = 1.0  # More frequent when visible
+                else:
+                    self.system_monitor.update_interval = 3.0  # Less frequent when hidden
+
         avail = imgui.get_content_region_available()
         imgui.begin_child("InfoGraphsTabContent", width=0, height=avail[1], border=False)
         if tab_selected == "video":
@@ -138,8 +249,17 @@ class InfoGraphsUI:
                 self._render_content_undo_redo_history()
         elif tab_selected == "performance":
             imgui.spacing()
-            if imgui.collapsing_header("Performance Monitor##PerformanceSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+            if imgui.collapsing_header("System Monitor##PerformanceSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 self._render_content_performance()
+            imgui.separator()
+            if imgui.collapsing_header("UI Performance##UIPerformanceSection", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_content_ui_performance()
+        
+        # Always check memory alerts (critical system safety), but less frequently when performance tab not visible
+        if hasattr(self, 'system_monitor'):
+            stats = self.system_monitor.get_stats()
+            self._check_memory_alerts(stats)
+        
         imgui.end_child()
 
     def _get_k_resolution_label(self, width, height):
@@ -157,6 +277,7 @@ class InfoGraphsUI:
         return ""
 
     def _render_content_video_info(self):
+        self.video_info_perf.start_timing()
         file_mgr = self.app.file_manager
 
         imgui.columns(2, "video_info_stats", border=False)
@@ -257,11 +378,16 @@ class InfoGraphsUI:
             imgui.next_column()
         imgui.columns(1)
         imgui.spacing()
+        
+        # End performance monitoring
+        self.video_info_perf.end_timing()
 
     def _render_content_video_settings(self):
+        self.video_settings_perf.start_timing()
         processor = self.app.processor
         if not processor:
             imgui.text("VideoProcessor not initialized.")
+            self.video_settings_perf.end_timing()
             return
 
         imgui.text("Hardware Acceleration")
@@ -326,8 +452,13 @@ class InfoGraphsUI:
                 
                 # Schedule debounced video rendering (only the expensive video processing)
                 self._schedule_video_render(new_pitch)
+        
+        # End performance monitoring
+        self.video_settings_perf.end_timing()
+
 
     def _render_content_funscript_info(self, timeline_num):
+        self.funscript_info_perf.start_timing()
         fs_proc = self.app.funscript_processor
         stats = fs_proc.funscript_stats_t1 if timeline_num == 1 else fs_proc.funscript_stats_t2
         source_text = stats.get("source_type", "N/A")
@@ -374,6 +505,10 @@ class InfoGraphsUI:
 
         imgui.columns(1)
         imgui.spacing()
+        
+        # End performance monitoring
+        self.funscript_info_perf.end_timing()
+
 
     def _render_content_undo_redo_history(self):
         fs_proc = self.app.funscript_processor
@@ -419,77 +554,504 @@ class InfoGraphsUI:
         imgui.end_child()
 
     def _render_content_performance(self):
-        """Render performance information with sorting and total time."""
+        # Start performance monitoring
+        self.perf_monitor.start_timing()
+        
+        stats = self.system_monitor.get_stats()
+        
+        # Check for memory alerts
+        self._check_memory_alerts(stats)
+        
+        # Get available width for full-width graphs
+        available_width = imgui.get_content_region_available_width()
+        
+        # Helper to render a graph with better colors and full width
+        def render_graph(label, data, overlay_text, scale_min=0, scale_max=100, height=60, color=None):
+            # Ensure data is a numpy array of float32, as required by pyimgui
+            np_data = np.array(data, dtype=np.float32)
+            
+            # Choose color based on current value
+            current_value = data[-1] if data else 0
+            if color is None:
+                if current_value < 50:
+                    color = (0.2, 0.8, 0.2, 0.8)  # Green
+                elif current_value < 80:
+                    color = (1.0, 0.8, 0.2, 0.8)  # Yellow
+                else:
+                    color = (1.0, 0.2, 0.2, 0.8)  # Red
+            
+            # Set plot color temporarily
+            imgui.push_style_color(imgui.COLOR_PLOT_LINES, *color)
+            imgui.plot_lines(
+                f"##{label}",
+                np_data,
+                overlay_text=overlay_text,
+                scale_min=scale_min,
+                scale_max=scale_max,
+                graph_size=(available_width, height)  # Full width
+            )
+            imgui.pop_style_color()
+        
+        # Helper to render graphical core representation
+        def render_core_bars(per_core_usage):
+            if not per_core_usage:
+                return
+                
+            bar_width = max(8, (available_width - 20) / len(per_core_usage))  # Adjust bar width based on cores
+            bar_height = 30
+            spacing = 2
+            
+            # Calculate actual width needed
+            total_width = (bar_width + spacing) * len(per_core_usage) - spacing
+            start_x = imgui.get_cursor_screen_pos()[0]
+            
+            for i, core_load in enumerate(per_core_usage):
+                # Position for this bar
+                bar_x = start_x + i * (bar_width + spacing)
+                bar_y = imgui.get_cursor_screen_pos()[1]
+                
+                # Color based on load
+                if core_load < 50:
+                    color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0)  # Green
+                elif core_load < 80:
+                    color = imgui.get_color_u32_rgba(1.0, 0.8, 0.2, 1.0)  # Yellow
+                else:
+                    color = imgui.get_color_u32_rgba(1.0, 0.2, 0.2, 1.0)  # Red
+                
+                # Draw background bar
+                bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.8)
+                imgui.get_window_draw_list().add_rect_filled(
+                    bar_x, bar_y,
+                    bar_x + bar_width, bar_y + bar_height,
+                    bg_color
+                )
+                
+                # Draw usage bar (from bottom up)
+                usage_height = (core_load / 100.0) * bar_height
+                imgui.get_window_draw_list().add_rect_filled(
+                    bar_x, bar_y + bar_height - usage_height,
+                    bar_x + bar_width, bar_y + bar_height,
+                    color
+                )
+                
+                # Draw core number
+                text = f"C{i}"
+                text_size = imgui.calc_text_size(text)
+                text_x = bar_x + (bar_width - text_size[0]) / 2
+                text_y = bar_y + bar_height + 2
+                imgui.get_window_draw_list().add_text(text_x, text_y, imgui.get_color_u32_rgba(0.8, 0.8, 0.8, 1.0), text)
+            
+            # Advance cursor past the bars
+            imgui.dummy(total_width, bar_height + 20)
+
+        # --- CPU Section ---
+        physical_cores = stats.get('cpu_physical_cores', stats['cpu_core_count'])
+        logical_cores = stats['cpu_core_count']
+        core_info = f"({physical_cores}P/{logical_cores}L cores)" if physical_cores != logical_cores else f"({logical_cores} cores)"
+        
+        # CPU Header with current load
+        cpu_load = stats['cpu_load']
+        current_cpu = cpu_load[-1] if cpu_load else 0
+        
+        if current_cpu < 50:
+            header_color = (0.2, 0.8, 0.2, 1.0)
+            cpu_status = "[OK]"
+        elif current_cpu < 80:
+            header_color = (1.0, 0.8, 0.2, 1.0)
+            cpu_status = "[HIGH]"
+        else:
+            header_color = (1.0, 0.2, 0.2, 1.0)
+            cpu_status = "[CRIT]"
+        
+        imgui.text_colored(f"CPU {core_info} {cpu_status}", *header_color)
+        
+        # Overall CPU graph - simplified overlay text
+        render_graph("cpu_load", cpu_load, f"{current_cpu:.1f}%", height=50)
+        
+        # CPU frequency information (compact)
+        cpu_freq = stats.get('cpu_freq', 0)
+        if cpu_freq > 0:
+            freq_ghz = cpu_freq / 1000  # Convert MHz to GHz
+            imgui.same_line()
+            imgui.text_colored(f" @ {freq_ghz:.1f}GHz", 0.7, 0.7, 0.7, 1.0)
+        
+        imgui.spacing()
+        
+        # Per-core CPU usage with graphical bars
+        per_core_usage = stats.get('cpu_per_core', [])
+        if per_core_usage:
+            imgui.text("Per-Core Usage:")
+            render_core_bars(per_core_usage)
+        else:
+            imgui.text_disabled("Per-core data not available")
+        
+        imgui.separator()
+        imgui.spacing()
+        
+        # --- RAM Section ---
+        ram_percent = stats['ram_usage_percent']
+        ram_gb = stats['ram_usage_gb']
+        ram_total = stats.get('ram_total_gb', 0)
+        current_ram = ram_percent[-1] if ram_percent else 0
+        
+        # RAM Header with current usage
+        if current_ram < 60:
+            ram_color = (0.2, 0.8, 0.2, 1.0)
+        elif current_ram < 85:
+            ram_color = (1.0, 0.8, 0.2, 1.0)
+        else:
+            ram_color = (1.0, 0.2, 0.2, 1.0)
+        
+        ram_status = "[OK]" if current_ram < 60 else "[HIGH]" if current_ram < 85 else "[CRIT]"
+        imgui.text_colored(f"Memory (RAM) {ram_status}", *ram_color)
+        render_graph("ram_usage", ram_percent, 
+                    f"{current_ram:.1f}% ({ram_gb[-1]:.1f}GB)", height=55)
+        
+        # Swap usage (integrated with RAM section)
+        swap_percent = stats.get('swap_usage_percent', 0)
+        swap_gb = stats.get('swap_usage_gb', 0)
+        if swap_percent > 0:
+            swap_color = (0.2, 0.8, 0.2, 1.0) if swap_percent < 50 else (1.0, 0.8, 0.2, 1.0) if swap_percent < 80 else (1.0, 0.2, 0.2, 1.0)
+            imgui.text_colored(f"Swap: {swap_percent:.1f}% ({swap_gb:.1f}GB)", *swap_color)
+        else:
+            imgui.text_colored("Swap: Not in use", 0.2, 0.8, 0.2, 1.0)
+
+        imgui.separator()
+        imgui.spacing()
+
+        # --- GPU Section ---
+        if stats['gpu_available']:
+            gpu_name = stats.get('gpu_name', 'Unknown GPU')
+            # Shorten very long GPU names
+            if len(gpu_name) > 35:
+                gpu_name = gpu_name[:32] + "..."
+            
+            gpu_load = stats['gpu_load']
+            current_gpu = gpu_load[-1] if gpu_load else 0
+            
+            if current_gpu < 50:
+                gpu_color = (0.2, 0.8, 0.2, 1.0)
+            elif current_gpu < 80:
+                gpu_color = (1.0, 0.8, 0.2, 1.0)
+            else:
+                gpu_color = (1.0, 0.2, 0.2, 1.0)
+            
+            gpu_status = "[OK]" if current_gpu < 50 else "[HIGH]" if current_gpu < 80 else "[CRIT]"
+            imgui.text_colored(f"GPU - {gpu_name} {gpu_status}", *gpu_color)
+            
+            if any(load > 0 for load in gpu_load):  # Only show if we have data
+                render_graph("gpu_load", gpu_load, f"{current_gpu:.1f}%", height=55)
+                
+                gpu_mem = stats['gpu_mem_usage_percent']
+                if stats['gpu_info'] and 'gpu' in stats['gpu_info']:
+                    gpu_info_data = stats['gpu_info']['gpu'][0]
+                    gpu_mem_used = gpu_info_data.get('fb_memory_usage', {}).get('used', 0) / 1024
+                    gpu_mem_total = gpu_info_data.get('fb_memory_usage', {}).get('total', 0) / 1024
+                    render_graph("gpu_mem", gpu_mem, f"{gpu_mem[-1]:.1f}% ({gpu_mem_used:.1f}GB)", height=45)
+                else:
+                    render_graph("gpu_mem", gpu_mem, f"{gpu_mem[-1]:.1f}%", height=45)
+            else:
+                # Clear messaging: either we have data or we don't
+                if stats['os'] == 'Darwin' and 'Apple' in gpu_name:
+                    imgui.text_colored("[INFO] GPU detected but metrics require admin access", 0.6, 0.8, 1.0, 1.0)
+                    imgui.text_colored("      Run with 'sudo' to enable GPU monitoring", 0.5, 0.6, 0.7, 1.0)
+                else:
+                    imgui.text_colored("[INFO] GPU monitoring not available", 0.7, 0.7, 0.7, 1.0)
+                imgui.spacing()
+            
+            imgui.separator()
+            imgui.spacing()
+
+        # Remove memory pressure - it's not working properly and always shows 0
+        
+        # End performance monitoring and display results
+        self.perf_monitor.end_timing()
+        
+        imgui.separator()
+        imgui.spacing()
+        self.perf_monitor.render_info(show_detailed=True)
+
+    def _check_memory_alerts(self, stats):
+        """Check memory usage and trigger alerts if thresholds are exceeded."""
+        if not hasattr(self, '_last_alert_time'):
+            self._last_alert_time = {'ram': 0}
+        
+        import time
+        current_time = time.time()
+        alert_cooldown = 300  # 5 minutes between alerts
+        
+        # RAM usage alerts
+        ram_percent = stats['ram_usage_percent']
+        if ram_percent:
+            current_ram = ram_percent[-1]
+            if current_ram >= 90 and (current_time - self._last_alert_time['ram']) > alert_cooldown:
+                ram_gb = stats['ram_usage_gb'][-1] if stats['ram_usage_gb'] else 0
+                ram_total = stats.get('ram_total_gb', 0)
+                self.app.logger.warning(
+                    f"[CRITICAL] HIGH MEMORY USAGE: {current_ram:.1f}% ({ram_gb:.1f}/{ram_total:.1f} GB) - "
+                    f"Consider closing unnecessary applications or upgrading RAM.",
+                    extra={'status_message': True}
+                )
+                self._last_alert_time['ram'] = current_time
+            elif current_ram >= 85 and (current_time - self._last_alert_time['ram']) > alert_cooldown:
+                self.app.logger.warning(
+                    f"[WARNING] Memory usage is high: {current_ram:.1f}% - Monitor for potential issues.",
+                    extra={'status_message': True}
+                )
+                self._last_alert_time['ram'] = current_time
+        
+        # Removed memory pressure alerts - feature wasn't working properly
+
+    def _render_content_ui_performance(self):
+        """Render UI performance information with clean, organized layout."""
+        self.ui_performance_perf.start_timing()
         app = self.app
         gui = app.gui_instance if hasattr(app, 'gui_instance') else None
         if not gui:
             imgui.text_disabled("Performance data not available.")
+            self.ui_performance_perf.end_timing()
             return
 
-        # Sorting state
-        if not hasattr(self, '_perf_sort_mode'):
-            self._perf_sort_mode = 0  # 0: slowest→fastest, 1: fastest→slowest, 2: alphabetical
-        sort_modes = ["Slowest→Fastest", "Fastest→Slowest", "A→Z"]
-        if imgui.button(f"Sort: {sort_modes[self._perf_sort_mode]}"):
-            self._perf_sort_mode = (self._perf_sort_mode + 1) % 3
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Click to cycle sort order for the list below.")
-        imgui.spacing()
-
-        # Prepare data
-        stats = list(gui.component_render_times.items())
-        if self._perf_sort_mode == 0:
-            stats.sort(key=lambda x: x[1], reverse=True)  # slowest→fastest
-        elif self._perf_sort_mode == 1:
-            stats.sort(key=lambda x: x[1])  # fastest→slowest
-        else:
-            stats.sort(key=lambda x: x[0].lower())  # alphabetical
-
-        # Display stats
-        imgui.text("Frame Render Times (ms):")
-        total = 0.0
-        for component, render_time in stats:
-            color = (0.0, 1.0, 0.0, 1.0) if render_time < 16.67 else (1.0, 1.0, 0.0, 1.0)
-            imgui.text_colored(f"  {component}: {render_time:.2f}", *color)
-            total += render_time
-        if not stats:
-            imgui.text_disabled("  No render data available")
+        # Performance Overview Header
+        imgui.text("UI Component Performance")
         imgui.separator()
-        imgui.text(f"Total: {total:.2f} ms")
         imgui.spacing()
-
-        # Show average performance if available
-        if gui.perf_accumulated_times and gui.perf_frame_count > 0:
-            imgui.text("Average Times (ms):")
-            avg_stats = list(gui.perf_accumulated_times.items())
-            if self._perf_sort_mode == 0:
-                avg_stats.sort(key=lambda x: x[1]/gui.perf_frame_count, reverse=True)
-            elif self._perf_sort_mode == 1:
-                avg_stats.sort(key=lambda x: x[1]/gui.perf_frame_count)
+        
+        # 1. Current Frame Performance Summary
+        current_stats = list(gui.component_render_times.items()) if hasattr(gui, 'component_render_times') else []
+        current_total = 0
+        
+        if current_stats:
+            # Calculate totals
+            current_total = sum(time for _, time in current_stats)
+            
+            # Summary metrics
+            imgui.text_colored("Current Frame:", 0.8, 0.9, 1.0, 1.0)
+            
+            # Overall status indicator
+            if current_total < 16.67:  # 60 FPS
+                status_color = (0.2, 0.8, 0.2, 1.0)
+                status_text = "[SMOOTH]"
+                fps_target = "60+ FPS"
+            elif current_total < 33.33:  # 30 FPS
+                status_color = (1.0, 0.8, 0.2, 1.0) 
+                status_text = "[GOOD]"
+                fps_target = "30-60 FPS"
             else:
-                avg_stats.sort(key=lambda x: x[0].lower())
-            avg_total = 0.0
-            for component, total_time in avg_stats:
-                avg_time = total_time / gui.perf_frame_count
-                color = (0.0, 1.0, 0.0, 1.0) if avg_time < 16.67 else (1.0, 1.0, 0.0, 1.0)
-                imgui.text_colored(f"  {component}: {avg_time:.2f}", *color)
-                avg_total += avg_time
-            if not avg_stats:
-                imgui.text_disabled("  No average data available")
-            imgui.separator()
-            imgui.text(f"Total: {avg_total:.2f} ms")
+                status_color = (1.0, 0.2, 0.2, 1.0)
+                status_text = "[SLOW]"
+                fps_target = "<30 FPS"
+            
+            imgui.same_line()
+            imgui.text_colored(f" {current_total:.1f}ms {status_text} ({fps_target})", *status_color)
+        else:
+            imgui.text_disabled("No current frame data available")
+        
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        
+        # 2. Top 3 Most Expensive Components (Historical Average) - NOT affected by sorting
+        if (hasattr(gui, 'perf_accumulated_times') and gui.perf_accumulated_times and 
+            hasattr(gui, 'perf_frame_count') and gui.perf_frame_count > 0):
+            imgui.text_colored("Average Performance:", 0.8, 0.9, 1.0, 1.0)
+            imgui.same_line()
+            imgui.text(f"({gui.perf_frame_count} frames tracked)")
+            
+            avg_stats = list(gui.perf_accumulated_times.items())
+            avg_total = sum(total_time / gui.perf_frame_count for _, total_time in avg_stats) if gui.perf_frame_count > 0 else 0
+            
+            # Always sort by average time (descending) for the expensive components list - NOT affected by sort toggle
+            avg_stats_for_expensive = list(gui.perf_accumulated_times.items())
+            if gui.perf_frame_count > 0:
+                avg_stats_for_expensive.sort(key=lambda x: x[1]/gui.perf_frame_count, reverse=True)  # Always by impact
+            else:
+                avg_stats_for_expensive.sort(key=lambda x: x[0].lower())  # Fallback to alphabetical
+            
+            # Overall average status
+            if avg_total < 16.67:
+                avg_status_color = (0.2, 0.8, 0.2, 1.0)
+                avg_status_text = "[EXCELLENT]"
+            elif avg_total < 33.33:
+                avg_status_color = (1.0, 0.8, 0.2, 1.0)
+                avg_status_text = "[GOOD]"
+            else:
+                avg_status_color = (1.0, 0.2, 0.2, 1.0)
+                avg_status_text = "[NEEDS OPTIMIZATION]"
+            
+            imgui.text_colored(f"Overall: {avg_total:.1f}ms {avg_status_text}", *avg_status_color)
+            
             imgui.spacing()
-
-        # Show frame count and timing info
-        if gui.perf_frame_count > 0:
-            imgui.text(f"Frames tracked: {gui.perf_frame_count}")
+            
+            # Top 3 most expensive components only (not affected by sorting)
+            imgui.text("Most Expensive Components (avg):")
+            for i, (component, total_time) in enumerate(avg_stats_for_expensive[:3]):
+                avg_time = total_time / gui.perf_frame_count if gui.perf_frame_count > 0 else 0.0
+                time_color = (0.0, 1.0, 0.0, 1.0) if avg_time < 5.0 else (1.0, 0.8, 0.0, 1.0) if avg_time < 16.67 else (1.0, 0.2, 0.2, 1.0)
+                imgui.text_colored(f"  {i+1}. {component}: {avg_time:.2f}ms", *time_color)
+                
+            if len(avg_stats_for_expensive) > 3:
+                imgui.text_disabled(f"  ... and {len(avg_stats_for_expensive) - 3} more components")
+        else:
+            imgui.text_disabled("No historical data available")
+            
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        
+        # 3. Complete Component List - ALL components with Time/Avg/% columns
+        if current_stats and len(current_stats) > 0 and hasattr(gui, 'perf_accumulated_times') and gui.perf_accumulated_times and hasattr(gui, 'perf_frame_count'):
+            imgui.text_colored("All Components:", 0.8, 0.9, 1.0, 1.0)
+            
+            # Sort toggle - affects the full component table below
+            if not hasattr(self, '_perf_sort_mode'):
+                self._perf_sort_mode = 0  # 0: by current time (slowest first), 1: by avg time, 2: alphabetical
+            
+            sort_modes = ["by Current", "by Average", "A-Z"]
+            sort_label = sort_modes[self._perf_sort_mode]
+            if imgui.small_button(f"Sort: {sort_label}"):
+                self._perf_sort_mode = (self._perf_sort_mode + 1) % 3
+            
+            # Get all components (union of current and historical data)
+            all_component_names = set()
+            current_dict = dict(current_stats)
+            avg_dict = {}
+            
+            # Add current frame components
+            for component, _ in current_stats:
+                all_component_names.add(component)
+            
+            # Add historical components and calculate averages
+            if gui.perf_frame_count > 0:
+                for component, total_time in gui.perf_accumulated_times.items():
+                    all_component_names.add(component)
+                    avg_dict[component] = total_time / gui.perf_frame_count
+            else:
+                # No historical data yet, just add component names with 0 averages
+                for component in gui.perf_accumulated_times.keys():
+                    all_component_names.add(component)
+                    avg_dict[component] = 0.0
+            
+            # Create complete list with all data
+            complete_stats = []
+            for component in all_component_names:
+                current_time = current_dict.get(component, 0.0)
+                avg_time = avg_dict.get(component, 0.0)
+                complete_stats.append((component, current_time, avg_time))
+            
+            # Apply sorting
+            if self._perf_sort_mode == 0:  # by current time
+                complete_stats.sort(key=lambda x: x[1], reverse=True)
+            elif self._perf_sort_mode == 1:  # by average time
+                complete_stats.sort(key=lambda x: x[2], reverse=True)
+            else:  # alphabetical
+                complete_stats.sort(key=lambda x: x[0].lower())
+            
+            imgui.spacing()
+            
+            # Table headers
+            imgui.columns(4, "complete_perf_table", border=False)
+            imgui.set_column_width(0, 180)
+            imgui.set_column_width(1, 70)
+            imgui.set_column_width(2, 70)
+            imgui.set_column_width(3, 70)
+            imgui.text("Component")
+            imgui.next_column()
+            imgui.text("Time (ms)")
+            imgui.next_column()
+            imgui.text("Avg (ms)")
+            imgui.next_column()
+            imgui.text("% of Total")
+            imgui.next_column()
+            imgui.separator()
+            
+            # Show ALL component rows
+            for component, current_time, avg_time in complete_stats:
+                percentage = (current_time / current_total) * 100 if current_total > 0 and current_time > 0 else 0.0
+                
+                # Component name
+                imgui.text(component)
+                imgui.next_column()
+                
+                # Current time with color coding
+                if current_time > 0:
+                    time_color = (0.0, 1.0, 0.0, 1.0) if current_time < 16.67 else (1.0, 0.8, 0.0, 1.0) if current_time < 33.33 else (1.0, 0.2, 0.2, 1.0)
+                    imgui.text_colored(f"{current_time:.2f}", *time_color)
+                else:
+                    imgui.text_disabled("0.00")
+                imgui.next_column()
+                
+                # Average time with color coding
+                if avg_time > 0:
+                    avg_color = (0.0, 1.0, 0.0, 1.0) if avg_time < 5.0 else (1.0, 0.8, 0.0, 1.0) if avg_time < 16.67 else (1.0, 0.2, 0.2, 1.0)
+                    imgui.text_colored(f"{avg_time:.2f}", *avg_color)
+                else:
+                    imgui.text_disabled("0.00")
+                imgui.next_column()
+                
+                # Percentage (only for current frame components)
+                if percentage > 0:
+                    imgui.text(f"{percentage:.1f}%")
+                else:
+                    imgui.text_disabled("-")
+                imgui.next_column()
+            
+            imgui.columns(1)
+            
+        elif current_stats and len(current_stats) > 0:
+            # Fallback: show current frame data only if no historical data
+            imgui.text_colored("All Components (current frame only):", 0.8, 0.9, 1.0, 1.0)
+            imgui.text_disabled("Historical data not yet available")
+            
+            imgui.spacing()
+            
+            # Simple current-only table
+            imgui.columns(3, "current_only_table", border=False)
+            imgui.set_column_width(0, 200)
+            imgui.set_column_width(1, 80)
+            imgui.text("Component")
+            imgui.next_column()
+            imgui.text("Time (ms)")
+            imgui.next_column()
+            imgui.text("% of Total")
+            imgui.next_column()
+            imgui.separator()
+            
+            for component, render_time in current_stats:
+                percentage = (render_time / current_total) * 100 if current_total > 0 else 0
+                
+                imgui.text(component)
+                imgui.next_column()
+                
+                time_color = (0.0, 1.0, 0.0, 1.0) if render_time < 16.67 else (1.0, 0.8, 0.0, 1.0) if render_time < 33.33 else (1.0, 0.2, 0.2, 1.0)
+                imgui.text_colored(f"{render_time:.2f}", *time_color)
+                imgui.next_column()
+                
+                imgui.text(f"{percentage:.1f}%")
+                imgui.next_column()
+            
+            imgui.columns(1)
+        
+        # Monitoring Status Footer
+        imgui.spacing()
+        imgui.separator()
+        
+        if hasattr(gui, 'last_perf_log_time') and hasattr(gui, 'perf_log_interval'):
             import time
             time_since_log = time.time() - gui.last_perf_log_time
-            imgui.text(f"Next log in: {gui.perf_log_interval - time_since_log:.1f}s")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                "Shows real-time frame render times for GUI components.\n"
-                "Green: < 16.67ms (60+ FPS)\n"
-                "Yellow: ≥ 16.67ms (< 60 FPS)\n"
-                "Data is logged every 5 seconds to debug output."
-            )
+            next_log_in = gui.perf_log_interval - time_since_log
+            
+            imgui.text_disabled(f"Next debug log in: {next_log_in:.1f}s")
+            
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Performance data is logged to console every few seconds.\n\n"
+                    "Color coding:\n"
+                    "Green: Excellent performance\n"
+                    "Yellow: Acceptable performance\n"
+                    "Red: Needs optimization"
+                )
+        
+        # End performance monitoring
+        self.ui_performance_perf.end_timing()
+
