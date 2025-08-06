@@ -1,3 +1,6 @@
 -i https://download.pytorch.org/whl/cu129
-torch
-torchvision
+torch==2.8.0+cu129
+torchvision==0.23.0+cu129
+torchaudio==2.8.0+cu129
+# Ensure sympy version is compatible with other packages
+sympy>=1.13.3

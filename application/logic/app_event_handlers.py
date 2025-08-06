@@ -107,6 +107,7 @@ class AppEventHandlers:
         if not self.app._check_model_paths():
             return
         if not self.app.tracker: self.logger.error("Tracker not initialized."); return
+        
         self.app.tracker.set_tracking_mode("YOLO_ROI")  # Ensure correct mode
         self.app.stage_processor.start_full_analysis(processing_mode=self.app.app_state_ui.selected_tracker_mode)
         self.app.energy_saver.reset_activity_timer()
@@ -122,6 +123,26 @@ class AppEventHandlers:
             return
 
         selected_mode_from_ui = self.app.app_state_ui.selected_tracker_mode
+        
+        # Check for .engine model with live optical flow methods
+        if selected_mode_from_ui in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
+            detection_model_path = self.app.yolo_det_model_path
+            if detection_model_path and detection_model_path.lower().endswith('.engine'):
+                warning_message = (
+                    "Live optical flow methods are currently broken with .engine models.\nPlease use a .pt model instead for live tracking."
+                )
+                
+                # Log to terminal
+                self.logger.warning("Live optical flow with .engine model detected - this is currently broken. Use .pt model instead.")
+                
+                # Show GUI popup
+                if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                    self.app.gui_instance.show_error_popup(
+                        "WARNING!", 
+                        warning_message
+                    )
+                return
+        
         if selected_mode_from_ui == TrackerMode.LIVE_USER_ROI:
             self.app.tracker.set_tracking_mode("USER_FIXED_ROI")
         elif selected_mode_from_ui == TrackerMode.OSCILLATION_DETECTOR:
