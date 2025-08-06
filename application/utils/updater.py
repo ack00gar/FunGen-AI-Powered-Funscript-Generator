@@ -8,9 +8,9 @@ import time
 import unicodedata
 import re
 import json
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional
 from datetime import datetime
-from application.utils import GitHubTokenManager
+from application.utils import GitHubTokenManager, format_github_date
 from config.constants import DEFAULT_COMMIT_FETCH_COUNT
 from config.element_group_colors import AppGUIColors, UpdateSettingsColors
 
@@ -218,20 +218,73 @@ class AutoUpdater:
             self.status_message = "Could not connect to check for updates."
             return None
 
-    def _get_commit_diff(self, local_hash: str, remote_hash: str) -> list[str]:
-        """Gets commit messages between local and remote updates."""
+    def _get_remote_commit_data(self) -> tuple[str | None, str | None]:
+        """Gets the latest commit hash and date from the remote repository via GitHub API."""
+        commit_data = self.github_api.get_branch_commit(self.BRANCH)
+        if commit_data:
+            commit_hash = commit_data.get('sha')
+            # Extract date from the same response
+            commit_info = commit_data.get('commit', {})
+            author_info = commit_info.get('author', {})
+            commit_date = author_info.get('date', 'Unknown date')
+            return commit_hash, commit_date
+        else:
+            self.logger.error("Failed to fetch remote update")
+            self.status_message = "Could not connect to check for updates."
+            return None, None
+
+    def _get_commit_diff(self, local_hash: str, remote_hash: str) -> tuple[list[str] | None, str | None]:
+        """Gets detailed commit information between local and remote updates, plus local commit date."""
         compare_data = self.github_api.compare_commits(local_hash, remote_hash)
         
         if compare_data is None:
             self.logger.warning(f"Could not compare commits {local_hash[:7]} and {remote_hash[:7]} - they may be from different branches")
-            return None  # Return None to indicate failure
+            return None, None  # Return None to indicate failure
+
+        # Extract local commit date from the comparison response
+        local_commit_date = None
+        base_commit = compare_data.get('base_commit', {})
+        if base_commit:
+            commit_info = base_commit.get('commit', {})
+            author_info = commit_info.get('author', {})
+            local_commit_date = author_info.get('date', 'Unknown date')
 
         changelog = []
         commits = compare_data.get('commits', [])
+        
+        if not commits:
+            changelog.append("No commits found between the specified hashes.")
+            return changelog, local_commit_date
+            
+        changelog.append(f"Changes from {local_hash[:7]} to {remote_hash[:7]}")
+        changelog.append(f"Total commits: {len(commits)}")
+        changelog.append("")
+        
         for commit_data in commits:
-            message = commit_data.get('commit', {}).get('message', 'No commit message.')
-            changelog.append(message)
-        return changelog
+            # Get commit details
+            commit_info = commit_data.get('commit', {})
+            author_info = commit_info.get('author', {})
+            author_data = commit_data.get('author')
+            
+            # Use GitHub username if available, otherwise use commit author name
+            author = author_data.get('login') if author_data else author_info.get('name', 'Unknown')
+            message = commit_info.get('message', 'No commit message')
+            date = author_info.get('date', 'Unknown date')
+            commit_hash = commit_data.get('sha', 'Unknown')
+            
+            changelog.append(f"Commit: {commit_hash[:7]}")
+            changelog.append(f"Author: {self.clean_text(author)}")
+            changelog.append(f"Date:   {format_github_date(date, include_time=True)}")
+            changelog.append("Message:")
+            
+            # Split message into lines and format nicely
+            message_lines = message.split('\n')
+            for line in message_lines:
+                cleaned_line = self.clean_text(line)
+                if cleaned_line.strip():
+                    changelog.append(f"  {cleaned_line}")
+            changelog.append("")
+        return changelog, local_commit_date
 
     def _get_commit_date(self, commit_hash: str) -> str:
         """Gets the commit date for a given commit hash."""
@@ -244,53 +297,83 @@ class AutoUpdater:
         commit_info = commit_data.get('commit', {})
         author_info = commit_info.get('author', {})
         date_str = author_info.get('date', 'Unknown date')
-        
-        # Parse and format the date
-        try:
-
-            date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            return date_obj.strftime('%Y-%m-%d %H:%M')
-        except ValueError:
-            return date_str
+        return format_github_date(date_str, include_time=False)
 
     def _check_worker(self):
         """Worker thread to check for updates and fetch changelog."""
         self.local_commit_hash = self._get_local_commit_hash()
-        if self.local_commit_hash:
-            self.remote_commit_hash = self._get_remote_commit_hash()
-
-        if self.local_commit_hash and self.remote_commit_hash:
-            # Cache commit dates to avoid repeated API calls in the UI
-            self.local_commit_date = self._get_commit_date(self.local_commit_hash)
-            self.remote_commit_date = self._get_commit_date(self.remote_commit_hash)
-            
-            if self.local_commit_hash != self.remote_commit_hash:
-                # Check if the remote commit is in the skip list
-                if self.remote_commit_hash in self.skipped_commits:
-                    self.logger.info(f"Update {self.remote_commit_hash[:7]} is marked as skipped, ignoring.")
-                    self.status_message = "You are on the latest update (skipped updates ignored)."
-                    self.update_available = False
-                    self.update_changelog = []
-                else:
-                    self.logger.info("Update available.")
-                    self.status_message = "A new update is available!"
-                    self.update_available = True
-                    # Fetch the changelog
-                    self.update_changelog = self._get_commit_diff(self.local_commit_hash, self.remote_commit_hash)
-                    if self.update_changelog is None:
-                        # Failed to fetch changelog - show error popup
-                        self.show_update_error_dialog = True
-                    elif not self.app.app_settings.get("updater_suppress_popup", False):
-                        self.show_update_dialog = True
-            else:
-                self.logger.info("Application is up to date.")
-                self.status_message = "You are on the latest update."
-                self.update_changelog = []
-        else:
-            # Failed to get commit hashes - show error popup
+        if not self.local_commit_hash:
+            self.logger.error("Could not determine local commit hash")
             self.show_update_error_dialog = True
+            self.update_check_complete = True
+            return
+
+        # Get latest commit hash and date from repo (1 API call)
+        self.remote_commit_hash, self.remote_commit_date = self._get_remote_commit_data()
+        if not self.remote_commit_hash:
+            self.logger.error("Could not determine remote commit hash")
+            self.show_update_error_dialog = True
+            self.update_check_complete = True
+            return
+
+        # Compare latest repo hash with local hash
+        if self.local_commit_hash == self.remote_commit_hash:
+            # Same hash - no update needed
+            self.logger.info("Application is up to date.")
+            self.status_message = "You are on the latest update."
+            self.update_available = False
+            self.update_changelog = []
+            self.update_check_complete = True
+            return
+
+        # Different hash - check if it's in skip list
+        if self.remote_commit_hash in self.skipped_commits:
+            self.logger.info(f"Update {self.remote_commit_hash[:7]} is marked as skipped, ignoring.")
+            self.status_message = "You are on the latest update (skipped updates ignored)."
+            self.update_available = False
+            self.update_changelog = []
+            self.update_check_complete = True
+            return
+
+        # Hash is different and not skipped - get changelog and local commit date (1 API call)
+        self.update_changelog, self.local_commit_date = self._get_commit_diff(self.local_commit_hash, self.remote_commit_hash)
+        
+        if self.update_changelog is None:
+            self.show_update_error_dialog = True
+            self.update_check_complete = True
+            return
+
+        if self._is_remote_commit_newer():
+            self.logger.info("Update available.")
+            self.status_message = "A new update is available!"
+            self.update_available = True
+            if not self.app.app_settings.get("updater_suppress_popup", False):
+                self.show_update_dialog = True
+        else:
+            self.logger.info("Remote commit is older than local commit.")
+            self.status_message = "You are on the latest update."
+            self.update_available = False
+            self.update_changelog = []
 
         self.update_check_complete = True
+
+    def _is_remote_commit_newer(self) -> bool:
+        """Compares local and remote commit timestamps to determine if remote is newer."""
+        try:
+            # Parse the date strings to datetime objects for comparison using time utility
+            local_date = format_github_date(self.local_commit_date, return_datetime=True)
+            remote_date = format_github_date(self.remote_commit_date, return_datetime=True)
+            
+            if local_date is None or remote_date is None:
+                self.logger.warning("Could not parse commit dates")
+                return True
+            
+            # Return True if remote commit is newer than local commit
+            return remote_date > local_date
+        except (ValueError, AttributeError) as e:
+            self.logger.warning(f"Could not compare commit dates: {e}")
+            # If we can't compare dates, assume remote is newer (safer default)
+            return True
 
     def _restart_application(self):
         """Restarts the application with proper cleanup to prevent zombie processes."""
@@ -315,23 +398,20 @@ class AutoUpdater:
             if sys.platform == 'win32':
                 # On Windows, use subprocess.Popen with inherited console context
                 # This prevents CMD window proliferation while maintaining proper process inheritance
-                import subprocess
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = 0  # SW_HIDE = 0 (hide console window)
                 subprocess.Popen(cmd, startupinfo=startupinfo)  # Remove DETACHED_PROCESS for better UX
             else:
                 # On Unix-like systems, use subprocess.Popen
-                import subprocess
                 subprocess.Popen(cmd)
-            
-            # Give the new process a moment to start
+
             time.sleep(0.1)
-            
+
             # Exit the current process immediately to prevent terminal hanging
             self.logger.info("Restarting application...")
             os._exit(0)
-            
+
         except Exception as e:
             self.logger.error(f"Failed to restart application: {e}")
             # Fallback to os.execl if the proper restart fails
@@ -348,12 +428,58 @@ class AutoUpdater:
         self.last_check_time = time.time() # Update time when a check is initiated
         threading.Thread(target=self._check_worker, daemon=True).start()
 
-    def apply_update_and_restart(self):
-        """Pulls the latest changes from git and restarts the application."""
+    def _apply_update(self, target_hash: str = None, use_pull: bool = True):
+        """Unified method to apply updates using either git pull or git checkout."""
         self.update_in_progress = True
-        self.status_message = "Pulling updates..."
-        self.logger.info("Attempting to pull updates from origin...")
+        
+        if use_pull:
+            self.status_message = "Pulling updates..."
+            self.logger.info("Attempting to pull updates from origin...")
+        else:
+            self.status_message = f"Switching to commit: {target_hash[:7]}..."
+            self.logger.info(f"Attempting to checkout commit {target_hash}")
 
+        # Check if test mode is enabled
+        if self.test_mode_enabled:
+            current_branch = self._get_current_branch()
+            if use_pull:
+                self.logger.info(f"Running in test mode (current branch: {current_branch}, target branch: {self.BRANCH})")
+                self.status_message = "TEST MODE: Would pull latest updates"
+            else:
+                self.logger.info(f"Running in test mode (current branch: {current_branch}, target commit: {target_hash[:7]})")
+                self.status_message = f"TEST MODE: Would switch to commit {target_hash[:7]}"
+            time.sleep(2)
+            self.update_in_progress = False
+            return
+
+        try:
+            if use_pull:
+                success = self._perform_git_pull()
+            else:
+                success = self._perform_git_checkout(target_hash)
+                
+            if success:
+                if use_pull:
+                    self.logger.info("Git pull successful")
+                else:
+                    self.logger.info(f"Successfully checked out commit {target_hash}")
+                self.status_message = "Update complete. Restarting..."
+                time.sleep(2)
+                self._restart_application()
+            else:
+                if use_pull:
+                    self.status_message = "Update failed. Please check console or update manually."
+                else:
+                    self.status_message = "Update change failed. Please check console."
+                self.update_in_progress = False
+                
+        except Exception as e:
+            self.logger.error(f"An unexpected error occurred during update: {e}")
+            self.status_message = "An unexpected error occurred. See logs."
+            self.update_in_progress = False
+
+    def _perform_git_pull(self) -> bool:
+        """Performs git pull operation."""
         try:
             pull_result = subprocess.run(
                 ['git', 'pull', 'origin', self.BRANCH],
@@ -361,22 +487,28 @@ class AutoUpdater:
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
             self.logger.info(f"Git pull successful: {pull_result.stdout}")
-            self.status_message = "Update complete. Restarting..."
-
-            # Give a moment for the message to be seen
-            time.sleep(2)
-
-            # Restart the application with proper cleanup
-            self._restart_application()
-
+            return True
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Update failed during 'git pull': {e.stderr}")
-            self.status_message = "Update failed. Please check console or update manually."
-            self.update_in_progress = False
-        except Exception as e:
-            self.logger.error(f"An unexpected error occurred during update: {e}")
-            self.status_message = "An unexpected error occurred. See logs."
-            self.update_in_progress = False
+            return False
+
+    def _perform_git_checkout(self, commit_hash: str) -> bool:
+        """Performs git checkout operation."""
+        try:
+            checkout_result = subprocess.run(
+                ['git', 'checkout', commit_hash],
+                check=True, capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            self.logger.info(f"Git checkout successful: {checkout_result.stdout}")
+            return True
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Update failed during 'git checkout': {e.stderr}")
+            return False
+
+    def apply_update_and_restart(self):
+        """Pulls the latest changes from git and restarts the application."""
+        self._apply_update(use_pull=True)
 
     def _get_spinner_text(self) -> str:
         """Returns the current spinner animation text."""
@@ -384,15 +516,6 @@ class AutoUpdater:
         spinner_index = int(time.time() * 4) % 4
         return spinner_chars[spinner_index]
 
-    def _format_commit_date(self, date_str: str) -> str:
-        """Formats a GitHub date string to YYYY-MM-DD format."""
-        if date_str == 'Unknown date':
-            return date_str
-        try:
-            date_obj = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            return date_obj.strftime('%Y-%m-%d')
-        except ValueError:
-            return 'Unknown date'
 
     def render_update_dialog(self):
         """Renders the ImGui popup for the update confirmation."""
@@ -400,20 +523,16 @@ class AutoUpdater:
             imgui.open_popup("Update Available")
             self.show_update_dialog = False
 
-        # Set initial position for first time
         if not hasattr(self, '_update_dialog_pos'):
             main_viewport = imgui.get_main_viewport()
             popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
                          main_viewport.pos[1] + main_viewport.size[1] * 0.5)
             self._update_dialog_pos = (popup_pos[0] - 250, popup_pos[1] - 150)  # Center the window
 
-        # Allow width to grow/shrink but keep a minimum width; let height be auto
         imgui.set_next_window_size_constraints((500, 0), (float("inf"), float("inf")))
         imgui.set_next_window_position(*self._update_dialog_pos, condition=imgui.ONCE)
 
-        # Begin popup modal (still with auto-resize flag for height)
         if imgui.begin_popup_modal("Update Available", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
-            # Save window position for persistence
             window_pos = imgui.get_window_position()
             if window_pos[0] > 0 and window_pos[1] > 0:
                 self._update_dialog_pos = window_pos
@@ -429,16 +548,14 @@ class AutoUpdater:
                 if self.update_changelog:
                     imgui.text("Changes in this update:")
 
-                    # Fill width, scroll if needed
                     child_width = imgui.get_content_region_available()[0]
                     child_height = 180
                     imgui.begin_child("Changelog", child_width, child_height, border=True, flags=imgui.WINDOW_HORIZONTAL_SCROLLING_BAR
                             | imgui.WINDOW_ALWAYS_VERTICAL_SCROLLBAR)
                     for message in self.update_changelog:
-                        imgui.text_wrapped(self.clean_text(f"- {message}"))
+                        imgui.text_wrapped(self.clean_text(message))
                     imgui.end_child()
 
-                # Use cached commit dates to avoid repeated API calls
                 local_date = self.local_commit_date if self.local_commit_date else 'N/A'
                 remote_date = self.remote_commit_date if self.remote_commit_date else 'N/A'
                 
@@ -461,7 +578,6 @@ class AutoUpdater:
             imgui.open_popup("Update Check Failed")
             self.show_update_error_dialog = False
 
-        # Set initial position for first time
         if not hasattr(self, '_update_error_dialog_pos'):
             main_viewport = imgui.get_main_viewport()
             popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
@@ -472,7 +588,6 @@ class AutoUpdater:
         imgui.set_next_window_position(*self._update_error_dialog_pos, condition=imgui.ONCE)
 
         if imgui.begin_popup_modal("Update Check Failed", True)[0]:
-            # Save window position for persistence
             window_pos = imgui.get_window_position()
             if window_pos[0] > 0 and window_pos[1] > 0:
                 self._update_error_dialog_pos = window_pos
@@ -481,13 +596,10 @@ class AutoUpdater:
             imgui.text_wrapped("Please check your internet connection and try again later.")
             
             imgui.separator()
-            
-            # Center the close button
             close_button_width = 80
             imgui.set_cursor_pos_x((imgui.get_window_width() - close_button_width) * 0.5)
             if imgui.button("Close", width=close_button_width):
                 imgui.close_current_popup()
-
             imgui.end_popup()
 
     def _get_available_updates(self, custom_count: int = None) -> List[Dict]:
@@ -504,14 +616,12 @@ class AutoUpdater:
             per_page = 30  # GitHub API default
             
             while len(updates) < target_commit_count:
-                # Fetch a page of commits
                 commits_data = self.github_api.get_commits_list(target_branch, per_page=per_page, page=page)
                 
                 if commits_data is None:
                     self.logger.error("Failed to fetch commits from GitHub API")
                     return [{'name': 'Failed to fetch commits. Check network connection or GitHub token.', 'commit_hash': 'error', 'type': 'error', 'date': '', 'full_message': ''}]
                 
-                # If no more commits available, break
                 if not commits_data:
                     break
                 
@@ -521,42 +631,31 @@ class AutoUpdater:
                         if not sha:
                             continue
                         
-                        # Get commit details
                         commit_info = commit.get('commit', {})
                         author_info = commit_info.get('author', {})
                         date = author_info.get('date')
                         message = commit_info.get('message', 'No commit message')
                         
-                        # Check if this is a merge commit (has multiple parents) or direct push
                         parents = commit.get('parents', [])
-                        is_merge = len(parents) > 1
                         
-                        # Include both merge commits and direct branch pushes
-                        if is_merge or len(parents) == 1:
-                            # Get first line of commit message for display
+                        if parents:
                             first_line = message.split('\n')[0] if message else 'No commit message'
                             
                             if sha and date:
                                 updates.append({
                                     'name': first_line,
                                     'commit_hash': sha,
-                                    'type': 'merge',
+                                    'type': 'commit',
                                     'date': date,
-                                    'full_message': message,
-                                    'is_merge': True
+                                    'full_message': message
                                 })
-                                
-                                # Stop when we have enough commits
                                 if len(updates) >= target_commit_count:
                                     break
                     except (KeyError, TypeError) as e:
                         self.logger.warning(f"Skipping malformed commit data: {e}")
                         continue
-                
-                # Move to next page
+
                 page += 1
-                
-                # Safety check to prevent infinite loops
                 if page > 50:  # Maximum 50 pages
                     self.logger.warning(f"Reached maximum page limit. Found {len(updates)} commits, requested {target_commit_count}")
                     break
@@ -564,67 +663,12 @@ class AutoUpdater:
             # Sort by date (newest first)
             updates.sort(key=lambda x: x.get('date', 'Unknown'), reverse=True)
             
-            self.logger.info(f"Found {len(updates)} commits (merge + direct pushes) out of {target_commit_count} requested")
+            self.logger.info(f"Found {len(updates)} commits out of {target_commit_count} requested")
             
         except Exception as e:
             self.logger.error(f"Failed to fetch available updates: {e}")
             return []
-
         return updates
-
-    def _checkout_update(self, commit_hash: str) -> bool:
-        """Checks out a specific commit."""
-        try:
-            # Check if we're in a git repository
-            if not os.path.isdir('.git'):
-                self.logger.error("Not a git repository. Cannot checkout update.")
-                return False
-            
-            # Fetch latest changes first
-            self.logger.info("Fetching latest changes from origin...")
-            fetch_result = subprocess.run(
-                ['git', 'fetch', 'origin'],
-                capture_output=True, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            if fetch_result.returncode != 0:
-                self.logger.error(f"Failed to fetch from origin: {fetch_result.stderr}")
-                return False
-            
-            # Check if the commit exists
-            self.logger.info(f"Verifying commit {commit_hash} exists...")
-            verify_result = subprocess.run(
-                ['git', 'rev-parse', '--verify', commit_hash],
-                capture_output=True, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            if verify_result.returncode != 0:
-                self.logger.error(f"Commit {commit_hash} does not exist: {verify_result.stderr}")
-                return False
-            
-            # Checkout the specific commit
-            self.logger.info(f"Checking out commit {commit_hash}...")
-            checkout_result = subprocess.run(
-                ['git', 'checkout', commit_hash],
-                capture_output=True, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            if checkout_result.returncode != 0:
-                self.logger.error(f"Failed to checkout commit {commit_hash}: {checkout_result.stderr}")
-                return False
-            
-            self.logger.info(f"Successfully checked out commit {commit_hash}")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"Failed to checkout commit {commit_hash}: {e.stderr}")
-            return False
-        except FileNotFoundError:
-            self.logger.error("Git not found. Please ensure Git is installed and in PATH.")
-            return False
-        except Exception as e:
-            self.logger.error(f"Unexpected error during checkout: {e}")
-            return False
 
     def clean_text(self, s: str) -> str:
         if not s:
@@ -686,7 +730,7 @@ class AutoUpdater:
         
         changelog.append(f"Commit: {target_hash[:7]}")
         changelog.append(f"Author: {self.clean_text(author)}")
-        changelog.append(f"Date:   {date}")
+        changelog.append(f"Date:   {format_github_date(date, include_time=True)}")
         changelog.append("")
         changelog.append("Message: ")
         for line in message_lines:
@@ -706,39 +750,12 @@ class AutoUpdater:
         """Worker thread to load available updates."""
         self.logger.info("Loading updates in worker thread")
         self.available_updates = self._get_available_updates(custom_count)
-        self.logger.info(f"Loaded {len(self.available_updates)} merge commits")
+        self.logger.info(f"Loaded {len(self.available_updates)} commits")
         self.update_picker_loading = False
 
-    def apply_update_change(self, commit_hash: str, commit_message: str):
+    def apply_update_change(self, commit_hash: str, commit_message: str = ""):
         """Applies the selected update change and restarts the application."""
-        self.update_in_progress = True
-        self.status_message = f"Switching to commit: {commit_message[:50]}..."
-        self.logger.info(f"Attempting to checkout commit {commit_hash}")
-
-        # Check if test mode is manually enabled
-        if self.test_mode_enabled:
-            current_branch = self._get_current_branch()
-            self.logger.info(f"Running in test mode (current branch: {current_branch}, target branch: {self.BRANCH})")
-            self.status_message = f"TEST MODE: Would switch to commit {commit_hash[:7]} ({commit_message[:30]}...)"
-            time.sleep(2)
-            self.update_in_progress = False
-            return
-
-        try:
-            success = self._checkout_update(commit_hash)
-            if success:
-                self.logger.info(f"Successfully checked out commit {commit_hash}")
-                self.status_message = "Update change complete. Restarting..."
-                time.sleep(2)
-                self._restart_application()
-            else:
-                self.status_message = "Update change failed. Please check console."
-                self.update_in_progress = False
-                
-        except Exception as e:
-            self.logger.error(f"An unexpected error occurred during update change: {e}")
-            self.status_message = "An unexpected error occurred. See logs."
-            self.update_in_progress = False
+        self._apply_update(target_hash=commit_hash, use_pull=False)
 
     def render_update_settings_dialog(self):
         """Renders the combined update commit & GitHub token dialog with tabs."""
@@ -867,50 +884,38 @@ class AutoUpdater:
                                 self.commit_changelogs[commit_hash] = [f"Error loading changelog: {str(e)}"]
                 
                 imgui.same_line()
-                commit_date = self._format_commit_date(update.get('date', 'Unknown date'))
+                commit_date = format_github_date(update.get('date', 'Unknown date'), include_time=False)
                 imgui.text(f"({commit_date})")
                 imgui.same_line()
-                
-                # Initialize skipped update state from persistent storage
+
                 is_skipped = commit_hash in self.skipped_commits
                 
                 # Position checkbox and label at the right edge first (before selectable)
                 imgui.same_line()
                 imgui.set_cursor_pos_x(imgui.get_window_width() - 90)
-                
-                # Make checkbox interactive with unique ID
+
                 checkbox_id = f"##skip_update_{commit_hash[:7]}"
                 changed, is_skipped = imgui.checkbox(checkbox_id, is_skipped)
-                
-                # Update persistent skip state if changed
+
                 if changed:
                     self._update_skip_state(commit_hash, is_skipped)
-                    # Save settings immediately when checkbox changes
                     self._save_skip_updates()
-                
                 imgui.same_line()
                 imgui.text("Skip")
-                
-                # Now render the selectable commit message (after checkbox to avoid overlap)
                 imgui.same_line()
                 imgui.set_cursor_pos_x(190)  # Position after the expand button and date with more space
-                
-                # Commit message
                 commit_msg = update['name']
                 if len(commit_msg) > 60:
                     commit_msg = commit_msg[:57] + "..."
-                
-                # All commits shown are merge commits, so all are selectable
+
                 if imgui.selectable(commit_msg, self.selected_update == update)[0]:
                     self.selected_update = update
-                
-                # Add (Current) indicator after commit message
+
                 if is_current:
                     imgui.same_line()
                     imgui.text("(Current)")
                     imgui.pop_style_color()
 
-                # Show inline changelog if expanded
                 if is_expanded:
                     imgui.indent(30)
                     imgui.push_style_color(imgui.COLOR_TEXT, *AppGUIColors.VERSION_CHANGELOG_TEXT)
@@ -936,12 +941,13 @@ class AutoUpdater:
             if imgui.is_item_hovered():
                 imgui.set_tooltip("When enabled, commit switching will only simulate the action without actually changing commits. Useful for testing the update system.")
             
-            imgui.same_line()
-            if imgui.button("Test Restart", width=120):
-                self.test_restart()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Test the restart mechanism without making any changes. This triggers the exact same restart procedure as a real update.")
-            
+            if self.test_mode_enabled:
+                imgui.same_line()
+                if imgui.button("Test Restart", width=120):
+                    self.test_restart()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Test the restart mechanism without making any changes. This triggers the exact same restart procedure as a real update.")
+
             imgui.separator()
 
             # Action buttons and commit count controls
