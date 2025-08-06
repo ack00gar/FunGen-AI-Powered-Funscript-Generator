@@ -1363,9 +1363,12 @@ class ApplicationLogic:
         try:
             # Consider making ffmpeg_path configurable via app_settings
             ffmpeg_path = self.app_settings.get("ffmpeg_path") or "ffmpeg" # Without 'or' it would accept "" or None as valid values (Is what Cluade told me)
+            # Windows fix: prevent terminal windows from spawning
+            import sys
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             result = subprocess.run(
                 [ffmpeg_path, '-hide_banner', '-hwaccels'],
-                capture_output=True, text=True, check=True, timeout=5
+                capture_output=True, text=True, check=True, timeout=5, creationflags=creation_flags
             )
             lines = result.stdout.strip().split('\n')
             hwaccels = []

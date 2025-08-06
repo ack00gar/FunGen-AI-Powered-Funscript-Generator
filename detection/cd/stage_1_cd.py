@@ -262,10 +262,13 @@ class FFmpegEncoder:
         
         for encoder_codec, encoder_name in encoder_configs:
             try:
+                # Windows fix: prevent terminal windows from spawning
+                import sys
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 subprocess.check_output([
                     self.ffmpeg_path, "-hide_banner", "-f", "lavfi", "-i", "testsrc", 
                     "-c:v", encoder_codec, "-f", "null", "-"
-                ], stderr=subprocess.PIPE, text=True, timeout=5)
+                ], stderr=subprocess.PIPE, text=True, timeout=5, creationflags=creation_flags)
                 # If we get here, encoder is available
                 all_devices.append(f"Device {device_id}: {encoder_name}")
                 device_id += 1
@@ -300,7 +303,10 @@ class FFmpegEncoder:
             return ["-c:v", "libx265", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p"]
 
         try:
-            output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True)
+            # Windows fix: prevent terminal windows from spawning
+            import sys
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            output = subprocess.check_output([self.ffmpeg_path, "-hide_banner", "-encoders"], text=True, creationflags=creation_flags)
         except Exception as e:
             log_vid.warning(f"Failed to query FFmpeg encoders: {e}")
             output = ""

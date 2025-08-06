@@ -88,7 +88,10 @@ def stage3_worker_proc(
                 import json
                 cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                        '-show_entries', 'stream=nb_frames', '-of', 'json', video_path]
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+                # Windows fix: prevent terminal windows from spawning
+                import sys
+                creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5, creationflags=creation_flags)
                 if result.returncode == 0:
                     data = json.loads(result.stdout)
                     stream_info = data.get('streams', [{}])[0]

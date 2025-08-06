@@ -67,7 +67,9 @@ def _ensure_packages(packages):
     if missing:
         print(f"Installing missing packages: {', '.join(missing)}")
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+            # Windows fix: prevent terminal windows from spawning
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            subprocess.check_call([sys.executable, "-m", "pip", "install", *missing], creationflags=creation_flags)
             packages_changed = True
         except subprocess.CalledProcessError as e:
             print(f"ERROR: Failed to install required packages. Please install them manually and restart.", file=sys.stderr)
@@ -77,7 +79,7 @@ def _ensure_packages(packages):
     if to_upgrade:
         print(f"Upgrading packages: {', '.join(to_upgrade)}")
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", *to_upgrade])
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", *to_upgrade], creationflags=creation_flags)
             packages_changed = True
         except subprocess.CalledProcessError as e:
             print(f"ERROR: Failed to upgrade packages. Please upgrade them manually and restart.", file=sys.stderr)
@@ -112,19 +114,23 @@ def _ensure_packages_with_args(packages, pip_args):
     if missing:
         print(f"Installing missing packages with custom index: {', '.join(missing)}")
         try:
+            # Windows fix: prevent terminal windows from spawning
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             cmd = [sys.executable, "-m", "pip", "install"] + pip_args + missing
-            subprocess.check_call(cmd)
+            subprocess.check_call(cmd, creationflags=creation_flags)
             packages_changed = True
         except subprocess.CalledProcessError as e:
             print(f"ERROR: Failed to install required packages. Please install them manually and restart.", file=sys.stderr)
             print(e, file=sys.stderr)
             sys.exit(1)
-    
+        
     if to_upgrade:
         print(f"Upgrading packages with custom index: {', '.join(to_upgrade)}")
         try:
+            # Windows fix: prevent terminal windows from spawning  
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + pip_args + to_upgrade
-            subprocess.check_call(cmd)
+            subprocess.check_call(cmd, creationflags=creation_flags)
             packages_changed = True
         except subprocess.CalledProcessError as e:
             print(f"ERROR: Failed to upgrade packages. Please upgrade them manually and restart.", file=sys.stderr)
@@ -161,8 +167,10 @@ def detect_gpu_environment():
     # Check for NVIDIA CUDA
     try:
         import subprocess
-        result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'], 
-                              capture_output=True, text=True, timeout=5)
+        # Windows fix: prevent terminal windows from spawning
+        import sys
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'], capture_output=True, text=True, timeout=5, creationflags=creation_flags)
         if result.returncode == 0:
             cuda_available = True
             gpu_names = result.stdout.strip().split('\n')
@@ -177,8 +185,7 @@ def detect_gpu_environment():
     # Check for AMD ROCm (Linux and Windows)
     if not cuda_available:
         try:
-            result = subprocess.run(['rocm-smi', '--showproductname'], 
-                                  capture_output=True, text=True, timeout=5)
+            result = subprocess.run(['rocm-smi', '--showproductname'], capture_output=True, text=True, timeout=5, creationflags=creation_flags)
             if result.returncode == 0:
                 rocm_available = True
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
