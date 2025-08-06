@@ -9,6 +9,7 @@ import threading
 import queue
 import os
 from typing import List, Dict
+from collections import deque
 
 from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu
@@ -60,6 +61,14 @@ class GUI:
         self.last_perf_log_time = time.time()
         self.perf_frame_count = 0
         self.perf_accumulated_times = {}
+        
+        # Frontend data queue - maintains continuous data flow
+        self._frontend_perf_queue = deque(maxlen=2)  # Keep last 2 data points
+        self._frontend_perf_queue.append({
+            'accumulated_times': {},
+            'frame_count': 0,
+            'timestamp': time.time()
+        })
 
         # Standard Components (owned by GUI)
         self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
@@ -393,21 +402,43 @@ class GUI:
         self.perf_accumulated_times[component_name] += duration_ms
 
     def _log_performance(self):
-        """Logs the average performance of components."""
-        if self.perf_frame_count == 0:
-            self.app.logger.debug("No frames rendered (yet).")
+        """Log performance statistics and reset accumulators."""
+        if not self.perf_accumulated_times or self.perf_frame_count == 0:
             return
 
-        log_message = "Avg Render Times (ms) over {} frames:".format(self.perf_frame_count)
-        for name, total_time in self.perf_accumulated_times.items():
-            avg_time = total_time / self.perf_frame_count
-            log_message += f"\n  - {name}: {avg_time:.3f}"
+        # Calculate averages
+        total_time = sum(self.perf_accumulated_times.values())
+        avg_time = total_time / self.perf_frame_count if self.perf_frame_count > 0 else 0
 
+        # Build detailed log message
+        log_parts = [f"Performance: {avg_time:.2f}ms avg ({self.perf_frame_count} frames)"]
+        
+        # Sort components by time (most expensive first)
+        sorted_components = sorted(
+            self.perf_accumulated_times.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        
+        # Add top 3 most expensive components
+        for i, (component, total_time) in enumerate(sorted_components[:3]):
+            avg_component_time = total_time / self.perf_frame_count if self.perf_frame_count > 0 else 0
+            log_parts.append(f"{component}: {avg_component_time:.2f}ms")
+        
+        log_message = " | ".join(log_parts)
         self.app.logger.debug(log_message)  # Use debug to avoid spamming info logs
 
-        # Reset accumulators for next interval
+        # Store the current stats in frontend queue before clearing backend
+        self._frontend_perf_queue.append({
+            'accumulated_times': self.perf_accumulated_times.copy(),
+            'frame_count': self.perf_frame_count,
+            'timestamp': time.time()
+        })
+        
+        # Clear the backend accumulators for the next interval
         self.perf_accumulated_times.clear()
         self.perf_frame_count = 0
+        
         self.last_perf_log_time = time.time()
 
     def init_glfw(self) -> bool:
@@ -1206,10 +1237,27 @@ class GUI:
         self.perf_frame_count += 1
         if time.time() - self.last_perf_log_time > self.perf_log_interval:
             self._log_performance()
+        
+        # Continuously update frontend queue with current data
+        self._update_frontend_perf_queue()
 
         imgui.render()
         if self.impl:
             self.impl.render(imgui.get_draw_data())
+
+    def _update_frontend_perf_queue(self):
+        """
+        Updates the frontend performance queue with the current accumulated times and frame count.
+        Only updates if there is valid data to prevent empty entries.
+        """
+        # Only update queue if we have valid data
+        if self.perf_accumulated_times and self.perf_frame_count > 0:
+            current_perf_data = {
+                'accumulated_times': self.perf_accumulated_times.copy(),
+                'frame_count': self.perf_frame_count,
+                'timestamp': time.time()
+            }
+            self._frontend_perf_queue.append(current_perf_data)
 
     def _render_status_message(self, app_state):
         if app_state.status_message and time.time() < app_state.status_message_time:
