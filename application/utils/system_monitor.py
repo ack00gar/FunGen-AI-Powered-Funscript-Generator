@@ -79,12 +79,6 @@ class SystemMonitor:
         self.swap_usage_gb: float = 0.0
 
         # Disk I/O histories (aggregate)
-        self.disk_read_bytes_delta: Deque[float] = deque(
-            [0.0] * self.history_size, maxlen=self.history_size
-        )
-        self.disk_write_bytes_delta: Deque[float] = deque(
-            [0.0] * self.history_size, maxlen=self.history_size
-        )
         self.disk_read_mb_s: Deque[float] = deque(
             [0.0] * self.history_size, maxlen=self.history_size
         )
@@ -358,9 +352,6 @@ class SystemMonitor:
             self.disk_cumulative_read_bytes = float(aggregate_counters.read_bytes)
             self.disk_cumulative_write_bytes = float(aggregate_counters.write_bytes)
 
-        self.disk_read_bytes_delta.append(read_delta_bytes)
-        self.disk_write_bytes_delta.append(write_delta_bytes)
-
         if elapsed_seconds > 0:
             self.disk_read_mb_s.append(_bytes_to_mb(read_delta_bytes) / elapsed_seconds)
             self.disk_write_mb_s.append(
@@ -520,8 +511,6 @@ class SystemMonitor:
                 "swap_usage_percent": self.swap_usage_percent,
                 "swap_usage_gb": self.swap_usage_gb,
                 # Disk I/O (aggregate)
-                "disk_read_bytes_delta": list(self.disk_read_bytes_delta),
-                "disk_write_bytes_delta": list(self.disk_write_bytes_delta),
                 "disk_read_mb_s": list(self.disk_read_mb_s),
                 "disk_write_mb_s": list(self.disk_write_mb_s),
                 "disk_cumulative_read_bytes": self.disk_cumulative_read_bytes,
