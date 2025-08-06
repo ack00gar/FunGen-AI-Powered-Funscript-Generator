@@ -116,9 +116,14 @@ class SystemMonitor:
         self.ram_usage_gb.append(mem.used / (1024**3))
         
         # Swap
-        swap = psutil.swap_memory()
-        self.swap_usage_percent = swap.percent
-        self.swap_usage_gb = swap.used / (1024**3)
+        try:
+            swap = psutil.swap_memory()
+            self.swap_usage_percent = swap.percent
+            self.swap_usage_gb = swap.used / (1024**3)
+        except (RuntimeError, OSError, AttributeError):
+            # Windows performance counters may be disabled
+            self.swap_usage_percent = 0
+            self.swap_usage_gb = 0
         
         # CPU Frequency (safe check)
         try:
