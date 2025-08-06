@@ -427,48 +427,37 @@ class InteractiveFunscriptTimeline:
                 extra = {'status_message': True})
             return False
 
-    def _perform_autotune_sg(self, sat_low: int, sat_high: int, max_window: int, polyorder: int, selected_indices: Optional[List[int]]):
-        """Wrapper to call the auto_tune_sg_filter method on the funscript object."""
+    def _call_funscript_method_with_result(self, method_name: str, error_context: str, **kwargs) -> Optional[Dict]:
+        """ Helper to call a method on the funscript object that is expected to return a result dictionary. """
         funscript_instance, axis_name = self._get_target_funscript_details()
         if not funscript_instance or not axis_name:
-            self.app.logger.warning(f"T{self.timeline_num}: Cannot auto-tune. Funscript object not found.", extra={'status_message': True})
-            return None # Return None on failure
+            self.app.logger.warning(f"T{self.timeline_num}: Cannot {error_context}. Funscript object not found.", extra={'status_message': True})
+            return None
         try:
-            method_to_call = getattr(funscript_instance, 'auto_tune_sg_filter')
-            result = method_to_call(axis=axis_name,
-                                    saturation_low=sat_low,
-                                    saturation_high=sat_high,
-                                    max_window_size=max_window,
-                                    polyorder=polyorder,
-                                    selected_indices=selected_indices)
-            return result # Return the result dictionary on success or None on failure
+            method_to_call = getattr(funscript_instance, method_name)
+            result = method_to_call(axis=axis_name, **kwargs)
+            return result
         except Exception as e:
             self.app.logger.error(
-                f"T{self.timeline_num} Error in auto-tune: {str(e)}", exc_info=True,
+                f"T{self.timeline_num} Error in {error_context} ({method_name}): {str(e)}", exc_info=True,
                 extra={'status_message': True})
             return None
 
-    def _perform_ultimate_autotune(self):
-        """ Gathers settings from the UI, runs the pipeline, and applies the result. """
-        fs_proc = self.app.funscript_processor
-        funscript_instance, axis_name = self._get_target_funscript_details()
-        if not funscript_instance or not axis_name:
-            self.app.logger.error("Ultimate Autotune: Could not find target funscript.")
-            return
+    def _perform_autotune_sg(self, sat_low: int, sat_high: int, max_window: int, polyorder: int, selected_indices: Optional[List[int]]):
+        """Wrapper to call the auto_tune_sg_filter method on the funscript object."""
+        return self._call_funscript_method_with_result('auto_tune_sg_filter', 'auto-tune',
+                                                       saturation_low=sat_low,
+                                                       saturation_high=sat_high,
+                                                       max_window_size=max_window,
+                                                       polyorder=polyorder,
+                                                       selected_indices=selected_indices)
 
-        op_desc = "Applied Custom Autotune"
-        fs_proc._record_timeline_action(self.timeline_num, op_desc)
-
-        # Call the new custom pipeline method. It doesn't need params from the UI.
-        new_actions = funscript_instance.apply_custom_autotune_pipeline(axis_name, {})
-
-        if new_actions is not None:
-            # Apply the result destructively
-            setattr(funscript_instance, f"{axis_name}_actions", new_actions)
-            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-            self.app.logger.info("✨ Custom Autotune Pipeline applied successfully.", extra={'status_message': True})
-        else:
-            self.app.logger.warning("Custom Autotune Pipeline failed to produce a result.", extra={'status_message': True})
+    def _perform_ultimate_autotune(self) -> bool:
+        """
+        Runs the ultimate autotune pipeline and applies the result using the undo system.
+        Returns True on success, False on failure.
+        """
+        return self._call_funscript_method('apply_custom_autotune_pipeline_destructive', 'Ultimate Autotune')
 
     def _perform_sg_filter(self, window_length: int, polyorder: int, selected_indices: Optional[List[int]]):
         return (self._call_funscript_method('apply_savitzky_golay', 'SG filter', window_length=window_length, polyorder=polyorder, selected_indices=selected_indices))
@@ -1179,6 +1168,10 @@ class InteractiveFunscriptTimeline:
             # --- Auto-Tune SG Settings Window ---
             autotune_window_title = f"Auto-Tune SG Filter Settings (Timeline {self.timeline_num})##AutoTuneSettingsWindow{window_id_suffix}"
             if self.show_autotune_popup:
+                # On first open, generate an initial preview
+                if not self.is_previewing:
+                    self._update_preview('autotune')
+
                 main_viewport = imgui.get_main_viewport()
                 popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 400) * 0.5
                 popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 250) * 0.5
@@ -1283,8 +1276,13 @@ class InteractiveFunscriptTimeline:
 
                     button_width = (imgui.get_content_region_available_width() - imgui.get_style().item_spacing[0]) / 2.0
 
-                    if imgui.button("Apply and Replace##UltimateApply", width=button_width):
-                        self._perform_ultimate_autotune()
+                    if imgui.button("Apply##UltimateApply", width=button_width):
+                        op_desc = "Applied Ultimate Autotune"
+                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+                        if self._perform_ultimate_autotune():
+                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+                            self.app.logger.info("✨ Ultimate Autotune applied successfully.", extra={'status_message': True})
+                        # On failure, the recorded action is automatically discarded by the undo manager.
                         self.clear_preview()
                         self.show_ultimate_autotune_popup = False
 
