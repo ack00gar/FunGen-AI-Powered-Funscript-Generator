@@ -276,6 +276,10 @@ class MainMenu:
 
             if _menu_item_simple("Exit"):
                 app.shutdown_app()
+                # Close the GLFW window to exit the application
+                if app.gui_instance and app.gui_instance.window:
+                    import glfw
+                    glfw.set_window_should_close(app.gui_instance.window, True)
             imgui.end_menu()
 
     def _render_edit_menu(self, app_state):
