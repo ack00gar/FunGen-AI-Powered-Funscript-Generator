@@ -1509,18 +1509,57 @@ class ROITracker:
         [V9 - Advanced Filtering] Implements global motion cancellation, advanced oscillation scoring,
         and a VR-specific focus on the central third of the frame.
         """
+        # --- Optional pre-downscale for performance (approx 720p height) ---
+        try:
+            target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)('oscillation_processing_target_height', 720)
+        except Exception:
+            target_height = 720
+
+        if frame is None or frame.size == 0:
+            return frame, None
+
+        src_h, src_w = frame.shape[:2]
+        if target_height and src_h > target_height:
+            scale = float(target_height) / float(src_h)
+            new_w = max(1, int(round(src_w * scale)))
+            processed_input = cv2.resize(frame, (new_w, target_height), interpolation=cv2.INTER_AREA)
+        else:
+            processed_input = frame
+
         # --- Use oscillation area for detection if set ---
         use_oscillation_area = self.oscillation_area_fixed is not None
         if use_oscillation_area:
             ax, ay, aw, ah = self.oscillation_area_fixed
-            # Crop frame and gray image to oscillation area
-            processed_frame = self.preprocess_frame(frame)
+            # Prepare letterboxed processed frame and compute mapping to its coordinate space
+            processed_frame = self.preprocess_frame(processed_input)
+            target_w, target_h = self.target_size_preprocess
+            in_w, in_h = processed_input.shape[1], processed_input.shape[0]
+            if in_w <= 0 or in_h <= 0:
+                return processed_input, None
+            scale_lb = min(target_w / float(in_w), target_h / float(in_h))
+            new_w_lb = int(round(in_w * scale_lb))
+            new_h_lb = int(round(in_h * scale_lb))
+            delta_w = target_w - new_w_lb
+            delta_h = target_h - new_h_lb
+            left = delta_w // 2
+            top = delta_h // 2
+            # Map original area to letterboxed coordinates
+            ax = int(round(ax * scale_lb + left))
+            ay = int(round(ay * scale_lb + top))
+            aw = int(round(aw * scale_lb))
+            ah = int(round(ah * scale_lb))
+
+            # Clamp area to processed_frame bounds
+            ax = max(0, min(ax, target_w - 1))
+            ay = max(0, min(ay, target_h - 1))
+            aw = max(1, min(aw, target_w - ax))
+            ah = max(1, min(ah, target_h - ay))
+
             current_gray_full = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
-            # For detection, crop to area
             processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw].copy()
             current_gray = current_gray_full[ay:ay+ah, ax:ax+aw].copy()
         else:
-            processed_frame = self.preprocess_frame(frame)
+            processed_frame = self.preprocess_frame(processed_input)
             current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
             processed_frame_area = processed_frame
             ax, ay = 0, 0
@@ -1551,8 +1590,8 @@ class ROITracker:
             active_block_positions = set(active_blocks)
             for motion in block_motions:
                 r, c = motion['pos']
-                x1, y1 = c * self.oscillation_block_size, r * self.oscillation_block_size
-                x2, y2 = x1 + self.oscillation_block_size, y1 + self.oscillation_block_size
+                x1, y1 = c * local_block_size, r * local_block_size
+                x2, y2 = x1 + local_block_size, y1 + local_block_size
                 color = (100, 100, 100)
                 if is_camera_motion:
                     color = (0, 165, 255)
@@ -1581,25 +1620,35 @@ class ROITracker:
 
         # --- Step 2: Identify Active Cells & Apply VR Focus ---
         min_motion_threshold = 15
-        min_cell_activation_pixels = (self.oscillation_block_size**2) * 0.05
-
         frame_diff = cv2.absdiff(current_gray, self.prev_gray_oscillation)
         _, motion_mask = cv2.threshold(frame_diff, min_motion_threshold, 255, cv2.THRESH_BINARY)
 
+        # Compute dynamic grid based on current analysis image size
+        img_h, img_w = current_gray.shape[:2]
+        grid_size = max(1, int(self.oscillation_grid_size))
+        local_block_size = max(8, min(img_h // grid_size, img_w // grid_size))
+        if local_block_size <= 0:
+            local_block_size = 8
+        num_rows = max(1, img_h // local_block_size)
+        num_cols = max(1, img_w // local_block_size)
+        min_cell_activation_pixels = (local_block_size * local_block_size) * 0.05
+
         # Check if the video is VR to apply the focus rule
         is_vr = self._is_vr_video()
-        vr_central_third_start = self.oscillation_grid_size // 3
-        vr_central_third_end = 2 * self.oscillation_grid_size // 3
+        vr_central_third_start = num_cols // 3
+        vr_central_third_end = 2 * num_cols // 3
 
         newly_active_cells = set()
-        for r in range(self.oscillation_grid_size):
-            for c in range(self.oscillation_grid_size):
+        for r in range(num_rows):
+            for c in range(num_cols):
                 # If VR, skip cells outside the central third
                 if is_vr and (c < vr_central_third_start or c > vr_central_third_end):
                     continue
 
-                y_start, x_start = r * self.oscillation_block_size, c * self.oscillation_block_size
-                mask_roi = motion_mask[y_start:y_start + self.oscillation_block_size, x_start:x_start + self.oscillation_block_size]
+                y_start, x_start = r * local_block_size, c * local_block_size
+                mask_roi = motion_mask[y_start:y_start + local_block_size, x_start:x_start + local_block_size]
+                if mask_roi.size == 0:
+                    continue
                 if cv2.countNonZero(mask_roi) > min_cell_activation_pixels:
                     newly_active_cells.add((r, c))
 
@@ -1621,11 +1670,11 @@ class ROITracker:
         block_motions = []
         max_magnitude = 0.0
         for r, c in persistent_active_cells:
-            y_start = r * self.oscillation_block_size
-            x_start = c * self.oscillation_block_size
+            y_start = r * local_block_size
+            x_start = c * local_block_size
 
             # Sample the pre-computed flow field for this cell's ROI
-            flow_patch = flow[y_start:y_start + self.oscillation_block_size, x_start:x_start + self.oscillation_block_size]
+            flow_patch = flow[y_start:y_start + local_block_size, x_start:x_start + local_block_size]
 
             if flow_patch.size > 0:
                 # Subtract global motion to get true local motion
@@ -1730,9 +1779,9 @@ class ROITracker:
         # Step 7: Visualization
         active_block_positions = {b['pos'] for b in active_blocks}
         for r,c in self.oscillation_cell_persistence.keys():
-            x1, y1 = c * self.oscillation_block_size + ax, r * self.oscillation_block_size + ay
+            x1, y1 = c * local_block_size + ax, r * local_block_size + ay
             color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
-            cv2.rectangle(processed_frame, (x1, y1), (x1 + self.oscillation_block_size, y1 + self.oscillation_block_size), color, 1)
+            cv2.rectangle(processed_frame, (x1, y1), (x1 + local_block_size, y1 + local_block_size), color, 1)
 
         self.prev_gray_oscillation = current_gray.copy()
         return processed_frame, action_log_list if action_log_list else None

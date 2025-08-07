@@ -471,10 +471,7 @@ class VideoDisplayUI:
                                             else:
                                                 self.app.logger.info("Drawn oscillation area is too small. Please redraw.", extra={'status_message': True})
                                                 self.drawn_oscillation_area_video_coords = None
-                                        else:
-                                            self.app.logger.warning(
-                                                "Could not convert oscillation area screen coordinates to video coordinates (likely drawn outside video area).")
-                                            self.drawn_oscillation_area_video_coords = None
+                                        # Only warn on conversion failure during mouse release, handled above.
 
                                 elif self.waiting_for_oscillation_point_click and self.drawn_oscillation_area_video_coords: # Point selection phase
                                     # Use center point of the area as the tracking point
