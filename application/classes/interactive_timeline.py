@@ -2111,6 +2111,8 @@ class InteractiveFunscriptTimeline:
             actions_to_render = self.preview_actions if self.is_previewing else actions_list
             indices_to_draw = []
 
+            avg_interval_ms = 0
+
             if actions_to_render:
                 # Calculate the average time interval between points in the script
                 fs_proc = self.app.funscript_processor  # Get the funscript processor instance
