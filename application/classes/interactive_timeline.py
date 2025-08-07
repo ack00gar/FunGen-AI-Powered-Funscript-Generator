@@ -17,6 +17,9 @@ class InteractiveFunscriptTimeline:
         self.app = app_instance
         self.timeline_num = timeline_num
 
+        # GPU Integration (if available)
+        self.gpu_integration = getattr(app_instance, 'gpu_integration', None)
+
         self.selected_action_idx = -1
         self.dragging_action_idx = -1
         self.drag_start_action_state: Optional[Dict] = None
@@ -35,12 +38,12 @@ class InteractiveFunscriptTimeline:
         self.amp_apply_to_selection = False
         self.amp_scale_factor = self.app.app_settings.get(f"timeline{self.timeline_num}_amp_default_scale", 1.5)
         self.amp_center_value = self.app.app_settings.get(f"timeline{self.timeline_num}_amp_default_center", 50)
-        
+
         # PERFORMANCE OPTIMIZATION: Cache pre-computed arrays to avoid recreating them every frame
         self._cached_actions_data = None  # Stores pre-computed arrays
         self._cached_actions_hash = None  # Hash of actions_list to detect changes
         self._cached_arrays_initialized = False
-        
+
         # RADICAL OPTIMIZATION: Motion-based temporal culling
         self._last_pan_offset = 0
         self._last_frame_time = time.time()
@@ -79,28 +82,39 @@ class InteractiveFunscriptTimeline:
         self.autotune_apply_to_selection = False
         self.autotune_sat_low = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_sat_low", 1)
         self.autotune_sat_high = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_sat_high", 99)
-        self.autotune_max_window = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_max_window", 15)
-        self.autotune_polyorder = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_polyorder", 2)
+        self.autotune_max_window = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_max_window",
+                                                             15)
+        self.autotune_polyorder = self.app.app_settings.get(f"timeline{self.timeline_num}_autotune_default_polyorder",
+                                                            2)
 
         # --- ULTIMATE AUTOTUNE STATE ---
         self.show_ultimate_autotune_popup = False
 
-        self.ultimate_presmoothing_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_presmoothing_enabled", True)
-        self.ultimate_presmoothing_max_window = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_presmoothing_max_window", 15)
+        self.ultimate_presmoothing_enabled = self.app.app_settings.get(
+            f"timeline{self.timeline_num}_ultimate_presmoothing_enabled", True)
+        self.ultimate_presmoothing_max_window = self.app.app_settings.get(
+            f"timeline{self.timeline_num}_ultimate_presmoothing_max_window", 15)
 
-        self.ultimate_peaks_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_peaks_enabled", True)
-        self.ultimate_peaks_prominence = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_peaks_prominence", 10)
+        self.ultimate_peaks_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_peaks_enabled",
+                                                                True)
+        self.ultimate_peaks_prominence = self.app.app_settings.get(
+            f"timeline{self.timeline_num}_ultimate_peaks_prominence", 10)
 
-        self.ultimate_recovery_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_recovery_enabled", True)
-        self.ultimate_recovery_threshold = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_recovery_threshold", 1.8)
+        self.ultimate_recovery_enabled = self.app.app_settings.get(
+            f"timeline{self.timeline_num}_ultimate_recovery_enabled", True)
+        self.ultimate_recovery_threshold = self.app.app_settings.get(
+            f"timeline{self.timeline_num}_ultimate_recovery_threshold", 1.8)
 
-        self.ultimate_normalization_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_normalization_enabled", True)
+        self.ultimate_normalization_enabled = self.app.app_settings.get(
+            f"timeline{self.timeline_num}_ultimate_normalization_enabled", True)
 
-        #self.ultimate_regeneration_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_regeneration_enabled", True)
-        #self.ultimate_resample_rate = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_resample_rate", 40)
+        # self.ultimate_regeneration_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_regeneration_enabled", True)
+        # self.ultimate_resample_rate = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_resample_rate", 40)
 
-        self.ultimate_speed_limit_enabled = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_speed_limit_enabled", True)
-        self.ultimate_speed_threshold = self.app.app_settings.get(f"timeline{self.timeline_num}_ultimate_speed_threshold", 500.0)
+        self.ultimate_speed_limit_enabled = self.app.app_settings.get(
+            f"timeline{self.timeline_num}_ultimate_speed_limit_enabled", True)
+        self.ultimate_speed_threshold = self.app.app_settings.get(
+            f"timeline{self.timeline_num}_ultimate_speed_threshold", 500.0)
 
         self.multi_selected_action_indices = set()
         self.is_marqueeing = False
@@ -131,7 +145,8 @@ class InteractiveFunscriptTimeline:
         if is_simple_mode:
             self.show_ultimate_autotune_preview = True
         else:
-            self.show_ultimate_autotune_preview = self.app.app_settings.get(f"timeline{self.timeline_num}_show_ultimate_preview", True)
+            self.show_ultimate_autotune_preview = self.app.app_settings.get(
+                f"timeline{self.timeline_num}_show_ultimate_preview", True)
         self.ultimate_autotune_preview_actions: Optional[List[Dict]] = None
         self._ultimate_preview_dirty: bool = True
 
@@ -167,7 +182,8 @@ class InteractiveFunscriptTimeline:
             preview_actions = funscript_instance.apply_custom_autotune_pipeline(axis_name, {})
             self.ultimate_autotune_preview_actions = preview_actions
         except Exception as e:
-            self.app.logger.error(f"T{self.timeline_num}: Failed to generate ultimate autotune preview: {e}", exc_info=True)
+            self.app.logger.error(f"T{self.timeline_num}: Failed to generate ultimate autotune preview: {e}",
+                                  exc_info=True)
             self.ultimate_autotune_preview_actions = None
         finally:
             self._ultimate_preview_dirty = False
@@ -182,7 +198,7 @@ class InteractiveFunscriptTimeline:
         if funscript_instance and axis_name:
             return getattr(funscript_instance, f"{axis_name}_actions", None)
         return None
-    
+
     def _get_or_compute_cached_arrays(self, actions_list: List[Dict]) -> Dict:
         """
         PERFORMANCE OPTIMIZATION: Get or compute cached arrays to avoid recreating them every frame.
@@ -190,21 +206,20 @@ class InteractiveFunscriptTimeline:
         """
         if not actions_list:
             return {"ats": np.array([]), "poss": np.array([])}
-        
+
         # Create a simple hash of the actions list to detect changes
         # Using length + first/last elements as a fast approximation
         if len(actions_list) >= 2:
-            actions_hash = (len(actions_list), actions_list[0]["at"], actions_list[0]["pos"], 
-                          actions_list[-1]["at"], actions_list[-1]["pos"])
+            actions_hash = (len(actions_list), actions_list[0]["at"], actions_list[0]["pos"],
+                            actions_list[-1]["at"], actions_list[-1]["pos"])
         else:
-            actions_hash = (len(actions_list), actions_list[0]["at"] if actions_list else 0, 
-                          actions_list[0]["pos"] if actions_list else 0)
-        
+            actions_hash = (len(actions_list), actions_list[0]["at"] if actions_list else 0,
+                            actions_list[0]["pos"] if actions_list else 0)
+
         # Check if we need to recompute the cache
-        if (self._cached_actions_hash != actions_hash or 
-            self._cached_actions_data is None or 
-            not self._cached_arrays_initialized):
-            
+        if (self._cached_actions_hash != actions_hash or
+                self._cached_actions_data is None or
+                not self._cached_arrays_initialized):
             # Recompute cached arrays
             self._cached_actions_data = {
                 "ats": np.array([action["at"] for action in actions_list], dtype=float),
@@ -212,14 +227,15 @@ class InteractiveFunscriptTimeline:
             }
             self._cached_actions_hash = actions_hash
             self._cached_arrays_initialized = True
-        
+
         return self._cached_actions_data
 
     def _perform_time_shift(self, frame_delta: int):
         fs_proc = self.app.funscript_processor
         video_fps_for_calc = self.app.processor.fps if self.app.processor and self.app.processor.fps and self.app.processor.fps > 0 else 0
         if video_fps_for_calc <= 0:
-            self.app.logger.warning(f"T{self.timeline_num}: Cannot shift time. Video FPS is not available.", extra={'status_message': True})
+            self.app.logger.warning(f"T{self.timeline_num}: Cannot shift time. Video FPS is not available.",
+                                    extra={'status_message': True})
             return
 
         time_delta_ms = int(round((frame_delta / video_fps_for_calc) * 1000.0))
@@ -301,15 +317,17 @@ class InteractiveFunscriptTimeline:
     def _handle_copy_to_other_timeline(self):
         source_actions_ref = self._get_actions_list_ref()
         if not source_actions_ref or not self.multi_selected_action_indices:
-            self.app.logger.warning(f"T{self.timeline_num}: No points selected to copy.", extra={'status_message': True})
+            self.app.logger.warning(f"T{self.timeline_num}: No points selected to copy.",
+                                    extra={'status_message': True})
             return
 
         destination_timeline_num = 2 if self.timeline_num == 1 else 1
-        dest_funscript_instance, dest_axis_name = self.app.funscript_processor._get_target_funscript_object_and_axis(destination_timeline_num)
+        dest_funscript_instance, dest_axis_name = self.app.funscript_processor._get_target_funscript_object_and_axis(
+            destination_timeline_num)
 
         if not dest_funscript_instance or not dest_axis_name:
             self.app.logger.error(f"T{self.timeline_num}: Could not find destination timeline to copy points.",
-            extra = {'status_message': True})
+                                  extra={'status_message': True})
             return
 
         actions_to_copy = [source_actions_ref[idx] for idx in sorted(list(self.multi_selected_action_indices))]
@@ -356,7 +374,7 @@ class InteractiveFunscriptTimeline:
         self.app.funscript_processor._finalize_action_and_update_ui(destination_timeline_num, op_desc)
         self.app.logger.info(
             f"Pasted to T{destination_timeline_num}, overwriting points in range [{min_timestamp}, {max_timestamp}].",
-            extra = {'status_message': True})
+            extra={'status_message': True})
 
     # --- Selection Filtering Methods ---
     def _select_top_points(self, selection: List[Dict]) -> List[Dict]:
@@ -458,7 +476,7 @@ class InteractiveFunscriptTimeline:
         funscript_instance, axis_name = self._get_target_funscript_details()
         if not funscript_instance or not axis_name:
             self.app.logger.warning(f"T{self.timeline_num}: Cannot {error_context}. Funscript object not found.",
-            extra = {'status_message': True})
+                                    extra={'status_message': True})
             return False
         try:
             method_to_call = getattr(funscript_instance, method_name)
@@ -467,14 +485,15 @@ class InteractiveFunscriptTimeline:
         except Exception as e:
             self.app.logger.error(
                 f"T{self.timeline_num} Error in {error_context} ({method_name}): {str(e)}", exc_info=True,
-                extra = {'status_message': True})
+                extra={'status_message': True})
             return False
 
     def _call_funscript_method_with_result(self, method_name: str, error_context: str, **kwargs) -> Optional[Dict]:
         """ Helper to call a method on the funscript object that is expected to return a result dictionary. """
         funscript_instance, axis_name = self._get_target_funscript_details()
         if not funscript_instance or not axis_name:
-            self.app.logger.warning(f"T{self.timeline_num}: Cannot {error_context}. Funscript object not found.", extra={'status_message': True})
+            self.app.logger.warning(f"T{self.timeline_num}: Cannot {error_context}. Funscript object not found.",
+                                    extra={'status_message': True})
             return None
         try:
             method_to_call = getattr(funscript_instance, method_name)
@@ -486,7 +505,8 @@ class InteractiveFunscriptTimeline:
                 extra={'status_message': True})
             return None
 
-    def _perform_autotune_sg(self, sat_low: int, sat_high: int, max_window: int, polyorder: int, selected_indices: Optional[List[int]]):
+    def _perform_autotune_sg(self, sat_low: int, sat_high: int, max_window: int, polyorder: int,
+                             selected_indices: Optional[List[int]]):
         """Wrapper to call the auto_tune_sg_filter method on the funscript object."""
         return self._call_funscript_method_with_result('auto_tune_sg_filter', 'auto-tune',
                                                        saturation_low=sat_low,
@@ -503,40 +523,51 @@ class InteractiveFunscriptTimeline:
         return self._call_funscript_method('apply_custom_autotune_pipeline_destructive', 'Ultimate Autotune')
 
     def _perform_sg_filter(self, window_length: int, polyorder: int, selected_indices: Optional[List[int]]):
-        return (self._call_funscript_method('apply_savitzky_golay', 'SG filter', window_length=window_length, polyorder=polyorder, selected_indices=selected_indices))
+        return (self._call_funscript_method('apply_savitzky_golay', 'SG filter', window_length=window_length,
+                                            polyorder=polyorder, selected_indices=selected_indices))
 
     def _perform_speed_limiter(self, min_interval: int, vibe_amount: int, speed_threshold: float):
-        return (self._call_funscript_method('apply_speed_limiter', 'Speed Limiter', min_interval = min_interval, vibe_amount = vibe_amount, speed_threshold = speed_threshold))
+        return (self._call_funscript_method('apply_speed_limiter', 'Speed Limiter', min_interval=min_interval,
+                                            vibe_amount=vibe_amount, speed_threshold=speed_threshold))
 
     def _perform_rdp_simplification(self, epsilon: float, selected_indices: Optional[List[int]]):
-        return (self._call_funscript_method('simplify_rdp', 'RDP simplification', epsilon = epsilon, selected_indices = selected_indices))
+        return (self._call_funscript_method('simplify_rdp', 'RDP simplification', epsilon=epsilon,
+                                            selected_indices=selected_indices))
 
-    def _perform_peaks_simplification(self, height, threshold, distance, prominence, width, selected_indices: Optional[List[int]]):
+    def _perform_peaks_simplification(self, height, threshold, distance, prominence, width,
+                                      selected_indices: Optional[List[int]]):
         return (self._call_funscript_method('find_peaks_and_valleys', 'Peak finding',
-                                           height=height,
-                                           threshold=threshold,
-                                           distance=distance,
-                                           prominence=prominence,
-                                           width=width,
-                                           selected_indices=selected_indices))
+                                            height=height,
+                                            threshold=threshold,
+                                            distance=distance,
+                                            prominence=prominence,
+                                            width=width,
+                                            selected_indices=selected_indices))
 
     def _perform_inversion(self, selected_indices: Optional[List[int]]):
-        return (self._call_funscript_method('invert_points_values', 'inversion', selected_indices = selected_indices))
+        return (self._call_funscript_method('invert_points_values', 'inversion', selected_indices=selected_indices))
 
     def _perform_clamp(self, clamp_value: int, selected_indices: Optional[List[int]]):
-        return (self._call_funscript_method('clamp_points_values', f'clamp to {clamp_value}', clamp_value = clamp_value, selected_indices = selected_indices))
+        return (self._call_funscript_method('clamp_points_values', f'clamp to {clamp_value}', clamp_value=clamp_value,
+                                            selected_indices=selected_indices))
 
     def _perform_amplify(self, scale_factor: float, center_value: int, selected_indices: Optional[List[int]]):
-        return (self._call_funscript_method('amplify_points_values', 'Amplify', scale_factor = scale_factor, center_value = center_value, selected_indices = selected_indices))
+        return (self._call_funscript_method('amplify_points_values', 'Amplify', scale_factor=scale_factor,
+                                            center_value=center_value, selected_indices=selected_indices))
 
     def _perform_resample(self, selected_indices: Optional[List[int]]):
         # We can hardcode the resample rate for now, or add a popup later.
         # 50ms is a good starting point.
         resample_rate = 50
-        return (self._call_funscript_method('apply_peak_preserving_resample', 'Resample', resample_rate_ms = resample_rate, selected_indices = selected_indices))
+        return (
+            self._call_funscript_method('apply_peak_preserving_resample', 'Resample', resample_rate_ms=resample_rate,
+                                        selected_indices=selected_indices))
 
-    def _perform_keyframe_simplification(self, position_tolerance: int, time_tolerance_ms: int, selected_indices: Optional[List[int]]):
-        return (self._call_funscript_method('simplify_to_keyframes', 'Keyframe Extraction', position_tolerance = position_tolerance, time_tolerance_ms = time_tolerance_ms, selected_indices = selected_indices))
+    def _perform_keyframe_simplification(self, position_tolerance: int, time_tolerance_ms: int,
+                                         selected_indices: Optional[List[int]]):
+        return (self._call_funscript_method('simplify_to_keyframes', 'Keyframe Extraction',
+                                            position_tolerance=position_tolerance, time_tolerance_ms=time_tolerance_ms,
+                                            selected_indices=selected_indices))
 
     def _get_ultimate_autotune_params(self) -> Dict:
         """Helper to gather all Ultimate Autotune settings from the UI state."""
@@ -600,7 +631,6 @@ class InteractiveFunscriptTimeline:
             self.set_preview_actions(preview_actions)
             return
 
-
         indices_to_process = list(self.multi_selected_action_indices) if apply_to_selection else None
 
         params = {}
@@ -638,10 +668,10 @@ class InteractiveFunscriptTimeline:
             }
 
         generated_preview_actions = funscript_instance.calculate_filter_preview(
-            axis = axis_name,
-            filter_type = filter_type,
-            filter_params = params,
-            selected_indices = indices_to_process)
+            axis=axis_name,
+            filter_type=filter_type,
+            filter_params=params,
+            selected_indices=indices_to_process)
         self.set_preview_actions(generated_preview_actions)
 
     def _handle_copy_full_timeline_to_other(self):
@@ -721,7 +751,6 @@ class InteractiveFunscriptTimeline:
 
         self.app.logger.info(op_desc, extra={'status_message': True})
 
-
     def render(self, timeline_y_start_coord: float = 0, timeline_render_height: float = 0, view_mode: str = 'expert'):
         app_state = self.app.app_state_ui
         is_floating = app_state.ui_layout_mode == 'floating'
@@ -737,7 +766,8 @@ class InteractiveFunscriptTimeline:
         if is_floating:
             window_title = f"Interactive Timeline {self.timeline_num}"
             imgui.set_next_window_size(app_state.window_width, 180, condition=imgui.APPEARING)
-            is_open, new_visibility = imgui.begin(window_title, closable=True, flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
+            is_open, new_visibility = imgui.begin(window_title, closable=True,
+                                                  flags=imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
             if new_visibility != is_visible:
                 setattr(app_state, visibility_flag_name, new_visibility)
                 self.app.project_manager.project_dirty = True
@@ -749,7 +779,8 @@ class InteractiveFunscriptTimeline:
             imgui.set_next_window_position(0, timeline_y_start_coord)
             imgui.set_next_window_size(app_state.window_width, timeline_render_height)
             imgui.begin(f"Funscript Editor Timeline##Interactive{self.timeline_num}",
-                flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE))
+                        flags=(
+                                    imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE))
 
         # --- Content Rendering ---
         if should_render_content:
@@ -802,10 +833,12 @@ class InteractiveFunscriptTimeline:
                     imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
                 if imgui.button(f"{clear_button_text}##ClearButton{window_id_suffix}"):
                     if not clear_op_disabled:
-                        indices_to_clear = list(self.multi_selected_action_indices) if num_selected_for_clear > 0 else None
+                        indices_to_clear = list(
+                            self.multi_selected_action_indices) if num_selected_for_clear > 0 else None
                         op_desc = f"Cleared {len(indices_to_clear) if indices_to_clear else 'All'} Point(s)"
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                        target_funscript_instance_for_render.clear_points(axis=axis_name_for_render, selected_indices = indices_to_clear)
+                        target_funscript_instance_for_render.clear_points(axis=axis_name_for_render,
+                                                                          selected_indices=indices_to_clear)
                         if indices_to_clear: self.multi_selected_action_indices.clear()
                         self.selected_action_idx = -1
                         self.dragging_action_idx = -1
@@ -927,7 +960,8 @@ class InteractiveFunscriptTimeline:
                             fs_proc._record_timeline_action(self.timeline_num, op_desc)  # For Undo
                             if self._perform_resample(selected_indices=indices_to_use):
                                 fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                                self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                                self.app.logger.info(f"{op_desc} on T{self.timeline_num}.",
+                                                     extra={'status_message': True})
 
                     if resample_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
                     imgui.same_line()
@@ -973,7 +1007,8 @@ class InteractiveFunscriptTimeline:
                             fs_proc._record_timeline_action(self.timeline_num, op_desc)
                             if self._perform_inversion(selected_indices=indices_to_op):
                                 fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                                self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                                self.app.logger.info(f"{op_desc} on T{self.timeline_num}.",
+                                                     extra={'status_message': True})
                     if invert_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
                     imgui.same_line()
 
@@ -991,16 +1026,19 @@ class InteractiveFunscriptTimeline:
                             fs_proc._record_timeline_action(self.timeline_num, op_desc)
                             if self._perform_clamp(0, selected_indices=indices_to_op):
                                 fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                                self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                                self.app.logger.info(f"{op_desc} on T{self.timeline_num}.",
+                                                     extra={'status_message': True})
                     imgui.same_line()
                     if imgui.button(f"{clamp_button_prefix} 100##Clamp100{window_id_suffix}"):
                         if not clamp_disabled_bool:
-                            indices_to_op = list(self.multi_selected_action_indices) if self.multi_selected_action_indices else None
+                            indices_to_op = list(
+                                self.multi_selected_action_indices) if self.multi_selected_action_indices else None
                             op_desc = "Clamped Selected to 100" if indices_to_op else "Clamped All to 100"
                             fs_proc._record_timeline_action(self.timeline_num, op_desc)
                             if self._perform_clamp(100, selected_indices=indices_to_op):
                                 fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                                self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                                self.app.logger.info(f"{op_desc} on T{self.timeline_num}.",
+                                                     extra={'status_message': True})
                     if clamp_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
                     imgui.same_line()
 
@@ -1012,16 +1050,19 @@ class InteractiveFunscriptTimeline:
                     imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
                 if imgui.button(f"<<##ShiftLeft{window_id_suffix}"):
-                    if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(-self.shift_frames_amount)
+                    if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(
+                        -self.shift_frames_amount)
                 imgui.same_line()
 
                 imgui.push_item_width(80 * self.app.app_settings.get("global_font_scale", 1.0))
-                _, self.shift_frames_amount = imgui.input_int(f"Frames##ShiftAmount{window_id_suffix}", self.shift_frames_amount, 1, 10)
+                _, self.shift_frames_amount = imgui.input_int(f"Frames##ShiftAmount{window_id_suffix}",
+                                                              self.shift_frames_amount, 1, 10)
                 if self.shift_frames_amount < 0: self.shift_frames_amount = 0
                 imgui.pop_item_width()
                 imgui.same_line()
                 if imgui.button(f">>##ShiftRight{window_id_suffix}"):
-                    if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(self.shift_frames_amount)
+                    if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(
+                        self.shift_frames_amount)
                 if time_shift_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
                 imgui.same_line()
 
@@ -1030,11 +1071,12 @@ class InteractiveFunscriptTimeline:
                 # Allow scrubbing if not actively processing, or if paused (is_processing True and pause_event is set)
                 processor = self.app.processor
                 can_manual_pan_zoom = (
-                    video_loaded and (
-                        not processor.is_processing
-                        or (processor.is_processing and hasattr(processor, 'pause_event') and processor.pause_event.is_set())
-                    )
-                ) or not video_loaded
+                                              video_loaded and (
+                                              not processor.is_processing
+                                              or (processor.is_processing and hasattr(processor,
+                                                                                      'pause_event') and processor.pause_event.is_set())
+                                      )
+                                      ) or not video_loaded
                 zoom_disabled_bool = False  # not allow_editing_timeline or not can_manual_pan_zoom
                 if zoom_disabled_bool:
                     imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
@@ -1057,9 +1099,12 @@ class InteractiveFunscriptTimeline:
                 view_mode = getattr(self.app.app_state_ui, 'ui_view_mode', 'expert')
                 if view_mode != 'simple':  # Only show in Expert mode
                     imgui.same_line()
-                    changed, self.show_ultimate_autotune_preview = imgui.checkbox(f"Show Ultimate Preview##UltimatePreviewCheckbox{window_id_suffix}", self.show_ultimate_autotune_preview)
+                    changed, self.show_ultimate_autotune_preview = imgui.checkbox(
+                        f"Show Ultimate Preview##UltimatePreviewCheckbox{window_id_suffix}",
+                        self.show_ultimate_autotune_preview)
                     if changed:
-                        self.app.app_settings.set(f"timeline{self.timeline_num}_show_ultimate_preview", self.show_ultimate_autotune_preview)
+                        self.app.app_settings.set(f"timeline{self.timeline_num}_show_ultimate_preview",
+                                                  self.show_ultimate_autotune_preview)
                         if self.show_ultimate_autotune_preview:
                             self.invalidate_ultimate_preview()  # Make it re-render on next frame
                         else:
@@ -1090,16 +1135,18 @@ class InteractiveFunscriptTimeline:
                     imgui.text(f"Speed Limiter (Timeline {self.timeline_num})")
                     imgui.separator()
 
-                    interval_changed, self.min_interval = imgui.slider_int("Min Interval (ms)##HandyMinIntervalPopup", self.min_interval, 0, 200)
+                    interval_changed, self.min_interval = imgui.slider_int("Min Interval (ms)##HandyMinIntervalPopup",
+                                                                           self.min_interval, 0, 200)
                     if interval_changed: self._update_preview('speed_limiter')
                     if imgui.is_item_hovered(): imgui.set_tooltip("Action points closer than this (in ms) are removed.")
 
-                    #vibe_changed, self.vibe_amount = imgui.slider_int("Vibration Amplitude##HandyVibeAmountPopup",
+                    # vibe_changed, self.vibe_amount = imgui.slider_int("Vibration Amplitude##HandyVibeAmountPopup",
                     #                                                        self.vibe_amount, 0, 100)
-                    #if vibe_changed: self._update_preview('speed_limiter')
-                    #if imgui.is_item_hovered(): imgui.set_tooltip("Vibration starting amplitude (1-100).")
+                    # if vibe_changed: self._update_preview('speed_limiter')
+                    # if imgui.is_item_hovered(): imgui.set_tooltip("Vibration starting amplitude (1-100).")
 
-                    speed_changed, self.speed_threshold = imgui.slider_float("Speed Threshold##HandySpeedThresholdPopup", self.speed_threshold, 100.0, 1000.0, "%.1f")
+                    speed_changed, self.speed_threshold = imgui.slider_float(
+                        "Speed Threshold##HandySpeedThresholdPopup", self.speed_threshold, 100.0, 1000.0, "%.1f")
                     if speed_changed: self._update_preview('speed_limiter')
                     if imgui.is_item_hovered(): imgui.set_tooltip(
                         "Speed limit for the script. 500 is the default 'Handy' limit.")
@@ -1114,7 +1161,8 @@ class InteractiveFunscriptTimeline:
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                             self.app.app_settings.set(f"timeline{self.timeline_num}_min_interval", self.min_interval)
                             self.app.app_settings.set(f"timeline{self.timeline_num}_vibe_amount", self.vibe_amount)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_speed_threshold", self.speed_threshold)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_speed_threshold",
+                                                      self.speed_threshold)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
 
                         self.clear_preview()
@@ -1182,15 +1230,19 @@ class InteractiveFunscriptTimeline:
                     if imgui.button(f"Apply##SGApplyPop{window_id_suffix}"):
                         indices_to_use = list(
                             self.multi_selected_action_indices) if self.sg_apply_to_selection else None
-                        op_desc = f"Applied SG (W:{self.sg_window_length}, P:{self.sg_poly_order})" + (" to selection" if indices_to_use else "")
+                        op_desc = f"Applied SG (W:{self.sg_window_length}, P:{self.sg_poly_order})" + (
+                            " to selection" if indices_to_use else "")
 
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)  # Record for Undo
 
                         # This calls the original, DESTRUCTIVE method
-                        if self._perform_sg_filter(self.sg_window_length, self.sg_poly_order, selected_indices=indices_to_use):
+                        if self._perform_sg_filter(self.sg_window_length, self.sg_poly_order,
+                                                   selected_indices=indices_to_use):
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_sg_default_window", self.sg_window_length)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_sg_default_polyorder", self.sg_poly_order)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_sg_default_window",
+                                                      self.sg_window_length)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_sg_default_polyorder",
+                                                      self.sg_poly_order)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
 
                         self.clear_preview()
@@ -1220,7 +1272,8 @@ class InteractiveFunscriptTimeline:
                 popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 250) * 0.5
                 imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
                 imgui.set_next_window_size(400, 0, condition=imgui.APPEARING)
-                window_expanded, self.show_autotune_popup = imgui.begin(autotune_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+                window_expanded, self.show_autotune_popup = imgui.begin(autotune_window_title, closable=True,
+                                                                        flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
 
                 if window_expanded:
                     imgui.text(f"Auto-Tune SG Filter (Timeline {self.timeline_num})")
@@ -1228,19 +1281,22 @@ class InteractiveFunscriptTimeline:
                     imgui.separator()
 
                     # MODIFIED: Sliders now update the preview
-                    sl_changed, self.autotune_sat_low = imgui.slider_int("Saturation Low##AutoTuneSatLow", self.autotune_sat_low, 0, 10)
+                    sl_changed, self.autotune_sat_low = imgui.slider_int("Saturation Low##AutoTuneSatLow",
+                                                                         self.autotune_sat_low, 0, 10)
                     if sl_changed:
                         self._update_preview('autotune')
                     if imgui.is_item_hovered():
                         imgui.set_tooltip("Points at or below this value are 'saturated'.")
 
-                    sh_changed, self.autotune_sat_high = imgui.slider_int("Saturation High##AutoTuneSatHigh", self.autotune_sat_high, 90, 100)
+                    sh_changed, self.autotune_sat_high = imgui.slider_int("Saturation High##AutoTuneSatHigh",
+                                                                          self.autotune_sat_high, 90, 100)
                     if sh_changed:
                         self._update_preview('autotune')
                     if imgui.is_item_hovered():
                         imgui.set_tooltip("Points at or above this value are 'saturated'.")
 
-                    mw_changed, self.autotune_max_window = imgui.slider_int("Max Window Size##AutoTuneMaxWin", self.autotune_max_window, 5, 25)
+                    mw_changed, self.autotune_max_window = imgui.slider_int("Max Window Size##AutoTuneMaxWin",
+                                                                            self.autotune_max_window, 5, 25)
                     if mw_changed:
                         if self.autotune_max_window % 2 == 0:
                             self.autotune_max_window += 1
@@ -1251,7 +1307,9 @@ class InteractiveFunscriptTimeline:
                     imgui.separator()
 
                     if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3:
-                        sel_changed, self.autotune_apply_to_selection = imgui.checkbox(f"Apply to {len(self.multi_selected_action_indices)} selected##AutoTuneApplyToSel", self.autotune_apply_to_selection)
+                        sel_changed, self.autotune_apply_to_selection = imgui.checkbox(
+                            f"Apply to {len(self.multi_selected_action_indices)} selected##AutoTuneApplyToSel",
+                            self.autotune_apply_to_selection)
                         if sel_changed: self._update_preview('autotune')
                     else:
                         imgui.text_disabled("Apply to: Full Script")
@@ -1260,7 +1318,8 @@ class InteractiveFunscriptTimeline:
                     imgui.separator()
 
                     if imgui.button(f"Apply##AutoTuneApplyPop{window_id_suffix}"):
-                        indices_to_use = list(self.multi_selected_action_indices) if self.autotune_apply_to_selection else None
+                        indices_to_use = list(
+                            self.multi_selected_action_indices) if self.autotune_apply_to_selection else None
                         op_desc = f"Applied Auto-Tune SG" + (" to selection" if indices_to_use else "")
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
 
@@ -1271,14 +1330,19 @@ class InteractiveFunscriptTimeline:
 
                         if result:
                             # Success! Finalize the undo action with a more descriptive message.
-                            final_op_desc = f"Auto-Tune SG (W:{result['window_length']}, P:{result['polyorder']})" + (" to sel." if indices_to_use else "")
+                            final_op_desc = f"Auto-Tune SG (W:{result['window_length']}, P:{result['polyorder']})" + (
+                                " to sel." if indices_to_use else "")
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, final_op_desc)
 
                             # Save settings for next time
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_low", self.autotune_sat_low)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_high", self.autotune_sat_high)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_max_window", self.autotune_max_window)
-                            self.app.logger.info(f"{final_op_desc} on T{self.timeline_num}.", extra={'status_message': True})
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_low",
+                                                      self.autotune_sat_low)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_sat_high",
+                                                      self.autotune_sat_high)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_autotune_default_max_window",
+                                                      self.autotune_max_window)
+                            self.app.logger.info(f"{final_op_desc} on T{self.timeline_num}.",
+                                                 extra={'status_message': True})
                         else:
                             # Failure or no solution found. The recorded action will be discarded by the undo manager.
                             self.app.logger.warning(
@@ -1317,14 +1381,16 @@ class InteractiveFunscriptTimeline:
                     imgui.text_wrapped("Do you want to replace the current script with this previewed version?")
                     imgui.dummy(0, 10)
 
-                    button_width = (imgui.get_content_region_available_width() - imgui.get_style().item_spacing[0]) / 2.0
+                    button_width = (imgui.get_content_region_available_width() - imgui.get_style().item_spacing[
+                        0]) / 2.0
 
                     if imgui.button("Apply##UltimateApply", width=button_width):
                         op_desc = "Applied Ultimate Autotune"
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
                         if self._perform_ultimate_autotune():
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                            self.app.logger.info("✨ Ultimate Autotune applied successfully.", extra={'status_message': True})
+                            self.app.logger.info("✨ Ultimate Autotune applied successfully.",
+                                                 extra={'status_message': True})
                         # On failure, the recorded action is automatically discarded by the undo manager.
                         self.clear_preview()
                         self.show_ultimate_autotune_popup = False
@@ -1352,12 +1418,15 @@ class InteractiveFunscriptTimeline:
                 popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 180) * 0.5
                 imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
                 imgui.set_next_window_size(350, 0, condition=imgui.APPEARING)
-                window_expanded, self.show_rdp_settings_popup = imgui.begin(rdp_window_title, closable=self.show_rdp_settings_popup, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+                window_expanded, self.show_rdp_settings_popup = imgui.begin(rdp_window_title,
+                                                                            closable=self.show_rdp_settings_popup,
+                                                                            flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
 
                 if window_expanded:
                     imgui.text(f"RDP Simplification (Timeline {self.timeline_num})");
                     imgui.separator()
-                    epsilon_changed, self.rdp_epsilon = imgui.slider_float("Epsilon##RDPEpsPopup", self.rdp_epsilon, 0.1, 20.0, "%.1f")
+                    epsilon_changed, self.rdp_epsilon = imgui.slider_float("Epsilon##RDPEpsPopup", self.rdp_epsilon,
+                                                                           0.1, 20.0, "%.1f")
                     if epsilon_changed:
                         self._update_preview('rdp')
 
@@ -1378,7 +1447,8 @@ class InteractiveFunscriptTimeline:
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
                         if self._perform_rdp_simplification(self.rdp_epsilon, selected_indices=indices_to_use):
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_rdp_default_epsilon", self.rdp_epsilon)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_rdp_default_epsilon",
+                                                      self.rdp_epsilon)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
                         self.clear_preview()
                         self.show_rdp_settings_popup = False
@@ -1400,7 +1470,8 @@ class InteractiveFunscriptTimeline:
                 imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
                 imgui.set_next_window_size(450, 0, condition=imgui.APPEARING)
 
-                window_expanded, self.show_peaks_settings_popup = imgui.begin(peaks_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+                window_expanded, self.show_peaks_settings_popup = imgui.begin(peaks_window_title, closable=True,
+                                                                              flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
 
                 if window_expanded:
                     imgui.text("Peak & Valley Extraction (scipy.find_peaks)")
@@ -1412,23 +1483,27 @@ class InteractiveFunscriptTimeline:
                         self._update_preview('peaks')
                     if imgui.is_item_hovered(): imgui.set_tooltip("Required height of peaks.")
 
-                    t_changed, self.peaks_threshold = imgui.slider_int("Threshold##PeaksThreshold", self.peaks_threshold, 0, 2)
+                    t_changed, self.peaks_threshold = imgui.slider_int("Threshold##PeaksThreshold",
+                                                                       self.peaks_threshold, 0, 2)
                     if t_changed:
                         self._update_preview('peaks')
                     if imgui.is_item_hovered(): imgui.set_tooltip("Vertical distance between a peak and its neighbors.")
 
-                    d_changed, self.peaks_distance = imgui.slider_int("Distance##PeaksDistance", self.peaks_distance, 1, 50)
+                    d_changed, self.peaks_distance = imgui.slider_int("Distance##PeaksDistance", self.peaks_distance, 1,
+                                                                      50)
                     if d_changed:
                         self._update_preview('peaks')
                     if imgui.is_item_hovered(): imgui.set_tooltip(
                         "Minimum horizontal distance (in # of points) between peaks.")
 
-                    p_changed, self.peaks_prominence = imgui.slider_int("Prominence##PeaksProminence", self.peaks_prominence, 0, 50)
+                    p_changed, self.peaks_prominence = imgui.slider_int("Prominence##PeaksProminence",
+                                                                        self.peaks_prominence, 0, 50)
                     if p_changed:
                         self._update_preview('peaks')
-                    if imgui.is_item_hovered(): imgui.set_tooltip("The vertical distance between the peak and its lowest contour line.")
+                    if imgui.is_item_hovered(): imgui.set_tooltip(
+                        "The vertical distance between the peak and its lowest contour line.")
 
-                    w_changed, self.peaks_width = imgui.slider_int("Width##PeaksWidth", self.peaks_width,0, 5)
+                    w_changed, self.peaks_width = imgui.slider_int("Width##PeaksWidth", self.peaks_width, 0, 5)
                     if w_changed:
                         self._update_preview('peaks')
                     if imgui.is_item_hovered(): imgui.set_tooltip("Required width of peaks in samples.")
@@ -1437,7 +1512,8 @@ class InteractiveFunscriptTimeline:
 
                     if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3:
                         sel_changed, self.peaks_apply_to_selection = imgui.checkbox(
-                            f"Apply to {len(self.multi_selected_action_indices)} selected##PeaksApplyToSel", self.peaks_apply_to_selection)
+                            f"Apply to {len(self.multi_selected_action_indices)} selected##PeaksApplyToSel",
+                            self.peaks_apply_to_selection)
                         if sel_changed: self._update_preview('peaks')
                     else:
                         imgui.text_disabled("Apply to: Full Script")
@@ -1459,11 +1535,16 @@ class InteractiveFunscriptTimeline:
                         ):
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                             # Save settings
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_height", self.peaks_height)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_threshold", self.peaks_threshold)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_distance", self.peaks_distance)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_prominence", self.peaks_prominence)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_width", self.peaks_width)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_height",
+                                                      self.peaks_height)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_threshold",
+                                                      self.peaks_threshold)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_distance",
+                                                      self.peaks_distance)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_prominence",
+                                                      self.peaks_prominence)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_peaks_default_width",
+                                                      self.peaks_width)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
 
                         self.clear_preview()
@@ -1492,22 +1573,27 @@ class InteractiveFunscriptTimeline:
                 imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
                 imgui.set_next_window_size(350, 0, condition=imgui.APPEARING)
 
-                window_expanded, self.show_amp_settings_popup = imgui.begin(amp_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+                window_expanded, self.show_amp_settings_popup = imgui.begin(amp_window_title, closable=True,
+                                                                            flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
 
                 if window_expanded:
                     imgui.text(f"Amplify Values (Timeline {self.timeline_num})")
                     imgui.separator()
 
-                    sf_changed, self.amp_scale_factor = imgui.slider_float("Scale Factor##AmpScalePopup", self.amp_scale_factor, 0.1, 5.0, "%.2f")
+                    sf_changed, self.amp_scale_factor = imgui.slider_float("Scale Factor##AmpScalePopup",
+                                                                           self.amp_scale_factor, 0.1, 5.0, "%.2f")
                     if sf_changed:
                         self._update_preview('amp')
 
-                    cv_changed, self.amp_center_value = imgui.slider_int("Center Value##AmpCenterPopup", self.amp_center_value, 0, 100)
+                    cv_changed, self.amp_center_value = imgui.slider_int("Center Value##AmpCenterPopup",
+                                                                         self.amp_center_value, 0, 100)
                     if cv_changed:
                         self._update_preview('amp')
 
                     if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2:
-                        sel_changed, self.amp_apply_to_selection = imgui.checkbox(f"Apply to {len(self.multi_selected_action_indices)} selected##AmpApplyToSel", self.amp_apply_to_selection)
+                        sel_changed, self.amp_apply_to_selection = imgui.checkbox(
+                            f"Apply to {len(self.multi_selected_action_indices)} selected##AmpApplyToSel",
+                            self.amp_apply_to_selection)
                         if sel_changed:
                             self._update_preview('amp')
                     else:
@@ -1517,13 +1603,17 @@ class InteractiveFunscriptTimeline:
                     if imgui.button(f"Apply##AmpApplyPop{window_id_suffix}"):
                         indices_to_use = list(
                             self.multi_selected_action_indices) if self.amp_apply_to_selection else None
-                        op_desc = (f"Amplified (S:{self.amp_scale_factor:.2f}, C:{self.amp_center_value})" + (" to selection" if indices_to_use else ""))
+                        op_desc = (f"Amplified (S:{self.amp_scale_factor:.2f}, C:{self.amp_center_value})" + (
+                            " to selection" if indices_to_use else ""))
 
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                        if self._perform_amplify(self.amp_scale_factor, self.amp_center_value, selected_indices=indices_to_use):
+                        if self._perform_amplify(self.amp_scale_factor, self.amp_center_value,
+                                                 selected_indices=indices_to_use):
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_amp_default_scale", self.amp_scale_factor)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_amp_default_center", self.amp_center_value)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_amp_default_scale",
+                                                      self.amp_scale_factor)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_amp_default_center",
+                                                      self.amp_center_value)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
 
                         self.clear_preview()
@@ -1548,11 +1638,12 @@ class InteractiveFunscriptTimeline:
 
                 main_viewport = imgui.get_main_viewport()
                 popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 350) * 0.5
-                popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 220) * 0.5 
+                popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 220) * 0.5
                 imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
                 imgui.set_next_window_size(350, 0, condition=imgui.APPEARING)
 
-                window_expanded, self.show_keyframe_settings_popup = imgui.begin(keyframe_window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+                window_expanded, self.show_keyframe_settings_popup = imgui.begin(keyframe_window_title, closable=True,
+                                                                                 flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
 
                 if window_expanded:
                     imgui.text(f"Dominant Keyframe Extraction")
@@ -1561,18 +1652,23 @@ class InteractiveFunscriptTimeline:
                     imgui.text_wrapped("Filters out minor peaks/valleys based on position and time.")
 
                     # Slider 1: Position Tolerance
-                    pos_tol_changed, self.keyframe_position_tolerance = imgui.slider_int("Position Tolerance##KeyframePosTol", self.keyframe_position_tolerance, 0, 15)
+                    pos_tol_changed, self.keyframe_position_tolerance = imgui.slider_int(
+                        "Position Tolerance##KeyframePosTol", self.keyframe_position_tolerance, 0, 15)
                     if pos_tol_changed: self._update_preview('keyframe')
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Minimum change in position to create a new keyframe.")
+                    if imgui.is_item_hovered(): imgui.set_tooltip(
+                        "Minimum change in position to create a new keyframe.")
 
                     # Slider 2: Time Tolerance
-                    time_tol_changed, self.keyframe_time_tolerance = imgui.slider_int("Time Tolerance (ms)##KeyframeTimeTol", self.keyframe_time_tolerance, 0, 100)
+                    time_tol_changed, self.keyframe_time_tolerance = imgui.slider_int(
+                        "Time Tolerance (ms)##KeyframeTimeTol", self.keyframe_time_tolerance, 0, 100)
                     if time_tol_changed: self._update_preview('keyframe')
                     if imgui.is_item_hovered(): imgui.set_tooltip("Minimum time between two keyframes.")
 
                     # ... (The rest of the popup: selection checkbox and Apply/Cancel buttons) ...
                     if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 3:
-                        sel_changed, self.keyframe_apply_to_selection = imgui.checkbox(f"Apply to {len(self.multi_selected_action_indices)} selected##KeyframeApplyToSel", self.keyframe_apply_to_selection)
+                        sel_changed, self.keyframe_apply_to_selection = imgui.checkbox(
+                            f"Apply to {len(self.multi_selected_action_indices)} selected##KeyframeApplyToSel",
+                            self.keyframe_apply_to_selection)
                         if sel_changed:
                             self._update_preview('keyframe')
                     else:
@@ -1580,14 +1676,20 @@ class InteractiveFunscriptTimeline:
                         self.keyframe_apply_to_selection = False
 
                     if imgui.button(f"Apply##KeyframeApplyPop{window_id_suffix}"):
-                        indices_to_use = list(self.multi_selected_action_indices) if self.keyframe_apply_to_selection else None
-                        op_desc = (f"Simplified to Keyframes (P-Tol:{self.keyframe_position_tolerance}, T-Tol:{self.keyframe_time_tolerance}")
+                        indices_to_use = list(
+                            self.multi_selected_action_indices) if self.keyframe_apply_to_selection else None
+                        op_desc = (
+                            f"Simplified to Keyframes (P-Tol:{self.keyframe_position_tolerance}, T-Tol:{self.keyframe_time_tolerance}")
 
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                        if self._perform_keyframe_simplification(self.keyframe_position_tolerance, self.keyframe_time_tolerance, selected_indices=indices_to_use):
+                        if self._perform_keyframe_simplification(self.keyframe_position_tolerance,
+                                                                 self.keyframe_time_tolerance,
+                                                                 selected_indices=indices_to_use):
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_keyframe_default_pos_tol", self.keyframe_position_tolerance)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_keyframe_default_time_tol", self.keyframe_time_tolerance)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_keyframe_default_pos_tol",
+                                                      self.keyframe_position_tolerance)
+                            self.app.app_settings.set(f"timeline{self.timeline_num}_keyframe_default_time_tol",
+                                                      self.keyframe_time_tolerance)
                             self.app.logger.info(f"{op_desc} on T{self.timeline_num}.", extra={'status_message': True})
 
                         self.clear_preview()
@@ -1607,7 +1709,7 @@ class InteractiveFunscriptTimeline:
             if not self.show_sg_settings_popup and not self.show_rdp_settings_popup and not self.show_peaks_settings_popup and not self.show_amp_settings_popup and not self.show_keyframe_settings_popup and not self.show_speed_limiter_popup and not self.show_autotune_popup and not self.show_ultimate_autotune_popup:
                 self.clear_preview()
 
-            imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95) # TODO: change to theme color
+            imgui.text_colored(script_info_text, 0.75, 0.75, 0.75, 0.95)  # TODO: change to theme color
             # --- (Drag and drop target for T2 remains the same) ---
             if self.timeline_num == 2:
                 if imgui.begin_drag_drop_target():
@@ -1630,12 +1732,16 @@ class InteractiveFunscriptTimeline:
                 imgui.end()
                 return
 
-            draw_list.add_rect_filled(canvas_abs_pos[0], canvas_abs_pos[1], canvas_abs_pos[0] + canvas_size[0], canvas_abs_pos[1] + canvas_size[1], imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND))
+            draw_list.add_rect_filled(canvas_abs_pos[0], canvas_abs_pos[1], canvas_abs_pos[0] + canvas_size[0],
+                                      canvas_abs_pos[1] + canvas_size[1],
+                                      imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND))
 
             video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
 
             processor = self.app.processor
-            can_manual_pan_zoom = (video_loaded and (not processor.is_processing or (processor.is_processing and hasattr(processor,'pause_event') and processor.pause_event.is_set()))) or not video_loaded
+            can_manual_pan_zoom = (video_loaded and (not processor.is_processing or (
+                        processor.is_processing and hasattr(processor,
+                                                            'pause_event') and processor.pause_event.is_set()))) or not video_loaded
 
             video_fps_for_calc = self.app.processor.fps if video_loaded and self.app.processor.fps > 0 else 30.0
             effective_total_duration_s, _, _ = self.app.get_effective_video_duration_params()
@@ -1644,10 +1750,12 @@ class InteractiveFunscriptTimeline:
             # --- Coordinate Transformation Helpers (Unchanged) ---
             def time_to_x(time_ms: float) -> float:
                 if app_state.timeline_zoom_factor_ms_per_px == 0: return canvas_abs_pos[0]
-                return canvas_abs_pos[0] + (time_ms - app_state.timeline_pan_offset_ms) / app_state.timeline_zoom_factor_ms_per_px
+                return canvas_abs_pos[0] + (
+                            time_ms - app_state.timeline_pan_offset_ms) / app_state.timeline_zoom_factor_ms_per_px
 
             def x_to_time(x_pos: float) -> float:
-                return (x_pos - canvas_abs_pos[0]) * app_state.timeline_zoom_factor_ms_per_px + app_state.timeline_pan_offset_ms
+                return (x_pos - canvas_abs_pos[
+                    0]) * app_state.timeline_zoom_factor_ms_per_px + app_state.timeline_pan_offset_ms
 
             def pos_to_y(val: int) -> float:
                 if canvas_size[1] == 0:
@@ -1662,10 +1770,12 @@ class InteractiveFunscriptTimeline:
             def time_to_x_vec(time_ms_arr: np.ndarray) -> np.ndarray:
                 if app_state.timeline_zoom_factor_ms_per_px == 0:
                     return np.full_like(time_ms_arr, canvas_abs_pos[0], dtype=float)
-                return canvas_abs_pos[0] + (time_ms_arr - app_state.timeline_pan_offset_ms) / app_state.timeline_zoom_factor_ms_per_px
+                return canvas_abs_pos[0] + (
+                            time_ms_arr - app_state.timeline_pan_offset_ms) / app_state.timeline_zoom_factor_ms_per_px
 
             def pos_to_y_vec(val_arr: np.ndarray) -> np.ndarray:
-                if canvas_size[1] == 0: return np.full_like(val_arr, canvas_abs_pos[1] + canvas_size[1] / 2.0, dtype=float)
+                if canvas_size[1] == 0: return np.full_like(val_arr, canvas_abs_pos[1] + canvas_size[1] / 2.0,
+                                                            dtype=float)
                 return canvas_abs_pos[1] + canvas_size[1] * (1.0 - (val_arr / 100.0))
 
             # endregion
@@ -1675,9 +1785,11 @@ class InteractiveFunscriptTimeline:
                 # if can_manual_pan_zoom:
                 time_at_current_center_ms = x_to_time(center_x_marker)
                 scale_factor = self.zoom_action_request
-                app_state.timeline_zoom_factor_ms_per_px = max(0.01, min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, 2000.0))
+                app_state.timeline_zoom_factor_ms_per_px = max(0.01,
+                                                               min(app_state.timeline_zoom_factor_ms_per_px * scale_factor,
+                                                                   2000.0))
                 app_state.timeline_pan_offset_ms = time_at_current_center_ms - (
-                            canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
+                        canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
                 app_state.timeline_interaction_active = True
                 self.is_zooming_active = True
 
@@ -1701,25 +1813,28 @@ class InteractiveFunscriptTimeline:
 
             # Original strict hover check for general timeline interaction
             is_timeline_hovered = (imgui.is_window_hovered()
-                and canvas_abs_pos[0] <= mouse_pos[0] < canvas_abs_pos[0] + canvas_size[0] 
-                and canvas_abs_pos[1] <= mouse_pos[1] < canvas_abs_pos[1] + canvas_size[1])
+                                   and canvas_abs_pos[0] <= mouse_pos[0] < canvas_abs_pos[0] + canvas_size[0]
+                                   and canvas_abs_pos[1] <= mouse_pos[1] < canvas_abs_pos[1] + canvas_size[1])
 
             # Relaxed hover check specifically for starting a marquee selection
             # This allows starting a marquee a few pixels outside the strict canvas bounds
-            marquee_hover_padding = 5.0 * self.app.app_settings.get("global_font_scale", 1.0)  # Adjust padding as needed
+            marquee_hover_padding = 5.0 * self.app.app_settings.get("global_font_scale",
+                                                                    1.0)  # Adjust padding as needed
             is_timeline_hovered_for_marquee_start = (imgui.is_window_hovered()
-                and canvas_abs_pos[0] - marquee_hover_padding <= mouse_pos[0] < canvas_abs_pos[0] + canvas_size[0] + marquee_hover_padding
-                and canvas_abs_pos[1] - marquee_hover_padding <= mouse_pos[1] < canvas_abs_pos[1] + canvas_size[1] + marquee_hover_padding)
+                                                     and canvas_abs_pos[0] - marquee_hover_padding <= mouse_pos[0] <
+                                                     canvas_abs_pos[0] + canvas_size[0] + marquee_hover_padding
+                                                     and canvas_abs_pos[1] - marquee_hover_padding <= mouse_pos[1] <
+                                                     canvas_abs_pos[1] + canvas_size[1] + marquee_hover_padding)
 
             # Check all inputs that count as interaction
             if is_timeline_hovered:
                 # Mouse Pan (still restricted)
                 if can_manual_pan_zoom:
                     is_mouse_panning = (imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_MIDDLE)
-                            or (io.key_shift
-                            and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT)
-                            and self.dragging_action_idx == -1
-                            and not self.is_marqueeing))
+                                        or (io.key_shift
+                                            and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT)
+                                            and self.dragging_action_idx == -1
+                                            and not self.is_marqueeing))
 
                     if is_mouse_panning:
                         app_state.timeline_pan_offset_ms -= io.mouse_delta[0] * app_state.timeline_zoom_factor_ms_per_px
@@ -1730,8 +1845,11 @@ class InteractiveFunscriptTimeline:
                 if io.mouse_wheel != 0.0:
                     time_at_current_center_ms = x_to_time(center_x_marker)
                     scale_factor = 0.85 if io.mouse_wheel > 0 else 1.15
-                    app_state.timeline_zoom_factor_ms_per_px = max(0.01, min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, 2000.0))
-                    app_state.timeline_pan_offset_ms = time_at_current_center_ms - (canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
+                    app_state.timeline_zoom_factor_ms_per_px = max(0.01,
+                                                                   min(app_state.timeline_zoom_factor_ms_per_px * scale_factor,
+                                                                       2000.0))
+                    app_state.timeline_pan_offset_ms = time_at_current_center_ms - (
+                                canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
                     is_interacting_this_frame = True
                     self.is_zooming_active = True
 
@@ -1751,25 +1869,25 @@ class InteractiveFunscriptTimeline:
                     shortcuts.get("pan_timeline_left", "ALT+LEFT_ARROW"))
 
                 if pan_left_tuple and (pan_left_tuple[1]['alt'] == io.key_alt
-                    and pan_left_tuple[1]['ctrl'] == io.key_ctrl
-                    and pan_left_tuple[1]['shift'] == io.key_shift
-                    and pan_left_tuple[1]['super'] == io.key_super) \
-                    and imgui.is_key_down(pan_left_tuple[0]):
-                        app_state.timeline_pan_offset_ms -= pan_key_speed_ms
-                        is_interacting_this_frame = True
-                        self.is_panning_active = True
+                                       and pan_left_tuple[1]['ctrl'] == io.key_ctrl
+                                       and pan_left_tuple[1]['shift'] == io.key_shift
+                                       and pan_left_tuple[1]['super'] == io.key_super) \
+                        and imgui.is_key_down(pan_left_tuple[0]):
+                    app_state.timeline_pan_offset_ms -= pan_key_speed_ms
+                    is_interacting_this_frame = True
+                    self.is_panning_active = True
 
                 pan_right_tuple = self.app._map_shortcut_to_glfw_key(
                     shortcuts.get("pan_timeline_right", "ALT+RIGHT_ARROW"))
 
                 if pan_right_tuple and (pan_right_tuple[1]['alt'] == io.key_alt
-                    and pan_right_tuple[1]['ctrl'] == io.key_ctrl
-                    and pan_right_tuple[1]['shift'] == io.key_shift
-                    and pan_right_tuple[1]['super'] == io.key_super) \
-                    and imgui.is_key_down(pan_right_tuple[0]):
-                        app_state.timeline_pan_offset_ms += pan_key_speed_ms
-                        is_interacting_this_frame = True
-                        self.is_panning_active = True
+                                        and pan_right_tuple[1]['ctrl'] == io.key_ctrl
+                                        and pan_right_tuple[1]['shift'] == io.key_shift
+                                        and pan_right_tuple[1]['super'] == io.key_super) \
+                        and imgui.is_key_down(pan_right_tuple[0]):
+                    app_state.timeline_pan_offset_ms += pan_key_speed_ms
+                    is_interacting_this_frame = True
+                    self.is_panning_active = True
 
                 # Select All
                 select_all_tuple = self.app._map_shortcut_to_glfw_key(shortcuts.get("select_all_points", "CTRL+A"))
@@ -1783,18 +1901,24 @@ class InteractiveFunscriptTimeline:
                 # Nudge Position
                 pos_nudge_delta = 0
                 nudge_up_tuple = self.app._map_shortcut_to_glfw_key(shortcuts.get("nudge_selection_pos_up", "UP_ARROW"))
-                if nudge_up_tuple and imgui.is_key_pressed(nudge_up_tuple[0]) and all(m == io_m for m, io_m in zip(nudge_up_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super])):
+                if nudge_up_tuple and imgui.is_key_pressed(nudge_up_tuple[0]) and all(m == io_m for m, io_m in
+                                                                                      zip(nudge_up_tuple[1].values(),
+                                                                                          [io.key_shift, io.key_ctrl,
+                                                                                           io.key_alt, io.key_super])):
                     pos_nudge_delta = app_state.snap_to_grid_pos if app_state.snap_to_grid_pos > 0 else 1
                 nudge_down_tuple = self.app._map_shortcut_to_glfw_key(
                     shortcuts.get("nudge_selection_pos_down", "DOWN_ARROW"))
-                if pos_nudge_delta == 0 and nudge_down_tuple and imgui.is_key_pressed(nudge_down_tuple[0]) and all(m == io_m for m, io_m in zip(nudge_down_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super])):
+                if pos_nudge_delta == 0 and nudge_down_tuple and imgui.is_key_pressed(nudge_down_tuple[0]) and all(
+                        m == io_m for m, io_m in
+                        zip(nudge_down_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super])):
                     pos_nudge_delta = -(app_state.snap_to_grid_pos if app_state.snap_to_grid_pos > 0 else 1)
 
                 if pos_nudge_delta != 0 and self.multi_selected_action_indices:
                     op_desc = f"Nudged Point(s) Pos by {pos_nudge_delta}"
                     fs_proc._record_timeline_action(self.timeline_num, op_desc)
                     for idx in self.multi_selected_action_indices:
-                        if 0 <= idx < len(actions_list): actions_list[idx]["pos"] = min(100, max(0, actions_list[idx]["pos"] + pos_nudge_delta))
+                        if 0 <= idx < len(actions_list): actions_list[idx]["pos"] = min(100, max(0, actions_list[idx][
+                            "pos"] + pos_nudge_delta))
                     fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
 
                 # Determine paused state
@@ -1855,7 +1979,8 @@ class InteractiveFunscriptTimeline:
 
                     actions_list.sort(key=lambda a: a["at"])
                     # Re-select moved points robustly
-                    self.multi_selected_action_indices = {actions_list.index(obj) for obj in objects_to_move if obj in actions_list}
+                    self.multi_selected_action_indices = {actions_list.index(obj) for obj in objects_to_move if
+                                                          obj in actions_list}
                     self.selected_action_idx = min(
                         self.multi_selected_action_indices) if self.multi_selected_action_indices else -1
                     fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
@@ -1884,20 +2009,24 @@ class InteractiveFunscriptTimeline:
                 bck_key_tuple = self.app._map_shortcut_to_glfw_key(del_alt_sc_str)
                 delete_pressed = False
 
-                if del_key_tuple and imgui.is_key_pressed(del_key_tuple[0]) and all(m == io_m for m, io_m in zip(del_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super])):
+                if del_key_tuple and imgui.is_key_pressed(del_key_tuple[0]) and all(m == io_m for m, io_m in
+                                                                                    zip(del_key_tuple[1].values(),
+                                                                                        [io.key_shift, io.key_ctrl,
+                                                                                         io.key_alt, io.key_super])):
                     delete_pressed = True
 
                 if (not delete_pressed
-                    and bck_key_tuple
-                    and imgui.is_key_pressed(bck_key_tuple[0])
-                    and all(m == io_m for m, io_m in zip(bck_key_tuple[1].values(),
-                    [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))):
-                        delete_pressed = True
+                        and bck_key_tuple
+                        and imgui.is_key_pressed(bck_key_tuple[0])
+                        and all(m == io_m for m, io_m in zip(bck_key_tuple[1].values(),
+                                                             [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))):
+                    delete_pressed = True
 
                 if delete_pressed and self.multi_selected_action_indices:
                     op_desc = f"Deleted {len(self.multi_selected_action_indices)} Selected Point(s) (Key)"
                     fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                    target_funscript_instance_for_render.clear_points(axis=axis_name_for_render, selected_indices = list(self.multi_selected_action_indices))
+                    target_funscript_instance_for_render.clear_points(axis=axis_name_for_render, selected_indices=list(
+                        self.multi_selected_action_indices))
                     self.multi_selected_action_indices.clear()
                     self.selected_action_idx = -1
                     fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
@@ -1911,7 +2040,9 @@ class InteractiveFunscriptTimeline:
                     bound_key_str_num = shortcuts.get(f"add_point_{i * 10}", str(i))
                     if not bound_key_str_num: continue
                     glfw_key_num_tuple = self.app._map_shortcut_to_glfw_key(bound_key_str_num)
-                    if (glfw_key_num_tuple and imgui.is_key_pressed(glfw_key_num_tuple[0]) and all(m == io_m for m, io_m in  zip(glfw_key_num_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))):
+                    if (glfw_key_num_tuple and imgui.is_key_pressed(glfw_key_num_tuple[0]) and all(
+                            m == io_m for m, io_m in zip(glfw_key_num_tuple[1].values(),
+                                                         [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))):
                         target_pos_val = i * 10
                         op_desc = "Added Point (Key)"
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
@@ -1925,7 +2056,8 @@ class InteractiveFunscriptTimeline:
                         )
 
                         # Re-fetch actions and select the new point
-                        actions_list = getattr(target_funscript_instance_for_render, f"{axis_name_for_render}_actions", [])
+                        actions_list = getattr(target_funscript_instance_for_render, f"{axis_name_for_render}_actions",
+                                               [])
                         new_idx = next((idx for idx, act in enumerate(actions_list) if
                                         act['at'] == snapped_time_add_key and act['pos'] == target_pos_val), -1)
                         if new_idx != -1:
@@ -1942,7 +2074,8 @@ class InteractiveFunscriptTimeline:
 
             # Clip pan offset if any interaction occurred
             if app_state.timeline_interaction_active:
-                app_state.timeline_pan_offset_ms = np.clip(app_state.timeline_pan_offset_ms, min_pan_allowed, max_pan_allowed)
+                app_state.timeline_pan_offset_ms = np.clip(app_state.timeline_pan_offset_ms, min_pan_allowed,
+                                                           max_pan_allowed)
 
             # Determine paused state
             is_paused = False
@@ -1967,10 +2100,11 @@ class InteractiveFunscriptTimeline:
             # Auto-pan logic (for playback or forced sync)
             is_playing = video_loaded and self.app.processor.is_processing and not is_paused
             pan_to_current_frame = video_loaded and not is_playing and app_state.force_timeline_pan_to_current_frame
-            if (is_playing or pan_to_current_frame) and not app_state.timeline_interaction_active:  # No manual interaction right now
+            if (
+                    is_playing or pan_to_current_frame) and not app_state.timeline_interaction_active:  # No manual interaction right now
                 current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
                 # Using effective center of screen
-                target_pan_offset = current_video_time_ms - center_marker_offset_ms  
+                target_pan_offset = current_video_time_ms - center_marker_offset_ms
                 app_state.timeline_pan_offset_ms = np.clip(
                     target_pan_offset, min_pan_allowed,
                     max_pan_allowed)
@@ -1978,14 +2112,15 @@ class InteractiveFunscriptTimeline:
                     app_state.force_timeline_pan_to_current_frame = False
 
             marker_color_fixed = imgui.get_color_u32_rgba(*TimelineColors.CENTER_MARKER)
-            draw_list.add_line(center_x_marker, canvas_abs_pos[1], center_x_marker, canvas_abs_pos[1] + canvas_size[1], marker_color_fixed, 1.5)
+            draw_list.add_line(center_x_marker, canvas_abs_pos[1], center_x_marker, canvas_abs_pos[1] + canvas_size[1],
+                               marker_color_fixed, 1.5)
             tri_half_base, tri_height = 5.0, 8.0
 
             draw_list.add_triangle_filled(
                 center_x_marker, canvas_abs_pos[1] + tri_height,
-                center_x_marker - tri_half_base,
+                                 center_x_marker - tri_half_base,
                 canvas_abs_pos[1],
-                center_x_marker + tri_half_base,
+                                 center_x_marker + tri_half_base,
                 canvas_abs_pos[1],
                 marker_color_fixed)
 
@@ -2003,13 +2138,16 @@ class InteractiveFunscriptTimeline:
             # Grid drawing (Horizontal - Position)
             for i in range(5):  # 0, 25, 50, 75, 100
                 y_grid_h = canvas_abs_pos[1] + (i / 4.0) * canvas_size[1]
-                grid_col = imgui.get_color_u32_rgba(*TimelineColors.GRID_LINES if i != 2 else TimelineColors.GRID_MAJOR_LINES)  # Center line darker
+                grid_col = imgui.get_color_u32_rgba(
+                    *TimelineColors.GRID_LINES if i != 2 else TimelineColors.GRID_MAJOR_LINES)  # Center line darker
                 line_thickness = 1.0 if i != 2 else 1.5
-                draw_list.add_line(canvas_abs_pos[0], y_grid_h, canvas_abs_pos[0] + canvas_size[0], y_grid_h, grid_col, line_thickness)
+                draw_list.add_line(canvas_abs_pos[0], y_grid_h, canvas_abs_pos[0] + canvas_size[0], y_grid_h, grid_col,
+                                   line_thickness)
                 pos_val = 100 - int((i / 4.0) * 100)
                 text_y_offset = -imgui.get_text_line_height() - 2 if i == 4 else (
                     2 if i == 0 else -imgui.get_text_line_height() / 2)
-                draw_list.add_text(canvas_abs_pos[0] + 3, y_grid_h + text_y_offset, imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), str(pos_val))
+                draw_list.add_text(canvas_abs_pos[0] + 3, y_grid_h + text_y_offset,
+                                   imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), str(pos_val))
 
             # Grid drawing (Vertical - Time)
             time_per_screen_ms_grid = canvas_size[0] * app_state.timeline_zoom_factor_ms_per_px
@@ -2028,7 +2166,8 @@ class InteractiveFunscriptTimeline:
                 time_step_ms_grid = 5000
             elif px_per_100ms_grid > 0.5:
                 time_step_ms_grid = 10000
-            else: time_step_ms_grid = 60000
+            else:
+                time_step_ms_grid = 60000
 
             if time_step_ms_grid > 0:
                 start_time = app_state.timeline_pan_offset_ms
@@ -2046,7 +2185,8 @@ class InteractiveFunscriptTimeline:
                         continue
 
                     is_major_tick = (t_ms % (time_step_ms_grid * 5)) == 0
-                    tick_color = imgui.get_color_u32_rgba(*TimelineColors.GRID_MAJOR_LINES if is_major_tick else TimelineColors.GRID_LINES)
+                    tick_color = imgui.get_color_u32_rgba(
+                        *TimelineColors.GRID_MAJOR_LINES if is_major_tick else TimelineColors.GRID_LINES)
                     tick_thickness = 1.5 if is_major_tick else 1.0
 
                     # Draw vertical grid line
@@ -2063,215 +2203,259 @@ class InteractiveFunscriptTimeline:
 
             # --- Draw Audio Waveform ---
             if self.app.app_state_ui.show_audio_waveform and self.app.audio_waveform_data is not None:
-                    waveform_data = self.app.audio_waveform_data
-                    num_samples = len(waveform_data)
+                waveform_data = self.app.audio_waveform_data
+                num_samples = len(waveform_data)
 
-                    if num_samples > 1 and effective_total_duration_ms > 0:
-                        # Compute visible time range on timeline
-                        visible_start_ms = app_state.timeline_pan_offset_ms
-                        visible_end_ms = visible_start_ms + (canvas_size[0] * app_state.timeline_zoom_factor_ms_per_px)
+                if num_samples > 1 and effective_total_duration_ms > 0:
+                    # Compute visible time range on timeline
+                    visible_start_ms = app_state.timeline_pan_offset_ms
+                    visible_end_ms = visible_start_ms + (canvas_size[0] * app_state.timeline_zoom_factor_ms_per_px)
 
-                        # Convert visible time range to sample indices
-                        start_idx = int(max(0, (visible_start_ms / effective_total_duration_ms) * num_samples))
-                        end_idx = int(min(num_samples, (visible_end_ms / effective_total_duration_ms) * num_samples + 2))
+                    # Convert visible time range to sample indices
+                    start_idx = int(max(0, (visible_start_ms / effective_total_duration_ms) * num_samples))
+                    end_idx = int(min(num_samples, (visible_end_ms / effective_total_duration_ms) * num_samples + 2))
 
-                        if end_idx > start_idx:
-                            # Slice visible waveform segment
-                            visible_indices = np.arange(start_idx, end_idx)
-                            visible_times_ms = (visible_indices / (num_samples - 1)) * effective_total_duration_ms
-                            visible_amplitudes = waveform_data[start_idx:end_idx]
+                    if end_idx > start_idx:
+                        # Slice visible waveform segment
+                        visible_indices = np.arange(start_idx, end_idx)
+                        visible_times_ms = (visible_indices / (num_samples - 1)) * effective_total_duration_ms
+                        visible_amplitudes = waveform_data[start_idx:end_idx]
 
-                            # Calculate coordinates
-                            x_coords = time_to_x_vec(visible_times_ms)
-                            canvas_center_y = canvas_abs_pos[1] + (canvas_size[1] / 2.0)
-                            y_offsets = visible_amplitudes * (canvas_size[1] / 2.0)
-                            y_coords_top = canvas_center_y - y_offsets
-                            y_coords_bottom = canvas_center_y + y_offsets
+                        # Calculate coordinates
+                        x_coords = time_to_x_vec(visible_times_ms)
+                        canvas_center_y = canvas_abs_pos[1] + (canvas_size[1] / 2.0)
+                        y_offsets = visible_amplitudes * (canvas_size[1] / 2.0)
+                        y_coords_top = canvas_center_y - y_offsets
+                        y_coords_bottom = canvas_center_y + y_offsets
 
-                        waveform_color = imgui.get_color_u32_rgba(*TimelineColors.AUDIO_WAVEFORM)
-                        points_top = list(zip(x_coords, y_coords_top))
-                        points_bottom = list(zip(x_coords, y_coords_bottom))
-                        draw_list.add_polyline(points_top, waveform_color, False, 1.0)
-                        draw_list.add_polyline(points_bottom, waveform_color, False, 1.0)
+                    waveform_color = imgui.get_color_u32_rgba(*TimelineColors.AUDIO_WAVEFORM)
+                    points_top = list(zip(x_coords, y_coords_top))
+                    points_bottom = list(zip(x_coords, y_coords_bottom))
+                    draw_list.add_polyline(points_top, waveform_color, False, 1.0)
+                    draw_list.add_polyline(points_bottom, waveform_color, False, 1.0)
 
-            # --- Draw Actions (Points and Lines) ---
+            # --- Draw Actions (Points and Lines) with GPU Acceleration ---
             hovered_action_idx_current_timeline = -1
-            visible_actions_indices_range = None
-            if actions_list:
-                action_times = [action["at"] for action in actions_list]
-                margin_ms_act = 2000
-                search_start_time = app_state.timeline_pan_offset_ms - margin_ms_act
-                search_end_time = app_state.timeline_pan_offset_ms + canvas_size[0] * app_state.timeline_zoom_factor_ms_per_px + margin_ms_act
-                start_idx = bisect_left(action_times, search_start_time)
-                end_idx = bisect_right(action_times, search_end_time)
-                if start_idx < end_idx:
-                    visible_actions_indices_range = (start_idx, end_idx)
 
-            # --- START: LOD OPTIMIZATION ---
-            actions_to_render = self.preview_actions if self.is_previewing else actions_list
-            indices_to_draw = []
+            # Try GPU rendering first (if available and enabled)
+            gpu_render_success = False
+            if (self.gpu_integration and
+                    self.app.app_settings.get("timeline_gpu_enabled", False) and
+                    actions_list):
 
-            avg_interval_ms = 0
+                # Gather selected/hovered indices for GPU rendering
+                selected_indices = list(self.multi_selected_action_indices)
+                if self.selected_action_idx >= 0:
+                    selected_indices.append(self.selected_action_idx)
 
-            if actions_to_render:
-                # Calculate the average time interval between points in the script
-                fs_proc = self.app.funscript_processor  # Get the funscript processor instance
-                stats = fs_proc.funscript_stats_t1 if self.timeline_num == 1 else fs_proc.funscript_stats_t2  # Access stats from the processor
-                avg_interval_ms = stats.get('avg_interval_ms', 20)  # Use pre-calculated avg interval
+                # Attempt GPU rendering
+                gpu_render_success = self.gpu_integration.render_timeline_optimized(
+                    actions_list=actions_list,
+                    canvas_abs_pos=canvas_abs_pos,
+                    canvas_size=canvas_size,
+                    app_state=app_state,
+                    draw_list=draw_list,
+                    mouse_pos=mouse_pos,
+                    selected_indices=selected_indices,
+                    hovered_index=self.selected_action_idx
+                )
 
-                # Calculate how many points, on average, would fall into a single horizontal pixel
-                points_per_pixel = (
+                if gpu_render_success:
+                    # GPU rendering succeeded - get hovered index from GPU system
+                    hovered_action_idx_current_timeline = getattr(self.gpu_integration, '_last_hovered_index', -1)
+
+                    # Show GPU indicator if enabled
+                    if self.app.app_settings.get("show_timeline_optimization_indicator", False):
+                        gpu_stats = self.gpu_integration.get_performance_summary().get('gpu_details', {})
+                        gpu_text = f"GPU Mode ({gpu_stats.get('points_rendered', 0):,} pts, {gpu_stats.get('render_time_ms', 0):.1f}ms)"
+                        draw_list.add_text(canvas_abs_pos[0] + 10, canvas_abs_pos[1] + 10,
+                                           imgui.get_color_u32_rgba(0.0, 1.0, 0.0, 0.8), gpu_text)
+
+            # Fallback to optimized CPU rendering if GPU failed or unavailable
+            if not gpu_render_success:
+                visible_actions_indices_range = None
+                if actions_list:
+                    action_times = [action["at"] for action in actions_list]
+                    margin_ms_act = 2000
+                    search_start_time = app_state.timeline_pan_offset_ms - margin_ms_act
+                    search_end_time = app_state.timeline_pan_offset_ms + canvas_size[
+                        0] * app_state.timeline_zoom_factor_ms_per_px + margin_ms_act
+                    start_idx = bisect_left(action_times, search_start_time)
+                    end_idx = bisect_right(action_times, search_end_time)
+                    if start_idx < end_idx:
+                        visible_actions_indices_range = (start_idx, end_idx)
+
+                # --- START: LOD OPTIMIZATION ---
+                actions_to_render = self.preview_actions if self.is_previewing else actions_list
+                indices_to_draw = []
+
+                avg_interval_ms = 0
+
+                if actions_to_render:
+                    # Calculate the average time interval between points in the script
+                    fs_proc = self.app.funscript_processor  # Get the funscript processor instance
+                    stats = fs_proc.funscript_stats_t1 if self.timeline_num == 1 else fs_proc.funscript_stats_t2  # Access stats from the processor
+                    avg_interval_ms = stats.get('avg_interval_ms', 20)  # Use pre-calculated avg interval
+
+                    # Calculate how many points, on average, would fall into a single horizontal pixel
+                    points_per_pixel = (
                             app_state.timeline_zoom_factor_ms_per_px / avg_interval_ms) if avg_interval_ms > 0 else 1.0
 
-                # Determine the step size for drawing. Never less than 1.
-                # The '4.0' is a tunable value; a lower number means a denser line when zoomed out.
-                draw_step = max(1, int(points_per_pixel / 4.0))
+                    # Determine the step size for drawing. Never less than 1.
+                    # The '4.0' is a tunable value; a lower number means a denser line when zoomed out.
+                    draw_step = max(1, int(points_per_pixel / 4.0))
 
-                # Use the existing culling to find the visible range
-                s_idx, e_idx = 0, len(actions_to_render)
-                if visible_actions_indices_range:
-                    s_idx, e_idx = visible_actions_indices_range
+                    # Use the existing culling to find the visible range
+                    s_idx, e_idx = 0, len(actions_to_render)
+                    if visible_actions_indices_range:
+                        s_idx, e_idx = visible_actions_indices_range
 
-                # Create the decimated list of indices for drawing
-                indices_to_draw = range(s_idx, e_idx, draw_step)
+                    # Create the decimated list of indices for drawing
+                    indices_to_draw = range(s_idx, e_idx, draw_step)
 
-                # Ensure the very last visible point is always included to complete the line segment
-                last_visible_idx = e_idx - 1
-                if last_visible_idx >= s_idx and last_visible_idx not in indices_to_draw:
-                    indices_to_draw = list(indices_to_draw) + [last_visible_idx]
-            # --- END: LOD OPTIMIZATION ---
+                    # Ensure the very last visible point is always included to complete the line segment
+                    last_visible_idx = e_idx - 1
+                    if last_visible_idx >= s_idx and last_visible_idx not in indices_to_draw:
+                        indices_to_draw = list(indices_to_draw) + [last_visible_idx]
+                # --- END: LOD OPTIMIZATION ---
 
-            # --- Draw Lines (Vectorized) ---
-            if len(actions_list) > 1 and visible_actions_indices_range:
-                if len(indices_to_draw) > 1:
-                    # PERFORMANCE OPTIMIZATION: Use cached arrays to avoid recreating numpy arrays every frame
-                    cached_data = self._get_or_compute_cached_arrays(actions_list)
-                    all_ats, all_poss = cached_data["ats"], cached_data["poss"]
-                    
-                    indices_array = np.array(list(indices_to_draw))
-                    p1_indices = indices_array[:-1]
-                    p2_indices = indices_array[1:]
+                # --- Draw Lines (Vectorized) ---
+                if len(actions_list) > 1 and visible_actions_indices_range:
+                    if len(indices_to_draw) > 1:
+                        # PERFORMANCE OPTIMIZATION: Use cached arrays to avoid recreating numpy arrays every frame
+                        cached_data = self._get_or_compute_cached_arrays(actions_list)
+                        all_ats, all_poss = cached_data["ats"], cached_data["poss"]
 
-                    # Use array indexing on cached arrays instead of list comprehensions
-                    p1_ats = all_ats[p1_indices]
-                    p1_poss = all_poss[p1_indices]
-                    p2_ats = all_ats[p2_indices]
-                    p2_poss = all_poss[p2_indices]
+                        indices_array = np.array(list(indices_to_draw))
+                        p1_indices = indices_array[:-1]
+                        p2_indices = indices_array[1:]
 
-                    x1s = time_to_x_vec(p1_ats)
-                    y1s = pos_to_y_vec(p1_poss)
-                    x2s = time_to_x_vec(p2_ats)
-                    y2s = pos_to_y_vec(p2_poss)
+                        # Use array indexing on cached arrays instead of list comprehensions
+                        p1_ats = all_ats[p1_indices]
+                        p1_poss = all_poss[p1_indices]
+                        p2_ats = all_ats[p2_indices]
+                        p2_poss = all_poss[p2_indices]
 
-                    delta_t_ms_vec = p2_ats - p1_ats
-                    delta_pos_vec = np.abs(p2_poss - p1_poss)
-                    speeds_vec = np.divide(delta_pos_vec, delta_t_ms_vec / 1000.0, out=np.zeros_like(delta_pos_vec), where=delta_t_ms_vec > 1e-5)
+                        x1s = time_to_x_vec(p1_ats)
+                        y1s = pos_to_y_vec(p1_poss)
+                        x2s = time_to_x_vec(p2_ats)
+                        y2s = pos_to_y_vec(p2_poss)
 
-                    # PERFORMANCE OPTIMIZATION: Vectorized color calculation (50x faster than individual calls)
-                    colors_rgba = self.app.utility.get_speed_colors_vectorized(speeds_vec)
-                    alpha = 0.2 if self.is_previewing else 1.0
-                    thickness = 1.0 if self.is_previewing else 2.0
+                        delta_t_ms_vec = p2_ats - p1_ats
+                        delta_pos_vec = np.abs(p2_poss - p1_poss)
+                        speeds_vec = np.divide(delta_pos_vec, delta_t_ms_vec / 1000.0, out=np.zeros_like(delta_pos_vec),
+                                               where=delta_t_ms_vec > 1e-5)
 
-                    canvas_x, canvas_w = canvas_abs_pos[0], canvas_size[0]
-                    canvas_x_end = canvas_x + canvas_w
+                        # PERFORMANCE OPTIMIZATION: Vectorized color calculation (50x faster than individual calls)
+                        colors_rgba = self.app.utility.get_speed_colors_vectorized(speeds_vec)
+                        alpha = 0.2 if self.is_previewing else 1.0
+                        thickness = 1.0 if self.is_previewing else 2.0
 
-                    for i in range(len(x1s)):
-                        x1, y1, x2, y2 = x1s[i], y1s[i], x2s[i], y2s[i]
+                        canvas_x, canvas_w = canvas_abs_pos[0], canvas_size[0]
+                        canvas_x_end = canvas_x + canvas_w
 
-                        # Skip lines that are completely outside the horizontal canvas bounds
-                        if (x1 < canvas_x and x2 < canvas_x) or (x1 > canvas_x_end and x2 > canvas_x_end):
-                            continue
+                        for i in range(len(x1s)):
+                            x1, y1, x2, y2 = x1s[i], y1s[i], x2s[i], y2s[i]
 
-                        color = colors_rgba[i]  # Use pre-computed color from vectorized calculation
-                        final_color = imgui.get_color_u32_rgba(color[0], color[1], color[2], color[3] * alpha)
-                        draw_list.add_line(x1, y1, x2, y2, final_color, thickness)
+                            # Skip lines that are completely outside the horizontal canvas bounds
+                            if (x1 < canvas_x and x2 < canvas_x) or (x1 > canvas_x_end and x2 > canvas_x_end):
+                                continue
 
-            # --- RADICAL OPTIMIZATION: Motion-based temporal culling ---
-            current_time = time.time()
-            current_pan_offset = app_state.timeline_pan_offset_ms
-            time_delta = current_time - self._last_frame_time
-            
-            if time_delta > 0:
-                pan_delta = abs(current_pan_offset - self._last_pan_offset)
-                self._pan_velocity = pan_delta / (time_delta * 1000)  # pixels per second
-                
-            self._last_pan_offset = current_pan_offset
-            self._last_frame_time = current_time
-            
-            # Detect fast scrolling/panning
-            is_fast_scrolling = self._pan_velocity > 500  # Threshold for "fast" scrolling
-            
-            # --- Draw Points (Conditional Based on Zoom Level & Motion) ---
-            # RADICAL OPTIMIZATION: Skip point rendering when zoomed out or scrolling fast
-            points_per_pixel = (app_state.timeline_zoom_factor_ms_per_px / avg_interval_ms) if avg_interval_ms > 0 else 1.0
-            should_render_points = (
-                not is_fast_scrolling and  # Skip points during fast scrolling for smooth performance
-                (points_per_pixel < 2.0 or  # Not too dense
-                 self.selected_action_idx >= 0 or  # Always render when editing
-                 len(self.multi_selected_action_indices) > 0 or  # Always render when selecting
-                 self.dragging_action_idx >= 0)  # Always render when dragging
-            )
-            
-            # Visual indicator for optimization modes (optional debug info)
-            if self.app.app_settings.get("show_timeline_optimization_indicator", False):
-                optimization_text = ""
-                if is_fast_scrolling:
-                    optimization_text = "🚀 Fast Scroll Mode"
-                elif points_per_pixel >= 2.0:
-                    optimization_text = "📊 Lines-Only Mode"
-                elif len(indices_to_draw) != len(actions_list):
-                    optimization_text = f"⚡ LOD Active ({len(indices_to_draw)}/{len(actions_list)})"
-                
-                if optimization_text:
-                    text_pos = (canvas_abs_pos[0] + 10, canvas_abs_pos[1] + 10)
-                    draw_list.add_text(text_pos[0], text_pos[1], 
-                                     imgui.get_color_u32_rgba(1.0, 1.0, 0.0, 0.8), 
-                                     optimization_text)
-            
-            if actions_list and visible_actions_indices_range and should_render_points:
-                if indices_to_draw:
-                    # PERFORMANCE OPTIMIZATION: Reuse cached arrays and avoid list comprehensions
-                    cached_data = self._get_or_compute_cached_arrays(actions_list)
-                    all_ats, all_poss = cached_data["ats"], cached_data["poss"]
-                    
-                    point_indices = np.array(list(indices_to_draw))
-                    point_ats = all_ats[point_indices]
-                    point_poss = all_poss[point_indices]
-                    pxs = time_to_x_vec(point_ats)
-                    pys = pos_to_y_vec(point_poss)
+                            color = colors_rgba[i]  # Use pre-computed color from vectorized calculation
+                            final_color = imgui.get_color_u32_rgba(color[0], color[1], color[2], color[3] * alpha)
+                            draw_list.add_line(x1, y1, x2, y2, final_color, thickness)
 
-                    # PERFORMANCE OPTIMIZATION: Vectorized distance calculation for hover detection (100x faster)
-                    hover_radius_sq = (app_state.timeline_point_radius + 4) ** 2
-                    distances_sq = (mouse_pos[0] - pxs) ** 2 + (mouse_pos[1] - pys) ** 2
-                    hovered_mask = distances_sq < hover_radius_sq
-                    
-                    for i_loop, original_list_idx in enumerate(point_indices):
-                        px, py = pxs[i_loop], pys[i_loop]
-                        is_hovered_pt = hovered_mask[i_loop]  # Use pre-computed hover status
-                        is_primary_selected = (original_list_idx == self.selected_action_idx)
-                        is_in_multi_selection = (original_list_idx in self.multi_selected_action_indices)
-                        is_being_dragged = (original_list_idx == self.dragging_action_idx)
-                        point_radius_draw = app_state.timeline_point_radius
-                        pt_color_tuple = TimelineColors.POINT_DEFAULT
+                # --- RADICAL OPTIMIZATION: Motion-based temporal culling ---
+                current_time = time.time()
+                current_pan_offset = app_state.timeline_pan_offset_ms
+                time_delta = current_time - self._last_frame_time
 
-                        if is_being_dragged:
-                            pt_color_tuple = TimelineColors.POINT_DRAGGING
-                            point_radius_draw += 1
-                        elif is_primary_selected or is_in_multi_selection:
-                            pt_color_tuple = TimelineColors.POINT_SELECTED
-                            if is_in_multi_selection and not is_primary_selected: point_radius_draw += 0.5
-                        elif is_hovered_pt and imgui.is_window_hovered() and not self.is_marqueeing:
-                            pt_color_tuple = TimelineColors.POINT_HOVER
-                            if self.dragging_action_idx == -1:
-                                hovered_action_idx_current_timeline = original_list_idx
+                if time_delta > 0:
+                    pan_delta = abs(current_pan_offset - self._last_pan_offset)
+                    self._pan_velocity = pan_delta / (time_delta * 1000)  # pixels per second
 
-                        point_alpha = 0.3 if self.is_previewing else 1.0
-                        final_pt_color = imgui.get_color_u32_rgba(pt_color_tuple[0], pt_color_tuple[1], pt_color_tuple[2], pt_color_tuple[3] * point_alpha)
+                self._last_pan_offset = current_pan_offset
+                self._last_frame_time = current_time
 
-                        draw_list.add_circle_filled(px, py, point_radius_draw, final_pt_color)
+                # Detect fast scrolling/panning
+                is_fast_scrolling = self._pan_velocity > 500  # Threshold for "fast" scrolling
 
-                        if is_primary_selected and not is_being_dragged:
-                            draw_list.add_circle(px, py, point_radius_draw + 1, imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER), thickness=1.0)
+                # --- Draw Points (Conditional Based on Zoom Level & Motion) ---
+                # RADICAL OPTIMIZATION: Skip point rendering when zoomed out or scrolling fast
+                points_per_pixel = (
+                            app_state.timeline_zoom_factor_ms_per_px / avg_interval_ms) if avg_interval_ms > 0 else 1.0
+                should_render_points = (
+                        not is_fast_scrolling and  # Skip points during fast scrolling for smooth performance
+                        (points_per_pixel < 2.0 or  # Not too dense
+                         self.selected_action_idx >= 0 or  # Always render when editing
+                         len(self.multi_selected_action_indices) > 0 or  # Always render when selecting
+                         self.dragging_action_idx >= 0)  # Always render when dragging
+                )
+
+                # Visual indicator for optimization modes (optional debug info)
+                if self.app.app_settings.get("show_timeline_optimization_indicator", False):
+                    optimization_text = ""
+                    if is_fast_scrolling:
+                        optimization_text = "Fast Scroll Mode"
+                    elif points_per_pixel >= 2.0:
+                        optimization_text = "Lines-Only Mode"
+                    elif len(indices_to_draw) != len(actions_list):
+                        optimization_text = f"LOD Active ({len(indices_to_draw)}/{len(actions_list)})"
+
+                    if optimization_text:
+                        text_pos = (canvas_abs_pos[0] + 10, canvas_abs_pos[1] + 10)
+                        draw_list.add_text(text_pos[0], text_pos[1],
+                                           imgui.get_color_u32_rgba(1.0, 1.0, 0.0, 0.8),
+                                           optimization_text)
+
+                if actions_list and visible_actions_indices_range and should_render_points:
+                    if indices_to_draw:
+                        # PERFORMANCE OPTIMIZATION: Reuse cached arrays and avoid list comprehensions
+                        cached_data = self._get_or_compute_cached_arrays(actions_list)
+                        all_ats, all_poss = cached_data["ats"], cached_data["poss"]
+
+                        point_indices = np.array(list(indices_to_draw))
+                        point_ats = all_ats[point_indices]
+                        point_poss = all_poss[point_indices]
+                        pxs = time_to_x_vec(point_ats)
+                        pys = pos_to_y_vec(point_poss)
+
+                        # PERFORMANCE OPTIMIZATION: Vectorized distance calculation for hover detection (100x faster)
+                        hover_radius_sq = (app_state.timeline_point_radius + 4) ** 2
+                        distances_sq = (mouse_pos[0] - pxs) ** 2 + (mouse_pos[1] - pys) ** 2
+                        hovered_mask = distances_sq < hover_radius_sq
+
+                        for i_loop, original_list_idx in enumerate(point_indices):
+                            px, py = pxs[i_loop], pys[i_loop]
+                            is_hovered_pt = hovered_mask[i_loop]  # Use pre-computed hover status
+                            is_primary_selected = (original_list_idx == self.selected_action_idx)
+                            is_in_multi_selection = (original_list_idx in self.multi_selected_action_indices)
+                            is_being_dragged = (original_list_idx == self.dragging_action_idx)
+                            point_radius_draw = app_state.timeline_point_radius
+                            pt_color_tuple = TimelineColors.POINT_DEFAULT
+
+                            if is_being_dragged:
+                                pt_color_tuple = TimelineColors.POINT_DRAGGING
+                                point_radius_draw += 1
+                            elif is_primary_selected or is_in_multi_selection:
+                                pt_color_tuple = TimelineColors.POINT_SELECTED
+                                if is_in_multi_selection and not is_primary_selected: point_radius_draw += 0.5
+                            elif is_hovered_pt and imgui.is_window_hovered() and not self.is_marqueeing:
+                                pt_color_tuple = TimelineColors.POINT_HOVER
+                                if self.dragging_action_idx == -1:
+                                    hovered_action_idx_current_timeline = original_list_idx
+
+                            point_alpha = 0.3 if self.is_previewing else 1.0
+                            final_pt_color = imgui.get_color_u32_rgba(pt_color_tuple[0], pt_color_tuple[1],
+                                                                      pt_color_tuple[2],
+                                                                      pt_color_tuple[3] * point_alpha)
+
+                            draw_list.add_circle_filled(px, py, point_radius_draw, final_pt_color)
+
+                            if is_primary_selected and not is_being_dragged:
+                                draw_list.add_circle(px, py, point_radius_draw + 1,
+                                                     imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER),
+                                                     thickness=1.0)
 
             # --- Draw Ultimate Autotune Preview (if enabled) ---
             if self.ultimate_autotune_preview_actions:
@@ -2296,7 +2480,8 @@ class InteractiveFunscriptTimeline:
 
                             preview_color = imgui.get_color_u32_rgba(*TimelineColors.ULTIMATE_AUTOTUNE_PREVIEW)
                             for i in range(len(x_coords) - 1):
-                                draw_list.add_line(x_coords[i], y_coords[i], x_coords[i + 1], y_coords[i + 1], preview_color, 1.5)
+                                draw_list.add_line(x_coords[i], y_coords[i], x_coords[i + 1], y_coords[i + 1],
+                                                   preview_color, 1.5)
 
             # --- Draw Preview Actions on Top ---
             if self.is_previewing and self.preview_actions:
@@ -2312,7 +2497,7 @@ class InteractiveFunscriptTimeline:
                     pys = pos_to_y_vec(p_poss)
                     for i in range(len(pxs) - 1):
                         draw_list.add_line(pxs[i], pys[i], pxs[i + 1], pys[i + 1],
-                        preview_line_color, 2.0)
+                                           preview_line_color, 2.0)
 
                 for action in self.preview_actions:
                     px = time_to_x(action['at'])
@@ -2321,10 +2506,14 @@ class InteractiveFunscriptTimeline:
 
             # --- Draw Marquee Selection ---
             if self.is_marqueeing and self.marquee_start_screen_pos and self.marquee_end_screen_pos:
-                min_x, max_x = min(self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0]), max(self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0])
-                min_y, max_y = min(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1]), max(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1])
-                draw_list.add_rect_filled(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_FILL))
-                draw_list.add_rect(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_BORDER))
+                min_x, max_x = min(self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0]), max(
+                    self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0])
+                min_y, max_y = min(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1]), max(
+                    self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1])
+                draw_list.add_rect_filled(min_x, min_y, max_x, max_y,
+                                          imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_FILL))
+                draw_list.add_rect(min_x, min_y, max_x, max_y,
+                                   imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_BORDER))
 
             # --- Mouse Interactions ---
             # region Mouse
@@ -2369,7 +2558,8 @@ class InteractiveFunscriptTimeline:
                         self.drag_undo_recorded = True
 
                     if video_loaded and not self.app.processor.is_processing and video_fps_for_calc > 0:
-                        target_frame_on_click = int(round((actions_list[hovered_action_idx_current_timeline]["at"] / 1000.0) * video_fps_for_calc))
+                        target_frame_on_click = int(round(
+                            (actions_list[hovered_action_idx_current_timeline]["at"] / 1000.0) * video_fps_for_calc))
                         self.app.processor.seek_video(
                             np.clip(target_frame_on_click, 0, self.app.processor.total_frames - 1))
                         app_state.force_timeline_pan_to_current_frame = True
@@ -2415,9 +2605,13 @@ class InteractiveFunscriptTimeline:
                     snapped_new_at = max(0, int(round(new_time_cand_ms / snap_time)) * snap_time)
                     snapped_new_pos = min(100, max(0, int(round(new_pos_cand / snap_pos)) * snap_pos))
 
-                    effective_prev_at_lim = actions_list[self.dragging_action_idx - 1]["at"] + 1 if self.dragging_action_idx > 0 else 0
-                    effective_next_at_lim = actions_list[self.dragging_action_idx + 1]["at"] - 1 if self.dragging_action_idx < len(actions_list) - 1 else float('inf')
-                    action_to_drag["at"] = int(np.clip(float(snapped_new_at), float(effective_prev_at_lim), float(effective_next_at_lim)))
+                    effective_prev_at_lim = actions_list[self.dragging_action_idx - 1][
+                                                "at"] + 1 if self.dragging_action_idx > 0 else 0
+                    effective_next_at_lim = actions_list[self.dragging_action_idx + 1][
+                                                "at"] - 1 if self.dragging_action_idx < len(
+                        actions_list) - 1 else float('inf')
+                    action_to_drag["at"] = int(
+                        np.clip(float(snapped_new_at), float(effective_prev_at_lim), float(effective_next_at_lim)))
                     action_to_drag["pos"] = snapped_new_pos
 
                     self.app.project_manager.project_dirty = True
@@ -2489,7 +2683,8 @@ class InteractiveFunscriptTimeline:
             # --- Context Menu & Tooltip ---
             # region Context/Tooltip
             if imgui.begin_popup(context_popup_id):
-                imgui.text(f"Timeline {self.timeline_num} @ Time: {self.new_point_candidate_at}ms, Pos: {self.new_point_candidate_pos}")
+                imgui.text(
+                    f"Timeline {self.timeline_num} @ Time: {self.new_point_candidate_at}ms, Pos: {self.new_point_candidate_pos}")
                 imgui.separator()
 
                 if allow_editing_timeline:
@@ -2520,19 +2715,20 @@ class InteractiveFunscriptTimeline:
                 other_timeline_num = 2 if self.timeline_num == 1 else 1
 
                 # Option 1: Copy this entire timeline over to the other one
-                if imgui.menu_item(f"Copy All to Timeline {other_timeline_num}##CTXCopyFull", enabled=allow_editing_timeline)[0]:
+                if imgui.menu_item(f"Copy All to Timeline {other_timeline_num}##CTXCopyFull",
+                                   enabled=allow_editing_timeline)[0]:
                     if allow_editing_timeline:
                         self._handle_copy_full_timeline_to_other()
                     imgui.close_current_popup()
 
                 # Option 2: Swap the contents of the two timelines
-                if imgui.menu_item(f"Swap with Timeline {other_timeline_num}##CTXSwap", enabled=allow_editing_timeline)[0]:
+                if imgui.menu_item(f"Swap with Timeline {other_timeline_num}##CTXSwap", enabled=allow_editing_timeline)[
+                    0]:
                     if allow_editing_timeline:
                         self._handle_swap_with_other_timeline()
                     imgui.close_current_popup()
 
                 imgui.separator()
-
 
                 can_copy_to_other = allow_editing_timeline and bool(self.multi_selected_action_indices)
                 copy_dest_t_num = 2 if self.timeline_num == 1 else 1
@@ -2574,7 +2770,8 @@ class InteractiveFunscriptTimeline:
                             self.selected_action_idx = self.selection_anchor_idx
                             self.multi_selected_action_indices.clear()
                             self.multi_selected_action_indices.add(self.selection_anchor_idx)
-                            self.app.logger.info(f"T{self.timeline_num}: Selection start point set at index {self.selection_anchor_idx}.")
+                            self.app.logger.info(
+                                f"T{self.timeline_num}: Selection start point set at index {self.selection_anchor_idx}.")
                             imgui.close_current_popup()
                     # Only show "End selection" if an anchor is set AND it's a different point
                     elif self.selection_anchor_idx != -1 and self.selection_anchor_idx != self.context_menu_point_idx:
@@ -2595,32 +2792,42 @@ class InteractiveFunscriptTimeline:
                 # --- End new items ---
                 imgui.separator()
 
-                can_copy = allow_editing_timeline and (bool(self.multi_selected_action_indices) or self.selected_action_idx != -1)
-                if imgui.menu_item(f"Copy Selected##CTXMenuCopy", shortcut=shortcuts.get("copy_selection", "Ctrl+C"), enabled=can_copy)[0]:
+                can_copy = allow_editing_timeline and (
+                            bool(self.multi_selected_action_indices) or self.selected_action_idx != -1)
+                if imgui.menu_item(f"Copy Selected##CTXMenuCopy", shortcut=shortcuts.get("copy_selection", "Ctrl+C"),
+                                   enabled=can_copy)[0]:
                     if can_copy: self._handle_copy_selection()
                     imgui.close_current_popup()
                 can_paste = allow_editing_timeline and self.app.funscript_processor.clipboard_has_actions()
-                if imgui.menu_item(f"Paste at Cursor##CTXMenuPaste", shortcut=shortcuts.get("paste_selection", "Ctrl+V"), enabled=can_paste)[0]:
+                if \
+                imgui.menu_item(f"Paste at Cursor##CTXMenuPaste", shortcut=shortcuts.get("paste_selection", "Ctrl+V"),
+                                enabled=can_paste)[0]:
                     if can_paste: self._handle_paste_actions(self.new_point_candidate_at)
                     imgui.close_current_popup()
                 imgui.separator()
                 if imgui.menu_item(f"Cancel##CTXMenuCancel")[0]: imgui.close_current_popup()
                 imgui.end_popup()
 
-            if hovered_action_idx_current_timeline != -1 and self.dragging_action_idx == -1 and not imgui.is_popup_open(context_popup_id):
+            if hovered_action_idx_current_timeline != -1 and self.dragging_action_idx == -1 and not imgui.is_popup_open(
+                    context_popup_id):
                 if 0 <= hovered_action_idx_current_timeline < len(actions_list):
                     action_hovered = actions_list[hovered_action_idx_current_timeline]
                     imgui.begin_tooltip()
-                    imgui.text(f"Time: {action_hovered['at']} ms ({action_hovered['at'] / 1000.0:.2f}s) | Pos: {action_hovered['pos']}")
+                    imgui.text(
+                        f"Time: {action_hovered['at']} ms ({action_hovered['at'] / 1000.0:.2f}s) | Pos: {action_hovered['pos']}")
                     if video_loaded and video_fps_for_calc > 0:
                         imgui.text(f"Frame: {int(round((action_hovered['at'] / 1000.0) * video_fps_for_calc))}")
                     if hovered_action_idx_current_timeline > 0:
                         dt = action_hovered['at'] - actions_list[hovered_action_idx_current_timeline - 1]['at']
-                        speed = abs(action_hovered['pos'] - actions_list[hovered_action_idx_current_timeline - 1]['pos']) / (dt / 1000.0) if dt > 0 else 0
+                        speed = abs(
+                            action_hovered['pos'] - actions_list[hovered_action_idx_current_timeline - 1]['pos']) / (
+                                            dt / 1000.0) if dt > 0 else 0
                         imgui.text(f"In-Speed: {speed:.1f} pos/s")
                     if hovered_action_idx_current_timeline < len(actions_list) - 1:
                         dt = actions_list[hovered_action_idx_current_timeline + 1]['at'] - action_hovered['at']
-                        speed = abs(actions_list[hovered_action_idx_current_timeline + 1]['pos'] - action_hovered['pos']) / (dt / 1000.0) if dt > 0 else 0
+                        speed = abs(
+                            actions_list[hovered_action_idx_current_timeline + 1]['pos'] - action_hovered['pos']) / (
+                                            dt / 1000.0) if dt > 0 else 0
                         imgui.text(f"Out-Speed: {speed:.1f} pos/s")
                     imgui.end_tooltip()
             # endregion
