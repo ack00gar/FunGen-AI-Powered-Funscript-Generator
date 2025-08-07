@@ -19,6 +19,42 @@ class AppUtility:
         self.alpha_val = RGBColors.TIMELINE_COLOR_ALPHA
 
         self.grey_rgb = RGBColors.GREY
+        
+        # Initialize color caching for performance optimization
+        self._color_cache = None
+        self._color_cache_resolution = 2000  # Cache colors for speeds 0-1999 pps
+        self._build_color_cache()
+
+    def _build_color_cache(self):
+        """Pre-compute color lookup table for speed-based coloring performance optimization"""
+        self._color_cache = np.zeros((self._color_cache_resolution, 4), dtype=np.float32)
+        
+        for i in range(self._color_cache_resolution):
+            speed = float(i)
+            color = self._compute_speed_color(speed)
+            self._color_cache[i] = color
+    
+    def _compute_speed_color(self, speed_pps: float) -> tuple:
+        """Original color computation logic (used for cache building and fallback)"""
+        if np.isnan(speed_pps):
+            return (self.grey_rgb[0]/255.0, self.grey_rgb[1]/255.0, self.grey_rgb[2]/255.0, self.alpha_val)
+
+        max_index = len(self.heatmap_colors_list) - 1
+        max_value = max_index * self.step_val
+
+        if speed_pps <= 0:
+            c = self.heatmap_colors_list[0]
+        elif speed_pps >= max_value:
+            c = self.heatmap_colors_list[max_index]
+        else:
+            index = int(speed_pps // self.step_val)
+            t = (speed_pps % self.step_val) / self.step_val
+            c1 = self.heatmap_colors_list[index]
+            c2 = self.heatmap_colors_list[index + 1]
+            c = [c1[i] + (c2[i] - c1[i]) * t for i in range(3)]
+
+        r, g, b = (ch / 255.0 for ch in c)
+        return (r, g, b, self.alpha_val)
 
     def _download_reporthook(self, block_num, block_size, total_size, progress_callback):
         """Callback for urllib.request.urlretrieve to report progress."""
@@ -130,23 +166,46 @@ class AppUtility:
         return color, thickness, is_dashed
 
     def get_speed_color_from_map(self, speed_pps: float) -> tuple:
+        """Optimized color lookup using pre-computed cache for performance"""
         if np.isnan(speed_pps):
-            return (self.grey_rgb, self.alpha_val)  # gray for NaN
-
-        max_index = len(self.heatmap_colors_list) - 1
-        max_value = max_index * self.step_val
-
-        if speed_pps <= 0:
-            c = self.heatmap_colors_list[0]
-        elif speed_pps >= max_value:
-            c = self.heatmap_colors_list[max_index]
-        else:
-            index = int(speed_pps // self.step_val)
-            t = (speed_pps % self.step_val) / self.step_val
-            c1 = self.heatmap_colors_list[index]
-            c2 = self.heatmap_colors_list[index + 1]
-            c = [c1[i] + (c2[i] - c1[i]) * t for i in range(3)]
-
-        r, g, b = (ch / 255.0 for ch in c)
-        return (r, g, b, self.alpha_val)
+            return (self.grey_rgb[0]/255.0, self.grey_rgb[1]/255.0, self.grey_rgb[2]/255.0, self.alpha_val)
+        
+        # Use cached colors for common speed ranges (major performance optimization)
+        if 0 <= speed_pps < self._color_cache_resolution:
+            cache_index = int(speed_pps)
+            return tuple(self._color_cache[cache_index])
+        
+        # Fallback to computation for very high speeds (rare case)
+        return self._compute_speed_color(speed_pps)
+    
+    def get_speed_colors_vectorized(self, speeds: np.ndarray) -> np.ndarray:
+        """Vectorized color lookup for maximum performance with large arrays"""
+        result_colors = np.zeros((len(speeds), 4), dtype=np.float32)
+        
+        # Handle NaN values
+        nan_mask = np.isnan(speeds)
+        result_colors[nan_mask] = [self.grey_rgb[0]/255.0, self.grey_rgb[1]/255.0, self.grey_rgb[2]/255.0, self.alpha_val]
+        
+        # Process valid speeds using cache lookup
+        valid_speeds = speeds[~nan_mask]
+        valid_indices = np.where(~nan_mask)[0]
+        
+        if len(valid_speeds) > 0:
+            # Use cache for speeds within cache range
+            cache_mask = (valid_speeds >= 0) & (valid_speeds < self._color_cache_resolution)
+            cache_indices = valid_indices[cache_mask]
+            cache_speeds = valid_speeds[cache_mask].astype(int)
+            
+            if len(cache_indices) > 0:
+                result_colors[cache_indices] = self._color_cache[cache_speeds]
+            
+            # Handle speeds outside cache range (compute individually)
+            out_of_range_mask = ~cache_mask
+            out_of_range_indices = valid_indices[out_of_range_mask]
+            out_of_range_speeds = valid_speeds[out_of_range_mask]
+            
+            for i, speed in zip(out_of_range_indices, out_of_range_speeds):
+                result_colors[i] = self._compute_speed_color(speed)
+        
+        return result_colors
 

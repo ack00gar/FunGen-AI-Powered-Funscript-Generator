@@ -845,6 +845,8 @@ class InfoGraphsUI:
         else:
             imgui.text_colored("Swap: Not in use", 0.2, 0.8, 0.2, 1.0)
 
+        imgui.separator()
+
         # GPU
         if stats.get("gpu_available", False):
             gpu_name = stats.get("gpu_name", "Unknown GPU")
@@ -936,7 +938,6 @@ class InfoGraphsUI:
                     )
                 imgui.spacing()
 
-            imgui.separator()
             imgui.spacing()
 
         self.perf_monitor.end_timing()
@@ -1052,7 +1053,6 @@ class InfoGraphsUI:
             color=(1.0, 0.6, 0.2, 0.9),
         )
 
-        imgui.separator()
         imgui.spacing()
 
     def _check_memory_alerts(self, stats):
