@@ -365,26 +365,27 @@ class GUI:
         image_data = np.full((target_height, target_width, 4), (colors.HEATMAP_BACKGROUND), dtype=np.uint8)
 
         if len(actions) > 1 and total_duration_s > 0.001:
-            for i in range(len(actions) - 1):
-                p1, p2 = actions[i], actions[i + 1]
-                start_time_s, end_time_s = p1["at"] / 1000.0, p2["at"] / 1000.0
-                if end_time_s <= start_time_s: continue
-                seg_start_x_px = int(round((start_time_s / total_duration_s) * target_width))
-                seg_end_x_px = int(round((end_time_s / total_duration_s) * target_width))
-                seg_start_x_px, seg_end_x_px = max(0, seg_start_x_px), min(target_width, seg_end_x_px)
-
-                if seg_end_x_px <= seg_start_x_px:
-                    if seg_start_x_px < target_width:
-                        seg_end_x_px = seg_start_x_px + 1
-                    else:
-                        continue
-
-                delta_pos = abs(p2["pos"] - p1["pos"])
-                delta_time_s_seg = (p2["at"] - p1["at"]) / 1000.0
-                speed_pps = delta_pos / delta_time_s_seg if delta_time_s_seg > 0.001 else 0.0
-                segment_color_float_rgba = self.app.utility.get_speed_color_from_map(speed_pps)
-                segment_color_byte_rgba = np.array([int(c * 255) for c in segment_color_float_rgba], dtype=np.uint8)
-                image_data[:, seg_start_x_px:seg_end_x_px] = segment_color_byte_rgba
+            ats = np.array([a['at'] for a in actions], dtype=np.float64) / 1000.0
+            poss = np.array([a['pos'] for a in actions], dtype=np.float32)
+            # Segment starts/ends in pixel space
+            x_coords = np.round((ats / total_duration_s) * (target_width - 1)).astype(np.int32)
+            x_coords = np.clip(x_coords, 0, target_width - 1)
+            # Compute speeds per segment
+            dt = np.diff(ats)
+            dpos = np.abs(np.diff(poss))
+            speeds = np.divide(dpos, dt, out=np.zeros_like(dpos), where=dt > 1e-6)
+            # Vectorized color mapping
+            colors_rgba = self.app.utility.get_speed_colors_vectorized(speeds)  # float RGBA 0..1
+            colors_u8 = np.clip(np.round(colors_rgba * 255.0), 0, 255).astype(np.uint8)
+            # For each column, find its segment index via searchsorted
+            cols = np.arange(target_width, dtype=np.int32)
+            # Map columns to times then to segment indices
+            # In pixel domain we can use x_coords boundaries directly
+            seg_idx_for_col = np.searchsorted(x_coords, cols, side='right') - 1
+            seg_idx_for_col = np.clip(seg_idx_for_col, 0, len(speeds) - 1)
+            col_colors = colors_u8[seg_idx_for_col]  # shape (W,4)
+            # Broadcast to image rows
+            image_data[:] = col_colors[np.newaxis, :, :]
 
         return image_data
 
@@ -561,15 +562,25 @@ class GUI:
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, texture_id)
 
+        # Cache last texture sizes to prefer glTexSubImage2D when dimensions unchanged
+        if not hasattr(self, '_texture_sizes'):
+            self._texture_sizes = {}
+
+        last_size = self._texture_sizes.get(texture_id)
+
         # Determine format and upload
         if len(image.shape) == 2:
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RED, w, h, 0, gl.GL_RED, gl.GL_UNSIGNED_BYTE, image)
+            internal_fmt = gl.GL_RED; fmt = gl.GL_RED; payload = image
         elif image.shape[2] == 3:
-            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, w, h, 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, rgb_image)
-        elif image.shape[2] == 4:
-            # The worker already produces RGBA, no conversion needed
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, w, h, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, image)
+            internal_fmt = gl.GL_RGB; fmt = gl.GL_RGB; payload = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            internal_fmt = gl.GL_RGBA; fmt = gl.GL_RGBA; payload = image
+
+        if last_size and last_size == (w, h, internal_fmt):
+            gl.glTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, w, h, fmt, gl.GL_UNSIGNED_BYTE, payload)
+        else:
+            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, internal_fmt, w, h, 0, fmt, gl.GL_UNSIGNED_BYTE, payload)
+            self._texture_sizes[texture_id] = (w, h, internal_fmt)
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
