@@ -76,6 +76,7 @@ class TrackerMode(Enum):
     OSCILLATION_DETECTOR = "Live - Oscillation Detector (Experimental)"
     LIVE_YOLO_ROI = "Live - Optical Flow (YOLO auto ROI)"
     LIVE_USER_ROI = "Live - Optical Flow (User manual ROI)"
+    LIVE_YOLO_OSCILLATION = "Live - YOLO + Oscillation (Auto focus)"
     OFFLINE_2_STAGE = "Offline - YOLO AI (2 Stages)"
     OFFLINE_3_STAGE = "Offline - YOLO AI + Opt. Flow (3 Stages)"
 
