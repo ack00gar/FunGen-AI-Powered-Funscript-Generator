@@ -433,7 +433,7 @@ class AutoUpdater:
         threading.Thread(target=self._check_worker, daemon=True).start()
 
     def _apply_update(self, target_hash: str = None, use_pull: bool = True):
-        """Unified method to apply updates using either git pull or git checkout."""
+        """Unified method to apply updates using either a git update or git checkout."""
         self.update_in_progress = True
         
         if use_pull:
@@ -464,7 +464,7 @@ class AutoUpdater:
                 
             if success:
                 if use_pull:
-                    self.logger.info("Git pull successful")
+                    self.logger.info("Update pull successful")
                 else:
                     self.logger.info(f"Successfully checked out commit {target_hash}")
                 self.status_message = "Update complete. Restarting..."
@@ -483,17 +483,27 @@ class AutoUpdater:
             self.update_in_progress = False
 
     def _perform_git_pull(self) -> bool:
-        """Performs git pull operation."""
+        """Performs a git fetch and hard reset to handle forced updates gracefully."""
         try:
-            pull_result = subprocess.run(
-                ['git', 'pull', 'origin', self.BRANCH],
+            # Fetch the latest updates from the remote without trying to merge or rebase
+            fetch_result = subprocess.run(
+                ['git', 'fetch', 'origin', self.BRANCH],
                 check=True, capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
-            self.logger.info(f"Git pull successful: {pull_result.stdout}")
+            self.logger.info(f"Git fetch successful: {fetch_result.stdout}")
+
+            # Reset the local branch to exactly match the remote branch
+            # This is a robust way to handle force pushes and ensures a clean update
+            reset_result = subprocess.run(
+                ['git', 'reset', '--hard', f'origin/{self.BRANCH}'],
+                check=True, capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            self.logger.info(f"Git reset successful: {reset_result.stdout}")
             return True
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Update failed during 'git pull': {e.stderr}")
+            self.logger.error(f"Update failed during 'git fetch' or 'git reset': {e.stderr}")
             return False
 
     def _perform_git_checkout(self, commit_hash: str) -> bool:
