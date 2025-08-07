@@ -42,96 +42,66 @@ def _check_version_compatibility(installed_version, required_spec):
 
 def _ensure_packages(packages):
     """
-    Checks if essential packages are installed and upgrades them if needed.
-    Returns: True if any packages were installed/upgraded (requiring restart)
+    Checks if essential packages are installed and offers to install them if missing.
+    Returns: True if any packages were installed (requiring restart)
     """
     missing = []
-    to_upgrade = []
-    
     for package_spec in packages:
-        package_name, version_spec = _parse_package_spec(package_spec)
-        
+        package_name, _ = _parse_package_spec(package_spec)
         try:
-            installed_version = version(package_name)
-            if version_spec:
-                is_compatible, needs_upgrade = _check_version_compatibility(installed_version, version_spec)
-                if not is_compatible:
-                    print(f"Package {package_name} version {installed_version} doesn't satisfy {version_spec}")
-                    #to_upgrade.append(package_spec)
-            # else: package exists and no version requirement, keep it
+            version(package_name)
         except PackageNotFoundError:
             missing.append(package_spec)
 
-    packages_changed = False
-    
-    if missing:
-        print(f"Installing missing packages: {', '.join(missing)}")
-        try:
+    if not missing:
+        return False
+
+    print(f"The following required packages are missing: {', '.join(missing)}")
+    try:
+        response = input(f"Would you like to install them now? (y/n): ").lower()
+        if response == 'y':
+            print(f"Installing missing packages: {', '.join(missing)}")
             subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
-            packages_changed = True
-        except subprocess.CalledProcessError as e:
-            print(f"ERROR: Failed to install required packages. Please install them manually and restart.", file=sys.stderr)
-            print(e, file=sys.stderr)
-            sys.exit(1)
-    
-    if to_upgrade:
-        print(f"Upgrading packages: {', '.join(to_upgrade)}")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", *to_upgrade])
-            packages_changed = True
-        except subprocess.CalledProcessError as e:
-            print(f"ERROR: Failed to upgrade packages. Please upgrade them manually and restart.", file=sys.stderr)
-            print(e, file=sys.stderr)
-            sys.exit(1)
-    
-    return packages_changed
+            return True
+        else:
+            print("Installation skipped. The application may not function correctly.", file=sys.stderr)
+            return False
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"ERROR: Failed to install required packages: {e}", file=sys.stderr)
+        print("Please install them manually and restart.", file=sys.stderr)
+        sys.exit(1)
 
 def _ensure_packages_with_args(packages, pip_args):
     """
-    Checks if essential packages are installed and upgrades them with custom pip arguments.
-    Returns: True if any packages were installed/upgraded (requiring restart)
+    Checks if essential packages are installed and offers to install them with custom pip arguments.
+    Returns: True if any packages were installed (requiring restart)
     """
     missing = []
-    to_upgrade = []
-    
     for package_spec in packages:
-        package_name, version_spec = _parse_package_spec(package_spec)
-        
+        package_name, _ = _parse_package_spec(package_spec)
         try:
-            installed_version = version(package_name)
-            if version_spec:
-                is_compatible, needs_upgrade = _check_version_compatibility(installed_version, version_spec)
-                if not is_compatible:
-                    print(f"Package {package_name} version {installed_version} doesn't satisfy {version_spec}")
-                    to_upgrade.append(package_spec)
+            version(package_name)
         except PackageNotFoundError:
             missing.append(package_spec)
 
-    packages_changed = False
-    
-    if missing:
-        print(f"Installing missing packages with custom index: {', '.join(missing)}")
-        try:
+    if not missing:
+        return False
+
+    print(f"The following required packages are missing: {', '.join(missing)}")
+    try:
+        response = input(f"Would you like to install them now using custom arguments? (y/n): ").lower()
+        if response == 'y':
+            print(f"Installing missing packages with custom index: {', '.join(missing)}")
             cmd = [sys.executable, "-m", "pip", "install"] + pip_args + missing
             subprocess.check_call(cmd)
-            packages_changed = True
-        except subprocess.CalledProcessError as e:
-            print(f"ERROR: Failed to install required packages. Please install them manually and restart.", file=sys.stderr)
-            print(e, file=sys.stderr)
-            sys.exit(1)
-    
-    if to_upgrade:
-        print(f"Upgrading packages with custom index: {', '.join(to_upgrade)}")
-        try:
-            cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + pip_args + to_upgrade
-            subprocess.check_call(cmd)
-            packages_changed = True
-        except subprocess.CalledProcessError as e:
-            print(f"ERROR: Failed to upgrade packages. Please upgrade them manually and restart.", file=sys.stderr)
-            print(e, file=sys.stderr)
-            sys.exit(1)
-    
-    return packages_changed
+            return True
+        else:
+            print("Installation skipped. The application may not function correctly.", file=sys.stderr)
+            return False
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"ERROR: Failed to install required packages: {e}", file=sys.stderr)
+        print("Please install them manually and restart.", file=sys.stderr)
+        sys.exit(1)
 
 def get_bin_dir():
     """Gets the directory where binaries like ffmpeg should be stored."""
@@ -201,10 +171,6 @@ def check_and_install_dependencies():
     """
     # 1. Self-bootstrap: Ensure the checker has its own dependencies
     bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging'])
-    
-    # Now that we are sure they exist, we can import them.
-    import requests
-    from tqdm import tqdm
 
     print("--- Checking Application Dependencies ---")
 
@@ -223,7 +189,7 @@ def check_and_install_dependencies():
 
     core_changed = False
     if core_packages:
-        print("Installing core packages...")
+        print("Checking core packages...")
         core_changed = _ensure_packages(core_packages)
 
     # 4. Load and install GPU-specific requirements if needed
@@ -244,7 +210,7 @@ def check_and_install_dependencies():
                         gpu_packages.append(line)
 
             if gpu_packages:
-                print(f"Installing GPU-specific packages...")
+                print(f"Checking GPU-specific packages...")
                 if pip_extra_args:
                     print(f"Using custom index: {' '.join(pip_extra_args)}")
                     gpu_changed = _ensure_packages_with_args(gpu_packages, pip_extra_args)
@@ -278,116 +244,59 @@ def check_and_install_dependencies():
         sys.exit(1)
 
     # 6. Check for ffmpeg and ffprobe
-    bin_dir = get_bin_dir()
-    if bin_dir not in os.environ['PATH'].split(os.pathsep):
-        os.environ['PATH'] = os.pathsep.join([bin_dir, os.environ['PATH']])
-
-    if is_tool('ffmpeg') and is_tool('ffprobe'):
-        print("ffmpeg and ffprobe are available.")
-    else:
-        print("ffmpeg and/or ffprobe not found. Attempting to download...")
-        download_ffmpeg(bin_dir, requests, tqdm)
+    check_ffmpeg_ffprobe()
 
     print("--- Dependency Check Finished ---\n")
 
 
-def download_ffmpeg(bin_dir, requests, tqdm):
-    """Downloads and extracts ffmpeg and ffprobe."""
-    os.makedirs(bin_dir, exist_ok=True)
+def check_ffmpeg_ffprobe():
+    """Checks for ffmpeg and ffprobe and offers to install them if missing."""
+    ffmpeg_missing = not is_tool('ffmpeg')
+    ffprobe_missing = not is_tool('ffprobe')
 
-    system = platform.system()
-    arch = platform.machine()
+    if ffmpeg_missing or ffprobe_missing:
+        missing_tools = []
+        if ffmpeg_missing:
+            missing_tools.append('ffmpeg')
+        if ffprobe_missing:
+            missing_tools.append('ffprobe')
+        
+        print(f"WARNING: The following required tools are not found in your system's PATH: {', '.join(missing_tools)}.")
+        
+        system = platform.system()
+        install_cmd = ""
+        if system == "Darwin":
+            install_cmd = "brew install ffmpeg"
+        elif system == "Linux":
+            install_cmd = "sudo apt-get update && sudo apt-get install ffmpeg"
+        elif system == "Windows":
+            install_cmd = "choco install ffmpeg"
 
-    if system == "Windows":
-        url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-        archive_path = os.path.join(bin_dir, "ffmpeg.zip")
-        extract_dir = os.path.join(bin_dir, "ffmpeg-temp-extract")
-        ffmpeg_exe = "ffmpeg.exe"
-        ffprobe_exe = "ffprobe.exe"
-        bin_in_archive = "bin"
-    elif system == "Darwin": # macOS
-        # URL for Apple Silicon (arm64) vs Intel (x86_64)
-        url = "https://evermeet.cx/ffmpeg/ffmpeg-113893-g37b9f52534.zip" # This is an older build that might be intel
-        print("Warning: Using a potentially outdated ffmpeg build for macOS. If you encounter issues, please install ffmpeg manually via Homebrew ('brew install ffmpeg').")
-        archive_path = os.path.join(bin_dir, "ffmpeg.zip")
-        extract_dir = bin_dir # This specific zip extracts directly
-        ffmpeg_exe = "ffmpeg"
-        ffprobe_exe = "ffprobe"
-        bin_in_archive = None # Not needed
-    else: # Linux (assuming x86_64)
-        url = "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-        archive_path = os.path.join(bin_dir, "ffmpeg.tar.xz")
-        extract_dir = os.path.join(bin_dir, "ffmpeg-temp-extract")
-        ffmpeg_exe = "ffmpeg"
-        ffprobe_exe = "ffprobe"
-        bin_in_archive = "ffmpeg-*-amd64-static" # Using a glob pattern
+        if install_cmd:
+            try:
+                response = input(f"Would you like to attempt to install it now using '{install_cmd}'? (y/n): ").lower()
+                if response == 'y':
+                    print(f"Running installation command: {install_cmd}")
+                    subprocess.check_call(install_cmd, shell=True)
+                    # Re-check after installation
+                    if not is_tool('ffmpeg') or not is_tool('ffprobe'):
+                        print("Installation may have failed. Please install ffmpeg manually.", file=sys.stderr)
+                        sys.exit(1)
+                    else:
+                        print("ffmpeg installed successfully.")
+                else:
+                    print("Installation skipped. Please install ffmpeg manually to proceed.", file=sys.stderr)
+                    sys.exit(1)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                print(f"Error during installation: {e}", file=sys.stderr)
+                print(f"Please install ffmpeg manually.", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print("Could not determine the installation command for your OS. Please install ffmpeg manually.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print("ffmpeg and ffprobe are available.")
 
-    # Download the archive
-    try:
-        print(f"Downloading from: {url}")
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        total_size = int(response.headers.get('content-length', 0))
-        with open(archive_path, 'wb') as f, tqdm(
-            desc="Downloading ffmpeg", total=total_size, unit='iB', unit_scale=True, unit_divisor=1024,
-        ) as bar:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-                bar.update(len(chunk))
-    except requests.exceptions.RequestException as e:
-        print(f"ERROR: Failed to download ffmpeg: {e}", file=sys.stderr)
-        return
-
-    # Extract the archive
-    print("Extracting ffmpeg...")
-    os.makedirs(extract_dir, exist_ok=True)
-    try:
-        if archive_path.endswith('.zip'):
-            import zipfile
-            with zipfile.ZipFile(archive_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
-        elif archive_path.endswith('.tar.xz'):
-            import tarfile
-            with tarfile.open(archive_path, 'r:xz') as tar_ref:
-                tar_ref.extractall(extract_dir)
-    except Exception as e:
-        print(f"ERROR: Failed to extract ffmpeg: {e}", file=sys.stderr)
-        return
-    finally:
-        os.remove(archive_path)
-
-    # Find and move binaries
-    try:
-        source_bin_dir = extract_dir
-        if bin_in_archive:
-            import glob
-            # Find the directory that matches the pattern
-            found_dirs = glob.glob(os.path.join(extract_dir, bin_in_archive))
-            if not found_dirs:
-                raise FileNotFoundError("Could not find ffmpeg binaries in extracted archive.")
-            source_bin_dir = found_dirs[0]
-
-
-        shutil.move(os.path.join(source_bin_dir, ffmpeg_exe), os.path.join(bin_dir, ffmpeg_exe))
-        shutil.move(os.path.join(source_bin_dir, ffprobe_exe), os.path.join(bin_dir, ffprobe_exe))
-
-        # Clean up the extraction directory
-        shutil.rmtree(extract_dir, ignore_errors=True)
-        # Also remove the parent dir if it was a zip extraction
-        if "ffmpeg-master-latest-win64-gpl" in source_bin_dir:
-             shutil.rmtree(os.path.dirname(source_bin_dir), ignore_errors=True)
-
-
-    except Exception as e:
-        print(f"ERROR: Could not locate and move ffmpeg binaries: {e}", file=sys.stderr)
-        return
-
-    # Make executable on non-windows
-    if system != "Windows":
-        os.chmod(os.path.join(bin_dir, ffmpeg_exe), 0o755)
-        os.chmod(os.path.join(bin_dir, ffprobe_exe), 0o755)
-
-    print("ffmpeg and ffprobe downloaded and configured successfully.")
 
 if __name__ == '__main__':
     check_and_install_dependencies()
