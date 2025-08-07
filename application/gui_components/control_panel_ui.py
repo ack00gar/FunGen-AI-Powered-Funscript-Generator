@@ -252,13 +252,15 @@ class ControlPanelUI:
 
         modes_display = [
             "Live Oscillation Detector",
-            "Offline AI Analysis (3-Stage)",
+            "Live - YOLO + Oscillation (Auto focus)",
             "Live Tracking (YOLO ROI)",
+            "Offline AI Analysis (3-Stage)",
         ]
         modes_enum = [
             tracker_mode.OSCILLATION_DETECTOR,
-            tracker_mode.OFFLINE_3_STAGE,
+            tracker_mode.LIVE_YOLO_OSCILLATION,
             tracker_mode.LIVE_YOLO_ROI,
+            tracker_mode.OFFLINE_3_STAGE,
         ]
         try:
             cur_idx = modes_enum.index(app_state.selected_tracker_mode)
@@ -273,8 +275,9 @@ class ControlPanelUI:
         imgui.pop_item_width()
         self._help_tooltip(
             "Live Oscillation Detector: Fast & simple, best for rhythmic motion\n"
-            "Offline AI Analysis: High quality, uses AI for object detection\n"
-            "Live Tracking: Real-time AI tracking with immediate preview"
+            "Live - YOLO + Oscillation: Auto-detects focus area each stride and runs oscillation detector on it\n"
+            "Live Tracking (YOLO ROI): Real-time AI tracking with immediate preview\n"
+            "Offline AI Analysis: High quality, uses AI for object detection"
         )
         if clicked and new_idx != cur_idx:
             app_state.selected_tracker_mode = modes_enum[new_idx]
@@ -335,6 +338,7 @@ class ControlPanelUI:
             tracker_mode.OSCILLATION_DETECTOR,
             tracker_mode.LIVE_YOLO_ROI,
             tracker_mode.LIVE_USER_ROI,
+            tracker_mode.LIVE_YOLO_OSCILLATION,
             tracker_mode.OFFLINE_2_STAGE,
             tracker_mode.OFFLINE_3_STAGE,
         ]
@@ -374,6 +378,8 @@ class ControlPanelUI:
                     tr.set_tracking_mode("USER_FIXED_ROI")
                 elif new_mode == tracker_mode.OSCILLATION_DETECTOR:
                     tr.set_tracking_mode("OSCILLATION_DETECTOR")
+                elif new_mode == tracker_mode.LIVE_YOLO_OSCILLATION:
+                    tr.set_tracking_mode("YOLO_OSCILLATION")
                 else:
                     tr.set_tracking_mode("YOLO_ROI")
 
@@ -503,6 +509,7 @@ class ControlPanelUI:
 
         if tmode in (
             self.TrackerMode.LIVE_YOLO_ROI,
+            self.TrackerMode.LIVE_YOLO_OSCILLATION,
             self.TrackerMode.OFFLINE_2_STAGE,
             self.TrackerMode.OFFLINE_3_STAGE,
         ):
@@ -511,12 +518,13 @@ class ControlPanelUI:
             imgui.separator()
 
         adv = app.app_state_ui.show_advanced_options
-        if tmode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI) and adv:
+        if tmode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_YOLO_OSCILLATION, self.TrackerMode.LIVE_USER_ROI) and adv:
             self._render_live_tracker_settings()
             imgui.separator()
 
         if tmode in (
             self.TrackerMode.LIVE_YOLO_ROI,
+            self.TrackerMode.LIVE_YOLO_OSCILLATION,
             self.TrackerMode.OFFLINE_2_STAGE,
             self.TrackerMode.OFFLINE_3_STAGE,
         ) and adv:
@@ -526,9 +534,13 @@ class ControlPanelUI:
         if tmode == self.TrackerMode.OSCILLATION_DETECTOR:
             if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector")[0]:
                 self._render_oscillation_detector_settings()
+        if tmode == self.TrackerMode.LIVE_YOLO_OSCILLATION:
+            if imgui.collapsing_header("YOLO + Oscillation Settings##ConfigYOLOOscillation")[0]:
+                self._render_yolo_oscillation_settings()
 
         with_config = {
             self.TrackerMode.LIVE_YOLO_ROI,
+            self.TrackerMode.LIVE_YOLO_OSCILLATION,
             self.TrackerMode.LIVE_USER_ROI,
             self.TrackerMode.OFFLINE_2_STAGE,
             self.TrackerMode.OFFLINE_3_STAGE,
@@ -738,6 +750,81 @@ class ControlPanelUI:
                 "Number of processes for Stage 2 Optical Flow gap recovery. "
                 "More may be faster on high-core CPUs."
             )
+
+    def _render_yolo_oscillation_settings(self):
+        app = self.app
+        tr = app.tracker
+        settings = app.app_settings
+
+        imgui.text("Detection Parameters")
+        imgui.separator()
+
+        # Target class
+        classes_raw = getattr(tr, 'classes', None)
+        class_options = []
+        if isinstance(classes_raw, dict):
+            try:
+                class_options = [classes_raw[k] for k in sorted(classes_raw.keys(), key=lambda x: int(x))]
+            except Exception:
+                class_options = list(classes_raw.values())
+        elif isinstance(classes_raw, (list, tuple)):
+            class_options = list(classes_raw)
+        target_cls = settings.get('yolo_oscillation_target_class', getattr(tr, 'yolo_oscillation_target_class', 'penis'))
+        if class_options:
+            try:
+                idx = class_options.index(target_cls)
+            except ValueError:
+                idx = 0
+            ch, nidx = imgui.combo("Target Class##YOLOOscTargetClass", idx, class_options)
+            if ch:
+                target_cls = class_options[nidx]
+                settings.set('yolo_oscillation_target_class', target_cls)
+                tr.yolo_oscillation_target_class = target_cls
+        else:
+            changed, text_val = imgui.input_text("Target Class (text)##YOLOOscTargetClassText", target_cls, 128)
+            if changed:
+                target_cls = text_val
+                settings.set('yolo_oscillation_target_class', target_cls)
+                tr.yolo_oscillation_target_class = target_cls
+
+        # Confidence
+        cur_conf = float(settings.get('yolo_oscillation_conf_threshold', getattr(tr, 'yolo_oscillation_conf_threshold', 0.4)))
+        ch, new_conf = imgui.slider_float("Confidence##YOLOOscConf", cur_conf, 0.05, 0.95, "%.2f")
+        if ch and new_conf != cur_conf:
+            settings.set('yolo_oscillation_conf_threshold', new_conf)
+            tr.yolo_oscillation_conf_threshold = new_conf
+
+        # Min box area (pixels)
+        cur_min_box = int(settings.get('yolo_oscillation_min_box', getattr(tr, 'yolo_oscillation_min_box', 64)))
+        ch, new_min = imgui.input_int("Min Box Area (px^2)##YOLOOscMinBox", cur_min_box)
+        if ch and new_min != cur_min_box:
+            v = max(16, new_min)
+            settings.set('yolo_oscillation_min_box', v)
+            tr.yolo_oscillation_min_box = v
+
+        # Detection stride
+        cur_stride = int(settings.get('yolo_osc_det_stride', getattr(tr, 'yolo_osc_det_stride', 3)))
+        ch, new_stride = imgui.slider_int("Detection Stride (frames)##YOLOOscStride", cur_stride, 1, 10)
+        if ch and new_stride != cur_stride:
+            settings.set('yolo_osc_det_stride', new_stride)
+            setattr(tr, 'yolo_osc_det_stride', new_stride)
+
+        # Reset buttons row
+        if imgui.button("Reset Class"):
+            settings.set('yolo_oscillation_target_class', 'penis')
+            tr.yolo_oscillation_target_class = 'penis'
+        imgui.same_line()
+        if imgui.button("Reset Conf"):
+            settings.set('yolo_oscillation_conf_threshold', 0.4)
+            tr.yolo_oscillation_conf_threshold = 0.4
+        imgui.same_line()
+        if imgui.button("Reset MinBox"):
+            settings.set('yolo_oscillation_min_box', 64)
+            tr.yolo_oscillation_min_box = 64
+        imgui.same_line()
+        if imgui.button("Reset Stride"):
+            settings.set('yolo_osc_det_stride', 3)
+            setattr(tr, 'yolo_osc_det_stride', 3)
 
     # ---------------- Settings: interface/perf ----------------
 
@@ -1284,7 +1371,7 @@ class ControlPanelUI:
             if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_2_STAGE]:
                 start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
-            elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR]:
+            elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.LIVE_YOLO_OSCILLATION]:
                 start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
                 handler = event_handlers.handle_start_live_tracker_click
             

@@ -197,6 +197,11 @@ class ROITracker:
 
         # --- Oscillation sensitivity control ---
         self.oscillation_sensitivity: float = self.app.app_settings.get("oscillation_detector_sensitivity", 1.0) if self.app else 1.0
+        # --- YOLO+Oscillation combined pipeline state ---
+        self.yolo_oscillation_active: bool = False
+        self.yolo_oscillation_target_class: str = self.app.app_settings.get("yolo_oscillation_target_class", "penis") if self.app else "penis"
+        self.yolo_oscillation_conf_threshold: float = self.app.app_settings.get("yolo_oscillation_conf_threshold", 0.4) if self.app else 0.4
+        self.yolo_oscillation_min_box: int = 64
 
         self.last_frame_time_sec_fps: Optional[float] = None
         self.current_fps: float = 0.0
@@ -449,7 +454,7 @@ class ROITracker:
         return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
 
     def set_tracking_mode(self, mode: str):
-        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR"]:
+        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR", "YOLO_OSCILLATION"]:
             if self.tracking_mode != mode:
                 self.tracking_mode = mode
                 self.logger.info(f"Tracker mode set to: {self.tracking_mode}")
@@ -468,6 +473,10 @@ class ROITracker:
                     # Clear flow history to prevent using old data in the new fixed ROI
                     self.primary_flow_history_smooth.clear()
                     self.secondary_flow_history_smooth.clear()
+                elif mode == "OSCILLATION_DETECTOR":
+                    self.yolo_oscillation_active = False
+                elif mode == "YOLO_OSCILLATION":
+                    self.yolo_oscillation_active = True
         else:
             self.logger.warning(f"Attempted to set invalid tracking mode: {mode}")
 
@@ -989,6 +998,28 @@ class ROITracker:
                           min_write_frame_id: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
         if self.tracking_mode == "OSCILLATION_DETECTOR":
             return self.process_frame_for_oscillation(frame, frame_time_ms, frame_index)
+        if self.tracking_mode == "YOLO_OSCILLATION":
+            # Update oscillation area from YOLO detections at a configurable stride
+            stride = int(self.app.app_settings.get('yolo_osc_det_stride', 3)) if self.app else 3
+            if stride <= 0:
+                stride = 1
+            if (self.internal_frame_counter % stride) == 0:
+                pre = self.preprocess_frame(frame)
+                dets = self.detect_objects(pre)
+                best = None
+                best_conf = 0.0
+                target_cls = self.yolo_oscillation_target_class
+                for d in dets:
+                    if d.get('class_name') == target_cls and d.get('confidence', 0) >= self.yolo_oscillation_conf_threshold:
+                        x,y,w,h = d['box']
+                        if w*h >= self.yolo_oscillation_min_box and d['confidence'] > best_conf:
+                            best = (x,y,w,h)
+                            best_conf = d['confidence']
+                if best is not None:
+                    cx, cy, cw, ch = best
+                    center_pt = (cx + cw//2, cy + ch//2)
+                    self.set_oscillation_area_and_point(best, center_pt, frame)
+            return self.process_frame_for_oscillation(frame, frame_time_ms, frame_index)
 
         self._update_fps()
         processed_frame = self.preprocess_frame(frame)
@@ -1335,6 +1366,19 @@ class ROITracker:
             self.prev_gray_oscillation = None
             self.oscillation_funscript_pos = 50
             self.logger.info(f"Oscillation detector started. History size set to {self.oscillation_history_max_len} frames.")
+        elif self.tracking_mode == "YOLO_OSCILLATION":
+            self.update_oscillation_grid_size()
+            self.update_oscillation_sensitivity()
+            fps = self.app.processor.fps if self.app and self.app.processor and self.app.processor.fps > 0 else 30.0
+            amp_window_ms = self.app.app_settings.get("live_oscillation_amp_window_ms", 4000)
+            new_maxlen = int(fps * (amp_window_ms / 1000.0))
+            self.oscillation_position_history = deque(maxlen=new_maxlen)
+            self.oscillation_history_max_len = int(self.oscillation_history_seconds * fps)
+            self.oscillation_history.clear()
+            self.prev_gray_oscillation = None
+            self.oscillation_funscript_pos = 50
+            self.yolo_oscillation_active = True
+            self.logger.info("YOLO+Oscillation pipeline started.")
 
         self.internal_frame_counter = 0 # Reset for both live and S3 context if S3 reuses this
         self.flow_min_primary_adaptive, self.flow_max_primary_adaptive = -1.0, 1.0
