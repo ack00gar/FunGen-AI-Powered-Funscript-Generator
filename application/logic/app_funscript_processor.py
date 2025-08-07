@@ -14,8 +14,7 @@ from config import constants
 class AppFunscriptProcessor:
     def __init__(self, app_logic):
         self.app = app_logic
-        self.logger = self.app.logger if hasattr(self.app, 'logger') else logging.getLogger(
-            "AppFunscriptProcessor_fallback")
+        self.logger = self.app.logger if hasattr(self.app, 'logger') else logging.getLogger("AppFunscriptProcessor_fallback")
 
         # Chapters and Scripting Range
         self.video_chapters: List[VideoSegment] = []
