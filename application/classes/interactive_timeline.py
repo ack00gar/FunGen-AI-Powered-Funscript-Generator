@@ -230,6 +230,70 @@ class InteractiveFunscriptTimeline:
 
         return self._cached_actions_data
 
+    def _render_dense_envelope(self,
+                               draw_list,
+                               canvas_abs_pos: Tuple[float, float],
+                               canvas_size: Tuple[float, float],
+                               app_state,
+                               cached_data: Dict,
+                               step_px: int = 2) -> None:
+        """
+        Dense-mode rendering for very large action counts or high zoom-out levels.
+        Renders a min/max envelope per screen x-column using vectorized binning.
+        """
+        ats_all: np.ndarray = cached_data.get("ats", np.array([], dtype=float))
+        poss_all: np.ndarray = cached_data.get("poss", np.array([], dtype=float))
+
+        if ats_all.size < 2:
+            return
+
+        canvas_x0 = int(canvas_abs_pos[0])
+        canvas_w = int(canvas_size[0])
+        if canvas_w <= 0:
+            return
+
+        zoom_ms_per_px: float = getattr(app_state, 'timeline_zoom_factor_ms_per_px', 1.0) or 1.0
+        pan_ms: float = float(getattr(app_state, 'timeline_pan_offset_ms', 0))
+
+        # Vectorized transform to screen coords
+        x_screen = np.round((ats_all - pan_ms) / zoom_ms_per_px).astype(np.int32) + canvas_x0
+        y_screen = (canvas_abs_pos[1] + canvas_size[1] - (poss_all / 100.0 * canvas_size[1])).astype(np.int32)
+
+        # Visible mask within current canvas
+        x_min = canvas_x0
+        x_max = canvas_x0 + canvas_w - 1
+        visible_mask = (x_screen >= x_min) & (x_screen <= x_max)
+        if not np.any(visible_mask):
+            return
+
+        x_vis = x_screen[visible_mask]
+        y_vis = y_screen[visible_mask]
+
+        # Bin y values per x column using numpy indexed reductions
+        x_idx = x_vis - canvas_x0  # 0..canvas_w-1
+        min_vals = np.full(canvas_w, np.iinfo(np.int32).max, dtype=np.int32)
+        max_vals = np.full(canvas_w, np.iinfo(np.int32).min, dtype=np.int32)
+        np.minimum.at(min_vals, x_idx, y_vis)
+        np.maximum.at(max_vals, x_idx, y_vis)
+
+        # Draw vertical filled bars for bins that received data
+        alpha = 0.35 if getattr(self, 'is_previewing', False) else 0.8
+        rgba = (*TimelineColors.AUDIO_WAVEFORM[:3], TimelineColors.AUDIO_WAVEFORM[3] * alpha)
+        color_u32 = imgui.get_color_u32_rgba(rgba[0], rgba[1], rgba[2], rgba[3])
+
+        # Step rendering to limit draw calls when very wide
+        if step_px < 1:
+            step_px = 1
+
+        for xi in range(0, canvas_w, step_px):
+            y0 = int(min_vals[xi])
+            y1 = int(max_vals[xi])
+            if y1 < y0:
+                continue
+            x0_screen = canvas_x0 + xi
+            # Filled thin rect for the envelope column
+            draw_list.add_rect_filled(x0_screen, y0, x0_screen + step_px, y1, color_u32)
+
     def _perform_time_shift(self, frame_delta: int):
         fs_proc = self.app.funscript_processor
         video_fps_for_calc = self.app.processor.fps if self.app.processor and self.app.processor.fps and self.app.processor.fps > 0 else 0
@@ -2261,15 +2325,22 @@ class InteractiveFunscriptTimeline:
                 )
 
                 if gpu_render_success:
-                    # GPU rendering succeeded - get hovered index from GPU system
-                    hovered_action_idx_current_timeline = getattr(self.gpu_integration, '_last_hovered_index', -1)
+                    # Ensure GPU actually drew content; otherwise fall back to CPU drawing
+                    perf_summary = self.gpu_integration.get_performance_summary()
+                    backend_used = str(perf_summary.get('current_backend', 'cpu'))
+                    gpu_stats = perf_summary.get('gpu_details', {})
+                    drew_anything = (gpu_stats.get('points_rendered', 0) + gpu_stats.get('lines_rendered', 0)) > 0
+                    if backend_used != 'gpu' or not drew_anything:
+                        gpu_render_success = False
+                    else:
+                        # GPU rendering succeeded - get hovered index from GPU system
+                        hovered_action_idx_current_timeline = getattr(self.gpu_integration, '_last_hovered_index', -1)
 
-                    # Show GPU indicator if enabled
-                    if self.app.app_settings.get("show_timeline_optimization_indicator", False):
-                        gpu_stats = self.gpu_integration.get_performance_summary().get('gpu_details', {})
-                        gpu_text = f"GPU Mode ({gpu_stats.get('points_rendered', 0):,} pts, {gpu_stats.get('render_time_ms', 0):.1f}ms)"
-                        draw_list.add_text(canvas_abs_pos[0] + 10, canvas_abs_pos[1] + 10,
-                                           imgui.get_color_u32_rgba(0.0, 1.0, 0.0, 0.8), gpu_text)
+                        # Show GPU indicator if enabled
+                        if self.app.app_settings.get("show_timeline_optimization_indicator", False):
+                            gpu_text = f"GPU Mode ({gpu_stats.get('points_rendered', 0):,} pts, {gpu_stats.get('render_time_ms', 0):.1f}ms)"
+                            draw_list.add_text(canvas_abs_pos[0] + 10, canvas_abs_pos[1] + 10,
+                                               imgui.get_color_u32_rgba(0.0, 1.0, 0.0, 0.8), gpu_text)
 
             # Fallback to optimized CPU rendering if GPU failed or unavailable
             if not gpu_render_success:
@@ -2288,82 +2359,81 @@ class InteractiveFunscriptTimeline:
                 # --- START: LOD OPTIMIZATION ---
                 actions_to_render = self.preview_actions if self.is_previewing else actions_list
                 indices_to_draw = []
-
                 avg_interval_ms = 0
-
+                points_per_pixel = 1.0
+                s_idx, e_idx = 0, 0
                 if actions_to_render:
-                    # Calculate the average time interval between points in the script
-                    fs_proc = self.app.funscript_processor  # Get the funscript processor instance
-                    stats = fs_proc.funscript_stats_t1 if self.timeline_num == 1 else fs_proc.funscript_stats_t2  # Access stats from the processor
-                    avg_interval_ms = stats.get('avg_interval_ms', 20)  # Use pre-calculated avg interval
+                    # Calculate avg interval (pre-computed in stats)
+                    fs_proc = self.app.funscript_processor
+                    stats = fs_proc.funscript_stats_t1 if self.timeline_num == 1 else fs_proc.funscript_stats_t2
+                    avg_interval_ms = stats.get('avg_interval_ms', 20)
 
-                    # Calculate how many points, on average, would fall into a single horizontal pixel
-                    points_per_pixel = (
-                            app_state.timeline_zoom_factor_ms_per_px / avg_interval_ms) if avg_interval_ms > 0 else 1.0
+                    points_per_pixel = (app_state.timeline_zoom_factor_ms_per_px / avg_interval_ms) if avg_interval_ms > 0 else 1.0
 
-                    # Determine the step size for drawing. Never less than 1.
-                    # The '4.0' is a tunable value; a lower number means a denser line when zoomed out.
-                    draw_step = max(1, int(points_per_pixel / 4.0))
-
-                    # Use the existing culling to find the visible range
+                    # Visible range
                     s_idx, e_idx = 0, len(actions_to_render)
                     if visible_actions_indices_range:
                         s_idx, e_idx = visible_actions_indices_range
 
-                    # Create the decimated list of indices for drawing
+                    # Decimate for line drawing
+                    draw_step = max(1, int(points_per_pixel / 4.0))
                     indices_to_draw = range(s_idx, e_idx, draw_step)
-
-                    # Ensure the very last visible point is always included to complete the line segment
                     last_visible_idx = e_idx - 1
                     if last_visible_idx >= s_idx and last_visible_idx not in indices_to_draw:
                         indices_to_draw = list(indices_to_draw) + [last_visible_idx]
                 # --- END: LOD OPTIMIZATION ---
 
-                # --- Draw Lines (Vectorized) ---
-                if len(actions_list) > 1 and visible_actions_indices_range:
-                    if len(indices_to_draw) > 1:
-                        # PERFORMANCE OPTIMIZATION: Use cached arrays to avoid recreating numpy arrays every frame
-                        cached_data = self._get_or_compute_cached_arrays(actions_list)
-                        all_ats, all_poss = cached_data["ats"], cached_data["poss"]
+                # --- Draw Lines OR Dense Envelope (Vectorized) ---
+                # Do not require visible_actions_indices_range; fall back to full-range with LOD
+                if len(actions_list) > 1:
+                    cached_data = self._get_or_compute_cached_arrays(actions_list)
+                    use_envelope = False
+                    if s_idx < e_idx:
+                        visible_count = (e_idx - s_idx)
+                        use_envelope = (points_per_pixel >= 4.0 and visible_count >= 2000)
 
-                        indices_array = np.array(list(indices_to_draw))
-                        p1_indices = indices_array[:-1]
-                        p2_indices = indices_array[1:]
+                    if use_envelope:
+                        # Dense waveform-like envelope to drastically cut draw calls
+                        step_px = max(1, int(points_per_pixel / 2.0))
+                        self._render_dense_envelope(draw_list, canvas_abs_pos, canvas_size, app_state, cached_data, step_px)
+                    else:
+                        if len(indices_to_draw) > 1:
+                            all_ats, all_poss = cached_data["ats"], cached_data["poss"]
 
-                        # Use array indexing on cached arrays instead of list comprehensions
-                        p1_ats = all_ats[p1_indices]
-                        p1_poss = all_poss[p1_indices]
-                        p2_ats = all_ats[p2_indices]
-                        p2_poss = all_poss[p2_indices]
+                            indices_array = np.array(list(indices_to_draw))
+                            p1_indices = indices_array[:-1]
+                            p2_indices = indices_array[1:]
 
-                        x1s = time_to_x_vec(p1_ats)
-                        y1s = pos_to_y_vec(p1_poss)
-                        x2s = time_to_x_vec(p2_ats)
-                        y2s = pos_to_y_vec(p2_poss)
+                            # Use array indexing on cached arrays instead of list comprehensions
+                            p1_ats = all_ats[p1_indices]
+                            p1_poss = all_poss[p1_indices]
+                            p2_ats = all_ats[p2_indices]
+                            p2_poss = all_poss[p2_indices]
 
-                        delta_t_ms_vec = p2_ats - p1_ats
-                        delta_pos_vec = np.abs(p2_poss - p1_poss)
-                        speeds_vec = np.divide(delta_pos_vec, delta_t_ms_vec / 1000.0, out=np.zeros_like(delta_pos_vec),
-                                               where=delta_t_ms_vec > 1e-5)
+                            x1s = time_to_x_vec(p1_ats)
+                            y1s = pos_to_y_vec(p1_poss)
+                            x2s = time_to_x_vec(p2_ats)
+                            y2s = pos_to_y_vec(p2_poss)
 
-                        # PERFORMANCE OPTIMIZATION: Vectorized color calculation (50x faster than individual calls)
-                        colors_rgba = self.app.utility.get_speed_colors_vectorized(speeds_vec)
-                        alpha = 0.2 if self.is_previewing else 1.0
-                        thickness = 1.0 if self.is_previewing else 2.0
+                            delta_t_ms_vec = p2_ats - p1_ats
+                            delta_pos_vec = np.abs(p2_poss - p1_poss)
+                            speeds_vec = np.divide(delta_pos_vec, delta_t_ms_vec / 1000.0, out=np.zeros_like(delta_pos_vec),
+                                                   where=delta_t_ms_vec > 1e-5)
 
-                        canvas_x, canvas_w = canvas_abs_pos[0], canvas_size[0]
-                        canvas_x_end = canvas_x + canvas_w
+                            colors_rgba = self.app.utility.get_speed_colors_vectorized(speeds_vec)
+                            alpha = 0.2 if self.is_previewing else 1.0
+                            thickness = 1.0 if self.is_previewing else 2.0
 
-                        for i in range(len(x1s)):
-                            x1, y1, x2, y2 = x1s[i], y1s[i], x2s[i], y2s[i]
+                            canvas_x, canvas_w = canvas_abs_pos[0], canvas_size[0]
+                            canvas_x_end = canvas_x + canvas_w
 
-                            # Skip lines that are completely outside the horizontal canvas bounds
-                            if (x1 < canvas_x and x2 < canvas_x) or (x1 > canvas_x_end and x2 > canvas_x_end):
-                                continue
-
-                            color = colors_rgba[i]  # Use pre-computed color from vectorized calculation
-                            final_color = imgui.get_color_u32_rgba(color[0], color[1], color[2], color[3] * alpha)
-                            draw_list.add_line(x1, y1, x2, y2, final_color, thickness)
+                            for i in range(len(x1s)):
+                                x1, y1, x2, y2 = x1s[i], y1s[i], x2s[i], y2s[i]
+                                if (x1 < canvas_x and x2 < canvas_x) or (x1 > canvas_x_end and x2 > canvas_x_end):
+                                    continue
+                                color = colors_rgba[i]
+                                final_color = imgui.get_color_u32_rgba(color[0], color[1], color[2], color[3] * alpha)
+                                draw_list.add_line(x1, y1, x2, y2, final_color, thickness)
 
                 # --- RADICAL OPTIMIZATION: Motion-based temporal culling ---
                 current_time = time.time()
@@ -2397,6 +2467,8 @@ class InteractiveFunscriptTimeline:
                     optimization_text = ""
                     if is_fast_scrolling:
                         optimization_text = "Fast Scroll Mode"
+                    elif points_per_pixel >= 4.0 and (e_idx - s_idx) >= 2000:
+                        optimization_text = "Envelope Mode"
                     elif points_per_pixel >= 2.0:
                         optimization_text = "Lines-Only Mode"
                     elif len(indices_to_draw) != len(actions_list):
