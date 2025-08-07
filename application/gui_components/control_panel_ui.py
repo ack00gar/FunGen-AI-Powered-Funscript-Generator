@@ -775,6 +775,77 @@ class ControlPanelUI:
         imgui.pop_item_width()
         _tooltip_if_hovered("Multiplier for keyboard-based timeline panning speed.")
 
+        # --- Timeline Performance & GPU Settings ---
+        imgui.separator()
+        imgui.text("Timeline Performance")
+        
+        # GPU Enable/Disable
+        gpu_enabled = settings.get("timeline_gpu_enabled", False)
+        changed, gpu_enabled = imgui.checkbox("Enable GPU Rendering##GPUTimeline", gpu_enabled)
+        if changed:
+            settings.set("timeline_gpu_enabled", gpu_enabled)
+            app.energy_saver.reset_activity_timer()
+            # Reinitialize GPU if being enabled
+            if gpu_enabled and hasattr(app, '_initialize_gpu_timeline'):
+                app._initialize_gpu_timeline()
+            app.logger.info(
+                f"GPU timeline rendering {'enabled' if gpu_enabled else 'disabled'}",
+                extra={"status_message": True}
+            )
+        _tooltip_if_hovered(
+            "Enable GPU-accelerated timeline rendering for massive performance improvements.\n"
+            "Best for datasets with 10,000+ points. Automatic fallback to CPU if GPU fails."
+        )
+        
+        if gpu_enabled:
+            imgui.text("GPU Threshold")
+            imgui.same_line()
+            imgui.push_item_width(120)
+            gpu_threshold = settings.get("timeline_gpu_threshold_points", 5000)
+            changed, gpu_threshold = imgui.input_int("##GPUThreshold", gpu_threshold)
+            if changed:
+                gpu_threshold = max(1000, min(100000, gpu_threshold))  # Clamp between 1k-100k
+                settings.set("timeline_gpu_threshold_points", gpu_threshold)
+            imgui.pop_item_width()
+            _tooltip_if_hovered("Use GPU rendering when timeline has more than this many points")
+        
+        # Performance indicators
+        show_perf = settings.get("show_timeline_optimization_indicator", False)
+        changed, show_perf = imgui.checkbox("Show Performance Info##PerfIndicator", show_perf)
+        if changed:
+            settings.set("show_timeline_optimization_indicator", show_perf)
+        _tooltip_if_hovered("Display performance indicators on timeline (render time, optimization modes)")
+        
+        # Performance stats (if GPU enabled and available)
+        if gpu_enabled and hasattr(app, 'gpu_integration') and app.gpu_integration:
+            try:
+                stats = app.gpu_integration.get_performance_summary()
+                imgui.text(f"GPU Backend: {stats.get('current_backend', 'Unknown')}")
+                
+                if 'gpu_details' in stats:
+                    gpu_stats = stats['gpu_details']
+                    render_time = gpu_stats.get('render_time_ms', 0)
+                    points_rendered = gpu_stats.get('points_rendered', 0)
+                    imgui.text(f"Last Render: {render_time:.2f}ms, {points_rendered:,} pts")
+                    
+                    # Show GPU performance color coding
+                    if render_time < 5.0:
+                        imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 1.0, 0.0, 1.0)  # Green
+                        imgui.text("Excellent Performance")
+                    elif render_time < 16.67:  # 60fps threshold
+                        imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 0.0, 1.0)  # Yellow
+                        imgui.text("Good Performance")
+                    else:
+                        imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.5, 0.0, 1.0)  # Orange
+                        imgui.text("High Load")
+                    imgui.pop_style_color()
+            except Exception as e:
+                imgui.text_disabled(f"GPU stats unavailable: {str(e)[:30]}...")
+        elif gpu_enabled:
+            imgui.text_disabled("GPU not available - using CPU fallback")
+        
+        imgui.separator()
+
         imgui.text("Video Decoding")
         imgui.same_line()
         imgui.push_item_width(180)

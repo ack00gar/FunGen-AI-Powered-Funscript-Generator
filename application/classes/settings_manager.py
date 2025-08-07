@@ -48,6 +48,12 @@ class AppSettings:
             "show_funscript_interactive_timeline": True,
             "show_funscript_interactive_timeline2": False,
             "show_funscript_timeline": True,
+            
+            # Timeline Performance & GPU Settings
+            "timeline_gpu_enabled": True,  # GPU rendering enabled by default for better performance
+            "timeline_gpu_threshold_points": 5000,  # Use GPU above this point count
+            "show_timeline_optimization_indicator": False,  # Performance indicators hidden by default
+            "timeline_performance_logging": False,  # Log timeline performance stats
             "show_heatmap": True,
             "use_simplified_funscript_preview": False,
             "show_stage2_overlay": True,
