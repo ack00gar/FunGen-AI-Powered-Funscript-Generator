@@ -21,25 +21,26 @@ dependencies = [
     "rdp>=0.8",
     "send2trash>=1.8.3",
     "aiosqlite>=0.21.0",
+    "sympy>=1.13.1",
 ]
 
 [project.optional-dependencies]
 cpu = [
-  "torch>=2.5.0,<2.6",
+  "torch>=2.8,<2.9",
   "torchvision>=0.20.1",
 ]
 cuda = [
-  "torch>=2.5.0,<2.6",
+  "torch>=2.8,<2.9",
   "torchvision>=0.20.1",
   "tensorrt",
 ]
 cuda-rtx50 = [
-  "torch>=2.7,<2.8",
+  "torch>=2.8,<2.9",
   "torchvision>=0.22.1",
   "tensorrt",
 ]
 rocm = [
-  "torch>=2.5.0,<2.6",
+  "torch>=2.8,<2.9",
   "torchvision>=0.20.1",
   "pytorch-triton-rocm",
 ]
@@ -78,16 +79,16 @@ explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-cuda"
-url = "https://download.pytorch.org/whl/cu121"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cuda-rtx50"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [[tool.uv.index]]
+name = "pytorch-cuda-rtx50"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
 name = "pytorch-rocm"
-url = "https://download.pytorch.org/whl/rocm6.2"
+url = "https://download.pytorch.org/whl/rocm6.4"
 explicit = true
 
