@@ -1523,6 +1523,14 @@ class ControlPanelUI:
                 tr = app.tracker
                 if tr:
                     tr.update_oscillation_grid_size()
+        imgui.same_line()
+        if imgui.button("Reset##ResetGridSize"):
+            default_grid = 20
+            if cur_grid != default_grid:
+                settings.set("oscillation_detector_grid_size", default_grid)
+                tr = app.tracker
+                if tr:
+                    tr.update_oscillation_grid_size()
         imgui.pop_item_width()
 
         imgui.text("Detection Sensitivity")
@@ -1539,6 +1547,14 @@ class ControlPanelUI:
             tr = app.tracker
             if tr:
                 tr.update_oscillation_sensitivity()
+        imgui.same_line()
+        if imgui.button("Reset##ResetSensitivity"):
+            default_sens = 1.0
+            if cur_sens != default_sens:
+                settings.set("oscillation_detector_sensitivity", default_sens)
+                tr = app.tracker
+                if tr:
+                    tr.update_oscillation_sensitivity()
         imgui.pop_item_width()
         imgui.separator()
 
@@ -1599,6 +1615,11 @@ class ControlPanelUI:
             ch, nv = imgui.slider_int("##LiveAmpWindow", cur_ms, 1000, 10000)
             if ch and nv != cur_ms:
                 settings.set("live_oscillation_amp_window_ms", nv)
+            imgui.same_line()
+            if imgui.button("Reset##ResetAmpWindow"):
+                default_ms = 4000
+                if cur_ms != default_ms:
+                    settings.set("live_oscillation_amp_window_ms", default_ms)
             imgui.pop_item_width()
 
 # ---------------- Class filtering ----------------
