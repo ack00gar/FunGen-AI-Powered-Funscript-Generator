@@ -1077,6 +1077,37 @@ class ApplicationLogic:
         self.exit_set_user_roi_mode()
         self.energy_saver.reset_activity_timer()
 
+    def clear_all_overlays_and_ui_drawings(self) -> None:
+        """Clears all drawn visuals on the video regardless of current mode.
+        This includes: manual ROI & point, oscillation area & grid, YOLO ROI box,
+        and any in-progress UI drawing states.
+        """
+        # Clear tracker-side overlays/state
+        if self.tracker and hasattr(self.tracker, 'clear_all_drawn_overlays'):
+            self.tracker.clear_all_drawn_overlays()
+
+        # Clear any UI-side drawing state (ROI/oscillation drawing in progress)
+        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):
+            vdui = self.gui_instance.video_display_ui
+            # User ROI drawing state
+            vdui.is_drawing_user_roi = False
+            vdui.drawn_user_roi_video_coords = None
+            vdui.waiting_for_point_click = False
+            vdui.user_roi_draw_start_screen_pos = (0, 0)
+            vdui.user_roi_draw_current_screen_pos = (0, 0)
+
+            # Oscillation area drawing state
+            if hasattr(vdui, 'is_drawing_oscillation_area'):
+                vdui.is_drawing_oscillation_area = False
+            if hasattr(vdui, 'drawn_oscillation_area_video_coords'):
+                vdui.drawn_oscillation_area_video_coords = None
+            if hasattr(vdui, 'waiting_for_oscillation_point_click'):
+                vdui.waiting_for_oscillation_point_click = False
+            if hasattr(vdui, 'oscillation_area_draw_start_screen_pos'):
+                vdui.oscillation_area_draw_start_screen_pos = (0, 0)
+            if hasattr(vdui, 'oscillation_area_draw_current_screen_pos'):
+                vdui.oscillation_area_draw_current_screen_pos = (0, 0)
+
     def enter_set_oscillation_area_mode(self):
         if self.processor and self.processor.is_processing:
             self.processor.pause_processing()  # Pause if playing/tracking

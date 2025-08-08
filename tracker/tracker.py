@@ -467,29 +467,54 @@ class ROITracker:
     def set_tracking_mode(self, mode: str):
         if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR", "YOLO_OSCILLATION"]:
             if self.tracking_mode != mode:
+                previous_mode = self.tracking_mode
                 self.tracking_mode = mode
-                self.logger.info(f"Tracker mode set to: {self.tracking_mode}")
-                # DO NOT STOP TRACKING. This allows for seamless transitions.
-                # Instead, clear the state relevant to the new mode.
-                if mode == "YOLO_ROI":
-                    self.clear_user_defined_roi_and_point()
-                    # Also clear YOLO-specific state for a clean transition
-                    self.prev_gray_main_roi, self.prev_features_main_roi = None, None
-                    self.roi = None
-                elif mode == "USER_FIXED_ROI":
-                    # When switching to user ROI, invalidate any existing YOLO ROI
-                    self.roi = None
-                    self.penis_last_known_box = None
-                    self.main_interaction_class = None
-                    # Clear flow history to prevent using old data in the new fixed ROI
-                    self.primary_flow_history_smooth.clear()
-                    self.secondary_flow_history_smooth.clear()
-                elif mode == "OSCILLATION_DETECTOR":
-                    self.yolo_oscillation_active = False
-                elif mode == "YOLO_OSCILLATION":
-                    self.yolo_oscillation_active = True
+                self.logger.info(f"Tracker mode changed: {previous_mode} -> {self.tracking_mode}")
+                # Log state before and after clearing to help debug
+                try:
+                    self.logger.info(
+                        f"Before clear overlays: user_roi_fixed={self.user_roi_fixed}, user_roi_initial_point_relative={self.user_roi_initial_point_relative}, "
+                        f"yolo_roi={self.roi}, osc_area={getattr(self, 'oscillation_area_fixed', None)}, "
+                        f"osc_grid_blocks={len(getattr(self, 'oscillation_grid_blocks', []))}"
+                    )
+                except Exception:
+                    pass
+                # Clear ALL drawn overlays when switching modes (ROI rectangles, oscillation area, YOLO ROI box)
+                self.clear_all_drawn_overlays()
+                try:
+                    self.logger.info(
+                        f"After clear overlays: user_roi_fixed={self.user_roi_fixed}, user_roi_initial_point_relative={self.user_roi_initial_point_relative}, "
+                        f"yolo_roi={self.roi}, osc_area={getattr(self, 'oscillation_area_fixed', None)}, "
+                        f"osc_grid_blocks={len(getattr(self, 'oscillation_grid_blocks', []))}"
+                    )
+                except Exception:
+                    pass
+                # Set mode-specific flags
+                self.yolo_oscillation_active = (mode == "YOLO_OSCILLATION")
         else:
             self.logger.warning(f"Attempted to set invalid tracking mode: {mode}")
+
+    def clear_all_drawn_overlays(self) -> None:
+        """Clears any visuals drawn on the video (ROI rectangles, oscillation area, YOLO ROI box).
+        Also resets flags so UI does not re-render stale overlays.
+        """
+        self.logger.info("clear_all_drawn_overlays: invoked")
+        # Clear manual user ROI and point
+        if self.user_roi_fixed is not None or self.user_roi_initial_point_relative is not None:
+            self.logger.info(f"Clearing user ROI: {self.user_roi_fixed}, point_rel={self.user_roi_initial_point_relative}")
+        self.clear_user_defined_roi_and_point()
+        # Clear oscillation visualization
+        if hasattr(self, 'clear_oscillation_area_and_point') and getattr(self, 'oscillation_area_fixed', None) is not None:
+            self.logger.info(f"Clearing oscillation area: {self.oscillation_area_fixed} with {len(getattr(self, 'oscillation_grid_blocks', []))} blocks")
+            self.clear_oscillation_area_and_point()
+        # Clear YOLO ROI box and related state
+        if self.roi is not None:
+            self.logger.info(f"Clearing YOLO ROI: {self.roi}")
+        self.roi = None
+        self.prev_gray_main_roi = None
+        self.prev_features_main_roi = None
+        self.penis_last_known_box = None
+        self.main_interaction_class = None
 
     def reconfigure_for_chapter(self, chapter):  # video_segment.VideoSegment
         """Reconfigures the tracker using ROI data from a chapter."""
@@ -671,6 +696,9 @@ class ROITracker:
         self.oscillation_area_tracked_point_relative = None
         self.prev_gray_oscillation_area_patch = None
         self.oscillation_grid_blocks = []
+        # Also clear any active grid state to avoid lingering visuals
+        if hasattr(self, 'oscillation_active_block_positions'):
+            self.oscillation_active_block_positions = set()
         self.logger.info("Oscillation area and point cleared.")
 
     def _get_effective_amplification_factor(self) -> float:
@@ -1501,8 +1529,11 @@ class ROITracker:
 
     def reset(self, reason: Optional[str] = None):
         self.stop_tracking()  # Explicitly set tracking_active to False.
-        self.clear_user_defined_roi_and_point()
-        self.set_tracking_mode("YOLO_ROI")  # Default mode on full reset
+        preserve_user_roi = (reason == "stop_preserve_funscript")
+        if not preserve_user_roi:
+            # Full reset clears any user-defined ROI/point and returns to default mode
+            self.clear_user_defined_roi_and_point()
+            self.set_tracking_mode("YOLO_ROI")  # Default mode on full reset
 
         # Clear all relevant state variables to ensure a clean slate
         self.internal_frame_counter = 0
