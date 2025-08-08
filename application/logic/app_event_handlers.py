@@ -139,7 +139,11 @@ class AppEventHandlers:
 
         if current_tracker_mode == "USER_FIXED_ROI":
             # Check for a global ROI OR a chapter-specific ROI at the current frame
-            has_global_roi = bool(self.app.tracker.user_roi_fixed and self.app.tracker.user_roi_initial_point_relative)
+            has_global_roi = bool(
+                self.app.tracker.user_roi_fixed and (
+                    self.app.tracker.user_roi_initial_point_relative or self.app.tracker.user_roi_tracked_point_relative
+                )
+            )
 
             has_chapter_roi_at_current_frame = False
             if not has_global_roi:
@@ -150,9 +154,13 @@ class AppEventHandlers:
                         has_chapter_roi_at_current_frame = True
 
             if not has_global_roi and not has_chapter_roi_at_current_frame:
-                self.logger.info("User Defined ROI: Please set a global ROI or a chapter-specific ROI for the current position first.",
-                                 extra={'status_message': True, 'duration': 5.0})
+                self.logger.info("User Defined ROI: Please set a global ROI or a chapter-specific ROI for the current position first.", extra={'status_message': True, 'duration': 5.0})
                 return
+
+            if has_global_roi and self.app.tracker.user_roi_fixed and \
+               not self.app.tracker.user_roi_initial_point_relative and \
+               self.app.tracker.user_roi_tracked_point_relative:
+                self.app.tracker.user_roi_initial_point_relative = self.app.tracker.user_roi_tracked_point_relative
             self.logger.info("Starting User Defined ROI tracking.")
         elif current_tracker_mode == "YOLO_ROI":
             self.logger.info("Starting Live Tracker (YOLO_ROI mode - if applicable).")

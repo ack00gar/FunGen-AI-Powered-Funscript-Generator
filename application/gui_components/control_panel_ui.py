@@ -280,36 +280,48 @@ class ControlPanelUI:
             "Offline AI Analysis: High quality, uses AI for object detection"
         )
         if clicked and new_idx != cur_idx:
-            app_state.selected_tracker_mode = modes_enum[new_idx]
+            new_mode = modes_enum[new_idx]
+            # Clear overlays only when switching modes
+            if app_state.selected_tracker_mode != new_mode:
+                if hasattr(app, 'logger') and app.logger:
+                    app.logger.info(f"UI(Simple): Mode change requested {app_state.selected_tracker_mode} -> {new_mode}. Clearing overlays.")
+                if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
+                    app.clear_all_overlays_and_ui_drawings()
+            app_state.selected_tracker_mode = new_mode
 
-        imgui.separator()
-        self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
-        imgui.separator()
+        # imgui.separator()
         self._render_execution_progress_display()
+        # imgui.separator()
+        self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
         imgui.end()
 
     def _render_processing_speed_controls(self, app_state):
         app = self.app
         processor = app.processor
         selected_mode = app_state.selected_tracker_mode
-        is_live_mode = selected_mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR)
+        is_live_mode = selected_mode in (
+            self.TrackerMode.LIVE_YOLO_ROI,
+            self.TrackerMode.LIVE_USER_ROI,
+            self.TrackerMode.OSCILLATION_DETECTOR,
+            self.TrackerMode.LIVE_YOLO_OSCILLATION,
+        )
         is_playback_active = processor and processor.is_processing and not processor.enable_tracker_processing
 
         if not (is_live_mode or is_playback_active):
             return
 
-        if processor:
-            imgui.text(f"Actual FPS: {processor.actual_fps:.1f}")
+        # if processor:
+        #     imgui.text(f"Actual FPS: {processor.actual_fps:.1f}")
 
         if not app_state.show_video_feed:  # video feed not visible
             app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.MAX_SPEED
             return
 
-
+        
         self._section_header(">> Processing Speed", "Control the processing speed for live analysis")
 
         current_speed_mode = app_state.selected_processing_speed_mode
-        
+ 
         if imgui.radio_button("Real Time", current_speed_mode == config.ProcessingSpeedMode.REALTIME):
             app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.REALTIME
         imgui.same_line()
@@ -318,9 +330,6 @@ class ControlPanelUI:
         imgui.same_line()
         if imgui.radio_button("Max Speed", current_speed_mode == config.ProcessingSpeedMode.MAX_SPEED):
             app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.MAX_SPEED
-
-        #if processor:
-        #    imgui.text(f"Actual FPS: {processor.actual_fps:.1f}")
 
     def _render_run_control_tab(self):
         app = self.app
@@ -358,7 +367,7 @@ class ControlPanelUI:
                 app_state.selected_tracker_mode = modes_enum[cur_idx]
 
             clicked, new_idx = imgui.combo(
-                "Tracker Type##TrackerModeCombo", cur_idx, modes_display
+                "##TrackerModeCombo", cur_idx, modes_display
             )
             self._help_tooltip(
                 "Choose analysis method:\n"
@@ -371,6 +380,12 @@ class ControlPanelUI:
 
         if clicked and new_idx != cur_idx:
             new_mode = modes_enum[new_idx]
+            # Clear all overlays only when switching to a different mode
+            if app_state.selected_tracker_mode != new_mode:
+                if hasattr(app, 'logger') and app.logger:
+                    app.logger.info(f"UI(RunTab): Mode change requested {app_state.selected_tracker_mode} -> {new_mode}. Clearing overlays.")
+                if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
+                    app.clear_all_overlays_and_ui_drawings()
             app_state.selected_tracker_mode = new_mode
             tr = app.tracker
             if tr:
@@ -383,10 +398,21 @@ class ControlPanelUI:
                 else:
                     tr.set_tracking_mode("YOLO_ROI")
 
+        proc = app.processor
+        video_loaded = proc and proc.is_video_open()
+        processing_active = stage_proc.full_analysis_active
+        disable_after = (not video_loaded) or processing_active
+
+        with _DisabledScope(disable_after):
+            
+            self._render_execution_progress_display()
+        # imgui.separator()
+
         self._render_processing_speed_controls(app_state)
 
+        
         self._section_header(
-            ">> Output Configuration", "Configure which movement axes to track and output"
+            ">> Tracking", "Configure which movement axes to track and output"
         )
         self._render_tracking_axes_mode(stage_proc)
 
@@ -408,7 +434,7 @@ class ControlPanelUI:
                     self._render_range_selection(stage_proc, fs_proc, events)
 
                     if mode in (tracker_mode.OFFLINE_2_STAGE, tracker_mode.OFFLINE_3_STAGE):
-                        imgui.separator()
+                        # imgui.separator()
                         imgui.text("Stage Reruns:")
                         with _DisabledScope(disable_combo):
                             _, stage_proc.force_rerun_stage1 = imgui.checkbox(
@@ -420,7 +446,7 @@ class ControlPanelUI:
                                 "Force Re-run S2 Chapter Creation##ForceRerunS2",
                                 stage_proc.force_rerun_stage2_segmentation,
                             )
-                            imgui.separator()
+                            # imgui.separator()
                             if not hasattr(stage_proc, "save_preprocessed_video"):
                                 stage_proc.save_preprocessed_video = app.app_settings.get(
                                     "save_preprocessed_video", False
@@ -453,32 +479,24 @@ class ControlPanelUI:
                                 "Disable to save disk space (database is automatically deleted).\n" 
                                 "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
                             )
-            imgui.separator()
-
-        self._render_start_stop_buttons(stage_proc, fs_proc, events)
-        # Show YOLO + Oscillation settings in Run Control tab when applicable
-        if app_state.selected_tracker_mode == tracker_mode.LIVE_YOLO_OSCILLATION:
-            imgui.separator()
-            open_, _ = imgui.collapsing_header(
-                "YOLO + Oscillation Settings##RunYOLOOscillation",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
-            )
-            if open_:
-                self._render_yolo_oscillation_settings()
-                # Processing speed controls apply to this mode too
-                imgui.separator()
-                imgui.text("Frame Processing Speed")
-                self._render_processing_speed_controls(app_state)
-        imgui.separator()
+            # imgui.separator()
 
         proc = app.processor
         video_loaded = proc and proc.is_video_open()
         processing_active = stage_proc.full_analysis_active
         disable_after = (not video_loaded) or processing_active
 
-        with _DisabledScope(disable_after):
-            self._render_execution_progress_display()
-        imgui.separator()
+        self._render_start_stop_buttons(stage_proc, fs_proc, events)
+        # Show YOLO + Oscillation settings in Run Control tab when applicable
+        if app_state.selected_tracker_mode == tracker_mode.LIVE_YOLO_OSCILLATION:
+            # imgui.separator()
+            open_, _ = imgui.collapsing_header(
+                "YOLO + Oscillation Settings##RunYOLOOscillation",
+                flags=imgui.TREE_NODE_DEFAULT_OPEN,
+            )
+            if open_:
+                self._render_yolo_oscillation_settings()
+        # imgui.separator()
 
         self._render_interactive_refinement_controls()
 
@@ -510,7 +528,7 @@ class ControlPanelUI:
             imgui.set_tooltip(
                 "Requires a video to be loaded and no other process to be active."
             )
-        imgui.separator()
+        # imgui.separator()
 
     def _render_configuration_tab(self):
         app = self.app
@@ -528,12 +546,12 @@ class ControlPanelUI:
         ):
             if imgui.collapsing_header("AI Models & Inference##ConfigAIModels")[0]:
                 self._render_ai_model_settings()
-            imgui.separator()
+            # imgui.separator()
 
         adv = app.app_state_ui.show_advanced_options
         if tmode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_YOLO_OSCILLATION, self.TrackerMode.LIVE_USER_ROI) and adv:
             self._render_live_tracker_settings()
-            imgui.separator()
+            # imgui.separator()
 
         if tmode in (
             self.TrackerMode.LIVE_YOLO_ROI,
@@ -547,7 +565,6 @@ class ControlPanelUI:
         if tmode == self.TrackerMode.OSCILLATION_DETECTOR:
             if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector")[0]:
                 self._render_oscillation_detector_settings()
-        # Moved YOLO + Oscillation settings into Run Control tab
 
         with_config = {
             self.TrackerMode.LIVE_YOLO_ROI,
@@ -571,24 +588,24 @@ class ControlPanelUI:
             flags=imgui.TREE_NODE_DEFAULT_OPEN,
         )[0]:
             self._render_settings_interface_perf()
-            imgui.separator()
+            # imgui.separator()
             # self._render_performance_info()  # Removed from settings tab
-        imgui.separator()
+        # imgui.separator()
 
         if imgui.collapsing_header(
             "File & Output##SettingsMenuOutput", flags=imgui.TREE_NODE_DEFAULT_OPEN
         )[0]:
             self._render_settings_file_output()
-        imgui.separator()
+        # imgui.separator()
 
         if app_state.show_advanced_options:
             if imgui.collapsing_header("Logging & Autosave##SettingsMenuLogging")[0]:
                 self._render_settings_logging_autosave()
-            imgui.separator()
+            # imgui.separator()
 
             if imgui.collapsing_header("View/Edit Hotkeys##FSHotkeysMenuSettingsDetail")[0]:
                 self._render_settings_hotkeys()
-            imgui.separator()
+            # imgui.separator()
         imgui.spacing()
 
         if imgui.button("Reset All Settings to Default##ResetAllSettingsButton", width=-1):
@@ -600,7 +617,7 @@ class ControlPanelUI:
             imgui.text("This will reset all application settings to their defaults.")
             imgui.text("Your projects will not be affected.")
             imgui.text("This action cannot be undone.")
-            imgui.separator()
+            # imgui.separator()
 
             avail_w = imgui.get_content_region_available_width()
             pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
@@ -623,7 +640,7 @@ class ControlPanelUI:
             "Manual Adjustments##PostProcManual", flags=imgui.TREE_NODE_DEFAULT_OPEN
         )[0]:
             self._render_funscript_processing_tools(app.funscript_processor, app.event_handlers)
-        imgui.separator()
+        # imgui.separator()
         if imgui.collapsing_header("Automated Post-Processing##PostProcAuto")[0]:
             self._render_automatic_post_processing_new(app.funscript_processor)
 
@@ -691,7 +708,7 @@ class ControlPanelUI:
             % self.AI_modelTooltipExtensions
         )
 
-        imgui.separator()
+        # imgui.separator()
         imgui.text("Pose Model Artifacts Dir")
         dir_input_w = avail_w - browse_w - style.item_spacing.x if avail_w > browse_w else -1
         _readonly_input("##PoseArtifactsDirPath", app.pose_model_artifacts_dir, dir_input_w)
@@ -709,11 +726,11 @@ class ControlPanelUI:
             "Path to the folder containing your trained classifier,\n"
             "imputer, and other .joblib model artifacts."
         )
-        imgui.separator()
+        # imgui.separator()
 
         mode = app.app_state_ui.selected_tracker_mode
         if mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE):
-            imgui.separator()
+            # imgui.separator()
             imgui.text("Stage 1 Inference Workers:")
             imgui.push_item_width(100)
             is_save_pre = getattr(stage_proc, "save_preprocessed_video", False)
@@ -768,7 +785,7 @@ class ControlPanelUI:
         settings = app.app_settings
 
         imgui.text("Detection Parameters")
-        imgui.separator()
+        # imgui.separator()
 
         # Target class
         classes_raw = getattr(tr, 'classes', None)
@@ -874,7 +891,7 @@ class ControlPanelUI:
         _tooltip_if_hovered("Multiplier for keyboard-based timeline panning speed.")
 
         # --- Timeline Performance & GPU Settings ---
-        imgui.separator()
+        # imgui.separator()
         imgui.text("Timeline Performance")
         
         # GPU Enable/Disable
@@ -942,7 +959,7 @@ class ControlPanelUI:
         elif gpu_enabled:
             imgui.text_disabled("GPU not available - using CPU fallback")
         
-        imgui.separator()
+        # imgui.separator()
 
         imgui.text("Video Decoding")
         imgui.same_line()
@@ -967,7 +984,7 @@ class ControlPanelUI:
         _tooltip_if_hovered(
             "Select FFmpeg hardware acceleration. Requires video reload to apply."
         )
-        imgui.separator()
+        # imgui.separator()
 
         imgui.text("Energy Saver Mode:")
         ch_es, v_es = imgui.checkbox("Enable##EnableES", energy.energy_saver_enabled)
@@ -1021,7 +1038,7 @@ class ControlPanelUI:
             settings.set("output_folder_path", new_val)
         imgui.pop_item_width()
         _tooltip_if_hovered("Root folder for all generated files (projects, analysis data, etc.).")
-        imgui.separator()
+        # imgui.separator()
 
         imgui.text("Funscript Output:")
         ch, v = imgui.checkbox(
@@ -1036,7 +1053,7 @@ class ControlPanelUI:
         )
         if ch:
             settings.set("generate_roll_file", v)
-        imgui.separator()
+        # imgui.separator()
 
         imgui.text("Batch Processing Default:")
         cur = settings.get("batch_mode_overwrite_strategy", 0)
@@ -1067,7 +1084,7 @@ class ControlPanelUI:
             if new_level != app.logging_level_setting.upper():
                 app.set_application_logging_level(new_level)
         imgui.pop_item_width()
-        imgui.separator()
+        # imgui.separator()
 
         imgui.text("Project Autosave:")
         ch, v = imgui.checkbox(
@@ -1125,11 +1142,12 @@ class ControlPanelUI:
             self._render_stage_progress_ui(stage_proc)
             return
 
-        if mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI):
+        if mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.LIVE_YOLO_OSCILLATION):
             tr = app.tracker
-            imgui.text("Live Tracker Status:")
+            imgui.text(">> Tracker Status")
+            imgui.separator()
             fps = (tr.current_fps if tr else 0.0)
-            imgui.text("  - Actual FPS: %.1f" % (fps if isinstance(fps, (int, float)) else 0.0))
+            imgui.text(" - Actual FPS: %.1f" % (fps if isinstance(fps, (int, float)) else 0.0))
             roi_status = "Not Set"
             if tr:
                 if mode == self.TrackerMode.LIVE_YOLO_ROI:
@@ -1140,13 +1158,11 @@ class ControlPanelUI:
                     )
                 else:
                     roi_status = "Set" if getattr(tr, "user_roi_fixed", False) else "Not Set"
-            imgui.text("  - ROI Status: %s" % roi_status)
+            imgui.text(" - ROI Status: %s" % roi_status)
 
             if mode == self.TrackerMode.LIVE_USER_ROI:
                 self._render_user_roi_controls_for_run_tab()
             return
-
-        imgui.text_disabled("No execution monitoring for this mode.")
 
 # ---------------- Live tracker settings ----------------
 
@@ -1286,7 +1302,7 @@ class ControlPanelUI:
                     settings.set("live_tracker_class_amp_multipliers", cur)
                     tr.class_specific_amplification_multipliers = cur
 
-                imgui.separator()
+                # imgui.separator()
 
             cur_smooth = settings.get("live_tracker_flow_smoothing_window")
             ch, nv = imgui.input_int(
@@ -1298,7 +1314,7 @@ class ControlPanelUI:
                     settings.set("live_tracker_flow_smoothing_window", v)
                     tr.flow_history_window_smooth = v
 
-            imgui.separator()
+            # imgui.separator()
             imgui.text("Output Delay (frames):")
             cur_delay = settings.get("funscript_output_delay_frames")
             ch, nd = imgui.slider_int("##OutputDelayFrames", cur_delay, 0, 20)
@@ -1481,7 +1497,7 @@ class ControlPanelUI:
             imgui.pop_style_color()
         else:
             imgui.text_wrapped(f"Status: {stage_proc.stage1_status_text}")
-        imgui.separator()
+        # imgui.separator()
 
         # Stage 2
         s2_title = "Stage 2: Contact Analysis & Funscript" if selected_mode == self.TrackerMode.OFFLINE_2_STAGE else "Stage 2: Segmentation"
@@ -1516,7 +1532,7 @@ class ControlPanelUI:
             imgui.pop_style_color()
         else:
             imgui.text_wrapped(f"Status: {stage_proc.stage2_status_text}")
-        imgui.separator()
+        # imgui.separator()
 
         # Stage 3
         if selected_mode == self.TrackerMode.OFFLINE_3_STAGE:
@@ -1559,15 +1575,13 @@ class ControlPanelUI:
         disable_axis_controls = (
             stage_proc.full_analysis_active
             or self.app.is_setting_user_roi_mode
-            or (
-                processor and processor.is_processing and not processor.pause_event.is_set() and not self._is_normal_playback_mode()
-            )
+            or (processor and processor.is_processing and not processor.pause_event.is_set() and not self._is_normal_playback_mode())
         )
         if disable_axis_controls:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-        axis_mode_changed, new_axis_mode_idx = imgui.combo("Tracking Axes##TrackingAxisModeComboGlobal", current_axis_mode_idx, axis_modes)
+        axis_mode_changed, new_axis_mode_idx = imgui.combo("##TrackingAxisModeComboGlobal", current_axis_mode_idx, axis_modes)
         if axis_mode_changed:
             old_mode = self.app.tracking_axis_mode
             if new_axis_mode_idx == 0:
@@ -1654,7 +1668,7 @@ class ControlPanelUI:
                 if tr:
                     tr.update_oscillation_sensitivity()
         imgui.pop_item_width()
-        imgui.separator()
+        # imgui.separator()
 
         imgui.text("Oscillation Area Selection")
         _tooltip_if_hovered(
@@ -1694,7 +1708,7 @@ class ControlPanelUI:
                     v.oscillation_area_draw_start_screen_pos = (0, 0)
                     v.oscillation_area_draw_current_screen_pos = (0, 0)
                 app.logger.info("Oscillation area cleared.", extra={"status_message": True})
-        imgui.separator()
+        # imgui.separator()
 
         imgui.text("Live Signal Amplification")
         _tooltip_if_hovered(
@@ -1865,7 +1879,7 @@ class ControlPanelUI:
 
         if disabled and imgui.is_item_hovered():
             imgui.set_tooltip("Refinement is disabled while another process is active.")
-        imgui.separator()
+        # imgui.separator()
 
 # ---------------- Post-processing helpers ----------------
 
@@ -1878,7 +1892,7 @@ class ControlPanelUI:
             imgui.columns(2, "profile_settings", border=False)
 
             imgui.text("Amplification")
-            imgui.separator()
+            # imgui.separator()
 
             imgui.text("Scale")
             imgui.next_column()
@@ -1932,7 +1946,7 @@ class ControlPanelUI:
             imgui.columns(2, "profile_settings_2", border=False)
 
             imgui.text("Smoothing (SG Filter)")
-            imgui.separator()
+            # imgui.separator()
 
             imgui.text("Window")
             imgui.next_column()
@@ -1961,7 +1975,7 @@ class ControlPanelUI:
             imgui.next_column()
 
             imgui.text("Simplification (RDP)")
-            imgui.separator()
+            # imgui.separator()
 
             imgui.text("Epsilon")
             imgui.next_column()
@@ -2030,12 +2044,12 @@ class ControlPanelUI:
                 "If checked, the profiles below will be applied automatically\n"
                 "after an offline analysis or live tracking session finishes."
             )
-            imgui.separator()
+            # imgui.separator()
 
             if imgui.button("Run Post-Processing Now##RunAutoPostProcessButton", width=-1):
                 if hasattr(fs_proc, "apply_automatic_post_processing"):
                     fs_proc.apply_automatic_post_processing()
-            imgui.separator()
+            # imgui.separator()
 
             use_chapter = app.app_settings.get("auto_processing_use_chapter_profiles", True)
             ch, nv = imgui.checkbox(
@@ -2047,7 +2061,7 @@ class ControlPanelUI:
                 "If checked, applies specific profiles below to each chapter.\n"
                 "If unchecked, applies only the 'Default' profile to the entire script."
             )
-            imgui.separator()
+            # imgui.separator()
 
             config = app.app_settings.get("auto_post_processing_amplification_config", {})
             config_copy = config.copy()
@@ -2077,7 +2091,7 @@ class ControlPanelUI:
                 app.app_settings.set("auto_post_processing_amplification_config", config_copy)
                 app.project_manager.project_dirty = True
 
-            imgui.separator()
+            # imgui.separator()
             if imgui.button("Reset All Profiles to Defaults##ResetAutoPostProcessing", width=-1):
                 app.app_settings.set(
                     "auto_post_processing_amplification_config",
@@ -2088,7 +2102,7 @@ class ControlPanelUI:
                     "All post-processing profiles reset to defaults.",
                     extra={"status_message": True},
                 )
-            imgui.separator()
+            # imgui.separator()
 
             imgui.text("Final Smoothing Pass")
             en = app.app_settings.get("auto_post_proc_final_rdp_enabled", False)
@@ -2214,11 +2228,10 @@ class ControlPanelUI:
         """Render UI controls for selecting which movement axes to track and output."""
         app = self.app
         
-        imgui.text("Tracking Axes")
+        imgui.text("Axis:")
         imgui.same_line()
-        imgui.push_item_width(120)
-        
-        axis_mode_opts = ["Both Axes", "Vertical Only", "Horizontal Only"]
+        imgui.push_item_width(100)
+        axis_mode_opts = ["Both", "Vertical", "Horizontal"]
         current_mode_idx = 0
         if app.tracking_axis_mode == "vertical":
             current_mode_idx = 1
@@ -2240,11 +2253,11 @@ class ControlPanelUI:
         # Show single axis output target when not tracking both axes
         if app.tracking_axis_mode != "both":
             imgui.same_line()
-            imgui.push_item_width(100)
-            output_target_opts = ["Primary", "Secondary"]
+            imgui.push_item_width(120)
+            output_target_opts = ["Primary Timeline", "Secondary Timeline"]
             current_target_idx = 0 if app.single_axis_output_target == "primary" else 1
             
-            changed, new_target_idx = imgui.combo("Output##SingleAxisOutput", current_target_idx, output_target_opts)
+            changed, new_target_idx = imgui.combo("##SingleAxisOutput", current_target_idx, output_target_opts)
             if changed:
                 app.single_axis_output_target = "primary" if new_target_idx == 0 else "secondary"
                 app.app_settings.set("single_axis_output_target", app.single_axis_output_target)
@@ -2253,7 +2266,7 @@ class ControlPanelUI:
             
         _tooltip_if_hovered(
             "Select which movement axes to track during analysis.\n"
-            "'Both Axes' tracks vertical and horizontal movement.\n"
+            "'Both Axis' tracks vertical and horizontal movement.\n"
             "'Vertical Only' or 'Horizontal Only' tracks only one axis.\n"
             "When tracking a single axis, choose which axis to output."
         )
@@ -2278,6 +2291,8 @@ class ControlPanelUI:
         
         # Start button
         with _DisabledScope(not can_start):
+            
+            imgui.separator()
             if imgui.button("Start Analysis", width=120):
                 if app_state.selected_tracker_mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE):
                     event_handlers.handle_start_ai_cv_analysis()
@@ -2291,7 +2306,6 @@ class ControlPanelUI:
                 imgui.set_tooltip("Please complete ROI selection first.")
             else:
                 imgui.set_tooltip("Analysis already in progress.")
-        
         imgui.same_line()
         
         # Stop/Abort button
@@ -2311,7 +2325,7 @@ class ControlPanelUI:
             imgui.text_colored("Analysis Running...", *config.ControlPanelColors.STATUS_READY)
         elif is_live_tracking_running:
             imgui.same_line()
-            imgui.text_colored("Live Tracking...", *config.ControlPanelColors.STATUS_INFO)
+            imgui.text_colored("Tracking...", *config.ControlPanelColors.STATUS_INFO)
 
     # ---------------- Post-processing manual tools ----------------
 
@@ -2327,7 +2341,7 @@ class ControlPanelUI:
             ch, nidx = imgui.combo("Target Axis##ProcAxis", cur_idx, axis_opts)
             if ch and nidx != cur_idx:
                 event_handlers.set_selected_axis_for_processing("primary" if nidx == 0 else "secondary")
-            imgui.separator()
+            # imgui.separator()
 
             imgui.text("Apply To:")
             range_label = fs_proc.get_operation_target_range_label()
@@ -2359,7 +2373,7 @@ class ControlPanelUI:
                             extra={"status_message": True},
                         )
 
-            imgui.separator()
+            # imgui.separator()
             imgui.text("Points operations")
             if imgui.button("Clamp to 0##Clamp0"):
                 prep_op()
@@ -2377,7 +2391,7 @@ class ControlPanelUI:
                 prep_op()
                 fs_proc.handle_funscript_operation("clear")
 
-            imgui.separator()
+            # imgui.separator()
             imgui.text("Amplify Values")
             ch, nv = imgui.slider_float(
                 "Factor##AmplifyFactor", fs_proc.amplify_factor_input, 0.1, 3.0, "%.2f"
@@ -2393,7 +2407,7 @@ class ControlPanelUI:
                 prep_op()
                 fs_proc.handle_funscript_operation("amplify")
 
-            imgui.separator()
+            # imgui.separator()
             imgui.text("Savitzky-Golay Filter")
             ch, nv = imgui.slider_int("Window Length##SGWin", fs_proc.sg_window_length_input, 3, 99)
             if ch:
@@ -2407,7 +2421,7 @@ class ControlPanelUI:
                 prep_op()
                 fs_proc.handle_funscript_operation("apply_sg")
 
-            imgui.separator()
+            # imgui.separator()
             imgui.text("RDP Simplification")
             ch, nv = imgui.slider_float(
                 "Epsilon##RDPEps", fs_proc.rdp_epsilon_input, 0.01, 20.0, "%.2f"
@@ -2418,7 +2432,7 @@ class ControlPanelUI:
                 prep_op()
                 fs_proc.handle_funscript_operation("apply_rdp")
 
-            imgui.separator()
+            # imgui.separator()
             imgui.text("Dynamic Amplification")
             if not hasattr(fs_proc, "dynamic_amp_window_ms_input"):
                 fs_proc.dynamic_amp_window_ms_input = 4000

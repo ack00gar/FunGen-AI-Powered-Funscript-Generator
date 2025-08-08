@@ -335,6 +335,22 @@ class VideoDisplayUI:
                                 draw_list = imgui.get_window_draw_list()
                                 mouse_screen_x, mouse_screen_y = io.mouse_pos
 
+                                # Keep the just-drawn ROI visible while waiting for the user to click the point
+                                if self.waiting_for_point_click and self.drawn_user_roi_video_coords:
+                                    img_rect = self._actual_video_image_rect_on_screen
+                                    draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
+                                    rx_vid, ry_vid, rw_vid, rh_vid = self.drawn_user_roi_video_coords
+                                    roi_start_screen = self._video_to_screen_coords(rx_vid, ry_vid)
+                                    roi_end_screen = self._video_to_screen_coords(rx_vid + rw_vid, ry_vid + rh_vid)
+                                    if roi_start_screen and roi_end_screen:
+                                        draw_list.add_rect(
+                                            roi_start_screen[0], roi_start_screen[1],
+                                            roi_end_screen[0], roi_end_screen[1],
+                                            imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_BORDER),
+                                            thickness=2
+                                        )
+                                    draw_list.pop_clip_rect()
+
                                 if is_hovering_actual_video_image:
                                     if not self.waiting_for_point_click: # ROI Drawing phase
                                         if io.mouse_down[0] and not self.is_drawing_user_roi: # Left mouse button down
@@ -534,22 +550,23 @@ class VideoDisplayUI:
                                 # Try to infer grid dimensions
                                 grid_blocks = self.app.tracker.oscillation_grid_blocks
                                 num_blocks = len(grid_blocks)
-                                # Try to get max_blocks_w from tracker if available
-                                max_blocks_w = getattr(self.app.tracker, 'oscillation_max_blocks_w', 0)
-                                if max_blocks_w <= 0:
-                                    # Fallback: estimate as square
-                                    max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
-                                for i, (x, y, w, h) in enumerate(grid_blocks):
-                                    grid_start = self._video_to_screen_coords(x, y)
-                                    grid_end = self._video_to_screen_coords(x + w, y + h)
-                                    if grid_start and grid_end:
-                                        # Compute (r, c) for this block
-                                        r = i // max_blocks_w
-                                        c = i % max_blocks_w
-                                        color = (0, 0, 0, 0.3)  # Faded grey
-                                        if (r, c) in self.app.tracker.oscillation_active_block_positions:
-                                            color = (0, 255, 0, 255)  # Green for active
-                                        #draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
+                                if num_blocks > 0 and self.app.tracker.oscillation_area_fixed is not None:
+                                    # Try to get max_blocks_w from tracker if available
+                                    max_blocks_w = getattr(self.app.tracker, 'oscillation_max_blocks_w', 0)
+                                    if max_blocks_w <= 0:
+                                        # Fallback: estimate as square
+                                        max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
+                                    for i, (x, y, w, h) in enumerate(grid_blocks):
+                                        grid_start = self._video_to_screen_coords(x, y)
+                                        grid_end = self._video_to_screen_coords(x + w, y + h)
+                                        if grid_start and grid_end:
+                                            # Compute (r, c) for this block
+                                            r = i // max_blocks_w
+                                            c = i % max_blocks_w
+                                            color = (0, 0, 0, 0.3)  # Faded grey
+                                            if (r, c) in self.app.tracker.oscillation_active_block_positions:
+                                                color = (0, 255, 0, 255)  # Green for active
+                                            #draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
 
                             # Visualization of active User Fixed ROI (even when not setting)
                             if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
