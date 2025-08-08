@@ -456,6 +456,19 @@ class ControlPanelUI:
             imgui.separator()
 
         self._render_start_stop_buttons(stage_proc, fs_proc, events)
+        # Show YOLO + Oscillation settings in Run Control tab when applicable
+        if app_state.selected_tracker_mode == tracker_mode.LIVE_YOLO_OSCILLATION:
+            imgui.separator()
+            open_, _ = imgui.collapsing_header(
+                "YOLO + Oscillation Settings##RunYOLOOscillation",
+                flags=imgui.TREE_NODE_DEFAULT_OPEN,
+            )
+            if open_:
+                self._render_yolo_oscillation_settings()
+                # Processing speed controls apply to this mode too
+                imgui.separator()
+                imgui.text("Frame Processing Speed")
+                self._render_processing_speed_controls(app_state)
         imgui.separator()
 
         proc = app.processor
@@ -534,9 +547,7 @@ class ControlPanelUI:
         if tmode == self.TrackerMode.OSCILLATION_DETECTOR:
             if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector")[0]:
                 self._render_oscillation_detector_settings()
-        if tmode == self.TrackerMode.LIVE_YOLO_OSCILLATION:
-            if imgui.collapsing_header("YOLO + Oscillation Settings##ConfigYOLOOscillation")[0]:
-                self._render_yolo_oscillation_settings()
+        # Moved YOLO + Oscillation settings into Run Control tab
 
         with_config = {
             self.TrackerMode.LIVE_YOLO_ROI,

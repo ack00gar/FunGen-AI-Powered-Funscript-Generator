@@ -269,14 +269,8 @@ def stage3_worker_proc(
 
     # Clean up resources before worker termination
     try:
-        # Clean up ROI tracker and its ModelPool
+        # Clean up ROI tracker resources (ModelPool removed)
         if 'roi_tracker_instance' in locals() and roi_tracker_instance is not None:
-            # Clean up ModelPool if it exists
-            if hasattr(roi_tracker_instance, 'model_pool') and roi_tracker_instance.model_pool is not None:
-                roi_tracker_instance.model_pool.cleanup()
-                worker_logger.debug(f"Worker {worker_id}: ModelPool cleaned up")
-            
-            # Clear any OpenCV objects that might hold GPU memory
             roi_tracker_instance.prev_gray_main_roi = None
             roi_tracker_instance.prev_gray_user_roi_patch = None
             roi_tracker_instance.prev_gray_oscillation_area_patch = None
