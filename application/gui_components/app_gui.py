@@ -386,6 +386,9 @@ class GUI:
                 col_colors[valid_mask] = colors_u8[seg_idx_for_col[valid_mask]]  # shape (W,4)
                 # Ensure fully opaque for fixed columns
                 col_colors[valid_mask, 3] = 255
+            # Ensure not-yet-fixed columns remain fully transparent
+            if np.any(~valid_mask):
+                col_colors[~valid_mask, 3] = 0
             # Broadcast to image rows
             image_data[:] = col_colors[np.newaxis, :, :]
 

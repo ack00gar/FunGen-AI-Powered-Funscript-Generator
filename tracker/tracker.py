@@ -11,7 +11,7 @@ from funscript import DualAxisFunscript
 from config import constants
 from config.constants_colors import RGBColors
 from config.element_group_colors import AppGUIColors
-from application.utils import ModelPool
+from application.utils import VideoSegment, _format_time
 
 
 class ROITracker:
@@ -77,10 +77,9 @@ class ROITracker:
         self.det_model_path = tracker_model_path
         self.pose_model_path = pose_model_path
 
-        # Initialize ModelPool for efficient memory management
-        self.model_pool = ModelPool(max_gpu_memory_ratio=0.8, logger=self.logger)
-        
-        # Legacy model holders (kept for compatibility but will be None)
+        # Direct YOLO usage with simple caching
+        self._cached_detection_model: Optional[YOLO] = None
+        self._cached_model_path: Optional[str] = None
         self.yolo: Optional[YOLO] = None
         self.yolo_pose: Optional[YOLO] = None
         self.classes = []
@@ -222,8 +221,19 @@ class ROITracker:
         """Load class names from detection model for compatibility."""
         if self.det_model_path and os.path.exists(self.det_model_path):
             try:
-                with self.model_pool.get_model(self.det_model_path, 'detect') as model:
-                    self.classes = model.names
+                # Ensure cached model is available to read names
+                if self._cached_detection_model is None or self._cached_model_path != self.det_model_path:
+                    self._cached_detection_model = YOLO(self.det_model_path)
+                    self._cached_model_path = self.det_model_path
+                names_attr = getattr(self._cached_detection_model, 'names', None)
+                if names_attr:
+                    if isinstance(names_attr, dict):
+                        try:
+                            self.classes = [names_attr[k] for k in sorted(names_attr.keys(), key=lambda x: int(x))]
+                        except Exception:
+                            self.classes = list(names_attr.values())
+                    elif isinstance(names_attr, (list, tuple)):
+                        self.classes = list(names_attr)
                 self.logger.info(f"Loaded class names from detection model: {self.det_model_path}")
             except Exception as e:
                 self.logger.error(f"Could not load class names from {self.det_model_path}: {e}")
@@ -234,31 +244,32 @@ class ROITracker:
 
     def _load_models(self):
         """Legacy method - now just loads class names for compatibility."""
-        self.logger.warning("_load_models() is deprecated. Models are now loaded on-demand via ModelPool.")
+        self.logger.warning("_load_models() is deprecated. Models are now loaded on-demand via direct YOLO caching.")
         self._load_class_names()
 
     def unload_detection_model(self):
         """Unloads the detection model to free up memory."""
-        # Legacy compatibility - ModelPool handles this automatically
+        self._cached_detection_model = None
+        self._cached_model_path = None
         self.yolo = None
         self.logger.info("Tracker: Detection model reference cleared.")
 
     def unload_pose_model(self):
         """Unloads the pose model to free up memory."""
-        # Legacy compatibility - ModelPool handles this automatically
         self.yolo_pose = None
         self.logger.info("Tracker: Pose model reference cleared.")
     
     def unload_all_models(self):
-        """Unload all models and clear GPU memory."""
-        self.model_pool.clear_all_models()
+        """Unload all models and clear references."""
+        self._cached_detection_model = None
+        self._cached_model_path = None
         self.yolo = None
         self.yolo_pose = None
         self.logger.info("Tracker: All models unloaded and GPU memory cleared.")
     
     def get_memory_stats(self) -> Dict[str, Any]:
-        """Get current memory usage statistics from the model pool."""
-        return self.model_pool.get_memory_stats()
+        """Get current memory usage statistics (placeholder since pool removed)."""
+        return {"pool_removed": True}
 
     def histogram_calculate_flow_in_sub_regions(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray]) \
             -> Tuple[float, float, float, float, Optional[np.ndarray]]:
@@ -624,8 +635,10 @@ class ROITracker:
 
         ax, ay, aw, ah = self.oscillation_area_fixed
         ax_c, ay_c = max(0, ax), max(0, ay)
-        aw_c = min(aw, 640 - ax_c)  # Assuming 640x640 frame
-        ah_c = min(ah, 640 - ay_c)
+        target_h = constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
+        target_w = self.target_size_preprocess[0] if hasattr(self, 'target_size_preprocess') and self.target_size_preprocess else constants.YOLO_INPUT_SIZE
+        aw_c = min(aw, target_w - ax_c)
+        ah_c = min(ah, target_h - ay_c)
 
         if aw_c <= 0 or ah_c <= 0:
             return
@@ -703,27 +716,54 @@ class ROITracker:
         if self.app and hasattr(self.app, 'discarded_tracking_classes'):
             discarded_classes_runtime = self.app.discarded_tracking_classes
 
-        # Use ModelPool for efficient model management
+        # Direct YOLO model caching
         try:
-            with self.model_pool.get_model(self.det_model_path, 'detect') as model:
-                results = model(frame, device=constants.DEVICE, verbose=False, conf=self.confidence_threshold)
-                
-                for result in results:
-                    for box in result.boxes:
-                        conf = float(box.conf[0])
-                        class_id = int(box.cls[0])
-                        class_name = self.classes[class_id] if class_id < len(self.classes) else f"class_{class_id}"
-                        
-                        if class_name in discarded_classes_runtime:
-                            continue
-                            
-                        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                        detections.append({
-                            "box": (x1, y1, x2 - x1, y2 - y1),
-                            "class_id": class_id,
-                            "class_name": class_name,
-                            "confidence": conf
-                        })
+            if self._cached_detection_model is None or self._cached_model_path != self.det_model_path:
+                self.logger.info(f"Loading {self.det_model_path} for detection...")
+                self._cached_detection_model = YOLO(self.det_model_path)
+                self._cached_model_path = self.det_model_path
+                # Names
+                try:
+                    names_attr = getattr(self._cached_detection_model, 'names', None)
+                    if names_attr:
+                        if isinstance(names_attr, dict):
+                            # Convert dict to ordered list by index if possible
+                            try:
+                                self.classes = [names_attr[k] for k in sorted(names_attr.keys(), key=lambda x: int(x))]
+                            except Exception:
+                                self.classes = list(names_attr.values())
+                        elif isinstance(names_attr, (list, tuple)):
+                            self.classes = list(names_attr)
+                except Exception:
+                    pass
+
+            results = self._cached_detection_model(frame, device=constants.DEVICE, verbose=False, conf=self.confidence_threshold)
+
+            for result in results:
+                for box in result.boxes:
+                    conf = float(box.conf[0])
+                    class_id = int(box.cls[0])
+                    class_name = None
+                    if self.classes and 0 <= class_id < len(self.classes):
+                        class_name = self.classes[class_id]
+                    else:
+                        # Try names in result
+                        rn = getattr(result, 'names', None)
+                        if isinstance(rn, dict) and class_id in rn:
+                            class_name = rn[class_id]
+                        else:
+                            class_name = f"class_{class_id}"
+
+                    if class_name in discarded_classes_runtime:
+                        continue
+
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    detections.append({
+                        "box": (x1, y1, x2 - x1, y2 - y1),
+                        "class_id": class_id,
+                        "class_name": class_name,
+                        "confidence": conf
+                    })
         except Exception as e:
             self.logger.error(f"Object detection failed: {e}")
             
@@ -1004,21 +1044,35 @@ class ROITracker:
             if stride <= 0:
                 stride = 1
             if (self.internal_frame_counter % stride) == 0:
-                pre = self.preprocess_frame(frame)
-                dets = self.detect_objects(pre)
+                # Build the same processed_input used by process_frame_for_oscillation
+                try:
+                      target_height = self.app.app_settings.get('oscillation_processing_target_height', constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT) if self.app else constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
+                except Exception:
+                    target_height = constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
+                processed_input = frame
+                if processed_input is not None and processed_input.size > 0:
+                    src_h, src_w = processed_input.shape[:2]
+                    if target_height and src_h > target_height:
+                        scale = float(target_height) / float(src_h)
+                        new_w = max(1, int(round(src_w * scale)))
+                        processed_input = cv2.resize(processed_input, (new_w, target_height), interpolation=cv2.INTER_AREA)
+
+                # Run detection on processed_input so boxes are in the expected coordinate space
+                dets = self.detect_objects(processed_input)
                 best = None
                 best_conf = 0.0
                 target_cls = self.yolo_oscillation_target_class
                 for d in dets:
                     if d.get('class_name') == target_cls and d.get('confidence', 0) >= self.yolo_oscillation_conf_threshold:
-                        x,y,w,h = d['box']
-                        if w*h >= self.yolo_oscillation_min_box and d['confidence'] > best_conf:
-                            best = (x,y,w,h)
+                        x, y, w, h = d['box']
+                        if w * h >= self.yolo_oscillation_min_box and d['confidence'] > best_conf:
+                            best = (x, y, w, h)
                             best_conf = d['confidence']
                 if best is not None:
-                    cx, cy, cw, ch = best
-                    center_pt = (cx + cw//2, cy + ch//2)
-                    self.set_oscillation_area_and_point(best, center_pt, frame)
+                    bx, by, bw, bh = best
+                    center_pt = (bx + bw // 2, by + bh // 2)
+                    # Set area/point relative to the same processed_input used for detection
+                    self.set_oscillation_area_and_point(best, center_pt, processed_input)
             return self.process_frame_for_oscillation(frame, frame_time_ms, frame_index)
 
         self._update_fps()
@@ -1281,8 +1335,6 @@ class ROITracker:
                 secondary_pos=secondary_to_write,
                 is_from_live_tracker=(not is_file_processing_context)
             )
-
-            self.funscript.add_action(int(round(adjusted_frame_time_ms)), primary_to_write, secondary_to_write)
             action_log_list.append({
                 "at": int(round(adjusted_frame_time_ms)), "pos": primary_to_write, "secondary_pos": secondary_to_write,
                 "raw_ud_pos_computed": final_primary_pos, "raw_lr_pos_computed": final_secondary_pos,
@@ -1379,6 +1431,12 @@ class ROITracker:
             self.oscillation_funscript_pos = 50
             self.yolo_oscillation_active = True
             self.logger.info("YOLO+Oscillation pipeline started.")
+            # Re-link undo managers to ensure timeline remains writable after clears
+            try:
+                if self.app and hasattr(self.app, 'funscript_processor'):
+                    self.app.funscript_processor._ensure_undo_managers_linked()
+            except Exception:
+                pass
 
         self.internal_frame_counter = 0 # Reset for both live and S3 context if S3 reuses this
         self.flow_min_primary_adaptive, self.flow_max_primary_adaptive = -1.0, 1.0
@@ -1555,9 +1613,9 @@ class ROITracker:
         """
         # --- Optional pre-downscale for performance (approx 720p height) ---
         try:
-            target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)('oscillation_processing_target_height', 720)
+            target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)('oscillation_processing_target_height', constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT)
         except Exception:
-            target_height = 720
+            target_height = constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
 
         if frame is None or frame.size == 0:
             return frame, None
@@ -1613,6 +1671,16 @@ class ROITracker:
         is_camera_motion = getattr(self, 'is_camera_motion', False)
         block_motions = getattr(self, 'block_motions', [])
 
+        # Compute dynamic grid based on current analysis image size (used in vis and scoring)
+        img_h, img_w = current_gray.shape[:2]
+        grid_size = max(1, int(self.oscillation_grid_size))
+        local_block_size = max(8, min(img_h // grid_size, img_w // grid_size))
+        if local_block_size <= 0:
+            local_block_size = 8
+        num_rows = max(1, img_h // local_block_size)
+        num_cols = max(1, img_w // local_block_size)
+        min_cell_activation_pixels = (local_block_size * local_block_size) * 0.05
+
         # --- Visualization for grid and motion detection ---
         if use_oscillation_area and self.oscillation_grid_blocks:
             active_block_positions = set(active_blocks)
@@ -1667,15 +1735,7 @@ class ROITracker:
         frame_diff = cv2.absdiff(current_gray, self.prev_gray_oscillation)
         _, motion_mask = cv2.threshold(frame_diff, min_motion_threshold, 255, cv2.THRESH_BINARY)
 
-        # Compute dynamic grid based on current analysis image size
-        img_h, img_w = current_gray.shape[:2]
-        grid_size = max(1, int(self.oscillation_grid_size))
-        local_block_size = max(8, min(img_h // grid_size, img_w // grid_size))
-        if local_block_size <= 0:
-            local_block_size = 8
-        num_rows = max(1, img_h // local_block_size)
-        num_cols = max(1, img_w // local_block_size)
-        min_cell_activation_pixels = (local_block_size * local_block_size) * 0.05
+        # Grid variables already computed above
 
         # Check if the video is VR to apply the focus rule
         is_vr = self._is_vr_video()
@@ -1834,9 +1894,7 @@ class ROITracker:
         """Explicit cleanup method for resource management."""
         try:
             # Clean up ModelPool if it exists
-            if hasattr(self, 'model_pool') and self.model_pool is not None:
-                self.model_pool.cleanup()
-                self.logger.debug("ROITracker: ModelPool cleaned up")
+            # ModelPool removed
             
             # Clear OpenCV objects that might hold memory
             self.prev_gray_main_roi = None
