@@ -1324,21 +1324,8 @@ class ROITracker:
         if self.app and self.tracking_active and \
                 (min_write_frame_id is None or (frame_index is not None and frame_index >= min_write_frame_id)):
 
-            # --- Automatic Lag Compensation ---
-            # Calculate the inherent delay from the smoothing window. A window of size N has a lag of (N-1)/2 frames.
-            # A window size of 1 means no smoothing and no delay.
-            automatic_smoothing_delay_frames = (self.flow_history_window_smooth - 1) / 2.0 if self.flow_history_window_smooth > 1 else 0.0
-
-            # Combine the automatic compensation with the user's manual delay setting.
-            total_delay_frames = self.output_delay_frames + automatic_smoothing_delay_frames
-
-            # Convert the total frame delay to milliseconds.
-            delay_ms = (total_delay_frames / self.current_video_fps_for_delay) * 1000.0 if self.current_video_fps_for_delay > 0 else 0.0
-
-            # Adjust the timestamp to compensate for the total delay.
-            adjusted_frame_time_ms = frame_time_ms - delay_ms
+            # Determine which axis we will write for this frame
             current_tracking_axis_mode = self.app.tracking_axis_mode
-
             current_single_axis_output = self.app.single_axis_output_target
             primary_to_write, secondary_to_write = None, None
 
@@ -1355,6 +1342,28 @@ class ROITracker:
                 else:
                     secondary_to_write = final_secondary_pos
 
+            # --- Automatic Lag Compensation ---
+            # Calculate the inherent delay from the smoothing window. A window of size N has a lag of (N-1)/2 frames.
+            # A window size of 1 means no smoothing and no delay.
+            automatic_smoothing_delay_frames = (self.flow_history_window_smooth - 1) / 2.0 if self.flow_history_window_smooth > 1 else 0.0
+
+            # Combine the automatic compensation with the user's manual delay setting.
+            total_delay_frames = self.output_delay_frames + automatic_smoothing_delay_frames
+
+            # Convert the total frame delay to milliseconds.
+            base_delay_ms = (total_delay_frames / self.current_video_fps_for_delay) * 1000.0 if self.current_video_fps_for_delay > 0 else 0.0
+
+            # Immediate-visibility safeguard after a clear: for the first live point on the axis we are writing, bypass delay
+            primary_empty = (len(self.funscript.primary_actions) == 0)
+            secondary_empty = (len(self.funscript.secondary_actions) == 0)
+
+            effective_delay_ms = base_delay_ms
+            if (primary_to_write is not None and primary_empty) or (secondary_to_write is not None and secondary_empty):
+                effective_delay_ms = 0.0
+
+            # Adjust the timestamp with the effective delay
+            adjusted_frame_time_ms = frame_time_ms - effective_delay_ms
+
             is_file_processing_context = frame_index is not None
 
             self.funscript.add_action(
@@ -1368,7 +1377,7 @@ class ROITracker:
                 "raw_ud_pos_computed": final_primary_pos, "raw_lr_pos_computed": final_secondary_pos,
                 "mode": current_tracking_axis_mode,
                 "target": current_single_axis_output if current_tracking_axis_mode != "both" else "N/A",
-                "raw_at": frame_time_ms, "delay_applied_ms": delay_ms,
+                "raw_at": frame_time_ms, "delay_applied_ms": effective_delay_ms,
                 "roi_main": self.roi if self.tracking_mode == "YOLO_ROI" else self.user_roi_fixed,
                 "amp": self.current_effective_amp_factor
             })
