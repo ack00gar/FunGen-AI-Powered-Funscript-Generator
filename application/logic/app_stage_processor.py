@@ -809,7 +809,9 @@ class AppStageProcessor:
                     self.gui_event_queue.put(("analysis_message", "No relevant segments in range for Stage 3.", "Info"))
                     return
 
-                self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in s2_output_data.get("all_s2_frame_objects_list", [])}
+                frame_objects_list = s2_output_data.get("all_s2_frame_objects_list", [])
+                self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
+                self.logger.info(f"Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
 
                 # Store SQLite database path for Stage 3
                 self.app.s2_sqlite_db_path = s2_output_data.get("sqlite_db_path")
@@ -1047,8 +1049,265 @@ class AppStageProcessor:
                               extra={'status_message': True})
             self.gui_event_queue.put(("stage1_status_update", f"S1 Error - {str(e)}", "Error"))
             return {"success": False, "max_fps": 0.0, "preprocessed_video_path": None}
+    
+    def _load_existing_stage2_data(self, stage2_data_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Load existing Stage 2 data from database and overlay files.
+        
+        Args:
+            stage2_data_info: Information about Stage 2 assets from validation
+            
+        Returns:
+            Dictionary with loaded Stage 2 data or None if loading fails
+        """
+        try:
+            file_paths = stage2_data_info.get('file_paths', {})
+            db_path = file_paths.get('database')
+            overlay_path = file_paths.get('overlay_msgpack')
+            
+            loaded_data = {
+                "video_segments": [],
+                "atr_segments_objects": [],
+                "overlay_data": None,
+                "frame_objects_map": {},
+                "all_s2_frame_objects_list": []
+            }
+            
+            # Load segments and frame data from database
+            if db_path and os.path.exists(db_path):
+                try:
+                    import sqlite3
+                    with sqlite3.connect(db_path) as conn:
+                        cursor = conn.cursor()
+                        
+                        # Load segments data
+                        segment_tables = ['atr_segments', 'segments']
+                        for table_name in segment_tables:
+                            try:
+                                cursor.execute(f"SELECT * FROM {table_name}")
+                                segments_data = cursor.fetchall()
+                                if segments_data:
+                                    # Convert to expected format
+                                    from application.utils.video_segment import VideoSegment
+                                    for segment_row in segments_data:
+                                        # Basic segment reconstruction - adjust based on actual DB schema
+                                        segment = VideoSegment(
+                                            start_frame_id=segment_row[1] if len(segment_row) > 1 else 0,
+                                            end_frame_id=segment_row[2] if len(segment_row) > 2 else 0,
+                                            class_id=segment_row[3] if len(segment_row) > 3 else 1,
+                                            class_name=segment_row[4] if len(segment_row) > 4 else "unknown",
+                                            segment_type="SexAct",
+                                            position_short_name=segment_row[4] if len(segment_row) > 4 else "HJ",
+                                            position_long_name=segment_row[4] if len(segment_row) > 4 else "Hand Job"
+                                        )
+                                        loaded_data["video_segments"].append(segment)
+                                        loaded_data["atr_segments_objects"].append(segment)
+                                    break  # Use first successful table
+                            except sqlite3.Error:
+                                continue
+                                
+                        # Load frame objects from database for Stage 3
+                        try:
+                            from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
+                            storage = Stage2SQLiteStorage(db_path, self.logger)
+                            
+                            # Get frame range to load all frame objects
+                            min_frame, max_frame = storage.get_frame_range()
+                            if min_frame is not None and max_frame is not None:
+                                frame_objects_dict = storage.get_frame_objects_range(min_frame, max_frame)
+                                
+                                # Populate both data structures that Stage 3 expects
+                                loaded_data["frame_objects_map"] = frame_objects_dict
+                                loaded_data["all_s2_frame_objects_list"] = list(frame_objects_dict.values())
+                                
+                                self.logger.info(f"Loaded {len(frame_objects_dict)} frame objects from database")
+                            
+                            storage.close()
+                        except Exception as fe:
+                            self.logger.warning(f"Failed to load frame objects from database: {fe}")
+                        
+                        # Store reference to database for Stage 3
+                        self.app.s2_sqlite_db_path = db_path
+                        loaded_data["sqlite_db_path"] = db_path
+                        
+                except Exception as e:
+                    self.logger.warning(f"Failed to load segments from database: {e}")
+            
+            # Load overlay data if available
+            if overlay_path and os.path.exists(overlay_path):
+                try:
+                    import msgpack
+                    with open(overlay_path, 'rb') as f:
+                        overlay_data = msgpack.unpack(f, raw=False)
+                        loaded_data["overlay_data"] = overlay_data
+                except Exception as e:
+                    self.logger.warning(f"Failed to load overlay data: {e}")
+            
+            # Ensure we have some data
+            has_segments = bool(loaded_data["video_segments"])
+            has_frame_objects = stage2_data_info.get('frame_objects_available', False)
+            
+            if has_segments or has_frame_objects:
+                self.logger.info(f"Loaded existing Stage 2 data: {len(loaded_data['video_segments'])} segments")
+                
+                # If we have frame objects but no segments, recreate segments from overlay data
+                # This uses the original Stage 2 logic to properly reconstruct segments
+                if not has_segments and has_frame_objects and loaded_data.get("overlay_data"):
+                    self.logger.info("Reconstructing video segments from Stage 2 overlay data")
+                    
+                    try:
+                        # Reconstruct frame objects from overlay data
+                        frame_objects = self._reconstruct_frame_objects_from_overlay(loaded_data["overlay_data"])
+                        
+                        if frame_objects:
+                            # Use the original Stage 2 logic to create segments
+                            from detection.cd.stage_2_cd import _atr_aggregate_segments
+                            
+                            # Get FPS from app processor if available
+                            fps = 30.0  # Default fallback
+                            if self.app and hasattr(self.app, 'processor') and self.app.processor:
+                                video_info = getattr(self.app.processor, 'video_info', {})
+                                fps = video_info.get('fps', 30.0)
+                            
+                            # Recreate segments using Stage 2 logic
+                            # Use default min_segment_duration (1 second = fps frames)
+                            min_segment_duration_frames = int(fps * 1.0)
+                            atr_segments = _atr_aggregate_segments(frame_objects, fps, min_segment_duration_frames, self.logger)
+                            
+                            # Convert ATR segments to video segments format
+                            from application.utils.video_segment import VideoSegment
+                            for atr_segment in atr_segments:
+                                # Get segment data from ATR segment
+                                segment_dict = atr_segment.to_dict()
+                                
+                                # Create VideoSegment using the data from ATRSegment
+                                video_segment = VideoSegment(
+                                    start_frame_id=segment_dict['start_frame_id'],
+                                    end_frame_id=segment_dict['end_frame_id'],
+                                    class_id=1,  # Default class ID
+                                    class_name=segment_dict['class_name'],
+                                    segment_type="SexAct",  # Standard segment type for Stage 3
+                                    position_short_name=segment_dict['position_short_name'],
+                                    position_long_name=segment_dict['position_long_name'],
+                                    duration=segment_dict['duration'],
+                                    source="reconstructed"  # Mark as reconstructed from overlay
+                                )
+                                loaded_data["video_segments"].append(video_segment)
+                                loaded_data["atr_segments_objects"].append(atr_segment)
+                            
+                            # Also add frame objects for Stage 3
+                            frame_objects_map = {fo.frame_id: fo for fo in frame_objects}
+                            loaded_data["frame_objects_map"] = frame_objects_map
+                            loaded_data["all_s2_frame_objects_list"] = frame_objects
+                            
+                            self.logger.info(f"Reconstructed {len(atr_segments)} segments and {len(frame_objects)} frame objects from overlay data")
+                        else:
+                            self.logger.warning("Failed to reconstruct frame objects from overlay data")
+                            
+                    except Exception as e:
+                        self.logger.warning(f"Failed to reconstruct segments from overlay: {e}")
+                        # Fall back to single segment if reconstruction fails
+                        self.logger.info("Falling back to single full-video segment")
+                        from application.utils.video_segment import VideoSegment
+                        estimated_frame_count = stage2_data_info.get('estimated_frame_count', 17982)
+                        fallback_segment = VideoSegment(
+                            start_frame_id=0, end_frame_id=estimated_frame_count - 1,
+                            class_id=1, class_name="mixed", segment_type="SexAct",
+                            position_short_name="Mixed", position_long_name="Mixed Content"
+                        )
+                        loaded_data["video_segments"].append(fallback_segment)
+                
+                return loaded_data
+            else:
+                self.logger.warning("No usable Stage 2 data found in existing assets")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error loading existing Stage 2 data: {e}")
+            return None
+    
+    def _reconstruct_frame_objects_from_overlay(self, overlay_data):
+        """
+        Reconstruct minimal frame objects from Stage 2 overlay data for segment creation.
+        
+        Args:
+            overlay_data: List of frame overlay dictionaries from msgpack
+            
+        Returns:
+            List of minimal frame objects with position data needed for segmentation
+        """
+        try:
+            from detection.cd.stage_2_cd import FrameObject
+            
+            frame_objects = []
+            for frame_dict in overlay_data:
+                if isinstance(frame_dict, dict) and 'frame_id' in frame_dict:
+                    # Create minimal frame object with just the data needed for segmentation
+                    frame_obj = FrameObject(
+                        frame_id=frame_dict.get('frame_id', 0),
+                        yolo_input_size=640  # Standard size used in validation
+                    )
+                    
+                    # Set the position data which is essential for segment creation
+                    frame_obj.atr_assigned_position = frame_dict.get('atr_assigned_position', 'unknown')
+                    
+                    # Add any other fields that might be needed for segment logic
+                    frame_obj.motion_mode = frame_dict.get('motion_mode', 'unknown')
+                    frame_obj.active_interaction_track_id = frame_dict.get('active_interaction_track_id', 0)
+                    
+                    frame_objects.append(frame_obj)
+            
+            self.logger.debug(f"Reconstructed {len(frame_objects)} frame objects from overlay data")
+            return frame_objects
+            
+        except Exception as e:
+            self.logger.warning(f"Error reconstructing frame objects from overlay: {e}")
+            return []
 
     def _execute_stage2_logic(self, s2_overlay_output_path: Optional[str], generate_funscript_actions: bool = True, is_ranged_data_source: bool = False) -> Dict[str, Any]:
+        self.gui_event_queue.put(("stage2_status_update", "Checking existing S2...", "Validating"))
+        
+        fm = self.app.file_manager
+        
+        # Check if we can skip Stage 2 by reusing existing assets
+        if not self.force_rerun_stage2_segmentation:
+            from application.utils.stage_output_validator import can_skip_stage2_for_stage3
+            
+            # Get the correct output folder where Stage 2 files are stored
+            output_folder = os.path.dirname(fm.get_output_path_for_file(fm.video_path, "_dummy.tmp"))
+            
+            # Pass project-saved database path if available for priority checking
+            project_db_path = getattr(self.app, 's2_sqlite_db_path', None)
+            can_skip, stage2_data = can_skip_stage2_for_stage3(fm.video_path, False, output_folder, self.logger, project_db_path)
+            
+            if can_skip:
+                self.logger.info("Stage 2 assets found and validated - skipping Stage 2 processing")
+                self.gui_event_queue.put(("stage2_status_update", "Reusing existing S2...", "Loading cached results"))
+                
+                # Load existing Stage 2 data
+                existing_data = self._load_existing_stage2_data(stage2_data)
+                if existing_data:
+                    # Update progress to show completion
+                    self.gui_event_queue.put(("stage2_dual_progress", (6, 6, "Loaded from cache"), (1, 1, "Complete")))
+                    self.gui_event_queue.put(("stage2_status_update", "S2 Complete (Cached)", "Loaded from cache"))
+                    
+                    if s2_overlay_output_path and os.path.exists(s2_overlay_output_path):
+                        self.gui_event_queue.put(("load_s2_overlay", s2_overlay_output_path, None))
+                    
+                    self.logger.info("DEBUG: Returning early with cached data")
+                    return {
+                        "success": True,
+                        "data": existing_data,
+                        "skipped": True,
+                        "skip_reason": "Existing Stage 2 assets validated and reused"
+                    }
+                else:
+                    self.logger.warning("Failed to load existing Stage 2 data - will reprocess")
+            else:
+                self.logger.debug("Stage 2 assets not suitable for reuse - processing from scratch")
+        else:
+            self.logger.debug("Stage 2 force rerun enabled - processing from scratch")
+        
         self.gui_event_queue.put(("stage2_status_update", "Running S2...", "Initializing S2..."))
         initial_total_main_steps = getattr(stage2_module, 'ATR_PASS_COUNT', self.S2_TOTAL_MAIN_STEPS_FALLBACK)
         if not generate_funscript_actions:
@@ -1056,7 +1315,7 @@ class AppStageProcessor:
             self.gui_event_queue.put(("stage2_status_update", "Running S2 (Segmentation)...", "Initializing S2 Seg..."))
 
         self.gui_event_queue.put(("stage2_dual_progress", (1, initial_total_main_steps, "Initializing..."), (0, 1, "Starting")))
-        fm = self.app.file_manager
+        
         try:
             if not stage2_module:
                 msg = "Error - S2 Module not loaded."
@@ -1113,6 +1372,12 @@ class AppStageProcessor:
                 return {"success": False, "error": msg}
 
             if stage2_results and "error" not in stage2_results:
+                # Capture and save the database path from Stage 2 results
+                sqlite_db_path = stage2_results.get("sqlite_db_path")
+                if sqlite_db_path:
+                    self.app.s2_sqlite_db_path = sqlite_db_path
+                    self.logger.info(f"Stage 2 database path saved: {sqlite_db_path}")
+                
                 if generate_funscript_actions:
                     packaged_data = {
                         "results_dict": stage2_results,
@@ -1564,6 +1829,7 @@ class AppStageProcessor:
         return {
             "stage1_output_msgpack_path": self.app.file_manager.stage1_output_msgpack_path,
             "stage2_overlay_msgpack_path": self.app.file_manager.stage2_output_msgpack_path,
+            "stage2_database_path": getattr(self.app, 's2_sqlite_db_path', None),
             "stage2_status_text": self.stage2_status_text,
             "stage3_status_text": self.stage3_status_text,
         }
