@@ -63,6 +63,8 @@ if torch:
 
 # The side length of the square input image for the YOLO model.
 YOLO_INPUT_SIZE = 640
+# Default target height for oscillation processing/downscaling to match model input characteristics
+DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT = 640
 # Fallback for determining producer/consumer counts if os.cpu_count() fails.
 DEFAULT_FALLBACK_CPU_CORES = 4
 
@@ -76,6 +78,7 @@ class TrackerMode(Enum):
     OSCILLATION_DETECTOR = "Live - Oscillation Detector (Experimental)"
     LIVE_YOLO_ROI = "Live - Optical Flow (YOLO auto ROI)"
     LIVE_USER_ROI = "Live - Optical Flow (User manual ROI)"
+    LIVE_YOLO_OSCILLATION = "Live - YOLO + Oscillation (Experimental)"
     OFFLINE_2_STAGE = "Offline - YOLO AI (2 Stages)"
     OFFLINE_3_STAGE = "Offline - YOLO AI + Opt. Flow (3 Stages)"
 

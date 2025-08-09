@@ -22,17 +22,25 @@ class AppUtility:
         
         # Initialize color caching for performance optimization
         self._color_cache = None
+        self._color_cache_u8 = None
         self._color_cache_resolution = 2000  # Cache colors for speeds 0-1999 pps
         self._build_color_cache()
 
     def _build_color_cache(self):
         """Pre-compute color lookup table for speed-based coloring performance optimization"""
         self._color_cache = np.zeros((self._color_cache_resolution, 4), dtype=np.float32)
-        
+        self._color_cache_u8 = np.zeros((self._color_cache_resolution, 4), dtype=np.uint8)
+
         for i in range(self._color_cache_resolution):
             speed = float(i)
-            color = self._compute_speed_color(speed)
-            self._color_cache[i] = color
+            r, g, b, a = self._compute_speed_color(speed)
+            self._color_cache[i] = (r, g, b, a)
+            self._color_cache_u8[i] = (
+                int(max(0, min(255, round(r * 255.0)))),
+                int(max(0, min(255, round(g * 255.0)))),
+                int(max(0, min(255, round(b * 255.0)))),
+                int(max(0, min(255, round(a * 255.0))))
+            )
     
     def _compute_speed_color(self, speed_pps: float) -> tuple:
         """Original color computation logic (used for cache building and fallback)"""
@@ -207,5 +215,43 @@ class AppUtility:
             for i, speed in zip(out_of_range_indices, out_of_range_speeds):
                 result_colors[i] = self._compute_speed_color(speed)
         
+        return result_colors
+
+    def get_speed_colors_vectorized_u8(self, speeds: np.ndarray) -> np.ndarray:
+        """Vectorized color lookup returning uint8 RGBA for maximum performance."""
+        result_colors = np.zeros((len(speeds), 4), dtype=np.uint8)
+
+        # Handle NaNs as grey
+        nan_mask = np.isnan(speeds)
+        if np.any(nan_mask):
+            grey = np.array([
+                self.grey_rgb[0], self.grey_rgb[1], self.grey_rgb[2], int(self.alpha_val * 255)
+            ], dtype=np.uint8)
+            result_colors[nan_mask] = grey
+
+        valid_mask = ~nan_mask
+        if np.any(valid_mask):
+            v = speeds[valid_mask]
+            # Use cache where possible
+            cache_mask = (v >= 0) & (v < self._color_cache_resolution)
+            if np.any(cache_mask):
+                cache_idx = v[cache_mask].astype(int)
+                result_colors[np.where(valid_mask)[0][cache_mask]] = self._color_cache_u8[cache_idx]
+
+            # Compute others
+            o_mask = ~cache_mask
+            if np.any(o_mask):
+                o_idx = np.where(valid_mask)[0][o_mask]
+                o_vals = v[o_mask]
+                # Compute per value
+                for i, speed in zip(o_idx, o_vals):
+                    r, g, b, a = self._compute_speed_color(float(speed))
+                    result_colors[i] = (
+                        int(max(0, min(255, round(r * 255.0)))),
+                        int(max(0, min(255, round(g * 255.0)))),
+                        int(max(0, min(255, round(b * 255.0)))),
+                        int(max(0, min(255, round(a * 255.0))))
+                    )
+
         return result_colors
 

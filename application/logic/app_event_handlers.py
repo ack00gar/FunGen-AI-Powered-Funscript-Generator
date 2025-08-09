@@ -124,29 +124,14 @@ class AppEventHandlers:
 
         selected_mode_from_ui = self.app.app_state_ui.selected_tracker_mode
         
-        # Check for .engine model with live optical flow methods
-        if selected_mode_from_ui in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI]:
-            detection_model_path = self.app.yolo_det_model_path
-            if detection_model_path and detection_model_path.lower().endswith('.engine'):
-                warning_message = (
-                    "Live optical flow methods are currently broken with .engine models.\nPlease use a .pt model instead for live tracking."
-                )
-                
-                # Log to terminal
-                self.logger.warning("Live optical flow with .engine model detected - this is currently broken. Use .pt model instead.")
-                
-                # Show GUI popup
-                if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
-                    self.app.gui_instance.show_error_popup(
-                        "WARNING!", 
-                        warning_message
-                    )
-                return
+        # Allow .engine models for live modes; handled by direct YOLO loading
         
         if selected_mode_from_ui == TrackerMode.LIVE_USER_ROI:
             self.app.tracker.set_tracking_mode("USER_FIXED_ROI")
         elif selected_mode_from_ui == TrackerMode.OSCILLATION_DETECTOR:
             self.app.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
+        elif selected_mode_from_ui == TrackerMode.LIVE_YOLO_OSCILLATION:
+            self.app.tracker.set_tracking_mode("YOLO_OSCILLATION")
         elif selected_mode_from_ui == TrackerMode.LIVE_YOLO_ROI:
             self.app.tracker.set_tracking_mode("YOLO_ROI")
 
@@ -154,7 +139,11 @@ class AppEventHandlers:
 
         if current_tracker_mode == "USER_FIXED_ROI":
             # Check for a global ROI OR a chapter-specific ROI at the current frame
-            has_global_roi = bool(self.app.tracker.user_roi_fixed and self.app.tracker.user_roi_initial_point_relative)
+            has_global_roi = bool(
+                self.app.tracker.user_roi_fixed and (
+                    self.app.tracker.user_roi_initial_point_relative or self.app.tracker.user_roi_tracked_point_relative
+                )
+            )
 
             has_chapter_roi_at_current_frame = False
             if not has_global_roi:
@@ -165,14 +154,20 @@ class AppEventHandlers:
                         has_chapter_roi_at_current_frame = True
 
             if not has_global_roi and not has_chapter_roi_at_current_frame:
-                self.logger.info("User Defined ROI: Please set a global ROI or a chapter-specific ROI for the current position first.",
-                                 extra={'status_message': True, 'duration': 5.0})
+                self.logger.info("User Defined ROI: Please set a global ROI or a chapter-specific ROI for the current position first.", extra={'status_message': True, 'duration': 5.0})
                 return
+
+            if has_global_roi and self.app.tracker.user_roi_fixed and \
+               not self.app.tracker.user_roi_initial_point_relative and \
+               self.app.tracker.user_roi_tracked_point_relative:
+                self.app.tracker.user_roi_initial_point_relative = self.app.tracker.user_roi_tracked_point_relative
             self.logger.info("Starting User Defined ROI tracking.")
         elif current_tracker_mode == "YOLO_ROI":
             self.logger.info("Starting Live Tracker (YOLO_ROI mode - if applicable).")
         elif current_tracker_mode == "OSCILLATION_DETECTOR":
             self.logger.info("Starting Live Tracker (2D Oscillation Detector mode).")
+        elif current_tracker_mode == "YOLO_OSCILLATION":
+            self.logger.info("Starting Live Tracker (YOLO Oscillation auto focus mode).")
         else:
             self.logger.error(f"Unknown tracker mode for live start: {current_tracker_mode}");
             return
