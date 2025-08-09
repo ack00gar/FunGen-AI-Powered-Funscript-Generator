@@ -901,8 +901,7 @@ class InteractiveFunscriptTimeline:
                             self.multi_selected_action_indices) if num_selected_for_clear > 0 else None
                         op_desc = f"Cleared {len(indices_to_clear) if indices_to_clear else 'All'} Point(s)"
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                        target_funscript_instance_for_render.clear_points(axis=axis_name_for_render,
-                                                                          selected_indices=indices_to_clear)
+                        target_funscript_instance_for_render.clear_points(axis=axis_name_for_render, selected_indices=indices_to_clear)
                         if indices_to_clear: self.multi_selected_action_indices.clear()
                         self.selected_action_idx = -1
                         self.dragging_action_idx = -1
@@ -2451,15 +2450,19 @@ class InteractiveFunscriptTimeline:
                 is_fast_scrolling = self._pan_velocity > 500  # Threshold for "fast" scrolling
 
                 # --- Draw Points (Conditional Based on Zoom Level & Motion) ---
-                # RADICAL OPTIMIZATION: Skip point rendering when zoomed out or scrolling fast
+                # RADICAL OPTIMIZATION with early-visibility safeguard for new/live points
                 points_per_pixel = (
                             app_state.timeline_zoom_factor_ms_per_px / avg_interval_ms) if avg_interval_ms > 0 else 1.0
+                visible_count = (e_idx - s_idx) if (s_idx is not None and e_idx is not None) else len(actions_list)
                 should_render_points = (
-                        not is_fast_scrolling and  # Skip points during fast scrolling for smooth performance
-                        (points_per_pixel < 2.0 or  # Not too dense
-                         self.selected_action_idx >= 0 or  # Always render when editing
-                         len(self.multi_selected_action_indices) > 0 or  # Always render when selecting
-                         self.dragging_action_idx >= 0)  # Always render when dragging
+                    (not is_fast_scrolling) and  # Skip points during fast scrolling for smooth performance
+                    (
+                        (points_per_pixel < 2.0) or  # Not too dense
+                        (visible_count <= 4) or  # Always render when just a few points exist (post-clear/live)
+                        (self.selected_action_idx >= 0) or  # Always render when editing
+                        (len(self.multi_selected_action_indices) > 0) or  # Always render when selecting
+                        (self.dragging_action_idx >= 0)  # Always render when dragging
+                    )
                 )
 
                 # Visual indicator for optimization modes (optional debug info)
@@ -2480,7 +2483,7 @@ class InteractiveFunscriptTimeline:
                                            imgui.get_color_u32_rgba(1.0, 1.0, 0.0, 0.8),
                                            optimization_text)
 
-                if actions_list and visible_actions_indices_range and should_render_points:
+                if actions_list and should_render_points:
                     if indices_to_draw:
                         # PERFORMANCE OPTIMIZATION: Reuse cached arrays and avoid list comprehensions
                         cached_data = self._get_or_compute_cached_arrays(actions_list)
@@ -2518,16 +2521,21 @@ class InteractiveFunscriptTimeline:
                                     hovered_action_idx_current_timeline = original_list_idx
 
                             point_alpha = 0.3 if self.is_previewing else 1.0
-                            final_pt_color = imgui.get_color_u32_rgba(pt_color_tuple[0], pt_color_tuple[1],
-                                                                      pt_color_tuple[2],
-                                                                      pt_color_tuple[3] * point_alpha)
+                            final_pt_color = imgui.get_color_u32_rgba(
+                                pt_color_tuple[0],
+                                pt_color_tuple[1],
+                                pt_color_tuple[2],
+                                pt_color_tuple[3] * point_alpha
+                            )
 
                             draw_list.add_circle_filled(px, py, point_radius_draw, final_pt_color)
 
                             if is_primary_selected and not is_being_dragged:
-                                draw_list.add_circle(px, py, point_radius_draw + 1,
-                                                     imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER),
-                                                     thickness=1.0)
+                                draw_list.add_circle(
+                                    px, py, point_radius_draw + 1,
+                                    imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER),
+                                    thickness=1.0
+                                )
 
             # --- Draw Ultimate Autotune Preview (if enabled) ---
             if self.ultimate_autotune_preview_actions:
@@ -2552,8 +2560,7 @@ class InteractiveFunscriptTimeline:
 
                             preview_color = imgui.get_color_u32_rgba(*TimelineColors.ULTIMATE_AUTOTUNE_PREVIEW)
                             for i in range(len(x_coords) - 1):
-                                draw_list.add_line(x_coords[i], y_coords[i], x_coords[i + 1], y_coords[i + 1],
-                                                   preview_color, 1.5)
+                                draw_list.add_line(x_coords[i], y_coords[i], x_coords[i + 1], y_coords[i + 1], preview_color, 1.5)
 
             # --- Draw Preview Actions on Top ---
             if self.is_previewing and self.preview_actions:
@@ -2568,8 +2575,7 @@ class InteractiveFunscriptTimeline:
                     pxs = time_to_x_vec(p_ats)
                     pys = pos_to_y_vec(p_poss)
                     for i in range(len(pxs) - 1):
-                        draw_list.add_line(pxs[i], pys[i], pxs[i + 1], pys[i + 1],
-                                           preview_line_color, 2.0)
+                        draw_list.add_line(pxs[i], pys[i], pxs[i + 1], pys[i + 1], preview_line_color, 2.0)
 
                 for action in self.preview_actions:
                     px = time_to_x(action['at'])
@@ -2582,10 +2588,8 @@ class InteractiveFunscriptTimeline:
                     self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0])
                 min_y, max_y = min(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1]), max(
                     self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1])
-                draw_list.add_rect_filled(min_x, min_y, max_x, max_y,
-                                          imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_FILL))
-                draw_list.add_rect(min_x, min_y, max_x, max_y,
-                                   imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_BORDER))
+                draw_list.add_rect_filled(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_FILL))
+                draw_list.add_rect(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_BORDER))
 
             # --- Mouse Interactions ---
             # region Mouse
