@@ -2785,6 +2785,12 @@ def perform_contact_analysis(
         if state.use_sqlite and state.sqlite_storage and output_folder_path:
             # Generate database filename based on video name
             video_filename = os.path.splitext(os.path.basename(video_path_arg))[0]
+            
+            # Handle preprocessed videos: use original filename for database consistency  
+            if video_filename.endswith('_preprocessed'):
+                video_filename = video_filename[:-len('_preprocessed')]
+                logger.debug(f"Using original video stem '{video_filename}' for SQLite database naming")
+            
             db_filename = f"{video_filename}_stage2_data.db"
             state.sqlite_db_path = os.path.join(output_folder_path, db_filename)
 

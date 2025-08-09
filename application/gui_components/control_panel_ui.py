@@ -339,10 +339,6 @@ class ControlPanelUI:
         events = app.event_handlers
         tracker_mode = self.TrackerMode
 
-        self._section_header(
-            ">> Analysis Method", "Choose how the application will analyze your video"
-        )
-
         modes_enum = [
             tracker_mode.OSCILLATION_DETECTOR,
             tracker_mode.LIVE_YOLO_ROI,
@@ -351,70 +347,79 @@ class ControlPanelUI:
             tracker_mode.OFFLINE_2_STAGE,
             tracker_mode.OFFLINE_3_STAGE,
         ]
-        modes_display = [m.value for m in modes_enum]
 
-        processor = app.processor
-        disable_combo = (
-            stage_proc.full_analysis_active
-            or app.is_setting_user_roi_mode
-            or (processor and processor.is_processing and not processor.pause_event.is_set())
+        open_, _ = imgui.collapsing_header(
+            "Choose Analysis Method##SimpleAnalysisMethod",
+            flags=imgui.TREE_NODE_DEFAULT_OPEN,
         )
-        with _DisabledScope(disable_combo):
-            try:
-                cur_idx = modes_enum.index(app_state.selected_tracker_mode)
-            except ValueError:
-                cur_idx = 0
-                app_state.selected_tracker_mode = modes_enum[cur_idx]
+        if open_:
 
-            clicked, new_idx = imgui.combo(
-                "##TrackerModeCombo", cur_idx, modes_display
+            modes_display = [m.value for m in modes_enum]
+
+            processor = app.processor
+            disable_combo = (
+                stage_proc.full_analysis_active
+                or app.is_setting_user_roi_mode
+                or (processor and processor.is_processing and not processor.pause_event.is_set())
             )
-            self._help_tooltip(
-                "Choose analysis method:\n"
-                "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion\n"
-                "• Live YOLO ROI: AI-powered object detection with real-time tracking\n"
-                "• Live User ROI: Manual region selection for custom tracking\n"
-                "• Offline 2-Stage: GPU-accelerated batch processing\n"
-                "• Offline 3-Stage: Full pipeline with advanced post-processing"
-            )
+            with _DisabledScope(disable_combo):
+                try:
+                    cur_idx = modes_enum.index(app_state.selected_tracker_mode)
+                except ValueError:
+                    cur_idx = 0
+                    app_state.selected_tracker_mode = modes_enum[cur_idx]
 
-        if clicked and new_idx != cur_idx:
-            new_mode = modes_enum[new_idx]
-            # Clear all overlays only when switching to a different mode
-            if app_state.selected_tracker_mode != new_mode:
-                if hasattr(app, 'logger') and app.logger:
-                    app.logger.info(f"UI(RunTab): Mode change requested {app_state.selected_tracker_mode} -> {new_mode}. Clearing overlays.")
-                if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
-                    app.clear_all_overlays_and_ui_drawings()
-            app_state.selected_tracker_mode = new_mode
-            tr = app.tracker
-            if tr:
-                if new_mode == tracker_mode.LIVE_USER_ROI:
-                    tr.set_tracking_mode("USER_FIXED_ROI")
-                elif new_mode == tracker_mode.OSCILLATION_DETECTOR:
-                    tr.set_tracking_mode("OSCILLATION_DETECTOR")
-                elif new_mode == tracker_mode.LIVE_YOLO_OSCILLATION:
-                    tr.set_tracking_mode("YOLO_OSCILLATION")
-                else:
-                    tr.set_tracking_mode("YOLO_ROI")
+                clicked, new_idx = imgui.combo(
+                    "##TrackerModeCombo", cur_idx, modes_display
+                )
+                self._help_tooltip(
+                    "Choose analysis method:\n"
+                    "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion\n"
+                    "• Live YOLO ROI: AI-powered object detection with real-time tracking\n"
+                    "• Live User ROI: Manual region selection for custom tracking\n"
+                    "• Offline 2-Stage: GPU-accelerated batch processing\n"
+                    "• Offline 3-Stage: Full pipeline with advanced post-processing"
+                )
 
-        proc = app.processor
-        video_loaded = proc and proc.is_video_open()
-        processing_active = stage_proc.full_analysis_active
-        disable_after = (not video_loaded) or processing_active
+            if clicked and new_idx != cur_idx:
+                new_mode = modes_enum[new_idx]
+                # Clear all overlays only when switching to a different mode
+                if app_state.selected_tracker_mode != new_mode:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.info(f"UI(RunTab): Mode change requested {app_state.selected_tracker_mode} -> {new_mode}. Clearing overlays.")
+                    if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
+                        app.clear_all_overlays_and_ui_drawings()
+                app_state.selected_tracker_mode = new_mode
+                tr = app.tracker
+                if tr:
+                    if new_mode == tracker_mode.LIVE_USER_ROI:
+                        tr.set_tracking_mode("USER_FIXED_ROI")
+                    elif new_mode == tracker_mode.OSCILLATION_DETECTOR:
+                        tr.set_tracking_mode("OSCILLATION_DETECTOR")
+                    elif new_mode == tracker_mode.LIVE_YOLO_OSCILLATION:
+                        tr.set_tracking_mode("YOLO_OSCILLATION")
+                    else:
+                        tr.set_tracking_mode("YOLO_ROI")
 
-        with _DisabledScope(disable_after):
-            
-            self._render_execution_progress_display()
-        # imgui.separator()
+            proc = app.processor
+            video_loaded = proc and proc.is_video_open()
+            processing_active = stage_proc.full_analysis_active
+            disable_after = (not video_loaded) or processing_active
 
-        self._render_processing_speed_controls(app_state)
+            with _DisabledScope(disable_after):
+
+                self._render_execution_progress_display()
+            # imgui.separator()
+
+            self._render_processing_speed_controls(app_state)
 
         
-        self._section_header(
-            ">> Tracking", "Configure which movement axes to track and output"
+        open_, _ = imgui.collapsing_header(
+            "Tracking##SimpleTracking",
+            flags=imgui.TREE_NODE_DEFAULT_OPEN,
         )
-        self._render_tracking_axes_mode(stage_proc)
+        if open_:
+            self._render_tracking_axes_mode(stage_proc)
 
         mode = app_state.selected_tracker_mode
         if mode in (
@@ -443,7 +448,7 @@ class ControlPanelUI:
                             )
                             imgui.same_line()
                             _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
-                                "Force Re-run S2 Chapter Creation##ForceRerunS2",
+                                "Force Re-run Stage 2##ForceRerunS2",
                                 stage_proc.force_rerun_stage2_segmentation,
                             )
                             # imgui.separator()

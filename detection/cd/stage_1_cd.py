@@ -73,6 +73,24 @@ def _validate_preprocessed_file_completeness(file_path: str, expected_frames: in
         logger.error(f"Error validating preprocessed file {file_path}: {e}")
         return False
 
+def _is_already_preprocessed_video(video_path: str, logger: logging.Logger) -> bool:
+    """
+    Checks if a video file is already a preprocessed video to prevent double preprocessing.
+
+    Args:
+        video_path: Path to the video file
+        logger: Logger instance
+
+    Returns:
+        True if the video is already preprocessed, False otherwise
+    """
+    # Check by filename pattern
+    if video_path.endswith("_preprocessed.mkv"):
+        logger.warning(f"Video appears to be already preprocessed (by filename): {os.path.basename(video_path)}")
+        return True
+    
+    return False
+
 def _validate_preprocessed_video_completeness(video_path: str, expected_frames: int, expected_fps: float, logger: logging.Logger, tolerance_frames: int = 5) -> bool:
     """
     Validates that a preprocessed video has the expected duration and frame count.
@@ -847,6 +865,14 @@ def perform_yolo_analysis(
 
     if save_preprocessed_video_arg:
         process_logger.info("Preprocessed video generation/reuse is ENABLED for Stage 1.")
+        
+        # CRITICAL: Check if the input video is already preprocessed to prevent double preprocessing
+        if _is_already_preprocessed_video(video_path_arg, process_logger):
+            process_logger.error("REFUSING TO PROCESS: Input video appears to be already preprocessed!")
+            process_logger.error("Double preprocessing can corrupt the output and waste resources.")
+            process_logger.error("Please use the original video file for processing.")
+            return None, 0.0
+        
         if preprocessed_video_path_arg and os.path.exists(preprocessed_video_path_arg):
             process_logger.info(f"Found existing preprocessed video. Using: {preprocessed_video_path_arg}")
             video_path_to_use = preprocessed_video_path_arg
