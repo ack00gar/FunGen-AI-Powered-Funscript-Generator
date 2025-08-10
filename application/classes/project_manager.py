@@ -266,6 +266,7 @@ class ProjectManager:
             "loaded_funscript_path_timeline1": self.app.file_manager.loaded_funscript_path,  # T1 specific
             "stage1_output_msgpack_path": stage_proc_data.get("stage1_output_msgpack_path"),
             "stage2_overlay_msgpack_path": stage_proc_data.get("stage2_overlay_msgpack_path"),
+            "stage2_database_path": stage_proc_data.get("stage2_database_path"),
 
             # Funscript Data
             "funscript_actions_timeline1": primary_actions,
@@ -324,6 +325,14 @@ class ProjectManager:
         fm.loaded_funscript_path = project_data.get("loaded_funscript_path_timeline1", fm.funscript_path)
         fm.stage1_output_msgpack_path = project_data.get("stage1_output_msgpack_path")
         fm.stage2_output_msgpack_path = project_data.get("stage2_overlay_msgpack_path")  # Path to overlay
+        
+        # Load Stage 2 database path and set it in the app
+        stage2_db_path = project_data.get("stage2_database_path")
+        if stage2_db_path and os.path.exists(stage2_db_path):
+            self.app.s2_sqlite_db_path = stage2_db_path
+            self.app.logger.info(f"Loaded Stage 2 database path from project: {stage2_db_path}")
+        else:
+            self.app.s2_sqlite_db_path = None
 
         # Data for FunscriptProcessor
         fs_proc = self.app.funscript_processor

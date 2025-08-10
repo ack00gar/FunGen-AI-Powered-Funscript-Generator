@@ -206,19 +206,19 @@ def stage3_worker_proc(
                 # Load chunk data from SQLite on-demand
                 chunk_data_map = worker_sqlite_storage.get_frame_objects_range(chunk_start, chunk_end)
                 worker_logger.info(
-                    f"Processing SQLite chunk F{chunk_start}-{chunk_end} ({len(chunk_data_map)} frames) for Chapter '{segment_obj.major_position}'"
+                    f"Processing SQLite chunk F{chunk_start}-{chunk_end} ({len(chunk_data_map)} frames) for Chapter '{getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')}'"
                 )
             else:
                 # Memory-based task (fallback)
                 segment_obj, chunk_data_map, chunk_start, chunk_end, output_start, output_end = task
                 worker_logger.info(
-                    f"Processing memory chunk F{chunk_start}-{chunk_end} for Chapter '{segment_obj.major_position}'"
+                    f"Processing memory chunk F{chunk_start}-{chunk_end} for Chapter '{getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')}'"
                 )
 
             # Initialize funscript for oscillation detector
             roi_tracker_instance.funscript = DualAxisFunscript(logger=worker_logger)
             roi_tracker_instance.start_tracking()
-            roi_tracker_instance.main_interaction_class = segment_obj.major_position
+            roi_tracker_instance.main_interaction_class = getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')
 
             frame_stream = video_processor.stream_frames_for_segment(
                 start_frame_abs_idx=chunk_start,
@@ -269,14 +269,8 @@ def stage3_worker_proc(
 
     # Clean up resources before worker termination
     try:
-        # Clean up ROI tracker and its ModelPool
+        # Clean up ROI tracker resources (ModelPool removed)
         if 'roi_tracker_instance' in locals() and roi_tracker_instance is not None:
-            # Clean up ModelPool if it exists
-            if hasattr(roi_tracker_instance, 'model_pool') and roi_tracker_instance.model_pool is not None:
-                roi_tracker_instance.model_pool.cleanup()
-                worker_logger.debug(f"Worker {worker_id}: ModelPool cleaned up")
-            
-            # Clear any OpenCV objects that might hold GPU memory
             roi_tracker_instance.prev_gray_main_roi = None
             roi_tracker_instance.prev_gray_user_roi_patch = None
             roi_tracker_instance.prev_gray_oscillation_area_patch = None
@@ -361,7 +355,13 @@ def perform_stage3_analysis(
     OVERLAP_SIZE = common_app_config.get("s3_overlap_size", 30)
     logger.info(f"Using chunk size: {CHUNK_SIZE}, overlap: {OVERLAP_SIZE}")
 
-    relevant_segments = [seg for seg in atr_segments_list if seg.major_position not in ["Not Relevant", "Close Up"]]
+    # Handle both ATRSegment and VideoSegment objects
+    relevant_segments = []
+    for seg in atr_segments_list:
+        # Get position name - ATRSegment uses major_position, VideoSegment uses position_long_name
+        position_name = getattr(seg, 'major_position', None) or getattr(seg, 'position_long_name', '')
+        if position_name not in ["Not Relevant", "Close Up"]:
+            relevant_segments.append(seg)
 
     logger.info(f"Found {len(relevant_segments)} relevant segments to process in Stage 3.")
     logger.info(f"Details: {[seg.to_dict() for seg in relevant_segments]}")
@@ -479,10 +479,10 @@ def perform_stage3_analysis(
             chapter_index = np.searchsorted(cumulative_frames, current_frames_done, side='left')
             if chapter_index < len(relevant_segments):
                 current_chapter_idx_for_progress = chapter_index + 1
-                chapter_name_for_progress = relevant_segments[chapter_index].major_position
+                chapter_name_for_progress = getattr(relevant_segments[chapter_index], 'major_position', None) or getattr(relevant_segments[chapter_index], 'position_long_name', 'Unknown')
             else: # If done, lock to the last chapter
                 current_chapter_idx_for_progress = len(relevant_segments)
-                chapter_name_for_progress = relevant_segments[-1].major_position
+                chapter_name_for_progress = getattr(relevant_segments[-1], 'major_position', None) or getattr(relevant_segments[-1], 'position_long_name', 'Unknown')
 
         # --- Call progress_callback with both chapter and chunk info ---
         progress_callback(
@@ -534,13 +534,15 @@ def perform_stage3_analysis(
             sqlite_storage.close()
             sqlite_storage.cleanup_temp_files()
 
-            # Optionally keep the database file for debugging
-            cleanup_db_file = common_app_config.get("cleanup_stage2_db", True)
+            # Respect user's database retention setting
+            retain_database = common_app_config.get("retain_stage2_database", True)
+            cleanup_db_file = not retain_database  # Only cleanup if retention is disabled
+            
             if cleanup_db_file and os.path.exists(sqlite_db_path):
                 os.remove(sqlite_db_path)
-                logger.info(f"Cleaned up SQLite database file: {sqlite_db_path}")
+                logger.info(f"Cleaned up SQLite database file (retain_stage2_database=False): {sqlite_db_path}")
             elif os.path.exists(sqlite_db_path):
-                logger.info(f"Preserved SQLite database file for debugging: {sqlite_db_path}")
+                logger.info(f"Preserved SQLite database file (retain_stage2_database=True): {sqlite_db_path}")
         except Exception as e:
             logger.warning(f"Failed to clean up SQLite database: {e}")
 
