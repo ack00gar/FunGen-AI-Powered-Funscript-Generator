@@ -67,6 +67,10 @@ class AppSettings:
             "show_oscillation_grid_overlay": True,
             "oscillation_dis_flow_preset": "ULTRAFAST",
             "oscillation_dis_finest_scale": constants.DEFAULT_DIS_FINEST_SCALE,
+            # Live preview/heatmap performance controls
+            "live_update_timeline_enabled": True,
+            "live_update_heatmap_enabled": True,
+            "live_preview_update_interval_sec": 2.0,
 
             # File Handling & Output
             "autosave_final_funscript_to_video_location": True,

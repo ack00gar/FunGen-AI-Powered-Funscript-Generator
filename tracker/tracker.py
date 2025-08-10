@@ -172,6 +172,14 @@ class ROITracker:
         self.show_masks: bool = False
         self.show_stats: bool = False
 
+        # --- Preallocated buffers for memory reuse ---
+        self._preprocess_buffer: Optional[np.ndarray] = None  # BGR target size buffer
+        self._resize_tmp: Optional[np.ndarray] = None          # temp buffer for resized content
+        self._resize_tmp_shape: Optional[Tuple[int, int]] = None
+        self._gray_full_buffer: Optional[np.ndarray] = None    # Gray buffer for full frame (target size)
+        self._gray_roi_buffer: Optional[np.ndarray] = None     # Gray buffer for ROI-sized crops
+        self._prev_gray_osc_buffer: Optional[np.ndarray] = None
+
         # Properties for thrust vs. ride detection
         self.enable_inversion_detection: bool = True  # Master switch for this feature
         # The ratio to split the ROI for inversion detection.
@@ -693,18 +701,42 @@ class ROITracker:
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         h, w = frame.shape[:2]
-        if h == 0 or w == 0: return frame.copy()
+        if h == 0 or w == 0:
+            return frame
         target_w, target_h = self.target_size_preprocess
-        if (w, h) == (target_w, target_h): return frame.copy()
+        # Ensure preallocated buffers exist
+        if self._preprocess_buffer is None or self._preprocess_buffer.shape[:2] != (target_h, target_w):
+            self._preprocess_buffer = np.zeros((target_h, target_w, 3), dtype=frame.dtype)
+
+        if (w, h) == (target_w, target_h):
+            # Copy into preallocated buffer to avoid returning a reference to the source
+            np.copyto(self._preprocess_buffer, frame)
+            return self._preprocess_buffer
+
         scale = min(target_w / w, target_h / h)
         new_w, new_h = int(w * scale), int(h * scale)
-        if new_w <= 0 or new_h <= 0: return frame.copy()
-        frame_resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        if (new_w, new_h) == (target_w, target_h): return frame_resized
+        if new_w <= 0 or new_h <= 0:
+            np.copyto(self._preprocess_buffer, 0)
+            return self._preprocess_buffer
+
+        # Resize into a temp buffer (reallocate only if dims change)
+        if self._resize_tmp is None or self._resize_tmp_shape != (new_h, new_w):
+            self._resize_tmp = np.empty((new_h, new_w, 3), dtype=frame.dtype)
+            self._resize_tmp_shape = (new_h, new_w)
+        cv2.resize(frame, (new_w, new_h), dst=self._resize_tmp, interpolation=cv2.INTER_LINEAR)
+
+        if (new_w, new_h) == (target_w, target_h):
+            np.copyto(self._preprocess_buffer, self._resize_tmp)
+            return self._preprocess_buffer
+
+        # Letterbox copy into target buffer
         delta_w, delta_h = target_w - new_w, target_h - new_h
         top, bottom = delta_h // 2, delta_h - (delta_h // 2)
         left, right = delta_w // 2, delta_w - (delta_w // 2)
-        return cv2.copyMakeBorder(frame_resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=RGBColors.BLACK)
+        # Fill with black
+        self._preprocess_buffer[...] = 0
+        self._preprocess_buffer[top:top+new_h, left:left+new_w] = self._resize_tmp
+        return self._preprocess_buffer
 
     def detect_objects(self, frame: np.ndarray) -> List[Dict]:
         detections = []
@@ -1540,12 +1572,20 @@ class ROITracker:
             # Preprocess entire frame to expected working size first
             processed_frame = self.preprocess_frame(frame)
             # Crop to area first, then convert only the crop to grayscale (avoid full-frame cvtColor)
-            processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw].copy()
-            current_gray = cv2.cvtColor(processed_frame_area, cv2.COLOR_BGR2GRAY)
+            processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw]
+            # Reuse/allocate ROI gray buffer
+            if self._gray_roi_buffer is None or self._gray_roi_buffer.shape[:2] != (processed_frame_area.shape[0], processed_frame_area.shape[1]):
+                self._gray_roi_buffer = np.empty((processed_frame_area.shape[0], processed_frame_area.shape[1]), dtype=np.uint8)
+            cv2.cvtColor(processed_frame_area, cv2.COLOR_BGR2GRAY, dst=self._gray_roi_buffer)
+            current_gray = self._gray_roi_buffer
         else:
             processed_frame = self.preprocess_frame(frame)
             # Full-frame path: compute grayscale once for full frame
-            current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
+            target_h, target_w = processed_frame.shape[0], processed_frame.shape[1]
+            if self._gray_full_buffer is None or self._gray_full_buffer.shape[:2] != (target_h, target_w):
+                self._gray_full_buffer = np.empty((target_h, target_w), dtype=np.uint8)
+            cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY, dst=self._gray_full_buffer)
+            current_gray = self._gray_full_buffer
             processed_frame_area = processed_frame
             ax, ay = 0, 0
             aw, ah = processed_frame.shape[1], processed_frame.shape[0]
@@ -1769,7 +1809,11 @@ class ROITracker:
                 color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
                 cv2.rectangle(processed_frame, (x1, y1), (x1 + self.oscillation_block_size, y1 + self.oscillation_block_size), color, 1)
 
-        self.prev_gray_oscillation = current_gray.copy()
+        # Keep a reusable prev gray buffer
+        if self._prev_gray_osc_buffer is None or self._prev_gray_osc_buffer.shape != current_gray.shape:
+            self._prev_gray_osc_buffer = np.empty_like(current_gray)
+        np.copyto(self._prev_gray_osc_buffer, current_gray)
+        self.prev_gray_oscillation = self._prev_gray_osc_buffer
 
         # Lightweight instrumentation (debug level, once per second)
         try:

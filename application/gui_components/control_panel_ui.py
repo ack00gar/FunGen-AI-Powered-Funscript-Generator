@@ -1141,6 +1141,13 @@ class ControlPanelUI:
                 settings.set("live_tracker_dis_finest_scale", new_scale)
                 tr.update_dis_flow_config(finest_scale=new_scale)
 
+            # Toggle for optical flow visualization in ROI (tracker.show_flow)
+            imgui.separator()
+            cur_show_flow = getattr(tr, 'show_flow', True) if tr else True
+            ch, nv = imgui.checkbox("Show Optical Flow Visualization in ROI##ShowFlowVis", cur_show_flow)
+            if ch and tr:
+                tr.show_flow = nv
+
             if cur_sparse:
                 imgui.pop_style_var()
                 imgui.internal.pop_item_flag()
@@ -1551,6 +1558,22 @@ class ControlPanelUI:
                 # Hook for future use; the tracker can also read from settings each frame
                 app.logger.info(f"Oscillation grid overlay {'enabled' if nv else 'disabled' }.", extra={'status_message': True})
         imgui.separator()
+        # Live preview performance controls
+        imgui.text("Live Preview Updates")
+        cur_live_tl = settings.get("live_update_timeline_enabled", True)
+        ch, nv = imgui.checkbox("Update Timeline Preview During Live##LiveUpdTimeline", cur_live_tl)
+        if ch and nv != cur_live_tl:
+            settings.set("live_update_timeline_enabled", nv)
+        cur_live_hm = settings.get("live_update_heatmap_enabled", True)
+        ch, nv = imgui.checkbox("Update Heatmap During Live##LiveUpdHeatmap", cur_live_hm)
+        if ch and nv != cur_live_hm:
+            settings.set("live_update_heatmap_enabled", nv)
+        cur_int = settings.get("live_preview_update_interval_sec", 2.0)
+        imgui.push_item_width(200)
+        ch, nv = imgui.slider_float("Update Interval (s)##LiveUpdInterval", float(cur_int), 0.2, 5.0, "%.1f")
+        imgui.pop_item_width()
+        if ch and abs(nv - float(cur_int)) > 1e-6:
+            settings.set("live_preview_update_interval_sec", float(nv))
 
         # Oscillation DIS Flow controls (independent of Optical Flow UI)
         imgui.text("Oscillation Optical Flow (DIS)")

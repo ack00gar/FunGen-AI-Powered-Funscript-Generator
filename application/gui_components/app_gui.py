@@ -102,7 +102,11 @@ class GUI:
 
         self.last_preview_update_time_timeline = 0.0
         self.last_preview_update_time_heatmap = 0.0
-        self.preview_update_interval_seconds = 1.0
+        # Read default interval from settings; fallback to 1.0
+        try:
+            self.preview_update_interval_seconds = float(self.app.app_settings.get("live_preview_update_interval_sec", 1.0))
+        except Exception:
+            self.preview_update_interval_seconds = 1.0
 
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
@@ -604,6 +608,10 @@ class GUI:
         colors = self.colors
         style = imgui.get_style()
 
+        # If preview/timeline are hidden, skip all work
+        if not app_state.show_funscript_timeline:
+            return
+
         current_bar_width_float = imgui.get_content_region_available()[0]
         current_bar_width_int = int(round(current_bar_width_float))
 
@@ -621,12 +629,13 @@ class GUI:
 
         incremental_update_needed = current_action_count != self.last_submitted_action_count_timeline
 
-        # For this async model, we always do a full redraw. Incremental drawing is complex with threading.
-        # The performance gain from async outweighs the loss of incremental drawing.
+        # Respect setting to disable live timeline updates and use adjustable interval
+        live_tl_enabled = self.app.app_settings.get("live_update_timeline_enabled", True)
+        effective_interval_tl = float(self.app.app_settings.get("live_preview_update_interval_sec", self.preview_update_interval_seconds))
         needs_regen = (full_redraw_needed
             or (incremental_update_needed
             and (not is_live_tracking
-            or (time.time() - self.last_preview_update_time_timeline >= self.preview_update_interval_seconds))))
+            or (live_tl_enabled and (time.time() - self.last_preview_update_time_timeline >= effective_interval_tl)))))
 
         if needs_regen and self.preview_task_queue.empty():
             actions_copy = self.app.funscript_processor.get_actions('primary').copy()
@@ -706,6 +715,10 @@ class GUI:
     # --- This function now submits a task to the worker thread ---
     def render_funscript_heatmap_preview(self, total_video_duration_s: float, bar_width_float: float, bar_height_float: float):
         app_state = self.app.app_state_ui
+        # If heatmap hidden, skip all work
+        if not app_state.show_heatmap:
+            imgui.dummy(bar_width_float, bar_height_float)
+            return
         current_bar_width_int = int(round(bar_width_float))
         if current_bar_width_int <= 0 or app_state.heatmap_texture_fixed_height <= 0 or not self.heatmap_texture_id:
             imgui.dummy(bar_width_float, bar_height_float)
@@ -721,7 +734,10 @@ class GUI:
 
         incremental_update_needed = current_action_count != self.last_submitted_action_count_heatmap
 
-        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (time.time() - self.last_preview_update_time_heatmap >= self.preview_update_interval_seconds)))
+        # Respect setting to disable live heatmap updates and use adjustable interval
+        live_heatmap_enabled = self.app.app_settings.get("live_update_heatmap_enabled", True)
+        effective_interval_hm = float(self.app.app_settings.get("live_preview_update_interval_sec", self.preview_update_interval_seconds))
+        needs_regen = full_redraw_needed or (incremental_update_needed and (not is_live_tracking or (live_heatmap_enabled and (time.time() - self.last_preview_update_time_heatmap >= effective_interval_hm))))
 
         if needs_regen and self.preview_task_queue.empty():
             actions_copy = self.app.funscript_processor.get_actions('primary').copy()
