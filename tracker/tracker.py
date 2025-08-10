@@ -100,24 +100,20 @@ class ROITracker:
 
         self.base_amplification_factor = base_amplification_factor
         self.class_specific_amplification_multipliers = class_specific_amplification_multipliers if class_specific_amplification_multipliers is not None else constants.DEFAULT_CLASS_AMP_MULTIPLIERS
-        self.logger.info(f"Base Amplification: {self.base_amplification_factor}x")
-        self.logger.info(f"Class Specific Amp Multipliers: {self.class_specific_amplification_multipliers}")
+        self.logger.debug(f"Base Amplification: {self.base_amplification_factor}x")
+        self.logger.debug(f"Class Specific Amp Multipliers: {self.class_specific_amplification_multipliers}")
 
         # Track video source information for user feedback
         self._last_video_source_status: Optional[Dict[str, Any]] = None
 
         # Ensure these are initialized regardless of self.app
-        self.output_delay_frames: int = self.app.tracker.output_delay_frames if self.app and hasattr(self.app,
-                                                                                                     'tracker') else 0
+        self.output_delay_frames: int = self.app.tracker.output_delay_frames if self.app and hasattr(self.app, 'tracker') else 0
         self.current_video_fps_for_delay: float = self.app.tracker.current_video_fps_for_delay if self.app and hasattr(
             self.app, 'tracker') else 30.0
         # Sensitivity and offsets should also be settable or taken from defaults if no app
-        self.y_offset = self.app.tracker.y_offset if self.app and hasattr(self.app,
-                                                                          'tracker') else constants.DEFAULT_LIVE_TRACKER_Y_OFFSET
-        self.x_offset = self.app.tracker.x_offset if self.app and hasattr(self.app,
-                                                                          'tracker') else constants.DEFAULT_LIVE_TRACKER_X_OFFSET
-        self.sensitivity = self.app.tracker.sensitivity if self.app and hasattr(self.app,
-                                                                                'tracker') else constants.DEFAULT_LIVE_TRACKER_SENSITIVITY
+        self.y_offset = self.app.tracker.y_offset if self.app and hasattr(self.app, 'tracker') else constants.DEFAULT_LIVE_TRACKER_Y_OFFSET
+        self.x_offset = self.app.tracker.x_offset if self.app and hasattr(self.app, 'tracker') else constants.DEFAULT_LIVE_TRACKER_X_OFFSET
+        self.sensitivity = self.app.tracker.sensitivity if self.app and hasattr(self.app, 'tracker') else constants.DEFAULT_LIVE_TRACKER_SENSITIVITY
 
         self.dis_flow_preset = dis_flow_preset
         self.dis_finest_scale = dis_finest_scale
@@ -127,7 +123,7 @@ class ROITracker:
             "MEDIUM": cv2.DISOPTICAL_FLOW_PRESET_MEDIUM,
         }
         try:
-            selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+            selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
             self.flow_dense = cv2.DISOpticalFlow_create(selected_preset_cv)
             if self.dis_finest_scale is not None:
                 self.flow_dense.setFinestScale(self.dis_finest_scale)
@@ -478,25 +474,8 @@ class ROITracker:
                 previous_mode = self.tracking_mode
                 self.tracking_mode = mode
                 self.logger.info(f"Tracker mode changed: {previous_mode} -> {self.tracking_mode}")
-                # Log state before and after clearing to help debug
-                try:
-                    self.logger.info(
-                        f"Before clear overlays: user_roi_fixed={self.user_roi_fixed}, user_roi_initial_point_relative={self.user_roi_initial_point_relative}, "
-                        f"yolo_roi={self.roi}, osc_area={getattr(self, 'oscillation_area_fixed', None)}, "
-                        f"osc_grid_blocks={len(getattr(self, 'oscillation_grid_blocks', []))}"
-                    )
-                except Exception:
-                    pass
                 # Clear ALL drawn overlays when switching modes (ROI rectangles, oscillation area, YOLO ROI box)
                 self.clear_all_drawn_overlays()
-                try:
-                    self.logger.info(
-                        f"After clear overlays: user_roi_fixed={self.user_roi_fixed}, user_roi_initial_point_relative={self.user_roi_initial_point_relative}, "
-                        f"yolo_roi={self.roi}, osc_area={getattr(self, 'oscillation_area_fixed', None)}, "
-                        f"osc_grid_blocks={len(getattr(self, 'oscillation_grid_blocks', []))}"
-                    )
-                except Exception:
-                    pass
                 # Set mode-specific flags
                 self.yolo_oscillation_active = (mode == "YOLO_OSCILLATION")
         else:
@@ -506,7 +485,7 @@ class ROITracker:
         """Clears any visuals drawn on the video (ROI rectangles, oscillation area, YOLO ROI box).
         Also resets flags so UI does not re-render stale overlays.
         """
-        self.logger.info("clear_all_drawn_overlays: invoked")
+        self.logger.debug("clear_all_drawn_overlays: invoked")
         # Clear manual user ROI and point
         if self.user_roi_fixed is not None or self.user_roi_initial_point_relative is not None:
             self.logger.info(f"Clearing user ROI: {self.user_roi_fixed}, point_rel={self.user_roi_initial_point_relative}")
@@ -588,13 +567,14 @@ class ROITracker:
         self.secondary_flow_history_smooth.clear()
         self.user_roi_current_flow_vector = (0.0, 0.0)
 
-    def clear_user_defined_roi_and_point(self):
+    def clear_user_defined_roi_and_point(self, silent=False):
         self.user_roi_fixed = None
         self.user_roi_initial_point_relative = None
         self.user_roi_tracked_point_relative = None
         self.prev_gray_user_roi_patch = None
         self.user_roi_current_flow_vector = (0.0, 0.0)
-        self.logger.info("User defined ROI and point cleared.")
+        if not silent:
+            self.logger.info("User defined ROI and point cleared.")
 
     def set_oscillation_area_and_point(self,
                                        area_abs_coords: Tuple[int, int, int, int],
@@ -913,7 +893,7 @@ class ROITracker:
         }
 
         try:
-            selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+            selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
             # Re-create the dense flow object with the new settings
             self.flow_dense = cv2.DISOpticalFlow_create(selected_preset_cv)
             if self.dis_finest_scale is not None:
@@ -1594,7 +1574,7 @@ class ROITracker:
         preserve_user_roi = (reason == "stop_preserve_funscript")
         if not preserve_user_roi:
             # Full reset clears any user-defined ROI/point and returns to default mode
-            self.clear_user_defined_roi_and_point()
+            self.clear_user_defined_roi_and_point(silent=True)  # Silent to avoid duplicate messages from clear_all_drawn_overlays
             self.set_tracking_mode("YOLO_ROI")  # Default mode on full reset
 
         # Clear all relevant state variables to ensure a clean slate

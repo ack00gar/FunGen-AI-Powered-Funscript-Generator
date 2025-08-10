@@ -3,9 +3,12 @@ import sys
 import os
 import shutil
 import platform
+import logging
 from importlib.metadata import version, PackageNotFoundError
 from packaging import version as pkg_version
 from packaging.specifiers import SpecifierSet
+
+logger = logging.getLogger(__name__)
 
 def _parse_package_spec(package_spec):
     """
@@ -56,19 +59,19 @@ def _ensure_packages(packages):
     if not missing:
         return False
 
-    print(f"The following required packages are missing: {', '.join(missing)}")
+    logger.warning(f"The following required packages are missing: {', '.join(missing)}")
     try:
         response = input(f"Would you like to install them now? (y/n): ").lower()
         if response == 'y':
-            print(f"Installing missing packages: {', '.join(missing)}")
+            logger.info(f"Installing missing packages: {', '.join(missing)}")
             subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
             return True
         else:
-            print("Installation skipped. The application may not function correctly.", file=sys.stderr)
+            logger.warning("Installation skipped. The application may not function correctly.")
             return False
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"ERROR: Failed to install required packages: {e}", file=sys.stderr)
-        print("Please install them manually and restart.", file=sys.stderr)
+        logger.error(f"Failed to install required packages: {e}")
+        logger.error("Please install them manually and restart.")
         sys.exit(1)
 
 def _ensure_packages_with_args(packages, pip_args):
@@ -87,20 +90,20 @@ def _ensure_packages_with_args(packages, pip_args):
     if not missing:
         return False
 
-    print(f"The following required packages are missing: {', '.join(missing)}")
+    logger.warning(f"The following required packages are missing: {', '.join(missing)}")
     try:
         response = input(f"Would you like to install them now using custom arguments? (y/n): ").lower()
         if response == 'y':
-            print(f"Installing missing packages with custom index: {', '.join(missing)}")
+            logger.info(f"Installing missing packages with custom index: {', '.join(missing)}")
             cmd = [sys.executable, "-m", "pip", "install"] + pip_args + missing
             subprocess.check_call(cmd)
             return True
         else:
-            print("Installation skipped. The application may not function correctly.", file=sys.stderr)
+            logger.warning("Installation skipped. The application may not function correctly.")
             return False
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"ERROR: Failed to install required packages: {e}", file=sys.stderr)
-        print("Please install them manually and restart.", file=sys.stderr)
+        logger.error(f"Failed to install required packages: {e}")
+        logger.error("Please install them manually and restart.")
         sys.exit(1)
 
 def get_bin_dir():
@@ -172,24 +175,24 @@ def check_and_install_dependencies():
     # 1. Self-bootstrap: Ensure the checker has its own dependencies
     bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging'])
 
-    print("--- Checking Application Dependencies ---")
+    logger.info("=== Checking Application Dependencies ===")
 
     # 2. Detect GPU environment and select appropriate requirements
     requirements_file, env_description = detect_gpu_environment()
-    print(f"Detected environment: {env_description}")
-    print(f"Using requirements file: {requirements_file}")
+    logger.info(f"Detected environment: {env_description}")
+    logger.info(f"Using requirements file: {requirements_file}")
 
     # 3. Load and install core requirements first
     try:
         with open('core.requirements.txt', 'r') as f:
             core_packages = [line.strip() for line in f if line.strip() and not line.startswith('#')]
     except FileNotFoundError:
-        print("ERROR: core.requirements.txt not found.", file=sys.stderr)
+        logger.error("core.requirements.txt not found.")
         sys.exit(1)
 
     core_changed = False
     if core_packages:
-        print("Checking core packages...")
+        logger.info("Checking core packages...")
         core_changed = _ensure_packages(core_packages)
 
     # 4. Load and install GPU-specific requirements if needed
@@ -210,43 +213,43 @@ def check_and_install_dependencies():
                         gpu_packages.append(line)
 
             if gpu_packages:
-                print(f"Checking GPU-specific packages...")
+                logger.info("Checking GPU-specific packages...")
                 if pip_extra_args:
-                    print(f"Using custom index: {' '.join(pip_extra_args)}")
+                    logger.info(f"Using custom index: {' '.join(pip_extra_args)}")
                     gpu_changed = _ensure_packages_with_args(gpu_packages, pip_extra_args)
                 else:
                     gpu_changed = _ensure_packages(gpu_packages)
                     
         except FileNotFoundError:
-            print(f"WARNING: {requirements_file} not found. Continuing with core packages only.", file=sys.stderr)
+            logger.warning(f"{requirements_file} not found. Continuing with core packages only.")
 
     # Check if we need to restart due to major package changes
     major_changes = bootstrap_changed or core_changed or gpu_changed
     
     if major_changes:
-        print("\n--- Package Installation Complete ---")
-        print("IMPORTANT: Major packages were installed/upgraded.")
-        print("Please restart the application to ensure all changes take effect.")
-        print("--- Exiting for Restart ---")
+        logger.warning("\n=== Package Installation Complete ===")
+        logger.warning("IMPORTANT: Major packages were installed/upgraded.")
+        logger.warning("Please restart the application to ensure all changes take effect.")
+        logger.warning("=== Exiting for Restart ===")
         sys.exit(0)  # Clean exit to allow restart
     
-    print("All required packages are installed and up to date.")
+    logger.info("All required packages are installed and up to date.")
 
     # 5. Verify PyTorch installation
     try:
         version('torch')
         version('torchvision')
-        print("PyTorch (torch and torchvision) is installed.")
+        logger.info("PyTorch (torch and torchvision) is installed.")
     except PackageNotFoundError:
-        print("\n--- PyTorch Installation Failed ---", file=sys.stderr)
-        print("PyTorch installation may have failed. Please check the installation.", file=sys.stderr)
-        print("Installation guide: https://pytorch.org/get-started/locally/", file=sys.stderr)
+        logger.error("\n=== PyTorch Installation Failed ===")
+        logger.error("PyTorch installation may have failed. Please check the installation.")
+        logger.error("Installation guide: https://pytorch.org/get-started/locally/")
         sys.exit(1)
 
     # 6. Check for ffmpeg and ffprobe
     check_ffmpeg_ffprobe()
 
-    print("--- Dependency Check Finished ---\n")
+    logger.info("=== Dependency Check Finished ===\n")
 
 
 def check_ffmpeg_ffprobe():
@@ -261,7 +264,7 @@ def check_ffmpeg_ffprobe():
         if ffprobe_missing:
             missing_tools.append('ffprobe')
         
-        print(f"WARNING: The following required tools are not found in your system's PATH: {', '.join(missing_tools)}.")
+        logger.warning(f"The following required tools are not found in your system's PATH: {', '.join(missing_tools)}.")
         
         system = platform.system()
         install_cmd = ""
@@ -276,26 +279,26 @@ def check_ffmpeg_ffprobe():
             try:
                 response = input(f"Would you like to attempt to install it now using '{install_cmd}'? (y/n): ").lower()
                 if response == 'y':
-                    print(f"Running installation command: {install_cmd}")
+                    logger.info(f"Running installation command: {install_cmd}")
                     subprocess.check_call(install_cmd, shell=True)
                     # Re-check after installation
                     if not is_tool('ffmpeg') or not is_tool('ffprobe'):
-                        print("Installation may have failed. Please install ffmpeg manually.", file=sys.stderr)
+                        logger.error("Installation may have failed. Please install ffmpeg manually.")
                         sys.exit(1)
                     else:
-                        print("ffmpeg installed successfully.")
+                        logger.info("ffmpeg installed successfully.")
                 else:
-                    print("Installation skipped. Please install ffmpeg manually to proceed.", file=sys.stderr)
+                    logger.warning("Installation skipped. Please install ffmpeg manually to proceed.")
                     sys.exit(1)
             except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                print(f"Error during installation: {e}", file=sys.stderr)
-                print(f"Please install ffmpeg manually.", file=sys.stderr)
+                logger.error(f"Error during installation: {e}")
+                logger.error("Please install ffmpeg manually.")
                 sys.exit(1)
         else:
-            print("Could not determine the installation command for your OS. Please install ffmpeg manually.", file=sys.stderr)
+            logger.error("Could not determine the installation command for your OS. Please install ffmpeg manually.")
             sys.exit(1)
     else:
-        print("ffmpeg and ffprobe are available.")
+        logger.info("ffmpeg and ffprobe are available.")
 
 
 if __name__ == '__main__':

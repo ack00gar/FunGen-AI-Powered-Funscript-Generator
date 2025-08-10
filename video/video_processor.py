@@ -103,7 +103,7 @@ class VideoProcessor:
             if self.logger:
                 self.logger.info("No tracker provided. Tracker processing will be disabled.")
         else:
-            self.logger.info("Tracker is available, but processing is DISABLED by default. An explicit call is needed to enable it.")
+            self.logger.debug("Tracker is available, but processing is DISABLED by default. An explicit call is needed to enable it.")
 
         # Frame Caching
         self.frame_cache = OrderedDict()
@@ -1422,7 +1422,7 @@ class VideoProcessor:
         """Checks if a video is currently loaded and has valid information."""
         return bool(self.video_path and self.video_info and self.video_info.get('total_frames', 0) > 0)
 
-    def reset(self, close_video=False):
+    def reset(self, close_video=False, skip_tracker_reset=False):
         self.logger.info("Resetting VideoProcessor...")
         self.stop_processing(join_thread=True)
         self._clear_cache()
@@ -1430,7 +1430,7 @@ class VideoProcessor:
         self.frames_read_from_current_stream = 0
         self.current_stream_start_frame_abs = 0
         self.seek_request_frame_index = None
-        if self.tracker:
+        if self.tracker and not skip_tracker_reset:
             self.tracker.reset()
         if close_video:
             self.video_path = ""

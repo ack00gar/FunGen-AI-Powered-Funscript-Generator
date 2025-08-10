@@ -8,38 +8,52 @@ import sys
 import os
 import json
 import traceback
+import logging
+
+# Configure logging for TensorRT export utility
+logger = logging.getLogger(__name__)
+
+def _setup_standalone_logger():
+    """Setup minimal logging for standalone script execution."""
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter('%(levelname)-8s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
 def export_model(model_path, output_dir):
     """Export a YOLO model to TensorRT format."""
+    _setup_standalone_logger()
     try:
-        print("Starting TensorRT export process...")
-        print(f"Model path: {model_path}")
-        print(f"Output directory: {output_dir}")
+        logger.info("Starting TensorRT export process...")
+        logger.info(f"Model path: {model_path}")
+        logger.info(f"Output directory: {output_dir}")
         
-        print("Importing ultralytics...")
+        logger.info("Importing ultralytics...")
         from ultralytics import YOLO
         
-        print("Loading YOLO model...")
+        logger.info("Loading YOLO model...")
         model = YOLO(model_path)
         
-        print("Starting TensorRT export (this may take several minutes)...")
-        print("Export settings: half=True, batch=1, simplify=True")
+        logger.info("Starting TensorRT export (this may take several minutes)...")
+        logger.info("Export settings: half=True, batch=1, simplify=True")
         model.export(format="engine", half=True, batch=1, simplify=True)
-        print("TensorRT export completed!")
+        logger.info("TensorRT export completed!")
         
-        print("Searching for generated engine files...")
+        logger.info("Searching for generated engine files...")
         # Find the specific engine file that should have been created
         model_basename = os.path.splitext(os.path.basename(model_path))[0]
         expected_engine_path = os.path.join(output_dir, model_basename + ".engine")
         
         if os.path.exists(expected_engine_path):
-            print(f"Found engine file: {expected_engine_path}")
+            logger.info(f"Found engine file: {expected_engine_path}")
             result = {
                 'success': True,
                 'engine_file': expected_engine_path
             }
         else:
-            print("ERROR: No engine file was created!")
+            logger.error("No engine file was created!")
             result = {
                 'success': False,
                 'error': 'No engine file was created'

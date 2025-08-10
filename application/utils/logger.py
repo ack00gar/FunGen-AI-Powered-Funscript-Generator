@@ -83,63 +83,61 @@ class AppLogger:
     A wrapper class to simplify the creation and configuration of a logger.
     """
 
-    def __init__(self, logger_name=None, level=logging.DEBUG, log_file=None,
+    def __init__(self, level=logging.DEBUG, log_file=None,
                  app_logic_instance=None, status_level_durations=None):
         """
-        Initializes the logger.
+        Initializes and configures the root logger for the entire application.
 
         Args:
-            logger_name (str, optional): Name of the logger.
-                                         Defaults to the name of the calling module.
-            level (int, optional): The logging level for console and file. Defaults to logging.DEBUG.
+            level (int, optional): The master logging level. Defaults to logging.DEBUG.
             log_file (str, optional): Path to a file to save logs.
-                                      If None, logs are only printed to console.
-            app_logic_instance (object, optional): Instance of ApplicationLogic (or any class
-                                                   with a 'set_status_message(msg, duration)' method).
-            status_level_durations (dict, optional): Dict mapping log levels (e.g., logging.INFO)
-                                                     to durations for status messages. If None, uses defaults
-                                                     from StatusMessageHandler.
+            app_logic_instance (object, optional): Instance for status messages.
+            status_level_durations (dict, optional): Durations for status messages.
         """
-        if logger_name is None:
-            # Automatically get the name of the module that is creating the logger
-            frm = inspect.stack()[1]
-            mod = inspect.getmodule(frm[0])
-            logger_name = mod.__name__ if mod else '__main__'
+        # Configure the root logger directly to ensure consistency.
+        self.logger = logging.getLogger()  # Get the root logger
+        self.logger.setLevel(level)
 
-        self.logger = logging.getLogger(logger_name)
-        self.logger.setLevel(level)  # Master level for the logger
+        # Clear any existing handlers to prevent duplicates from previous runs or basicConfig.
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
 
-        # Prevent duplicate handlers if logger already exists
-        if not self.logger.handlers:
-            # Console Handler with colors
-            ch = logging.StreamHandler()
-            ch.setLevel(level)  # Handler respects the master level
-            ch.setFormatter(ColoredFormatter())
-            self.logger.addHandler(ch)
+        # Console Handler with colors
+        ch = logging.StreamHandler()
+        ch.setLevel(level)
+        ch.setFormatter(ColoredFormatter())
+        self.logger.addHandler(ch)
 
-            # File Handler (optional)
-            if log_file:
-                fh = logging.FileHandler(log_file)
-                fh.setLevel(level)  # Handler respects the master level
-                file_formatter = logging.Formatter(
-                    "%(asctime)s - %(name)s - %(levelname)-8s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s",
-                    datefmt='%Y-%m-%d %H:%M:%S'
-                )
-                fh.setFormatter(file_formatter)
-                self.logger.addHandler(fh)
+        # File Handler (optional)
+        if log_file:
+            fh = logging.FileHandler(log_file, mode='a', encoding='utf-8') # Use append mode
+            fh.setLevel(level)
+            file_formatter = logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)-8s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s",
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            fh.setFormatter(file_formatter)
+            self.logger.addHandler(fh)
 
-            # Status Message Handler (optional)
-            if app_logic_instance and hasattr(app_logic_instance, 'set_status_message'):
-                smh = StatusMessageHandler(app_logic_instance.set_status_message,
-                                           level_durations=status_level_durations)
-                # The StatusMessageHandler will decide to show a message based on its
-                # internal logic (level_durations config, or 'status_message' in extra).
-                # Set its level to the logger's main level so it sees all relevant messages.
-                smh.setLevel(level)
-                self.logger.addHandler(smh)
+        # Status Message Handler (optional)
+        if app_logic_instance and hasattr(app_logic_instance, 'set_status_message'):
+            smh = StatusMessageHandler(app_logic_instance.set_status_message,
+                                       level_durations=status_level_durations)
+            smh.setLevel(level)
+            self.logger.addHandler(smh)
 
     def get_logger(self):
         """
         Returns the configured logger instance.
         """
-        return self.logger
+        # Since we configured the root, any call to getLogger will use this config.
+        return logging.getLogger(self.get_caller_name())
+
+    def get_caller_name(self):
+        """Helper to get the name of the module that called get_logger."""
+        try:
+            frm = inspect.stack()[2] # 2 levels up to get the caller of get_logger
+            mod = inspect.getmodule(frm[0])
+            return mod.__name__ if mod else '__main__'
+        except IndexError:
+            return 'unknown_module'
