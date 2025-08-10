@@ -150,6 +150,15 @@ class InteractiveFunscriptTimeline:
         self.ultimate_autotune_preview_actions: Optional[List[Dict]] = None
         self._ultimate_preview_dirty: bool = True
 
+    def invalidate_cache(self):
+        """
+        Forces the timeline to re-compute its cached data on the next frame.
+        Call this after any external modification to the actions list.
+        """
+        self._cached_actions_hash = None
+        self._cached_arrays_initialized = False
+        self.app.logger.debug(f"T{self.timeline_num}: Cache invalidated.")
+
     def invalidate_ultimate_preview(self):
         """Marks the ultimate autotune preview as dirty, forcing recalculation."""
         self._ultimate_preview_dirty = True

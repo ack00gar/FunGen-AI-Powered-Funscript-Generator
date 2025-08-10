@@ -346,6 +346,7 @@ class ControlPanelUI:
             tracker_mode.LIVE_YOLO_OSCILLATION,
             tracker_mode.OFFLINE_2_STAGE,
             tracker_mode.OFFLINE_3_STAGE,
+            #tracker_mode.OFFLINE_3_STAGE_MIXED,
         ]
 
         open_, _ = imgui.collapsing_header(
@@ -378,7 +379,8 @@ class ControlPanelUI:
                     "• Live YOLO ROI: AI-powered object detection with real-time tracking\n"
                     "• Live User ROI: Manual region selection for custom tracking\n"
                     "• Offline 2-Stage: GPU-accelerated batch processing\n"
-                    "• Offline 3-Stage: Full pipeline with advanced post-processing"
+                    "• Offline 3-Stage: Full pipeline with advanced post-processing\n"
+                    "• Offline 3-Stage Mixed: Stage 2 signal + ROI tracking for BJ/HJ chapters"
                 )
 
             if clicked and new_idx != cur_idx:
@@ -548,6 +550,7 @@ class ControlPanelUI:
             self.TrackerMode.LIVE_YOLO_OSCILLATION,
             self.TrackerMode.OFFLINE_2_STAGE,
             self.TrackerMode.OFFLINE_3_STAGE,
+            self.TrackerMode.OFFLINE_3_STAGE_MIXED,
         ):
             if imgui.collapsing_header("AI Models & Inference##ConfigAIModels")[0]:
                 self._render_ai_model_settings()
@@ -563,6 +566,7 @@ class ControlPanelUI:
             self.TrackerMode.LIVE_YOLO_OSCILLATION,
             self.TrackerMode.OFFLINE_2_STAGE,
             self.TrackerMode.OFFLINE_3_STAGE,
+            self.TrackerMode.OFFLINE_3_STAGE_MIXED,
         ) and adv:
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
                 self._render_class_filtering_content()
@@ -577,6 +581,7 @@ class ControlPanelUI:
             self.TrackerMode.LIVE_USER_ROI,
             self.TrackerMode.OFFLINE_2_STAGE,
             self.TrackerMode.OFFLINE_3_STAGE,
+            self.TrackerMode.OFFLINE_3_STAGE_MIXED,
         }
         if tmode not in with_config:
             imgui.text_disabled("No configuration available for this mode.")
@@ -734,7 +739,7 @@ class ControlPanelUI:
         # imgui.separator()
 
         mode = app.app_state_ui.selected_tracker_mode
-        if mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE):
+        if mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED):
             # imgui.separator()
             imgui.text("Stage 1 Inference Workers:")
             imgui.push_item_width(100)
@@ -1143,7 +1148,7 @@ class ControlPanelUI:
         app_state = app.app_state_ui
         mode = app_state.selected_tracker_mode
 
-        if mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE):
+        if mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED):
             self._render_stage_progress_ui(stage_proc)
             return
 
@@ -1397,10 +1402,10 @@ class ControlPanelUI:
             
             # Check for resumable tasks
             resumable_checkpoint = None
-            if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_2_STAGE] and self.app.file_manager.video_path:
+            if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED, self.TrackerMode.OFFLINE_2_STAGE] and self.app.file_manager.video_path:
                 resumable_checkpoint = stage_proc.can_resume_video(self.app.file_manager.video_path)
             
-            if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_2_STAGE]:
+            if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED, self.TrackerMode.OFFLINE_2_STAGE]:
                 start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
             elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.LIVE_YOLO_OSCILLATION]:
@@ -1540,8 +1545,11 @@ class ControlPanelUI:
         # imgui.separator()
 
         # Stage 3
-        if selected_mode == self.TrackerMode.OFFLINE_3_STAGE:
-            imgui.text("Stage 3: Per-Segment Optical Flow")
+        if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED]:
+            if selected_mode == self.TrackerMode.OFFLINE_3_STAGE_MIXED:
+                imgui.text("Stage 3: Mixed Processing")
+            else:
+                imgui.text("Stage 3: Per-Segment Optical Flow")
             if is_analysis_running and stage_proc.current_analysis_stage == 3:
                 imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
 
@@ -2299,7 +2307,7 @@ class ControlPanelUI:
             
             imgui.separator()
             if imgui.button("Start Analysis", width=120):
-                if app_state.selected_tracker_mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE):
+                if app_state.selected_tracker_mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED):
                     event_handlers.handle_start_ai_cv_analysis()
                 else:
                     event_handlers.handle_start_live_tracker_click()

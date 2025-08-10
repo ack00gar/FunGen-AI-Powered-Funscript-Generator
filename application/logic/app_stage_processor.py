@@ -19,6 +19,7 @@ import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
 #import detection.stage_2_orchestrator as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
+import detection.cd.stage_3_mixed_processor as stage3_mixed_module
 
 from config import constants
 from config.constants import TrackerMode
@@ -598,7 +599,7 @@ class AppStageProcessor:
 
         self.reset_stage_status(stages=("stage2", "stage3"))
         self.stage2_status_text = "Queued..."
-        if selected_mode == TrackerMode.OFFLINE_3_STAGE:
+        if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]:
             self.stage3_status_text = "Queued..."
 
         self.logger.info("Starting Full Analysis sequence...", extra={'status_message': True})
@@ -768,7 +769,7 @@ class AppStageProcessor:
 
             if self.stop_stage_event.is_set() or not stage2_success:
                 self.logger.info("[Thread] Exiting after Stage 2 due to stop event or failure.")
-                if selected_mode == TrackerMode.OFFLINE_3_STAGE and "Queued" in self.stage3_status_text:
+                if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED] and "Queued" in self.stage3_status_text:
                      self.gui_event_queue.put(("stage3_status_update", "Skipped", "S2 Failed/Aborted"))
                 return
 
@@ -819,6 +820,47 @@ class AppStageProcessor:
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 
                 s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
+                stage3_success = s3_results_dict is not None
+
+                if stage3_success:
+                    self.gui_event_queue.put(("stage3_completed", self.stage3_time_elapsed_str, self.stage3_processing_fps_str))
+
+                    packaged_data = {
+                        "results_dict": s3_results_dict,
+                        "was_ranged": effective_range_is_active,
+                        "range_frames": (effective_start_frame, effective_end_frame)
+                    }
+                    self.last_analysis_result = packaged_data
+
+            elif selected_mode == TrackerMode.OFFLINE_3_STAGE_MIXED:
+                self.current_analysis_stage = 3
+                atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
+                video_segments_for_gui = s2_output_data.get("video_segments", [])
+
+                if video_segments_for_gui:
+                    self.gui_event_queue.put(("stage2_results_success_segments_only", video_segments_for_gui, None))
+
+                effective_range_is_active = frame_range_for_s1 is not None
+                effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
+                effective_end_frame = frame_range_for_s1[1] if effective_range_is_active else range_end_frame
+
+                segments_for_s3 = self._filter_segments_for_range(atr_segments_objects, effective_range_is_active,
+                                                                  effective_start_frame, effective_end_frame)
+
+                if not segments_for_s3:
+                    self.gui_event_queue.put(("analysis_message", "No relevant segments in range for Mixed Stage 3.", "Info"))
+                    return
+
+                frame_objects_list = s2_output_data.get("all_s2_frame_objects_list", [])
+                self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
+                self.logger.info(f"Mixed Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
+
+                # Store SQLite database path for Mixed Stage 3
+                self.app.s2_sqlite_db_path = s2_output_data.get("sqlite_db_path")
+
+                self.logger.info(f"Starting Mixed Stage 3 with {preprocessed_path_for_s3}.")
+
+                s3_results_dict = self._execute_mixed_stage_processing(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
                 stage3_success = s3_results_dict is not None
 
                 if stage3_success:
@@ -899,7 +941,7 @@ class AppStageProcessor:
                 
                 # CRITICAL: Never delete database during 3-stage pipeline until Stage 3 completes
                 # Stage 3 depends on the Stage 2 database for processing
-                is_3_stage_pipeline = selected_mode == TrackerMode.OFFLINE_3_STAGE
+                is_3_stage_pipeline = selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
                 stage3_completed = stage3_success if is_3_stage_pipeline else True
                 
                 if not retain_database and stage3_completed:
@@ -931,7 +973,7 @@ class AppStageProcessor:
                         retain_database = self.app_settings.get("retain_stage2_database", True)
                         
                         # Use same logic as database cleanup
-                        is_3_stage_pipeline = selected_mode == TrackerMode.OFFLINE_3_STAGE
+                        is_3_stage_pipeline = selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
                         stage3_completed = stage3_success if is_3_stage_pipeline else True
                         
                         if not retain_database and stage3_completed:
@@ -1065,6 +1107,9 @@ class AppStageProcessor:
             db_path = file_paths.get('database')
             overlay_path = file_paths.get('overlay_msgpack')
             
+            # DEBUG: Log initial data
+            self.logger.info(f"DEBUG _load_existing_stage2_data: db_path={db_path}, overlay_path={overlay_path}")
+            
             loaded_data = {
                 "video_segments": [],
                 "atr_segments_objects": [],
@@ -1080,30 +1125,105 @@ class AppStageProcessor:
                     with sqlite3.connect(db_path) as conn:
                         cursor = conn.cursor()
                         
+                        # DEBUG: First, explore the database schema
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                        tables = [row[0] for row in cursor.fetchall()]
+                        self.logger.info(f"DEBUG: Available database tables: {tables}")
+                        
                         # Load segments data
                         segment_tables = ['atr_segments', 'segments']
                         for table_name in segment_tables:
+                            if table_name not in tables:
+                                continue
+                                
                             try:
-                                cursor.execute(f"SELECT * FROM {table_name}")
+                                # DEBUG: Examine table structure
+                                cursor.execute(f"PRAGMA table_info({table_name})")
+                                columns = cursor.fetchall()
+                                column_names = [col[1] for col in columns]
+                                self.logger.info(f"DEBUG: Table {table_name} columns: {column_names}")
+                                
+                                cursor.execute(f"SELECT * FROM {table_name} LIMIT 5")
                                 segments_data = cursor.fetchall()
+                                
                                 if segments_data:
+                                    self.logger.info(f"DEBUG: Sample {table_name} data (first 3 rows):")
+                                    for i, row in enumerate(segments_data[:3]):
+                                        self.logger.info(f"DEBUG:   Row {i}: {row}")
+                                    
                                     # Convert to expected format
                                     from application.utils.video_segment import VideoSegment
-                                    for segment_row in segments_data:
-                                        # Basic segment reconstruction - adjust based on actual DB schema
-                                        segment = VideoSegment(
-                                            start_frame_id=segment_row[1] if len(segment_row) > 1 else 0,
-                                            end_frame_id=segment_row[2] if len(segment_row) > 2 else 0,
-                                            class_id=segment_row[3] if len(segment_row) > 3 else 1,
-                                            class_name=segment_row[4] if len(segment_row) > 4 else "unknown",
-                                            segment_type="SexAct",
-                                            position_short_name=segment_row[4] if len(segment_row) > 4 else "HJ",
-                                            position_long_name=segment_row[4] if len(segment_row) > 4 else "Hand Job"
-                                        )
+                                    
+                                    # Get all rows for processing
+                                    cursor.execute(f"SELECT * FROM {table_name}")
+                                    all_segments_data = cursor.fetchall()
+                                    
+                                    for segment_row in all_segments_data:
+                                        self.logger.info(f"DEBUG: Processing segment row: {segment_row}")
+                                        
+                                        # Try to map columns based on the actual schema
+                                        if 'major_position' in column_names:
+                                            # This looks like ATR segments table
+                                            major_position_idx = column_names.index('major_position')
+                                            start_frame_idx = column_names.index('start_frame_id') if 'start_frame_id' in column_names else 1
+                                            end_frame_idx = column_names.index('end_frame_id') if 'end_frame_id' in column_names else 2
+                                            
+                                            major_position = segment_row[major_position_idx] if len(segment_row) > major_position_idx else "unknown"
+                                            start_frame = segment_row[start_frame_idx] if len(segment_row) > start_frame_idx else 0
+                                            end_frame = segment_row[end_frame_idx] if len(segment_row) > end_frame_idx else 0
+                                            
+                                            self.logger.info(f"DEBUG: Extracted major_position='{major_position}' (type: {type(major_position)}), "
+                                                           f"start_frame={start_frame}, end_frame={end_frame}")
+                                            
+                                            # Map from major position to proper chapter names
+                                            position_mapping = {
+                                                'Handjob': ('HJ', 'Hand Job'),
+                                                'Blowjob': ('BJ', 'Blow Job'),  
+                                                'CG/Miss.': ('CG/Miss', 'Cowgirl / Missionary'),
+                                                'Cowgirl / Missionary': ('CG/Miss', 'Cowgirl / Missionary')
+                                            }
+                                            
+                                            if major_position in position_mapping:
+                                                short_name, long_name = position_mapping[major_position]
+                                            else:
+                                                # Use the major_position as-is if not in mapping
+                                                short_name = str(major_position)[:10]  # Truncate to reasonable length
+                                                long_name = str(major_position)
+                                            
+                                            self.logger.info(f"DEBUG: Mapped to short_name='{short_name}', long_name='{long_name}'")
+                                            
+                                            # Basic segment reconstruction using proper mapping
+                                            segment = VideoSegment(
+                                                start_frame_id=start_frame,
+                                                end_frame_id=end_frame,
+                                                class_id=1,  # Default class ID
+                                                class_name=short_name,  # Use mapped short name
+                                                segment_type="SexAct",
+                                                position_short_name=short_name,
+                                                position_long_name=long_name
+                                            )
+                                        else:
+                                            # Fallback to old logic for unknown schema
+                                            self.logger.warning(f"DEBUG: Unknown table schema for {table_name}, using fallback logic")
+                                            segment = VideoSegment(
+                                                start_frame_id=segment_row[1] if len(segment_row) > 1 else 0,
+                                                end_frame_id=segment_row[2] if len(segment_row) > 2 else 0,
+                                                class_id=segment_row[3] if len(segment_row) > 3 else 1,
+                                                class_name=segment_row[4] if len(segment_row) > 4 else "unknown",
+                                                segment_type="SexAct",
+                                                position_short_name=segment_row[4] if len(segment_row) > 4 else "HJ",
+                                                position_long_name=segment_row[4] if len(segment_row) > 4 else "Hand Job"
+                                            )
+                                        
+                                        self.logger.info(f"DEBUG: Created VideoSegment - position_short_name='{segment.position_short_name}', "
+                                                       f"position_long_name='{segment.position_long_name}'")
+                                        
                                         loaded_data["video_segments"].append(segment)
                                         loaded_data["atr_segments_objects"].append(segment)
+                                    
                                     break  # Use first successful table
-                            except sqlite3.Error:
+                            except sqlite3.Error as e:
+                                self.logger.warning(f"DEBUG: Failed to load from table {table_name}: {e}")
                                 continue
                                 
                         # Load frame objects from database for Stage 3
@@ -1532,6 +1652,134 @@ class AppStageProcessor:
             self.gui_event_queue.put(("stage3_status_update", f"S3 Failed: {error_msg}", "Failed"))
             return None
 
+    def _execute_mixed_stage_processing(self, atr_segments_objects: List[Any], preprocessed_video_path: Optional[str], s2_output_data: Dict[str, Any]) -> bool:
+        """Wrapper to call the new Mixed Stage 3 processing module."""
+        fs_proc = self.app.funscript_processor
+
+        if not self.app.file_manager.video_path:
+            self.logger.error("Mixed Stage 3: Video path not available.")
+            self.gui_event_queue.put(("stage3_status_update", "Error: Video path missing", "Error"))
+            return False
+
+        if not stage3_mixed_module:
+            self.logger.error("Mixed Stage 3: Mixed processing module (stage3_mixed_module) not loaded.")
+            self.gui_event_queue.put(("stage3_status_update", "Error: Mixed S3 Module missing", "Error"))
+            return False
+
+        # Build tracker config (reuse existing stage 3 config)
+        tracker_config_s3 = {
+            "confidence_threshold": self.app_settings.get('tracker_confidence_threshold', 0.4),
+            "roi_padding": self.app_settings.get('tracker_roi_padding', 20),
+            "roi_update_interval": self.app_settings.get('s3_roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
+            "roi_smoothing_factor": self.app_settings.get('tracker_roi_smoothing_factor', constants.DEFAULT_ROI_SMOOTHING_FACTOR),
+            "dis_flow_preset": self.app_settings.get('tracker_dis_flow_preset', "ULTRAFAST"),
+            "target_size_preprocess": self.app.tracker.target_size_preprocess if self.app.tracker else (640, 640),
+            "flow_history_window_smooth": self.app_settings.get('tracker_flow_history_window_smooth', 3),
+            "adaptive_flow_scale": self.app_settings.get('tracker_adaptive_flow_scale', True),
+            "use_sparse_flow": self.app_settings.get('tracker_use_sparse_flow', False),
+            "base_amplification_factor": self.app_settings.get('tracker_base_amplification', constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
+            "class_specific_amplification_multipliers": self.app_settings.get('tracker_class_specific_multipliers', constants.DEFAULT_CLASS_AMP_MULTIPLIERS),
+            "y_offset": self.app_settings.get('tracker_y_offset', constants.DEFAULT_LIVE_TRACKER_Y_OFFSET),
+            "x_offset": self.app_settings.get('tracker_x_offset', constants.DEFAULT_LIVE_TRACKER_X_OFFSET),
+            "sensitivity": self.app_settings.get('tracker_sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY),
+            "oscillation_grid_size": self.app_settings.get('oscillation_detector_grid_size', 20),
+            "oscillation_sensitivity": self.app_settings.get('oscillation_detector_sensitivity', 1.0)
+        }
+
+        video_fps_s3 = 30.0
+        if self.app.processor and self.app.processor.video_info:
+            video_fps_s3 = self.app.processor.video_info.get('fps', 30.0)
+            if video_fps_s3 <= 0: video_fps_s3 = 30.0
+        elif self.app.project_manager.current_project_data and \
+                self.app.project_manager.current_project_data.get('video_info'):
+            video_fps_s3 = self.app.project_manager.current_project_data['video_info'].get('fps', 30.0)
+            if video_fps_s3 <= 0: video_fps_s3 = 30.0
+
+        common_app_config_s3 = {
+            "yolo_det_model_path": self.app.yolo_det_model_path,
+            "yolo_pose_model_path": self.app.yolo_pose_model_path,
+            "yolo_input_size": self.app.yolo_input_size,
+            "video_fps": video_fps_s3,
+            "output_delay_frames": self.app.tracker.output_delay_frames if self.app.tracker else 0,
+            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10 + (self.app.tracker.output_delay_frames if self.app.tracker else 0)),
+            "roi_narrow_factor_hjbj": self.app_settings.get("roi_narrow_factor_hjbj", constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ),
+            "min_roi_dim_hjbj": self.app_settings.get("min_roi_dim_hjbj", constants.DEFAULT_MIN_ROI_DIM_HJBJ),
+            "tracking_axis_mode": self.app.tracking_axis_mode,
+            "single_axis_output_target": self.app.single_axis_output_target,
+            "s3_show_roi_debug": self.app_settings.get("s3_show_roi_debug", False),
+            "hardware_acceleration_method": self.app.hardware_acceleration_method,
+            "available_ffmpeg_hwaccels": self.app.available_ffmpeg_hwaccels,
+            "video_type": self.app.processor.video_type_setting if self.app.processor else "auto",
+            "vr_input_format": self.app.processor.vr_input_format if self.app.processor else "he",
+            "vr_fov": self.app.processor.vr_fov if self.app.processor else 190,
+            "vr_pitch": self.app.processor.vr_pitch if self.app.processor else 0,
+            "s3_chunk_size": self.app.app_settings.get("s3_chunk_size", 1000),
+            "s3_overlap_size": self.app.app_settings.get("s3_overlap_size", 30)
+        }
+
+        # Get SQLite database path from app instance
+        sqlite_db_path = getattr(self.app, 's2_sqlite_db_path', None)
+
+        # Call the mixed stage processor
+        s3_results = stage3_mixed_module.perform_mixed_stage_analysis(
+            video_path=self.app.file_manager.video_path,
+            preprocessed_video_path_arg=preprocessed_video_path,
+            atr_segments_list=atr_segments_objects,
+            s2_frame_objects_map=self.app.s2_frame_objects_map_for_s3,
+            tracker_config=tracker_config_s3,
+            common_app_config=common_app_config_s3,
+            progress_callback=self.on_stage3_progress,
+            stop_event=self.stop_stage_event,
+            parent_logger=self.logger,
+            sqlite_db_path=sqlite_db_path
+        )
+
+        # Clear Stage 2 memory map immediately after Mixed Stage 3 starts processing
+        if hasattr(self.app, 's2_frame_objects_map_for_s3') and self.app.s2_frame_objects_map_for_s3:
+            map_size = len(self.app.s2_frame_objects_map_for_s3)
+            self.app.s2_frame_objects_map_for_s3 = None
+            self.logger.info(f"[Memory] Cleared Stage 2 data map ({map_size} frames) early to reduce memory pressure")
+            gc.collect()
+
+        if self.stop_stage_event.is_set(): return False
+
+        if s3_results and "error" not in s3_results:
+            final_s3_primary_actions = s3_results.get("primary_actions", [])
+            final_s3_secondary_actions = s3_results.get("secondary_actions", [])
+            self.logger.info(f"Mixed Stage 3 generated {len(final_s3_primary_actions)} primary and {len(final_s3_secondary_actions)} secondary actions.")
+
+            range_is_active, range_start_f, range_end_f_effective = fs_proc.get_effective_scripting_range()
+            op_desc_s3 = "Mixed Stage 3"
+            video_total_frames_s3 = self.app.processor.total_frames if self.app.processor else 0
+            video_duration_ms_s3 = fs_proc.frame_to_ms(video_total_frames_s3 - 1) if video_total_frames_s3 > 0 else 0
+
+            if range_is_active:
+                start_ms = fs_proc.frame_to_ms(range_start_f if range_start_f is not None else 0)
+                end_ms = fs_proc.frame_to_ms(range_end_f_effective) if range_end_f_effective is not None else video_duration_ms_s3
+                op_desc_s3_range = f"{op_desc_s3} (Range F{range_start_f or 'Start'}-{range_end_f_effective if range_end_f_effective is not None else 'End'})"
+                fs_proc.clear_actions_in_range_and_inject_new(1, final_s3_primary_actions, start_ms, end_ms, op_desc_s3_range + " (T1)")
+                fs_proc.clear_actions_in_range_and_inject_new(2, final_s3_secondary_actions, start_ms, end_ms, op_desc_s3_range + " (T2)")
+            else:
+                fs_proc.clear_timeline_history_and_set_new_baseline(1, final_s3_primary_actions, op_desc_s3 + " (T1)")
+                fs_proc.clear_timeline_history_and_set_new_baseline(2, final_s3_secondary_actions, op_desc_s3 + " (T2)")
+
+            self.gui_event_queue.put(("stage3_status_update", "Mixed Stage 3 Completed.", "Done"))
+            self.app.project_manager.project_dirty = True
+
+            # Update chapters for GUI if video_segments are present
+            if "video_segments" in s3_results:
+                fs_proc.video_chapters.clear()
+                for seg_data in s3_results["video_segments"]:
+                    fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
+                self.app.app_state_ui.heatmap_dirty = True
+                self.app.app_state_ui.funscript_preview_dirty = True
+            return s3_results
+        else:
+            error_msg = s3_results.get("error", "Unknown Mixed S3 failure") if s3_results else "Mixed S3 returned None."
+            self.logger.error(f"Mixed Stage 3 execution failed: {error_msg}")
+            self.gui_event_queue.put(("stage3_status_update", f"Mixed S3 Failed: {error_msg}", "Failed"))
+            return None
+
     def abort_stage_processing(self):
         if self.full_analysis_active and self.stage_thread and self.stage_thread.is_alive():
             self.logger.info("Aborting current analysis stage(s)...", extra={'status_message': True})
@@ -1641,8 +1889,15 @@ class AppStageProcessor:
                     results_dict = packaged_data.get("results_dict", {})
                     video_segments_data = results_dict.get("video_segments", [])
                     # Use the same flag to protect chapters during a 2-Stage run.
-                    if self.force_rerun_stage2_segmentation:
-                        self.logger.info("Overwriting chapters with new 2-Stage analysis results as requested.")
+                    # However, if there are no existing chapters, always update them
+                    should_update_chapters = (self.force_rerun_stage2_segmentation or 
+                                            len(fs_proc.video_chapters) == 0)
+                    
+                    if should_update_chapters:
+                        if self.force_rerun_stage2_segmentation:
+                            self.logger.info("Overwriting chapters with new 2-Stage analysis results as requested.")
+                        else:
+                            self.logger.info("No existing chapters found - populating with new 2-Stage analysis results.")
                         fs_proc.video_chapters.clear()
                         if isinstance(video_segments_data, list):
                             for seg_data in video_segments_data:

@@ -172,6 +172,9 @@ class ApplicationLogic:
         )
         self.logger = self._logger_instance.get_logger()
         self.app_settings.logger = self.logger  # Now provide the logger to AppSettings
+        
+        # Configure third-party logging to reduce startup noise
+        self._configure_third_party_logging()
 
         # --- Initialize Auto-Updater ---
         self.updater = AutoUpdater(self)
@@ -355,6 +358,29 @@ class ApplicationLogic:
         elif timeline_num == 2:
             return getattr(self, 'interactive_timeline2', None)
         return None
+
+    def _configure_third_party_logging(self):
+        """Configure third-party library logging to reduce startup noise."""
+        # Suppress/reduce noisy third-party library logging
+        third_party_loggers = {
+            'coremltools': logging.ERROR,  # Only show critical errors from CoreML
+            'ultralytics': logging.WARNING,  # Reduce ultralytics noise
+            'torch': logging.WARNING,  # Reduce PyTorch noise
+            'torchvision': logging.WARNING,  # Reduce torchvision noise
+            'requests': logging.WARNING,  # Reduce requests noise
+            'urllib3': logging.WARNING,  # Reduce urllib3 noise
+            'PIL': logging.WARNING,  # Reduce Pillow noise
+            'matplotlib': logging.WARNING,  # Reduce matplotlib noise
+        }
+        
+        for logger_name, level in third_party_loggers.items():
+            logging.getLogger(logger_name).setLevel(level)
+        
+        # Special handling for ultralytics model loading warnings
+        ultralytics_logger = logging.getLogger('ultralytics')
+        ultralytics_logger.setLevel(logging.ERROR)  # Only show errors from ultralytics
+        
+        self.logger.debug("Third-party logging configured for reduced startup noise")
 
     def trigger_first_run_setup(self):
         """Initiates the first-run model download process in a background thread."""
@@ -933,7 +959,8 @@ class ApplicationLogic:
                 batch_mode_map = {
                     0: TrackerMode.OFFLINE_3_STAGE,
                     1: TrackerMode.OFFLINE_2_STAGE,
-                    2: TrackerMode.OSCILLATION_DETECTOR
+                    2: TrackerMode.OSCILLATION_DETECTOR,
+                    3: TrackerMode.OFFLINE_3_STAGE_MIXED
                 }
                 selected_mode = batch_mode_map.get(self.batch_processing_method_idx)
 
@@ -941,8 +968,8 @@ class ApplicationLogic:
                     self.logger.error(f"Invalid batch processing method index: {self.batch_processing_method_idx}. Skipping video.")
                     continue
 
-                # --- OFFLINE MODES (2-Stage / 3-Stage) ---
-                if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+                # --- OFFLINE MODES (2-Stage / 3-Stage / 3-Stage-Mixed) ---
+                if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]:
                     self.single_video_analysis_complete_event.clear()
                     self.save_and_reset_complete_event.clear()
                     self.stage_processor.start_full_analysis(processing_mode=selected_mode)
@@ -1603,7 +1630,7 @@ class ApplicationLogic:
         if self.processor and self.processor.is_processing: self.processor.stop_processing()
         if self.stage_processor.full_analysis_active: self.stage_processor.abort_stage_processing()  # Signals thread
 
-        self.file_manager.close_video_action(clear_funscript_unconditionally=True)
+        self.file_manager.close_video_action(clear_funscript_unconditionally=True, skip_tracker_reset=(not for_new_project))
         self.funscript_processor.reset_state_for_new_project()
         self.funscript_processor.update_funscript_stats_for_timeline(1, "Project Reset")
         self.funscript_processor.update_funscript_stats_for_timeline(2, "Project Reset")
@@ -1781,7 +1808,8 @@ class ApplicationLogic:
             mode_to_idx_map = {
                 '3-stage': 0,
                 '2-stage': 1,
-                'oscillation-detector': 2
+                'oscillation-detector': 2,
+                '3-stage-mixed': 3  # Add new mixed mode index
             }
             # Set the batch processing index, which the batch thread now uses
             self.batch_processing_method_idx = mode_to_idx_map.get(args.mode, 0)
@@ -1792,7 +1820,7 @@ class ApplicationLogic:
             self.batch_apply_ultimate_autotune = args.autotune
             self.batch_copy_funscript_to_video_location = args.copy
             self.batch_apply_post_processing = True  # Assume always on for CLI
-            self.batch_generate_roll_file = (args.mode == '3-stage')
+            self.batch_generate_roll_file = (args.mode in ['3-stage', '3-stage-mixed'])
 
             self.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
 

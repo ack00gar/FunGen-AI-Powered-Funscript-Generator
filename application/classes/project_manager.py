@@ -139,9 +139,21 @@ class ProjectManager:
                         f"Video file specified in project not found: {self.app.file_manager.video_path}")
                 self.app.file_manager.video_path = ""  # Ensure video_path is cleared if not valid
 
-            # On successful load, update the recent projects list
-            self._add_to_recent_projects(filepath)
-            self.app.app_settings.set("last_opened_project_path", os.path.abspath(filepath))
+            # On successful load, update the recent projects list and last opened path in one save
+            abs_filepath = os.path.abspath(filepath)
+            
+            # Update recent projects list
+            recent_list = self.app.app_settings.get("recent_projects", [])
+            if abs_filepath in recent_list:
+                recent_list.remove(abs_filepath)
+            recent_list.insert(0, abs_filepath)
+            trimmed_list = recent_list[:10]  # Trim to max 10 recent files
+            
+            # Batch update both settings in one save
+            self.app.app_settings.set_batch(
+                recent_projects=trimmed_list,
+                last_opened_project_path=abs_filepath
+            )
 
             self.project_file_path = filepath
 

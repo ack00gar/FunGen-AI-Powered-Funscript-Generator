@@ -78,27 +78,25 @@ class Stage2SQLiteStorage:
     def _init_db(self):
         """Initialize database schema optimized for performance."""
         with self.get_cursor() as cursor:
-            # Main frame objects table with minimal essential data
+            # Optimized frame objects table - only data needed by Stage 3/Stage 3 mixed
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS frame_objects (
                     frame_id INTEGER PRIMARY KEY,
-                    yolo_input_size INTEGER,
-                    frame_width INTEGER,
-                    frame_height INTEGER,
+                    
+                    -- Essential data for Stage 3/Mixed only
                     atr_assigned_position TEXT,
-
-                    -- Essential ATR data (serialized as compact binary)
-                    atr_locked_penis_state BLOB,
-                    atr_detected_contact_boxes BLOB,
-
-                    -- Boxes and poses (serialized as compact binary)
-                    boxes_data BLOB,
-                    poses_data BLOB,
-
-                    -- Funscript related data
                     atr_funscript_distance REAL,
-                    is_static_frame INTEGER DEFAULT 0,
-
+                    
+                    -- Locked penis ROI coordinates (x1, y1, x2, y2) for Stage 3 mixed ROI tracking
+                    locked_penis_x1 REAL,
+                    locked_penis_y1 REAL, 
+                    locked_penis_x2 REAL,
+                    locked_penis_y2 REAL,
+                    locked_penis_active INTEGER DEFAULT 0,
+                    
+                    -- Contact boxes for Stage 3 mixed (JSON format for lightweight storage)
+                    contact_boxes_json TEXT,
+                    
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 ) WITHOUT ROWID
             """)
@@ -138,34 +136,76 @@ class Stage2SQLiteStorage:
 
             batch_data = []
             for frame_obj in frame_objects:
-                # Serialize complex objects to compact binary format
-                atr_locked_penis_data = pickle.dumps(frame_obj.atr_locked_penis_state, protocol=pickle.HIGHEST_PROTOCOL)
-                atr_contact_boxes_data = pickle.dumps(frame_obj.atr_detected_contact_boxes,
-                                                      protocol=pickle.HIGHEST_PROTOCOL)
-                boxes_data = pickle.dumps(frame_obj.boxes, protocol=pickle.HIGHEST_PROTOCOL)
-                poses_data = pickle.dumps(frame_obj.poses, protocol=pickle.HIGHEST_PROTOCOL)
+                # Extract only essential data for Stage 3/Stage 3 mixed
+                locked_penis_active = 0
+                locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2 = 0, 0, 0, 0
+                
+                # Extract locked penis ROI coordinates if available
+                if (hasattr(frame_obj, 'atr_locked_penis_state') and 
+                    frame_obj.atr_locked_penis_state and 
+                    frame_obj.atr_locked_penis_state.active and 
+                    frame_obj.atr_locked_penis_state.box):
+                    locked_penis_active = 1
+                    box = frame_obj.atr_locked_penis_state.box
+                    
+                    # Debug: Check if box contains valid numeric data
+                    try:
+                        if isinstance(box, (list, tuple)) and len(box) >= 4:
+                            # Validate each coordinate
+                            coords = []
+                            for i, coord in enumerate(box[:4]):
+                                if isinstance(coord, (bytes, str)):
+                                    self.logger.error(f"Frame {frame_obj.frame_id} storing corrupted box[{i}]: {coord} (type: {type(coord)})")
+                                    # Try to skip this frame entirely to prevent corruption
+                                    locked_penis_active = 0
+                                    break
+                                coords.append(float(coord))
+                            
+                            if locked_penis_active:  # Only if all coords are valid
+                                locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2 = coords
+                        else:
+                            self.logger.error(f"Frame {frame_obj.frame_id} has invalid box format: {box}")
+                            locked_penis_active = 0
+                    except (ValueError, TypeError) as e:
+                        self.logger.error(f"Frame {frame_obj.frame_id} box validation error: {e}, box: {box}")
+                        locked_penis_active = 0
+                
+                # Convert contact boxes to lightweight JSON (only essential fields)
+                contact_boxes_json = "[]"
+                if hasattr(frame_obj, 'atr_detected_contact_boxes') and frame_obj.atr_detected_contact_boxes:
+                    contact_boxes = []
+                    for contact_box in frame_obj.atr_detected_contact_boxes:
+                        if isinstance(contact_box, dict):
+                            # Only store essential fields needed by Stage 3 mixed
+                            essential_contact = {
+                                'class_name': contact_box.get('class_name', 'unknown'),
+                                'confidence': contact_box.get('confidence', 0.5)
+                            }
+                            # Include bbox if available for potential future use
+                            if 'bbox' in contact_box:
+                                essential_contact['bbox'] = contact_box['bbox']
+                            contact_boxes.append(essential_contact)
+                    contact_boxes_json = json.dumps(contact_boxes)
 
                 batch_data.append((
                     frame_obj.frame_id,
-                    frame_obj.yolo_input_size,
-                    getattr(frame_obj, 'frame_width', 0),
-                    getattr(frame_obj, 'frame_height', 0),
                     frame_obj.atr_assigned_position,
-                    atr_locked_penis_data,
-                    atr_contact_boxes_data,
-                    boxes_data,
-                    poses_data,
                     frame_obj.atr_funscript_distance,
-                    1 if getattr(frame_obj, 'is_static_frame', False) else 0
+                    locked_penis_x1,
+                    locked_penis_y1,
+                    locked_penis_x2,
+                    locked_penis_y2,
+                    locked_penis_active,
+                    contact_boxes_json
                 ))
 
                 if len(batch_data) >= batch_size:
                     cursor.executemany("""
                         INSERT OR REPLACE INTO frame_objects
-                        (frame_id, yolo_input_size, frame_width, frame_height,
-                         atr_assigned_position, atr_locked_penis_state, atr_detected_contact_boxes,
-                         boxes_data, poses_data, atr_funscript_distance, is_static_frame)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (frame_id, atr_assigned_position, atr_funscript_distance,
+                         locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2,
+                         locked_penis_active, contact_boxes_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, batch_data)
                     batch_data.clear()
 
@@ -173,10 +213,10 @@ class Stage2SQLiteStorage:
             if batch_data:
                 cursor.executemany("""
                     INSERT OR REPLACE INTO frame_objects
-                    (frame_id, yolo_input_size, frame_width, frame_height,
-                     atr_assigned_position, atr_locked_penis_state, atr_detected_contact_boxes,
-                     boxes_data, poses_data, atr_funscript_distance, is_static_frame)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (frame_id, atr_assigned_position, atr_funscript_distance,
+                     locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2,
+                     locked_penis_active, contact_boxes_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, batch_data)
 
             cursor.execute("COMMIT")
@@ -218,11 +258,11 @@ class Stage2SQLiteStorage:
         cursor = conn.cursor()
 
         try:
-            # Single optimized query with minimal data transfer
+            # Single optimized query with essential data only
             cursor.execute("""
-                SELECT frame_id, yolo_input_size, frame_width, frame_height,
-                       atr_assigned_position, atr_locked_penis_state, atr_detected_contact_boxes,
-                       boxes_data, poses_data, atr_funscript_distance, is_static_frame
+                SELECT frame_id, atr_assigned_position, atr_funscript_distance,
+                       locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2,
+                       locked_penis_active, contact_boxes_json
                 FROM frame_objects
                 WHERE frame_id BETWEEN ? AND ?
                 ORDER BY frame_id
@@ -253,9 +293,9 @@ class Stage2SQLiteStorage:
         """Get single frame object by ID."""
         with self.get_cursor() as cursor:
             cursor.execute("""
-                SELECT frame_id, yolo_input_size, frame_width, frame_height,
-                       atr_assigned_position, atr_locked_penis_state, atr_detected_contact_boxes,
-                       boxes_data, poses_data, atr_funscript_distance, is_static_frame
+                SELECT frame_id, atr_assigned_position, atr_funscript_distance,
+                       locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2,
+                       locked_penis_active, contact_boxes_json
                 FROM frame_objects
                 WHERE frame_id = ?
             """, (frame_id,))
@@ -266,32 +306,38 @@ class Stage2SQLiteStorage:
         return None
 
     def _deserialize_frame_object(self, row) -> FrameObject:
-        """Deserialize frame object from database row with optimized unpickling."""
-        (frame_id, yolo_input_size, frame_width, frame_height,
-         atr_assigned_position, atr_locked_penis_data, atr_contact_boxes_data,
-         boxes_data, poses_data, atr_funscript_distance, is_static_frame) = row
+        """Deserialize frame object from optimized database row."""
+        from detection.cd.stage_2_cd import ATRLockedPenisState  # Import here to avoid circular imports
+        
+        (frame_id, atr_assigned_position, atr_funscript_distance,
+         locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2,
+         locked_penis_active, contact_boxes_json) = row
 
-        # Create frame object
-        frame_obj = FrameObject(frame_id=frame_id, yolo_input_size=yolo_input_size)
-        frame_obj.frame_width = frame_width
-        frame_obj.frame_height = frame_height
+        # Create minimal frame object with only essential data
+        frame_obj = FrameObject(frame_id=frame_id, yolo_input_size=640)  # Default yolo_input_size
         frame_obj.atr_assigned_position = atr_assigned_position
         frame_obj.atr_funscript_distance = atr_funscript_distance
-        frame_obj.is_static_frame = bool(is_static_frame)
 
-        # Deserialize complex objects with fast unpickling
+        # Reconstruct locked penis state from coordinates
+        frame_obj.atr_locked_penis_state = ATRLockedPenisState()
+        if locked_penis_active:
+            frame_obj.atr_locked_penis_state.active = True
+            frame_obj.atr_locked_penis_state.box = (locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2)
+        else:
+            frame_obj.atr_locked_penis_state.active = False
+            frame_obj.atr_locked_penis_state.box = None
+
+        # Reconstruct contact boxes from JSON
         try:
-            frame_obj.atr_locked_penis_state = pickle.loads(atr_locked_penis_data)
-            frame_obj.atr_detected_contact_boxes = pickle.loads(atr_contact_boxes_data)
-            frame_obj.boxes = pickle.loads(boxes_data)
-            frame_obj.poses = pickle.loads(poses_data)
+            contact_boxes = json.loads(contact_boxes_json) if contact_boxes_json else []
+            frame_obj.atr_detected_contact_boxes = contact_boxes
         except Exception as e:
-            self.logger.warning(f"Failed to deserialize frame {frame_id}: {e}")
-            # Fallback to empty objects
-            frame_obj.atr_locked_penis_state = None
+            self.logger.warning(f"Failed to deserialize contact boxes for frame {frame_id}: {e}")
             frame_obj.atr_detected_contact_boxes = []
-            frame_obj.boxes = []
-            frame_obj.poses = []
+
+        # Set minimal empty data for unused fields (Stage 3 doesn't need these)
+        frame_obj.boxes = []
+        frame_obj.poses = []
 
         return frame_obj
 

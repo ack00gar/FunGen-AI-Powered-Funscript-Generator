@@ -194,7 +194,7 @@ class CheckpointManager:
                 # Cleanup old checkpoints
                 self._cleanup_old_checkpoints(video_path)
                 
-                logger.info(f"Checkpoint created: {checkpoint_id} at {progress_percentage:.1f}%")
+                logger.debug(f"Checkpoint created: {checkpoint_id} at {progress_percentage:.1f}%")
                 return checkpoint_id
                 
             except Exception as e:
@@ -243,7 +243,7 @@ class CheckpointManager:
                     logger.warning(f"Video file missing for checkpoint: {checkpoint_data.video_path}")
                     return None
                 
-                logger.info(f"Checkpoint loaded: {checkpoint_id}")
+                logger.debug(f"Checkpoint loaded: {checkpoint_id}")
                 return checkpoint_data
                 
             except Exception as e:

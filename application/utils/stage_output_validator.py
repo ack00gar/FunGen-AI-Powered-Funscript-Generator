@@ -311,7 +311,7 @@ class StageOutputValidator:
             self.logger.info(f"Using project-saved database path: {project_db_path}")
             file_paths = {
                 'database': project_db_path,
-                'overlay_msgpack': self._get_stage2_file_paths(video_path, output_folder).get('overlay_msgpack')
+                'overlay_msgpack': self.get_stage2_output_paths(video_path, output_folder).get('overlay_msgpack')
             }
             can_skip = True  # We trust the project-saved path
         else:

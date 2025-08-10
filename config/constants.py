@@ -81,6 +81,7 @@ class TrackerMode(Enum):
     LIVE_YOLO_OSCILLATION = "Live - YOLO + Oscillation (Experimental)"
     OFFLINE_2_STAGE = "Offline - YOLO AI (2 Stages)"
     OFFLINE_3_STAGE = "Offline - YOLO AI + Opt. Flow (3 Stages)"
+    OFFLINE_3_STAGE_MIXED = "Offline - YOLO AI + Mixed Flow (3 Stages Mixed)"
 
 
 ####################################################################################################
