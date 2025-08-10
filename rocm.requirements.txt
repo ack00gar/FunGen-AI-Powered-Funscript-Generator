@@ -1,3 +1,0 @@
--i https://download.pytorch.org/whl/rocm6.2
-torch~=2.5.1
-torchvision~=0.20.1

@@ -1,0 +1,94 @@
+[project]
+name = "fungen-ai-powered-funscript-generator"
+version = "0.1.0"
+description = ""
+authors = [
+]
+requires-python = ">=3.10.0"
+dependencies = [
+    "numpy>=2.1.1,<3",
+    "ultralytics>=8.3.78,<9",
+    "glfw>=2.8.0,<3",
+    "pyopengl>=3.1.7,<4",
+    "tqdm>=4.67.1,<5",
+    "opencv-python>=4.10.0.84,<5",
+    "scipy>=1.15.1,<2",
+    "simplification>=0.7.13,<8",
+    "msgpack>=1.1.0,<2",
+    "orjson>=3.10.15,<4",
+    "imgui>=2.0.0",
+    "scenedetect[opencv]>=0.6.6",
+    "rdp>=0.8",
+    "send2trash>=1.8.3",
+    "aiosqlite>=0.21.0",
+    "sympy>=1.13.1",
+]
+
+[project.optional-dependencies]
+cpu = [
+  "torch>=2.8,<2.9",
+  "torchvision>=0.20.1",
+]
+cuda = [
+  "torch>=2.8,<2.9",
+  "torchvision>=0.20.1",
+  "tensorrt",
+]
+cuda-rtx50 = [
+  "torch>=2.8,<2.9",
+  "torchvision>=0.22.1",
+  "tensorrt",
+]
+rocm = [
+  "torch>=2.8,<2.9",
+  "torchvision>=0.20.1",
+  "pytorch-triton-rocm",
+]
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "cuda" },
+    { extra = "cuda-rtx50" },
+    { extra = "rocm" },
+  ],
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cuda", extra = "cuda" },
+  { index = "pytorch-cuda-rtx50", extra = "cuda-rtx50" },
+  { index = "pytorch-rocm", extra = "rocm" },
+]
+torchvision = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cuda", extra = "cuda" },
+  { index = "pytorch-cuda-rtx50", extra = "cuda-rtx50" },
+  { index = "pytorch-rocm", extra = "rocm" },
+]
+pytorch-triton-rocm = [
+  { index = "pytorch-rocm", extra = "rocm" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cuda-rtx50"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm6.4"
+explicit = true
+
