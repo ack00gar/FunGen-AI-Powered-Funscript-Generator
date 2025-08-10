@@ -1750,7 +1750,8 @@ class ApplicationLogic:
             mode_to_idx_map = {
                 '3-stage': 0,
                 '2-stage': 1,
-                'oscillation-detector': 2
+                'oscillation-detector': 2,
+                '3-stage-mixed': 3,
             }
             # Set the batch processing index, which the batch thread now uses
             self.batch_processing_method_idx = mode_to_idx_map.get(args.mode, 0)
@@ -1761,7 +1762,7 @@ class ApplicationLogic:
             self.batch_apply_ultimate_autotune = args.autotune
             self.batch_copy_funscript_to_video_location = args.copy
             self.batch_apply_post_processing = True  # Assume always on for CLI
-            self.batch_generate_roll_file = (args.mode == '3-stage')
+            self.batch_generate_roll_file = (args.mode in ('3-stage', '3-stage-mixed'))
 
             self.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
 

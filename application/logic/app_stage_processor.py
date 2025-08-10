@@ -19,9 +19,14 @@ import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
 #import detection.stage_2_orchestrator as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
+try:
+    import detection.cd.stage_3_mixed_processor as stage3_mixed_module
+except Exception:
+    stage3_mixed_module = None
 
 from config import constants
 from config.constants import TrackerMode
+from application.utils.stage_output_validator import can_skip_stage2_for_stage3
 from application.utils import VideoSegment
 
 
@@ -790,7 +795,7 @@ class AppStageProcessor:
                     "video_path": fm.video_path
                 }
                 self.gui_event_queue.put(("analysis_message", completion_payload, None))
-            elif selected_mode == TrackerMode.OFFLINE_3_STAGE:
+            elif selected_mode == TrackerMode.OFFLINE_3_STAGE or selected_mode == getattr(TrackerMode, 'OFFLINE_3_STAGE_MIXED', TrackerMode.OFFLINE_3_STAGE):
                 self.current_analysis_stage = 3
                 atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
@@ -818,7 +823,10 @@ class AppStageProcessor:
 
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 
-                s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
+                if selected_mode == getattr(TrackerMode, 'OFFLINE_3_STAGE_MIXED', None):
+                    s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3)
+                else:
+                    s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
                 stage3_success = s3_results_dict is not None
 
                 if stage3_success:
@@ -1530,6 +1538,40 @@ class AppStageProcessor:
             error_msg = s3_results.get("error", "Unknown S3 failure") if s3_results else "S3 returned None."
             self.logger.error(f"Stage 3 execution failed: {error_msg}")
             self.gui_event_queue.put(("stage3_status_update", f"S3 Failed: {error_msg}", "Failed"))
+            return None
+
+    def _execute_stage3_mixed_module(self, atr_segments_objects: List[Any], preprocessed_video_path: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Execute Mixed Stage 3 processing using stage_3_mixed_processor if available."""
+        if stage3_mixed_module is None:
+            self.logger.error("Stage 3 Mixed module not available.")
+            return None
+        fs_proc = self.app.funscript_processor
+        fm = self.app.file_manager
+        if not fm or not fm.video_path:
+            self.logger.error("Stage 3 Mixed: Video path not available.")
+            return None
+        common_app_config = {
+            "yolo_det_model_path": self.app.yolo_det_model_path,
+            "yolo_pose_model_path": self.app.yolo_pose_model_path,
+            "yolo_input_size": self.app.yolo_input_size,
+            "video_fps": (self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0),
+        }
+        try:
+            results = stage3_mixed_module.perform_mixed_stage_analysis(
+                video_path=fm.video_path,
+                preprocessed_video_path_arg=preprocessed_video_path,
+                atr_segments_list=atr_segments_objects,
+                s2_frame_objects_map=self.app.s2_frame_objects_map_for_s3 or {},
+                tracker_config={},
+                common_app_config=common_app_config,
+                progress_callback=self.on_stage3_progress,
+                stop_event=self.stop_stage_event,
+                parent_logger=self.logger,
+                sqlite_db_path=getattr(self.app, 's2_sqlite_db_path', None),
+            )
+            return results
+        except Exception as e:
+            self.logger.error(f"Stage 3 Mixed execution failed: {e}", exc_info=True)
             return None
 
     def abort_stage_processing(self):

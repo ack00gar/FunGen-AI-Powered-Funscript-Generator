@@ -334,6 +334,9 @@ class ControlPanelUI:
             tracker_mode.OFFLINE_2_STAGE,
             tracker_mode.OFFLINE_3_STAGE,
         ]
+        # Append Mixed 3-Stage if available in enum
+        if hasattr(tracker_mode, 'OFFLINE_3_STAGE_MIXED'):
+            modes_enum.append(tracker_mode.OFFLINE_3_STAGE_MIXED)
 
         open_, _ = imgui.collapsing_header(
             "Choose Analysis Method##SimpleAnalysisMethod",
@@ -358,14 +361,17 @@ class ControlPanelUI:
                 clicked, new_idx = imgui.combo(
                     "##TrackerModeCombo", cur_idx, modes_display
                 )
-                self._help_tooltip(
-                    "Choose analysis method:\n"
-                    "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion\n"
-                    "• Live YOLO ROI: AI-powered object detection with real-time tracking\n"
-                    "• Live User ROI: Manual region selection for custom tracking\n"
-                    "• Offline 2-Stage: GPU-accelerated batch processing\n"
+                help_lines = [
+                    "Choose analysis method:",
+                    "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion",
+                    "• Live YOLO ROI: AI-powered object detection with real-time tracking",
+                    "• Live User ROI: Manual region selection for custom tracking",
+                    "• Offline 2-Stage: GPU-accelerated batch processing",
                     "• Offline 3-Stage: Full pipeline with advanced post-processing"
-                )
+                ]
+                if hasattr(tracker_mode, 'OFFLINE_3_STAGE_MIXED'):
+                    help_lines.append("• Offline 3-Stage (Mixed): Combines S2 signal with targeted ROI tracking")
+                self._help_tooltip("\n".join(help_lines))
 
             if clicked and new_idx != cur_idx:
                 new_mode = modes_enum[new_idx]
@@ -513,6 +519,7 @@ class ControlPanelUI:
             self.TrackerMode.LIVE_YOLO_ROI,
             self.TrackerMode.OFFLINE_2_STAGE,
             self.TrackerMode.OFFLINE_3_STAGE,
+            getattr(self.TrackerMode, 'OFFLINE_3_STAGE_MIXED', self.TrackerMode.OFFLINE_3_STAGE),
         ):
             if imgui.collapsing_header("AI Models & Inference##ConfigAIModels")[0]:
                 self._render_ai_model_settings()
@@ -527,6 +534,7 @@ class ControlPanelUI:
             self.TrackerMode.LIVE_YOLO_ROI,
             self.TrackerMode.OFFLINE_2_STAGE,
             self.TrackerMode.OFFLINE_3_STAGE,
+            getattr(self.TrackerMode, 'OFFLINE_3_STAGE_MIXED', self.TrackerMode.OFFLINE_3_STAGE),
         ) and adv:
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
                 self._render_class_filtering_content()
@@ -1436,7 +1444,10 @@ class ControlPanelUI:
         imgui.separator()
 
         # Stage 3
-        if selected_mode == self.TrackerMode.OFFLINE_3_STAGE:
+        if selected_mode in (
+            self.TrackerMode.OFFLINE_3_STAGE,
+            getattr(self.TrackerMode, 'OFFLINE_3_STAGE_MIXED', self.TrackerMode.OFFLINE_3_STAGE),
+        ):
             imgui.text("Stage 3: Per-Segment Optical Flow")
             if is_analysis_running and stage_proc.current_analysis_stage == 3:
                 imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")

@@ -436,6 +436,12 @@ class AppFunscriptProcessor:
         timeline_instance = self.app.get_timeline(timeline_num)
         if timeline_instance:
             timeline_instance.invalidate_ultimate_preview()
+            # Also invalidate editor caches to reflect changes immediately (per commit 9337108)
+            if hasattr(timeline_instance, 'invalidate_cache'):
+                try:
+                    timeline_instance.invalidate_cache()
+                except Exception:
+                    pass
 
         if timeline_num == 1:
             self.app.app_state_ui.heatmap_dirty = True
