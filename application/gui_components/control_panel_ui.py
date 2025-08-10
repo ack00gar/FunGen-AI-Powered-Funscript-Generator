@@ -1542,6 +1542,68 @@ class ControlPanelUI:
         imgui.pop_item_width()
         imgui.separator()
 
+        # Oscillation overlay toggle
+        cur_show_grid = settings.get("show_oscillation_grid_overlay", True)
+        ch, nv = imgui.checkbox("Show Grid/Overlays##OscGridOverlay", cur_show_grid)
+        if ch and nv != cur_show_grid:
+            settings.set("show_oscillation_grid_overlay", nv)
+            if app.tracker:
+                # Hook for future use; the tracker can also read from settings each frame
+                app.logger.info(f"Oscillation grid overlay {'enabled' if nv else 'disabled' }.", extra={'status_message': True})
+        imgui.separator()
+
+        # Oscillation DIS Flow controls (independent of Optical Flow UI)
+        imgui.text("Oscillation Optical Flow (DIS)")
+        _tooltip_if_hovered("Preset and finest scale used by the oscillation detector's optical flow.")
+        presets = ["ULTRAFAST", "FAST", "MEDIUM"]
+        cur_preset = settings.get("oscillation_dis_flow_preset", "ULTRAFAST").upper()
+        try:
+            preset_idx = presets.index(cur_preset)
+        except ValueError:
+            preset_idx = 0
+        ch, new_idx = imgui.combo("Preset##OscDISPreset", preset_idx, presets)
+        if ch and new_idx != preset_idx:
+            new_val = presets[new_idx]
+            settings.set("oscillation_dis_flow_preset", new_val)
+            if app.tracker and hasattr(app.tracker, 'update_dis_flow_config'):
+                # Update both shared and dedicated osc flow objects for consistency
+                app.tracker.dis_flow_preset = new_val
+                app.tracker.update_dis_flow_config(preset=new_val)
+                if hasattr(app.tracker, 'flow_dense_osc') and app.tracker.flow_dense is not None:
+                    # Recreate dedicated osc flow to match preset
+                    try:
+                        import cv2
+                        dis_preset_map = {
+                            "ULTRAFAST": cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST,
+                            "FAST": cv2.DISOPTICAL_FLOW_PRESET_FAST,
+                            "MEDIUM": cv2.DISOPTICAL_FLOW_PRESET_MEDIUM,
+                        }
+                        sel = dis_preset_map.get(new_val.upper(), cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+                        app.tracker.flow_dense_osc = cv2.DISOpticalFlow_create(sel)
+                        fs = settings.get("oscillation_dis_finest_scale", None)
+                        if fs is not None and isinstance(fs, int) and fs > 0:
+                            app.tracker.flow_dense_osc.setFinestScale(fs)
+                    except Exception:
+                        pass
+
+        cur_finest = settings.get("oscillation_dis_finest_scale", 0)
+        ch, new_finest = imgui.input_int("Finest Scale (0=auto)##OscDISFinest", cur_finest)
+        if ch:
+            v = max(0, new_finest)
+            settings.set("oscillation_dis_finest_scale", v)
+            if app.tracker:
+                try:
+                    fs = v if v > 0 else None
+                    app.tracker.dis_finest_scale = fs
+                    # Update shared flow object
+                    app.tracker.update_dis_flow_config(finest_scale=v)
+                    # Update dedicated osc flow
+                    if hasattr(app.tracker, 'flow_dense_osc') and app.tracker.flow_dense_osc is not None:
+                        if fs is not None:
+                            app.tracker.flow_dense_osc.setFinestScale(fs)
+                except Exception:
+                    pass
+
         imgui.text("Oscillation Area Selection")
         _tooltip_if_hovered(
             "Select a specific area for oscillation detection instead of the full frame."

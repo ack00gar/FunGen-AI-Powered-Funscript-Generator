@@ -63,6 +63,10 @@ class AppSettings:
             "show_chapter_list_window": False,
             "show_timeline_editor_buttons": False,
             "show_advanced_options": False,
+            # Oscillation detector visualization & flow defaults
+            "show_oscillation_grid_overlay": True,
+            "oscillation_dis_flow_preset": "ULTRAFAST",
+            "oscillation_dis_finest_scale": constants.DEFAULT_DIS_FINEST_SCALE,
 
             # File Handling & Output
             "autosave_final_funscript_to_video_location": True,
