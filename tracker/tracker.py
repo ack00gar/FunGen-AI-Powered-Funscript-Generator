@@ -1659,8 +1659,13 @@ class ROITracker:
 
         # Check if the video is VR to apply the focus rule
         is_vr = self._is_vr_video()
-        vr_central_third_start = self.oscillation_grid_size // 3
-        vr_central_third_end = 2 * self.oscillation_grid_size // 3
+        # Apply VR central-third focus only for full-frame scans. When an ROI is set,
+        # scan the full ROI width to avoid off-center ROI being ignored.
+        apply_vr_central_focus = is_vr and not use_oscillation_area
+        # Use effective grid size for current image to compute central thirds
+        eff_cols = max(1, min(self.oscillation_grid_size, current_gray.shape[1] // self.oscillation_block_size))
+        vr_central_third_start = eff_cols // 3
+        vr_central_third_end = 2 * eff_cols // 3
 
         newly_active_cells = set()
         # Bound grid by current frame size to avoid scanning outside the image
@@ -1668,8 +1673,8 @@ class ROITracker:
         max_cols = max(0, min(self.oscillation_grid_size, current_gray.shape[1] // self.oscillation_block_size))
         for r in range(max_rows):
             for c in range(max_cols):
-                # If VR, skip cells outside the central third
-                if is_vr and (c < vr_central_third_start or c > vr_central_third_end):
+                # If VR central focus applies, skip cells outside the central third
+                if apply_vr_central_focus and (c < vr_central_third_start or c > vr_central_third_end):
                     continue
 
                 y_start, x_start = r * self.oscillation_block_size, c * self.oscillation_block_size
