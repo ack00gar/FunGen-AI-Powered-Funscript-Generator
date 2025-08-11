@@ -95,12 +95,7 @@ class TimelineTextureCache:
             self.logger.error(f"Failed to initialize texture cache: {e}")
             return False
     
-    def get_or_create_texture(self,
-                            cache_key: str,
-                            layer: CacheLayer,
-                            width: int,
-                            height: int,
-                            render_func: callable) -> Optional[int]:
+    def get_or_create_texture(self, cache_key: str, layer: CacheLayer, width: int, height: int, render_func: callable) -> Optional[int]:
         """
         Get cached texture or create new one if not cached.
         
@@ -272,9 +267,9 @@ class TimelineTextureCache:
             entry = self.cache_entries[cache_key]
             
             # Free GPU memory
-            if OPENGL_AVAILABLE and entry.texture_id:
+            # if OPENGL_AVAILABLE and entry.texture_id:
                 # gl.glDeleteTextures([entry.texture_id])
-                pass
+                # pass
             
             # Update cache size
             texture_size = entry.width * entry.height * 4

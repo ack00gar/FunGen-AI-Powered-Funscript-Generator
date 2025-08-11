@@ -259,7 +259,7 @@ def stage3_worker_proc(
             })
 
         except Empty:
-            worker_logger.info("Task queue is empty.")
+            worker_logger.debug("Task queue is empty.")
             continue
         except Exception as e:
             worker_logger.error(f"Error processing a chunk: {e}", exc_info=True)
