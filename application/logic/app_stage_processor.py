@@ -19,10 +19,7 @@ import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
 #import detection.stage_2_orchestrator as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
-try:
-    import detection.cd.stage_3_mixed_processor as stage3_mixed_module
-except Exception:
-    stage3_mixed_module = None
+import detection.cd.stage_3_mixed_processor as stage3_mixed_module
 
 from config import constants
 from config.constants import TrackerMode
@@ -603,7 +600,7 @@ class AppStageProcessor:
 
         self.reset_stage_status(stages=("stage2", "stage3"))
         self.stage2_status_text = "Queued..."
-        if selected_mode == TrackerMode.OFFLINE_3_STAGE:
+        if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]:
             self.stage3_status_text = "Queued..."
 
         self.logger.info("Starting Full Analysis sequence...", extra={'status_message': True})
@@ -773,7 +770,7 @@ class AppStageProcessor:
 
             if self.stop_stage_event.is_set() or not stage2_success:
                 self.logger.info("[Thread] Exiting after Stage 2 due to stop event or failure.")
-                if selected_mode == TrackerMode.OFFLINE_3_STAGE and "Queued" in self.stage3_status_text:
+                if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED] and "Queued" in self.stage3_status_text:
                      self.gui_event_queue.put(("stage3_status_update", "Skipped", "S2 Failed/Aborted"))
                 return
 
@@ -827,6 +824,47 @@ class AppStageProcessor:
                     s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3)
                 else:
                     s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
+                stage3_success = s3_results_dict is not None
+
+                if stage3_success:
+                    self.gui_event_queue.put(("stage3_completed", self.stage3_time_elapsed_str, self.stage3_processing_fps_str))
+
+                    packaged_data = {
+                        "results_dict": s3_results_dict,
+                        "was_ranged": effective_range_is_active,
+                        "range_frames": (effective_start_frame, effective_end_frame)
+                    }
+                    self.last_analysis_result = packaged_data
+
+            elif selected_mode == TrackerMode.OFFLINE_3_STAGE_MIXED:
+                self.current_analysis_stage = 3
+                atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
+                video_segments_for_gui = s2_output_data.get("video_segments", [])
+
+                if video_segments_for_gui:
+                    self.gui_event_queue.put(("stage2_results_success_segments_only", video_segments_for_gui, None))
+
+                effective_range_is_active = frame_range_for_s1 is not None
+                effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
+                effective_end_frame = frame_range_for_s1[1] if effective_range_is_active else range_end_frame
+
+                segments_for_s3 = self._filter_segments_for_range(atr_segments_objects, effective_range_is_active,
+                                                                  effective_start_frame, effective_end_frame)
+
+                if not segments_for_s3:
+                    self.gui_event_queue.put(("analysis_message", "No relevant segments in range for Mixed Stage 3.", "Info"))
+                    return
+
+                frame_objects_list = s2_output_data.get("all_s2_frame_objects_list", [])
+                self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
+                self.logger.info(f"Mixed Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
+
+                # Store SQLite database path for Mixed Stage 3
+                self.app.s2_sqlite_db_path = s2_output_data.get("sqlite_db_path")
+
+                self.logger.info(f"Starting Mixed Stage 3 with {preprocessed_path_for_s3}.")
+
+                s3_results_dict = self._execute_mixed_stage_processing(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
                 stage3_success = s3_results_dict is not None
 
                 if stage3_success:
@@ -907,7 +945,7 @@ class AppStageProcessor:
                 
                 # CRITICAL: Never delete database during 3-stage pipeline until Stage 3 completes
                 # Stage 3 depends on the Stage 2 database for processing
-                is_3_stage_pipeline = selected_mode == TrackerMode.OFFLINE_3_STAGE
+                is_3_stage_pipeline = selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
                 stage3_completed = stage3_success if is_3_stage_pipeline else True
                 
                 if not retain_database and stage3_completed:
@@ -939,7 +977,7 @@ class AppStageProcessor:
                         retain_database = self.app_settings.get("retain_stage2_database", True)
                         
                         # Use same logic as database cleanup
-                        is_3_stage_pipeline = selected_mode == TrackerMode.OFFLINE_3_STAGE
+                        is_3_stage_pipeline = selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
                         stage3_completed = stage3_success if is_3_stage_pipeline else True
                         
                         if not retain_database and stage3_completed:
@@ -1073,6 +1111,9 @@ class AppStageProcessor:
             db_path = file_paths.get('database')
             overlay_path = file_paths.get('overlay_msgpack')
             
+            # DEBUG: Log initial data
+            self.logger.info(f"DEBUG _load_existing_stage2_data: db_path={db_path}, overlay_path={overlay_path}")
+
             loaded_data = {
                 "video_segments": [],
                 "atr_segments_objects": [],
@@ -1683,8 +1724,15 @@ class AppStageProcessor:
                     results_dict = packaged_data.get("results_dict", {})
                     video_segments_data = results_dict.get("video_segments", [])
                     # Use the same flag to protect chapters during a 2-Stage run.
-                    if self.force_rerun_stage2_segmentation:
-                        self.logger.info("Overwriting chapters with new 2-Stage analysis results as requested.")
+                    # However, if there are no existing chapters, always update them
+                    should_update_chapters = (self.force_rerun_stage2_segmentation or 
+                                            len(fs_proc.video_chapters) == 0)
+                    
+                    if should_update_chapters:
+                        if self.force_rerun_stage2_segmentation:
+                            self.logger.info("Overwriting chapters with new 2-Stage analysis results as requested.")
+                        else:
+                            self.logger.info("No existing chapters found - populating with new 2-Stage analysis results.")
                         fs_proc.video_chapters.clear()
                         if isinstance(video_segments_data, list):
                             for seg_data in video_segments_data:

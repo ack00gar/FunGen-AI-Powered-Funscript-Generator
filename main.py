@@ -4,6 +4,7 @@ import argparse
 import sys
 import logging
 
+
 def _setup_bootstrap_logger():
     try:
         from application.utils.logger import AppLogger
@@ -12,7 +13,6 @@ def _setup_bootstrap_logger():
     except Exception:
         logging.basicConfig(level=logging.INFO)
         return logging.getLogger('FunGenBootstrapFallback')
-
 
 def run_gui():
     """Initializes and runs the graphical user interface."""
@@ -26,17 +26,19 @@ def run_gui():
 def run_cli(args):
     """Runs the application in command-line interface mode."""
     from application.logic.app_logic import ApplicationLogic
-    print("--- FunGen CLI Mode ---")
+    logger = logging.getLogger(__name__)
+    logger.info("--- FunGen CLI Mode ---")
     core_app = ApplicationLogic(is_cli=True)
     # This new method in ApplicationLogic will handle the CLI workflow
     core_app.run_cli(args)
-    print("--- CLI Task Finished ---")
+    logger.info("--- CLI Task Finished ---")
 
 def main():
     """
     Main function to run the application.
     This function handles dependency checking, argument parsing, and starts either the GUI or CLI.
     """
+
     # Bootstrap logger early
     bootstrap_logger = _setup_bootstrap_logger()
 
@@ -52,7 +54,7 @@ def main():
         bootstrap_logger.error(f"An unexpected error occurred during dependency check: {e}")
         sys.exit(1)
 
-    # Step 2: Set platform-specific multiprocessing behavior
+    # Step 3: Set platform-specific multiprocessing behavior
     if platform.system() != "Windows":
         multiprocessing.set_start_method('spawn', force=True)
     else:
@@ -61,7 +63,7 @@ def main():
         # Note: Windows uses 'spawn' by default, but we ensure it's set explicitly
         # This helps maintain consistent behavior across different Python versions
 
-    # Step 3: Parse command-line arguments
+    # Step 4: Parse command-line arguments
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation")
     parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file or a folder of videos. If omitted, GUI will start.')
     parser.add_argument('--mode', choices=['2-stage', '3-stage', '3-stage-mixed', 'oscillation-detector'], default='3-stage', help='The processing mode to use for analysis.')
@@ -72,7 +74,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Step 4: Start the appropriate interface
+    # Step 5: Start the appropriate interface
     if args.input_path:
         run_cli(args)
     else:

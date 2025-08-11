@@ -342,6 +342,22 @@ class VideoDisplayUI:
                                 draw_list = imgui.get_window_draw_list()
                                 mouse_screen_x, mouse_screen_y = io.mouse_pos
 
+                                # Keep the just-drawn ROI visible while waiting for the user to click the point
+                                if self.waiting_for_point_click and self.drawn_user_roi_video_coords:
+                                    img_rect = self._actual_video_image_rect_on_screen
+                                    draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
+                                    rx_vid, ry_vid, rw_vid, rh_vid = self.drawn_user_roi_video_coords
+                                    roi_start_screen = self._video_to_screen_coords(rx_vid, ry_vid)
+                                    roi_end_screen = self._video_to_screen_coords(rx_vid + rw_vid, ry_vid + rh_vid)
+                                    if roi_start_screen and roi_end_screen:
+                                        draw_list.add_rect(
+                                            roi_start_screen[0], roi_start_screen[1],
+                                            roi_end_screen[0], roi_end_screen[1],
+                                            imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_BORDER),
+                                            thickness=2
+                                        )
+                                    draw_list.pop_clip_rect()
+
                                 if is_hovering_actual_video_image:
                                     if not self.waiting_for_point_click: # ROI Drawing phase
                                         if io.mouse_down[0] and not self.is_drawing_user_roi: # Left mouse button down
@@ -478,10 +494,7 @@ class VideoDisplayUI:
                                             else:
                                                 self.app.logger.info("Drawn oscillation area is too small. Please redraw.", extra={'status_message': True})
                                                 self.drawn_oscillation_area_video_coords = None
-                                        else:
-                                            self.app.logger.warning(
-                                                "Could not convert oscillation area screen coordinates to video coordinates (likely drawn outside video area).")
-                                            self.drawn_oscillation_area_video_coords = None
+                                        # Only warn on conversion failure during mouse release, handled above.
 
                                 elif self.waiting_for_oscillation_point_click and self.drawn_oscillation_area_video_coords: # Point selection phase
                                     # Use center point of the area as the tracking point
@@ -544,22 +557,23 @@ class VideoDisplayUI:
                                 # Try to infer grid dimensions
                                 grid_blocks = self.app.tracker.oscillation_grid_blocks
                                 num_blocks = len(grid_blocks)
-                                # Try to get max_blocks_w from tracker if available
-                                max_blocks_w = getattr(self.app.tracker, 'oscillation_max_blocks_w', 0)
-                                if max_blocks_w <= 0:
-                                    # Fallback: estimate as square
-                                    max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
-                                for i, (x, y, w, h) in enumerate(grid_blocks):
-                                    grid_start = self._video_to_screen_coords(x, y)
-                                    grid_end = self._video_to_screen_coords(x + w, y + h)
-                                    if grid_start and grid_end:
-                                        # Compute (r, c) for this block
-                                        r = i // max_blocks_w
-                                        c = i % max_blocks_w
-                                        color = (0, 0, 0, 0.3)  # Faded grey
-                                        if (r, c) in self.app.tracker.oscillation_active_block_positions:
-                                            color = (0, 255, 0, 255)  # Green for active
-                                        #draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
+                                if num_blocks > 0 and self.app.tracker.oscillation_area_fixed is not None:
+                                    # Try to get max_blocks_w from tracker if available
+                                    max_blocks_w = getattr(self.app.tracker, 'oscillation_max_blocks_w', 0)
+                                    if max_blocks_w <= 0:
+                                        # Fallback: estimate as square
+                                        max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
+                                    for i, (x, y, w, h) in enumerate(grid_blocks):
+                                        grid_start = self._video_to_screen_coords(x, y)
+                                        grid_end = self._video_to_screen_coords(x + w, y + h)
+                                        if grid_start and grid_end:
+                                            # Compute (r, c) for this block
+                                            r = i // max_blocks_w
+                                            c = i % max_blocks_w
+                                            color = (0, 0, 0, 0.3)  # Faded grey
+                                            if (r, c) in self.app.tracker.oscillation_active_block_positions:
+                                                color = (0, 255, 0, 255)  # Green for active
+                                            #draw_list.add_rect(grid_start[0], grid_start[1], grid_end[0], grid_end[1], imgui.get_color_u32_rgba(*color), thickness=1)
 
                             # Visualization of active User Fixed ROI (even when not setting)
                             if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
@@ -589,6 +603,16 @@ class VideoDisplayUI:
                             if app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map and self.app.processor and \
                                     self.app.processor.current_frame_index >= 0:
                                 self._render_stage2_overlay(stage_proc, app_state)
+
+                            # Mixed mode debug overlay (shows when in mixed mode and debug data is available)
+                            if (app_state.selected_tracker_mode == constants.TrackerMode.OFFLINE_3_STAGE_MIXED and 
+                                ((hasattr(self.app, 'stage3_mixed_debug_frame_map') and self.app.stage3_mixed_debug_frame_map) or 
+                                 (hasattr(self.app, 'mixed_stage_processor') and self.app.mixed_stage_processor))):
+                                draw_list = imgui.get_window_draw_list()
+                                img_rect = self._actual_video_image_rect_on_screen
+                                draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
+                                self._render_mixed_mode_debug_overlay(draw_list)
+                                draw_list.pop_clip_rect()
 
                             # Only show live tracker info if the Stage 2 overlay isn't active
                             if self.app.tracker and self.app.tracker.tracking_active and not (app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map):
@@ -930,3 +954,127 @@ class VideoDisplayUI:
         if win_size[0] > text_size[0] and win_size[1] > text_size[1]:  # Check if window is large enough for text
             imgui.set_cursor_pos(((win_size[0] - text_size[0]) * 0.5 + cursor_start_pos[0], (win_size[1] - text_size[1]) * 0.5 + cursor_start_pos[1]))
         imgui.text(text_to_display)
+
+    def _render_mixed_mode_debug_overlay(self, draw_list):
+        """
+        Render debug overlay for Mixed Stage 3 mode.
+        Shows current processing state, ROI info, and signal source.
+        """
+        debug_info = None
+        
+        # Check if we have debug data loaded from msgpack (during video playback)
+        if (hasattr(self.app, 'stage3_mixed_debug_frame_map') and 
+            self.app.stage3_mixed_debug_frame_map and
+            self.app.processor and hasattr(self.app.processor, 'current_frame_index')):
+            
+            current_frame = self.app.processor.current_frame_index
+            debug_info = self.app.stage3_mixed_debug_frame_map.get(current_frame, {})
+            
+        # Fallback to live processor debug info (during processing)
+        elif (hasattr(self.app, 'mixed_stage_processor') and self.app.mixed_stage_processor):
+            debug_info = self.app.mixed_stage_processor.get_debug_info()
+        
+        if not debug_info:
+            return
+        
+        # Position overlay text in top-left corner of video area
+        img_rect = self._actual_video_image_rect_on_screen
+        overlay_x = img_rect['min_x'] + 10
+        overlay_y = img_rect['min_y'] + 10
+        
+        # Background for text
+        text_bg_color = (0, 0, 0, 180)  # Semi-transparent black
+        text_color = (255, 255, 255, 255)  # White text
+        
+        # Build debug text
+        debug_lines = [
+            f"Mixed Stage 3 Debug",
+            f"Chapter: {debug_info.get('current_chapter_type', 'Unknown')}",
+            f"Signal: {debug_info.get('signal_source', 'Unknown')}",
+            f"Live Tracker: {'Active' if debug_info.get('live_tracker_active', False) else 'Inactive'}",
+        ]
+        
+        # Add ROI info if available
+        roi = debug_info.get('current_roi')
+        if roi:
+            debug_lines.append(f"ROI: ({roi[0]}, {roi[1]}) - ({roi[2]}, {roi[3]})")
+            # Add ROI update info
+            roi_updated = debug_info.get('roi_updated', False)
+            roi_counter = debug_info.get('roi_update_counter', 0)
+            debug_lines.append(f"ROI Updated: {roi_updated} (Frame #{roi_counter})")
+        
+        # Add oscillation details if live tracker is active
+        if debug_info.get('live_tracker_active', False):
+            intensity = debug_info.get('oscillation_intensity', 0.0)
+            debug_lines.append(f"Oscillation: {intensity:.2f}")
+            
+            # Add oscillation position if available
+            osc_pos = debug_info.get('oscillation_pos')
+            if osc_pos is not None:
+                debug_lines.append(f"Osc Pos: {osc_pos}/100")
+            
+            # Add EMA alpha setting
+            ema_alpha = debug_info.get('ema_alpha')
+            if ema_alpha is not None:
+                debug_lines.append(f"EMA Alpha: {ema_alpha:.2f}")
+            
+            # Add last known position for debugging smoothing
+            last_known = debug_info.get('oscillation_last_known')
+            if last_known is not None:
+                debug_lines.append(f"Last Known: {last_known:.1f}")
+        
+        # Add frame ID for debugging
+        frame_id = debug_info.get('frame_id')
+        if frame_id is not None:
+            debug_lines.append(f"Frame: {frame_id}")
+        
+        # Render each line
+        line_height = 16
+        for i, line in enumerate(debug_lines):
+            text_y = overlay_y + (i * line_height)
+            
+            # Calculate text size for background
+            text_size = imgui.calc_text_size(line)
+            
+            # Draw background rectangle
+            draw_list.add_rect_filled(
+                overlay_x - 5, text_y - 2,
+                overlay_x + text_size.x + 5, text_y + text_size.y + 2,
+                imgui.get_color_u32_rgba(*text_bg_color)
+            )
+            
+            # Draw text
+            draw_list.add_text(
+                overlay_x, text_y,
+                imgui.get_color_u32_rgba(*text_color),
+                line
+            )
+        
+        # Render ROI box if available
+        roi = debug_info.get('current_roi')
+        if roi:
+            p1 = self._video_to_screen_coords(roi[0], roi[1])
+            p2 = self._video_to_screen_coords(roi[2], roi[3])
+            
+            if p1 and p2:
+                # ROI box color based on chapter type
+                chapter_type = debug_info.get('current_chapter_type', 'Other')
+                if chapter_type in ['BJ', 'HJ']:
+                    roi_color = (0, 255, 0, 255)  # Green for BJ/HJ (ROI tracking active)
+                else:
+                    roi_color = (255, 255, 0, 255)  # Yellow for other (Stage 2 signal)
+                
+                # Draw ROI rectangle
+                draw_list.add_rect(
+                    p1[0], p1[1], p2[0], p2[1],
+                    imgui.get_color_u32_rgba(*roi_color),
+                    thickness=2.0
+                )
+                
+                # Add ROI label
+                roi_label = f"ROI ({chapter_type})"
+                draw_list.add_text(
+                    p1[0], p1[1] - 20,
+                    imgui.get_color_u32_rgba(*roi_color),
+                    roi_label
+                )

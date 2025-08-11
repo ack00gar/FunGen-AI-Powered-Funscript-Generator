@@ -1016,8 +1016,10 @@ class DualAxisFunscript:
                 s_idx, e_idx = self._get_action_indices_in_time_range(target_actions_list, start_time_ms, end_time_ms)
                 if s_idx is not None and e_idx is not None and s_idx <= e_idx:
                     del target_actions_list[s_idx: e_idx + 1]
+                    self._invalidate_cache(axis_name)
             else:
                 target_actions_list[:] = []
+                self._invalidate_cache(axis_name)
 
             num_cleared_on_this_axis = initial_len - len(target_actions_list)
             total_cleared_count += num_cleared_on_this_axis

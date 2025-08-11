@@ -17,16 +17,14 @@ import tempfile
 from video import VideoProcessor
 from config import constants
 
-# --- Global Debug Flag ---
-_of_debug_prints_stage2 = False
 CONTACT_ONLY_FALLBACKS = {'hand', 'pussy', 'butt'}
 
-def _debug_log(logger_instance: Optional[logging.Logger], message: str):
-    """Helper for conditional debug logging."""
-    if _of_debug_prints_stage2 and logger_instance:
-        logger_instance.debug(f"[S2 DEBUG] {message}")
-    elif _of_debug_prints_stage2 and not logger_instance:
-        print(f"[S2 DEBUG - NO LOGGER] {message}")
+# Centralized logger for Stage 2 processing
+logger = logging.getLogger(__name__)
+
+def _debug_log(message: str):
+    """Centralized debug logging for Stage 2."""
+    logger.debug(f"[S2] {message}")
 
 
 def _progress_update(callback, task_name, current, total, force_update=False):
@@ -337,7 +335,21 @@ class FrameObject:
 class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with a single type from ATR
     def __init__(self, start_frame_id: int, end_frame_id: int, major_position: str):
         super().__init__(start_frame_id, end_frame_id)
+        # DEBUG: Log constructor parameters
+        if hasattr(ATRSegment, '_instance_count'):
+            ATRSegment._instance_count += 1
+        else:
+            ATRSegment._instance_count = 1
+        
+        if ATRSegment._instance_count <= 5:
+            _debug_log(f"ATRSegment.__init__ #{ATRSegment._instance_count}: major_position='{major_position}' (type: {type(major_position)})")
+        
         self.major_position = major_position
+        
+        # DEBUG: Verify what was stored
+        if ATRSegment._instance_count <= 5:
+            _debug_log(f"ATRSegment.__init__ #{ATRSegment._instance_count}: stored self.major_position='{self.major_position}' (type: {type(self.major_position)})")
+        
         self.segment_frame_objects: List[FrameObject] = []
         # List to hold different analysis sub-segments
         # Each entry is a dict: {'start': int, 'end': int, 'mode': str, 'roi': tuple}
@@ -359,13 +371,28 @@ class ATRSegment(BaseSegment):  # Replacing PenisSegment and SexActSegment with 
         # 1. position_long_name_val is straightforward:
         position_long_name_val = self.major_position
 
+        # DEBUG: Log to_dict conversion
+        if hasattr(ATRSegment, '_to_dict_count'):
+            ATRSegment._to_dict_count += 1
+        else:
+            ATRSegment._to_dict_count = 1
+        
+        if ATRSegment._to_dict_count <= 5:
+            _debug_log(f"ATRSegment.to_dict #{ATRSegment._to_dict_count}: self.major_position='{self.major_position}' (type: {type(self.major_position)})")
+
         # 2. To find position_short_name_val, we need to search the dictionary:
         position_short_name_key_val = "NR"  # Default if not found
 
         for key, info in constants.POSITION_INFO_MAPPING.items():
             if info["long_name"] == self.major_position:
                 position_short_name_key_val = key
+                if ATRSegment._to_dict_count <= 5:
+                    _debug_log(f"ATRSegment.to_dict #{ATRSegment._to_dict_count}: FOUND match - key='{key}', long_name='{info['long_name']}'")
                 break
+        else:
+            if ATRSegment._to_dict_count <= 5:
+                _debug_log(f"ATRSegment.to_dict #{ATRSegment._to_dict_count}: NO MATCH found for '{self.major_position}'")
+                _debug_log(f"ATRSegment.to_dict #{ATRSegment._to_dict_count}: Available long_names: {[info['long_name'] for info in constants.POSITION_INFO_MAPPING.values()]}")
 
         # ATR's funscript generation is 1D. Range/offset might not directly map.
         # These can be calculated from the self.atr_funscript_distance values within this segment's frames.
@@ -624,6 +651,17 @@ def _atr_assign_frame_position(contacts: List[Dict]) -> str:
 
     # Use a set for faster 'in' checks
     detected_class_names = {contact["class_name"] for contact in contacts}
+    
+    # DEBUG: Log contact data for first few calls
+    if hasattr(_atr_assign_frame_position, '_call_count'):
+        _atr_assign_frame_position._call_count += 1
+    else:
+        _atr_assign_frame_position._call_count = 1
+    
+    if _atr_assign_frame_position._call_count <= 10:
+        _debug_log(f"_atr_assign_frame_position call #{_atr_assign_frame_position._call_count}:")
+        _debug_log(f"  contacts (first 2): {contacts[:2]}")
+        _debug_log(f"  detected_class_names: {detected_class_names}")
 
     # --- Strict Priority Hierarchy ---
     # This order is now the single source of truth for classification.
@@ -640,8 +678,12 @@ def _atr_assign_frame_position(contacts: List[Dict]) -> str:
 
     for class_name, position in priority_order:
         if class_name in detected_class_names:
+            if _atr_assign_frame_position._call_count <= 10:
+                _debug_log(f"  MATCH: class_name='{class_name}' -> position='{position}' (type: {type(position)})")
             return position
 
+    if _atr_assign_frame_position._call_count <= 10:
+        _debug_log("  NO MATCH -> returning 'Not Relevant'")
     return "Not Relevant"  # Default if no priority classes are found
 
 
@@ -665,14 +707,23 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
     if frame_objects:
         current_pos = frame_objects[0].atr_assigned_position
         start_frame = frame_objects[0].frame_id
+        
+        # DEBUG: Log first segment creation
+        _debug_log(f"_atr_aggregate_segments: First frame position = '{current_pos}' (type: {type(current_pos)})")
+        
         for i in range(1, len(frame_objects)):
             if frame_objects[i].atr_assigned_position != current_pos:
+                # DEBUG: Log segment creation
+                _debug_log(f"_atr_aggregate_segments: Creating segment {start_frame}-{frame_objects[i - 1].frame_id} with position '{current_pos}' (type: {type(current_pos)})")
                 segments.append(ATRSegment(start_frame, frame_objects[i - 1].frame_id, current_pos))
                 current_pos = frame_objects[i].atr_assigned_position
                 start_frame = frame_objects[i].frame_id
+                
+        # DEBUG: Log final segment creation
+        _debug_log(f"_atr_aggregate_segments: Creating final segment {start_frame}-{frame_objects[-1].frame_id} with position '{current_pos}' (type: {type(current_pos)})")
         segments.append(ATRSegment(start_frame, frame_objects[-1].frame_id, current_pos))
 
-    _debug_log(logger, f"Pass 1 (Initial Creation) generated {len(segments)} granular segments.")
+    _debug_log(f"Pass 1 (Initial Creation) generated {len(segments)} granular segments.")
 
     # --- Pass 2: The Master Iterative Merging Loop ---
     # This loop continues until a full pass over all rules results in zero merges.
@@ -686,7 +737,7 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
             seg1, seg_gap, seg2 = segments[i], segments[i + 1], segments[i + 2]
             is_short_gap = seg_gap.major_position == "Not Relevant" and seg_gap.duration < (fps * 10)
             if seg1.major_position == seg2.major_position and seg1.major_position != "Not Relevant" and is_short_gap:
-                _debug_log(logger, f"Rule A: Merging {seg1.major_position} across short NR gap.")
+                _debug_log(f"Rule A: Merging {seg1.major_position} across short NR gap.")
                 seg1.end_frame_id = seg2.end_frame_id
                 seg1.update_duration()
                 segments.pop(i + 2)
@@ -701,7 +752,7 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
         while i < len(segments) - 1:
             pos1, pos2 = segments[i].major_position, segments[i + 1].major_position
             if {pos1, pos2} <= {'Handjob', 'Blowjob'}:  # Use set for commutative check
-                _debug_log(logger, f"Rule B: Merging adjacent '{pos1}' and '{pos2}' into 'Blowjob'.")
+                _debug_log(f"Rule B: Merging adjacent '{pos1}' and '{pos2}' into 'Blowjob'.")
                 segments[i].major_position = 'Blowjob'
                 segments[i].end_frame_id = segments[i + 1].end_frame_id
                 segments[i].update_duration()
@@ -715,7 +766,7 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
         i = 0
         while i < len(segments) - 1:
             if segments[i].major_position == segments[i + 1].major_position:
-                _debug_log(logger, f"Rule C: Merging adjacent identicals: {segments[i].major_position}")
+                _debug_log(f"Rule C: Merging adjacent identicals: {segments[i].major_position}")
                 segments[i].end_frame_id = segments[i + 1].end_frame_id
                 segments[i].update_duration()
                 segments.pop(i + 1)
@@ -726,7 +777,7 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
 
         # If a full pass of all rules resulted in no changes, the list is stable.
         if merges_made_in_pass == 0:
-            _debug_log(logger, "Pass 2 (Iterative Merging) stabilized.")
+            _debug_log("Pass 2 (Iterative Merging) stabilized.")
             break
 
     # --- Pass 3: Final Cleanup & Gap Filling ---
@@ -743,16 +794,14 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
                 break
 
             if prev_dur >= next_dur:  # Merge into previous neighbor
-                _debug_log(logger,
-                           f"Pass 3: Cleaning up short segment ({segments[i].major_position}) by merging into previous.")
+                _debug_log(f"Pass 3: Cleaning up short segment ({segments[i].major_position}) by merging into previous.")
                 segments[i - 1].end_frame_id = segments[i].end_frame_id
                 segments[i - 1].update_duration()
                 segments.pop(i)
                 i = 0  # Restart scan from the beginning after a merge
                 continue
             else:  # Merge into next neighbor
-                _debug_log(logger,
-                           f"Pass 3: Cleaning up short segment ({segments[i].major_position}) by merging into next.")
+                _debug_log(f"Pass 3: Cleaning up short segment ({segments[i].major_position}) by merging into next.")
                 segments[i + 1].start_frame_id = segments[i].start_frame_id
                 segments[i + 1].update_duration()
                 segments.pop(i)
@@ -778,7 +827,7 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
 
             # Check if segments are same type or HJ/BJ combination
             if pos1 == pos2 or {pos1, pos2} <= {'Handjob', 'Blowjob'}:
-                _debug_log(logger, f"Pass 4: Merging adjacent '{pos1}' and '{pos2}' segments.")
+                _debug_log(f"Pass 4: Merging adjacent '{pos1}' and '{pos2}' segments.")
                 # For HJ/BJ combination, use 'Blowjob' as the merged type
                 if {pos1, pos2} <= {'Handjob', 'Blowjob'}:
                     final_segments[i].major_position = 'Blowjob'
@@ -791,10 +840,10 @@ def _atr_aggregate_segments(frame_objects: List[FrameObject], fps: float, min_se
             i += 1
 
         if merges_made == 0:
-            _debug_log(logger, "Pass 4 (Final Merging) stabilized.")
+            _debug_log("Pass 4 (Final Merging) stabilized.")
             break
 
-    _debug_log(logger, f"Final, clean segment count: {len(final_segments)}")
+    _debug_log(f"Final, clean segment count: {len(final_segments)}")
     return final_segments
 
 def _atr_calculate_normalized_distance_to_base(locked_penis_box_coords: Tuple[float, float, float, float],
@@ -893,7 +942,7 @@ def resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.L
     if not logger:
         logger = logging.getLogger("ResilientTracker")
 
-    _debug_log(logger, "Starting Step 0: Resilient Object Tracking")
+    _debug_log("Starting Step 0: Resilient Object Tracking")
 
     # --- Configuration for the new tracker ---
     fps = state.video_info.get('fps', 30.0)
@@ -919,7 +968,7 @@ def resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.L
 
         for track_id in tracks_to_move_to_lost:
             lost_tracks[track_id] = active_tracks.pop(track_id)
-            _debug_log(logger, f"Track {track_id} ({lost_tracks[track_id]['class_name']}) moved to 'lost' state.")
+            _debug_log(f"Track {track_id} ({lost_tracks[track_id]['class_name']}) moved to 'lost' state.")
 
         tracks_to_delete_permanently = []
         for track_id, track_data in lost_tracks.items():
@@ -929,7 +978,7 @@ def resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.L
 
         for track_id in tracks_to_delete_permanently:
             del lost_tracks[track_id]
-            _debug_log(logger, f"Track {track_id} permanently deleted.")
+            _debug_log(f"Track {track_id} permanently deleted.")
 
         # --- 2. Match Active Tracks ---
         for track_id, track_data in active_tracks.items():
@@ -965,7 +1014,7 @@ def resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.L
                         best_lost_match_id = track_id
 
             if best_lost_match_id != -1:
-                _debug_log(logger, f"Re-identified track {best_lost_match_id} with new detection.")
+                _debug_log(f"Re-identified track {best_lost_match_id} with new detection.")
                 new_det.track_id = best_lost_match_id
                 # Reactivate the track
                 reactivated_track = lost_tracks.pop(best_lost_match_id)
@@ -985,12 +1034,12 @@ def resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.L
             }
             next_global_track_id += 1
 
-    _debug_log(logger, f"Resilient tracking complete. Assigned up to global_track_id {next_global_track_id - 1}.")
+    _debug_log(f"Resilient tracking complete. Assigned up to global_track_id {next_global_track_id - 1}.")
 
 
 # --- ATR Analysis Steps ---
 def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logging.Logger]):
-    _debug_log(logger, "Starting ATR Pass 1: Interpolate Boxes (using S2 Tracker IDs)")
+    _debug_log("Starting ATR Pass 1: Interpolate Boxes (using S2 Tracker IDs)")
     track_history: Dict[int, Dict[str, Any]] = {}
     total_interpolated = 0
     MAX_GAP_FRAMES = int(state.video_info.get('fps', 30) * 1)  # Max 1 second gap for interpolation
@@ -1022,7 +1071,7 @@ def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logg
                         # Check if this track_id already exists in the target_gap_frame_obj (e.g. from other interpolation direction)
                         # This simplistic check might not be perfect for complex scenarios.
                         if any(b.track_id == box_rec.track_id for b in target_gap_frame_obj.boxes):
-                            # _debug_log(logger, f"Skipping interpolation for track {box_rec.track_id} in frame {i_frame_id}, already exists.")
+                            # _debug_log(f"Skipping interpolation for track {box_rec.track_id} in frame {i_frame_id}, already exists.")
                             continue
 
                         t = (i_frame_id - last_frame_obj.frame_id) / float(frame_gap)
@@ -1065,7 +1114,7 @@ def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logg
                             total_interpolated += 1
 
             track_history[box_rec.track_id] = {"last_frame_obj": frame_obj, "last_box_rec": box_rec}
-    _debug_log(logger, f"ATR Pass 1: Interpolated {total_interpolated} boxes.")
+    _debug_log(f"ATR Pass 1: Interpolated {total_interpolated} boxes.")
 
 
 def smooth_single_track_worker_numpy(track_data_tuple: Tuple[np.ndarray, int]) -> Optional[np.ndarray]:
@@ -1100,7 +1149,7 @@ def atr_pass_1b_smooth_all_tracks(state: AppStateContainer, logger: Optional[log
     """
     return
 
-    _debug_log(logger, "Starting FULLY OPTIMIZED ATR Pass 1b: Smooth All Tracked Boxes")
+    _debug_log("Starting FULLY OPTIMIZED ATR Pass 1b: Smooth All Tracked Boxes")
 
     # --- 1. One-time conversion to a unified NumPy array ---
     box_list_for_np = []
@@ -1110,7 +1159,7 @@ def atr_pass_1b_smooth_all_tracks(state: AppStateContainer, logger: Optional[log
                 box_list_for_np.append([frame.frame_id, box.track_id, box.cx, box.cy, box.width, box.height])
 
     if not box_list_for_np:
-        _debug_log(logger, "No tracked boxes to smooth.")
+        _debug_log("No tracked boxes to smooth.")
         return
 
     master_array = np.array(box_list_for_np, dtype=np.float32)
@@ -1127,7 +1176,7 @@ def atr_pass_1b_smooth_all_tracks(state: AppStateContainer, logger: Optional[log
 
     # --- 3. Execute in parallel ---
     num_workers = psutil.cpu_count(logical=False)
-    _debug_log(logger, f"Distributing {len(worker_args)} tracks to {num_workers} NumPy-native workers...")
+    _debug_log(f"Distributing {len(worker_args)} tracks to {num_workers} NumPy-native workers...")
 
     all_smoothed_data = []
     with Pool(processes=num_workers) as pool:
@@ -1137,7 +1186,7 @@ def atr_pass_1b_smooth_all_tracks(state: AppStateContainer, logger: Optional[log
                 all_smoothed_data.append(result)
 
     # --- 4. Integrate results back into the original FrameObjects ---
-    _debug_log(logger, "Integrating smoothed results...")
+    _debug_log("Integrating smoothed results...")
     # Create a fast lookup: {track_id: {frame_id: smoothed_box_data}}
     results_map = {}
     for smoothed_track, track_id in all_smoothed_data:
@@ -1152,7 +1201,7 @@ def atr_pass_1b_smooth_all_tracks(state: AppStateContainer, logger: Optional[log
                 new_bbox = np.array([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2])
                 box.update_bbox(new_bbox, new_status=constants.STATUS_SMOOTHED)
 
-    _debug_log(logger, "Fully optimized smoothing pass complete.")
+    _debug_log("Fully optimized smoothing pass complete.")
 
 def atr_pass_2_preliminary_height_estimation(state: AppStateContainer, logger: Optional[logging.Logger]):
     """
@@ -1160,7 +1209,7 @@ def atr_pass_2_preliminary_height_estimation(state: AppStateContainer, logger: O
     This is crucial for the Kalman filter pass (Pass 3) to function correctly before
     the final, per-chapter height is calculated later in Pass 5.
     """
-    _debug_log(logger, "Starting ATR Pass 2: Preliminary Height Estimation")
+    _debug_log("Starting ATR Pass 2: Preliminary Height Estimation")
 
     # We use a simple moving average to provide a slightly more stable preliminary height
     # than just the raw detection of a single frame.
@@ -1193,7 +1242,7 @@ def atr_pass_2_preliminary_height_estimation(state: AppStateContainer, logger: O
             if not hasattr(frame_obj.atr_locked_penis_state, 'max_height'):
                 frame_obj.atr_locked_penis_state.max_height = 0.0
 
-    _debug_log(logger, "Preliminary height estimation complete.")
+    _debug_log("Preliminary height estimation complete.")
 
 
 def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[logging.Logger]):
@@ -1202,7 +1251,7 @@ def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[
     calculates the Kalman-filtered VISIBLE penis box. It no longer creates the
     full conceptual box, as the final max_height is not yet known.
     """
-    _debug_log(logger, "Starting ATR Pass 3: Kalman Filter and Lock State")
+    _debug_log("Starting ATR Pass 3: Kalman Filter and Lock State")
     fps, yolo_size = state.video_info.get('fps', 30.0), state.yolo_input_size
     # --- State variables for the loop ---
     current_lp_active = False
@@ -1300,7 +1349,7 @@ def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[
             if not current_lp_active and current_lp_consecutive_detections >= fps / 5:
                 current_lp_active = True
                 kf_height.statePost = np.array([[current_raw_height], [0]], dtype=np.float32)
-                _debug_log(logger, f"ATR LP Lock ACTIVATE at frame {frame_obj.frame_id}")
+                _debug_log(f"ATR LP Lock ACTIVATE at frame {frame_obj.frame_id}")
 
             kf_height.correct(np.array([[current_raw_height]], dtype=np.float32))
 
@@ -1340,9 +1389,41 @@ def atr_pass_3_kalman_and_lock_state(state: AppStateContainer, logger: Optional[
         last_frame_dominant_pose = dominant_pose_this_frame
 
 
+def _update_frames_with_aggregated_positions(frames: List[FrameObject], aggregated_segments: List[ATRSegment], logger: Optional[logging.Logger]):
+    """
+    Update individual frames to reflect their final aggregated segment position.
+    This ensures the chapter bar displays correctly based on final segments rather than individual frame detections.
+    """
+    _debug_log(f"Updating {len(frames)} frames with aggregated segment positions from {len(aggregated_segments)} segments")
+    
+    updated_count = 0
+    for frame_obj in frames:
+        frame_id = frame_obj.frame_id
+        original_position = frame_obj.atr_assigned_position
+        
+        # Find which aggregated segment this frame belongs to
+        for segment in aggregated_segments:
+            if segment.start_frame_id <= frame_id <= segment.end_frame_id:
+                # Update frame position to match the aggregated segment
+                frame_obj.atr_assigned_position = segment.major_position
+                
+                # Debug logging for significant changes
+                if original_position != segment.major_position:
+                    if updated_count < 10:  # Limit debug spam - show first 10 changes
+                        _debug_log(f"Frame {frame_id}: updated position '{original_position}' -> '{segment.major_position}' (segment {segment.start_frame_id}-{segment.end_frame_id})")
+                    updated_count += 1
+                break
+        else:
+            # Frame not found in any segment - this shouldn't happen but log it
+            if logger:
+                logger.warning(f"Frame {frame_id} not found in any aggregated segment")
+    
+    _debug_log(f"Updated {updated_count} frames with aggregated positions")
+
+
 def atr_pass_4_assign_positions_and_segments(state: AppStateContainer, logger: Optional[logging.Logger]):
     """ ATR Pass 4: Assign frame positions and aggregate into segments (with Sparse Pose Persistence). """
-    _debug_log(logger, "Starting ATR Pass 4: Assign Positions & Segments (with Sparse Pose Persistence)")
+    _debug_log("Starting ATR Pass 4: Assign Positions & Segments (with Sparse Pose Persistence)")
     fps = state.video_info.get('fps', 30.0)
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
     yolo_size = state.yolo_input_size
@@ -1392,15 +1473,27 @@ def atr_pass_4_assign_positions_and_segments(state: AppStateContainer, logger: O
                 if dissimilarity < constants.POSE_STABILITY_THRESHOLD:
                     # The overall posture hasn't changed. Maintain the classification.
                     assigned_pos_for_frame = last_known_good_position
-                    _debug_log(logger,
+                    _debug_log(
                                f"Frame {frame_obj.frame_id}: Sparse Pose persistence applied. Position '{last_known_good_position}' maintained.")
 
         # 4. Finalize the frame's position
+        # DEBUG: Log position assignment for first few frames
+        if frame_obj.frame_id < 10:
+            _debug_log(f"Frame {frame_obj.frame_id}: assigned_pos_for_frame = '{assigned_pos_for_frame}' (type: {type(assigned_pos_for_frame)})")
+        
         frame_obj.atr_assigned_position = assigned_pos_for_frame
+        
+        # DEBUG: Verify what was actually stored
+        if frame_obj.frame_id < 10:
+            _debug_log(f"Frame {frame_obj.frame_id}: stored atr_assigned_position = '{frame_obj.atr_assigned_position}' (type: {type(frame_obj.atr_assigned_position)})")
 
     # 5. Aggregate segments (this part of the function is unchanged)
     BaseSegment._id_counter = 0
     state.atr_segments = _atr_aggregate_segments(state.frames, fps, int(1.0 * fps), logger)
+    
+    # 5.1 Update individual frames to reflect their final aggregated segment position
+    # This ensures the chapter bar displays correctly based on final segments
+    _update_frames_with_aggregated_positions(state.frames, state.atr_segments, logger)
 
 def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, logger: Optional[logging.Logger]):
     """
@@ -1408,7 +1501,7 @@ def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, lo
     This ensures height is consistent across a logical action, fixing the "drop to zero" issue.
     This pass should run AFTER atr_pass_4_assign_positions_and_segments.
     """
-    _debug_log(logger, "Starting ATR Pass: Recalculate Heights Post-Aggregation")
+    _debug_log("Starting ATR Pass: Recalculate Heights Post-Aggregation")
 
     # --- Reset penis lock at the start of each new major segment ---
     # This prevents the lock from carrying over across completely different scenes
@@ -1421,7 +1514,7 @@ def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, lo
             if first_frame_of_segment_id < len(state.frames):
                 # This is a conceptual reset. The actual lock state is managed in Pass 3.
                 # Here we ensure the logic in Pass 6, which depends on this, knows about the change.
-                _debug_log(logger, f"Chapter changed at frame {first_frame_of_segment_id}. Resetting interactor context for segment '{segment.major_position}'.")
+                _debug_log(f"Chapter changed at frame {first_frame_of_segment_id}. Resetting interactor context for segment '{segment.major_position}'.")
 
     # Create a quick lookup for raw penis heights from the original detections
     raw_penis_heights = {}
@@ -1455,7 +1548,7 @@ def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, lo
                 # Use 95th percentile as a robust statistic for max height
                 chapter_max_h = np.percentile(heights_in_segment, 95)
 
-        _debug_log(logger, f"Final Segment '{segment.major_position}' ({segment.start_frame_id}-{segment.end_frame_id}): setting max_height to {chapter_max_h:.2f}")
+        _debug_log(f"Final Segment '{segment.major_position}' ({segment.start_frame_id}-{segment.end_frame_id}): setting max_height to {chapter_max_h:.2f}")
 
         # Apply this calculated height to every frame object within the segment
         for i in range(segment.start_frame_id, segment.end_frame_id + 1):
@@ -1467,7 +1560,7 @@ def atr_pass_5_recalculate_heights_post_aggregation(state: AppStateContainer, lo
 
 
 def initial_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
-    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (Multi-Fallback Heuristic with LOCKING)")
+    _debug_log("Starting ATR Pass 6: Determine Frame Distances (Multi-Fallback Heuristic with LOCKING)")
     fps = state.video_info.get('fps', 30.0)
     yolo_size = state.yolo_input_size
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
@@ -1501,7 +1594,7 @@ def initial_atr_pass_6_determine_distance(state: AppStateContainer, logger: Opti
         elif segment.major_position == 'Footjob':
             primary_classes_for_segment = ['foot']
 
-        _debug_log(logger,
+        _debug_log(
                    f"Processing segment '{segment.major_position}': Primary={primary_classes_for_segment}, Fallback={fallback_classes_for_segment}")
 
         # --- Initialize state for this segment's processing ---
@@ -1588,7 +1681,7 @@ def initial_atr_pass_6_determine_distance(state: AppStateContainer, logger: Opti
 
                     if active_box and active_box.track_id != active_interactor_state.get('id'):
                         active_interactor_state['id'] = active_box.track_id
-                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
+                        _debug_log(f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
                     active_interactor_state['unseen_frames'] = 0
 
             # --- NEW: STATEFUL & HIERARCHICAL FALLBACK SELECTION ---
@@ -1629,7 +1722,7 @@ def initial_atr_pass_6_determine_distance(state: AppStateContainer, logger: Opti
                         new_box_to_lock = best_new_candidate[0]
                         final_contributors.append(new_box_to_lock)
                         locked_fallback_interactors[fb_class] = {'id': new_box_to_lock.track_id, 'unseen_frames': 0}
-                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
+                        _debug_log(f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
 
             if final_contributors:
                 frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if c.track_id is not None]
@@ -1667,7 +1760,7 @@ def initial_atr_pass_6_determine_distance(state: AppStateContainer, logger: Opti
             else:
                 # If no contributors at all, hold the last known value
                 final_distance = last_valid_distance
-                _debug_log(logger, f"Frame {frame_obj.frame_id}: No contributors found. Holding last valid distance ({final_distance:.1f}).")
+                _debug_log(f"Frame {frame_obj.frame_id}: No contributors found. Holding last valid distance ({final_distance:.1f}).")
 
             frame_obj.atr_funscript_distance = int(np.clip(round(final_distance), 0, 100))
             last_valid_distance = frame_obj.atr_funscript_distance
@@ -1679,7 +1772,7 @@ def initial_atr_pass_6_determine_distance(state: AppStateContainer, logger: Opti
 
 
 def prev_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
-    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (Multi-Fallback Heuristic with ROBUST LOCKING)")
+    _debug_log("Starting ATR Pass 6: Determine Frame Distances (Multi-Fallback Heuristic with ROBUST LOCKING)")
     fps = state.video_info.get('fps', 30.0)
     yolo_size = state.yolo_input_size
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
@@ -1712,7 +1805,7 @@ def prev_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optiona
         elif segment.major_position == 'Footjob':
             primary_classes_for_segment = ['foot']
 
-        _debug_log(logger,
+        _debug_log(
                    f"Processing segment '{segment.major_position}': Primary={primary_classes_for_segment}, Fallback={fallback_classes_for_segment}")
 
         # --- Initialize state for this segment's processing ---
@@ -1788,7 +1881,7 @@ def prev_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optiona
                         active_interactor_state['id'] = active_box.track_id
                         active_interactor_state['unseen_frames'] = 0
                         frame_obj.is_occluded = False  # A new primary contact was found
-                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
+                        _debug_log(f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
 
             # --- ROBUST, STATEFUL & HIERARCHICAL FALLBACK SELECTION ---
             final_contributors = []
@@ -1828,7 +1921,7 @@ def prev_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optiona
                         new_box_to_lock = best_new_candidate[0]
                         final_contributors.append(new_box_to_lock)
                         locked_fallback_interactors[fb_class] = {'id': new_box_to_lock.track_id, 'unseen_frames': 0}
-                        _debug_log(logger, f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
+                        _debug_log(f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
 
             if final_contributors:
                 frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if c.track_id is not None]
@@ -1859,7 +1952,7 @@ def prev_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optiona
                 final_distance = total_weighted_distance / total_weight
             else:
                 final_distance = last_valid_distance
-                _debug_log(logger, f"Frame {frame_obj.frame_id}: No contributors found. Holding last valid distance ({final_distance:.1f}).")
+                _debug_log(f"Frame {frame_obj.frame_id}: No contributors found. Holding last valid distance ({final_distance:.1f}).")
 
             frame_obj.atr_funscript_distance = int(np.clip(round(final_distance), 0, 100))
             last_valid_distance = frame_obj.atr_funscript_distance
@@ -1870,7 +1963,7 @@ def prev_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optiona
                     last_known_box_positions[box.track_id] = (box.cx, box.cy)
 
 def prev2_atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
-    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (DYNAMIC AMPLIFICATION)")
+    _debug_log("Starting ATR Pass 6: Determine Frame Distances (DYNAMIC AMPLIFICATION)")
     fps = state.video_info.get('fps', 30.0)
     yolo_size = state.yolo_input_size
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
@@ -1914,7 +2007,7 @@ def prev2_atr_pass_6_determine_distance(state: AppStateContainer, logger: Option
             fallback_classes_for_segment = ['hand']
         elif segment.major_position == 'Footjob':
             primary_classes_for_segment = ['foot']
-        _debug_log(logger,
+        _debug_log(
                    f"Processing segment '{segment.major_position}': Primary={primary_classes_for_segment}, Fallback={fallback_classes_for_segment}")
         active_interactor_state = {'id': None, 'unseen_frames': 0}
         locked_fallback_interactors = {}
@@ -1978,7 +2071,7 @@ def prev2_atr_pass_6_determine_distance(state: AppStateContainer, logger: Option
                         active_interactor_state['id'] = active_box.track_id
                         active_interactor_state['unseen_frames'] = 0
                         frame_obj.is_occluded = False
-                        _debug_log(logger,
+                        _debug_log(
                                    f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
             final_contributors = []
             for fb_class in fallback_classes_for_segment:
@@ -2013,7 +2106,7 @@ def prev2_atr_pass_6_determine_distance(state: AppStateContainer, logger: Option
                         new_box_to_lock = best_new_candidate[0]
                         final_contributors.append(new_box_to_lock)
                         locked_fallback_interactors[fb_class] = {'id': new_box_to_lock.track_id, 'unseen_frames': 0}
-                        _debug_log(logger,
+                        _debug_log(
                                    f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
             if final_contributors:
                 frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if
@@ -2075,7 +2168,7 @@ def prev2_atr_pass_6_determine_distance(state: AppStateContainer, logger: Option
                     last_known_box_positions[box.track_id] = (box.cx, box.cy)
 
 def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[logging.Logger]):
-    _debug_log(logger, "Starting ATR Pass 6: Determine Frame Distances (DYNAMIC AMPLIFICATION)")
+    _debug_log("Starting ATR Pass 6: Determine Frame Distances (DYNAMIC AMPLIFICATION)")
     fps = state.video_info.get('fps', 30.0)
     yolo_size = state.yolo_input_size
     is_vr = state.video_info.get('actual_video_type', '2D') == 'VR'
@@ -2089,7 +2182,7 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
             raw_penis_heights[frame_obj.frame_id] = penis_detections[0].height
 
     if not raw_penis_heights:
-        _debug_log(logger, "No raw penis heights found to process. Skipping distance calculation.")
+        _debug_log("No raw penis heights found to process. Skipping distance calculation.")
         return
 
     # Create sorted NumPy arrays for lightning-fast lookups
@@ -2124,7 +2217,7 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
             fallback_classes_for_segment = ['hand']
         elif segment.major_position == 'Footjob':
             primary_classes_for_segment = ['foot']
-        _debug_log(logger,
+        _debug_log(
                    f"Processing segment '{segment.major_position}': Primary={primary_classes_for_segment}, Fallback={fallback_classes_for_segment}")
         active_interactor_state = {'id': None, 'unseen_frames': 0}
         locked_fallback_interactors = {}
@@ -2186,7 +2279,7 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
                         active_interactor_state['id'] = active_box.track_id
                         active_interactor_state['unseen_frames'] = 0
                         frame_obj.is_occluded = False
-                        _debug_log(logger,
+                        _debug_log(
                                    f"Frame {frame_obj.frame_id}: Locking on to new primary interactor TID {active_box.track_id} ('{active_box.class_name}')")
             final_contributors = []
             for fb_class in fallback_classes_for_segment:
@@ -2219,7 +2312,7 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
                         new_box_to_lock = best_new_candidate[0]
                         final_contributors.append(new_box_to_lock)
                         locked_fallback_interactors[fb_class] = {'id': new_box_to_lock.track_id, 'unseen_frames': 0}
-                        _debug_log(logger,
+                        _debug_log(
                                    f"Frame {frame_obj.frame_id}: Locked new fallback '{fb_class}' to TID {new_box_to_lock.track_id}")
             if final_contributors:
                 frame_obj.atr_fallback_contributor_ids = [c.track_id for c in final_contributors if
@@ -2283,21 +2376,21 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
 
 def atr_pass_7_smooth_and_normalize_distances(state: AppStateContainer, logger: Optional[logging.Logger]):
     """ ATR Pass 7 (denoising with SG) and Pass 9 (amplifying/normalizing per segment) combined """
-    _debug_log(logger, "Starting ATR Pass 7: Smooth and Normalize Distances")
+    _debug_log("Starting ATR Pass 7: Smooth and Normalize Distances")
 
     all_raw_distances = [fo.atr_funscript_distance for fo in state.frames]
     if not all_raw_distances or len(all_raw_distances) < 11:  # Savgol needs enough points
-        _debug_log(logger, "Not enough data points for Savitzky-Golay filter.")
+        _debug_log("Not enough data points for Savitzky-Golay filter.")
     else:
         # ATR used (11,2) for Savgol
         smoothed_distances = savgol_filter(all_raw_distances, window_length=11, polyorder=2)
         for i, fo in enumerate(state.frames):
             fo.atr_funscript_distance = int(np.clip(round(smoothed_distances[i]), 0, 100))
-        _debug_log(logger, "Applied Savitzky-Golay filter to distances.")
+        _debug_log("Applied Savitzky-Golay filter to distances.")
 
     # Now apply ATR's per-segment normalization (_normalize_funscript_sparse equivalent)
     _atr_normalize_funscript_sparse_per_segment(state, logger)
-    _debug_log(logger, "Applied per-segment normalization to distances.")
+    _debug_log("Applied per-segment normalization to distances.")
 
     full_script_data_np = np.array(
         [[fo.frame_id, fo.atr_funscript_distance] for fo in state.frames],
@@ -2314,10 +2407,10 @@ def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[loggin
     ULTIMATE SOLUTION: A fully vectorized, high-performance signal simplification pipeline
     that minimizes data conversions and uses optimized algorithms.
     """
-    _debug_log(logger, "Starting ULTIMATE ATR Pass 8: High-Performance Signal Simplification")
+    _debug_log("Starting ULTIMATE ATR Pass 8: High-Performance Signal Simplification")
 
     if not state.frames:
-        _debug_log(logger, "No data to simplify.")
+        _debug_log("No data to simplify.")
         return
 
     # --- Step 1: One-time conversion to a NumPy array ---
@@ -2343,7 +2436,7 @@ def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[loggin
 
     # Extract only the keyframes based on these indices. The data remains a NumPy array.
     keyframes_np = full_script_data_np[key_indices]
-    _debug_log(logger, f"Pass 1 (Peak/Valley): Simplified to {len(keyframes_np)} points.")
+    _debug_log(f"Pass 1 (Peak/Valley): Simplified to {len(keyframes_np)} points.")
 
     # --- Step 3: High-Performance RDP Simplification ---
     # Apply RDP simplification. The `simplify_coords_vw` is a C-based implementation
@@ -2352,7 +2445,7 @@ def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[loggin
         final_simplified_np = simplify_coords_vw(keyframes_np, 2.0)
     else:
         final_simplified_np = keyframes_np
-    _debug_log(logger, f"Pass 2 (RDP): Simplified to {len(final_simplified_np)} points.")
+    _debug_log(f"Pass 2 (RDP): Simplified to {len(final_simplified_np)} points.")
 
     # --- Step 4: Final Conversion to Output Lists ---
     final_frames = final_simplified_np[:, 0].astype(int)
@@ -2361,37 +2454,37 @@ def atr_pass_8_simplify_signal(state: AppStateContainer, logger: Optional[loggin
     state.funscript_frames = final_frames.tolist()
     state.funscript_distances = final_positions.tolist()
 
-    _debug_log(logger, f"High-performance simplification complete. Final points: {len(state.funscript_frames)}")
+    _debug_log(f"High-performance simplification complete. Final points: {len(state.funscript_frames)}")
 
 def load_yolo_results_stage2(msgpack_file_path: str, stop_event: threading.Event, logger: logging.Logger) -> Optional[List]:
-    # _debug_log(logger, f"Loading YOLO results from: {msgpack_file_path}")
+    # _debug_log(f"Loading YOLO results from: {msgpack_file_path}")
     if logger: # Use logger directly if _debug_log isn't available or needed here
         logger.debug(f"[S2 Load] Loading YOLO results from: {msgpack_file_path}")
     else:
-        print(f"[S2 Load - NO LOGGER] Loading YOLO results from: {msgpack_file_path}")
+        logger.info(f"Loading YOLO results from: {msgpack_file_path}")
 
     if stop_event.is_set():
         if logger:
             logger.info("Load YOLO stopped by event.")
         else:
-            print("Load YOLO stopped by event.")
+            logger.warning("Load YOLO stopped by event.")
         return None
     try:
         with open(msgpack_file_path, 'rb') as f:
             packed_data = f.read()
         all_frames_raw_detections = msgpack.unpackb(packed_data, raw=False)
-        # _debug_log(logger, f"Loaded {len(all_frames_raw_detections)} frames' raw detections.")
+        # _debug_log(f"Loaded {len(all_frames_raw_detections)} frames' raw detections.")
         if logger:
             logger.debug(f"[S2 Load] Loaded {len(all_frames_raw_detections)} frames' raw detections.")
         else:
-            print(f"[S2 Load - NO LOGGER] Loaded {len(all_frames_raw_detections)} frames' raw detections.")
+            logger.info(f"Loaded {len(all_frames_raw_detections)} frames' raw detections.")
 
         return all_frames_raw_detections
     except Exception as e:
         if logger:
             logger.error(f"Error loading/unpacking msgpack {msgpack_file_path}: {e}", exc_info=True)
         else:
-            print(f"Error loading/unpacking msgpack {msgpack_file_path}: {e}")
+            logger.error(f"Error loading/unpacking msgpack {msgpack_file_path}: {e}")
         return None
 
 
@@ -2401,7 +2494,7 @@ def _pre_scan_for_interactor_ids(state: AppStateContainer, logger: Optional[logg
     objects that ever interact with the penis. This avoids running expensive
     recovery on irrelevant tracks.
     """
-    _debug_log(logger, "Pre-scanning to identify all potential interactor track IDs...")
+    _debug_log("Pre-scanning to identify all potential interactor track IDs...")
     interactor_ids = set()
 
     # This scan simulates the lock-on logic from Pass 3 to accurately find interactors.
@@ -2436,7 +2529,7 @@ def _pre_scan_for_interactor_ids(state: AppStateContainer, logger: Optional[logg
                     if _atr_calculate_iou(penis_box.bbox, other_box.bbox) > 0:
                         interactor_ids.add(other_box.track_id)
 
-    _debug_log(logger, f"Pre-scan found {len(interactor_ids)} unique interactor track IDs.")
+    _debug_log(f"Pre-scan found {len(interactor_ids)} unique interactor track IDs.")
     return interactor_ids
 
 
@@ -2542,7 +2635,7 @@ def atr_pass_1c_recover_lost_tracks_with_of(
     MODIFIED: Identifies gaps and provides an 'interrupt_frame' to the worker if a
     high-confidence re-detection appears within the gap.
     """
-    _debug_log(logger, "Starting ATR Pass 1c: Recover Lost Tracks with INTERRUPTIBLE Optical Flow")
+    _debug_log("Starting ATR Pass 1c: Recover Lost Tracks with INTERRUPTIBLE Optical Flow")
 
     if not preprocessed_video_path_arg or not os.path.exists(preprocessed_video_path_arg):
         message = "Skipped - Preprocessed file not found."
@@ -2854,16 +2947,18 @@ def perform_contact_analysis(
 
     # --- Prepare overlay data BEFORE clearing frames from memory ---
     all_frames_overlay_data = []
-    overlay_package = None
+    overlay_data_with_segments = None
+
     if output_overlay_msgpack_path:
         logger.info("Preparing overlay data before memory optimization...")
-        all_frames_overlay_data = [frame.to_overlay_dict() for frame in state.frames if not stop_event.is_set()]
+        frame_data = [frame.to_overlay_dict() for frame in state.frames if not stop_event.is_set()]
         if stop_event.is_set(): return {"error": "Processing stopped during overlay data prep (ATR S2)."}
+
         try:
             segments_for_overlay = [seg.to_dict() for seg in state.atr_segments]
         except Exception:
             segments_for_overlay = []
-        overlay_package = {"frames": all_frames_overlay_data, "segments": segments_for_overlay, "metadata": {"schema": "v1.1"}}
+        overlay_data_with_segments = {"frames": all_frames_overlay_data, "segments": segments_for_overlay, "metadata": {"schema": "v1.1"}}
 
     # --- Store processed data to SQLite for Stage 3 memory optimization ---
     if state.use_sqlite and state.sqlite_storage:
@@ -2965,7 +3060,7 @@ def perform_contact_analysis(
         "sqlite_db_path": getattr(state, 'sqlite_db_path', None)  # Include SQLite path if available
     }
 
-    if output_overlay_msgpack_path and (overlay_package or all_frames_overlay_data):
+    if output_overlay_msgpack_path and (overlay_data_with_segments or all_frames_overlay_data):
         logger.info(f"Saving ATR Stage 2 overlay data to: {output_overlay_msgpack_path}")
         try:
             def numpy_default_handler(obj):
@@ -2977,13 +3072,14 @@ def perform_contact_analysis(
                     return obj.tolist()
                 raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable for msgpack")
 
-            to_write = overlay_package if overlay_package is not None else all_frames_overlay_data
+            to_write = overlay_data_with_segments if overlay_data_with_segments is not None else all_frames_overlay_data
             with open(output_overlay_msgpack_path, 'wb') as f:
                 f.write(msgpack.packb(to_write, use_bin_type=True, default=numpy_default_handler))
-            if overlay_package:
-                logger.info(f"Successfully saved ATR overlay package with {len(overlay_package.get('frames', []))} frames and {len(overlay_package.get('segments', []))} segments to {output_overlay_msgpack_path}.")
+            if overlay_data_with_segments:
+                logger.info(f"Successfully saved ATR overlay package with {len(overlay_data_with_segments.get('frames', []))} frames and {len(overlay_data_with_segments.get('segments', []))} segments to {output_overlay_msgpack_path}.")
             else:
                 logger.info(f"Successfully saved ATR overlay data for {len(all_frames_overlay_data)} frames to {output_overlay_msgpack_path}.")
+
             if os.path.exists(output_overlay_msgpack_path):
                 return_dict["overlay_msgpack_path"] = output_overlay_msgpack_path
         except Exception as e:

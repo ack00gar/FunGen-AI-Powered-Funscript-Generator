@@ -172,6 +172,9 @@ class ApplicationLogic:
         )
         self.logger = self._logger_instance.get_logger()
         self.app_settings.logger = self.logger  # Now provide the logger to AppSettings
+        
+        # Configure third-party logging to reduce startup noise
+        self._configure_third_party_logging()
 
         # Quiet noisy third-party loggers similar to 93371089faf7
         try:
@@ -362,6 +365,29 @@ class ApplicationLogic:
         elif timeline_num == 2:
             return getattr(self, 'interactive_timeline2', None)
         return None
+
+    def _configure_third_party_logging(self):
+        """Configure third-party library logging to reduce startup noise."""
+        # Suppress/reduce noisy third-party library logging
+        third_party_loggers = {
+            'coremltools': logging.ERROR,  # Only show critical errors from CoreML
+            'ultralytics': logging.WARNING,  # Reduce ultralytics noise
+            'torch': logging.WARNING,  # Reduce PyTorch noise
+            'torchvision': logging.WARNING,  # Reduce torchvision noise
+            'requests': logging.WARNING,  # Reduce requests noise
+            'urllib3': logging.WARNING,  # Reduce urllib3 noise
+            'PIL': logging.WARNING,  # Reduce Pillow noise
+            'matplotlib': logging.WARNING,  # Reduce matplotlib noise
+        }
+        
+        for logger_name, level in third_party_loggers.items():
+            logging.getLogger(logger_name).setLevel(level)
+        
+        # Special handling for ultralytics model loading warnings
+        ultralytics_logger = logging.getLogger('ultralytics')
+        ultralytics_logger.setLevel(logging.ERROR)  # Only show errors from ultralytics
+        
+        self.logger.debug("Third-party logging configured for reduced startup noise")
 
     def trigger_first_run_setup(self):
         """Initiates the first-run model download process in a background thread."""
@@ -940,7 +966,8 @@ class ApplicationLogic:
                 batch_mode_map = {
                     0: TrackerMode.OFFLINE_3_STAGE,
                     1: TrackerMode.OFFLINE_2_STAGE,
-                    2: TrackerMode.OSCILLATION_DETECTOR
+                    2: TrackerMode.OSCILLATION_DETECTOR,
+                    3: TrackerMode.OFFLINE_3_STAGE_MIXED
                 }
                 selected_mode = batch_mode_map.get(self.batch_processing_method_idx)
 
@@ -948,8 +975,8 @@ class ApplicationLogic:
                     self.logger.error(f"Invalid batch processing method index: {self.batch_processing_method_idx}. Skipping video.")
                     continue
 
-                # --- OFFLINE MODES (2-Stage / 3-Stage) ---
-                if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]:
+                # --- OFFLINE MODES (2-Stage / 3-Stage / 3-Stage-Mixed) ---
+                if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]:
                     self.single_video_analysis_complete_event.clear()
                     self.save_and_reset_complete_event.clear()
                     self.stage_processor.start_full_analysis(processing_mode=selected_mode)
@@ -1083,6 +1110,37 @@ class ApplicationLogic:
 
         self.exit_set_user_roi_mode()
         self.energy_saver.reset_activity_timer()
+
+    def clear_all_overlays_and_ui_drawings(self) -> None:
+        """Clears all drawn visuals on the video regardless of current mode.
+        This includes: manual ROI & point, oscillation area & grid, YOLO ROI box,
+        and any in-progress UI drawing states.
+        """
+        # Clear tracker-side overlays/state
+        if self.tracker and hasattr(self.tracker, 'clear_all_drawn_overlays'):
+            self.tracker.clear_all_drawn_overlays()
+
+        # Clear any UI-side drawing state (ROI/oscillation drawing in progress)
+        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):
+            vdui = self.gui_instance.video_display_ui
+            # User ROI drawing state
+            vdui.is_drawing_user_roi = False
+            vdui.drawn_user_roi_video_coords = None
+            vdui.waiting_for_point_click = False
+            vdui.user_roi_draw_start_screen_pos = (0, 0)
+            vdui.user_roi_draw_current_screen_pos = (0, 0)
+
+            # Oscillation area drawing state
+            if hasattr(vdui, 'is_drawing_oscillation_area'):
+                vdui.is_drawing_oscillation_area = False
+            if hasattr(vdui, 'drawn_oscillation_area_video_coords'):
+                vdui.drawn_oscillation_area_video_coords = None
+            if hasattr(vdui, 'waiting_for_oscillation_point_click'):
+                vdui.waiting_for_oscillation_point_click = False
+            if hasattr(vdui, 'oscillation_area_draw_start_screen_pos'):
+                vdui.oscillation_area_draw_start_screen_pos = (0, 0)
+            if hasattr(vdui, 'oscillation_area_draw_current_screen_pos'):
+                vdui.oscillation_area_draw_current_screen_pos = (0, 0)
 
     def enter_set_oscillation_area_mode(self):
         if self.processor and self.processor.is_processing:
@@ -1758,7 +1816,7 @@ class ApplicationLogic:
                 '3-stage': 0,
                 '2-stage': 1,
                 'oscillation-detector': 2,
-                '3-stage-mixed': 3,
+                '3-stage-mixed': 3  # Add new mixed mode index
             }
             # Set the batch processing index, which the batch thread now uses
             self.batch_processing_method_idx = mode_to_idx_map.get(args.mode, 0)
@@ -1770,7 +1828,6 @@ class ApplicationLogic:
             self.batch_copy_funscript_to_video_location = args.copy
             self.batch_apply_post_processing = True  # Assume always on for CLI
             self.batch_generate_roll_file = (args.mode in ('3-stage', '3-stage-mixed'))
-
             self.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
 
             # 3. Set up and run the batch processing

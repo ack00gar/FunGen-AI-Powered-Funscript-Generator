@@ -410,6 +410,11 @@ class AppFileManager:
             potential_s2_overlay = self.get_output_path_for_file(self.video_path, "_stage2_overlay.msgpack")
             if os.path.exists(potential_s2_overlay):
                 self.load_stage2_overlay_data(potential_s2_overlay)
+            
+            # Auto-load Stage 3 mixed debug data if it exists
+            potential_s3_mixed_debug = self.get_output_path_for_file(self.video_path, "_stage3_mixed_debug.msgpack")
+            if os.path.exists(potential_s3_mixed_debug):
+                self.load_stage3_mixed_debug_data(potential_s3_mixed_debug)
 
         # This part runs for both project loads and new projects.
         if self.app.processor:
@@ -430,7 +435,8 @@ class AppFileManager:
 
     def close_video_action(self, clear_funscript_unconditionally=False, skip_tracker_reset=False):
         if self.app.processor:
-            if self.app.processor.is_processing: self.app.processor.stop_processing()
+            if self.app.processor.is_processing:
+                self.app.processor.stop_processing()
             try:
                 self.app.processor.reset(close_video=True, skip_tracker_reset=skip_tracker_reset)  # Resets video info in processor
             except TypeError:
@@ -535,6 +541,45 @@ class AppFileManager:
         stage_processor.stage2_overlay_data = None
         stage_processor.stage2_overlay_data_map = None
         self.stage2_output_msgpack_path = None  # Clear path if data is cleared
+
+    def load_stage3_mixed_debug_data(self, filepath: str):
+        """Load Stage 3 mixed debug msgpack for overlay display during video playback."""
+        self.clear_stage3_mixed_debug_data()
+        try:
+            with open(filepath, 'rb') as f:
+                packed_data = f.read()
+            loaded_data = msgpack.unpackb(packed_data, raw=False)
+            
+            if isinstance(loaded_data, dict) and 'frame_data' in loaded_data:
+                # Store the loaded debug data
+                self.app.stage3_mixed_debug_data = loaded_data
+                self.app.stage3_mixed_debug_frame_map = {}
+                
+                # Create frame map for quick lookup
+                for frame_id_str, frame_debug in loaded_data['frame_data'].items():
+                    try:
+                        frame_id = int(frame_id_str)
+                        self.app.stage3_mixed_debug_frame_map[frame_id] = frame_debug
+                    except (ValueError, TypeError):
+                        continue
+                
+                frame_count = len(self.app.stage3_mixed_debug_frame_map)
+                self.logger.info(f"Loaded Stage 3 mixed debug data: {os.path.basename(filepath)} ({frame_count} frames)")
+                return True
+            else:
+                self.logger.error("Stage 3 mixed debug data is not in expected format.")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error loading Stage 3 mixed debug msgpack '{filepath}': {e}")
+            return False
+    
+    def clear_stage3_mixed_debug_data(self):
+        """Clear Stage 3 mixed debug data."""
+        if hasattr(self.app, 'stage3_mixed_debug_data'):
+            self.app.stage3_mixed_debug_data = None
+        if hasattr(self.app, 'stage3_mixed_debug_frame_map'):
+            self.app.stage3_mixed_debug_frame_map = None
 
     def open_video_from_path(self, file_path: str) -> bool:
         """

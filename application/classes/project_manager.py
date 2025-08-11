@@ -142,7 +142,6 @@ class ProjectManager:
             # On successful load, update the recent projects list
             self._add_to_recent_projects(filepath)
             self.app.app_settings.set_batch(last_opened_project_path=os.path.abspath(filepath))
-
             self.project_file_path = filepath
 
             # Final UI updates after everything is loaded

@@ -433,9 +433,16 @@ class AppFunscriptProcessor:
         self.app.project_manager.project_dirty = True
 
         # Invalidate the ultimate autotune preview for the affected timeline
-        timeline_instance = self.app.get_timeline(timeline_num)
+        timeline_instance = None
+        if self.app.gui_instance:
+            if timeline_num == 1:
+                timeline_instance = self.app.gui_instance.timeline_editor1
+            elif timeline_num == 2:
+                timeline_instance = self.app.gui_instance.timeline_editor2
+
         if timeline_instance:
             timeline_instance.invalidate_ultimate_preview()
+
             # Also invalidate editor caches to reflect changes immediately (per 9337108)
             if hasattr(timeline_instance, 'invalidate_cache'):
                 try:

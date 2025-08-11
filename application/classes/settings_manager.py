@@ -203,6 +203,12 @@ class AppSettings:
     def set(self, key, value):
         self.data[key] = value
         self.save_settings()  # here for immediate saving
+    
+    def set_batch(self, **kwargs):
+        """Set multiple keys at once and save only once at the end."""
+        for key, value in kwargs.items():
+            self.data[key] = value
+        self.save_settings()
 
     def set_batch(self, **kwargs):
         """Set multiple settings and save once for efficiency."""
