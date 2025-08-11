@@ -285,6 +285,13 @@ class VideoDisplayUI:
 
         if should_render_content:
             stage_proc = self.app.stage_processor
+            # Render Mixed Stage 3 debug overlay when available
+            if hasattr(self.app, 'stage3_mixed_debug_data') and self.app.stage3_mixed_debug_data and \
+               getattr(self.app.app_state_ui, 'selected_tracker_mode', None) == getattr(constants.TrackerMode, 'OFFLINE_3_STAGE_MIXED', constants.TrackerMode.OFFLINE_3_STAGE):
+                try:
+                    self._render_mixed_stage3_debug_overlay()
+                except Exception:
+                    pass
 
             # If video feed is disabled, just show the drop prompt if no video is loaded,
             # otherwise show a blank placeholder and skip all expensive processing.
@@ -668,6 +675,20 @@ class VideoDisplayUI:
 
         imgui.end()
         imgui.pop_style_var()
+
+    def _render_mixed_stage3_debug_overlay(self):
+        data = getattr(self.app, 'stage3_mixed_debug_data', None)
+        if not data:
+            return
+        draw_list = imgui.get_window_draw_list()
+        img_rect = self._actual_video_image_rect_on_screen
+        draw_list.push_clip_rect(img_rect['min_x'], img_rect['min_y'], img_rect['max_x'], img_rect['max_y'], True)
+        # Basic textual overlay (lightweight)
+        summary = data.get('summary') if isinstance(data, dict) else None
+        if isinstance(summary, dict):
+            txt = f"Mixed S3: segs={summary.get('num_segments','?')} roi_frames={summary.get('roi_frames','?')}"
+            draw_list.add_text(img_rect['min_x'] + 8, img_rect['min_y'] + 8, imgui.get_color_u32_rgba(255, 255, 0, 255), txt)
+        draw_list.pop_clip_rect()
 
     def _handle_video_mouse_interaction(self, app_state):
         if not (self.app.processor and self.app.processor.current_frame is not None): return

@@ -428,16 +428,24 @@ class AppFileManager:
                     if funscript_to_load:
                         self.load_funscript_to_timeline(funscript_to_load, timeline_num=1)
 
-    def close_video_action(self, clear_funscript_unconditionally=False):
+    def close_video_action(self, clear_funscript_unconditionally=False, skip_tracker_reset=False):
         if self.app.processor:
             if self.app.processor.is_processing: self.app.processor.stop_processing()
-            self.app.processor.reset(close_video=True)  # Resets video info in processor
+            try:
+                self.app.processor.reset(close_video=True, skip_tracker_reset=skip_tracker_reset)  # Resets video info in processor
+            except TypeError:
+                self.app.processor.reset(close_video=True)
 
         self.video_path = ""
         self.preprocessed_video_path = None
         self.app.stage_processor.reset_stage_status(stages=("stage1", "stage2", "stage3"))
         self.app.funscript_processor.video_chapters.clear()
         self.clear_stage2_overlay_data()
+        # Also clear any mixed debug artifacts
+        if hasattr(self.app, 'stage3_mixed_debug_data'):
+            self.app.stage3_mixed_debug_data = None
+        if hasattr(self.app, 'stage3_mixed_debug_frame_map'):
+            self.app.stage3_mixed_debug_frame_map = None
 
         # Clear audio waveform data
         self.app.audio_waveform_data = None
