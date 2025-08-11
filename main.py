@@ -2,6 +2,17 @@ import multiprocessing
 import platform
 import argparse
 import sys
+import logging
+
+def _setup_bootstrap_logger():
+    try:
+        from application.utils.logger import AppLogger
+        app_logger = AppLogger(logger_name='FunGenBootstrap', level=logging.INFO)
+        return app_logger.get_logger()
+    except Exception:
+        logging.basicConfig(level=logging.INFO)
+        return logging.getLogger('FunGenBootstrapFallback')
+
 
 def run_gui():
     """Initializes and runs the graphical user interface."""
@@ -26,16 +37,19 @@ def main():
     Main function to run the application.
     This function handles dependency checking, argument parsing, and starts either the GUI or CLI.
     """
+    # Bootstrap logger early
+    bootstrap_logger = _setup_bootstrap_logger()
+
     # Step 1: Perform dependency check before importing anything else
     try:
         from application.utils.dependency_checker import check_and_install_dependencies
         check_and_install_dependencies()
     except ImportError as e:
-        print(f"Failed to import dependency checker: {e}", file=sys.stderr)
-        print("Please ensure the file 'application/utils/dependency_checker.py' exists.", file=sys.stderr)
+        bootstrap_logger.error(f"Failed to import dependency checker: {e}")
+        bootstrap_logger.error("Please ensure the file 'application/utils/dependency_checker.py' exists.")
         sys.exit(1)
     except Exception as e:
-        print(f"An unexpected error occurred during dependency check: {e}", file=sys.stderr)
+        bootstrap_logger.error(f"An unexpected error occurred during dependency check: {e}")
         sys.exit(1)
 
     # Step 2: Set platform-specific multiprocessing behavior

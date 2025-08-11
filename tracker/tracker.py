@@ -100,8 +100,8 @@ class ROITracker:
 
         self.base_amplification_factor = base_amplification_factor
         self.class_specific_amplification_multipliers = class_specific_amplification_multipliers if class_specific_amplification_multipliers is not None else constants.DEFAULT_CLASS_AMP_MULTIPLIERS
-        self.logger.info(f"Base Amplification: {self.base_amplification_factor}x")
-        self.logger.info(f"Class Specific Amp Multipliers: {self.class_specific_amplification_multipliers}")
+        self.logger.debug(f"Base Amplification: {self.base_amplification_factor}x")
+        self.logger.debug(f"Class Specific Amp Multipliers: {self.class_specific_amplification_multipliers}")
 
         # Track video source information for user feedback
         self._last_video_source_status: Optional[Dict[str, Any]] = None
@@ -122,7 +122,7 @@ class ROITracker:
             "MEDIUM": cv2.DISOPTICAL_FLOW_PRESET_MEDIUM,
         }
         try:
-            selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+            selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
             # General-purpose dense flow (used in non-oscillation paths)
             self.flow_dense = cv2.DISOpticalFlow_create(selected_preset_cv)
             if self.dis_finest_scale is not None:
@@ -133,7 +133,7 @@ class ROITracker:
             if self.dis_finest_scale is not None:
                 self.flow_dense_osc.setFinestScale(self.dis_finest_scale)
         except AttributeError:
-            self.logger.warning("cv2.DISOpticalFlow_create not found or preset invalid. Optical flow might not work.")
+            self.logger.debug("cv2.DISOpticalFlow_create not found or preset invalid. Optical flow might not work.")
             self.flow_dense = None
             self.flow_dense_osc = None
 
@@ -863,12 +863,12 @@ class ROITracker:
         """
         if preset is not None and preset.upper() != self.dis_flow_preset.upper():
             self.dis_flow_preset = preset.upper()
-            self.logger.info(f"DIS Optical Flow preset updated to: {self.dis_flow_preset}")
+            self.logger.debug(f"DIS Optical Flow preset updated to: {self.dis_flow_preset}")
 
         if finest_scale is not None and finest_scale != self.dis_finest_scale:
             # A value of 0 from the UI means 'auto', which we can represent as None internally
             self.dis_finest_scale = finest_scale if finest_scale > 0 else None
-            self.logger.info(f"DIS Optical Flow finest scale updated to: {self.dis_finest_scale}")
+            self.logger.debug(f"DIS Optical Flow finest scale updated to: {self.dis_finest_scale}")
 
         dis_preset_map = {
             "ULTRAFAST": cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST,
@@ -877,14 +877,14 @@ class ROITracker:
         }
 
         try:
-            selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+            selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
             # Re-create the dense flow object with the new settings
             self.flow_dense = cv2.DISOpticalFlow_create(selected_preset_cv)
             if self.dis_finest_scale is not None:
                 self.flow_dense.setFinestScale(self.dis_finest_scale)
-            self.logger.info("Successfully re-initialized DIS Optical Flow object with new configuration.")
+            self.logger.debug("Successfully re-initialized DIS Optical Flow object with new configuration.")
         except AttributeError:
-            self.logger.warning("cv2.DISOpticalFlow_create not found or preset invalid while updating config. Optical flow may not work.")
+            self.logger.debug("cv2.DISOpticalFlow_create not found or preset invalid while updating config. Optical flow may not work.")
             self.flow_dense = None
         except Exception as e:
             self.logger.error(f"An unexpected error occurred while updating DIS flow config: {e}")

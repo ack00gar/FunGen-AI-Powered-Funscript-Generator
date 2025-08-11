@@ -2854,10 +2854,16 @@ def perform_contact_analysis(
 
     # --- Prepare overlay data BEFORE clearing frames from memory ---
     all_frames_overlay_data = []
+    overlay_package = None
     if output_overlay_msgpack_path:
         logger.info("Preparing overlay data before memory optimization...")
         all_frames_overlay_data = [frame.to_overlay_dict() for frame in state.frames if not stop_event.is_set()]
         if stop_event.is_set(): return {"error": "Processing stopped during overlay data prep (ATR S2)."}
+        try:
+            segments_for_overlay = [seg.to_dict() for seg in state.atr_segments]
+        except Exception:
+            segments_for_overlay = []
+        overlay_package = {"frames": all_frames_overlay_data, "segments": segments_for_overlay, "metadata": {"schema": "v1.1"}}
 
     # --- Store processed data to SQLite for Stage 3 memory optimization ---
     if state.use_sqlite and state.sqlite_storage:
@@ -2959,7 +2965,7 @@ def perform_contact_analysis(
         "sqlite_db_path": getattr(state, 'sqlite_db_path', None)  # Include SQLite path if available
     }
 
-    if output_overlay_msgpack_path and all_frames_overlay_data:
+    if output_overlay_msgpack_path and (overlay_package or all_frames_overlay_data):
         logger.info(f"Saving ATR Stage 2 overlay data to: {output_overlay_msgpack_path}")
         try:
             def numpy_default_handler(obj):
@@ -2971,9 +2977,13 @@ def perform_contact_analysis(
                     return obj.tolist()
                 raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable for msgpack")
 
+            to_write = overlay_package if overlay_package is not None else all_frames_overlay_data
             with open(output_overlay_msgpack_path, 'wb') as f:
-                f.write(msgpack.packb(all_frames_overlay_data, use_bin_type=True, default=numpy_default_handler))
-            logger.info(f"Successfully saved ATR overlay data for {len(all_frames_overlay_data)} frames to {output_overlay_msgpack_path}.")
+                f.write(msgpack.packb(to_write, use_bin_type=True, default=numpy_default_handler))
+            if overlay_package:
+                logger.info(f"Successfully saved ATR overlay package with {len(overlay_package.get('frames', []))} frames and {len(overlay_package.get('segments', []))} segments to {output_overlay_msgpack_path}.")
+            else:
+                logger.info(f"Successfully saved ATR overlay data for {len(all_frames_overlay_data)} frames to {output_overlay_msgpack_path}.")
             if os.path.exists(output_overlay_msgpack_path):
                 return_dict["overlay_msgpack_path"] = output_overlay_msgpack_path
         except Exception as e:

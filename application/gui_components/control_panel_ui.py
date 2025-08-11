@@ -477,6 +477,17 @@ class ControlPanelUI:
 
         self._render_interactive_refinement_controls()
 
+        # Add teal colored text about timeline dots visibility for specific methods only
+        if app_state.selected_tracker_mode in (
+            tracker_mode.OSCILLATION_DETECTOR,
+            tracker_mode.LIVE_YOLO_ROI,
+            tracker_mode.LIVE_USER_ROI,
+            tracker_mode.OFFLINE_3_STAGE_MIXED,
+        ):
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 0.8, 0.8)  # Teal color
+            imgui.text_wrapped("Timeline \"dots\" can take about 35 seconds of video duration to become visible")
+            imgui.pop_style_color()
+
         chapters = getattr(app.funscript_processor, "video_chapters", [])
         if chapters:
             if imgui.button("Clear All Chapters", width=-1):
@@ -1671,6 +1682,10 @@ class ControlPanelUI:
                 app.enter_set_oscillation_area_mode()
 
         if has_area:
+            # Add teal colored text about clearing oscillation area causing slowdown
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 0.8, 0.8)  # Teal color
+            imgui.text_wrapped("Clearing Oscillation Area may cause slowdown in full frame processing.\nThis is a known bug.\n\nTo get fix, restart the app.")
+            imgui.pop_style_color()
             if imgui.button("Clear Oscillation Area##ClearOscillationArea", width=btn_w):
                 tr.clear_oscillation_area_and_point()
                 if hasattr(app, "is_setting_oscillation_area_mode"):

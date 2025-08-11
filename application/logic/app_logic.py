@@ -173,6 +173,13 @@ class ApplicationLogic:
         self.logger = self._logger_instance.get_logger()
         self.app_settings.logger = self.logger  # Now provide the logger to AppSettings
 
+        # Quiet noisy third-party loggers similar to 93371089faf7
+        try:
+            for noisy in ['ultralytics', 'torch', 'urllib3', 'requests']:
+                logging.getLogger(noisy).setLevel(logging.WARNING)
+        except Exception:
+            pass
+
         # --- Initialize Auto-Updater ---
         self.updater = AutoUpdater(self)
 
@@ -1572,7 +1579,7 @@ class ApplicationLogic:
         if self.processor and self.processor.is_processing: self.processor.stop_processing()
         if self.stage_processor.full_analysis_active: self.stage_processor.abort_stage_processing()  # Signals thread
 
-        self.file_manager.close_video_action(clear_funscript_unconditionally=True)
+        self.file_manager.close_video_action(clear_funscript_unconditionally=True, skip_tracker_reset=True)
         self.funscript_processor.reset_state_for_new_project()
         self.funscript_processor.update_funscript_stats_for_timeline(1, "Project Reset")
         self.funscript_processor.update_funscript_stats_for_timeline(2, "Project Reset")

@@ -48,8 +48,8 @@ class ProjectManager:
             self.app.logger.warning("Unsaved changes in current project. Consider saving first.")
 
         # Set the last opened project to None so it doesn't load on next startup.
-        # This does NOT affect the recent projects list.
-        self.app.app_settings.set("last_opened_project_path", None)
+        # Use batch to coalesce writes when updating multiple settings
+        self.app.app_settings.set_batch(last_opened_project_path=None)
         self.app.logger.info("Last project reference cleared. App will start fresh next time.")
 
         # Delegate to ApplicationLogic's comprehensive reset method
@@ -141,7 +141,7 @@ class ProjectManager:
 
             # On successful load, update the recent projects list
             self._add_to_recent_projects(filepath)
-            self.app.app_settings.set("last_opened_project_path", os.path.abspath(filepath))
+            self.app.app_settings.set_batch(last_opened_project_path=os.path.abspath(filepath))
 
             self.project_file_path = filepath
 
@@ -200,7 +200,7 @@ class ProjectManager:
 
             # On successful save, update the recent projects list
             self._add_to_recent_projects(filepath)
-            self.app.app_settings.set("last_opened_project_path", os.path.abspath(filepath))
+            self.app.app_settings.set_batch(last_opened_project_path=os.path.abspath(filepath))
 
             self.app.logger.info(f"Project saved to '{os.path.basename(filepath)}'.", extra={'status_message': True})
             self.app.energy_saver.reset_activity_timer()
