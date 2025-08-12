@@ -1,42 +1,40 @@
 import cv2
-from collections import Counter, deque
-import numpy as np
-import time
-from typing import List, Dict, Tuple, Optional, Any
-from ultralytics import YOLO
 import logging
 import os
-
+import numpy as np
+import time
+import math
+from collections import Counter, deque
+from typing import List, Dict, Tuple, Optional, Any
+from ultralytics import YOLO
 from funscript import DualAxisFunscript
 from config import constants
 from config.constants_colors import RGBColors
-from config.element_group_colors import AppGUIColors
-from application.utils import VideoSegment, _format_time
 
 
 class ROITracker:
     def __init__(self,
-                 app_logic_instance: Optional[Any],
-                 tracker_model_path: str,
-                 pose_model_path: Optional[str] = None,
-                 confidence_threshold: float = constants.DEFAULT_TRACKER_CONFIDENCE_THRESHOLD,
-                 roi_padding: int = constants.DEFAULT_TRACKER_ROI_PADDING,
-                 roi_update_interval: int = constants.DEFAULT_ROI_UPDATE_INTERVAL,
-                 roi_smoothing_factor: float = constants.DEFAULT_ROI_SMOOTHING_FACTOR,
-                 dis_flow_preset: str = constants.DEFAULT_DIS_FLOW_PRESET,
-                 dis_finest_scale: Optional[int] = constants.DEFAULT_DIS_FINEST_SCALE,
-                 target_size_preprocess: Tuple[int, int] = (constants.YOLO_INPUT_SIZE, constants.YOLO_INPUT_SIZE),
-                 flow_history_window_smooth: int = constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW,
-                 adaptive_flow_scale: bool = True,
-                 use_sparse_flow: bool = False,
-                 max_frames_for_roi_persistence: int = constants.DEFAULT_ROI_PERSISTENCE_FRAMES,
-                 base_amplification_factor: float = constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION,
-                 class_specific_amplification_multipliers: Optional[Dict[str, float]] = None,
-                 logger: Optional[logging.Logger] = None,
-                 inversion_detection_split_ratio: float = constants.INVERSION_DETECTION_SPLIT_RATIO,
-                 video_type_override: Optional[str] = None,
-                 load_models_on_init: bool = True
-                 ):
+        app_logic_instance: Optional[Any],
+        tracker_model_path: str,
+        pose_model_path: Optional[str] = None,
+        confidence_threshold: float = constants.DEFAULT_TRACKER_CONFIDENCE_THRESHOLD,
+        roi_padding: int = constants.DEFAULT_TRACKER_ROI_PADDING,
+        roi_update_interval: int = constants.DEFAULT_ROI_UPDATE_INTERVAL,
+        roi_smoothing_factor: float = constants.DEFAULT_ROI_SMOOTHING_FACTOR,
+        dis_flow_preset: str = constants.DEFAULT_DIS_FLOW_PRESET,
+        dis_finest_scale: Optional[int] = constants.DEFAULT_DIS_FINEST_SCALE,
+        target_size_preprocess: Tuple[int, int] = (constants.YOLO_INPUT_SIZE, constants.YOLO_INPUT_SIZE),
+        flow_history_window_smooth: int = constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW,
+        adaptive_flow_scale: bool = True,
+        use_sparse_flow: bool = False,
+        max_frames_for_roi_persistence: int = constants.DEFAULT_ROI_PERSISTENCE_FRAMES,
+        base_amplification_factor: float = constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION,
+        class_specific_amplification_multipliers: Optional[Dict[str, float]] = None,
+        logger: Optional[logging.Logger] = None,
+        inversion_detection_split_ratio: float = constants.INVERSION_DETECTION_SPLIT_RATIO,
+        video_type_override: Optional[str] = None,
+        load_models_on_init: bool = True
+    ):
         self.app = app_logic_instance  # Can be None if instantiated by Stage 3
         self.video_type_override = video_type_override
 
@@ -48,8 +46,7 @@ class ROITracker:
             self.logger = logging.getLogger('ROITracker_fallback')
             if not self.logger.handlers:
                 self.logger.addHandler(logging.NullHandler())
-            self.logger.warning("No external logger provided to ROITracker, using fallback NullHandler.",
-                                extra={'status_message': False})
+            self.logger.warning("No external logger provided to ROITracker, using fallback NullHandler.", extra={'status_message': False})
 
         self.tracking_mode: str = "YOLO_ROI"
         self.user_roi_fixed: Optional[Tuple[int, int, int, int]] = None
@@ -108,8 +105,7 @@ class ROITracker:
 
         # Ensure these are initialized regardless of self.app
         self.output_delay_frames: int = self.app.tracker.output_delay_frames if self.app and hasattr(self.app, 'tracker') else 0
-        self.current_video_fps_for_delay: float = self.app.tracker.current_video_fps_for_delay if self.app and hasattr(
-            self.app, 'tracker') else 30.0
+        self.current_video_fps_for_delay: float = self.app.tracker.current_video_fps_for_delay if self.app and hasattr(self.app, 'tracker') else 30.0
         # Sensitivity and offsets should also be settable or taken from defaults if no app
         self.y_offset = self.app.tracker.y_offset if self.app and hasattr(self.app, 'tracker') else constants.DEFAULT_LIVE_TRACKER_Y_OFFSET
         self.x_offset = self.app.tracker.x_offset if self.app and hasattr(self.app, 'tracker') else constants.DEFAULT_LIVE_TRACKER_X_OFFSET
@@ -149,8 +145,7 @@ class ROITracker:
         self.flow_max_secondary_adaptive: float = 1.0
         self.use_sparse_flow = use_sparse_flow
         self.feature_params = dict(maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
-        self.lk_params = dict(winSize=(15, 15), maxLevel=2,
-                              criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+        self.lk_params = dict(winSize=(15, 15), maxLevel=2, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
         self.prev_features_main_roi: Optional[np.ndarray] = None
         self.main_interaction_class: Optional[str] = None
         self.CLASS_PRIORITY = {"pussy": 0, "anus": 0, "butt": 1, "face": 2, "hand": 3, "breast": 4, "foot": 5}
@@ -163,7 +158,10 @@ class ROITracker:
         self.show_flow: bool = True
         self.show_all_boxes: bool = True
         self.show_tracking_points: bool = True
-        self.show_masks: bool = False
+        # Whether to draw oscillation grid/cell overlays
+        self.show_masks: bool = bool(self.app.app_settings.get("oscillation_show_overlay", False)) if self.app else False
+        # Whether to draw static grid blocks for oscillation area (UI-controlled)
+        self.show_grid_blocks: bool = bool(self.app.app_settings.get("oscillation_show_grid_blocks", False)) if self.app else False
         self.show_stats: bool = False
 
         # Properties for thrust vs. ride detection
@@ -180,15 +178,13 @@ class ROITracker:
         self.OSCILLATION_PERSISTENCE_FRAMES = 4  # A cell stays active for 4 frames without motion
 
         # --- Attributes for Oscillation Detector ---
-        self.oscillation_grid_size: int = self.app.app_settings.get("oscillation_detector_grid_size",
-                                                                    20) if self.app else 20
+        self.oscillation_grid_size: int = self.app.app_settings.get("oscillation_detector_grid_size", 20) if self.app else 20
         self.oscillation_block_size: int = constants.YOLO_INPUT_SIZE // self.oscillation_grid_size
         self.oscillation_history_seconds: float = 2.0
         self.oscillation_history: Dict[Tuple[int, int], deque] = {}
         self.prev_gray_oscillation: Optional[np.ndarray] = None
         # --- Attributes for live amplification and smoothing ---
-        self.live_amp_enabled = self.app.app_settings.get("live_oscillation_dynamic_amp_enabled",
-                                                          True) if self.app else True
+        self.live_amp_enabled = self.app.app_settings.get("live_oscillation_dynamic_amp_enabled", True) if self.app else True
         # --- Initialize deque with a default maxlen. It will be resized in start_tracking. ---
         self.oscillation_position_history = deque(maxlen=120)  # Default to 4 seconds @ 30fps
         self.oscillation_last_known_pos: float = 50.0
@@ -200,18 +196,12 @@ class ROITracker:
 
         # --- Oscillation sensitivity control ---
         self.oscillation_sensitivity: float = self.app.app_settings.get("oscillation_detector_sensitivity", 1.0) if self.app else 1.0
-        # --- YOLO+Oscillation combined pipeline state ---
-        self.yolo_oscillation_active: bool = False
-        self.yolo_oscillation_target_class: str = self.app.app_settings.get("yolo_oscillation_target_class", "penis") if self.app else "penis"
-        self.yolo_oscillation_conf_threshold: float = self.app.app_settings.get("yolo_oscillation_conf_threshold", 0.4) if self.app else 0.4
-        self.yolo_oscillation_min_box: int = 64
 
         self.last_frame_time_sec_fps: Optional[float] = None
         self.current_fps: float = 0.0
         self.current_effective_amp_factor: float = self.base_amplification_factor
         self.stats_display: List[str] = []
-        self.logger.info(
-            f"Tracker fully initialized (ROI Persistence: {self.max_frames_for_roi_persistence} frames, ROI Smoothing: {self.roi_smoothing_factor}). App instance {'provided' if self.app else 'not provided (e.g. S3 mode)'}.")
+        self.logger.info(f"Tracker fully initialized (ROI Persistence: {self.max_frames_for_roi_persistence} frames, ROI Smoothing: {self.roi_smoothing_factor}). App instance {'provided' if self.app else 'not provided (e.g. S3 mode)'}.")
 
     def _is_vr_video(self) -> bool:
         """Determines if the video is VR, using the override if available."""
@@ -469,15 +459,13 @@ class ROITracker:
         return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
 
     def set_tracking_mode(self, mode: str):
-        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR", "YOLO_OSCILLATION"]:
+        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR"]:
             if self.tracking_mode != mode:
                 previous_mode = self.tracking_mode
                 self.tracking_mode = mode
                 self.logger.info(f"Tracker mode changed: {previous_mode} -> {self.tracking_mode}")
                 # Clear ALL drawn overlays when switching modes (ROI rectangles, oscillation area, YOLO ROI box)
                 self.clear_all_drawn_overlays()
-                # Set mode-specific flags
-                self.yolo_oscillation_active = (mode == "YOLO_OSCILLATION")
         else:
             self.logger.warning(f"Attempted to set invalid tracking mode: {mode}")
 
@@ -490,10 +478,12 @@ class ROITracker:
         if self.user_roi_fixed is not None or self.user_roi_initial_point_relative is not None:
             self.logger.info(f"Clearing user ROI: {self.user_roi_fixed}, point_rel={self.user_roi_initial_point_relative}")
         self.clear_user_defined_roi_and_point()
+
         # Clear oscillation visualization
         if hasattr(self, 'clear_oscillation_area_and_point') and getattr(self, 'oscillation_area_fixed', None) is not None:
             self.logger.info(f"Clearing oscillation area: {self.oscillation_area_fixed} with {len(getattr(self, 'oscillation_grid_blocks', []))} blocks")
             self.clear_oscillation_area_and_point()
+
         # Clear YOLO ROI box and related state
         if self.roi is not None:
             self.logger.info(f"Clearing YOLO ROI: {self.roi}")
@@ -516,18 +506,8 @@ class ROITracker:
             self.secondary_flow_history_smooth.clear()
             self.prev_gray_user_roi_patch = None
             self.logger.info(f"Tracker reconfigured for chapter {chapter.unique_id[:8]}.")
-        # else:
-        #     # If the chapter has no ROI, switch to a safe, inactive state
-        #     self.set_tracking_mode("YOLO_ROI")  # A mode that does nothing without a target
-        #     self.roi = None
-        #     if self.tracking_active:
-        #         self.stop_tracking()  # Stop generating actions in gaps/unconfigured chapters
-        #     self.logger.info(f"Chapter {chapter.unique_id[:8]} has no ROI. Tracker is inactive.")
 
-    def set_user_defined_roi_and_point(self,
-                                       roi_abs_coords: Tuple[int, int, int, int],
-                                       point_abs_coords_in_frame: Tuple[int, int],
-                                       current_frame_for_patch: np.ndarray):
+    def set_user_defined_roi_and_point(self, roi_abs_coords: Tuple[int, int, int, int], point_abs_coords_in_frame: Tuple[int, int], current_frame_for_patch: Optional[np.ndarray]):
         self.user_roi_fixed = roi_abs_coords
         rx, ry, rw, rh = roi_abs_coords
         point_x_frame, point_y_frame = point_abs_coords_in_frame
@@ -555,8 +535,7 @@ class ROITracker:
             if urw_c > 0 and urh_c > 0:
                 patch_slice = frame_gray[ury_c: ury_c + urh_c, urx_c: urx_c + urw_c]
                 self.prev_gray_user_roi_patch = np.ascontiguousarray(patch_slice)
-                self.logger.info(
-                    f"Initial gray patch for User ROI captured, shape: {self.prev_gray_user_roi_patch.shape}")
+                self.logger.info(f"Initial gray patch for User ROI captured, shape: {self.prev_gray_user_roi_patch.shape}")
             else:
                 self.logger.warning("User defined ROI resulted in zero-size patch. Patch not set.")
                 self.prev_gray_user_roi_patch = None
@@ -576,10 +555,7 @@ class ROITracker:
         if not silent:
             self.logger.info("User defined ROI and point cleared.")
 
-    def set_oscillation_area_and_point(self,
-                                       area_abs_coords: Tuple[int, int, int, int],
-                                       point_abs_coords_in_frame: Tuple[int, int],
-                                       current_frame_for_patch: np.ndarray):
+    def set_oscillation_area_and_point(self, area_abs_coords: Tuple[int, int, int, int], point_abs_coords_in_frame: Tuple[int, int], current_frame_for_patch: Optional[np.ndarray]):
         """Sets the oscillation detection area and initial tracking point."""
         self.oscillation_area_fixed = area_abs_coords
         ax, ay, aw, ah = area_abs_coords
@@ -593,13 +569,7 @@ class ROITracker:
         rel_x = max(0, min(area_w - 1, point_x - area_x))
         rel_y = max(0, min(area_h - 1, point_y - area_y))
         self.oscillation_area_initial_point_relative = (rel_x, rel_y)
-        # Optionally store the patch for future flow calculations
-        if current_frame_for_patch is not None:
-            # Extract the patch for the selected area
-            self.prev_gray_oscillation_area_patch = current_frame_for_patch[area_y:area_y + area_h,
-                                                    area_x:area_x + area_w].copy()
-        else:
-            self.prev_gray_oscillation_area_patch = None
+
         # Recalculate the grid blocks for the new area
         self._calculate_oscillation_grid_layout()
         # Reset tracked point and block positions
@@ -622,8 +592,7 @@ class ROITracker:
 
         self.oscillation_area_tracked_point_relative = self.oscillation_area_initial_point_relative
         self.logger.info(f"Oscillation area set to: {self.oscillation_area_fixed}")
-        self.logger.info(
-            f"Oscillation initial/tracked point (relative to area): {self.oscillation_area_initial_point_relative}")
+        self.logger.info(f"Oscillation initial/tracked point (relative to area): {self.oscillation_area_initial_point_relative}")
 
         # Calculate and store the static grid layout
         self._calculate_oscillation_grid_layout()
@@ -636,8 +605,7 @@ class ROITracker:
             if aw_c > 0 and ah_c > 0:
                 patch_slice = frame_gray[ay_c: ay_c + ah_c, ax_c: ax_c + aw_c]
                 self.prev_gray_oscillation_area_patch = np.ascontiguousarray(patch_slice)
-                self.logger.info(
-                    f"Initial gray patch for oscillation area captured, shape: {self.prev_gray_oscillation_area_patch.shape}")
+                self.logger.info(f"Initial gray patch for oscillation area captured, shape: {self.prev_gray_oscillation_area_patch.shape}")
             else:
                 self.logger.warning("Oscillation area resulted in zero-size patch. Patch not set.")
                 self.prev_gray_oscillation_area_patch = None
@@ -710,19 +678,28 @@ class ROITracker:
         self.last_frame_time_sec_fps = current_time_sec
 
     def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Aspect-preserving resize with letterbox to target size in a single pass.
+
+        Rationale: Replaced the previous resize + copyMakeBorder sequence with a
+        one-pass affine scale-and-center (cv2.warpAffine). This removes an extra
+        intermediate image write, reducing memory bandwidth per frame while
+        producing the same letterboxed result.
+        """
         h, w = frame.shape[:2]
-        if h == 0 or w == 0: return frame.copy()
         target_w, target_h = self.target_size_preprocess
-        if (w, h) == (target_w, target_h): return frame.copy()
-        scale = min(target_w / w, target_h / h)
-        new_w, new_h = int(w * scale), int(h * scale)
-        if new_w <= 0 or new_h <= 0: return frame.copy()
-        frame_resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        if (new_w, new_h) == (target_w, target_h): return frame_resized
-        delta_w, delta_h = target_w - new_w, target_h - new_h
-        top, bottom = delta_h // 2, delta_h - (delta_h // 2)
-        left, right = delta_w // 2, delta_w - (delta_w // 2)
-        return cv2.copyMakeBorder(frame_resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=RGBColors.BLACK)
+        if h <= 1 or w <= 1 or (w, h) == (target_w, target_h):
+            return frame.copy()
+        # Single-pass: scale and center via affine transform
+        scale = min(target_w / float(w), target_h / float(h))
+        if scale <= 0.0:
+            return frame.copy()
+        trans_x = (target_w - scale * w) * 0.5
+        trans_y = (target_h - scale * h) * 0.5
+        affine_trans = np.array([[scale, 0.0, trans_x], [0.0, scale, trans_y]], dtype=np.float32)
+        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        # Single render into the final target canvas (no separate border staging)
+        return cv2.warpAffine(frame, affine_trans, (target_w, target_h), flags=interp, borderMode=cv2.BORDER_CONSTANT, borderValue=RGBColors.BLACK)
 
     def detect_objects(self, frame: np.ndarray) -> List[Dict]:
         detections = []
@@ -838,14 +815,12 @@ class ROITracker:
             self.main_interaction_class = None
         self.current_effective_amp_factor = self._get_effective_amplification_factor()
 
-    def _calculate_combined_roi(self, frame_shape: Tuple[int, int], penis_box_xywh: Tuple[int, int, int, int],
-                                interacting_objects: List[Dict]) -> Tuple[int, int, int, int]:
+    def _calculate_combined_roi(self, frame_shape: Tuple[int, int], penis_box_xywh: Tuple[int, int, int, int], interacting_objects: List[Dict]) -> Tuple[int, int, int, int]:
         entities = [penis_box_xywh] + [obj["box"] for obj in interacting_objects]
         min_x, min_y = min(e[0] for e in entities), min(e[1] for e in entities)
         max_x_coord, max_y_coord = max(e[0] + e[2] for e in entities), max(e[1] + e[3] for e in entities)
         rx1, ry1 = max(0, min_x - self.roi_padding), max(0, min_y - self.roi_padding)
-        rx2, ry2 = min(frame_shape[1], max_x_coord + self.roi_padding), min(frame_shape[0],
-                                                                            max_y_coord + self.roi_padding)
+        rx2, ry2 = min(frame_shape[1], max_x_coord + self.roi_padding), min(frame_shape[0], max_y_coord + self.roi_padding)
         rw, rh = rx2 - rx1, ry2 - ry1
         min_w, min_h = 128, 128
         if rw < min_w:
@@ -907,9 +882,7 @@ class ROITracker:
             self.logger.error(f"An unexpected error occurred while updating DIS flow config: {e}")
             self.flow_dense = None
 
-    def _calculate_flow_in_patch(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray],
-                                 use_sparse: bool = False, prev_features_for_sparse: Optional[np.ndarray] = None) \
-            -> Tuple[float, float, Optional[np.ndarray], Optional[np.ndarray]]:
+    def _calculate_flow_in_patch(self, patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray], use_sparse: bool = False, prev_features_for_sparse: Optional[np.ndarray] = None) -> Tuple[float, float, Optional[np.ndarray], Optional[np.ndarray]]:
         dx, dy = 0.0, 0.0
         flow_vis = None
         updated_sparse = prev_features_for_sparse
@@ -922,8 +895,7 @@ class ROITracker:
 
         if use_sparse and self.feature_params:
             if prev_features_for_sparse is not None and len(prev_features_for_sparse) > 0:
-                next_feat, status, _ = cv2.calcOpticalFlowPyrLK(prev_cont, curr_cont, prev_features_for_sparse, None,
-                                                                **self.lk_params)
+                next_feat, status, _ = cv2.calcOpticalFlowPyrLK(prev_cont, curr_cont, prev_features_for_sparse, None, **self.lk_params)
                 good_prev = prev_features_for_sparse[status == 1]
                 good_next = next_feat[status == 1] if next_feat is not None else np.array(
                     [])  # Ensure good_next is an array
@@ -933,19 +905,16 @@ class ROITracker:
                     dx, dy = np.median(good_next[:, 0] - good_prev[:, 0]), np.median(good_next[:, 1] - good_prev[:, 1])
                     updated_sparse = good_next.reshape(-1, 1, 2)
                 else:
-                    updated_sparse = cv2.goodFeaturesToTrack(curr_cont, mask=None,
-                                                             **self.feature_params) if curr_cont.size > 0 else None
+                    updated_sparse = cv2.goodFeaturesToTrack(curr_cont, mask=None, **self.feature_params) if curr_cont.size > 0 else None
             else:
-                updated_sparse = cv2.goodFeaturesToTrack(curr_cont, mask=None,
-                                                         **self.feature_params) if curr_cont.size > 0 else None
+                updated_sparse = cv2.goodFeaturesToTrack(curr_cont, mask=None, **self.feature_params) if curr_cont.size > 0 else None
         elif self.flow_dense:
             flow = self.flow_dense.calc(prev_cont, curr_cont, None)
             if flow is not None:
                 dx, dy, flow_vis = np.median(flow[..., 0]), np.median(flow[..., 1]), flow
         return dx, dy, flow_vis, updated_sparse
 
-    def _apply_adaptive_scaling(self, value: float, min_val_attr: str, max_val_attr: str, size_factor: float,
-                                is_primary: bool) -> int:
+    def _apply_adaptive_scaling(self, value: float, min_val_attr: str, max_val_attr: str, size_factor: float, is_primary: bool) -> int:
         min_h, max_h = getattr(self, min_val_attr), getattr(self, max_val_attr)
         setattr(self, min_val_attr, min(min_h * 0.995, value * 0.9 if value < -0.1 else value * 1.1))
         setattr(self, max_val_attr, max(max_h * 0.995, value * 1.1 if value > 0.1 else value * 0.9))
@@ -966,11 +935,7 @@ class ROITracker:
         cur_size = self.penis_last_known_box[2] * self.penis_last_known_box[3]
         return np.clip(cur_size / max_hist, 0.1, 1.5)
 
-    def process_main_roi_content(self, processed_frame_draw_target: np.ndarray,
-                                 current_roi_patch_gray: np.ndarray,
-                                 prev_roi_patch_gray: Optional[np.ndarray],
-                                 prev_sparse_features: Optional[np.ndarray]) \
-            -> Tuple[int, int, float, float, Optional[np.ndarray]]:
+    def process_main_roi_content(self, processed_frame_draw_target: np.ndarray, current_roi_patch_gray: np.ndarray, prev_roi_patch_gray: Optional[np.ndarray], prev_sparse_features: Optional[np.ndarray]) -> Tuple[int, int, float, float, Optional[np.ndarray]]:
 
         updated_sparse_features_out = None
         dy_raw, dx_raw, lower_mag, upper_mag = 0.0, 0.0, 0.0, 0.0
@@ -1025,10 +990,8 @@ class ROITracker:
         # Calculate the base positions before potential inversion
         size_factor = self.get_current_penis_size_factor()
         if self.adaptive_flow_scale:
-            base_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
-                                                            "flow_max_primary_adaptive", size_factor, True)
-            secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive",
-                                                         "flow_max_secondary_adaptive", size_factor, False)
+            base_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive", "flow_max_primary_adaptive", size_factor, True)
+            secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive", "flow_max_secondary_adaptive", size_factor, False)
         else:
             effective_amp_factor = self._get_effective_amplification_factor()
             manual_scale_multiplier = (self.sensitivity / 10.0) * (1.0 / size_factor) * effective_amp_factor
@@ -1053,8 +1016,7 @@ class ROITracker:
                                 hsv[..., 0] = ang * 180 / np.pi / 2
                                 hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
                                 vis = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-                                processed_frame_draw_target[ry:ry + rh, rx:rx + rw] = cv2.addWeighted(roi_display_patch,
-                                                                                                      0.5, vis.astype(
+                                processed_frame_draw_target[ry:ry + rh, rx:rx + rw] = cv2.addWeighted(roi_display_patch, 0.5, vis.astype(
                                         roi_display_patch.dtype), 0.5, 0)
                         except cv2.error as e:
                             self.logger.error(f"Flow vis error: {e}")
@@ -1070,45 +1032,8 @@ class ROITracker:
 
         return primary_pos, secondary_pos, dy_smooth, dx_smooth, updated_sparse_features_out
 
-    def process_frame(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None,
-                      min_write_frame_id: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
+    def process_frame(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None, min_write_frame_id: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
         if self.tracking_mode == "OSCILLATION_DETECTOR":
-            return self.process_frame_for_oscillation(frame, frame_time_ms, frame_index)
-        if self.tracking_mode == "YOLO_OSCILLATION":
-            # Update oscillation area from YOLO detections at a configurable stride
-            stride = int(self.app.app_settings.get('yolo_osc_det_stride', 3)) if self.app else 3
-            if stride <= 0:
-                stride = 1
-            if (self.internal_frame_counter % stride) == 0:
-                # Build the same processed_input used by process_frame_for_oscillation
-                try:
-                      target_height = self.app.app_settings.get('oscillation_processing_target_height', constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT) if self.app else constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
-                except Exception:
-                    target_height = constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
-                processed_input = frame
-                if processed_input is not None and processed_input.size > 0:
-                    src_h, src_w = processed_input.shape[:2]
-                    if target_height and src_h > target_height:
-                        scale = float(target_height) / float(src_h)
-                        new_w = max(1, int(round(src_w * scale)))
-                        processed_input = cv2.resize(processed_input, (new_w, target_height), interpolation=cv2.INTER_AREA)
-
-                # Run detection on processed_input so boxes are in the expected coordinate space
-                dets = self.detect_objects(processed_input)
-                best = None
-                best_conf = 0.0
-                target_cls = self.yolo_oscillation_target_class
-                for d in dets:
-                    if d.get('class_name') == target_cls and d.get('confidence', 0) >= self.yolo_oscillation_conf_threshold:
-                        x, y, w, h = d['box']
-                        if w * h >= self.yolo_oscillation_min_box and d['confidence'] > best_conf:
-                            best = (x, y, w, h)
-                            best_conf = d['confidence']
-                if best is not None:
-                    bx, by, bw, bh = best
-                    center_pt = (bx + bw // 2, by + bh // 2)
-                    # Set area/point relative to the same processed_input used for detection
-                    self.set_oscillation_area_and_point(best, center_pt, processed_input)
             return self.process_frame_for_oscillation(frame, frame_time_ms, frame_index)
 
         self._update_fps()
@@ -1139,20 +1064,17 @@ class ROITracker:
 
             if run_detection_this_frame:
                 detected_objects_this_frame = self.detect_objects(processed_frame)
-                penis_boxes = [obj["box"] for obj in detected_objects_this_frame if
-                               obj["class_name"].lower() == "penis"]
+                penis_boxes = [obj["box"] for obj in detected_objects_this_frame if obj["class_name"].lower() == "penis"]
                 if penis_boxes:
                     self.frames_since_target_lost = 0
                     self._update_penis_tracking(penis_boxes[0])
-                    interacting_objs = self._find_interacting_objects(self.penis_last_known_box,
-                                                                      detected_objects_this_frame)
+                    interacting_objs = self._find_interacting_objects(self.penis_last_known_box, detected_objects_this_frame)
                     current_best_interaction_name = None
                     if interacting_objs:
                         interacting_objs.sort(key=lambda x: self.CLASS_PRIORITY.get(x["class_name"].lower(), 99))
                         current_best_interaction_name = interacting_objs[0]["class_name"].lower()
                     self.update_main_interaction_class(current_best_interaction_name)
-                    combined_roi_candidate = self._calculate_combined_roi(processed_frame.shape[:2],
-                                                                          self.penis_last_known_box, interacting_objs)
+                    combined_roi_candidate = self._calculate_combined_roi(processed_frame.shape[:2], self.penis_last_known_box, interacting_objs)
 
                     # Apply new VR-specific ROI width limits
                     if self._is_vr_video() and self.penis_last_known_box:
@@ -1161,7 +1083,7 @@ class ROITracker:
                         new_rw = 0
 
                         # Check main_interaction_class which is more stable than the instantaneous best name
-                        self.logger.info(f"Main interaction class: {self.main_interaction_class}")
+                        self.logger.debug(f"Main interaction class: {self.main_interaction_class}")
                         if self.main_interaction_class in ["face", "hand"]:
                             new_rw = penis_w
                         else:
@@ -1201,13 +1123,11 @@ class ROITracker:
 
             if self.roi and self.tracking_active and self.roi[2] > 0 and self.roi[3] > 0:
                 rx, ry, rw, rh = self.roi
-                main_roi_patch_gray = current_frame_gray[ry:min(ry + rh, current_frame_gray.shape[0]),
-                                      rx:min(rx + rw, current_frame_gray.shape[1])]
+                main_roi_patch_gray = current_frame_gray[ry:min(ry + rh, current_frame_gray.shape[0]), rx:min(rx + rw, current_frame_gray.shape[1])]
                 if main_roi_patch_gray.size > 0:
                     # process_main_roi_content returns updated_sparse_features, which we store in self.prev_features_main_roi
                     final_primary_pos, final_secondary_pos, _, _, self.prev_features_main_roi = \
-                        self.process_main_roi_content(processed_frame, main_roi_patch_gray, self.prev_gray_main_roi,
-                                                      self.prev_features_main_roi)
+                        self.process_main_roi_content(processed_frame, main_roi_patch_gray, self.prev_gray_main_roi, self.prev_features_main_roi)
                     self.prev_gray_main_roi = main_roi_patch_gray.copy()
                 else:
                     self.prev_gray_main_roi = None
@@ -1223,8 +1143,7 @@ class ROITracker:
             if self.user_roi_fixed and self.tracking_active:
                 urx, ury, urw, urh = self.user_roi_fixed
                 urx_c, ury_c = max(0, urx), max(0, ury)
-                urw_c, urh_c = min(urw, current_frame_gray.shape[1] - urx_c), min(urh,
-                                                                                  current_frame_gray.shape[0] - ury_c)
+                urw_c, urh_c = min(urw, current_frame_gray.shape[1] - urx_c), min(urh, current_frame_gray.shape[0] - ury_c)
 
                 if urw_c > 0 and urh_c > 0:
                     current_user_roi_patch_gray = current_frame_gray[ury_c: ury_c + urh_c, urx_c: urx_c + urw_c]
@@ -1232,8 +1151,7 @@ class ROITracker:
 
                     if self.enable_user_roi_sub_tracking and self.prev_gray_user_roi_patch is not None and self.user_roi_tracked_point_relative and self.flow_dense:
                         if self.prev_gray_user_roi_patch.shape == current_user_roi_patch_gray.shape:
-                            flow = self.flow_dense.calc(np.ascontiguousarray(self.prev_gray_user_roi_patch),
-                                                        np.ascontiguousarray(current_user_roi_patch_gray), None)
+                            flow = self.flow_dense.calc(np.ascontiguousarray(self.prev_gray_user_roi_patch), np.ascontiguousarray(current_user_roi_patch_gray), None)
 
                             if flow is not None:
                                 track_w, track_h = self.user_roi_tracking_box_size
@@ -1267,12 +1185,8 @@ class ROITracker:
 
                         size_factor = self.get_current_penis_size_factor()
                         if self.adaptive_flow_scale:
-                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
-                                                                             "flow_max_primary_adaptive", size_factor,
-                                                                             True)
-                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive",
-                                                                               "flow_max_secondary_adaptive",
-                                                                               size_factor, False)
+                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive", "flow_max_primary_adaptive", size_factor, True)
+                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive", "flow_max_secondary_adaptive", size_factor, False)
                         else:
                             effective_amp_factor = self._get_effective_amplification_factor()
                             manual_scale_multiplier = (self.sensitivity / 10.0) * effective_amp_factor
@@ -1287,8 +1201,7 @@ class ROITracker:
                             prev_x_rel, prev_y_rel = self.user_roi_tracked_point_relative
                             new_x_rel = prev_x_rel + dx_smooth
                             new_y_rel = prev_y_rel + dy_smooth
-                            self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))),
-                                                                    max(0.0, min(new_y_rel, float(urh_c))))
+                            self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))), max(0.0, min(new_y_rel, float(urh_c))))
                     else:
                         # Fallback to calculating flow on the whole User ROI without calling YOLO-specific methods.
                         dx_raw, dy_raw, _, _ = self._calculate_flow_in_patch(
@@ -1315,12 +1228,8 @@ class ROITracker:
                         # Apply scaling and generate final position
                         size_factor = 1.0  # No object detection in this mode
                         if self.adaptive_flow_scale:
-                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive",
-                                                                             "flow_max_primary_adaptive", size_factor,
-                                                                             True)
-                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive",
-                                                                               "flow_max_secondary_adaptive",
-                                                                               size_factor, False)
+                            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, "flow_min_primary_adaptive", "flow_max_primary_adaptive", size_factor, True)
+                            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, "flow_min_secondary_adaptive", "flow_max_secondary_adaptive", size_factor, False)
                         else:
                             effective_amp_factor = self._get_effective_amplification_factor()
                             manual_scale_multiplier = (self.sensitivity / 10.0) * effective_amp_factor
@@ -1335,8 +1244,7 @@ class ROITracker:
                             prev_x_rel, prev_y_rel = self.user_roi_tracked_point_relative
                             new_x_rel = prev_x_rel + dx_smooth
                             new_y_rel = prev_y_rel + dy_smooth
-                            self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))),
-                                                                    max(0.0, min(new_y_rel, float(urh_c))))
+                            self.user_roi_tracked_point_relative = (max(0.0, min(new_x_rel, float(urw_c))), max(0.0, min(new_y_rel, float(urh_c))))
 
                     self.prev_gray_user_roi_patch = np.ascontiguousarray(current_user_roi_patch_gray)
 
@@ -1349,8 +1257,7 @@ class ROITracker:
                 final_primary_pos, final_secondary_pos = 50, 50
                 self.user_roi_current_flow_vector = (0.0, 0.0)
 
-        if self.app and self.tracking_active and \
-                (min_write_frame_id is None or (frame_index is not None and frame_index >= min_write_frame_id)):
+        if self.app and self.tracking_active and (min_write_frame_id is None or (frame_index is not None and frame_index >= min_write_frame_id)):
 
             # Determine which axis we will write for this frame
             current_tracking_axis_mode = self.app.tracking_axis_mode
@@ -1413,6 +1320,7 @@ class ROITracker:
         if self.show_masks and detected_objects_this_frame and self.tracking_mode == "YOLO_ROI":
             self.draw_detections(processed_frame, detected_objects_this_frame)
 
+        # YOLO ROI rectangle overlay
         if self.tracking_mode == "YOLO_ROI" and self.show_roi and self.roi:
             rx, ry, rw, rh = self.roi
             color = self.get_class_color(
@@ -1421,10 +1329,9 @@ class ROITracker:
             status_text = self.main_interaction_class or ('P' if self.penis_last_known_box else 'Lost...')
             cv2.putText(processed_frame, f"ROI:{status_text}", (rx, ry - 2), cv2.FONT_HERSHEY_PLAIN, 0.7, color, 1)
             if not self.penis_last_known_box:
-                cv2.putText(processed_frame,
-                            f"Lost: {self.frames_since_target_lost}/{self.max_frames_for_roi_persistence}",
-                            (rx, ry + rh + 10), cv2.FONT_HERSHEY_PLAIN, 0.6, RGBColors.BLUE, 1)
+                cv2.putText(processed_frame, f"Lost: {self.frames_since_target_lost}/{self.max_frames_for_roi_persistence}", (rx, ry + rh + 10), cv2.FONT_HERSHEY_PLAIN, 0.6, RGBColors.BLUE, 1)
 
+        # User-defined ROI rectangle overlay
         elif self.tracking_mode == "USER_FIXED_ROI" and self.show_roi and self.user_roi_fixed:
             urx, ury, urw, urh = self.user_roi_fixed
             urx_c, ury_c = max(0, urx), max(0, ury)
@@ -1438,8 +1345,7 @@ class ROITracker:
 
         if self.show_stats:
             for i, stat_text in enumerate(self.stats_display):
-                cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35,
-                            RGBColors.TEAL, 1)
+                cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35, RGBColors.TEAL, 1)
 
         self.internal_frame_counter += 1
         return processed_frame, action_log_list if action_log_list else None
@@ -1475,43 +1381,22 @@ class ROITracker:
             # --- Dynamically resize history buffer for live amplification when tracking starts ---
             amp_window_ms = self.app.app_settings.get("live_oscillation_amp_window_ms", 4000)
             new_maxlen = int(fps * (amp_window_ms / 1000.0))
-            if not hasattr(self,
-                           'oscillation_position_history') or self.oscillation_position_history.maxlen != new_maxlen:
+            if not hasattr(self, 'oscillation_position_history') or self.oscillation_position_history.maxlen != new_maxlen:
                 self.oscillation_position_history = deque(maxlen=new_maxlen)
                 self.logger.info(f"Live amplification history buffer resized to {new_maxlen} frames.")
 
             self.oscillation_history_max_len = int(self.oscillation_history_seconds * fps)
             self.oscillation_history.clear()
             self.prev_gray_oscillation = None
+            # Force-recreate optical flow engine to eliminate internal state carry-over
+            try:
+                self.logger.debug(f"Oscillation start: recreating DIS flow (preset={self.dis_flow_preset}, finest_scale={self.dis_finest_scale})")
+                self.update_dis_flow_config()
+            except Exception as e:
+                self.logger.warning(f"Oscillation start: DIS flow recreate failed: {e}")
             self.oscillation_funscript_pos = 50
 
             self.logger.info(f"Oscillation detector started. History size set to {self.oscillation_history_max_len} frames.")
-        elif self.tracking_mode == "YOLO_OSCILLATION":
-            self.update_oscillation_grid_size()
-            self.update_oscillation_sensitivity()
-            fps = self.app.processor.fps if self.app and self.app.processor and self.app.processor.fps > 0 else 30.0
-            amp_window_ms = self.app.app_settings.get("live_oscillation_amp_window_ms", 4000)
-            new_maxlen = int(fps * (amp_window_ms / 1000.0))
-            self.oscillation_position_history = deque(maxlen=new_maxlen)
-            self.oscillation_history_max_len = int(self.oscillation_history_seconds * fps)
-            self.oscillation_history.clear()
-            self.prev_gray_oscillation = None
-            self.oscillation_funscript_pos = 50
-            self.yolo_oscillation_active = True
-            self.logger.info("YOLO+Oscillation pipeline started.")
-            # Re-link undo managers to ensure timeline remains writable after clears
-            try:
-                if self.app and hasattr(self.app, 'funscript_processor'):
-                    self.app.funscript_processor._ensure_undo_managers_linked()
-            except Exception:
-                pass
-
-        self.internal_frame_counter = 0  # Reset for both live and S3 context if S3 reuses this
-        self.flow_min_primary_adaptive, self.flow_max_primary_adaptive = -1.0, 1.0
-        self.flow_min_secondary_adaptive, self.flow_max_secondary_adaptive = -1.0, 1.0
-        for lst in [self.primary_flow_history_smooth, self.secondary_flow_history_smooth, self.class_history]:
-            lst.clear()
-        # self.current_effective_amp_factor = self._get_effective_amplification_factor() # Done per frame/segment start
 
         # Dynamically set the motion history window to match the video's FPS (~1 second buffer)
         if self.app and hasattr(self.app, 'processor') and self.app.processor.fps > 0:
@@ -1558,8 +1443,7 @@ class ROITracker:
             if new_grid_size != self.oscillation_grid_size:
                 self.oscillation_grid_size = new_grid_size
                 self.oscillation_block_size = constants.YOLO_INPUT_SIZE // self.oscillation_grid_size
-                self.logger.info(
-                    f"Oscillation grid size updated to {self.oscillation_grid_size} (block size: {self.oscillation_block_size}x{self.oscillation_block_size})")
+                self.logger.info(f"Oscillation grid size updated to {self.oscillation_grid_size} (block size: {self.oscillation_block_size}x{self.oscillation_block_size})")
 
     def update_oscillation_sensitivity(self):
         """Updates the oscillation sensitivity from app settings."""
@@ -1567,7 +1451,7 @@ class ROITracker:
             new_sensitivity = self.app.app_settings.get("oscillation_detector_sensitivity", 1.0)
             if new_sensitivity != self.oscillation_sensitivity:
                 self.oscillation_sensitivity = new_sensitivity
-                self.logger.info(f"Oscillation sensitivity updated to {self.oscillation_sensitivity}")
+                self.logger.debug(f"Oscillation sensitivity updated to {self.oscillation_sensitivity}")
 
     def reset(self, reason: Optional[str] = None):
         self.stop_tracking()  # Explicitly set tracking_active to False.
@@ -1624,21 +1508,15 @@ class ROITracker:
             if current_status != self._last_video_source_status:
                 if current_status.get("using_preprocessed", False):
                     if current_status.get("valid", False):
-                        self.logger.info(
-                            f"Live tracking using preprocessed video: {os.path.basename(current_status.get('path', 'unknown'))} "
-                            f"({current_status.get('frame_count', 0)} frames)", extra={'status_message': True})
+                        self.logger.info(f"Live tracking using preprocessed video: {os.path.basename(current_status.get('path', 'unknown'))} ({current_status.get('frame_count', 0)} frames)", extra={'status_message': True})
                     else:
-                        self.logger.warning(
-                            "Live tracking: preprocessed video detected but invalid, using original video",
-                            extra={'status_message': True})
+                        self.logger.warning("Live tracking: preprocessed video detected but invalid, using original video", extra={'status_message': True})
                 else:
                     if current_status.get("exists", False):
                         self.logger.info(
-                            "Live tracking using original video (preprocessed video available but not used)",
-                            extra={'status_message': True})
+                            "Live tracking using original video (preprocessed video available but not used)", extra={'status_message': True})
                     else:
-                        self.logger.info("Live tracking using original video (no preprocessed video available)",
-                                         extra={'status_message': True})
+                        self.logger.info("Live tracking using original video (no preprocessed video available)", extra={'status_message': True})
 
                 self._last_video_source_status = current_status.copy()
 
@@ -1688,7 +1566,9 @@ class ROITracker:
         [V9 - Advanced Filtering] Implements global motion cancellation, advanced oscillation scoring,
         and a VR-specific focus on the central third of the frame.
         """
-        # --- Optional pre-downscale for performance (approx 720p height) ---
+
+        self._update_fps()
+
         try:
             target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)('oscillation_processing_target_height', constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT)
         except Exception:
@@ -1747,7 +1627,6 @@ class ROITracker:
         action_log_list = []
         active_blocks = getattr(self, 'oscillation_active_block_positions', set())
         is_camera_motion = getattr(self, 'is_camera_motion', False)
-        block_motions = getattr(self, 'block_motions', [])
 
         # Compute dynamic grid based on current analysis image size (used in vis and scoring)
         img_h, img_w = current_gray.shape[:2]
@@ -1759,35 +1638,27 @@ class ROITracker:
         num_cols = max(1, img_w // local_block_size)
         min_cell_activation_pixels = (local_block_size * local_block_size) * 0.05
 
-        # --- Visualization for grid and motion detection ---
-        if use_oscillation_area and self.oscillation_grid_blocks:
-            active_block_positions = set(active_blocks)
-            max_blocks_w = getattr(self, 'oscillation_max_blocks_w', 0)
-            if max_blocks_w <= 0:
-                num_blocks = len(self.oscillation_grid_blocks)
-                max_blocks_w = int(num_blocks ** 0.5) if num_blocks > 0 else 1
-            for i, (x1, y1, w, h) in enumerate(self.oscillation_grid_blocks):
-                color = (100, 100, 100)
-                block_r = i // max_blocks_w
-                block_c = i % max_blocks_w
-                if is_camera_motion:
-                    color = (0, 165, 255)
-                elif (block_r, block_c) in active_block_positions:
-                    color = (0, 255, 0)
-                # Draw grid block relative to full frame
-                # cv2.rectangle(processed_frame, (x1 + ax, y1 + ay), (x1 + ax + w, y1 + ay + h), color, 1)
-        else:
-            active_block_positions = set(active_blocks)
-            for motion in block_motions:
-                r, c = motion['pos']
-                x1, y1 = c * local_block_size, r * local_block_size
-                x2, y2 = x1 + local_block_size, y1 + local_block_size
-                color = (100, 100, 100)
-                if is_camera_motion:
-                    color = (0, 165, 255)
-                elif (r, c) in active_block_positions:
-                    color = (0, 255, 0)
-                cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 1)
+        # --- Visualization: optional static grid blocks overlay (independent of show_masks) ---
+        if getattr(self, 'show_grid_blocks', False):
+            # Draw a static grid over the current analysis area (ROI or full frame)
+            start_x, start_y = ax, ay
+            end_x, end_y = ax + aw, ay + ah
+            # If VR central-third focus is active (no ROI), align the grid to that region
+            if not use_oscillation_area and self._is_vr_video():
+                vr_central_third_start_local = num_cols // 3
+                vr_central_third_end_local = 2 * num_cols // 3
+                start_x = ax + (vr_central_third_start_local * local_block_size)
+                end_x = ax + (vr_central_third_end_local * local_block_size)
+            gray_color = (100, 100, 100)
+            for y in range(start_y, end_y, local_block_size):
+                row_h = min(local_block_size, end_y - y)
+                if row_h <= 0:
+                    break
+                for x in range(start_x, end_x, local_block_size):
+                    col_w = min(local_block_size, end_x - x)
+                    if col_w <= 0:
+                        break
+                    cv2.rectangle(processed_frame, (x, y), (x + col_w, y + row_h), gray_color, 1)
 
         # --- Detection logic: operate only on area ---
         if self.prev_gray_oscillation is None or self.prev_gray_oscillation.shape != current_gray.shape:
@@ -1813,8 +1684,6 @@ class ROITracker:
         frame_diff = cv2.absdiff(current_gray, self.prev_gray_oscillation)
         _, motion_mask = cv2.threshold(frame_diff, min_motion_threshold, 255, cv2.THRESH_BINARY)
 
-        # Grid variables already computed above
-
         # Check if the video is VR to apply the focus rule
         is_vr = self._is_vr_video()
         vr_central_third_start = num_cols // 3
@@ -1823,8 +1692,8 @@ class ROITracker:
         newly_active_cells = set()
         for r in range(num_rows):
             for c in range(num_cols):
-                # If VR, skip cells outside the central third
-                if is_vr and (c < vr_central_third_start or c > vr_central_third_end):
+                # If VR, skip cells outside the central third unless an oscillation ROI is set
+                if is_vr and (not use_oscillation_area) and (c < vr_central_third_start or c > vr_central_third_end):
                     continue
 
                 y_start, x_start = r * local_block_size, c * local_block_size
@@ -1850,7 +1719,6 @@ class ROITracker:
 
         # --- Step 3: Analyze Localized Motion in Active Cells ---
         block_motions = []
-        max_magnitude = 0.0
         for r, c in persistent_active_cells:
             y_start = r * local_block_size
             x_start = c * local_block_size
@@ -1983,16 +1851,17 @@ class ROITracker:
                 else:
                     secondary_to_write = self.oscillation_funscript_secondary_pos
 
-            self.funscript.add_action(timestamp_ms=frame_time_ms, primary_pos=primary_to_write,
-                                      secondary_pos=secondary_to_write)
+            self.funscript.add_action(timestamp_ms=frame_time_ms, primary_pos=primary_to_write, secondary_pos=secondary_to_write)
             action_log_list.append({"at": frame_time_ms, "pos": primary_to_write, "secondary_pos": secondary_to_write})
 
         # Step 7: Visualization
-        active_block_positions = {b['pos'] for b in active_blocks}
-        for r,c in self.oscillation_cell_persistence.keys():
-            x1, y1 = c * local_block_size + ax, r * local_block_size + ay
-            color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
-            cv2.rectangle(processed_frame, (x1, y1), (x1 + local_block_size, y1 + local_block_size), color, 1)
+        # Draw oscillation grid overlay if enabled
+        if self.show_masks:
+            active_block_positions = {b['pos'] for b in active_blocks}
+            for r,c in list(self.oscillation_cell_persistence.keys()):
+                x1, y1 = c * local_block_size + ax, r * local_block_size + ay
+                color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
+                cv2.rectangle(processed_frame, (x1, y1), (x1 + local_block_size, y1 + local_block_size), color, 1)
 
         self.prev_gray_oscillation = current_gray.copy()
         return processed_frame, action_log_list if action_log_list else None

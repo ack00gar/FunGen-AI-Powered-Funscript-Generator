@@ -109,7 +109,7 @@ class VideoProcessor:
         self.frame_cache = OrderedDict()
         self.frame_cache_max_size = cache_size
         self.frame_cache_lock = threading.Lock()
-        self.batch_fetch_size = 50
+        self.batch_fetch_size = 120
 
     def _clear_cache(self):
         with self.frame_cache_lock:
@@ -411,18 +411,16 @@ class VideoProcessor:
                 cmd2.extend(['-frames:v', str(num_frames_to_fetch)])
                 cmd2.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
 
-                self.logger.debug(f"get_frames_batch Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
-                self.logger.debug(f"get_frames_batch Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(f"get_frames_batch Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
+                    self.logger.debug(f"get_frames_batch Pipe 2 CMD: {' '.join(shlex.quote(str(x)) for x in cmd2)}")
 
                 # Windows fix: prevent terminal windows from spawning
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 local_p1_proc = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if local_p1_proc.stdout is None: raise IOError("get_frames_batch: Pipe 1 stdout is None.")
 
-                local_p2_proc = subprocess.Popen(cmd2, stdin=local_p1_proc.stdout,
-                                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20),
-                                                 creationflags=creation_flags)
+                local_p2_proc = subprocess.Popen(cmd2, stdin=local_p1_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20), creationflags=creation_flags)
                 local_p1_proc.stdout.close()
 
             else:  # Standard single FFmpeg process
@@ -437,12 +435,11 @@ class VideoProcessor:
                 cmd_single.extend(['-vf', effective_vf])
                 cmd_single.extend(['-frames:v', str(num_frames_to_fetch)])
                 cmd_single.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
-                self.logger.debug(
-                    f"get_frames_batch CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in cmd_single)}")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(
+                        f"get_frames_batch CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in cmd_single)}")
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                local_p2_proc = subprocess.Popen(cmd_single, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                 bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20),
-                                                 creationflags=creation_flags)
+                local_p2_proc = subprocess.Popen(cmd_single, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20), creationflags=creation_flags)
 
             if not local_p2_proc or local_p2_proc.stdout is None:
                 self.logger.error("get_frames_batch: Output FFmpeg process or its stdout is None.")
@@ -489,8 +486,9 @@ class VideoProcessor:
                 self.current_frame_index = frame_index_abs
                 return frame
 
-        self.logger.debug(
-            f"Cache MISS for frame {frame_index_abs}. Attempting batch fetch using get_frames_batch (batch size: {self.batch_fetch_size}).")
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug(
+                f"Cache MISS for frame {frame_index_abs}. Attempting batch fetch using get_frames_batch (batch size: {self.batch_fetch_size}).")
 
         batch_start_frame = max(0, frame_index_abs - self.batch_fetch_size // 2)
         if self.total_frames > 0:
@@ -619,8 +617,7 @@ class VideoProcessor:
                                '-show_entries', 'stream=codec_type', '-of', 'json', filename]
             try:
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                result_audio = subprocess.run(cmd_audio_check, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                              check=True, text=True, creationflags=creation_flags)
+                result_audio = subprocess.run(cmd_audio_check, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, creationflags=creation_flags)
                 audio_data = json.loads(result_audio.stdout)
                 if audio_data.get('streams') and audio_data['streams'][0].get('codec_type') == 'audio':
                     has_audio_ffprobe = True
@@ -898,6 +895,14 @@ class VideoProcessor:
                 process.kill()
                 self.logger.info(f"{process_name} process killed.")
 
+        # Ensure all standard pipes are closed to release OS resources
+        for stream in (getattr(process, 'stdout', None), getattr(process, 'stderr', None), getattr(process, 'stdin', None)):
+            try:
+                if stream is not None:
+                    stream.close()
+            except Exception:
+                pass
+
     def _terminate_ffmpeg_processes(self):
         """Safely terminates all active FFmpeg processes using the helper."""
         self._terminate_process(self.ffmpeg_pipe1_process, "Pipe 1")
@@ -949,10 +954,7 @@ class VideoProcessor:
                 self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if self.ffmpeg_pipe1_process.stdout is None:
                     raise IOError("Pipe 1 stdout is None.")
-                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout,
-                                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 5,
-                                                       creationflags=creation_flags)
+                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * 5, creationflags=creation_flags)
                 self.ffmpeg_pipe1_process.stdout.close()
                 return True
             except Exception as e:
@@ -975,9 +977,7 @@ class VideoProcessor:
             self.logger.info(f"Single Pipe CMD: {' '.join(shlex.quote(str(x)) for x in cmd)}")
             try:
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                self.ffmpeg_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 5,
-                                                       creationflags=creation_flags)
+                self.ffmpeg_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * 5, creationflags=creation_flags)
                 return True
             except Exception as e:
                 self.logger.error(f"Failed to start FFmpeg: {e}", exc_info=True)
@@ -1009,8 +1009,7 @@ class VideoProcessor:
             if 0 <= start_frame < self.total_frames:
                 effective_start_frame = start_frame
             else:
-                self.logger.warning(
-                    f"Start frame {start_frame} out of bounds ({self.total_frames} total). Not starting.")
+                self.logger.warning(f"Start frame {start_frame} out of bounds ({self.total_frames} total). Not starting.")
                 return
 
         self.logger.info(f"Starting processing from frame {effective_start_frame}.")
@@ -1086,8 +1085,7 @@ class VideoProcessor:
         self.enable_tracker_processing = False
 
         if self.app and hasattr(self.app, 'on_processing_stopped'):
-            self.app.on_processing_stopped(was_scripting_session=was_scripting_session,
-                                           scripted_frame_range=scripted_range)
+            self.app.on_processing_stopped(was_scripting_session=was_scripting_session, scripted_frame_range=scripted_range)
 
         self.logger.info("GUI processing stopped.")
 
@@ -1221,8 +1219,7 @@ class VideoProcessor:
                     if self.app:
                         was_scripting_at_end = self.tracker and self.tracker.tracking_active
                         end_range = (self.processing_start_frame_limit, self.current_frame_index)
-                        self.app.on_processing_stopped(was_scripting_session=was_scripting_at_end,
-                                                       scripted_frame_range=end_range)
+                        self.app.on_processing_stopped(was_scripting_session=was_scripting_at_end, scripted_frame_range=end_range)
                     break
 
                 self.current_frame_index = self.current_stream_start_frame_abs + self.frames_read_from_current_stream
@@ -1241,8 +1238,7 @@ class VideoProcessor:
                     if self.app:
                         was_scripting_at_end_limit = self.tracker and self.tracker.tracking_active
                         end_range_limit = (self.processing_start_frame_limit, self.processing_end_frame_limit)
-                        self.app.on_processing_stopped(was_scripting_session=was_scripting_at_end_limit,
-                                                       scripted_frame_range=end_range_limit)
+                        self.app.on_processing_stopped(was_scripting_session=was_scripting_at_end_limit, scripted_frame_range=end_range_limit)
                     break
                 if self.total_frames > 0 and self.current_frame_index >= self.total_frames:
                     self.logger.info("Reached end of video. Stopping GUI processing.")
@@ -1252,12 +1248,10 @@ class VideoProcessor:
                     if self.app:
                         was_scripting_at_eos = self.tracker and self.tracker.tracking_active
                         end_range_eos = (self.processing_start_frame_limit, self.current_frame_index)
-                        self.app.on_processing_stopped(was_scripting_session=was_scripting_at_eos,
-                                                       scripted_frame_range=end_range_eos)
+                        self.app.on_processing_stopped(was_scripting_session=was_scripting_at_eos, scripted_frame_range=end_range_eos)
                     break
 
-                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size,
-                                                                                  self.yolo_input_size, 3)
+                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
                 processed_frame_for_gui = frame_np
                 if self.tracker and self.tracker.tracking_active:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
@@ -1272,8 +1266,9 @@ class VideoProcessor:
 
                 self.frames_for_fps_calc += 1
                 current_time_fps_calc = time.time()
-                if current_time_fps_calc - self.last_fps_update_time >= 1.0:
-                    self.actual_fps = self.frames_for_fps_calc / (current_time_fps_calc - self.last_fps_update_time)
+                elapsed = current_time_fps_calc - self.last_fps_update_time
+                if elapsed >= 1.0:
+                    self.actual_fps = self.frames_for_fps_calc / elapsed
                     self.last_fps_update_time = current_time_fps_calc
                     self.frames_for_fps_calc = 0
 
@@ -1294,8 +1289,7 @@ class VideoProcessor:
             self.pause_event.set()
             self.last_processed_chapter_id = None
 
-    def _start_ffmpeg_for_segment_streaming(self, start_frame_abs_idx: int,
-                                            num_frames_to_stream_hint: Optional[int] = None) -> bool:
+    def _start_ffmpeg_for_segment_streaming(self, start_frame_abs_idx: int, num_frames_to_stream_hint: Optional[int] = None) -> bool:
         self._terminate_ffmpeg_processes()
 
         if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0:
@@ -1336,10 +1330,7 @@ class VideoProcessor:
                 self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if self.ffmpeg_pipe1_process.stdout is None:
                     raise IOError("Segment Pipe 1 stdout is None.")
-                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout,
-                                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 20,
-                                                       creationflags=creation_flags)
+                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * 20, creationflags=creation_flags)
                 self.ffmpeg_pipe1_process.stdout.close()
                 return True
             except Exception as e:
@@ -1362,9 +1353,7 @@ class VideoProcessor:
             self.logger.info(f"Segment CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
             try:
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                                       bufsize=self.frame_size_bytes * 20,
-                                                       creationflags=creation_flags)
+                self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * 20, creationflags=creation_flags)
                 return True
             except Exception as e:
                 self.logger.warning(f"Failed to start FFmpeg for segment: {e}", exc_info=True)
@@ -1406,8 +1395,7 @@ class VideoProcessor:
                         f"after {frames_yielded} frames for segment (start {start_frame_abs_idx}). Stderr: '{stderr_on_short_read.strip()}'")
                     break
 
-                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size,
-                                                                                  self.yolo_input_size, 3)
+                frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
                 current_frame_id = start_frame_abs_idx + frames_yielded
                 yield current_frame_id, frame_np
                 frames_yielded += 1
