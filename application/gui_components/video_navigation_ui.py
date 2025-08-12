@@ -45,6 +45,28 @@ class VideoNavigationUI:
         except (ValueError, IndexError):
             self.selected_position_idx_in_dialog = 0
 
+    def _start_live_tracking(self, success_info: Optional[str] = None, on_error_clear_pending_action: bool = False) -> None:
+        """Centralized starter for live tracking across UI entry points.
+
+        - Calls `event_handlers.handle_start_live_tracker_click()` if available
+        - Logs a provided success message
+        - Optionally clears pending action on error when requested
+        """
+        try:
+            handler = getattr(self.app.event_handlers, 'handle_start_live_tracker_click', None)
+            if callable(handler):
+                handler()
+                if success_info:
+                    self.app.logger.info(success_info)
+            else:
+                self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                if on_error_clear_pending_action and hasattr(self.app, 'clear_pending_action_after_tracking'):
+                    self.app.clear_pending_action_after_tracking()
+        except Exception as exc:
+            self.app.logger.error(f"Failed to start live tracking: {exc}")
+            if on_error_clear_pending_action and hasattr(self.app, 'clear_pending_action_after_tracking'):
+                self.app.clear_pending_action_after_tracking()
+
     def _get_current_fps(self) -> float:
         fps = DEFAULT_CHAPTER_FPS
         if self.app.processor:
@@ -496,12 +518,9 @@ class VideoNavigationUI:
                         # Set scripting range to the selected chapter
                         if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
                             self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
-                            # Start live tracking
-                            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
-                                self.app.event_handlers.handle_start_live_tracker_click()
-                                self.app.logger.info(f"Started Live Oscillation Detector analysis for chapter: {selected_chapter.position_short_name}")
-                            else:
-                                self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                            self._start_live_tracking(
+                                success_info=f"Started Live Oscillation Detector analysis for chapter: {selected_chapter.position_short_name}"
+                            )
                         else:
                             self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
                         self.context_selected_chapters.clear()
@@ -513,12 +532,9 @@ class VideoNavigationUI:
                         # Set scripting range to the selected chapter
                         if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
                             self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
-                            # Start live tracking
-                            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
-                                self.app.event_handlers.handle_start_live_tracker_click()
-                                self.app.logger.info(f"Started Live Tracking (YOLO ROI) analysis for chapter: {selected_chapter.position_short_name}")
-                            else:
-                                self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                            self._start_live_tracking(
+                                success_info=f"Started Live Tracking (YOLO ROI) analysis for chapter: {selected_chapter.position_short_name}"
+                            )
                         else:
                             self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
                         self.context_selected_chapters.clear()
@@ -530,12 +546,9 @@ class VideoNavigationUI:
                         # Set scripting range to the selected chapter
                         if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
                             self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
-                            # Start live tracking
-                            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
-                                self.app.event_handlers.handle_start_live_tracker_click()
-                                self.app.logger.info(f"Started Live Tracking (User ROI) analysis for chapter: {selected_chapter.position_short_name}")
-                            else:
-                                self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                            self._start_live_tracking(
+                                success_info=f"Started Live Tracking (User ROI) analysis for chapter: {selected_chapter.position_short_name}"
+                            )
                         else:
                             self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
                         self.context_selected_chapters.clear()
@@ -604,13 +617,13 @@ class VideoNavigationUI:
                     self.app.project_manager.project_dirty = True
 
                     # Start the tracker for the gap
-                    if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
-                        self.app.event_handlers.handle_start_live_tracker_click()
-                        self.app.logger.info(
-                            f"Tracker started for gap between {gap_fill_c1.position_short_name} and {gap_fill_c2.position_short_name} (Frames: {gap_start_frame}-{gap_end_frame})")
-                    else:
-                        self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
-                        self.app.clear_pending_action_after_tracking()  # Abort pending action
+                    self._start_live_tracking(
+                        success_info=(
+                            f"Tracker started for gap between {gap_fill_c1.position_short_name} and {gap_fill_c2.position_short_name} "
+                            f"(Frames: {gap_start_frame}-{gap_end_frame})"
+                        ),
+                        on_error_clear_pending_action=True
+                    )
 
                     self.context_selected_chapters.clear()  # Clear selection as process is underway
                     imgui.close_current_popup()
@@ -645,12 +658,9 @@ class VideoNavigationUI:
                         self.context_selected_chapters = [new_gap_chapter]
                         if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
                             self.app.funscript_processor.set_scripting_range_from_chapter(new_gap_chapter)
-                            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
-                                self.app.event_handlers.handle_start_live_tracker_click()
-                                self.app.logger.info(
-                                    f"Tracker started for new gap chapter: {new_gap_chapter.unique_id}")
-                            else:
-                                self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                            self._start_live_tracking(
+                                success_info=f"Tracker started for new gap chapter: {new_gap_chapter.unique_id}"
+                            )
                         else:
                             self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
                     else:
@@ -667,12 +677,9 @@ class VideoNavigationUI:
                         f"UI Action: Setting range and starting tracker for chapter {selected_chapter.unique_id}")
                     if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
                         self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
-                        if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
-                            self.app.event_handlers.handle_start_live_tracker_click()
-                            self.app.logger.info(
-                                f"Tracker started for chapter: {selected_chapter.position_short_name}")
-                        else:
-                            self.app.logger.error("handle_start_live_tracker_click not found in event_handlers.")
+                        self._start_live_tracking(
+                            success_info=f"Tracker started for chapter: {selected_chapter.position_short_name}"
+                        )
                     else:
                         self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
             # --- Split Chapter ---
@@ -720,7 +727,6 @@ class VideoNavigationUI:
     def _render_create_chapter_window(self):
         if not self.show_create_chapter_dialog:
             return
-        window_open_flag_list = [self.show_create_chapter_dialog]
         window_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_COLLAPSE
         io = imgui.get_io()
         if io.display_size[0] > 0 and io.display_size[1] > 0:
@@ -729,21 +735,19 @@ class VideoNavigationUI:
             center_y = main_viewport.pos[1] + main_viewport.size[1] * 0.5
             imgui.set_next_window_position(center_x, center_y, imgui.APPEARING, 0.5, 0.5)
 
-        is_not_collapsed = imgui.begin(
+        is_not_collapsed, self.show_create_chapter_dialog = imgui.begin(
             "Create New Chapter##CreateWindow",
-            window_open_flag_list,
+            closable=True,
             flags=window_flags
         )
-        if not window_open_flag_list[0]:
-            self.show_create_chapter_dialog = False
 
         if is_not_collapsed and self.show_create_chapter_dialog:
             imgui.text("Create New Chapter Details")
             imgui.separator()
             imgui.push_item_width(200)
-            changed_start, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##CreateWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
-            changed_end, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##CreateWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
-            changed_type, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##CreateWin", self.chapter_edit_data.get("segment_type", "SexAct"), 128)
+            _, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##CreateWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##CreateWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
+            _, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##CreateWin", self.chapter_edit_data.get("segment_type", "SexAct"), 128)
             clicked_pos, self.selected_position_idx_in_dialog = imgui.combo("Position##CreateWin", self.selected_position_idx_in_dialog, self.position_display_names)
             if clicked_pos and self.position_short_name_keys and 0 <= self.selected_position_idx_in_dialog < len(
                     self.position_short_name_keys):
@@ -752,7 +756,7 @@ class VideoNavigationUI:
             current_selected_key = self.chapter_edit_data.get("position_short_name_key")
             long_name_display = POSITION_INFO_MAPPING.get(current_selected_key, {}).get("long_name", "N/A") if current_selected_key else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display}")
-            changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##CreateWin", self.chapter_edit_data.get("source", "manual"), 64)
+            _, self.chapter_edit_data["source"] = imgui.input_text("Source##CreateWin", self.chapter_edit_data.get("source", "manual"), 64)
 
             if imgui.button("Set Range##ChapterCreateSetRangeWinBtn"):
                 self._set_chapter_range_by_selection()
@@ -772,7 +776,6 @@ class VideoNavigationUI:
         if not self.show_edit_chapter_dialog or not self.chapter_to_edit_id:
             if not self.show_edit_chapter_dialog: self.chapter_to_edit_id = None
             return
-        window_open_flag_list = [self.show_edit_chapter_dialog]
         window_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_COLLAPSE
         io = imgui.get_io()
         if io.display_size[0] > 0 and io.display_size[1] > 0:
@@ -781,22 +784,21 @@ class VideoNavigationUI:
             center_y = main_viewport.pos[1] + main_viewport.size[1] * 0.5
             imgui.set_next_window_position(center_x, center_y, imgui.APPEARING, 0.5, 0.5)
 
-        is_not_collapsed = imgui.begin(
+        is_not_collapsed, self.show_edit_chapter_dialog = imgui.begin(
             f"Edit Chapter: {self.chapter_to_edit_id[:8]}...##EditChapterWindow",
-            window_open_flag_list,
+            closable=True,
             flags=window_flags
         )
-        if not window_open_flag_list[0]:
-            self.show_edit_chapter_dialog = False
+        if not self.show_edit_chapter_dialog:
             self.chapter_to_edit_id = None
 
         if is_not_collapsed and self.show_edit_chapter_dialog:
             imgui.text(f"Editing Chapter ID: {self.chapter_to_edit_id}")
             imgui.separator()
             imgui.push_item_width(200)
-            changed_start, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
-            changed_end, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
-            changed_type, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##EditWin", self.chapter_edit_data.get("segment_type", ""), 128)
+            _, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
+            _, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##EditWin", self.chapter_edit_data.get("segment_type", ""), 128)
             current_pos_key_for_edit = self.chapter_edit_data.get("position_short_name_key")
             try:
                 if self.position_short_name_keys and current_pos_key_for_edit in self.position_short_name_keys:
@@ -818,7 +820,7 @@ class VideoNavigationUI:
             pos_key_edit_display = self.chapter_edit_data.get("position_short_name_key")
             long_name_display_edit = POSITION_INFO_MAPPING.get(pos_key_edit_display, {}).get("long_name", "N/A") if pos_key_edit_display else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display_edit}")
-            changed_source, self.chapter_edit_data["source"] = imgui.input_text("Source##EditWin", self.chapter_edit_data.get("source", ""), 64)
+            _, self.chapter_edit_data["source"] = imgui.input_text("Source##EditWin", self.chapter_edit_data.get("source", ""), 64)
 
             if imgui.button("Set Range##ChapterUpdateSetRangeWinBtn"):
                 self._set_chapter_range_by_selection()
@@ -976,7 +978,7 @@ class ChapterListWindow:
             imgui.same_line()
 
             # --- Create Chapter in Gap & Track Button ---
-            can_create_in_gap, create_c1, create_c2, gap_start, gap_end = self._get_gap_info(fs_proc)
+            can_create_in_gap, create_c1, _, gap_start, gap_end = self._get_gap_info(fs_proc)
             if not can_create_in_gap:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
@@ -1118,11 +1120,7 @@ class ChapterListWindow:
         fs_proc.selected_chapter_for_scripting = None
         self.app.project_manager.project_dirty = True
 
-        if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
-            self.app.event_handlers.handle_start_live_tracker_click()
-        else:
-            self.app.logger.error("handle_start_live_tracker_click not found.")
-            self.app.clear_pending_action_after_tracking()
+        self._start_live_tracking(on_error_clear_pending_action=True)
 
     def _handle_create_chapter_in_gap(self, fs_proc, c1, gap_start, gap_end):
         self.app.logger.info(f"UI Action: Creating new chapter in gap after {c1.unique_id}")
@@ -1136,10 +1134,7 @@ class ChapterListWindow:
         new_chapter = fs_proc.create_new_chapter_from_data(gap_chapter_data, return_chapter_object=True)
         if new_chapter:
             fs_proc.set_scripting_range_from_chapter(new_chapter)
-            if hasattr(self.app.event_handlers, 'handle_start_live_tracker_click'):
-                self.app.event_handlers.handle_start_live_tracker_click()
-            else:
-                self.app.logger.error("handle_start_live_tracker_click not found.")
+            self._start_live_tracking()
         else:
             self.app.logger.error("Failed to create new chapter in gap.")
 
