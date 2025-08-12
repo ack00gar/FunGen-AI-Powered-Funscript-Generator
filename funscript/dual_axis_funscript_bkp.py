@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Optional, Callable, List, Tuple, Dict, Any
+from typing import Optional, Callable, List, Tuple, Dict
 import logging
 import bisect
 import copy
@@ -23,7 +23,6 @@ class DualAxisFunscript:
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.primary_actions: List[Dict] = []
         self.secondary_actions: List[Dict] = []
-        self.chapters: List[Dict] = []  # Funscript chapters/segments
         self.min_interval_ms: int = 20
         self.last_timestamp_primary: int = 0
         self.last_timestamp_secondary: int = 0
@@ -552,6 +551,173 @@ class DualAxisFunscript:
 
             self.add_actions_batch(batch_data)
 
+    # Legacy method
+    # def apply_ultimate_autotune(self, axis: str, params: Dict) -> Optional[List[Dict]]:
+    #     """
+    #     Applies a comprehensive, multi-stage enhancement pipeline by calling existing
+    #     methods on a temporary, isolated Funscript object.
+    #     This method is NON-DESTRUCTIVE and returns a new list of actions.
+    #     """
+    #     actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+    #     if not actions_list_ref or len(actions_list_ref) < 3:
+    #         return copy.deepcopy(actions_list_ref)
+    #
+    #     self.logger.info("Starting Ultimate Autotune pipeline...")
+    #
+    #     # Create a temporary, isolated Funscript object to work with.
+    #     temp_fs = DualAxisFunscript(logger=self.logger)
+    #     if axis == 'primary':
+    #         temp_fs.primary_actions = copy.deepcopy(actions_list_ref)
+    #     else:
+    #         temp_fs.secondary_actions = copy.deepcopy(actions_list_ref)
+    #
+    #     # === NEW STEP 1: PRE-SMOOTHING ===
+    #     p = params.get('presmoothing', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (1) Pre-smoothing script.")
+    #         # Reuse the existing auto_tune_sg_filter on the temp object
+    #         temp_fs.auto_tune_sg_filter(
+    #             axis,
+    #             max_window_size=p.get('max_window_size', 15),
+    #             # Use sensible defaults for other params in this context
+    #             saturation_low=1,
+    #             saturation_high=99,
+    #             polyorder=2
+    #         )
+    #
+    #     # === STEP 2: CORE MOTION EXTRACTION ===
+    #     p = params.get('peaks', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (2) Extracting Core Motion.")
+    #         temp_fs.find_peaks_and_valleys(axis, prominence=p.get('prominence', 10), distance=p.get('distance', 1))
+    #
+    #     if len(getattr(temp_fs, f"{axis}_actions")) < 2:
+    #         self.logger.warning("Ultimate Autotune: Core motion extraction filtered all points.")
+    #         return getattr(temp_fs, f"{axis}_actions")
+    #
+    #     # === STEP 3: MISSING STROKE RECOVERY ===
+    #     p = params.get('recovery', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (3) Recovering Missing Strokes.")
+    #         temp_fs.recover_missing_strokes(axis, original_actions=actions_list_ref,
+    #                                         threshold_factor=p.get('threshold_factor', 1.8))
+    #         # Re-run peak finding to clean up after stroke recovery
+    #         temp_fs.find_peaks_and_valleys(axis, prominence=1)
+    #
+    #     # === STEP 4: DYNAMIC RANGE NORMALIZATION ===
+    #     p = params.get('normalization', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (4) Normalizing Dynamic Range.")
+    #         temp_fs.scale_points_to_range(axis, output_min=0, output_max=100)
+    #
+    #     # === STEP 5: SMOOTH STROKE REGENERATION ===
+    #     # p = params.get('regeneration', {})
+    #     # if p.get('enabled', True):
+    #     #     self.logger.debug("Ultimate Autotune: (5) Regenerating Smooth Strokes.")
+    #     #     temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=p.get('resample_rate_ms', 40))
+    #
+    #     # === STEP 6: SPEED LIMITER ===
+    #     p = params.get('speed_limiter', {})
+    #     if p.get('enabled', True):
+    #         self.logger.debug("Ultimate Autotune: (6) Applying Speed Limit.")
+    #         temp_fs.apply_speed_limiter(axis, min_interval=20, vibe_amount=0,
+    #                                     speed_threshold=p.get('speed_threshold', 500.0))
+    #
+    #     final_actions = getattr(temp_fs, f"{axis}_actions")
+    #     self.logger.info(
+    #         f"Ultimate Autotune pipeline finished. Points: {len(actions_list_ref)} -> {len(final_actions)}.")
+    #     return final_actions
+
+    def apply_custom_autotune_pipeline(self, axis: str, params: Dict) -> Optional[List[Dict]]:
+        """
+        Applies a new, specific multi-stage enhancement pipeline.
+        This method is NON-DESTRUCTIVE and returns a new list of actions.
+        """
+        actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list_ref or len(actions_list_ref) < 2:
+            return copy.deepcopy(actions_list_ref)
+
+        self.logger.info("Starting Custom Autotune pipeline...")
+
+        # Create a temporary, isolated Funscript object to work with.
+        temp_fs = DualAxisFunscript(logger=self.logger)
+        if axis == 'primary':
+            temp_fs.primary_actions = copy.deepcopy(actions_list_ref)
+        else:
+            temp_fs.secondary_actions = copy.deepcopy(actions_list_ref)
+
+        # === STEP 1: Custom Speed Limiter (Remove high-speed points) ===
+        self.logger.debug("Custom Pipeline: (1) Removing high-speed points.")
+        actions = getattr(temp_fs, f"{axis}_actions")
+        if len(actions) > 2:
+            actions_to_keep = [actions[0]]  # Always keep the first point
+            for i in range(1, len(actions) - 1):
+                p_prev, p_curr, p_next = actions[i - 1], actions[i], actions[i + 1]
+
+                # Calculate in-speed
+                in_dt = p_curr['at'] - p_prev['at']
+                in_speed = abs(p_curr['pos'] - p_prev['pos']) / (in_dt / 1000.0) if in_dt > 0 else float('inf')
+
+                # Calculate out-speed
+                out_dt = p_next['at'] - p_curr['at']
+                out_speed = abs(p_next['pos'] - p_curr['pos']) / (out_dt / 1000.0) if out_dt > 0 else float('inf')
+
+                if not (in_speed > 1000 and out_speed > 1000):
+                    actions_to_keep.append(p_curr)
+            
+            actions_to_keep.append(actions[-1]) # Always keep the last point
+            setattr(temp_fs, f"{axis}_actions", actions_to_keep)
+
+        # === STEP 2: Resample ===
+        self.logger.debug("Custom Pipeline: (2) Resampling.")
+        temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=50)
+
+        # === STEP 3: Smooth SG (11, 7) ===
+        self.logger.debug("Custom Pipeline: (3) Applying SG Filter.")
+        temp_fs.apply_savitzky_golay(axis, window_length=11, polyorder=7)
+
+        # === STEP 4: Resample ===
+        self.logger.debug("Custom Pipeline: (4) Resampling.")
+        temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=50)
+
+        # === STEP 5: Amplify (1.25, 50) ===
+        self.logger.debug("Custom Pipeline: (5) Amplifying.")
+        temp_fs.amplify_points_values(axis, scale_factor=1.25, center_value=50)
+
+        # === STEP 6: Resample ===
+        self.logger.debug("Custom Pipeline: (6) Resampling.")
+        temp_fs.apply_peak_preserving_resample(axis, resample_rate_ms=50)
+
+        # === STEP 7: Keyframes (10, 50) ===
+        self.logger.debug("Custom Pipeline: (7) Simplifying to Keyframes.")
+        temp_fs.simplify_to_keyframes(axis, position_tolerance=10, time_tolerance_ms=50)
+
+        final_actions = getattr(temp_fs, f"{axis}_actions")
+        self.logger.info(
+            f"Custom Autotune pipeline finished. Points: {len(actions_list_ref)} -> {len(final_actions)}.")
+        return final_actions
+
+    def apply_custom_autotune_pipeline_destructive(self, axis: str):
+        """
+        Applies the custom autotune pipeline destructively to the current funscript.
+        This method integrates with the undo system by using slice assignment to preserve
+        the list reference while replacing its contents.
+        """
+        # Get the processed actions from the non-destructive version
+        processed_actions = self.apply_custom_autotune_pipeline(axis, {})
+        
+        if processed_actions is not None:
+            # Get reference to the original actions list
+            actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
+            
+            # Use slice assignment to replace contents while preserving the list object
+            # This is critical for undo system compatibility
+            actions_list_ref[:] = processed_actions
+            
+            self._invalidate_cache(axis)
+            self.logger.info(f"Applied Custom Autotune Pipeline to {axis} axis. Points: {len(actions_list_ref)}")
+        else:
+            raise Exception("Custom Autotune Pipeline failed to produce a result.")
 
     def simplify_rdp(self, axis: str, epsilon: float,
                      start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
@@ -1559,177 +1725,167 @@ class DualAxisFunscript:
 
         actions_list_ref[:] = prefix_actions + final_keyframes + suffix_actions
 
+    def apply_speed_limiter(self, axis: str, min_interval: int, vibe_amount: int, speed_threshold: float):
+        """
+        Applies a series of filters to make a script more compatible with Handy in Bluetooth mode.
+        This process involves removing rapid actions, replacing small movements with vibrations,
+        and limiting the maximum speed.
+        """
+        target_list_attr = 'primary_actions' if axis == 'primary' else 'secondary_actions'
+        actions_list_ref = getattr(self, target_list_attr)
 
-    def list_available_plugins(self) -> List[Dict]:
-        """Return a list of available plugins with their metadata."""
-        from funscript.plugins.base_plugin import plugin_registry
-        from funscript.plugins.plugin_loader import plugin_loader
-        
-        # Ensure plugins are loaded if they haven't been already
-        if not plugin_registry.is_global_plugins_loaded():
-            # Load built-in plugins
-            builtin_results = plugin_loader.load_builtin_plugins()
-            self.logger.debug(f"Loaded {len(builtin_results)} built-in plugins")
-            
-            # Load user plugins
-            user_results = plugin_loader.load_user_plugins()
-            self.logger.debug(f"Loaded {len(user_results)} user plugins")
-            
-            plugin_registry.set_global_plugins_loaded(True)
-        
-        # Get all registered plugins
-        return plugin_registry.list_plugins()
+        if not actions_list_ref or len(actions_list_ref) < 2:
+            self.logger.info(f"Not enough points on {axis} axis for Speed Limiter.")
+            return
 
-    def apply_plugin(self, plugin_name: str, axis: str = 'both', **parameters) -> bool:
-        """
-        Apply a plugin to the funscript.
-        
-        Args:
-            plugin_name: Name of the plugin to apply
-            axis: Which axis to apply to ('primary', 'secondary', 'both')
-            **parameters: Plugin-specific parameters
-            
-        Returns:
-            True if plugin was applied successfully, False otherwise
-        """
-        from funscript.plugins.base_plugin import plugin_registry
-        from funscript.plugins.plugin_loader import plugin_loader
-        
-        # Ensure plugins are loaded
-        if not plugin_registry.is_global_plugins_loaded():
-            plugin_loader.load_builtin_plugins()
-            plugin_loader.load_user_plugins()
-            plugin_registry.set_global_plugins_loaded(True)
-        
-        # Get the plugin
-        plugin = plugin_registry.get_plugin(plugin_name)
-        if not plugin:
-            self.logger.error(f"Plugin '{plugin_name}' not found")
-            return False
-        
-        try:
-            # Apply the plugin
-            result = plugin.transform(self, axis=axis, **parameters)
-            
-            # Plugin might return None (for in-place modification) or a new funscript
-            if result is not None:
-                # Plugin returns a new funscript - replace our data
-                if axis in ['primary', 'both']:
-                    self.primary_actions = result.primary_actions
-                if axis in ['secondary', 'both']:
-                    self.secondary_actions = result.secondary_actions
-                self._invalidate_cache()
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Error applying plugin '{plugin_name}': {e}")
-            return False
+        # Operate on a deep copy of the actions
+        actions = copy.deepcopy(actions_list_ref)
 
-    def get_plugin_preview(self, plugin_name: str, axis: str = 'both', **parameters) -> Dict[str, Any]:
-        """
-        Get a preview of what a plugin would do without applying it.
-        
-        Args:
-            plugin_name: Name of the plugin to preview
-            axis: Which axis to preview ('primary', 'secondary', 'both') 
-            **parameters: Plugin-specific parameters
-            
-        Returns:
-            Dictionary with preview information
-        """
-        from funscript.plugins.base_plugin import plugin_registry
-        from funscript.plugins.plugin_loader import plugin_loader
-        
-        # Ensure plugins are loaded
-        if not plugin_registry.is_global_plugins_loaded():
-            plugin_loader.load_builtin_plugins()
-            plugin_loader.load_user_plugins()
-            plugin_registry.set_global_plugins_loaded(True)
-        
-        # Get the plugin
-        plugin = plugin_registry.get_plugin(plugin_name)
-        if not plugin:
-            return {"error": f"Plugin '{plugin_name}' not found"}
-        
-        try:
-            # Get plugin preview
-            return plugin.get_preview(self, axis=axis, **parameters)
-            
-        except Exception as e:
-            return {"error": f"Error generating preview for '{plugin_name}': {e}"}
+        # --- 1. Remove actions with short intervals ---
+        action_points_removed = 0
+        if len(actions) > 1:
+            reversed_actions = list(reversed(actions))
+            last_action_at = reversed_actions[0]['at']
 
-    def set_chapters_from_segments(self, video_segments: List, video_fps: float):
-        """
-        Set funscript chapters from video segments.
-        
-        Args:
-            video_segments: List of VideoSegment objects or dictionaries
-            video_fps: Video frames per second for timestamp conversion
-        """
-        self.chapters = []
-        
-        for segment in video_segments:
-            # Handle both VideoSegment objects and dictionaries
-            if hasattr(segment, 'start_frame_id'):
-                # VideoSegment object
-                start_frame_id = segment.start_frame_id
-                end_frame_id = segment.end_frame_id
-                position_short = segment.position_short_name
-                position_long = segment.position_long_name
-            elif isinstance(segment, dict):
-                # Dictionary representation
-                start_frame_id = segment.get('start_frame_id', 0)
-                end_frame_id = segment.get('end_frame_id', 0)
-                position_short = segment.get('position_short_name', segment.get('major_position', 'Unknown'))
-                position_long = segment.get('position_long_name', segment.get('major_position', 'Unknown'))
+            # Build a new list of actions to keep, avoiding modification during iteration
+            actions_to_keep_after_interval_check = [reversed_actions[0]]
+
+            for i in range(1, len(reversed_actions)):
+                interval = abs(reversed_actions[i]['at'] - last_action_at)
+                if interval < min_interval:
+                    action_points_removed += 1
+                else:
+                    actions_to_keep_after_interval_check.append(reversed_actions[i])
+                    last_action_at = reversed_actions[i]['at']
+
+            # Restore the original order
+            actions = sorted(actions_to_keep_after_interval_check, key=lambda x: x['at'])
+
+        if action_points_removed > 0:
+            self.logger.info(
+                f"Speed Limiter: {action_points_removed} action points removed due to min interval ({min_interval}ms).")
+
+        # --- 2. Replace flat sections with vibrations ---
+        action_points_modified = 0
+        if len(actions) > 2:
+            last_action_at = actions[0]['at']
+            already_vibing = 0
+            last_vibe = ''
+            unmod_last_action_height = 0
+
+            # This loop modifies the 'actions' list in place
+            for i in range(1, len(actions)):
+                current = actions[i]
+                last = actions[i - 1]
+                next_pos = actions[i + 1] if (i + 1) < len(actions) else None
+
+                travel = abs(current['pos'] - unmod_last_action_height)
+
+                # Determine directions
+                unmod_last_direction = 'up' if current['pos'] > unmod_last_action_height else (
+                    'down' if current['pos'] < unmod_last_action_height else '')
+                last_direction = 'up' if current['pos'] > last['pos'] else (
+                    'down' if current['pos'] < last['pos'] else '')
+                if next_pos:
+                    next_direction = 'up' if current['pos'] < next_pos['pos'] else (
+                        'down' if current['pos'] > next_pos['pos'] else '')
+                else:
+                    next_direction = ''
+
+                # Detect if undulating movement is already happening
+                if next_pos and not (unmod_last_direction == next_direction) and (
+                        (abs(current['pos'] - unmod_last_action_height) > 8) or (
+                        abs(current['pos'] - next_pos['pos']) > 8)):
+                    already_vibing = 1
+                else:
+                    already_vibing = 0
+
+                if next_pos:
+                    next_travel = abs(next_pos['pos'] - current['pos'])
+                else:
+                    next_travel = float('inf')
+
+                interval = current['at'] - last_action_at
+
+                unmod_last_action_height = current['pos']
+
+                # Main condition to insert a vibe
+                # The original script disables vibe mods if min_interval is > 134
+                if (travel < 16) and (next_travel < 16) and (interval < 135) and (already_vibing == 0) and (
+                        min_interval <= 134):
+                    # Determine starting direction of the vibration
+                    if not last_vibe:
+                        if (last_direction == 'up') or (current['pos'] < 6):
+                            last_vibe = 'down'
+                        elif (last_direction == 'down') or (current['pos'] > 94):
+                            last_vibe = 'up'
+                        # Default fallback
+                        elif current['pos'] < 50:
+                            last_vibe = 'down'
+                        else:
+                            last_vibe = 'up'
+
+                    # Apply the vibration
+                    if last_vibe == 'down':
+                        current['pos'] += vibe_amount
+                        last_vibe = 'up'
+                    elif last_vibe == 'up':
+                        current['pos'] -= vibe_amount
+                        last_vibe = 'down'
+
+                    action_points_modified += 1
+                else:
+                    last_vibe = ''
+
+                last_action_at = current['at']
+
+                # Sanity check position
+                current['pos'] = int(round(np.clip(current['pos'], 0, 100)))
+
+        if action_points_modified > 0:
+            self.logger.info(f"Speed Limiter: {action_points_modified} action points modified to vibrate.")
+
+        # --- 3. Limit speed ---
+        speed_modified = 0
+        if len(actions) > 1:
+            for i in range(1, len(actions)):
+                current_action = actions[i]
+                prev_action = actions[i - 1]
+
+                time_diff_s = (current_action['at'] - prev_action['at']) / 1000.0
+                if time_diff_s == 0:
+                    continue
+
+                pos_diff = abs(current_action['pos'] - prev_action['pos'])
+                speed = pos_diff / time_diff_s
+
+                if speed > speed_threshold:
+                    speed_modified += 1
+                    new_pos_diff = speed_threshold * time_diff_s
+
+                    if current_action['pos'] > prev_action['pos']:
+                        current_action['pos'] = int(prev_action['pos'] + new_pos_diff)
+                    else:
+                        current_action['pos'] = int(prev_action['pos'] - new_pos_diff)
+
+                    current_action['pos'] = int(round(np.clip(current_action['pos'], 0, 100)))
+
+        if speed_modified > 0:
+            self.logger.info(f"Speed Limiter: {speed_modified} action points modified to reduce speed.")
+
+        # --- Finalize ---
+        if action_points_removed > 0 or action_points_modified > 0 or speed_modified > 0:
+            # Replace the original actions list with the modified one
+            actions_list_ref[:] = actions
+
+            # Update last timestamp for the axis
+            last_ts = actions_list_ref[-1]['at'] if actions_list_ref else 0
+            if axis == 'primary':
+                self.last_timestamp_primary = last_ts
             else:
-                self.logger.warning(f"Unknown segment type: {type(segment)}, skipping")
-                continue
-            
-            start_time_ms = int((start_frame_id / video_fps) * 1000)
-            end_time_ms = int((end_frame_id / video_fps) * 1000)
-            
-            chapter = {
-                "name": f"{position_short} - {position_long}",
-                "start": start_time_ms,
-                "end": end_time_ms,
-                "startTime": start_time_ms,  # Keep both for compatibility
-                "endTime": end_time_ms,
-                "position_short": position_short,
-                "position_long": position_long
-            }
-            
-            self.chapters.append(chapter)
-        
-        self.logger.debug(f"Set {len(self.chapters)} chapters from video segments")
+                self.last_timestamp_secondary = last_ts
 
-    def clear_chapters(self):
-        """Clear all chapters from the funscript."""
-        self.chapters = []
-        self.logger.debug("Cleared all chapters")
-
-    def add_chapter(self, start_time_ms: int, end_time_ms: int, name: str = "Chapter", 
-                   position_short: str = "", position_long: str = "", **kwargs):
-        """
-        Add a chapter to the funscript.
-        
-        Args:
-            start_time_ms: Chapter start time in milliseconds
-            end_time_ms: Chapter end time in milliseconds  
-            name: Chapter name/title
-            position_short: Short position name
-            position_long: Long position name
-            **kwargs: Additional chapter properties
-        """
-        chapter = {
-            "name": name,
-            "startTime": start_time_ms,
-            "endTime": end_time_ms,
-            "position_short": position_short,
-            "position_long": position_long,
-            **kwargs
-        }
-        self.chapters.append(chapter)
-        self.logger.debug(f"Added chapter '{name}' ({start_time_ms}-{end_time_ms}ms)")
+            self.logger.info(f"Speed Limiter applied successfully to {axis} axis.")
+        else:
+            self.logger.info(f"Speed Limiter: No changes were necessary for {axis} axis.")
 

@@ -169,6 +169,13 @@ def stage3_worker_proc(
                     def __init__(self):
                         self.determined_video_type = determined_video_type
                         self.fps = common_app_config.get('video_fps', 30.0)
+                    
+                    def get_preprocessed_video_status(self):
+                        return {
+                            'preprocessed_exists': False,
+                            'preprocessing_active': False,
+                            'preprocessing_progress': 0.0
+                        }
                 
                 self.processor = MockProcessor()
                 self.discarded_tracking_classes = []
@@ -206,19 +213,19 @@ def stage3_worker_proc(
                 # Load chunk data from SQLite on-demand
                 chunk_data_map = worker_sqlite_storage.get_frame_objects_range(chunk_start, chunk_end)
                 worker_logger.info(
-                    f"Processing SQLite chunk F{chunk_start}-{chunk_end} ({len(chunk_data_map)} frames) for Chapter '{getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')}'"
+                    f"Processing SQLite chunk F{chunk_start}-{chunk_end} ({len(chunk_data_map)} frames) for Chapter '{getattr(segment_obj, 'position_short_name', None) or getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')}'"
                 )
             else:
                 # Memory-based task (fallback)
                 segment_obj, chunk_data_map, chunk_start, chunk_end, output_start, output_end = task
                 worker_logger.info(
-                    f"Processing memory chunk F{chunk_start}-{chunk_end} for Chapter '{getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')}'"
+                    f"Processing memory chunk F{chunk_start}-{chunk_end} for Chapter '{getattr(segment_obj, 'position_short_name', None) or getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')}'"
                 )
 
             # Initialize funscript for oscillation detector
             roi_tracker_instance.funscript = DualAxisFunscript(logger=worker_logger)
             roi_tracker_instance.start_tracking()
-            roi_tracker_instance.main_interaction_class = getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')
+            roi_tracker_instance.main_interaction_class = getattr(segment_obj, 'position_short_name', None) or getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')
 
             frame_stream = video_processor.stream_frames_for_segment(
                 start_frame_abs_idx=chunk_start,
@@ -259,7 +266,7 @@ def stage3_worker_proc(
             })
 
         except Empty:
-            worker_logger.info("Task queue is empty.")
+            worker_logger.debug("Task queue is empty.")
             continue
         except Exception as e:
             worker_logger.error(f"Error processing a chunk: {e}", exc_info=True)
@@ -348,7 +355,11 @@ def perform_stage3_analysis(
 
     if not use_sqlite and not s2_frame_objects_map:
         logger.error("No data source available: neither SQLite nor in-memory frame objects map")
-        return {"primary_actions": [], "secondary_actions": [], "video_segments": [s.to_dict() for s in atr_segments_list]}
+        # Create empty funscript with chapters for consistency
+        empty_funscript = DualAxisFunscript()
+        video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
+        empty_funscript.set_chapters_from_segments(atr_segments_list, video_fps)
+        return {"success": False, "funscript": empty_funscript, "error": "No data source available"}
 
     # Get chunking parameters from the configuration
     CHUNK_SIZE = common_app_config.get("s3_chunk_size", 1000)
@@ -358,9 +369,9 @@ def perform_stage3_analysis(
     # Handle both ATRSegment and VideoSegment objects
     relevant_segments = []
     for seg in atr_segments_list:
-        # Get position name - ATRSegment uses major_position, VideoSegment uses position_long_name
-        position_name = getattr(seg, 'major_position', None) or getattr(seg, 'position_long_name', '')
-        if position_name not in ["Not Relevant", "Close Up"]:
+        # Prefer short codes when available
+        position_name = getattr(seg, 'position_short_name', None) or getattr(seg, 'major_position', None) or getattr(seg, 'position_long_name', '')
+        if position_name not in ["NR", "C-Up", "Not Relevant", "Close Up"]:
             relevant_segments.append(seg)
 
     logger.info(f"Found {len(relevant_segments)} relevant segments to process in Stage 3.")
@@ -368,8 +379,11 @@ def perform_stage3_analysis(
 
     if not relevant_segments:
         logger.info("No relevant segments to process in Stage 3.")
-        return {"primary_actions": [], "secondary_actions": [],
-                "video_segments": [s.to_dict() for s in atr_segments_list]}
+        # Create empty funscript with chapters for consistency
+        empty_funscript = DualAxisFunscript()
+        video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
+        empty_funscript.set_chapters_from_segments(atr_segments_list, video_fps)
+        return {"success": True, "funscript": empty_funscript, "total_frames_processed": 0, "processing_method": "optical_flow"}
 
     total_frames_to_process = sum(seg.end_frame_id - seg.start_frame_id + 1 for seg in relevant_segments)
 
@@ -479,10 +493,10 @@ def perform_stage3_analysis(
             chapter_index = np.searchsorted(cumulative_frames, current_frames_done, side='left')
             if chapter_index < len(relevant_segments):
                 current_chapter_idx_for_progress = chapter_index + 1
-                chapter_name_for_progress = getattr(relevant_segments[chapter_index], 'major_position', None) or getattr(relevant_segments[chapter_index], 'position_long_name', 'Unknown')
+                chapter_name_for_progress = getattr(relevant_segments[chapter_index], 'position_short_name', None) or getattr(relevant_segments[chapter_index], 'major_position', None) or getattr(relevant_segments[chapter_index], 'position_long_name', 'Unknown')
             else: # If done, lock to the last chapter
                 current_chapter_idx_for_progress = len(relevant_segments)
-                chapter_name_for_progress = getattr(relevant_segments[-1], 'major_position', None) or getattr(relevant_segments[-1], 'position_long_name', 'Unknown')
+                chapter_name_for_progress = getattr(relevant_segments[-1], 'position_short_name', None) or getattr(relevant_segments[-1], 'major_position', None) or getattr(relevant_segments[-1], 'position_long_name', 'Unknown')
 
         # --- Call progress_callback with both chapter and chunk info ---
         progress_callback(
@@ -546,8 +560,30 @@ def perform_stage3_analysis(
         except Exception as e:
             logger.warning(f"Failed to clean up SQLite database: {e}")
 
+    # Create funscript object
+    funscript_obj = DualAxisFunscript(logger=logger)
+    
+    # Add actions to funscript object
+    for action in all_primary_actions:
+        funscript_obj.add_action(action['at'], action['pos'], None)
+    for action in all_secondary_actions:
+        if action['at'] in [a['at'] for a in funscript_obj.primary_actions]:
+            # Update existing action with secondary position
+            for existing_action in funscript_obj.secondary_actions:
+                if existing_action['at'] == action['at']:
+                    existing_action['pos'] = action['pos']
+                    break
+        else:
+            funscript_obj.add_action(action['at'], None, action['pos'])
+    
+    # Set chapters from segments
+    if atr_segments_list:
+        video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
+        funscript_obj.set_chapters_from_segments(atr_segments_list, video_fps)
+
     return {
-        "primary_actions": all_primary_actions,
-        "secondary_actions": all_secondary_actions,
-        "video_segments": [s.to_dict() for s in atr_segments_list]
+        "success": True,
+        "funscript": funscript_obj,
+        "total_frames_processed": total_frames_to_process,
+        "processing_method": "optical_flow"
     }

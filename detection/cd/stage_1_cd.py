@@ -597,11 +597,10 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                             })
 
                 # --- Step 2: Conditionally perform Pose Estimation ---
-                # Run only on the first frame of every second (approximately)
+                # Run roughly once per second; safe for low FPS values
                 poses = []  # Default to empty
-                if frame_id % (int(video_fps) // 10) == 0:
-                    pose_results = pose_model(frame, device=pose_device, verbose=False, imgsz=yolo_input_size_consumer,
-                                        conf=confidence_threshold)
+                if frame_id % max(1, int(round(video_fps))) == 0:
+                    pose_results = pose_model(frame, device=pose_device, verbose=False, imgsz=yolo_input_size_consumer, conf=confidence_threshold)
                     for r in pose_results:
                         if r.keypoints and r.boxes:
                             for i in range(len(r.boxes)):
