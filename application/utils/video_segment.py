@@ -122,14 +122,30 @@ class VideoSegment:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'VideoSegment':
         """Create segment from dictionary for project loading."""
+        # Validate and correct position names if they're corrupted (e.g., "0.0")
+        position_short_name = data.get('position_short_name', data.get('segment_type', 'default'))
+        position_long_name = data.get('position_long_name', data.get('class_name', 'Unknown'))
+        
+        # Fix corrupted position names by using class_id as reference
+        if position_short_name == "0.0" or position_long_name == "0.0":
+            class_id = data.get('class_id', '')
+            # Try to map from class_id to proper position names
+            if class_id == "Cowgirl / Missionary":
+                position_short_name = "CG/Miss."
+                position_long_name = "Cowgirl / Missionary"
+            elif class_id in constants.POSITION_INFO_MAPPING:
+                position_info = constants.POSITION_INFO_MAPPING[class_id]
+                position_short_name = position_info.get("short_name", class_id)
+                position_long_name = position_info.get("long_name", class_id)
+        
         segment = cls(
             start_frame_id=data.get('start_frame_id', 0),
             end_frame_id=data.get('end_frame_id', 0),
             class_id=data.get('class_id'),  # Allow None
             class_name=data.get('class_name', 'Unknown'),
             segment_type=data.get('segment_type', 'default'),
-            position_short_name=data.get('position_short_name', data.get('segment_type', 'default')),  # Fallback
-            position_long_name=data.get('position_long_name', data.get('class_name', 'Unknown')),  # Fallback
+            position_short_name=position_short_name,
+            position_long_name=position_long_name,
             duration=data.get('duration', 0),
             occlusions=data.get('occlusions', []),
             source=data.get('source', 'project_load')

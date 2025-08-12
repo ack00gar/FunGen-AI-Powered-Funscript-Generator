@@ -180,6 +180,90 @@ class AppFunscriptProcessor:
         self.logger.warning("Funscript object not available.")
         return None
 
+    def _sync_chapters_to_funscript(self):
+        """Sync app-level chapters to funscript object chapters."""
+        try:
+            funscript_obj = self.get_funscript_obj()
+            if not funscript_obj:
+                self.logger.debug("No funscript object available for chapter sync")
+                return
+                
+            if not hasattr(funscript_obj, 'clear_chapters') or not hasattr(funscript_obj, 'add_chapter'):
+                self.logger.warning("Funscript object missing chapter methods")
+                return
+                
+            funscript_obj.clear_chapters()
+            fps = self._get_current_fps()
+            if fps <= 0:
+                self.logger.warning("Invalid FPS for chapter sync, using default 30.0")
+                fps = 30.0
+                
+            for segment in self.video_chapters:
+                if hasattr(segment, 'start_frame_id') and hasattr(segment, 'end_frame_id'):
+                    start_time_ms = int((segment.start_frame_id / fps) * 1000)
+                    end_time_ms = int((segment.end_frame_id / fps) * 1000)
+                    funscript_obj.add_chapter(
+                        start_time_ms,
+                        end_time_ms,
+                        getattr(segment, 'position_long_name', segment.class_name),
+                        getattr(segment, 'position_short_name', ''),
+                        getattr(segment, 'position_long_name', '')
+                    )
+            self.logger.debug(f"Synced {len(self.video_chapters)} chapters to funscript object")
+        except Exception as e:
+            self.logger.error(f"Error syncing chapters to funscript: {e}", exc_info=True)
+
+    def _sync_chapters_from_funscript(self):
+        """Sync funscript object chapters to app-level chapters."""
+        try:
+            funscript_obj = self.get_funscript_obj()
+            if not funscript_obj:
+                self.logger.debug("No funscript object available for chapter sync")
+                return
+                
+            if not hasattr(funscript_obj, 'chapters'):
+                self.logger.debug("Funscript object has no chapters attribute")
+                return
+                
+            if not funscript_obj.chapters:
+                self.logger.debug("Funscript object has empty chapters list")
+                return
+                
+            fps = self._get_current_fps()
+            if fps <= 0:
+                self.logger.warning("Invalid FPS for chapter sync, using default 30.0")
+                fps = 30.0
+                
+            self.video_chapters = []
+            for chapter in funscript_obj.chapters:
+                try:
+                    # Convert timestamps back to frame IDs
+                    start_frame_id = int((chapter.get('start', 0) / 1000) * fps)
+                    end_frame_id = int((chapter.get('end', 0) / 1000) * fps)
+                    segment = VideoSegment(
+                        start_frame_id=start_frame_id,
+                        end_frame_id=end_frame_id,
+                        class_id=None,
+                        class_name=chapter.get('name', 'Unknown'),
+                        segment_type='SexAct',
+                        position_short_name=chapter.get('position_short', ''),
+                        position_long_name=chapter.get('position_long', chapter.get('name', ''))
+                    )
+                    self.video_chapters.append(segment)
+                except Exception as chapter_e:
+                    self.logger.warning(f"Error converting chapter to VideoSegment: {chapter_e}")
+                    
+            self.video_chapters.sort(key=lambda c: c.start_frame_id)
+            self.logger.debug(f"Synced {len(self.video_chapters)} chapters from funscript object")
+        except Exception as e:
+            self.logger.error(f"Error syncing chapters from funscript: {e}", exc_info=True)
+
+    def _get_current_fps(self) -> float:
+        """Get current video FPS for chapter conversions."""
+        if self.app.processor:
+            return self.app.processor.fps
+        return 30.0  # Fallback
+
     def get_actions(self, axis: str) -> List[dict]:
         funscript_obj = self.get_funscript_obj()
         if funscript_obj:
@@ -263,6 +347,18 @@ class AppFunscriptProcessor:
                 return True
         return False
 
+    def _add_chapter_if_unique(self, chapter: 'VideoSegment') -> bool:
+        """Add a chapter only if it doesn't duplicate an existing one. Returns True if added."""
+        for existing_chapter in self.video_chapters:
+            if (existing_chapter.start_frame_id == chapter.start_frame_id and 
+                existing_chapter.end_frame_id == chapter.end_frame_id and
+                existing_chapter.position_short_name == chapter.position_short_name):
+                self.logger.debug(f"Skipping duplicate chapter at frames {chapter.start_frame_id}-{chapter.end_frame_id} ({chapter.position_short_name})")
+                return False
+        
+        self.video_chapters.append(chapter)
+        return True
+
     def create_new_chapter_from_data(self, data: Dict,
                                      return_chapter_object: bool = False):  # Added return_chapter_object
         self.logger.info(f"Attempting to create new chapter with data: {data}")
@@ -278,10 +374,19 @@ class AppFunscriptProcessor:
             if self._check_chapter_overlap(start_frame, end_frame):
                 self.logger.error("New chapter overlaps with an existing chapter.")
                 return None if return_chapter_object else None  # Explicitly return None
-
+            
+            # Check for duplicate chapters (same frame range and position)
             pos_short_key = data.get("position_short_name_key")
             pos_info = constants.POSITION_INFO_MAPPING.get(pos_short_key, {})
             pos_short_name = pos_info.get("short_name", pos_short_key if pos_short_key else "N/A")
+            
+            for existing_chapter in self.video_chapters:
+                if (existing_chapter.start_frame_id == start_frame and 
+                    existing_chapter.end_frame_id == end_frame and
+                    existing_chapter.position_short_name == pos_short_name):
+                    self.logger.warning(f"Duplicate chapter detected - skipping creation of identical chapter at frames {start_frame}-{end_frame}")
+                    return existing_chapter if return_chapter_object else None
+
             pos_long_name = pos_info.get("long_name", "Unknown Position")
 
             derived_class_name = pos_short_key if pos_short_key else "DefaultChapterType"
@@ -299,6 +404,9 @@ class AppFunscriptProcessor:
             )
             self.video_chapters.append(new_chapter)
             self.video_chapters.sort(key=lambda c: c.start_frame_id)
+
+            # Sync chapters to funscript object
+            self._sync_chapters_to_funscript()
 
             self.app.project_manager.project_dirty = True
             self.app.app_state_ui.heatmap_dirty = True
@@ -372,6 +480,9 @@ class AppFunscriptProcessor:
 
             self.video_chapters.sort(key=lambda c: c.start_frame_id)
 
+            # Sync chapters to funscript object
+            self._sync_chapters_to_funscript()
+
             self.app.project_manager.project_dirty = True
             self.app.app_state_ui.heatmap_dirty = True
             self.app.app_state_ui.funscript_preview_dirty = True
@@ -442,7 +553,19 @@ class AppFunscriptProcessor:
 
         if timeline_instance:
             timeline_instance.invalidate_ultimate_preview()
-            timeline_instance.invalidate_cache()
+
+            # Also invalidate editor caches to reflect changes immediately (per 9337108)
+            if hasattr(timeline_instance, 'invalidate_cache'):
+                try:
+                    timeline_instance.invalidate_cache()
+                except Exception:
+                    pass
+            # Also invalidate editor caches to reflect changes immediately (per commit 9337108)
+            if hasattr(timeline_instance, 'invalidate_cache'):
+                try:
+                    timeline_instance.invalidate_cache()
+                except Exception:
+                    pass
 
         if timeline_num == 1:
             self.app.app_state_ui.heatmap_dirty = True
@@ -824,6 +947,9 @@ class AppFunscriptProcessor:
         self.video_chapters = [VideoSegment.from_dict(data) for data in project_data.get("video_chapters", []) if
                                VideoSegment.is_valid_dict(data)]
 
+        # Sync loaded chapters to funscript object
+        self._sync_chapters_to_funscript()
+
         self.scripting_range_active = project_data.get("scripting_range_active", False)
         self.scripting_start_frame = project_data.get("scripting_start_frame", 0)
         self.scripting_end_frame = project_data.get("scripting_end_frame", -1)
@@ -881,6 +1007,10 @@ class AppFunscriptProcessor:
 
         if deleted_count > 0:
             self.logger.info(f"Deleted {deleted_count} chapter(s): {chapter_ids}")
+            
+            # Sync chapters to funscript object
+            self._sync_chapters_to_funscript()
+            
             self.app.project_manager.project_dirty = True
             self.app.app_state_ui.heatmap_dirty = True
             self.app.app_state_ui.funscript_preview_dirty = True
@@ -998,6 +1128,9 @@ class AppFunscriptProcessor:
         self.video_chapters = [ch for ch in self.video_chapters if ch.unique_id not in ids_to_delete]
         self.video_chapters.append(merged_chapter)
         self.video_chapters.sort(key=lambda c: c.start_frame_id)
+
+        # Sync chapters to funscript object
+        self._sync_chapters_to_funscript()
 
         self.logger.info(
             f"Merged chapters '{chapter1.unique_id}' and '{chapter2.unique_id}' into new chapter '{merged_chapter.unique_id}'.")

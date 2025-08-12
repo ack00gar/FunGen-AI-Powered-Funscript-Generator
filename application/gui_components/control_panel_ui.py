@@ -327,13 +327,21 @@ class ControlPanelUI:
         events = app.event_handlers
         tracker_mode = self.TrackerMode
 
+        # Ensure this is always defined before any conditional UI blocks use it
+        processor = app.processor
+        disable_combo = (
+            stage_proc.full_analysis_active
+            or app.is_setting_user_roi_mode
+            or (processor and processor.is_processing and not processor.pause_event.is_set())
+        )
+
         modes_enum = [
             tracker_mode.OSCILLATION_DETECTOR,
             tracker_mode.LIVE_YOLO_ROI,
             tracker_mode.LIVE_USER_ROI,
             tracker_mode.OFFLINE_2_STAGE,
             tracker_mode.OFFLINE_3_STAGE,
-            #tracker_mode.OFFLINE_3_STAGE_MIXED,
+            tracker_mode.OFFLINE_3_STAGE_MIXED,
         ]
 
         open_, _ = imgui.collapsing_header(

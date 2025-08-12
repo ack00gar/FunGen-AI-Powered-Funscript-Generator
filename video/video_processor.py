@@ -880,7 +880,7 @@ class VideoProcessor:
             self.logger.debug("Hardware acceleration explicitly disabled (CPU decoding).")
         return hwaccel_args
 
-    def _terminate_process(self, process: Optional[subprocess.Popen], process_name: str):
+    def _terminate_process(self, process: Optional[subprocess.Popen], process_name: str, timeout_sec: float = 2.0):
         """
         Terminate a process safely.
         """
@@ -888,12 +888,13 @@ class VideoProcessor:
             self.logger.debug(f"Terminating {process_name} process (PID: {process.pid}).")
             process.terminate()
             try:
-                process.wait(timeout=2.0)
-                self.logger.info(f"{process_name} process terminated gracefully.")
+                process.wait(timeout=timeout_sec)
+                self.logger.debug(f"{process_name} process terminated gracefully.")
             except subprocess.TimeoutExpired:
-                self.logger.warning(f"{process_name} process did not terminate in time. Killing.")
+                # Use reduced log level to avoid spam when streaming many short segments
+                self.logger.debug(f"{process_name} process did not terminate in time. Killing.")
                 process.kill()
-                self.logger.info(f"{process_name} process killed.")
+                self.logger.debug(f"{process_name} process killed.")
 
         # Ensure all standard pipes are closed to release OS resources
         for stream in (getattr(process, 'stdout', None), getattr(process, 'stderr', None), getattr(process, 'stdin', None)):

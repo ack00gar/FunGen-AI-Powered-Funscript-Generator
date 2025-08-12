@@ -120,12 +120,20 @@ class ROITracker:
         }
         try:
             selected_preset_cv = dis_preset_map.get(self.dis_flow_preset.upper(), cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
+
+            # General-purpose dense flow (used in non-oscillation paths)
             self.flow_dense = cv2.DISOpticalFlow_create(selected_preset_cv)
             if self.dis_finest_scale is not None:
                 self.flow_dense.setFinestScale(self.dis_finest_scale)
+
+            # Dedicated dense flow object for oscillation detector to avoid cross-mode side effects
+            self.flow_dense_osc = cv2.DISOpticalFlow_create(selected_preset_cv)
+            if self.dis_finest_scale is not None:
+                self.flow_dense_osc.setFinestScale(self.dis_finest_scale)
         except AttributeError:
-            self.logger.warning("cv2.DISOpticalFlow_create not found or preset invalid. Optical flow might not work.")
+            self.logger.debug("cv2.DISOpticalFlow_create not found or preset invalid. Optical flow might not work.")
             self.flow_dense = None
+            self.flow_dense_osc = None
 
         self.prev_gray_main_roi: Optional[np.ndarray] = None
         self.funscript = DualAxisFunscript(logger=self.logger)
@@ -163,6 +171,14 @@ class ROITracker:
         # Whether to draw static grid blocks for oscillation area (UI-controlled)
         self.show_grid_blocks: bool = bool(self.app.app_settings.get("oscillation_show_grid_blocks", False)) if self.app else False
         self.show_stats: bool = False
+
+        # --- Preallocated buffers for memory reuse ---
+        self._preprocess_buffer: Optional[np.ndarray] = None  # BGR target size buffer
+        self._resize_tmp: Optional[np.ndarray] = None          # temp buffer for resized content
+        self._resize_tmp_shape: Optional[Tuple[int, int]] = None
+        self._gray_full_buffer: Optional[np.ndarray] = None    # Gray buffer for full frame (target size)
+        self._gray_roi_buffer: Optional[np.ndarray] = None     # Gray buffer for ROI-sized crops
+        self._prev_gray_osc_buffer: Optional[np.ndarray] = None
 
         # Properties for thrust vs. ride detection
         self.enable_inversion_detection: bool = True  # Master switch for this feature
@@ -217,7 +233,7 @@ class ROITracker:
             try:
                 # Ensure cached model is available to read names
                 if self._cached_detection_model is None or self._cached_model_path != self.det_model_path:
-                    self._cached_detection_model = YOLO(self.det_model_path)
+                    self._cached_detection_model = YOLO(self.det_model_path, task='detect')
                     self._cached_model_path = self.det_model_path
                 names_attr = getattr(self._cached_detection_model, 'names', None)
                 if names_attr:
@@ -613,6 +629,15 @@ class ROITracker:
             self.logger.warning("Frame for patch not provided or empty during oscillation area setup.")
             self.prev_gray_oscillation_area_patch = None
 
+        # Reset oscillation detector state when (re)setting area to avoid stale state affecting performance
+        self.prev_gray_oscillation = None
+        if hasattr(self, 'oscillation_history') and self.oscillation_history is not None:
+            self.oscillation_history.clear()
+        if hasattr(self, 'oscillation_cell_persistence') and self.oscillation_cell_persistence is not None:
+            self.oscillation_cell_persistence.clear()
+        if hasattr(self, 'oscillation_active_block_positions') and self.oscillation_active_block_positions is not None:
+            self.oscillation_active_block_positions.clear()
+
     def _calculate_oscillation_grid_layout(self):
         """Calculates and stores the static grid layout for the oscillation area."""
         if not self.oscillation_area_fixed:
@@ -656,9 +681,15 @@ class ROITracker:
         self.oscillation_area_tracked_point_relative = None
         self.prev_gray_oscillation_area_patch = None
         self.oscillation_grid_blocks = []
-        # Also clear any active grid state to avoid lingering visuals
-        if hasattr(self, 'oscillation_active_block_positions'):
-            self.oscillation_active_block_positions = set()
+
+        # Also reset oscillation detector state to prevent persistent history from impacting full-frame runs
+        self.prev_gray_oscillation = None
+        if hasattr(self, 'oscillation_history') and self.oscillation_history is not None:
+            self.oscillation_history.clear()
+        if hasattr(self, 'oscillation_cell_persistence') and self.oscillation_cell_persistence is not None:
+            self.oscillation_cell_persistence.clear()
+        if hasattr(self, 'oscillation_active_block_positions') and self.oscillation_active_block_positions is not None:
+            self.oscillation_active_block_positions.clear()
         self.logger.info("Oscillation area and point cleared.")
 
     def _get_effective_amplification_factor(self) -> float:
@@ -717,7 +748,7 @@ class ROITracker:
         try:
             if self._cached_detection_model is None or self._cached_model_path != self.det_model_path:
                 self.logger.info(f"Loading {self.det_model_path} for detection...")
-                self._cached_detection_model = YOLO(self.det_model_path)
+                self._cached_detection_model = YOLO(self.det_model_path, task='detect')
                 self._cached_model_path = self.det_model_path
                 # Names
                 try:
@@ -854,12 +885,12 @@ class ROITracker:
         """
         if preset is not None and preset.upper() != self.dis_flow_preset.upper():
             self.dis_flow_preset = preset.upper()
-            self.logger.info(f"DIS Optical Flow preset updated to: {self.dis_flow_preset}")
+            self.logger.debug(f"DIS Optical Flow preset updated to: {self.dis_flow_preset}")
 
         if finest_scale is not None and finest_scale != self.dis_finest_scale:
             # A value of 0 from the UI means 'auto', which we can represent as None internally
             self.dis_finest_scale = finest_scale if finest_scale > 0 else None
-            self.logger.info(f"DIS Optical Flow finest scale updated to: {self.dis_finest_scale}")
+            self.logger.debug(f"DIS Optical Flow finest scale updated to: {self.dis_finest_scale}")
 
         dis_preset_map = {
             "ULTRAFAST": cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST,
@@ -873,10 +904,9 @@ class ROITracker:
             self.flow_dense = cv2.DISOpticalFlow_create(selected_preset_cv)
             if self.dis_finest_scale is not None:
                 self.flow_dense.setFinestScale(self.dis_finest_scale)
-            self.logger.info("Successfully re-initialized DIS Optical Flow object with new configuration.")
+            self.logger.debug("Successfully re-initialized DIS Optical Flow object with new configuration.")
         except AttributeError:
-            self.logger.warning(
-                "cv2.DISOpticalFlow_create not found or preset invalid while updating config. Optical flow may not work.")
+            self.logger.debug("cv2.DISOpticalFlow_create not found or preset invalid while updating config. Optical flow may not work.")
             self.flow_dense = None
         except Exception as e:
             self.logger.error(f"An unexpected error occurred while updating DIS flow config: {e}")
@@ -1589,38 +1619,23 @@ class ROITracker:
         use_oscillation_area = self.oscillation_area_fixed is not None
         if use_oscillation_area:
             ax, ay, aw, ah = self.oscillation_area_fixed
-            # Prepare letterboxed processed frame and compute mapping to its coordinate space
-            processed_frame = self.preprocess_frame(processed_input)
-            target_w, target_h = self.target_size_preprocess
-            in_w, in_h = processed_input.shape[1], processed_input.shape[0]
-            if in_w <= 0 or in_h <= 0:
-                return processed_input, None
-            scale_lb = min(target_w / float(in_w), target_h / float(in_h))
-            new_w_lb = int(round(in_w * scale_lb))
-            new_h_lb = int(round(in_h * scale_lb))
-            delta_w = target_w - new_w_lb
-            delta_h = target_h - new_h_lb
-            left = delta_w // 2
-            top = delta_h // 2
-            # Map original area to letterboxed coordinates
-            ax = int(round(ax * scale_lb + left))
-            ay = int(round(ay * scale_lb + top))
-            aw = int(round(aw * scale_lb))
-            ah = int(round(ah * scale_lb))
-
-            # Clamp area to processed_frame bounds
-            ax = max(0, min(ax, target_w - 1))
-            ay = max(0, min(ay, target_h - 1))
-            aw = max(1, min(aw, target_w - ax))
-            ah = max(1, min(ah, target_h - ay))
-
-            current_gray_full = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
-            processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw].copy()
-            current_gray = current_gray_full[ay:ay+ah, ax:ax+aw].copy()
-
+            # Preprocess entire frame to expected working size first
+            processed_frame = self.preprocess_frame(frame)
+            # Crop to area first, then convert only the crop to grayscale (avoid full-frame cvtColor)
+            processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw]
+            # Reuse/allocate ROI gray buffer
+            if self._gray_roi_buffer is None or self._gray_roi_buffer.shape[:2] != (processed_frame_area.shape[0], processed_frame_area.shape[1]):
+                self._gray_roi_buffer = np.empty((processed_frame_area.shape[0], processed_frame_area.shape[1]), dtype=np.uint8)
+            cv2.cvtColor(processed_frame_area, cv2.COLOR_BGR2GRAY, dst=self._gray_roi_buffer)
+            current_gray = self._gray_roi_buffer
         else:
-            processed_frame = self.preprocess_frame(processed_input)
-            current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
+            processed_frame = self.preprocess_frame(frame)
+            # Full-frame path: compute grayscale once for full frame
+            target_h, target_w = processed_frame.shape[0], processed_frame.shape[1]
+            if self._gray_full_buffer is None or self._gray_full_buffer.shape[:2] != (target_h, target_w):
+                self._gray_full_buffer = np.empty((target_h, target_w), dtype=np.uint8)
+            cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY, dst=self._gray_full_buffer)
+            current_gray = self._gray_full_buffer
             processed_frame_area = processed_frame
             ax, ay = 0, 0
             aw, ah = processed_frame.shape[1], processed_frame.shape[0]
@@ -1665,12 +1680,12 @@ class ROITracker:
             self.prev_gray_oscillation = current_gray.copy()
             return processed_frame, None
 
-        if not self.flow_dense:
+        if not hasattr(self, 'flow_dense_osc') or not self.flow_dense_osc:
             self.logger.warning("Dense optical flow not available for oscillation detection.")
             return processed_frame, None
 
         # --- Step 1: Calculate Global Optical Flow & Global Motion Vector ---
-        flow = self.flow_dense.calc(self.prev_gray_oscillation, current_gray, None)
+        flow = self.flow_dense_osc.calc(self.prev_gray_oscillation, current_gray, None)
         if flow is None:
             self.prev_gray_oscillation = current_gray.copy()
             return processed_frame, None
@@ -1686,8 +1701,14 @@ class ROITracker:
 
         # Check if the video is VR to apply the focus rule
         is_vr = self._is_vr_video()
-        vr_central_third_start = num_cols // 3
-        vr_central_third_end = 2 * num_cols // 3
+
+        # Apply VR central-third focus only for full-frame scans. When an ROI is set,
+        # scan the full ROI width to avoid off-center ROI being ignored.
+        apply_vr_central_focus = is_vr and not use_oscillation_area
+        # Use effective grid size for current image to compute central thirds
+        eff_cols = max(1, min(self.oscillation_grid_size, current_gray.shape[1] // self.oscillation_block_size))
+        vr_central_third_start = eff_cols // 3
+        vr_central_third_end = 2 * eff_cols // 3
 
         newly_active_cells = set()
         for r in range(num_rows):
@@ -1863,7 +1884,24 @@ class ROITracker:
                 color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
                 cv2.rectangle(processed_frame, (x1, y1), (x1 + local_block_size, y1 + local_block_size), color, 1)
 
-        self.prev_gray_oscillation = current_gray.copy()
+        # Keep a reusable prev gray buffer
+        if self._prev_gray_osc_buffer is None or self._prev_gray_osc_buffer.shape != current_gray.shape:
+            self._prev_gray_osc_buffer = np.empty_like(current_gray)
+        np.copyto(self._prev_gray_osc_buffer, current_gray)
+        self.prev_gray_oscillation = self._prev_gray_osc_buffer
+
+        # Lightweight instrumentation (debug level, once per second)
+        try:
+            now_sec = time.time()
+            last = getattr(self, '_osc_instr_last_log_sec', 0.0)
+            if now_sec - last >= 1.0:
+                self._osc_instr_last_log_sec = now_sec
+                self.logger.debug(
+                    f"OSC perf: area={use_oscillation_area} img={current_gray.shape} grid={max_rows}x{max_cols} "
+                    f"preset={self.dis_flow_preset} finest={self.dis_finest_scale} active_cells={len(self.oscillation_cell_persistence)} "
+                    f"fps={self.current_fps:.1f}")
+        except Exception:
+            pass
         return processed_frame, action_log_list if action_log_list else None
 
     def cleanup(self):
