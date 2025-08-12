@@ -715,17 +715,27 @@ class ApplicationLogic:
         # 1. Record state for Undo
         fs_proc._record_timeline_action(timeline_num, op_desc)
 
-        # 2. Run the non-destructive pipeline to get the result
-        new_actions = funscript_instance.apply_custom_autotune_pipeline(axis_name, params)
-
-        # 3. Apply the result and finalize the Undo action
-        if new_actions is not None:
-            setattr(funscript_instance, f"{axis_name}_actions", new_actions)
-            fs_proc._finalize_action_and_update_ui(timeline_num, op_desc)
-            self.logger.info("Default Ultimate Autotune applied successfully.",
-                             extra={'status_message': True, 'duration': 5.0})
-        else:
-            self.logger.warning("Default Ultimate Autotune failed to produce a result.", extra={'status_message': True})
+        # 2. Apply Ultimate Autotune using the plugin system
+        try:
+            from funscript.plugins.base_plugin import plugin_registry
+            ultimate_plugin = plugin_registry.get_plugin('Ultimate Autotune')
+            
+            if ultimate_plugin:
+                result = ultimate_plugin.transform(funscript_instance, axis_name, **params)
+                
+                if result:
+                    fs_proc._finalize_action_and_update_ui(timeline_num, op_desc)
+                    self.logger.info("Default Ultimate Autotune applied successfully.",
+                                     extra={'status_message': True, 'duration': 5.0})
+                else:
+                    self.logger.warning("Default Ultimate Autotune failed to produce a result.", 
+                                      extra={'status_message': True})
+            else:
+                self.logger.error("Ultimate Autotune plugin not available.", 
+                                extra={'status_message': True})
+        except Exception as e:
+            self.logger.error(f"Error applying Ultimate Autotune: {e}", 
+                            extra={'status_message': True})
 
     def toggle_file_manager_window(self):
         """Toggles the visibility of the Generated File Manager window."""
