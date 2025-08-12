@@ -373,7 +373,15 @@ class Stage2SQLiteStorage:
     def close(self):
         """Close all connections."""
         if hasattr(self._connection_cache, 'conn'):
-            self._connection_cache.conn.close()
+            try:
+                self._connection_cache.conn.close()
+            finally:
+                # Ensure the thread-local reference is removed so a fresh connection
+                # is created next time rather than holding a closed handle
+                try:
+                    delattr(self._connection_cache, 'conn')
+                except Exception:
+                    pass
 
     def get_frame_objects_streaming(self, start_frame: int, end_frame: int, batch_size: int = 500):
         """Generator that yields frame objects in batches for memory-efficient processing."""

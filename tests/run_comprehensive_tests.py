@@ -11,6 +11,7 @@ Modes:
     integration    - Run integration tests (medium)
     e2e            - Run end-to-end GUI tests (slow)
     perf           - Run performance benchmarks (slow)
+    plugins        - Run plugin system tests only (medium)
     comprehensive  - Run all test types (very slow)
     all            - Legacy alias for comprehensive
 
@@ -45,7 +46,7 @@ def run_tests(test_type: str, quick: bool = False, report: bool = False):
             'tests/unit/',
             '--tb=short'
         ]
-        print("🔧 Running unit tests...")
+        print("🔧 Running unit tests (including plugin functionality tests)...")
     
     elif test_type == 'integration':
         cmd = base_cmd + [
@@ -54,7 +55,7 @@ def run_tests(test_type: str, quick: bool = False, report: bool = False):
         ]
         if quick:
             cmd.extend(['-m', 'not slow'])
-        print("🔗 Running integration tests...")
+        print("🔗 Running integration tests (including plugin system integration)...")
         
     elif test_type == 'e2e':
         cmd = base_cmd + [
@@ -93,11 +94,43 @@ def run_tests(test_type: str, quick: bool = False, report: bool = False):
         ]
         if quick:
             cmd.extend(['-m', 'not slow'])
-        print("⚡ Running performance tests...")
+        print("⚡ Running performance tests (including plugin performance benchmarks)...")
         
     elif test_type == 'all':
         # Legacy support - redirect to comprehensive
         return run_tests('comprehensive', quick, report)
+        
+    elif test_type == 'plugins':
+        print("🔌 Running plugin-specific tests...")
+        
+        # Run plugin tests in sequence
+        plugin_test_files = [
+            'tests/integration/test_funscript_plugin_system.py',
+            'tests/unit/test_plugin_functionality.py',
+            'tests/unit/test_plugin_parameter_validation.py',
+            'tests/unit/test_plugin_preview_system.py',
+            'tests/performance/test_plugin_performance.py'
+        ]
+        
+        for test_file in plugin_test_files:
+            print(f"\n📋 Running {Path(test_file).name}...")
+            file_cmd = base_cmd + [test_file, '--tb=short']
+            
+            # Set environment
+            import os
+            env = os.environ.copy()
+            env['FUNGEN_TESTING'] = '1'
+            
+            try:
+                result = subprocess.run(file_cmd, env=env, cwd=Path(__file__).parent.parent)
+                if result.returncode != 0:
+                    print(f"❌ {test_file} failed")
+                else:
+                    print(f"✅ {test_file} passed")
+            except Exception as e:
+                print(f"❌ Error running {test_file}: {e}")
+        
+        return 0
         
     else:
         print(f"❌ Unknown test type: {test_type}")
@@ -201,7 +234,7 @@ def generate_performance_report():
 
 def main():
     parser = argparse.ArgumentParser(description="Run comprehensive test pipeline")
-    parser.add_argument('--mode', choices=['smoke', 'unit', 'integration', 'e2e', 'perf', 'comprehensive', 'all'], default='smoke',
+    parser.add_argument('--mode', choices=['smoke', 'unit', 'integration', 'e2e', 'perf', 'plugins', 'comprehensive', 'all'], default='smoke',
                        help='Type of tests to run')
     parser.add_argument('--quick', action='store_true',
                        help='Skip slow tests')
