@@ -43,9 +43,9 @@ def _check_version_compatibility(installed_version, required_spec):
         # If we can't parse versions, assume compatible
         return True, False
 
-def _ensure_packages(packages):
+def _ensure_packages(packages, pip_args=None, *, non_interactive: bool = True, auto_install: bool = True):
     """
-    Checks if essential packages are installed and offers to install them if missing.
+    Ensures required packages are installed. Supports optional pip arguments (e.g., custom index URLs).
     Returns: True if any packages were installed (requiring restart)
     """
     missing = []
@@ -60,51 +60,37 @@ def _ensure_packages(packages):
         return False
 
     logger.warning(f"The following required packages are missing: {', '.join(missing)}")
+    install_cmd = [sys.executable, "-m", "pip", "install"] + (pip_args or []) + missing
     try:
-        response = input(f"Would you like to install them now? (y/n): ").lower()
-        if response == 'y':
-            logger.info(f"Installing missing packages: {', '.join(missing)}")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+        if non_interactive and auto_install:
+            if pip_args:
+                logger.info(f"Auto-installing with custom args ({' '.join(pip_args)}): {', '.join(missing)}")
+            else:
+                logger.info(f"Auto-installing missing packages: {', '.join(missing)}")
+            subprocess.check_call(install_cmd)
             return True
-        else:
-            logger.warning("Installation skipped. The application may not function correctly.")
+        elif non_interactive and not auto_install:
+            logger.warning("Non-interactive mode: skipping auto-install. Application may not function correctly.")
             return False
+        else:
+            prompt = "Would you like to install them now" + (" using custom arguments" if pip_args else "") + "? (y/n): "
+            response = input(prompt).lower()
+            if response == 'y':
+                if pip_args:
+                    logger.info(f"Installing missing packages with custom args ({' '.join(pip_args)}): {', '.join(missing)}")
+                else:
+                    logger.info(f"Installing missing packages: {', '.join(missing)}")
+                subprocess.check_call(install_cmd)
+                return True
+            else:
+                logger.warning("Installation skipped. The application may not function correctly.")
+                return False
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         logger.error(f"Failed to install required packages: {e}")
         logger.error("Please install them manually and restart.")
         sys.exit(1)
 
-def _ensure_packages_with_args(packages, pip_args):
-    """
-    Checks if essential packages are installed and offers to install them with custom pip arguments.
-    Returns: True if any packages were installed (requiring restart)
-    """
-    missing = []
-    for package_spec in packages:
-        package_name, _ = _parse_package_spec(package_spec)
-        try:
-            version(package_name)
-        except PackageNotFoundError:
-            missing.append(package_spec)
-
-    if not missing:
-        return False
-
-    logger.warning(f"The following required packages are missing: {', '.join(missing)}")
-    try:
-        response = input(f"Would you like to install them now using custom arguments? (y/n): ").lower()
-        if response == 'y':
-            logger.info(f"Installing missing packages with custom index: {', '.join(missing)}")
-            cmd = [sys.executable, "-m", "pip", "install"] + pip_args + missing
-            subprocess.check_call(cmd)
-            return True
-        else:
-            logger.warning("Installation skipped. The application may not function correctly.")
-            return False
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.error(f"Failed to install required packages: {e}")
-        logger.error("Please install them manually and restart.")
-        sys.exit(1)
+# Note: _ensure_packages_with_args was merged into _ensure_packages via the optional pip_args parameter
 
 def get_bin_dir():
     """Gets the directory where binaries like ffmpeg should be stored."""
@@ -134,8 +120,7 @@ def detect_gpu_environment():
     # Check for NVIDIA CUDA
     try:
         import subprocess
-        result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'], 
-                              capture_output=True, text=True, timeout=5)
+        result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             cuda_available = True
             gpu_names = result.stdout.strip().split('\n')
@@ -150,8 +135,7 @@ def detect_gpu_environment():
     # Check for AMD ROCm (Linux and Windows)
     if not cuda_available:
         try:
-            result = subprocess.run(['rocm-smi', '--showproductname'], 
-                                  capture_output=True, text=True, timeout=5)
+            result = subprocess.run(['rocm-smi', '--showproductname'], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 rocm_available = True
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
@@ -167,13 +151,13 @@ def detect_gpu_environment():
     else:
         return "core.requirements.txt", "CPU-only"
 
-def check_and_install_dependencies():
+def check_and_install_dependencies(*, non_interactive: bool = True, auto_install: bool = True):
     """
     Checks for and installs missing dependencies.
     This function is designed to be run before the main application starts.
     """
     # 1. Self-bootstrap: Ensure the checker has its own dependencies
-    bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging'])
+    bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging'], pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
 
     logger.info("=== Checking Application Dependencies ===")
 
@@ -193,7 +177,7 @@ def check_and_install_dependencies():
     core_changed = False
     if core_packages:
         logger.info("Checking core packages...")
-        core_changed = _ensure_packages(core_packages)
+        core_changed = _ensure_packages(core_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
 
     # 4. Load and install GPU-specific requirements if needed
     gpu_changed = False
@@ -202,7 +186,7 @@ def check_and_install_dependencies():
             with open(requirements_file, 'r') as f:
                 lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
                 
-                # Handle pip index URLs (like -i https://download.pytorch.org/whl/cu129)
+                # Handle pip index URLs (like -i https://download.pytorch.org/whl/cu128)
                 pip_extra_args = []
                 gpu_packages = []
                 
@@ -216,9 +200,9 @@ def check_and_install_dependencies():
                 logger.info("Checking GPU-specific packages...")
                 if pip_extra_args:
                     logger.info(f"Using custom index: {' '.join(pip_extra_args)}")
-                    gpu_changed = _ensure_packages_with_args(gpu_packages, pip_extra_args)
+                    gpu_changed = _ensure_packages(gpu_packages, pip_args=pip_extra_args, non_interactive=non_interactive, auto_install=auto_install)
                 else:
-                    gpu_changed = _ensure_packages(gpu_packages)
+                    gpu_changed = _ensure_packages(gpu_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
                     
         except FileNotFoundError:
             logger.warning(f"{requirements_file} not found. Continuing with core packages only.")
@@ -252,7 +236,7 @@ def check_and_install_dependencies():
     logger.info("=== Dependency Check Finished ===\n")
 
 
-def check_ffmpeg_ffprobe():
+def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = False):
     """Checks for ffmpeg and ffprobe and offers to install them if missing."""
     ffmpeg_missing = not is_tool('ffmpeg')
     ffprobe_missing = not is_tool('ffprobe')
@@ -273,33 +257,53 @@ def check_ffmpeg_ffprobe():
         elif system == "Linux":
             install_cmd = "sudo apt-get update && sudo apt-get install ffmpeg"
         elif system == "Windows":
-            install_cmd = "choco install ffmpeg"
+            # Safer: only suggest Chocolatey if available; otherwise guide manual install
+            if shutil.which('choco'):
+                install_cmd = "choco install ffmpeg"
+            else:
+                install_cmd = ""
 
         if install_cmd:
             try:
-                response = input(f"Would you like to attempt to install it now using '{install_cmd}'? (y/n): ").lower()
-                if response == 'y':
-                    logger.info(f"Running installation command: {install_cmd}")
-                    subprocess.check_call(install_cmd, shell=True)
-                    # Re-check after installation
-                    if not is_tool('ffmpeg') or not is_tool('ffprobe'):
-                        logger.error("Installation may have failed. Please install ffmpeg manually.")
-                        sys.exit(1)
+                if non_interactive:
+                    if auto_install:
+                        logger.info(f"Attempting non-interactive install: {install_cmd}")
+                        subprocess.check_call(install_cmd, shell=True)
+                        if not is_tool('ffmpeg') or not is_tool('ffprobe'):
+                            logger.error("Installation may have failed. Please install ffmpeg manually.")
+                            sys.exit(1)
+                        else:
+                            logger.info("ffmpeg installed successfully.")
                     else:
-                        logger.info("ffmpeg installed successfully.")
+                        logger.warning("Non-interactive mode: skipping ffmpeg auto-install. Please install manually.")
+                        sys.exit(1)
                 else:
-                    logger.warning("Installation skipped. Please install ffmpeg manually to proceed.")
-                    sys.exit(1)
+                    response = input(f"Would you like to attempt to install it now using '{install_cmd}'? (y/n): ").lower()
+                    if response == 'y':
+                        logger.info(f"Running installation command: {install_cmd}")
+                        subprocess.check_call(install_cmd, shell=True)
+                        # Re-check after installation
+                        if not is_tool('ffmpeg') or not is_tool('ffprobe'):
+                            logger.error("Installation may have failed. Please install ffmpeg manually.")
+                            sys.exit(1)
+                        else:
+                            logger.info("ffmpeg installed successfully.")
+                    else:
+                        logger.warning("Installation skipped. Please install ffmpeg manually to proceed.")
+                        sys.exit(1)
             except (subprocess.CalledProcessError, FileNotFoundError) as e:
                 logger.error(f"Error during installation: {e}")
                 logger.error("Please install ffmpeg manually.")
                 sys.exit(1)
         else:
-            logger.error("Could not determine the installation command for your OS. Please install ffmpeg manually.")
+            # Provide safer guidance for manual installation on Windows without Chocolatey
+            if system == "Windows":
+                logger.error("ffmpeg/ffprobe not found. Install manually or install Chocolatey (https://chocolatey.org/install) and run 'choco install ffmpeg'.")
+            else:
+                logger.error("Could not determine the installation command for your OS. Please install ffmpeg manually.")
             sys.exit(1)
     else:
         logger.info("ffmpeg and ffprobe are available.")
-
 
 if __name__ == '__main__':
     check_and_install_dependencies()

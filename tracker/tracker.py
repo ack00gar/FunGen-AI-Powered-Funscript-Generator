@@ -67,6 +67,20 @@ class ROITracker:
         # --- Always-available set of active grid blocks ---
         self.oscillation_active_block_positions: set = set()
 
+        # --- Per-mode ROI caches to preserve user selections across mode switches ---
+        # Cache for USER_FIXED_ROI
+        self._cache_user_roi: Dict[str, Optional[Tuple]] = {
+            'roi': None,
+            'initial_rel': None,
+            'tracked_rel': None,
+        }
+        # Cache for OSCILLATION_DETECTOR
+        self._cache_oscillation: Dict[str, Optional[Tuple]] = {
+            'area': None,
+            'initial_rel': None,
+            'tracked_rel': None,
+        }
+
         self.enable_user_roi_sub_tracking: bool = True
         self.user_roi_tracking_box_size: Tuple[int, int] = (5, 5)
 
@@ -206,7 +220,7 @@ class ROITracker:
         self.oscillation_last_known_pos: float = 50.0
         self.oscillation_last_known_secondary_pos = 50.0
         self.oscillation_last_active_time = 0
-        self.oscillation_hold_duration_ms = 250  # Hold for 250ms before decaying
+        self.oscillation_hold_duration_ms = 200  # Hold for 200ms before decaying
         self.oscillation_ema_alpha: float = 0.3  # Smoothing factor for the final signal
         self.oscillation_history_max_len: int = 60
 
@@ -478,10 +492,14 @@ class ROITracker:
         if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR"]:
             if self.tracking_mode != mode:
                 previous_mode = self.tracking_mode
+                # Before switching, update caches from current state
+                self._update_roi_caches_from_current()
                 self.tracking_mode = mode
                 self.logger.info(f"Tracker mode changed: {previous_mode} -> {self.tracking_mode}")
                 # Clear ALL drawn overlays when switching modes (ROI rectangles, oscillation area, YOLO ROI box)
                 self.clear_all_drawn_overlays()
+                # After clearing, restore ROI from cache for the target mode (if any)
+                self._restore_roi_for_current_mode()
         else:
             self.logger.warning(f"Attempted to set invalid tracking mode: {mode}")
 
@@ -493,12 +511,14 @@ class ROITracker:
         # Clear manual user ROI and point
         if self.user_roi_fixed is not None or self.user_roi_initial_point_relative is not None:
             self.logger.info(f"Clearing user ROI: {self.user_roi_fixed}, point_rel={self.user_roi_initial_point_relative}")
-        self.clear_user_defined_roi_and_point()
+        # Use silent=True so caches are preserved across mode switches
+        self.clear_user_defined_roi_and_point(silent=True)
 
         # Clear oscillation visualization
         if hasattr(self, 'clear_oscillation_area_and_point') and getattr(self, 'oscillation_area_fixed', None) is not None:
             self.logger.info(f"Clearing oscillation area: {self.oscillation_area_fixed} with {len(getattr(self, 'oscillation_grid_blocks', []))} blocks")
-            self.clear_oscillation_area_and_point()
+            # Use silent=True so caches are preserved across mode switches
+            self.clear_oscillation_area_and_point(silent=True)
 
         # Clear YOLO ROI box and related state
         if self.roi is not None:
@@ -562,13 +582,20 @@ class ROITracker:
         self.secondary_flow_history_smooth.clear()
         self.user_roi_current_flow_vector = (0.0, 0.0)
 
+        # Update cache for USER_FIXED_ROI mode
+        self._cache_user_roi['roi'] = self.user_roi_fixed
+        self._cache_user_roi['initial_rel'] = self.user_roi_initial_point_relative
+        self._cache_user_roi['tracked_rel'] = self.user_roi_tracked_point_relative
+
     def clear_user_defined_roi_and_point(self, silent=False):
         self.user_roi_fixed = None
         self.user_roi_initial_point_relative = None
         self.user_roi_tracked_point_relative = None
         self.prev_gray_user_roi_patch = None
         self.user_roi_current_flow_vector = (0.0, 0.0)
+        # Clear cache on explicit user action (silent=False)
         if not silent:
+            self._cache_user_roi = {'roi': None, 'initial_rel': None, 'tracked_rel': None}
             self.logger.info("User defined ROI and point cleared.")
 
     def set_oscillation_area_and_point(self, area_abs_coords: Tuple[int, int, int, int], point_abs_coords_in_frame: Tuple[int, int], current_frame_for_patch: Optional[np.ndarray]):
@@ -638,6 +665,11 @@ class ROITracker:
         if hasattr(self, 'oscillation_active_block_positions') and self.oscillation_active_block_positions is not None:
             self.oscillation_active_block_positions.clear()
 
+        # Update cache for OSCILLATION_DETECTOR mode
+        self._cache_oscillation['area'] = self.oscillation_area_fixed
+        self._cache_oscillation['initial_rel'] = self.oscillation_area_initial_point_relative
+        self._cache_oscillation['tracked_rel'] = self.oscillation_area_tracked_point_relative
+
     def _calculate_oscillation_grid_layout(self):
         """Calculates and stores the static grid layout for the oscillation area."""
         if not self.oscillation_area_fixed:
@@ -674,8 +706,9 @@ class ROITracker:
 
         self.logger.info(f"Calculated static grid layout: {len(self.oscillation_grid_blocks)} blocks")
 
-    def clear_oscillation_area_and_point(self):
-        """Clears the oscillation detection area and tracking point."""
+    def clear_oscillation_area_and_point(self, silent: bool = False):
+        """Clears the oscillation detection area and tracking point.
+        If silent=True, preserve cache (used on mode switch)."""
         self.oscillation_area_fixed = None
         self.oscillation_area_initial_point_relative = None
         self.oscillation_area_tracked_point_relative = None
@@ -690,7 +723,41 @@ class ROITracker:
             self.oscillation_cell_persistence.clear()
         if hasattr(self, 'oscillation_active_block_positions') and self.oscillation_active_block_positions is not None:
             self.oscillation_active_block_positions.clear()
-        self.logger.info("Oscillation area and point cleared.")
+        if not silent:
+            self._cache_oscillation = {'area': None, 'initial_rel': None, 'tracked_rel': None}
+            self.logger.info("Oscillation area and point cleared.")
+
+    def _update_roi_caches_from_current(self) -> None:
+        """Capture current ROI state into per-mode caches before switching modes."""
+        if self.user_roi_fixed is not None or self.user_roi_initial_point_relative is not None:
+            self._cache_user_roi['roi'] = self.user_roi_fixed
+            self._cache_user_roi['initial_rel'] = self.user_roi_initial_point_relative
+            self._cache_user_roi['tracked_rel'] = self.user_roi_tracked_point_relative
+        if self.oscillation_area_fixed is not None or self.oscillation_area_initial_point_relative is not None:
+            self._cache_oscillation['area'] = self.oscillation_area_fixed
+            self._cache_oscillation['initial_rel'] = self.oscillation_area_initial_point_relative
+            self._cache_oscillation['tracked_rel'] = self.oscillation_area_tracked_point_relative
+
+    def _restore_roi_for_current_mode(self) -> None:
+        """Restore cached ROI state for the active mode after switching."""
+        if self.tracking_mode == "USER_FIXED_ROI":
+            cached_roi = self._cache_user_roi.get('roi')
+            if cached_roi:
+                self.user_roi_fixed = cached_roi
+                self.user_roi_initial_point_relative = self._cache_user_roi.get('initial_rel')
+                self.user_roi_tracked_point_relative = self._cache_user_roi.get('tracked_rel') or self.user_roi_initial_point_relative
+                # Defer patch recreation to processing step; ensure histories reset
+                self.prev_gray_user_roi_patch = None
+                self.primary_flow_history_smooth.clear()
+                self.secondary_flow_history_smooth.clear()
+        elif self.tracking_mode == "OSCILLATION_DETECTOR":
+            cached_area = self._cache_oscillation.get('area')
+            if cached_area:
+                self.oscillation_area_fixed = cached_area
+                self.oscillation_area_initial_point_relative = self._cache_oscillation.get('initial_rel')
+                self.oscillation_area_tracked_point_relative = self._cache_oscillation.get('tracked_rel') or self.oscillation_area_initial_point_relative
+                # Recalculate grid layout for restored area; defer patches to processing
+                self._calculate_oscillation_grid_layout()
 
     def _get_effective_amplification_factor(self) -> float:
         # main_interaction_class is set by YOLO_ROI mode or by Stage 3 processor
@@ -1891,17 +1958,20 @@ class ROITracker:
         self.prev_gray_oscillation = self._prev_gray_osc_buffer
 
         # Lightweight instrumentation (debug level, once per second)
-        try:
-            now_sec = time.time()
-            last = getattr(self, '_osc_instr_last_log_sec', 0.0)
-            if now_sec - last >= 1.0:
-                self._osc_instr_last_log_sec = now_sec
-                self.logger.debug(
-                    f"OSC perf: area={use_oscillation_area} img={current_gray.shape} grid={max_rows}x{max_cols} "
-                    f"preset={self.dis_flow_preset} finest={self.dis_finest_scale} active_cells={len(self.oscillation_cell_persistence)} "
-                    f"fps={self.current_fps:.1f}")
-        except Exception:
-            pass
+        if self.logger and self.logger.isEnabledFor(logging.DEBUG):
+            try:
+                now_sec = time.time()
+                last = getattr(self, '_osc_instr_last_log_sec', 0.0)
+                if now_sec - last >= 1.0:
+                    self._osc_instr_last_log_sec = now_sec
+                    cur_rows = max(1, current_gray.shape[0] // max(1, local_block_size))
+                    cur_cols = max(1, current_gray.shape[1] // max(1, local_block_size))
+                    self.logger.debug(
+                        f"OSC perf: area={use_oscillation_area} img={current_gray.shape} grid={cur_rows}x{cur_cols} "
+                        f"preset={self.dis_flow_preset} finest={self.dis_finest_scale} active_cells={len(self.oscillation_cell_persistence)} "
+                        f"fps={self.current_fps:.1f}")
+            except Exception:
+                pass
         return processed_frame, action_log_list if action_log_list else None
 
     def cleanup(self):

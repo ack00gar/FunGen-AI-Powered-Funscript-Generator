@@ -1,5 +1,7 @@
 import logging
 import inspect
+from logging.handlers import RotatingFileHandler
+from config import constants
 
 
 class StatusMessageHandler(logging.Handler):
@@ -110,7 +112,14 @@ class AppLogger:
 
         # File Handler (optional)
         if log_file:
-            fh = logging.FileHandler(log_file, mode='a', encoding='utf-8') # Use append mode
+            # Use rotating file handler to keep log size manageable
+            fh = RotatingFileHandler(
+                log_file,
+                mode='a',
+                maxBytes=getattr(constants, 'LOG_MAX_BYTES', 5 * 1024 * 1024),
+                backupCount=getattr(constants, 'LOG_BACKUP_COUNT', 3),
+                encoding='utf-8'
+            )
             fh.setLevel(level)
             file_formatter = logging.Formatter(
                 "%(asctime)s - %(name)s - %(levelname)-8s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s",

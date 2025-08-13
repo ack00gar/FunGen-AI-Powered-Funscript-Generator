@@ -282,6 +282,18 @@ class ControlPanelUI:
                 if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
                     app.clear_all_overlays_and_ui_drawings()
             app_state.selected_tracker_mode = new_mode
+            # Persist user choice (store enum index only)
+            if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
+                all_modes = [
+                    self.TrackerMode.OSCILLATION_DETECTOR,
+                    self.TrackerMode.LIVE_YOLO_ROI,
+                    self.TrackerMode.OFFLINE_3_STAGE,
+                ]
+                try:
+                    idx_to_store = all_modes.index(new_mode)
+                except ValueError:
+                    idx_to_store = 0
+                app.app_settings.set("selected_tracker_mode", idx_to_store)
 
         self._render_execution_progress_display()
         self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
@@ -349,7 +361,6 @@ class ControlPanelUI:
             flags=imgui.TREE_NODE_DEFAULT_OPEN,
         )
         if open_:
-
             modes_display = [m.value for m in modes_enum]
 
             processor = app.processor
@@ -378,13 +389,28 @@ class ControlPanelUI:
 
             if clicked and new_idx != cur_idx:
                 new_mode = modes_enum[new_idx]
-                # Clear all overlays only when switching to a different mode
+                # Clear all overlays when switching to a different mode
                 if app_state.selected_tracker_mode != new_mode:
                     if hasattr(app, 'logger') and app.logger:
                         app.logger.info(f"UI(RunTab): Mode change requested {app_state.selected_tracker_mode} -> {new_mode}. Clearing overlays.")
                     if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
                         app.clear_all_overlays_and_ui_drawings()
                 app_state.selected_tracker_mode = new_mode
+                # Persist user choice (store enum index only)
+                if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
+                    all_modes = [
+                        tracker_mode.OSCILLATION_DETECTOR,
+                        tracker_mode.LIVE_YOLO_ROI,
+                        tracker_mode.LIVE_USER_ROI,
+                        tracker_mode.OFFLINE_2_STAGE,
+                        tracker_mode.OFFLINE_3_STAGE,
+                        tracker_mode.OFFLINE_3_STAGE_MIXED,
+                    ]
+                    try:
+                        idx_to_store = all_modes.index(new_mode)
+                    except ValueError:
+                        idx_to_store = 0
+                    app.app_settings.set("selected_tracker_mode", idx_to_store)
                 tr = app.tracker
                 if tr:
                     if new_mode == tracker_mode.LIVE_USER_ROI:
@@ -1017,8 +1043,10 @@ class ControlPanelUI:
                         if getattr(tr, "main_interaction_class", None)
                         else "Searching..."
                     )
-                else:
+                elif mode == self.TrackerMode.LIVE_USER_ROI:
                     roi_status = "Set" if getattr(tr, "user_roi_fixed", False) else "Not Set"
+                elif mode == self.TrackerMode.OSCILLATION_DETECTOR:
+                    roi_status = "Set" if getattr(tr, "oscillation_area_fixed", None) else "Not Set"
             imgui.text(" - ROI Status: %s" % roi_status)
 
             if mode == self.TrackerMode.LIVE_USER_ROI:

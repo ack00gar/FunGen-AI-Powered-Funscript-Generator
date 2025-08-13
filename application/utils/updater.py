@@ -237,7 +237,7 @@ class AutoUpdater:
         
         if compare_data is None:
             self.logger.warning(f"Could not compare commits {local_hash[:7]} and {remote_hash[:7]} - they may be from different branches")
-            return None, None  # Return None to indicate failure
+            return None, None
 
         # Extract local commit date from the comparison response
         local_commit_date = None
@@ -354,11 +354,11 @@ class AutoUpdater:
             self.logger.info("Update available.")
             self.status_message = "A new update is available!"
             self.update_available = True
-            if not self.app.app_settings.get("updater_suppress_popup", False):
-                self.show_update_dialog = True
+            # Always show popup when startup checking is enabled and update is available
+            self.show_update_dialog = True
         else:
-            self.logger.info("Remote commit is older than local commit.")
-            self.status_message = "You are on the latest update."
+            self.logger.info("Remote commit is same or older than local commit.")
+            # self.status_message = "You are on the latest update."
             self.update_available = False
             self.update_changelog = []
 
@@ -430,7 +430,7 @@ class AutoUpdater:
     def check_for_updates_async(self):
         """Starts the update check in a background thread and updates the timestamp."""
         self.last_check_time = time.time() # Update time when a check is initiated
-        threading.Thread(target=self._check_worker, daemon=True).start()
+        threading.Thread(target=self._check_worker, daemon=True, name="UpdaterCheckThread").start()
 
     def _apply_update(self, target_hash: str = None, use_pull: bool = True):
         """Unified method to apply updates using either a git update or git checkout."""
@@ -755,7 +755,7 @@ class AutoUpdater:
         """Loads available updates in a background thread."""
         self.logger.info("Starting async update loading")
         self.update_picker_loading = True
-        threading.Thread(target=self._load_updates_worker, args=(custom_count,), daemon=True).start()
+        threading.Thread(target=self._load_updates_worker, args=(custom_count,), daemon=True, name="UpdaterLoadUpdatesThread").start()
 
     def _load_updates_worker(self, custom_count: int = None):
         """Worker thread to load available updates."""
@@ -926,7 +926,7 @@ class AutoUpdater:
                         # Load changelog if not cached (async to avoid blocking UI)
                         if commit_hash not in self.commit_changelogs:
                             self.commit_changelogs[commit_hash] = ["Loading changelog..."]
-                            threading.Thread(target=self._load_changelog_async, args=(commit_hash,), daemon=True).start()
+                            threading.Thread(target=self._load_changelog_async, args=(commit_hash,), daemon=True, name=f"UpdaterLoadChangelog-{commit_hash[:7]}").start()
 
                 imgui.same_line()
                 

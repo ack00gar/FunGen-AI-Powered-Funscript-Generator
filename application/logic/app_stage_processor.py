@@ -251,7 +251,8 @@ class AppStageProcessor:
         self.refinement_thread = threading.Thread(
             target=self._run_interactive_refinement_thread,
             args=(chapter, track_id),
-            daemon=True
+            daemon=True,
+            name="InteractiveRefinementThread",
         )
         self.refinement_thread.start()
 

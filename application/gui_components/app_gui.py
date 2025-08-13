@@ -41,8 +41,8 @@ class GUI:
         self.shutdown_event = threading.Event()
         # Start 2 workers to avoid stalls under load
         self.preview_worker_threads = [
-            threading.Thread(target=self._preview_generation_worker, daemon=True),
-            threading.Thread(target=self._preview_generation_worker, daemon=True)
+            threading.Thread(target=self._preview_generation_worker, daemon=True, name="PreviewWorker-1"),
+            threading.Thread(target=self._preview_generation_worker, daemon=True, name="PreviewWorker-2")
         ]
         for t in self.preview_worker_threads: t.start()
         
@@ -107,7 +107,7 @@ class GUI:
 
         self.last_preview_update_time_timeline = 0.0
         self.last_preview_update_time_heatmap = 0.0
-        self.preview_update_interval_seconds = 1.0
+        self.preview_update_interval_seconds = constants.UI_PREVIEW_UPDATE_INTERVAL_S
 
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
@@ -917,8 +917,7 @@ class GUI:
             or io.want_text_input
             or imgui.is_mouse_dragging(0)
             or imgui.is_any_item_active()
-            or imgui.is_any_item_focused()
-            or (self.file_dialog and self.file_dialog.open)):
+            or imgui.is_any_item_focused()):
                 interaction_detected_this_frame = True
         if hasattr(io, 'keys_down'):
             for i in range(len(io.keys_down)):
@@ -1319,15 +1318,22 @@ class GUI:
                 gl.glClearColor(*colors.BACKGROUND_CLEAR)
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
                 self.render_gui()
-                if self.app.app_settings.get("autosave_enabled", True) and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get("autosave_interval_seconds", 300):
+                if (
+                    self.app.app_settings.get("autosave_enabled", True)
+                    and time.time() - self.app.project_manager.last_autosave_time > self.app.app_settings.get("autosave_interval_seconds", constants.DEFAULT_AUTOSAVE_INTERVAL_SECONDS)
+                ):
                     self.app.project_manager.perform_autosave()
                 self.app.energy_saver.check_and_update_energy_saver()
                 glfw.swap_buffers(self.window)
                 current_target_duration = target_frame_duration_energy_saver if self.app.energy_saver.energy_saver_active else target_frame_duration_normal
                 elapsed_time_for_frame = time.time() - frame_start_time
                 sleep_duration = current_target_duration - elapsed_time_for_frame
-                # Periodic update checks
-                if self.app.app_settings.get("updater_check_periodically", True) and time.time() - self.app.updater.last_check_time > 3600:  # 1 hour
+                
+                if ( # Periodic update checks
+                    self.app.app_settings.get("updater_check_on_startup", True)
+                    and self.app.app_settings.get("updater_check_periodically", True)
+                    and time.time() - self.app.updater.last_check_time > 3600  # 1 hour
+                ):
                     self.app.updater.check_for_updates_async()
                 if sleep_duration > 0:
                     time.sleep(sleep_duration)

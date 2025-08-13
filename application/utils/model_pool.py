@@ -351,7 +351,7 @@ class SmartModelPool:
     
     def _start_cleanup_thread(self):
         """Start background thread for periodic cleanup of unused instances."""
-        self.cleanup_thread = threading.Thread(target=self._cleanup_worker, daemon=True)
+        self.cleanup_thread = threading.Thread(target=self._cleanup_worker, daemon=True, name="ModelPoolCleanup")
         self.cleanup_thread.start()
     
     def _cleanup_worker(self):

@@ -31,6 +31,12 @@ CONFIG_VERSION = 1
 ####################################################################################################
 SETTINGS_FILE = "settings.json"
 AUTOSAVE_FILE = "autosave.fgnstate"
+DEFAULT_AUTOSAVE_INTERVAL_SECONDS = 300
+
+# --- Logging Configuration ---
+# Maximum size per log file before rotation (bytes) and number of backups to keep
+LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+LOG_BACKUP_COUNT = 3
 PROJECT_FILE_EXTENSION = ".fgnproj"
 DEFAULT_OUTPUT_FOLDER = "output"
 
@@ -75,13 +81,14 @@ class ProcessingSpeedMode(Enum):
 
 
 class TrackerMode(Enum):
-    OSCILLATION_DETECTOR = "Live - Oscillation Detector (Experimental)"
-    LIVE_YOLO_ROI = "Live - Optical Flow (YOLO auto ROI)"
-    LIVE_USER_ROI = "Live - Optical Flow (User manual ROI)"
-    OFFLINE_2_STAGE = "Offline - YOLO AI (2 Stages)"
-    OFFLINE_3_STAGE = "Offline - YOLO AI + Opt. Flow (3 Stages)"
-    OFFLINE_3_STAGE_MIXED = "Offline - YOLO AI + Mixed Flow (3 Stages Mixed)"
+    OSCILLATION_DETECTOR = "Live - Oscillation Detector (Experimental)"         # 0
+    LIVE_YOLO_ROI = "Live - Optical Flow (YOLO auto ROI)"                       # 1
+    LIVE_USER_ROI = "Live - Optical Flow (User manual ROI)"                     # 2
+    OFFLINE_2_STAGE = "Offline - YOLO AI (2 Stages)"                            # 3
+    OFFLINE_3_STAGE = "Offline - YOLO AI + Opt. Flow (3 Stages)"                # 4 
+    OFFLINE_3_STAGE_MIXED = "Offline - YOLO AI + Mixed Flow (3 Stages Mixed)"   # 5
 
+DEFAULT_TRACKER_MODE = 0
 
 ####################################################################################################
 # AI & MODELS
