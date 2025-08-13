@@ -481,7 +481,7 @@ class SystemMonitor:
             if self._is_running:
                 return
             self._is_running = True
-            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread = threading.Thread(target=self._run, daemon=True, name="SystemMonitorThread")
             self._thread.start()
 
     def stop(self, timeout: Optional[float] = None) -> None:

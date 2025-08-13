@@ -1032,7 +1032,7 @@ class VideoProcessor:
         self.is_processing = True
         self.pause_event.clear()
         self.stop_event.clear()
-        self.processing_thread = threading.Thread(target=self._processing_loop)
+        self.processing_thread = threading.Thread(target=self._processing_loop, name="VideoProcessingThread")
         self.processing_thread.daemon = True
         self.processing_thread.start()
 

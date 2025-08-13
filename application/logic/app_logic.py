@@ -329,24 +329,21 @@ class ApplicationLogic:
             self._load_last_project_on_startup()
         self.energy_saver.reset_activity_timer()
 
-        # Check for updates on startup only if the setting is enabled
+        # Check for updates on startup only if enabled
         if self.app_settings.get("updater_check_on_startup", True):
             self.updater.check_for_updates_async()
 
-        #self.updater.check_for_updates_async()
-
-        # --- First Run Model Setup ---
-        # Disabled automatic model downloading - now handled manually via AI menu
-        # if getattr(self.app_settings, 'is_first_run', False):
-        #     self.logger.info("First application run detected. Preparing to download default models.")
-        #     self.trigger_first_run_setup()
-
-        # --- Force Oscillation Detector as the default mode on startup ---
-        if not self.is_cli_mode:
-            self.app_state_ui.selected_tracker_mode = TrackerMode.OSCILLATION_DETECTOR
-            if self.tracker:
-                # Also set the tracker's internal mode to match the UI default
-                self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
+        # --- Initialize tracker mode from persisted setting; default handled by AppStateUI ---
+        if not self.is_cli_mode and self.tracker:
+            # Map enum to tracker string
+            mode = self.app_state_ui.selected_tracker_mode
+            if mode == TrackerMode.LIVE_USER_ROI:
+                tracker_mode_str = "USER_FIXED_ROI"
+            elif mode == TrackerMode.OSCILLATION_DETECTOR:
+                tracker_mode_str = "OSCILLATION_DETECTOR"
+            else:
+                tracker_mode_str = "YOLO_ROI"
+            self.tracker.set_tracking_mode(tracker_mode_str)
 
     def get_timeline(self, timeline_num: int) -> Optional['InteractiveFunscriptTimeline']:
         """
@@ -389,7 +386,7 @@ class ApplicationLogic:
         self.show_first_run_setup_popup = True
         self.first_run_progress = 0
         self.first_run_status_message = "Starting setup..."
-        self.first_run_thread = threading.Thread(target=self._run_first_run_setup_thread, daemon=True)
+        self.first_run_thread = threading.Thread(target=self._run_first_run_setup_thread, daemon=True, name="FirstRunSetupThread")
         self.first_run_thread.start()
 
     def _run_first_run_setup_thread(self):
@@ -552,7 +549,7 @@ class ApplicationLogic:
 
         self.autotuner_forced_hwaccel = force_hwaccel
         self.is_autotuning_active = True
-        self.autotuner_thread = threading.Thread(target=self._run_autotuner_thread, daemon=True)
+        self.autotuner_thread = threading.Thread(target=self._run_autotuner_thread, daemon=True, name="AutotunerThread")
         self.autotuner_thread.start()
 
     def _run_autotuner_thread(self):
@@ -785,7 +782,7 @@ class ApplicationLogic:
                 self.logger.error("Failed to generate audio waveform.", extra={'status_message': True})
                 self.app_state_ui.show_audio_waveform = False
 
-        thread = threading.Thread(target=_generate_waveform_thread, daemon=True)
+        thread = threading.Thread(target=_generate_waveform_thread, daemon=True, name="WaveformGenThread")
         thread.start()
 
     def toggle_waveform_visibility(self):
@@ -871,7 +868,7 @@ class ApplicationLogic:
         self.current_batch_video_index = -1
         self.stop_batch_event.clear()
 
-        self.batch_processing_thread = threading.Thread(target=self._run_batch_processing_thread, daemon=True)
+        self.batch_processing_thread = threading.Thread(target=self._run_batch_processing_thread, daemon=True, name="BatchProcessingThread")
         self.batch_processing_thread.start()
 
         self.show_batch_confirmation_dialog = False

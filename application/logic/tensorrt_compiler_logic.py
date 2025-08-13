@@ -123,7 +123,7 @@ class TensorRTCompilerLogic:
                     if self._should_stop:
                         self.status_message = "Compilation stopped by user"
         
-        self.compile_thread = threading.Thread(target=run, daemon=True)
+        self.compile_thread = threading.Thread(target=run, daemon=True, name="TensorRTCompileThread")
         self.compile_thread.start()
 
     def request_stop_compilation(self):
