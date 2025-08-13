@@ -111,6 +111,13 @@ class AppSettings:
             
             "live_oscillation_dynamic_amp_enabled": True,
             "live_oscillation_amp_window_ms": 4000,  # 4-second analysis window
+            
+            # --- Signal Enhancement Settings ---
+            "enable_signal_enhancement": True,  # Enable frame difference based signal enhancement
+            "signal_enhancement_motion_threshold_low": 12.0,  # Minimum motion for significant movement
+            "signal_enhancement_motion_threshold_high": 30.0,  # High motion threshold for missing strokes
+            "signal_enhancement_signal_change_threshold": 6,  # Minimum signal change to consider significant
+            "signal_enhancement_strength": 0.25,  # Enhancement strength (0.0 - 1.0)
 
             # Auto Post-Processing
             "enable_auto_post_processing": False,
