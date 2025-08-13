@@ -18,7 +18,7 @@ except ImportError:
     AIOSQLITE_AVAILABLE = False
     aiosqlite = None
 
-from detection.cd.stage_2_cd import FrameObject, ATRSegment
+from detection.cd.data_structures import FrameObject, ATRSegment
 
 
 class Stage2SQLiteStorage:
@@ -307,7 +307,7 @@ class Stage2SQLiteStorage:
 
     def _deserialize_frame_object(self, row) -> FrameObject:
         """Deserialize frame object from optimized database row."""
-        from detection.cd.stage_2_cd import ATRLockedPenisState  # Import here to avoid circular imports
+        from detection.cd.data_structures import ATRLockedPenisState  # Import here to avoid circular imports
         
         (frame_id, atr_assigned_position, atr_funscript_distance,
          locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2,

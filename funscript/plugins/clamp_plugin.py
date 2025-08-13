@@ -239,7 +239,7 @@ class ValueClampPlugin(FunscriptTransformationPlugin):
     
     @property
     def name(self) -> str:
-        return "value_clamp"
+        return "Clamp"
     
     @property
     def description(self) -> str:

@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from detection.cd.stage_3_mixed_processor import MixedStageProcessor, perform_mixed_stage_analysis
-from detection.cd.stage_2_cd import FrameObject, ATRLockedPenisState
+from detection.cd.data_structures import FrameObject, ATRLockedPenisState
 from application.utils.video_segment import VideoSegment
 from config.constants import TrackerMode
 from funscript.dual_axis_funscript import DualAxisFunscript

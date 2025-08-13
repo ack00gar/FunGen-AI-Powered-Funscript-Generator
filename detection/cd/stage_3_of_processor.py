@@ -10,7 +10,7 @@ from queue import Empty
 from funscript import DualAxisFunscript
 from video import VideoProcessor
 from tracker import ROITracker
-from detection.cd.stage_2_cd import ATRSegment, FrameObject
+from detection.cd.data_structures import ATRSegment, FrameObject
 from config import constants
 
 
@@ -359,7 +359,7 @@ def perform_stage3_analysis(
         empty_funscript = DualAxisFunscript()
         video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
         empty_funscript.set_chapters_from_segments(atr_segments_list, video_fps)
-        return {"success": False, "funscript": empty_funscript, "error": "No data source available"}
+        return {"success": False, "funscript": empty_funscript, "error": "No data source available", "video_segments": [seg.to_dict() if hasattr(seg, 'to_dict') else seg.__dict__ for seg in atr_segments_list]}
 
     # Get chunking parameters from the configuration
     CHUNK_SIZE = common_app_config.get("s3_chunk_size", 1000)
@@ -383,7 +383,7 @@ def perform_stage3_analysis(
         empty_funscript = DualAxisFunscript()
         video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
         empty_funscript.set_chapters_from_segments(atr_segments_list, video_fps)
-        return {"success": True, "funscript": empty_funscript, "total_frames_processed": 0, "processing_method": "optical_flow"}
+        return {"success": True, "funscript": empty_funscript, "total_frames_processed": 0, "processing_method": "optical_flow", "video_segments": [seg.to_dict() if hasattr(seg, 'to_dict') else seg.__dict__ for seg in atr_segments_list]}
 
     total_frames_to_process = sum(seg.end_frame_id - seg.start_frame_id + 1 for seg in relevant_segments)
 
@@ -585,5 +585,6 @@ def perform_stage3_analysis(
         "success": True,
         "funscript": funscript_obj,
         "total_frames_processed": total_frames_to_process,
-        "processing_method": "optical_flow"
+        "processing_method": "optical_flow",
+        "video_segments": [seg.to_dict() if hasattr(seg, 'to_dict') else seg.__dict__ for seg in atr_segments_list]
     }

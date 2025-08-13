@@ -442,6 +442,7 @@ class ControlPanelUI:
         if mode in (
             tracker_mode.OFFLINE_2_STAGE,
             tracker_mode.OFFLINE_3_STAGE,
+            tracker_mode.OFFLINE_3_STAGE_MIXED,
             tracker_mode.LIVE_YOLO_ROI,
             tracker_mode.LIVE_USER_ROI,
             tracker_mode.OSCILLATION_DETECTOR,
@@ -455,7 +456,7 @@ class ControlPanelUI:
                     imgui.text("Analysis Range")
                     self._render_range_selection(stage_proc, fs_proc, events)
 
-                    if mode in (tracker_mode.OFFLINE_2_STAGE, tracker_mode.OFFLINE_3_STAGE):
+                    if mode in (tracker_mode.OFFLINE_2_STAGE, tracker_mode.OFFLINE_3_STAGE, tracker_mode.OFFLINE_3_STAGE_MIXED):
                         imgui.text("Stage Reruns:")
                         with _DisabledScope(disable_combo):
                             _, stage_proc.force_rerun_stage1 = imgui.checkbox(

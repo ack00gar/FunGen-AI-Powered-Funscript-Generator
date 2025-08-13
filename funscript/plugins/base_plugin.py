@@ -219,8 +219,8 @@ class PluginRegistry:
         if not plugin.check_dependencies():
             return False
         
-        if plugin.name in self._plugins:
-            self.logger.warning(f"Plugin '{plugin.name}' is already registered, replacing")
+        #if plugin.name in self._plugins:
+        #    self.logger.warning(f"Plugin '{plugin.name}' is already registered, replacing")
         
         self._plugins[plugin.name] = plugin
         self.logger.info(f"Registered plugin '{plugin.name}' v{plugin.version}")

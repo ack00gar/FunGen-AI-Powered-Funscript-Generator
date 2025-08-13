@@ -188,7 +188,7 @@ class TestRealWorldStageCarryover:
         # Load actual Stage 2 data
         import msgpack
         from detection.cd.stage_3_mixed_processor import MixedStageProcessor
-        from detection.cd.stage_2_cd import FrameObject, ATRLockedPenisState
+        from detection.cd.data_structures import FrameObject, ATRLockedPenisState
         from application.utils.video_segment import VideoSegment
         
         with open(stage2_overlay, 'rb') as f:
