@@ -61,6 +61,15 @@ class ImGuiFileDialog:
         self.overwrite_file_path: str = ""
         self.video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.webm'] # Added
 
+        # Cached directory listing and metadata to avoid per-frame filesystem hits
+        self._current_dir_cached: str = ""
+        self._cached_directories: list[str] = []
+        self._cached_files: list[str] = []
+        self._cached_special_packages: list[str] = []
+        self._needs_rescan: bool = True
+        self._file_sizes_cache: dict = {}
+        self._funscript_status_cache: dict = {}
+
     @staticmethod
     def get_funscript_status(video_path: str, logger: logging.Logger) -> Optional[str]:
         """Checks for an associated funscript and determines its origin."""
@@ -112,6 +121,37 @@ class ImGuiFileDialog:
         if initial_path and os.path.isdir(initial_path):
             self.current_dir = initial_path
 
+        # Invalidate caches on open
+        self._invalidate_listing_cache()
+
+    def _invalidate_listing_cache(self) -> None:
+        self._current_dir_cached = ""
+        self._cached_directories = []
+        self._cached_files = []
+        self._cached_special_packages = []
+        self._file_sizes_cache.clear()
+        self._funscript_status_cache.clear()
+        self._needs_rescan = True
+
+    def _build_listing_if_needed(self) -> None:
+        # Only (re)scan the filesystem when the directory actually changes or a refresh is requested
+        if not self._needs_rescan and self._current_dir_cached == self.current_dir:
+            return
+        try:
+            items = os.listdir(self.current_dir) if os.path.exists(self.current_dir) else []
+        except Exception:
+            items = []
+
+        special_packages = [d for d in items if os.path.isdir(os.path.join(self.current_dir, d)) and d.lower().endswith('.mlpackage')]
+        directories = [d for d in items if os.path.isdir(os.path.join(self.current_dir, d)) and not d.lower().endswith('.mlpackage')]
+        files = [f for f in items if os.path.isfile(os.path.join(self.current_dir, f))]
+
+        self._cached_directories = directories
+        self._cached_files = files
+        self._cached_special_packages = special_packages
+        self._current_dir_cached = self.current_dir
+        self._needs_rescan = False
+
     def _draw_common_dirs_sidebar(self):
         imgui.begin_child("sidebar", width=150, height=0, border=False)
 
@@ -125,6 +165,7 @@ class ImGuiFileDialog:
                 if os.path.exists(path):
                     self.current_dir = path
                     self.scroll_to_selected = True
+                    self._invalidate_listing_cache()
             imgui.spacing()
 
         # 1. Output Directory
@@ -134,6 +175,7 @@ class ImGuiFileDialog:
             if imgui.button("Output Folder", width=130):
                 self.current_dir = abs_output_dir
                 self.scroll_to_selected = True
+                self._invalidate_listing_cache()
             if imgui.is_item_hovered():
                 imgui.set_tooltip(f"Go to the configured output folder:\n{abs_output_dir}")
             imgui.spacing()
@@ -146,6 +188,7 @@ class ImGuiFileDialog:
                 if imgui.button("Curr. Video Folder", width=130):
                     self.current_dir = video_dir
                     self.scroll_to_selected = True
+                    self._invalidate_listing_cache()
                 if imgui.is_item_hovered():
                     imgui.set_tooltip(f"Go to the current video's folder:\n{video_dir}")
                 imgui.spacing()
@@ -156,13 +199,20 @@ class ImGuiFileDialog:
         # For folder dialogs: show only up button
         if not self.is_folder_dialog:
             filter_names = [name for name, _ in self.extension_groups]
-            clicked, self.active_extension_index = imgui.combo("File Type", self.active_extension_index, filter_names)
+            clicked, new_index = imgui.combo("File Type", self.active_extension_index, filter_names)
+            if clicked and new_index != self.active_extension_index:
+                self.active_extension_index = new_index
+                # No rescan needed; filtering is applied on cached files
             imgui.same_line()
             if imgui.button("^ Up", width=50):
                 self._navigate_up()
         else:
             if imgui.button("^ Up", width=50):
                 self._navigate_up()
+
+        imgui.same_line()
+        if imgui.button("Refresh", width=70):
+            self._invalidate_listing_cache()
 
     def _parse_extension_filter(self, filter_string: str) -> list[tuple[str, list[str]]]:
         if not filter_string or self.is_folder_dialog:
@@ -232,6 +282,7 @@ class ImGuiFileDialog:
             if os.path.exists(parent) and os.path.isdir(parent):
                 self.current_dir = parent
                 self.scroll_to_selected = True
+                self._invalidate_listing_cache()
         except Exception as e:
             imgui.text(f"Error navigating up: {str(e)}")
 
@@ -240,18 +291,11 @@ class ImGuiFileDialog:
             if not os.path.exists(self.current_dir):
                 imgui.text("Directory not found")
             else:
-                items = os.listdir(self.current_dir)
+                self._build_listing_if_needed()
 
-                # Handle .mlpackage as special case - treat as files even though they're directories
-                special_packages = [d for d in items if os.path.isdir(os.path.join(self.current_dir, d)) and d.lower().endswith('.mlpackage')]
-
-                # Other directories
-                directories = [d for d in items if os.path.isdir(os.path.join(self.current_dir, d)) and not d.lower().endswith('.mlpackage')]
-
-                # Regular files
-                files = [f for f in items if os.path.isfile(os.path.join(self.current_dir, f))]
-
-                # Add .mlpackage folders to files list for selection purposes
+                directories = self._cached_directories
+                files = self._cached_files
+                special_packages = self._cached_special_packages
                 selectable_files = files + special_packages
 
                 # Filter files based on selected extension group
@@ -289,6 +333,7 @@ class ImGuiFileDialog:
                     self.current_dir = os.path.join(self.current_dir, d)
                     self.selected_file = ""
                     self.scroll_to_selected = True
+                    self._invalidate_listing_cache()
             imgui.pop_id()
 
     def _draw_files(self, files: list[str]) -> None:
@@ -297,12 +342,20 @@ class ImGuiFileDialog:
             full_path = os.path.join(self.current_dir, f)
 
             try:
-                if os.path.isdir(full_path) and f.lower().endswith('.mlpackage'):
-                    size_bytes = get_directory_size(full_path)
+                size_bytes = None
+                if f.lower().endswith('.mlpackage'):
+                    # Avoid expensive recursive size computation for packages while browsing
+                    size_bytes = None
                 else:
-                    size_bytes = os.path.getsize(full_path)
+                    if full_path in self._file_sizes_cache:
+                        size_bytes = self._file_sizes_cache[full_path]
+                    else:
+                        size_bytes = os.path.getsize(full_path)
+                        self._file_sizes_cache[full_path] = size_bytes
 
-                if size_bytes < 1024:
+                if size_bytes is None:
+                    size_str = "—"
+                elif size_bytes < 1024:
                     size_str = f"{size_bytes} B"
                 elif size_bytes < 1024 * 1024:
                     size_str = f"{size_bytes / 1024:.1f} KB"
@@ -314,7 +367,11 @@ class ImGuiFileDialog:
             # Check for funscript status if the file is a video
             funscript_status = None
             if any(f.lower().endswith(ext) for ext in self.video_extensions):
-                funscript_status = self._get_funscript_status(full_path)
+                if full_path in self._funscript_status_cache:
+                    funscript_status = self._funscript_status_cache[full_path]
+                else:
+                    funscript_status = self._get_funscript_status(full_path)
+                    self._funscript_status_cache[full_path] = funscript_status
 
             imgui.push_id(f"file_{i}")
 

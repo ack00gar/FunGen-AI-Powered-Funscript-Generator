@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Tuple, Optional
-from config.constants import TrackerMode, ProcessingSpeedMode
+from config.constants import TrackerMode, ProcessingSpeedMode, DEFAULT_TRACKER_MODE
 
 
 class AppStateUI:
@@ -29,7 +29,19 @@ class AppStateUI:
         self.status_message: str = ""
         self.status_message_time: float = 0.0
 
-        self.selected_tracker_mode: TrackerMode = TrackerMode.OSCILLATION_DETECTOR
+        # Load last used tracker mode using enum index (integer only)
+        try:
+            loaded_mode_idx = int(self.app_settings.get(
+                "selected_tracker_mode",
+                defaults.get("selected_tracker_mode", DEFAULT_TRACKER_MODE)
+            ))
+        except Exception:
+            loaded_mode_idx = DEFAULT_TRACKER_MODE
+
+        all_modes = list(TrackerMode)
+        if loaded_mode_idx < 0 or loaded_mode_idx >= len(all_modes):
+            loaded_mode_idx = DEFAULT_TRACKER_MODE
+        self.selected_tracker_mode: TrackerMode = all_modes[loaded_mode_idx]
         self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode.REALTIME
 
         # UI visibility states
