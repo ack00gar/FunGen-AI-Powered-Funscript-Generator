@@ -19,7 +19,7 @@ import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from application.utils.video_segment import VideoSegment
-from detection.cd.stage_2_cd import FrameObject, ATRLockedPenisState
+from detection.cd.data_structures import FrameObject, ATRLockedPenisState
 from detection.cd.stage_3_mixed_processor import MixedStageProcessor, perform_mixed_stage_analysis
 from config.constants import TrackerMode
 

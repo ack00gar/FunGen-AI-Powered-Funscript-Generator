@@ -1691,7 +1691,7 @@ class DualAxisFunscript:
             end_time_ms = int((end_frame_id / video_fps) * 1000)
             
             chapter = {
-                "name": f"{position_short} - {position_long}",
+                "name": position_short,  # Use short name for UI display
                 "start": start_time_ms,
                 "end": end_time_ms,
                 "startTime": start_time_ms,  # Keep both for compatibility

@@ -60,7 +60,7 @@ class ROITracker:
         self.oscillation_area_initial_point_relative: Optional[Tuple[float, float]] = None
         self.oscillation_area_tracked_point_relative: Optional[Tuple[float, float]] = None
         self.prev_gray_oscillation_area_patch: Optional[np.ndarray] = None
-        self.oscillation_ema_alpha: float = 0.3
+        self.oscillation_ema_alpha: float = 0.5
 
         # --- Static grid storage for oscillation area ---
         self.oscillation_grid_blocks: List[Tuple[int, int, int, int]] = []  # List of (x, y, w, h) for each grid block
@@ -221,7 +221,7 @@ class ROITracker:
         self.oscillation_last_known_secondary_pos = 50.0
         self.oscillation_last_active_time = 0
         self.oscillation_hold_duration_ms = 200  # Hold for 200ms before decaying
-        self.oscillation_ema_alpha: float = 0.3  # Smoothing factor for the final signal
+        self.oscillation_ema_alpha: float = 0.5  # Smoothing factor for the final signal
         self.oscillation_history_max_len: int = 60
 
         # --- Oscillation sensitivity control ---
@@ -1213,8 +1213,7 @@ class ROITracker:
                     self.secondary_flow_history_smooth.clear()
                     self.frames_since_target_lost = 0
 
-            self.stats_display = [
-                f"T-FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
+            self.stats_display = [f"T-FPS:{self.current_fps:.1f} T(ms):{frame_time_ms} Amp:{self.current_effective_amp_factor:.2f}x"]
             if frame_index is not None: self.stats_display.append(f"FIdx:{frame_index}")
             if self.main_interaction_class: self.stats_display.append(f"Interact: {self.main_interaction_class}")
 

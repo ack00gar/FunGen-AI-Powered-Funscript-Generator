@@ -747,7 +747,7 @@ class AppStageProcessor:
                 except Exception as e:
                     self.logger.error(f"Error determining S2 overlay path: {e}")
 
-            generate_s2_funscript_actions = selected_mode == TrackerMode.OFFLINE_2_STAGE
+            generate_s2_funscript_actions = selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
             is_s1_data_source_ranged = (frame_range_for_s1 is not None)
 
             s2_start_time = time.time()
@@ -800,8 +800,14 @@ class AppStageProcessor:
                 atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
 
-                if video_segments_for_gui:
-                    self.gui_event_queue.put(("stage2_results_success_segments_only", video_segments_for_gui, None))
+                # Send complete Stage 2 results to properly update UI chapters
+                if s2_output_data:
+                    packaged_data = {
+                        "results_dict": s2_output_data,
+                        "was_ranged": is_s1_data_source_ranged,
+                        "range_frames": frame_range_for_s1 or (range_start_frame, range_end_frame)
+                    }
+                    self.gui_event_queue.put(("stage2_results_success", packaged_data, s2_overlay_path))
 
                 effective_range_is_active = frame_range_for_s1 is not None
                 effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
@@ -824,7 +830,7 @@ class AppStageProcessor:
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 
                 if selected_mode == getattr(TrackerMode, 'OFFLINE_3_STAGE_MIXED', None):
-                    s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3)
+                    s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
                 else:
                     s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
                 stage3_success = s3_results_dict is not None
@@ -847,8 +853,14 @@ class AppStageProcessor:
                 atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
 
-                if video_segments_for_gui:
-                    self.gui_event_queue.put(("stage2_results_success_segments_only", video_segments_for_gui, None))
+                # Send complete Stage 2 results to properly update UI chapters
+                if s2_output_data:
+                    packaged_data = {
+                        "results_dict": s2_output_data,
+                        "was_ranged": is_s1_data_source_ranged,
+                        "range_frames": frame_range_for_s1 or (range_start_frame, range_end_frame)
+                    }
+                    self.gui_event_queue.put(("stage2_results_success", packaged_data, s2_overlay_path))
 
                 effective_range_is_active = frame_range_for_s1 is not None
                 effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
@@ -870,7 +882,7 @@ class AppStageProcessor:
 
                 self.logger.info(f"Starting Mixed Stage 3 with {preprocessed_path_for_s3}.")
 
-                s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3)
+                s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
                 stage3_success = s3_results_dict is not None
 
                 if stage3_success:
@@ -1291,8 +1303,26 @@ class AppStageProcessor:
                         funscript_obj.set_chapters_from_segments(loaded_data["video_segments"], fps)
                         self.logger.info(f"Created funscript with {len(funscript_obj.chapters)} chapters from loaded segments")
                     
-                    # Add empty actions (Stage 2 from existing data doesn't have generated actions)
-                    # Actions would need to be regenerated or loaded from a separate source
+                    # Regenerate actions from frame objects for mixed mode compatibility
+                    if loaded_data.get("all_s2_frame_objects_list"):
+                        frame_objects_list = loaded_data["all_s2_frame_objects_list"]
+                        actions_generated = 0
+                        
+                        for frame_obj in frame_objects_list:
+                            if hasattr(frame_obj, 'atr_funscript_distance') and hasattr(frame_obj, 'frame_id'):
+                                try:
+                                    timestamp_ms = int((frame_obj.frame_id / fps) * 1000)
+                                    pos_0_100 = int(frame_obj.atr_funscript_distance)
+                                    pos_0_100 = max(0, min(100, pos_0_100))  # Clamp to valid range
+                                    funscript_obj.add_action(timestamp_ms, pos_0_100)
+                                    actions_generated += 1
+                                except (ValueError, TypeError, AttributeError):
+                                    continue
+                        
+                        if actions_generated > 0:
+                            self.logger.info(f"Regenerated {actions_generated} funscript actions from cached frame objects for mixed mode")
+                        else:
+                            self.logger.warning("No valid funscript actions could be regenerated from cached frame objects")
                     
                     loaded_data["funscript"] = funscript_obj
                     
@@ -1319,25 +1349,53 @@ class AppStageProcessor:
         # Get the funscript object first
         funscript_obj = results_dict.get("funscript")
         
-        # Use the same flag to protect chapters during a 2-Stage run.
-        # However, if there are no existing chapters, always update them
-        should_update_chapters = (self.force_rerun_stage2_segmentation or 
-                                len(fs_proc.video_chapters) == 0)
-        
-        if should_update_chapters:
-            if self.force_rerun_stage2_segmentation:
-                self.logger.info("Overwriting chapters with new 2-Stage analysis results as requested.")
-            else:
-                self.logger.info("No existing chapters found - populating with new 2-Stage analysis results.")
-            fs_proc.video_chapters.clear()
+        # Process the funscript object or fall back to raw actions
+        if funscript_obj:
+            # Use funscript object (preferred)
+            primary_actions = funscript_obj.primary_actions
+            secondary_actions = funscript_obj.secondary_actions
+
+            # Get the application's current axis settings
+            axis_mode = self.app.tracking_axis_mode
+            target_timeline = self.app.single_axis_output_target
+
+            self.app.logger.info(f"Applying 2-Stage results with axis mode: {axis_mode} and target: {target_timeline}.")
+
+            if axis_mode == "both":
+                # Overwrite both timelines with the new results.
+                fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
+                fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+
+            elif axis_mode == "vertical":
+                # Overwrite ONLY the target timeline, leaving the other one completely untouched.
+                if target_timeline == "primary":
+                    self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
+                    fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
+                else:  # Target is secondary
+                    self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
+                    fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+
+            elif axis_mode == "horizontal":
+                # Overwrite ONLY the target timeline with the secondary (horizontal) actions.
+                if target_timeline == "primary":
+                    self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
+                    fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
+                else:  # Target is secondary
+                    self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
+                    fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+
+                self.logger.info("Updating chapters with Stage 2 analysis results.")
+                fs_proc.video_chapters.clear()
             
             # Extract chapters from the funscript object instead of separate video_segments_data
-            if funscript_obj and hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
+            if  hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
                 fps = self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0
                 for chapter in funscript_obj.chapters:
                     # Convert funscript chapter back to VideoSegment
                     start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
+                    self.logger.info(f"Line 1378, start_frame: {start_frame}")
                     end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
+                    self.logger.info(f"Line 1380, end_frame: {end_frame}")
                     
                     from application.utils.video_segment import VideoSegment
                     video_segment = VideoSegment(
@@ -1352,62 +1410,6 @@ class AppStageProcessor:
                     )
                     fs_proc.video_chapters.append(video_segment)
                 self.logger.info(f"Extracted {len(funscript_obj.chapters)} chapters from funscript object")
-            else:
-                # Fallback to legacy video_segments_data for backwards compatibility
-                video_segments_data = results_dict.get("video_segments", [])
-                if isinstance(video_segments_data, list):
-                    from application.utils.video_segment import VideoSegment
-                    for seg_data in video_segments_data:
-                        if isinstance(seg_data, dict):
-                            fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
-                    self.logger.info(f"Extracted {len(video_segments_data)} chapters from legacy video_segments_data")
-        else:
-            self.app.logger.info("Preserving existing chapters. Stage 2 funscript generated without altering chapters.")
-
-        # Process the funscript object or fall back to raw actions
-        if funscript_obj:
-            # Use funscript object (preferred)
-            primary_actions = funscript_obj.primary_actions
-            secondary_actions = funscript_obj.secondary_actions
-            
-            # Set chapters from funscript if available
-            if hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
-                # Use the standardized sync method
-                fs_proc._sync_chapters_from_funscript()
-                self.app.logger.info(f"Updated chapters from funscript: {len(funscript_obj.chapters)} chapters")
-        else:
-            # Fall back to raw actions for backward compatibility
-            primary_actions = results_dict.get("primary_actions", [])
-            secondary_actions = results_dict.get("secondary_actions", [])
-
-        # Get the application's current axis settings
-        axis_mode = self.app.tracking_axis_mode
-        target_timeline = self.app.single_axis_output_target
-
-        self.app.logger.info(f"Applying 2-Stage results with axis mode: {axis_mode} and target: {target_timeline}.")
-
-        if axis_mode == "both":
-            # Overwrite both timelines with the new results.
-            fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
-            fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
-
-        elif axis_mode == "vertical":
-            # Overwrite ONLY the target timeline, leaving the other one completely untouched.
-            if target_timeline == "primary":
-                self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
-                fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
-            else:  # Target is secondary
-                self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
-                fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
-
-        elif axis_mode == "horizontal":
-            # Overwrite ONLY the target timeline with the secondary (horizontal) actions.
-            if target_timeline == "primary":
-                self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
-                fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
-            else:  # Target is secondary
-                self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
-                fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
 
         self.stage2_status_text = "S2 Completed. Results Processed."
         self.app.project_manager.project_dirty = True
@@ -1424,7 +1426,7 @@ class AppStageProcessor:
             List of minimal frame objects with position data needed for segmentation
         """
         try:
-            from detection.cd.stage_2_cd import FrameObject
+            from detection.cd.data_structures import FrameObject
             
             frame_objects = []
             for frame_dict in overlay_data:
@@ -1742,7 +1744,7 @@ class AppStageProcessor:
             self.gui_event_queue.put(("stage3_status_update", f"S3 Failed: {error_msg}", "Failed"))
             return None
 
-    def _execute_stage3_mixed_module(self, atr_segments_objects: List[Any], preprocessed_video_path: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _execute_stage3_mixed_module(self, atr_segments_objects: List[Any], preprocessed_video_path: Optional[str], s2_output_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
         """Execute Mixed Stage 3 processing using stage_3_mixed_processor if available."""
         if stage3_mixed_module is None:
             self.logger.error("Stage 3 Mixed module not available.")
@@ -1759,17 +1761,27 @@ class AppStageProcessor:
             "video_fps": (self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0),
         }
         try:
+            # Get Stage 2 funscript from the output data
+            self.logger.info(f"Stage 2 data available for mixed mode: {s2_output_data is not None}")
+            stage2_funscript = s2_output_data.get("funscript") if s2_output_data else None
+            self.logger.info(f"Stage 2 funscript available: {stage2_funscript is not None}")
+            if stage2_funscript:
+                self.logger.info(f"Stage 2 funscript has primary_actions: {hasattr(stage2_funscript, 'primary_actions')}")
+                if hasattr(stage2_funscript, 'primary_actions'):
+                    self.logger.info(f"Stage 2 funscript primary_actions count: {len(stage2_funscript.primary_actions)}")
+            
             results = stage3_mixed_module.perform_mixed_stage_analysis(
                 video_path=fm.video_path,
                 preprocessed_video_path_arg=preprocessed_video_path,
                 atr_segments_list=atr_segments_objects,
-                s2_frame_objects_map=self.app.s2_frame_objects_map_for_s3 or {},
+                s2_frame_objects_map=self.app.s2_frame_objects_map_for_s3 or {},  # Legacy fallback
                 tracker_config={},
                 common_app_config=common_app_config,
                 progress_callback=self.on_stage3_progress,
                 stop_event=self.stop_stage_event,
                 parent_logger=self.logger,
                 sqlite_db_path=getattr(self.app, 's2_sqlite_db_path', None),
+                stage2_funscript=stage2_funscript,  # New: Pass Stage 2 funscript directly
             )
             return results
         except Exception as e:
@@ -1886,48 +1898,9 @@ class AppStageProcessor:
                     # Get the funscript object first
                     funscript_obj = results_dict.get("funscript")
                     
-                    # Use the same flag to protect chapters during a 2-Stage run.
-                    # However, if there are no existing chapters, always update them
-                    should_update_chapters = (self.force_rerun_stage2_segmentation or 
-                                            len(fs_proc.video_chapters) == 0)
-                    
-                    if should_update_chapters:
-                        if self.force_rerun_stage2_segmentation:
-                            self.logger.info("Overwriting chapters with new 2-Stage analysis results as requested.")
-                        else:
-                            self.logger.info("No existing chapters found - populating with new 2-Stage analysis results.")
-                        fs_proc.video_chapters.clear()
-                        
-                        # Extract chapters from the funscript object instead of separate video_segments_data
-                        if funscript_obj and hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
-                            fps = self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0
-                            for chapter in funscript_obj.chapters:
-                                # Convert funscript chapter back to VideoSegment
-                                start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
-                                end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
-                                
-                                video_segment = VideoSegment(
-                                    start_frame_id=start_frame,
-                                    end_frame_id=end_frame,
-                                    class_id=chapter.get('class_id'),  # Preserve class_id for corruption recovery
-                                    class_name=chapter.get('name', 'Unknown'),
-                                    segment_type="SexAct",
-                                    position_short_name=chapter.get('position_short', chapter.get('name', '')),
-                                    position_long_name=chapter.get('position_long', chapter.get('description', chapter.get('name', 'Unknown'))),
-                                    source="stage2_funscript"
-                                )
-                                fs_proc.video_chapters.append(video_segment)
-                            self.logger.info(f"Extracted {len(funscript_obj.chapters)} chapters from funscript object")
-                        else:
-                            # Fallback to legacy video_segments_data for backwards compatibility
-                            video_segments_data = results_dict.get("video_segments", [])
-                            if isinstance(video_segments_data, list):
-                                for seg_data in video_segments_data:
-                                    if isinstance(seg_data, dict):
-                                        fs_proc.video_chapters.append(VideoSegment.from_dict(seg_data))
-                                self.logger.info(f"Extracted {len(video_segments_data)} chapters from legacy video_segments_data")
-                    else:
-                        self.app.logger.info("Preserving existing chapters. Stage 2 funscript generated without altering chapters.")
+                    # For Stage 2 results, always update chapters with the new analysis results
+                    # This is the primary output of Stage 2 analysis
+                    #should_update_chapters = True
 
                     # Process the funscript object or fall back to raw actions
                     if funscript_obj:
@@ -1935,15 +1908,36 @@ class AppStageProcessor:
                         primary_actions = funscript_obj.primary_actions
                         secondary_actions = funscript_obj.secondary_actions
                         
-                        # Set chapters from funscript if available
+                    #if should_update_chapters:
+                        self.logger.info("Updating chapters with Stage 2 analysis results.")
+                        fs_proc.video_chapters.clear()
+                        
+                        # Extract chapters from the funscript object instead of separate video_segments_data
                         if hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
-                            # Use the standardized sync method
-                            fs_proc._sync_chapters_from_funscript()
-                            self.app.logger.info(f"Updated chapters from funscript: {len(funscript_obj.chapters)} chapters")
+                            fps = self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0
+                            # Clear existing chapters and add new ones from Stage 3 funscript
+                            fs_proc.video_chapters.clear()
+                            for chapter in funscript_obj.chapters:
+                                start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
+                                end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
+                                
+                                video_segment = VideoSegment(
+                                    start_frame_id=start_frame,
+                                    end_frame_id=end_frame,
+                                    class_id=None,
+                                    class_name=chapter.get('name', 'Unknown'),
+                                    segment_type="SexAct",
+                                    position_short_name=chapter.get('name', ''),
+                                    position_long_name=chapter.get('description', chapter.get('name', 'Unknown')),
+                                    source="stage3_funscript"
+                                )
+                                fs_proc.video_chapters.append(video_segment)
+                            self.logger.info(f"Updated {len(funscript_obj.chapters)} chapters from Stage 2 funscript")
                     else:
-                        # Fall back to raw actions for backward compatibility
-                        primary_actions = results_dict.get("primary_actions", [])
-                        secondary_actions = results_dict.get("secondary_actions", [])
+                        # No funscript object available - initialize with empty actions
+                        primary_actions = []
+                        secondary_actions = []
+                        self.app.logger.warning("No funscript object available from Stage 2 - using empty action lists")
 
                     # Get the application's current axis settings
                     axis_mode = self.app.tracking_axis_mode

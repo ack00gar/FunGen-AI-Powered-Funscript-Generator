@@ -20,7 +20,7 @@ from application.logic.app_logic import ApplicationLogic
 from application.logic.app_stage_processor import AppStageProcessor
 from application.classes.settings_manager import AppSettings
 from application.utils.video_segment import VideoSegment
-from detection.cd.stage_2_cd import FrameObject, ATRLockedPenisState
+from detection.cd.data_structures import FrameObject, ATRLockedPenisState
 from detection.cd.stage_3_mixed_processor import MixedStageProcessor
 from config.constants import TrackerMode
 

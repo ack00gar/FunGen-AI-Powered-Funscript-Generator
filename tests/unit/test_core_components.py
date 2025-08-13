@@ -326,13 +326,9 @@ class TestErrorHandling:
             logger=logger
         )
         
-        # Test with None frame - should not crash
-        try:
+        # Test with None frame - should raise AttributeError
+        with pytest.raises(AttributeError):
             processed = tracker.preprocess_frame(None)
-            # Should return None or handle gracefully
-            assert processed is None or isinstance(processed, np.ndarray)
-        except Exception:
-            pytest.fail("preprocess_frame should handle None input gracefully")
     
     def test_empty_funscript_operations(self):
         """Test operations on empty funscript."""

@@ -3295,27 +3295,28 @@ class InteractiveFunscriptTimeline:
             if imgui.is_mouse_released(glfw.MOUSE_BUTTON_LEFT) and self.is_marqueeing:
                 self.is_marqueeing = False
                 if self.marquee_start_screen_pos and self.marquee_end_screen_pos and actions_list:
-                    # 1. Convert screen-space rect to data-space
-                    (min_x, max_x), (min_y, max_y) = (
-                        (func(self.marquee_start_screen_pos[i], self.marquee_end_screen_pos[i]) for func in (min, max))
-                        for i in (0, 1)
-                    )
+                    # 1. Get marquee rectangle in screen coordinates
+                    min_x, max_x = min(self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0]), max(
+                        self.marquee_start_screen_pos[0], self.marquee_end_screen_pos[0])
+                    min_y, max_y = min(self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1]), max(
+                        self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1])
 
+                    # 2. Find potential points in the time range to optimize
                     time_start_ms = x_to_time(min_x)
                     time_end_ms = x_to_time(max_x)
-                    pos_max_val = y_to_pos(min_y)  # Y axis is inverted
-                    pos_min_val = y_to_pos(max_y)
-
-                    # 2. Get all timestamps and use bisect to find the small slice in the time range
                     action_times = [a['at'] for a in actions_list]
                     s_idx_time = bisect_left(action_times, time_start_ms)
                     e_idx_time = bisect_right(action_times, time_end_ms)
 
                     newly_selected = set()
-                    # 3. Iterate ONLY over the much smaller, time-culled slice
+                    # 3. Iterate over the time-culled slice and check screen coordinates
                     for i in range(s_idx_time, e_idx_time):
                         action = actions_list[i]
-                        if pos_min_val <= action['pos'] <= pos_max_val:
+                        # Convert point to screen space to check against marquee
+                        px = time_to_x(action['at'])
+                        py = pos_to_y(action['pos'])
+
+                        if min_x <= px <= max_x and min_y <= py <= max_y:
                             newly_selected.add(i)
 
                     # 4. Update selection state
