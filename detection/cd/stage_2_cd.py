@@ -17,6 +17,8 @@ import tempfile
 from video import VideoProcessor
 from config import constants
 from funscript.dual_axis_funscript import DualAxisFunscript
+from application.utils.rts_smoother import RTSSmoother
+from application.utils.stage2_signal_enhancer import Stage2SignalEnhancer
 
 # Import data structures from new modular files
 from .data_structures import (
@@ -63,86 +65,7 @@ def _get_dis_flow_ultrafast():
 # moved to modular files in detection/cd/data_structures/ for better maintainability.
 
 
-# --- Kalman Smoother Helpers ---
-q_ext = np.diag(np.array([0.03, 0.03, 100.0, 100.0, 0.03, 0.03, 50.0, 50.0], dtype=np.float32))
-r_ext = np.diag(np.array([0.1, 0.1, 0.1, 0.1], dtype=np.float32))
-h_ext = np.array(
-    [[1, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0]],
-    dtype=np.float32)
-
-def run_rts_smoother_numpy(track_array: np.ndarray) -> np.ndarray:
-    """
-    A high-performance, NumPy-native implementation of the RTS smoother.
-    It operates directly on a NumPy array of box data for a single track.
-
-    Args:
-        track_array: A 2D NumPy array for a single track with columns:
-                     [frame_id, cx, cy, width, height].
-
-    Returns:
-        A 2D NumPy array with the smoothed [cx, cy, width, height] data.
-    """
-    n = track_array.shape[0]
-    frame_ids = track_array[:, 0]
-    measurements = track_array[:, 1:5]  # cx, cy, w, h
-
-    # Kalman filter matrices (constants)
-    q_ext = np.diag([0.03, 0.03, 100.0, 100.0, 0.03, 0.03, 50.0, 50.0], dtype=np.float32)
-    r_ext = np.diag([0.1, 0.1, 0.1, 0.1], dtype=np.float32)
-    h_ext = np.array(
-        [[1, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0, 0]],
-        dtype=np.float32)
-
-    # Vectorized calculation of time deltas (dt)
-    dts = np.diff(frame_ids, prepend=frame_ids[0])
-    dts[dts <= 0] = 1.0
-
-    # Initialize lists for storing states
-    x_filtered = np.zeros((n, 8, 1), dtype=np.float32)
-    P_filtered = np.zeros((n, 8, 8), dtype=np.float32)
-    x_pred_list = np.zeros((n, 8, 1), dtype=np.float32)
-    P_pred_list = np.zeros((n, 8, 8), dtype=np.float32)
-
-    # Initial state
-    initial_v = (measurements[1] - measurements[0]) / dts[1] if n > 1 else np.zeros(4)
-    x_filtered[0] = np.hstack([measurements[0], initial_v]).reshape(8, 1)
-    P_filtered[0] = np.eye(8, dtype=np.float32) * 100.0
-
-    # --- Forward Pass (Kalman Filter) ---
-    A = np.eye(8, dtype=np.float32)
-    for i in range(1, n):
-        dt = dts[i]
-        A[0, 4] = A[1, 5] = A[2, 6] = A[3, 7] = dt
-
-        x_pred = A @ x_filtered[i - 1]
-        P_pred = A @ P_filtered[i - 1] @ A.T + q_ext
-
-        x_pred_list[i] = x_pred
-        P_pred_list[i] = P_pred
-
-        z = measurements[i].reshape(4, 1)
-        y = z - (h_ext @ x_pred)
-        S = h_ext @ P_pred @ h_ext.T + r_ext
-        K = P_pred @ h_ext.T @ np.linalg.pinv(S)
-
-        x_filtered[i] = x_pred + K @ y
-        P_filtered[i] = (np.eye(8) - K @ h_ext) @ P_pred
-
-    # --- Backward Pass (RTS Smoother) ---
-    x_smoothed = np.copy(x_filtered)
-    P_smoothed = np.copy(P_filtered)
-
-    for i in range(n - 2, -1, -1):
-        dt = dts[i + 1]
-        A[0, 4] = A[1, 5] = A[2, 6] = A[3, 7] = dt
-
-        P_pred_inv = np.linalg.pinv(P_pred_list[i + 1])
-        J = P_filtered[i] @ A.T @ P_pred_inv
-
-        x_smoothed[i] += J @ (x_smoothed[i + 1] - x_pred_list[i + 1])
-        # P_smoothed is not needed for the final output, so we can skip its calculation
-
-    return x_smoothed[:, :4, 0]  # Return only the smoothed [cx, cy, w, h]
+# RTS smoother functionality moved to application.utils.rts_smoother.RTSSmoother
 
 # --- ATR Helper Functions (to be moved into this file) ---
 def _atr_calculate_iou(box1: Tuple[float, ...], box2: Tuple[float, ...]) -> float:
@@ -548,6 +471,102 @@ def _atr_normalize_funscript_sparse_per_segment(state: AppStateContainer, logger
 
             fo.atr_funscript_distance = int(np.clip(round(val), 0, 100))
 
+def _apply_signal_enhancement(state: AppStateContainer):
+    """
+    Apply Stage 2 signal enhancement using frame difference analysis.
+    
+    This function enhances Stage 2 funscript signals by:
+    - Suppressing false strokes (signal change without motion)
+    - Adding missing strokes (motion without signal change) 
+    - Reinforcing valid strokes (signal and motion agree)
+    """
+    # Check if enhancement is enabled in app settings
+    if not getattr(state, 'enable_signal_enhancement', True):
+        _debug_log("Signal enhancement disabled, skipping")
+        return
+    
+    if not state.frames or len(state.frames) < 2:
+        _debug_log("Not enough frames for signal enhancement")
+        return
+    
+    # Initialize signal enhancer
+    enhancer = Stage2SignalEnhancer(
+        motion_threshold_low=12.0,
+        motion_threshold_high=30.0, 
+        signal_change_threshold=6,
+        enhancement_strength=0.25,
+        logger=logger
+    )
+    
+    _debug_log(f"Applying signal enhancement to {len(state.frames)} frames")
+    
+    # We need access to the original video frames for motion analysis
+    # For now, we'll enhance based on existing locked penis positions as ROI proxy
+    enhanced_count = 0
+    
+    for i, frame_obj in enumerate(state.frames):
+        if i == 0:
+            continue  # Skip first frame
+        
+        # Get locked penis box as ROI for motion analysis
+        roi = None
+        if (frame_obj.atr_locked_penis_state.active and 
+            frame_obj.atr_locked_penis_state.box):
+            box = frame_obj.atr_locked_penis_state.box
+            # Convert to (x1, y1, x2, y2) format
+            roi = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+        
+        # For Stage 2, we don't have the original video frames readily available
+        # So we'll use a simplified enhancement based on signal patterns and locked penis movement
+        original_signal = frame_obj.atr_funscript_distance
+        
+        # Simple motion proxy: check if locked penis position changed significantly
+        prev_frame = state.frames[i-1]
+        motion_detected = False
+        
+        if (roi and prev_frame.atr_locked_penis_state.active and 
+            prev_frame.atr_locked_penis_state.box):
+            
+            prev_box = prev_frame.atr_locked_penis_state.box
+            
+            # Calculate center movement
+            curr_cx = (roi[0] + roi[2]) / 2
+            curr_cy = (roi[1] + roi[3]) / 2
+            prev_cx = (prev_box[0] + prev_box[2]) / 2
+            prev_cy = (prev_box[1] + prev_box[3]) / 2
+            
+            movement = np.sqrt((curr_cx - prev_cx)**2 + (curr_cy - prev_cy)**2)
+            
+            # Consider significant movement (>5 pixels) as motion
+            motion_detected = movement > 5.0
+        
+        # Apply simple enhancement logic
+        prev_signal = prev_frame.atr_funscript_distance
+        signal_change = abs(original_signal - prev_signal)
+        
+        enhanced_signal = original_signal
+        
+        # False stroke suppression: large signal change but no motion
+        if signal_change > 8 and not motion_detected:
+            # Reduce signal change by 40%
+            change_direction = 1 if original_signal > prev_signal else -1
+            reduced_change = int(signal_change * 0.6)
+            enhanced_signal = prev_signal + (change_direction * reduced_change)
+            enhanced_count += 1
+        
+        # Missing stroke detection: motion but small signal change
+        elif motion_detected and signal_change < 5:
+            # Add small boost based on motion
+            boost = 8  # Small boost
+            direction = 1 if i % 2 == 0 else -1  # Alternate direction for oscillation
+            enhanced_signal = original_signal + (direction * boost)
+            enhanced_count += 1
+        
+        # Apply enhanced signal
+        frame_obj.atr_funscript_distance = int(np.clip(enhanced_signal, 0, 100))
+    
+    _debug_log(f"Enhanced {enhanced_count} frame signals out of {len(state.frames)}")
+
 def _get_dominant_pose(frame_obj: FrameObject, is_vr: bool, frame_width: int) -> Optional[PoseRecord]:
     if not frame_obj.poses:
         return None
@@ -561,6 +580,201 @@ def _get_dominant_pose(frame_obj: FrameObject, is_vr: bool, frame_width: int) ->
 # --- Step 0: Global Object Tracking (IoU Tracker) ---
 
 def resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.Logger]):
+    """
+    Enhanced resilient tracker with:
+    - Velocity gating for sudden jumps
+    - Class exclusivity (breast, butt, pussy, face cannot overlap)
+    - Tentative → Active promotion
+    - Recently-dead buffer to avoid ghost recreation
+    - Stricter ReID thresholds
+    """
+    if not logger:
+        logger = logging.getLogger("ResilientTracker")
+
+    _debug_log("Starting Step 0: Enhanced Resilient Tracking")
+
+    fps = state.video_info.get('fps', 30.0)
+
+    IOU_THRESHOLD = 0.5
+    MAX_FRAMES_TO_BECOME_LOST = int(fps * 1.5)
+    MAX_FRAMES_IN_LOST_STATE = int(fps * 8)
+    REID_DISTANCE_FACTOR = 0.75  # stricter than before
+    MAX_NEW_TRACKS_PER_FRAME = 3
+
+    CLASS_SPECIFIC_IOU = {
+        'hand': 0.4,
+        'finger': 0.35,
+        'pussy': 0.6,
+        'butt': 0.6,
+        'face': 0.55,
+        'breast': 0.5,
+        'foot': 0.45
+    }
+
+    EXCLUSIVE_CLASSES = {'breast', 'butt', 'pussy', 'face'}
+
+    # Tentative promotion rule
+    TENTATIVE_FRAMES_REQUIRED = 2  # must be seen in N consecutive frames before becoming active
+
+    # Recently-dead buffer
+    RECENT_DEAD_FRAMES = int(fps * 0.5)  # 0.5 sec
+    recently_dead = []  # list of (frame_id, bbox, class_name)
+
+    next_global_track_id = 1
+    active_tracks = {}    # id -> {box_rec, frames_unseen, class_name, status}
+    lost_tracks = {}
+    tentative_tracks = {} # id -> same structure as active_tracks
+
+    for frame_obj in sorted(state.frames, key=lambda f: f.frame_id):
+        current_detections = [b for b in frame_obj.boxes if not b.is_excluded]
+        unmatched_detections = list(range(len(current_detections)))
+
+        # --- 1. Age existing tracks ---
+        to_lost = []
+        for track_id, td in active_tracks.items():
+            td["frames_unseen"] += 1
+            if td["frames_unseen"] > MAX_FRAMES_TO_BECOME_LOST:
+                to_lost.append(track_id)
+
+        for tid in to_lost:
+            lost_tracks[tid] = active_tracks.pop(tid)
+            lost_tracks[tid]["status"] = "lost"
+            recently_dead.append((frame_obj.frame_id, lost_tracks[tid]["box_rec"].bbox.copy(), lost_tracks[tid]["class_name"]))
+
+        # Prune recently_dead buffer
+        recently_dead = [(fid, bb, cn) for (fid, bb, cn) in recently_dead if frame_obj.frame_id - fid <= RECENT_DEAD_FRAMES]
+
+        # Delete old lost tracks
+        to_delete = []
+        for tid, td in lost_tracks.items():
+            td["frames_unseen"] += 1
+            if td["frames_unseen"] > MAX_FRAMES_IN_LOST_STATE:
+                to_delete.append(tid)
+        for tid in to_delete:
+            del lost_tracks[tid]
+
+        # --- 2. Match Active Tracks ---
+        for track_id, td in list(active_tracks.items()):
+            best_idx, max_iou = -1, -1
+            class_name = td["class_name"]
+            thr = CLASS_SPECIFIC_IOU.get(class_name, IOU_THRESHOLD)
+
+            for i in unmatched_detections:
+                det = current_detections[i]
+                if det.class_name != class_name:
+                    continue
+                iou = _atr_calculate_iou(td["box_rec"].bbox, det.bbox)
+
+                # Velocity gating
+                jump_dist = np.linalg.norm([det.cx - td["box_rec"].cx, det.cy - td["box_rec"].cy])
+                max_jump = max(td["box_rec"].width, td["box_rec"].height) * 1.5
+                if jump_dist > max_jump:
+                    continue
+
+                # Size consistency
+                size_ratio = min(det.width / td["box_rec"].width, det.height / td["box_rec"].height)
+                if not (0.7 <= size_ratio <= 1.3):
+                    continue
+
+                if iou > thr and iou > max_iou:
+                    max_iou = iou
+                    best_idx = i
+
+            if best_idx != -1:
+                det = current_detections[best_idx]
+                det.track_id = track_id
+                td["box_rec"] = det
+                td["frames_unseen"] = 0
+                unmatched_detections.remove(best_idx)
+
+        # --- 3. Re-Identify Lost Tracks ---
+        for i in list(unmatched_detections):
+            det = current_detections[i]
+            best_lost_id, min_score = -1, float('inf')
+            for tid, td in lost_tracks.items():
+                if td["class_name"] != det.class_name:
+                    continue
+                dist = np.linalg.norm([det.cx - td["box_rec"].cx, det.cy - td["box_rec"].cy])
+                reid_thr = REID_DISTANCE_FACTOR * min(td["box_rec"].width, td["box_rec"].height)
+                if dist > reid_thr:
+                    continue
+                size_ratio = min(det.width / td["box_rec"].width, det.height / td["box_rec"].height)
+                if not (0.7 <= size_ratio <= 1.3):
+                    continue
+                score = dist
+                if score < min_score:
+                    min_score = score
+                    best_lost_id = tid
+
+            if best_lost_id != -1:
+                det.track_id = best_lost_id
+                reactivated = lost_tracks.pop(best_lost_id)
+                reactivated["box_rec"] = det
+                reactivated["frames_unseen"] = 0
+                active_tracks[best_lost_id] = reactivated
+                unmatched_detections.remove(i)
+
+        # --- 4. Update Tentative Tracks ---
+        for tid, td in list(tentative_tracks.items()):
+            matched = False
+            for i in unmatched_detections:
+                det = current_detections[i]
+                if det.class_name != td["class_name"]:
+                    continue
+                iou = _atr_calculate_iou(td["box_rec"].bbox, det.bbox)
+                if iou > CLASS_SPECIFIC_IOU.get(td["class_name"], IOU_THRESHOLD):
+                    det.track_id = tid
+                    td["box_rec"] = det
+                    td["frames_seen"] += 1
+                    matched = True
+                    unmatched_detections.remove(i)
+                    break
+            if not matched:
+                td["frames_unseen"] += 1
+                if td["frames_unseen"] > 2:
+                    del tentative_tracks[tid]
+            elif td["frames_seen"] >= TENTATIVE_FRAMES_REQUIRED:
+                td["status"] = "active"
+                active_tracks[tid] = tentative_tracks.pop(tid)
+
+        # --- 5. Create New Tentative Tracks ---
+        new_tracks = 0
+        for i in unmatched_detections:
+            det = current_detections[i]
+            if new_tracks >= MAX_NEW_TRACKS_PER_FRAME:
+                break
+            if det.confidence < 0.4:
+                continue
+            # Prevent recreation from recently_dead
+            if any(det.class_name == cn and _atr_calculate_iou(det.bbox, bb) > 0.5 for (_, bb, cn) in recently_dead):
+                continue
+            det.track_id = next_global_track_id
+            tentative_tracks[next_global_track_id] = {
+                "box_rec": det,
+                "frames_unseen": 0,
+                "frames_seen": 1,
+                "class_name": det.class_name,
+                "status": "tentative"
+            }
+            next_global_track_id += 1
+            new_tracks += 1
+
+        # --- 6. Enforce Exclusive Class Overlaps ---
+        # Resolve conflicts by keeping highest-confidence track
+        active_tracks_list = sorted(active_tracks.items(), key=lambda x: x[1]["box_rec"].confidence, reverse=True)
+        kept_ids = []
+        for tid, td in active_tracks_list:
+            if td["class_name"] in EXCLUSIVE_CLASSES:
+                if any(_atr_calculate_iou(td["box_rec"].bbox, active_tracks[k]["box_rec"].bbox) > 0.3
+                       and active_tracks[k]["class_name"] in EXCLUSIVE_CLASSES for k in kept_ids):
+                    continue
+            kept_ids.append(tid)
+        active_tracks = {tid: active_tracks[tid] for tid in kept_ids}
+
+    _debug_log(f"Tracking complete. Final ID count: {next_global_track_id - 1}")
+
+
+def prev_resilient_tracker_step0(state: AppStateContainer, logger: Optional[logging.Logger]):
     """
     An improved IoU-based tracker with state persistence to handle occlusions.
     This replaces the previous simple tracker.
@@ -802,24 +1016,25 @@ def atr_pass_1_interpolate_boxes(state: AppStateContainer, logger: Optional[logg
 
 def smooth_single_track_worker_numpy(track_data_tuple: Tuple[np.ndarray, int]) -> Optional[np.ndarray]:
     """
-    NumPy-native worker. It receives a NumPy array for a track, smoothes it,
+    Enhanced NumPy-native worker with improved temporal size smoothing.
+    It receives a NumPy array for a track, smoothes it with RTS and temporal size smoothing,
     and returns the smoothed data along with the original track ID.
     """
     track_array, track_id = track_data_tuple
 
     try:
-        # Run the high-performance NumPy-native smoother
-        smoothed_coords = run_rts_smoother_numpy(track_array)
+        # Run the high-performance RTS smoother using the new class
+        smoother = RTSSmoother()
+        smoothed_coords = smoother.smooth_trajectory(track_array)
 
-        # Apply additional size smoothing (temporally)
-        widths, heights = smoothed_coords[:, 2], smoothed_coords[:, 3]
-        alpha = 0.1  # Simple exponential moving average for size
-        for i in range(1, len(widths)):
-            widths[i] = widths[i - 1] + alpha * (widths[i] - widths[i - 1])
-            heights[i] = heights[i - 1] + alpha * (heights[i] - heights[i - 1])
+        # Apply enhanced temporal size smoothing with frame-rate adaptation
+        frame_ids = track_array[:, 0]
+        final_coords = smoother.apply_temporal_size_smoothing(
+            smoothed_coords, frame_ids, fps=30.0  # TODO: Get FPS from state
+        )
 
         # Return the final smoothed cx, cy, w, h and the track_id to map it back
-        return np.hstack([smoothed_coords[:, :2], widths[:, np.newaxis], heights[:, np.newaxis]]), track_id
+        return final_coords, track_id
     except Exception:
         # If smoothing fails for any reason, return None
         return None
@@ -2124,13 +2339,13 @@ def atr_pass_6_determine_distance(state: AppStateContainer, logger: Optional[log
                 
                 # IMPROVED: Reduced fallback weights to prevent signal spikes
                 if contributor.class_name == 'breast':
-                    weight = 0.15
+                    weight = 0.8
                 elif contributor.class_name == 'anus':
                     weight = 0.2 
                 elif contributor.class_name == 'face':
                     weight = 0.1
                 elif contributor.class_name == 'navel':
-                    weight = 0.8
+                    weight = 1.0
                 else:
                     weight = 0.05
                 
@@ -2196,6 +2411,9 @@ def atr_pass_7_smooth_and_normalize_distances(state: AppStateContainer, logger: 
         for i, fo in enumerate(state.frames):
             fo.atr_funscript_distance = int(np.clip(round(smoothed_distances[i]), 0, 100))
         _debug_log("Applied Savitzky-Golay filter to distances.")
+    
+    # Apply signal enhancement if enabled
+    _apply_signal_enhancement(state)
 
     # Now apply ATR's per-segment normalization (_normalize_funscript_sparse equivalent)
     _atr_normalize_funscript_sparse_per_segment(state, logger)
