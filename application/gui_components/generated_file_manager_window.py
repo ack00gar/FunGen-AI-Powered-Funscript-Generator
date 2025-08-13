@@ -3,7 +3,7 @@ import os
 import logging
 from application.utils import GeneratedFileManager
 
-# TODO: Comprehansive delete options and settings. by date/days old, extension, size, etc.
+# TODO: Comprehensive delete options and settings. by date/days old, extension, size, etc.
 
 class GeneratedFileManagerWindow:
     def __init__(self, app_instance):
@@ -11,18 +11,16 @@ class GeneratedFileManagerWindow:
         self.output_folder = self.app.app_settings.get("output_folder_path", "output")
         self.sort_by = 'name'
         self.file_manager = GeneratedFileManager(self.output_folder, logger=self.app.logger, delete_funscript_files=False)
-        self._refresh_file_tree()
+        self.file_manager._scan_files()
         self.expanded_folders = set()
         self.expand_all = False
         self.force_expand_collapse = False
 
-    def _refresh_file_tree(self):
-        self.file_manager._scan_files()
 
     def render(self):
         """Orchestrates the rendering of the Generated File Manager window UI."""
         app_state = self.app.app_state_ui
-        is_visible, is_open = imgui.begin("Generated File Manager", True)
+        is_open, is_visible = imgui.begin("Generated File Manager", True)
         if not is_open:
             app_state.show_generated_file_manager = False
         if is_visible:
@@ -43,7 +41,7 @@ class GeneratedFileManagerWindow:
         imgui.text(f"Managing files in: {os.path.abspath(self.output_folder)}")
         imgui.text(f"Total Disk Space Used: {self.file_manager.total_size:.2f} MB")
         imgui.separator()
-        if imgui.button("Refresh File List"): self._refresh_file_tree()
+        if imgui.button("Refresh File List"): self.file_manager._scan_files()
         imgui.same_line()
         imgui.text("Sort by:")
         imgui.same_line()
@@ -94,7 +92,7 @@ class GeneratedFileManagerWindow:
                 self.app.set_status_message(f"INFO: {type_name_cap} not fully deleted (may contain .funscript files)", level=logging.INFO)
         else:
             self.app.set_status_message(f"INFO: {type_name_cap} not found or already deleted.", level=logging.INFO)
-        self._refresh_file_tree()
+        self.file_manager._scan_files()
 
     def _render_file_tree(self):
         """Renders the file tree structure for generated files and folders."""
@@ -168,11 +166,13 @@ class GeneratedFileManagerWindow:
             imgui.text("Contents will be moved to the recycle bin.")
             imgui.separator()
             if imgui.button("YES, DELETE EVERYTHING", width=200):
-                if self.file_manager.delete_all():
+                # Respect the user's checkbox for deleting .funscript files
+                include_funscripts = self.file_manager.delete_funscript_files
+                if self.file_manager.delete_all(include_funscript_files=include_funscripts):
                     self.app.set_status_message("SUCCESS: All generated files have been deleted.", level=logging.INFO)
                 else:
                     self.app.set_status_message(f"ERROR deleting all files in {self.output_folder}", level=logging.ERROR)
-                self._refresh_file_tree()
+                self.file_manager._scan_files()
                 imgui.close_current_popup()
             imgui.same_line()
             if imgui.button("Cancel", width=120):

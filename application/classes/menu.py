@@ -639,7 +639,6 @@ class MainMenu:
             for key, label, default in (
                 ("updater_check_on_startup", "Check for Updates on Startup", True),
                 ("updater_check_periodically", "Check Periodically in Background (Hourly)", True),  # noqa: E501
-                ("updater_suppress_popup", "Suppress Update Notification Popup", False),
             ):
                 cur = settings.get(key, default)
                 clicked, new_val = imgui.menu_item(label, selected=cur)
