@@ -221,8 +221,10 @@ class ROITracker:
         self.oscillation_last_known_secondary_pos = 50.0
         self.oscillation_last_active_time = 0
         self.oscillation_hold_duration_ms = 200  # Hold for 200ms before decaying
-        self.oscillation_ema_alpha: float = 0.5  # Smoothing factor for the final signal
+        self.oscillation_ema_alpha: float = 0.3  # Smoothing factor for the final signal (c9e6fbd original)
         self.oscillation_history_max_len: int = 60
+        self.oscillation_funscript_pos: int = 50  # Initialize legacy funscript positions
+        self.oscillation_funscript_secondary_pos: int = 50
 
         # --- Oscillation sensitivity control ---
         self.oscillation_sensitivity: float = self.app.app_settings.get("oscillation_detector_sensitivity", 1.0) if self.app else 1.0
@@ -489,7 +491,7 @@ class ROITracker:
         return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
 
     def set_tracking_mode(self, mode: str):
-        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR"]:
+        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY"]:
             if self.tracking_mode != mode:
                 previous_mode = self.tracking_mode
                 # Before switching, update caches from current state
@@ -665,7 +667,7 @@ class ROITracker:
         if hasattr(self, 'oscillation_active_block_positions') and self.oscillation_active_block_positions is not None:
             self.oscillation_active_block_positions.clear()
 
-        # Update cache for OSCILLATION_DETECTOR mode
+        # Update cache for OSCILLATION_DETECTOR and OSCILLATION_DETECTOR_LEGACY modes
         self._cache_oscillation['area'] = self.oscillation_area_fixed
         self._cache_oscillation['initial_rel'] = self.oscillation_area_initial_point_relative
         self._cache_oscillation['tracked_rel'] = self.oscillation_area_tracked_point_relative
@@ -750,7 +752,7 @@ class ROITracker:
                 self.prev_gray_user_roi_patch = None
                 self.primary_flow_history_smooth.clear()
                 self.secondary_flow_history_smooth.clear()
-        elif self.tracking_mode == "OSCILLATION_DETECTOR":
+        elif self.tracking_mode in ["OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY"]:
             cached_area = self._cache_oscillation.get('area')
             if cached_area:
                 self.oscillation_area_fixed = cached_area
@@ -1132,6 +1134,8 @@ class ROITracker:
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None, min_write_frame_id: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
         if self.tracking_mode == "OSCILLATION_DETECTOR":
             return self.process_frame_for_oscillation(frame, frame_time_ms, frame_index)
+        elif self.tracking_mode == "OSCILLATION_DETECTOR_LEGACY":
+            return self.process_frame_for_oscillation_legacy(frame, frame_time_ms, frame_index)
 
         self._update_fps()
         processed_frame = self.preprocess_frame(frame)
@@ -1467,7 +1471,7 @@ class ROITracker:
 
         # Check and report video source status when tracking starts
         self._check_and_report_video_source_status()
-        if self.tracking_mode == "OSCILLATION_DETECTOR":
+        if self.tracking_mode in ["OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY"]:
             # Update grid size and sensitivity from settings before starting
             self.update_oscillation_grid_size()
             self.update_oscillation_sensitivity()
@@ -1888,31 +1892,57 @@ class ROITracker:
 
         # If no blocks are active, final_dy and final_dx remain 0.0, and the position holds.
 
-        # --- The downstream dynamic scaling and integration logic remains the same ---
-        # It now operates on the intelligently selected final_dy and final_dx.
+        # --- Enhanced signal processing with legacy improvements ---
+        # Check for simple amplification mode setting
+        use_simple_amplification = getattr(self.app.app_settings, 'get', lambda k, d: d)('oscillation_use_simple_amplification', False) if self.app else False
+        enable_decay = getattr(self.app.app_settings, 'get', lambda k, d: d)('oscillation_enable_decay', True) if self.app else True
+        
         if abs(final_dy) > 0.01 or abs(final_dx) > 0.01:
-            base_sensitivity_scaler = 2.5  # 1.5
-            intensity_exponent = 0.7
+            # Update last active time for decay mechanism
+            self.oscillation_last_active_time = frame_time_ms
+            
+            if use_simple_amplification:
+                # Legacy-style simple amplification
+                max_deviation = 49 * self.oscillation_sensitivity
+                new_raw_primary_pos = 50 + np.clip(final_dy * -10, -max_deviation, max_deviation)
+                new_raw_secondary_pos = 50 + np.clip(final_dx * 10, -max_deviation, max_deviation)
+                
+                # Apply EMA smoothing
+                alpha = self.oscillation_ema_alpha
+                self.oscillation_last_known_pos = self.oscillation_last_known_pos * (1 - alpha) + new_raw_primary_pos * alpha
+                self.oscillation_last_known_secondary_pos = self.oscillation_last_known_secondary_pos * (1 - alpha) + new_raw_secondary_pos * alpha
+            else:
+                # Current dynamic scaling approach
+                base_sensitivity_scaler = 2.5  # 1.5
+                intensity_exponent = 0.7
 
-            dynamic_scaler_y = base_sensitivity_scaler * (abs(final_dy) ** intensity_exponent) if abs(final_dy) > 0.1 else base_sensitivity_scaler
-            dynamic_scaler_x = base_sensitivity_scaler * (abs(final_dx) ** intensity_exponent) if abs(final_dx) > 0.1 else base_sensitivity_scaler
+                dynamic_scaler_y = base_sensitivity_scaler * (abs(final_dy) ** intensity_exponent) if abs(final_dy) > 0.1 else base_sensitivity_scaler
+                dynamic_scaler_x = base_sensitivity_scaler * (abs(final_dx) ** intensity_exponent) if abs(final_dx) > 0.1 else base_sensitivity_scaler
 
-            primary_pos_change = -final_dy * dynamic_scaler_y
-            secondary_pos_change = final_dx * dynamic_scaler_x
+                primary_pos_change = -final_dy * dynamic_scaler_y
+                secondary_pos_change = final_dx * dynamic_scaler_x
 
-            new_primary_pos = self.oscillation_last_known_pos + primary_pos_change
-            new_secondary_pos = self.oscillation_last_known_secondary_pos + secondary_pos_change
+                new_primary_pos = self.oscillation_last_known_pos + primary_pos_change
+                new_secondary_pos = self.oscillation_last_known_secondary_pos + secondary_pos_change
 
-            alpha = self.oscillation_ema_alpha
-            self.oscillation_last_known_pos = (self.oscillation_last_known_pos * (1 - alpha)) + (new_primary_pos * alpha)
-            self.oscillation_last_known_secondary_pos = (self.oscillation_last_known_secondary_pos * (1 - alpha)) + (new_secondary_pos * alpha)
-
+                alpha = self.oscillation_ema_alpha
+                self.oscillation_last_known_pos = (self.oscillation_last_known_pos * (1 - alpha)) + (new_primary_pos * alpha)
+                self.oscillation_last_known_secondary_pos = (self.oscillation_last_known_secondary_pos * (1 - alpha)) + (new_secondary_pos * alpha)
+            
+            # Clip to valid range
             self.oscillation_last_known_pos = np.clip(self.oscillation_last_known_pos, 0, 100)
             self.oscillation_last_known_secondary_pos = np.clip(self.oscillation_last_known_secondary_pos, 0, 100)
-
-        # If active_blocks is empty, no code runs here.
-        # self.oscillation_last_known_pos simply retains its value from the previous frame.
-        # This correctly HOLDS the position when motion stops.
+        
+        elif enable_decay:
+            # Legacy-style decay mechanism when no motion is detected
+            hold_duration_ms = getattr(self.app.app_settings, 'get', lambda k, d: d)('oscillation_hold_duration_ms', 250) if self.app else 250
+            decay_factor = getattr(self.app.app_settings, 'get', lambda k, d: d)('oscillation_decay_factor', 0.95) if self.app else 0.95
+            
+            time_since_last_active = frame_time_ms - self.oscillation_last_active_time
+            if time_since_last_active > hold_duration_ms:
+                # Decay towards center after hold duration expires
+                self.oscillation_last_known_pos = self.oscillation_last_known_pos * decay_factor + 50 * (1 - decay_factor)
+                self.oscillation_last_known_secondary_pos = self.oscillation_last_known_secondary_pos * decay_factor + 50 * (1 - decay_factor)
 
         # The final funscript position is now based on the smoothed value
         self.oscillation_funscript_pos = int(round(self.oscillation_last_known_pos))
@@ -1971,6 +2001,195 @@ class ROITracker:
                         f"fps={self.current_fps:.1f}")
             except Exception:
                 pass
+        return processed_frame, action_log_list if action_log_list else None
+
+    def process_frame_for_oscillation_legacy(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> \
+    Tuple[np.ndarray, Optional[List[Dict]]]:
+        """
+        [V3] Legacy oscillation detector from commit c9e6fbd. Processes a frame to detect rhythmic oscillations. 
+        Culls black bars, uses a configurable grid, and employs cohesion, frequency weighting, and EMA smoothing 
+        for a natural signal with live dynamic amplification.
+        """
+        processed_frame = self.preprocess_frame(frame)
+        current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
+        action_log_list = []
+
+        if self.prev_gray_oscillation is None or self.prev_gray_oscillation.shape != current_gray.shape:
+            self.prev_gray_oscillation = current_gray
+            return processed_frame, None
+
+        if not self.flow_dense:
+            self.logger.warning("Dense optical flow not available for oscillation detection.")
+            return processed_frame, None
+
+        # --- Detect active video area to ignore black bars ---
+        active_area_rect = (0, 0, processed_frame.shape[1], processed_frame.shape[0])
+        if np.any(current_gray):
+            rows = np.any(current_gray, axis=1)
+            cols = np.any(current_gray, axis=0)
+            if np.any(rows) and np.any(cols):
+                y_min, y_max = np.where(rows)[0][[0, -1]]
+                x_min, x_max = np.where(cols)[0][[0, -1]]
+                active_area_rect = (x_min, y_min, x_max, y_max)
+
+        prev_gray_cont = np.ascontiguousarray(self.prev_gray_oscillation)
+        current_gray_cont = np.ascontiguousarray(current_gray)
+        flow = self.flow_dense.calc(prev_gray_cont, current_gray_cont, None)
+
+        if flow is None:
+            self.prev_gray_oscillation = current_gray
+            return processed_frame, None
+
+        # Analyze flow in grid blocks
+        block_motions = []
+        ax_min, ay_min, ax_max, ay_max = active_area_rect
+        for r in range(self.oscillation_grid_size):
+            for c in range(self.oscillation_grid_size):
+                y_start, x_start = r * self.oscillation_block_size, c * self.oscillation_block_size
+
+                # --- Skip blocks in black bar areas ---
+                block_center_x = x_start + self.oscillation_block_size / 2
+                block_center_y = y_start + self.oscillation_block_size / 2
+
+                if not (ax_min < block_center_x < ax_max and ay_min < block_center_y < ay_max):
+                    continue  # Skip blocks in padded areas
+
+                block_flow = flow[y_start:y_start + self.oscillation_block_size,
+                             x_start:x_start + self.oscillation_block_size]
+
+                if block_flow.size > 0:
+                    dx, dy = np.median(block_flow[..., 0]), np.median(block_flow[..., 1])
+                    mag = np.sqrt(dx ** 2 + dy ** 2)
+                    block_motions.append({'dx': dx, 'dy': dy, 'mag': mag, 'pos': (r, c)})
+
+                    block_pos = (r, c)
+                    if block_pos not in self.oscillation_history:
+                        self.oscillation_history[block_pos] = deque(maxlen=self.oscillation_history_max_len)
+                    self.oscillation_history[block_pos].append({'dx': dx, 'dy': dy, 'mag': mag})
+
+        is_camera_motion = False
+        median_dx, median_dy = (np.median([m['dx'] for m in block_motions]),
+                                np.median([m['dy'] for m in block_motions])) if block_motions else (0, 0)
+        if np.sqrt(median_dx ** 2 + median_dy ** 2) > 1.0:
+            coherent_blocks = 0
+            vec_median = np.array([median_dx, median_dy])
+            for motion in block_motions:
+                vec_block = np.array([motion['dx'], motion['dy']])
+                if np.linalg.norm(vec_block) > 0.5:
+                    cosine_sim = np.dot(vec_block, vec_median) / (np.linalg.norm(vec_block) * np.linalg.norm(vec_median) + 1e-6)
+                    if cosine_sim > 0.8:
+                        coherent_blocks += 1
+            if block_motions and (coherent_blocks / len(block_motions)) > 0.85:
+                is_camera_motion = True
+
+        active_blocks = []
+        if not is_camera_motion:
+            # --- Cohesion Analysis to find natural motion clusters ---
+            candidate_blocks = []
+            for pos, history in self.oscillation_history.items():
+                if len(history) < self.oscillation_history_max_len * 0.8: continue  # c9e6fbd original: 80%
+                mags, dys, dxs = [h['mag'] for h in history], [h['dy'] for h in history], [h['dx'] for h in history]
+                mean_mag, std_dev_dy = np.mean(mags), np.std(dys)
+                if mean_mag < 0.5 or (mean_mag > 0 and std_dev_dy / mean_mag < 0.5):  # c9e6fbd original thresholds
+                    continue  # --- Filter non-oscillating motion
+
+                smoothed_dys = np.convolve(dys, np.ones(5) / 5, mode='valid')
+                if len(smoothed_dys) < 2: continue
+                freq = (len(np.where(np.diff(np.sign(smoothed_dys)))[0]) / 2) / self.oscillation_history_seconds
+
+                # --- Adaptive Frequency Weighting (bell curve centered at 2.5Hz) ---
+                if 0.5 <= freq <= 7.0:  # c9e6fbd original frequency range
+                    freq_weight = np.exp(-((freq - 2.5) ** 2) / (2 * (1.5 ** 2)))  # Gaussian weight
+                    score = mean_mag * freq * freq_weight
+                    candidate_blocks.append({'pos': pos, 'score': score, 'dy': history[-1]['dy'], 'dx': history[-1]['dx'], 'mag': history[-1]['mag']})
+
+            if candidate_blocks:
+                candidate_pos = {b['pos'] for b in candidate_blocks}
+                for block in candidate_blocks:
+                    r, c = block['pos']
+                    cohesion_boost = 1.0
+                    for dr in [-1, 0, 1]:
+                        for dc in [-1, 0, 1]:
+                            if dr == 0 and dc == 0: continue
+                            if (r + dr, c + dc) in candidate_pos:
+                                cohesion_boost += 0.2  # Boost score by 20% for each active neighbor
+                    block['score'] *= cohesion_boost
+
+                max_score = max(b['score'] for b in candidate_blocks)
+                active_blocks = [b for b in candidate_blocks if b['score'] > max_score * 0.6]  # c9e6fbd original: 60% threshold
+
+        if active_blocks:
+            total_weight = sum(b['score'] for b in active_blocks)
+            final_dy = sum(b['dy'] * b['score'] for b in active_blocks) / total_weight
+            final_dx = sum(b['dx'] * b['score'] for b in active_blocks) / total_weight  # Add dx calculation
+            final_mag = sum(b['mag'] * b['score'] for b in active_blocks) / total_weight
+
+            amplitude_scaler = np.clip(final_mag / 4.0, 0.7, 1.5)
+            max_deviation = 50 * amplitude_scaler
+            scaled_dy = np.clip(final_dy * -10, -max_deviation, max_deviation)
+            scaled_dx = np.clip(final_dx * 10, -max_deviation, max_deviation)  # Add dx scaling
+            new_raw_primary_pos = np.clip(50 + scaled_dy, 0, 100)
+            new_raw_secondary_pos = np.clip(50 + scaled_dx, 0, 100)  # Add secondary calculation
+        else:
+            new_raw_primary_pos = self.oscillation_last_known_pos * 0.95 + 50 * 0.05
+            new_raw_secondary_pos = self.oscillation_last_known_secondary_pos * 0.95 + 50 * 0.05  # Add secondary decay
+
+        # --- Live Dynamic Amplification Stage ---
+        self.oscillation_position_history.append(new_raw_primary_pos)
+        final_primary_pos = new_raw_primary_pos
+        final_secondary_pos = new_raw_secondary_pos  # No amplification for secondary in c9e6fbd
+
+        if self.live_amp_enabled and len(self.oscillation_position_history) > self.oscillation_position_history.maxlen * 0.5:
+            p10 = np.percentile(self.oscillation_position_history, 10)
+            p90 = np.percentile(self.oscillation_position_history, 90)
+            effective_range = p90 - p10
+
+            if effective_range > 15: # c9e6fbd original amplification threshold
+                normalized_pos = (new_raw_primary_pos - p10) / effective_range
+                final_primary_pos = np.clip(normalized_pos * 100, 0, 100)
+
+        # Apply EMA smoothing to the final calculated positions
+        self.oscillation_last_known_pos = self.oscillation_last_known_pos * (1 - self.oscillation_ema_alpha) + final_primary_pos * self.oscillation_ema_alpha
+        self.oscillation_last_known_secondary_pos = self.oscillation_last_known_secondary_pos * (1 - self.oscillation_ema_alpha) + final_secondary_pos * self.oscillation_ema_alpha
+        self.oscillation_funscript_pos = int(round(self.oscillation_last_known_pos))
+        self.oscillation_funscript_secondary_pos = int(round(self.oscillation_last_known_secondary_pos))
+
+        if self.tracking_active:
+            # Use the same action logging logic as the current oscillation detector
+            current_tracking_axis_mode = self.app.tracking_axis_mode if self.app else "both"
+            current_single_axis_output = self.app.single_axis_output_target if self.app else "primary"
+            primary_to_write, secondary_to_write = None, None
+
+            if current_tracking_axis_mode == "both":
+                primary_to_write, secondary_to_write = self.oscillation_funscript_pos, self.oscillation_funscript_secondary_pos
+            elif current_tracking_axis_mode == "vertical":
+                if current_single_axis_output == "primary":
+                    primary_to_write = self.oscillation_funscript_pos
+                else:
+                    secondary_to_write = self.oscillation_funscript_pos
+            elif current_tracking_axis_mode == "horizontal":
+                if current_single_axis_output == "primary":
+                    primary_to_write = self.oscillation_funscript_secondary_pos
+                else:
+                    secondary_to_write = self.oscillation_funscript_secondary_pos
+
+            self.funscript.add_action(timestamp_ms=frame_time_ms, primary_pos=primary_to_write, secondary_pos=secondary_to_write)
+            action_log_list.append({"at": frame_time_ms, "pos": primary_to_write, "secondary_pos": secondary_to_write})
+
+        # --- Visualization only for active video area cells ---
+        active_block_positions = {b['pos'] for b in active_blocks}
+        for motion in block_motions:  # Loop through visible blocks only
+            r, c = motion['pos']
+            x1, y1 = c * self.oscillation_block_size, r * self.oscillation_block_size
+            x2, y2 = x1 + self.oscillation_block_size, y1 + self.oscillation_block_size
+            color = (100, 100, 100)
+            if is_camera_motion:
+                color = (0, 165, 255)
+            elif (r, c) in active_block_positions:
+                color = (0, 255, 0)
+            cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 1)
+
+        self.prev_gray_oscillation = current_gray
         return processed_frame, action_log_list if action_log_list else None
 
     def cleanup(self):

@@ -341,6 +341,8 @@ class ApplicationLogic:
                 tracker_mode_str = "USER_FIXED_ROI"
             elif mode == TrackerMode.OSCILLATION_DETECTOR:
                 tracker_mode_str = "OSCILLATION_DETECTOR"
+            elif mode == TrackerMode.OSCILLATION_DETECTOR_LEGACY:
+                tracker_mode_str = "OSCILLATION_DETECTOR_LEGACY"
             else:
                 tracker_mode_str = "YOLO_ROI"
             self.tracker.set_tracking_mode(tracker_mode_str)
@@ -1013,6 +1015,10 @@ class ApplicationLogic:
                     self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
                     self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
                     self.tracker.start_tracking()
+                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR_LEGACY:
+                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
+                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR_LEGACY")
+                    self.tracker.start_tracking()
                     self.processor.set_tracker_processing_enabled(True)
 
                     # Process the entire video from start to finish
@@ -1331,7 +1337,7 @@ class ApplicationLogic:
                 
                 # Handle Simple Mode auto ultimate autotune for live sessions
                 is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
-                is_live_mode = self.app_state_ui.selected_tracker_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]
+                is_live_mode = self.app_state_ui.selected_tracker_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR, TrackerMode.OSCILLATION_DETECTOR_LEGACY]
                 has_actions = bool(self.funscript_processor.get_actions('primary'))
                 
                 if is_simple_mode and is_live_mode and has_actions and not autotune_enabled:
@@ -1821,6 +1827,11 @@ class ApplicationLogic:
             # Set the batch processing index, which the batch thread now uses
             self.batch_processing_method_idx = mode_to_idx_map.get(args.mode, 0)
             self.logger.info(f"Processing Mode: {args.mode}")
+            
+            # Set oscillation detector mode for Stage 3 if provided
+            if hasattr(args, 'od_mode') and args.od_mode:
+                self.app_settings.set("stage3_oscillation_detector_mode", args.od_mode)
+                self.logger.info(f"Stage 3 Oscillation Detector Mode: {args.od_mode}")
 
             # Overwrite mode: 2 for overwrite, 1 for skip if missing (default), 0 process all except own matching.
             self.batch_overwrite_mode = 2 if args.overwrite else 1

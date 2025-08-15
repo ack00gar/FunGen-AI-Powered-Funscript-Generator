@@ -82,11 +82,12 @@ class ProcessingSpeedMode(Enum):
 
 class TrackerMode(Enum):
     OSCILLATION_DETECTOR = "Live - Oscillation Detector (Experimental)"         # 0
-    LIVE_YOLO_ROI = "Live - Optical Flow (YOLO auto ROI)"                       # 1
-    LIVE_USER_ROI = "Live - Optical Flow (User manual ROI)"                     # 2
-    OFFLINE_2_STAGE = "Offline - YOLO AI (2 Stages)"                            # 3
-    OFFLINE_3_STAGE = "Offline - YOLO AI + Opt. Flow (3 Stages)"                # 4 
-    OFFLINE_3_STAGE_MIXED = "Offline - YOLO AI + Mixed Flow (3 Stages Mixed)"   # 5
+    OSCILLATION_DETECTOR_LEGACY = "Live - Oscillation Detector (Legacy)"       # 1
+    LIVE_YOLO_ROI = "Live - Optical Flow (YOLO auto ROI)"                       # 2
+    LIVE_USER_ROI = "Live - Optical Flow (User manual ROI)"                     # 3
+    OFFLINE_2_STAGE = "Offline - YOLO AI (2 Stages)"                            # 4
+    OFFLINE_3_STAGE = "Offline - YOLO AI + Opt. Flow (3 Stages)"                # 5 
+    OFFLINE_3_STAGE_MIXED = "Offline - YOLO AI + Mixed Flow (3 Stages Mixed)"   # 6
 
 DEFAULT_TRACKER_MODE = 0
 

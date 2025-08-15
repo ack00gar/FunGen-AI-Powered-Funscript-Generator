@@ -147,8 +147,12 @@ def stage3_worker_proc(
         roi_tracker_instance.sensitivity = tracker_config.get('sensitivity', constants.DEFAULT_LIVE_TRACKER_SENSITIVITY)
         roi_tracker_instance.output_delay_frames = common_app_config.get('output_delay_frames', 0)
         roi_tracker_instance.current_video_fps_for_delay = common_app_config.get('video_fps', 30.0)
-        # Configure for oscillation detector mode
-        roi_tracker_instance.tracking_mode = "OSCILLATION_DETECTOR"
+        # Configure oscillation detector mode based on settings
+        od_mode = common_app_config.get('stage3_oscillation_detector_mode', 'current')
+        if od_mode == "legacy":
+            roi_tracker_instance.tracking_mode = "OSCILLATION_DETECTOR_LEGACY"
+        else:
+            roi_tracker_instance.tracking_mode = "OSCILLATION_DETECTOR"
         roi_tracker_instance.oscillation_grid_size = tracker_config.get('oscillation_grid_size', 20)
         roi_tracker_instance.oscillation_sensitivity = tracker_config.get('oscillation_sensitivity', 1.0)
         
