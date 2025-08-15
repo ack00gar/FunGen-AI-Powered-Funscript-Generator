@@ -98,6 +98,7 @@ def main():
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation")
     parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file or a folder of videos. If omitted, GUI will start.')
     parser.add_argument('--mode', choices=['2-stage', '3-stage', '3-stage-mixed', 'oscillation-detector'], default='3-stage', help='The processing mode to use for analysis.')
+    parser.add_argument('--od-mode', choices=['current', 'legacy'], default='current', help='Oscillation detector mode to use in Stage 3 (current=experimental, legacy=f5ae40f).')
     parser.add_argument('--overwrite', action='store_true', help='Force processing and overwrite existing funscripts. Default is to skip videos with existing funscripts.')
     parser.add_argument('--no-autotune', action='store_false', dest='autotune', help='Disable applying the default Ultimate Autotune settings after generation.')
     parser.add_argument('--no-copy', action='store_false', dest='copy', help='Do not save a copy of the final funscript next to the video file (will save to output folder only).')

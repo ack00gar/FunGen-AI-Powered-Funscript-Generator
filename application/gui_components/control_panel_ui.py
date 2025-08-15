@@ -249,11 +249,13 @@ class ControlPanelUI:
 
         modes_display = [
             "Live Oscillation Detector",
+            "Live Oscillation Detector (Legacy)",
             "Live Tracking (YOLO ROI)",
             "Offline AI Analysis (3-Stage)",
         ]
         modes_enum = [
             tracker_mode.OSCILLATION_DETECTOR,
+            tracker_mode.OSCILLATION_DETECTOR_LEGACY,
             tracker_mode.LIVE_YOLO_ROI,
             tracker_mode.OFFLINE_3_STAGE,
         ]
@@ -286,6 +288,7 @@ class ControlPanelUI:
             if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
                 all_modes = [
                     self.TrackerMode.OSCILLATION_DETECTOR,
+                    self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
                     self.TrackerMode.LIVE_YOLO_ROI,
                     self.TrackerMode.OFFLINE_3_STAGE,
                 ]
@@ -307,6 +310,7 @@ class ControlPanelUI:
             self.TrackerMode.LIVE_YOLO_ROI,
             self.TrackerMode.LIVE_USER_ROI,
             self.TrackerMode.OSCILLATION_DETECTOR,
+            self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
         )
         is_playback_active = processor and processor.is_processing and not processor.enable_tracker_processing
 
@@ -349,6 +353,7 @@ class ControlPanelUI:
 
         modes_enum = [
             tracker_mode.OSCILLATION_DETECTOR,
+            tracker_mode.OSCILLATION_DETECTOR_LEGACY,
             tracker_mode.LIVE_YOLO_ROI,
             tracker_mode.LIVE_USER_ROI,
             tracker_mode.OFFLINE_2_STAGE,
@@ -400,6 +405,7 @@ class ControlPanelUI:
                 if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
                     all_modes = [
                         tracker_mode.OSCILLATION_DETECTOR,
+                        tracker_mode.OSCILLATION_DETECTOR_LEGACY,
                         tracker_mode.LIVE_YOLO_ROI,
                         tracker_mode.LIVE_USER_ROI,
                         tracker_mode.OFFLINE_2_STAGE,
@@ -417,7 +423,8 @@ class ControlPanelUI:
                         tr.set_tracking_mode("USER_FIXED_ROI")
                     elif new_mode == tracker_mode.OSCILLATION_DETECTOR:
                         tr.set_tracking_mode("OSCILLATION_DETECTOR")
-                    
+                    elif new_mode == tracker_mode.OSCILLATION_DETECTOR_LEGACY:
+                        tr.set_tracking_mode("OSCILLATION_DETECTOR_LEGACY")
                     else:
                         tr.set_tracking_mode("YOLO_ROI")
 
@@ -563,12 +570,18 @@ class ControlPanelUI:
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
                 self._render_class_filtering_content()
 
-        if tmode == self.TrackerMode.OSCILLATION_DETECTOR:
+        if tmode in [self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
             if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 self._render_oscillation_detector_settings()
 
+        # Stage 3 specific settings
+        if tmode == self.TrackerMode.OFFLINE_3_STAGE:
+            if imgui.collapsing_header("Stage 3 Oscillation Detector Mode##ConfigStage3OD", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_stage3_oscillation_detector_mode_settings()
+
         with_config = {
             self.TrackerMode.OSCILLATION_DETECTOR,
+            self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
             self.TrackerMode.LIVE_YOLO_ROI,
             self.TrackerMode.LIVE_USER_ROI,
             self.TrackerMode.OFFLINE_2_STAGE,
@@ -1030,7 +1043,7 @@ class ControlPanelUI:
             self._render_stage_progress_ui(stage_proc)
             return
 
-        if mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR):
+        if mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY):
             tr = app.tracker
             imgui.text(">> Tracker Status")
             imgui.separator()
@@ -1046,7 +1059,7 @@ class ControlPanelUI:
                     )
                 elif mode == self.TrackerMode.LIVE_USER_ROI:
                     roi_status = "Set" if getattr(tr, "user_roi_fixed", False) else "Not Set"
-                elif mode == self.TrackerMode.OSCILLATION_DETECTOR:
+                elif mode in [self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
                     roi_status = "Set" if getattr(tr, "oscillation_area_fixed", None) else "Not Set"
             imgui.text(" - ROI Status: %s" % roi_status)
 
@@ -1263,7 +1276,7 @@ class ControlPanelUI:
             if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED, self.TrackerMode.OFFLINE_2_STAGE]:
                 start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
-            elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR]:
+            elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
                 imgui.new_line()
                 start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
                 handler = event_handlers.handle_start_live_tracker_click
@@ -1294,7 +1307,7 @@ class ControlPanelUI:
             else:
                 # Normal start button
                 if imgui.button(start_text, width=button_width):
-                    if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR]:
+                    if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
                         self._start_live_tracking()
                     elif handler: handler()
 
@@ -1308,7 +1321,7 @@ class ControlPanelUI:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
         # Place info note for live methods directly below the buttons
-        if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR]:
+        if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
             imgui.text_ansi_colored("It can take up to 35 seconds to see output on the timelines.\nThis is a known feature.", 0.25, 0.88, 0.82)
 
     def _render_stage_progress_ui(self, stage_proc):
@@ -1623,6 +1636,45 @@ class ControlPanelUI:
         if ch and nv != en:
             settings.set("live_oscillation_dynamic_amp_enabled", nv)
 
+        # Legacy improvements settings
+        imgui.separator()
+        imgui.text("Signal Processing Improvements")
+        
+        # Simple amplification mode
+        cur_simple_amp = settings.get("oscillation_use_simple_amplification", False)
+        ch, nv_simple = imgui.checkbox("Use Simple Amplification##UseSimpleAmp", cur_simple_amp)
+        if ch and nv_simple != cur_simple_amp:
+            settings.set("oscillation_use_simple_amplification", nv_simple)
+        _tooltip_if_hovered("Use legacy-style fixed multipliers (dy*-10, dx*10) instead of dynamic scaling")
+        
+        # Decay mechanism
+        cur_decay = settings.get("oscillation_enable_decay", True)
+        ch, nv_decay = imgui.checkbox("Enable Decay Mechanism##EnableDecay", cur_decay)
+        if ch and nv_decay != cur_decay:
+            settings.set("oscillation_enable_decay", nv_decay)
+        _tooltip_if_hovered("Gradually return to center when no motion is detected")
+        
+        if cur_decay:
+            # Hold duration
+            imgui.text("Hold Duration (ms)")
+            cur_hold = settings.get("oscillation_hold_duration_ms", 250)
+            imgui.push_item_width(150)
+            ch, nv_hold = imgui.slider_int("##HoldDuration", cur_hold, 50, 1000)
+            if ch and nv_hold != cur_hold:
+                settings.set("oscillation_hold_duration_ms", nv_hold)
+            imgui.pop_item_width()
+            _tooltip_if_hovered("How long to hold position before starting decay")
+            
+            # Decay factor
+            imgui.text("Decay Factor")
+            cur_decay_factor = settings.get("oscillation_decay_factor", 0.95)
+            imgui.push_item_width(150)
+            ch, nv_decay_factor = imgui.slider_float("##DecayFactor", cur_decay_factor, 0.85, 0.99, "%.3f")
+            if ch and nv_decay_factor != cur_decay_factor:
+                settings.set("oscillation_decay_factor", nv_decay_factor)
+            imgui.pop_item_width()
+            _tooltip_if_hovered("How quickly to decay towards center (0.95 = slow, 0.85 = fast)")
+
         imgui.new_line()
         imgui.text_ansi_colored("Note: Detection Sensitivity and Dynamic\nAmplification are currently not yet working.", 0.25, 0.88, 0.82)
 
@@ -1640,6 +1692,51 @@ class ControlPanelUI:
                 if cur_ms != default_ms:
                     settings.set("live_oscillation_amp_window_ms", default_ms)
             imgui.pop_item_width()
+
+    def _render_stage3_oscillation_detector_mode_settings(self):
+        """Render UI for selecting oscillation detector mode in Stage 3"""
+        app = self.app
+        settings = app.app_settings
+        
+        imgui.text("Stage 3 Oscillation Detector Mode")
+        _tooltip_if_hovered(
+            "Choose which oscillation detector algorithm to use in Stage 3:\n\n"
+            "Current: Uses the experimental oscillation detector with\n"
+            "  adaptive motion detection and dynamic scaling\n\n"
+            "Legacy: Uses the legacy oscillation detector from commit f5ae40f\n"
+            "  with fixed amplification and explicit decay mechanisms\n\n"
+            "Hybrid: Combines benefits from both approaches (future feature)"
+        )
+        
+        current_mode = settings.get("stage3_oscillation_detector_mode", "current")
+        mode_options = ["current", "legacy", "hybrid"]
+        mode_display = ["Current (Experimental)", "Legacy (f5ae40f)", "Hybrid (Coming Soon)"]
+        
+        try:
+            current_idx = mode_options.index(current_mode)
+        except ValueError:
+            current_idx = 0
+            
+        imgui.push_item_width(200)
+        
+        # Disable hybrid for now
+        with _DisabledScope(current_idx == 2):  # hybrid not implemented yet
+            clicked, new_idx = imgui.combo("##Stage3ODMode", current_idx, mode_display)
+            
+        if clicked and new_idx != current_idx and new_idx != 2:  # Don't allow selecting hybrid
+            new_mode = mode_options[new_idx]
+            settings.set("stage3_oscillation_detector_mode", new_mode)
+            app.logger.info(f"Stage 3 Oscillation Detector mode set to: {new_mode}", extra={"status_message": True})
+            
+        imgui.pop_item_width()
+        
+        # Show current selection info
+        if current_mode == "current":
+            imgui.text_ansi_colored("Using experimental oscillation detector", 0.0, 0.8, 0.0)
+        elif current_mode == "legacy":
+            imgui.text_ansi_colored("Using legacy oscillation detector (f5ae40f)", 0.0, 0.6, 0.8)
+        else:
+            imgui.text_ansi_colored("Hybrid mode (not yet implemented)", 0.8, 0.6, 0.0)
 
 # ------- Class filtering -------
 

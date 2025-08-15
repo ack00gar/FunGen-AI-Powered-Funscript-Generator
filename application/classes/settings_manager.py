@@ -108,7 +108,14 @@ class AppSettings:
 
             # --- Settings for the 2D Oscillation Detector ---
             "oscillation_detector_grid_size": 20,
-            "oscillation_detector_sensitivity": 1.5,
+            "oscillation_detector_sensitivity": 2.5,
+            "stage3_oscillation_detector_mode": "current",  # "current", "legacy", or "hybrid"
+            
+            # Oscillation Detector Improvements
+            "oscillation_enable_decay": True,  # Enable decay mechanism
+            "oscillation_hold_duration_ms": 250,  # Hold duration before decay starts
+            "oscillation_decay_factor": 0.95,  # Decay factor toward center
+            "oscillation_use_simple_amplification": False,  # Use simple fixed multipliers
             
             "live_oscillation_dynamic_amp_enabled": True,
             "live_oscillation_amp_window_ms": 4000,  # 4-second analysis window
