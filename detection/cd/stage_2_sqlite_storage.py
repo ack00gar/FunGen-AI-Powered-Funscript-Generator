@@ -18,7 +18,7 @@ except ImportError:
     AIOSQLITE_AVAILABLE = False
     aiosqlite = None
 
-from detection.cd.data_structures import FrameObject, ATRSegment
+from detection.cd.data_structures import FrameObject, Segment
 
 
 class Stage2SQLiteStorage:
@@ -141,12 +141,12 @@ class Stage2SQLiteStorage:
                 locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2 = 0, 0, 0, 0
                 
                 # Extract locked penis ROI coordinates if available
-                if (hasattr(frame_obj, 'atr_locked_penis_state') and 
-                    frame_obj.atr_locked_penis_state and 
-                    frame_obj.atr_locked_penis_state.active and 
-                    frame_obj.atr_locked_penis_state.box):
+                if (hasattr(frame_obj, 'locked_penis_state') and 
+                    frame_obj.locked_penis_state and 
+                    frame_obj.locked_penis_state.active and 
+                    frame_obj.locked_penis_state.box):
                     locked_penis_active = 1
-                    box = frame_obj.atr_locked_penis_state.box
+                    box = frame_obj.locked_penis_state.box
                     
                     # Debug: Check if box contains valid numeric data
                     try:
@@ -172,9 +172,9 @@ class Stage2SQLiteStorage:
                 
                 # Convert contact boxes to lightweight JSON (only essential fields)
                 contact_boxes_json = "[]"
-                if hasattr(frame_obj, 'atr_detected_contact_boxes') and frame_obj.atr_detected_contact_boxes:
+                if hasattr(frame_obj, 'detected_contact_boxes') and frame_obj.detected_contact_boxes:
                     contact_boxes = []
-                    for contact_box in frame_obj.atr_detected_contact_boxes:
+                    for contact_box in frame_obj.detected_contact_boxes:
                         if isinstance(contact_box, dict):
                             # Only store essential fields needed by Stage 3 mixed
                             essential_contact = {
@@ -189,8 +189,8 @@ class Stage2SQLiteStorage:
 
                 batch_data.append((
                     frame_obj.frame_id,
-                    frame_obj.atr_assigned_position,
-                    frame_obj.atr_funscript_distance,
+                    frame_obj.assigned_position,
+                    frame_obj.funscript_distance,
                     locked_penis_x1,
                     locked_penis_y1,
                     locked_penis_x2,
@@ -224,7 +224,7 @@ class Stage2SQLiteStorage:
         elapsed = time.time() - start_time
         self.logger.info(f"Stored {len(frame_objects)} frame objects in {elapsed:.2f}s")
 
-    def store_atr_segments(self, segments: List[ATRSegment]):
+    def store_segments(self, segments: List[Segment]):
         """Store ATR segments."""
         with self.get_cursor() as cursor:
             cursor.execute("BEGIN TRANSACTION")
@@ -307,7 +307,7 @@ class Stage2SQLiteStorage:
 
     def _deserialize_frame_object(self, row) -> FrameObject:
         """Deserialize frame object from optimized database row."""
-        from detection.cd.data_structures import ATRLockedPenisState  # Import here to avoid circular imports
+        from detection.cd.data_structures import LockedPenisState  # Import here to avoid circular imports
         
         (frame_id, atr_assigned_position, atr_funscript_distance,
          locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2,
@@ -319,21 +319,21 @@ class Stage2SQLiteStorage:
         frame_obj.atr_funscript_distance = atr_funscript_distance
 
         # Reconstruct locked penis state from coordinates
-        frame_obj.atr_locked_penis_state = ATRLockedPenisState()
+        frame_obj.locked_penis_state = LockedPenisState()
         if locked_penis_active:
-            frame_obj.atr_locked_penis_state.active = True
-            frame_obj.atr_locked_penis_state.box = (locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2)
+            frame_obj.locked_penis_state.active = True
+            frame_obj.locked_penis_state.box = (locked_penis_x1, locked_penis_y1, locked_penis_x2, locked_penis_y2)
         else:
-            frame_obj.atr_locked_penis_state.active = False
-            frame_obj.atr_locked_penis_state.box = None
+            frame_obj.locked_penis_state.active = False
+            frame_obj.locked_penis_state.box = None
 
         # Reconstruct contact boxes from JSON
         try:
             contact_boxes = json.loads(contact_boxes_json) if contact_boxes_json else []
-            frame_obj.atr_detected_contact_boxes = contact_boxes
+            frame_obj.detected_contact_boxes = contact_boxes
         except Exception as e:
             self.logger.warning(f"Failed to deserialize contact boxes for frame {frame_id}: {e}")
-            frame_obj.atr_detected_contact_boxes = []
+            frame_obj.detected_contact_boxes = []
 
         # Set minimal empty data for unused fields (Stage 3 doesn't need these)
         frame_obj.boxes = []
@@ -341,7 +341,7 @@ class Stage2SQLiteStorage:
 
         return frame_obj
 
-    def get_atr_segments(self) -> List[ATRSegment]:
+    def get_segments(self) -> List[Segment]:
         """Get all ATR segments."""
         with self.get_cursor() as cursor:
             cursor.execute("SELECT segment_data FROM atr_segments ORDER BY start_frame_id")

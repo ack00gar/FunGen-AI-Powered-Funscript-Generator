@@ -63,6 +63,7 @@ class AppSettings:
             "show_chapter_list_window": False,
             "show_timeline_editor_buttons": False,
             "show_advanced_options": False,
+            "show_video_feed": True,
 
             # File Handling & Output
             "autosave_final_funscript_to_video_location": True,

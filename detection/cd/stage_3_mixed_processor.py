@@ -78,7 +78,7 @@ class MixedStageProcessor:
     
     def _get_segment_position_short_name(self, segment) -> str:
         """
-        Get the position short name from either VideoSegment or ATRSegment objects.
+        Get the position short name from either VideoSegment or Segment objects.
         Returns the standardized short name (e.g., 'HJ', 'BJ', 'CG/Miss', 'NR').
         """
         if hasattr(segment, 'position_short_name') and isinstance(segment.position_short_name, str):
@@ -94,7 +94,7 @@ class MixedStageProcessor:
             else:
                 return segment.class_name
         elif hasattr(segment, 'major_position'):
-            # ATRSegment object - map major_position to short name
+            # Segment object - map major_position to short name
             position_mapping = {
                 'Handjob': 'HJ',
                 'Blowjob': 'BJ',
@@ -157,19 +157,20 @@ class MixedStageProcessor:
                 break
         return 'Other'
     
-    def extract_roi_from_stage2(self, frame_id: int) -> Optional[Tuple[int, int, int, int]]:
+    def extract_roi_from_stage2(self, frame_id: int, frame_shape: Tuple[int, int]) -> Optional[Tuple[int, int, int, int]]:
         """
         Extract ROI from Stage 2 locked penis state for the given frame.
-        Returns (x1, y1, x2, y2) or None if no valid ROI.
+        Applies proper padding and ROI calculation logic matching live YOLO_ROI tracker.
+        Returns (x, y, w, h) ROI coordinates or None if no valid ROI.
         """
         frame_obj = self.stage2_frame_objects.get(frame_id)
         if not frame_obj:
             return None
         
         # Check if locked penis is active and has a valid box
-        if (frame_obj.atr_locked_penis_state.active and 
-            frame_obj.atr_locked_penis_state.box):
-            box = frame_obj.atr_locked_penis_state.box
+        if (frame_obj.locked_penis_state.active and 
+            frame_obj.locked_penis_state.box):
+            box = frame_obj.locked_penis_state.box
             try:
                 # Debug: Log box data to understand the issue
                 logging.debug(f"Frame {frame_id} box data: {box} (type: {type(box)})")
@@ -195,8 +196,31 @@ class MixedStageProcessor:
                             
                             return None
                         coords.append(float(coord))  # Convert to float first, then int
-                    # Convert to integer coordinates
-                    return (int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3]))
+                    
+                    # Convert from (x1, y1, x2, y2) to (x, y, w, h) format for penis box
+                    x1, y1, x2, y2 = int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
+                    penis_box_xywh = (x1, y1, x2 - x1, y2 - y1)
+                    
+                    # Get contact boxes from Stage 2 data
+                    interacting_objects = []
+                    if hasattr(frame_obj, 'detected_contact_boxes') and frame_obj.detected_contact_boxes:
+                        for contact_box in frame_obj.detected_contact_boxes:
+                            if isinstance(contact_box, dict) and 'bbox' in contact_box:
+                                bbox = contact_box['bbox']
+                                if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                                    # Convert to (x, y, w, h) format
+                                    bx1, by1, bx2, by2 = bbox[:4]
+                                    contact_xywh = (int(bx1), int(by1), int(bx2 - bx1), int(by2 - by1))
+                                    interacting_objects.append({
+                                        'box': contact_xywh,
+                                        'class_name': contact_box.get('class_name', 'unknown')
+                                    })
+                    
+                    # Use the same ROI calculation logic as live YOLO_ROI tracker
+                    roi_padding = getattr(self.roi_tracker, 'roi_padding', 20) if self.roi_tracker else 20
+                    roi_xywh = self._calculate_combined_roi_with_padding(frame_shape, penis_box_xywh, interacting_objects, roi_padding)
+                    return roi_xywh
+                    
                 else:
                     logging.error(f"Frame {frame_id} box is not a valid sequence: {box}")
                     return None
@@ -205,6 +229,49 @@ class MixedStageProcessor:
                 return None
         
         return None
+    
+    def _calculate_combined_roi_with_padding(self, frame_shape: Tuple[int, int], penis_box_xywh: Tuple[int, int, int, int], 
+                                           interacting_objects: List[Dict], roi_padding: int) -> Tuple[int, int, int, int]:
+        """
+        Calculate combined ROI with padding, matching the live YOLO_ROI tracker logic.
+        Returns (x, y, w, h) ROI coordinates.
+        """
+        # Combine penis box with all interacting objects
+        entities = [penis_box_xywh] + [obj["box"] for obj in interacting_objects]
+        
+        # Find bounding box of all entities
+        min_x = min(e[0] for e in entities)
+        min_y = min(e[1] for e in entities)
+        max_x_coord = max(e[0] + e[2] for e in entities)
+        max_y_coord = max(e[1] + e[3] for e in entities)
+        
+        # Apply padding
+        rx1 = max(0, min_x - roi_padding)
+        ry1 = max(0, min_y - roi_padding)
+        rx2 = min(frame_shape[1], max_x_coord + roi_padding)  # frame_shape is (height, width)
+        ry2 = min(frame_shape[0], max_y_coord + roi_padding)
+        
+        rw = rx2 - rx1
+        rh = ry2 - ry1
+        
+        # Ensure minimum ROI size (matching live tracker logic)
+        min_w, min_h = 128, 128
+        if rw < min_w:
+            deficit = min_w - rw
+            rx1 = max(0, rx1 - deficit // 2)
+            rw = min_w
+        if rh < min_h:
+            deficit = min_h - rh
+            ry1 = max(0, ry1 - deficit // 2)
+            rh = min_h
+        
+        # Ensure ROI doesn't exceed frame boundaries
+        if rx1 + rw > frame_shape[1]:
+            rx1 = frame_shape[1] - rw
+        if ry1 + rh > frame_shape[0]:
+            ry1 = frame_shape[0] - rh
+            
+        return (int(rx1), int(ry1), int(rw), int(rh))
     
     def get_stage2_signal(self, frame_id: int) -> float:
         """
@@ -314,62 +381,66 @@ class MixedStageProcessor:
             # Use ROI tracking for BJ/HJ chapters
             self.signal_source = "roi_tracker"
             
-            # Extract ROI from Stage 2 data
-            roi = self.extract_roi_from_stage2(frame_id)
-            self.current_roi = roi
-            debug_info['current_roi'] = roi
-            
-            if roi and self.initialize_roi_tracker_if_needed(tracker_config, common_app_config):
+            if self.initialize_roi_tracker_if_needed(tracker_config, common_app_config):
                 # Process frame with ROI tracker
                 try:
                     self.live_tracker_active = True
                     debug_info['live_tracker_active'] = True
                     
-                    # Smart ROI adaptation - don't update every frame to allow tracking to work
-                    should_update_roi = False
+                    # Increment frame counter (matching live tracker logic)
+                    if not hasattr(self.roi_tracker, 'internal_frame_counter'):
+                        self.roi_tracker.internal_frame_counter = 0
+                    self.roi_tracker.internal_frame_counter += 1
                     
-                    if roi:
-                        # Only update ROI periodically or when significantly different
-                        if self.last_used_roi is None:
-                            # First time setting ROI
-                            should_update_roi = True
-                        elif self.roi_update_counter >= self.roi_update_frequency:
-                            # Periodic update
-                            should_update_roi = True
-                            self.roi_update_counter = 0
-                        elif self.last_used_roi and roi:
-                            # Check if ROI has moved significantly (more than 20% of box dimensions)
-                            old_roi = self.last_used_roi
-                            roi_moved = (
-                                abs(roi[0] - old_roi[0]) > (old_roi[2] - old_roi[0]) * 0.2 or
-                                abs(roi[1] - old_roi[1]) > (old_roi[3] - old_roi[1]) * 0.2
-                            )
-                            if roi_moved:
-                                should_update_roi = True
+                    # Use the same ROI update logic as live YOLO_ROI tracker
+                    frame_shape = video_frame.shape[:2]  # (height, width)
+                    run_detection_this_frame = (
+                        (self.roi_tracker.internal_frame_counter % self.roi_tracker.roi_update_interval == 0)
+                        or (self.roi_tracker.roi is None)
+                        or (not hasattr(self.roi_tracker, 'penis_last_known_box') or not self.roi_tracker.penis_last_known_box)
+                    )
+                    
+                    # Only extract and update ROI when needed (matching live tracker)
+                    if run_detection_this_frame:
+                        roi = self.extract_roi_from_stage2(frame_id, frame_shape)
+                        self.current_roi = roi
+                        debug_info['current_roi'] = roi
+                        debug_info['roi_update_frame'] = True
                         
-                        if should_update_roi:
-                            # Set oscillation area based on Stage 2 locked penis detection
-                            if hasattr(self.roi_tracker, 'set_oscillation_area'):
-                                self.roi_tracker.set_oscillation_area(roi)
-                            elif hasattr(self.roi_tracker, 'oscillation_area_fixed'):
-                                self.roi_tracker.oscillation_area_fixed = roi
-                            
-                            self.last_used_roi = roi
-                            debug_info['roi_updated'] = True
+                        if roi:
+                            # Update ROI in tracker (matching live tracker ROI setting logic)
+                            should_update_roi = True
                         else:
-                            debug_info['roi_updated'] = False
+                            should_update_roi = False
+                    else:
+                        # Use cached ROI or current ROI from tracker
+                        debug_info['roi_update_frame'] = False
+                        debug_info['current_roi'] = getattr(self.roi_tracker, 'roi', self.current_roi)
+                        should_update_roi = False
+                        roi = self.current_roi
                     
-                    self.roi_update_counter += 1
+                    # Apply ROI update if needed 
+                    if should_update_roi and roi:
+                        # Set ROI in tracker (matching live tracker logic)
+                        self.roi_tracker.roi = roi
+                        # Also set oscillation area for oscillation mode fallback
+                        if hasattr(self.roi_tracker, 'set_oscillation_area'):
+                            self.roi_tracker.set_oscillation_area(roi)
+                        elif hasattr(self.roi_tracker, 'oscillation_area_fixed'):
+                            self.roi_tracker.oscillation_area_fixed = roi
+                        
+                        self.last_used_roi = roi
+                        debug_info['roi_updated'] = True
+                    else:
+                        debug_info['roi_updated'] = False
                     
                     # Use the proper YOLO ROI tracking method with Stage 2 data
                     position = self.track_frame_with_stage2_data(frame_id, video_frame)
                     
-                    # Update debug info from new tracking method
-                    debug_info['roi_updated'] = True if self.roi_tracker and self.roi_tracker.roi else False
-                    debug_info['penis_box'] = self.roi_tracker.penis_last_known_box if self.roi_tracker else None
-                    debug_info['main_interaction'] = self.roi_tracker.main_interaction_class if self.roi_tracker else None
-                    debug_info['roi_current'] = self.roi_tracker.roi if self.roi_tracker else roi
-                    debug_info['roi_update_counter'] = self.roi_update_counter
+                    # Update debug info
+                    debug_info['penis_box'] = getattr(self.roi_tracker, 'penis_last_known_box', None)
+                    debug_info['main_interaction'] = getattr(self.roi_tracker, 'main_interaction_class', None)
+                    debug_info['roi_current'] = getattr(self.roi_tracker, 'roi', roi)
                     
                     # Store debug data for later msgpack creation
                     self.debug_data[frame_id] = debug_info.copy()
@@ -390,12 +461,16 @@ class MixedStageProcessor:
         stage2_position = self.get_stage2_signal(frame_id)
         return stage2_position, debug_info
     
-    def _initialize_roi_tracker(self):
+    def _initialize_roi_tracker(self, tracker_config: Dict[str, Any] = None):
         """Initialize ROI tracker for mixed mode processing."""
         if self.roi_tracker is not None:
             return
             
         from tracker import ROITracker
+        
+        # Use default config if none provided
+        if tracker_config is None:
+            tracker_config = {}
         
         # Mock app object for ROI tracker initialization
         class MockApp:
@@ -419,6 +494,8 @@ class MixedStageProcessor:
                 app_logic_instance=mock_app, 
                 tracker_model_path=self.tracker_model_path,
                 pose_model_path=self.pose_model_path,
+                roi_update_interval=tracker_config.get('roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
+                roi_padding=tracker_config.get('roi_padding', constants.DEFAULT_TRACKER_ROI_PADDING),
                 load_models_on_init=False  # No YOLO model needed for mixed mode
             )
             # Set to oscillation detector mode initially, we'll switch to YOLO_ROI when needed
@@ -441,9 +518,9 @@ class MixedStageProcessor:
             contact_boxes = []
             
             # Get locked penis box - convert from (x1,y1,x2,y2) to (x,y,w,h)
-            if (frame_obj.atr_locked_penis_state.active and 
-                frame_obj.atr_locked_penis_state.box):
-                box = frame_obj.atr_locked_penis_state.box
+            if (frame_obj.locked_penis_state.active and 
+                frame_obj.locked_penis_state.box):
+                box = frame_obj.locked_penis_state.box
                 if isinstance(box, (list, tuple)) and len(box) >= 4:
                     try:
                         # Convert from (x1,y1,x2,y2) to (x,y,w,h) format
@@ -453,7 +530,7 @@ class MixedStageProcessor:
                         pass
             
             # Get contact boxes from detected contact objects
-            for contact_obj in frame_obj.atr_detected_contact_boxes:
+            for contact_obj in frame_obj.detected_contact_boxes:
                 if isinstance(contact_obj, dict) and 'bbox' in contact_obj:
                     bbox = contact_obj['bbox']
                     class_name = contact_obj.get('class_name', 'unknown')
@@ -474,7 +551,7 @@ class MixedStageProcessor:
             
             # Initialize ROI tracker if needed
             if not self.roi_tracker:
-                self._initialize_roi_tracker()
+                self._initialize_roi_tracker({})
             
             # Set tracking mode to YOLO_ROI for proper ROI logic
             original_mode = self.roi_tracker.tracking_mode

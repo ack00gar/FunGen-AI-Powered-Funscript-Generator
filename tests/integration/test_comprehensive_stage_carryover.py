@@ -19,7 +19,7 @@ import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from application.utils.video_segment import VideoSegment
-from detection.cd.data_structures import FrameObject, ATRLockedPenisState
+from detection.cd.data_structures import FrameObject, LockedPenisState
 from detection.cd.stage_3_mixed_processor import MixedStageProcessor, perform_mixed_stage_analysis
 from config.constants import TrackerMode
 
@@ -450,7 +450,7 @@ class TestComprehensiveStageCarryover:
                 frame_obj.pos_0_100 = frame_data['pos_0_100']
             
             # Reconstruct contact boxes
-            frame_obj.atr_detected_contact_boxes = []
+            frame_obj.detected_contact_boxes = []
             if 'yolo_boxes' in frame_data:
                 for box in frame_data['yolo_boxes']:
                     class_name = box.get('class_name', '').lower()
@@ -460,10 +460,10 @@ class TestComprehensiveStageCarryover:
                             'confidence': box.get('confidence', 0.5),
                             'bbox': box.get('bbox', (0, 0, 0, 0))
                         }
-                        frame_obj.atr_detected_contact_boxes.append(contact_box)
+                        frame_obj.detected_contact_boxes.append(contact_box)
             
             # Reconstruct locked penis state
-            frame_obj.atr_locked_penis_state = ATRLockedPenisState()
+            frame_obj.locked_penis_state = LockedPenisState()
             locked_penis_data = None
             for box in frame_data.get('yolo_boxes', []):
                 if box.get('class_name', '').lower() in ['locked_penis', 'penis']:
@@ -471,8 +471,8 @@ class TestComprehensiveStageCarryover:
                     break
             
             if locked_penis_data and locked_penis_data.get('bbox'):
-                frame_obj.atr_locked_penis_state.active = True
-                frame_obj.atr_locked_penis_state.box = locked_penis_data.get('bbox')
+                frame_obj.locked_penis_state.active = True
+                frame_obj.locked_penis_state.box = locked_penis_data.get('bbox')
             
             frame_objects[frame_obj.frame_id] = frame_obj
         

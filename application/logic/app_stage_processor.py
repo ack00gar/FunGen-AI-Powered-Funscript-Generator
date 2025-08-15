@@ -17,7 +17,6 @@ from application.utils.checkpoint_manager import (
 
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
-#import detection.stage_2_orchestrator as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
 import detection.cd.stage_3_mixed_processor as stage3_mixed_module
 
@@ -797,7 +796,7 @@ class AppStageProcessor:
                 self.gui_event_queue.put(("analysis_message", completion_payload, None))
             elif selected_mode == TrackerMode.OFFLINE_3_STAGE or selected_mode == getattr(TrackerMode, 'OFFLINE_3_STAGE_MIXED', TrackerMode.OFFLINE_3_STAGE):
                 self.current_analysis_stage = 3
-                atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
+                segments_objects = s2_output_data.get("segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
 
                 # Send complete Stage 2 results to properly update UI chapters
@@ -813,7 +812,7 @@ class AppStageProcessor:
                 effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
                 effective_end_frame = frame_range_for_s1[1] if effective_range_is_active else range_end_frame
 
-                segments_for_s3 = self._filter_segments_for_range(atr_segments_objects, effective_range_is_active,
+                segments_for_s3 = self._filter_segments_for_range(segments_objects, effective_range_is_active,
                                                                   effective_start_frame, effective_end_frame)
 
                 if not segments_for_s3:
@@ -850,7 +849,7 @@ class AppStageProcessor:
 
             elif selected_mode == TrackerMode.OFFLINE_3_STAGE_MIXED:
                 self.current_analysis_stage = 3
-                atr_segments_objects = s2_output_data.get("atr_segments_objects", [])
+                segments_objects = s2_output_data.get("segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
 
                 # Send complete Stage 2 results to properly update UI chapters
@@ -866,7 +865,7 @@ class AppStageProcessor:
                 effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
                 effective_end_frame = frame_range_for_s1[1] if effective_range_is_active else range_end_frame
 
-                segments_for_s3 = self._filter_segments_for_range(atr_segments_objects, effective_range_is_active,
+                segments_for_s3 = self._filter_segments_for_range(segments_objects, effective_range_is_active,
                                                                   effective_start_frame, effective_end_frame)
 
                 if not segments_for_s3:
@@ -1137,7 +1136,7 @@ class AppStageProcessor:
 
             loaded_data = {
                 "video_segments": [],
-                "atr_segments_objects": [],
+                "segments_objects": [],
                 "overlay_data": None,
                 "frame_objects_map": {},
                 "all_s2_frame_objects_list": []
@@ -1171,7 +1170,7 @@ class AppStageProcessor:
                                             position_long_name=segment_row[4] if len(segment_row) > 4 else "Hand Job"
                                         )
                                         loaded_data["video_segments"].append(segment)
-                                        loaded_data["atr_segments_objects"].append(segment)
+                                        loaded_data["segments_objects"].append(segment)
                                     break  # Use first successful table
                             except sqlite3.Error:
                                 continue
@@ -1231,7 +1230,7 @@ class AppStageProcessor:
                         
                         if frame_objects:
                             # Use the original Stage 2 logic to create segments
-                            from detection.cd.stage_2_cd import _atr_aggregate_segments
+                            from detection.cd.stage_2_cd import _aggregate_segments
                             
                             # Get FPS from app processor if available
                             fps = 30.0  # Default fallback
@@ -1242,15 +1241,15 @@ class AppStageProcessor:
                             # Recreate segments using Stage 2 logic
                             # Use default min_segment_duration (1 second = fps frames)
                             min_segment_duration_frames = int(fps * 1.0)
-                            atr_segments = _atr_aggregate_segments(frame_objects, fps, min_segment_duration_frames, self.logger)
+                            segments = _aggregate_segments(frame_objects, fps, min_segment_duration_frames, self.logger)
                             
-                            # Convert ATR segments to video segments format
+                            # Convert segments to video segments format
                             from application.utils.video_segment import VideoSegment
-                            for atr_segment in atr_segments:
-                                # Get segment data from ATR segment
-                                segment_dict = atr_segment.to_dict()
+                            for segment in segments:
+                                # Get segment data from segment
+                                segment_dict = segment.to_dict()
                                 
-                                # Create VideoSegment using the data from ATRSegment
+                                # Create VideoSegment using the data from Segment
                                 video_segment = VideoSegment(
                                     start_frame_id=segment_dict['start_frame_id'],
                                     end_frame_id=segment_dict['end_frame_id'],
@@ -1263,7 +1262,7 @@ class AppStageProcessor:
                                     source="reconstructed"  # Mark as reconstructed from overlay
                                 )
                                 loaded_data["video_segments"].append(video_segment)
-                                loaded_data["atr_segments_objects"].append(atr_segment)
+                                loaded_data["segments_objects"].append(segment)
                             
                             # Also add frame objects for Stage 3
                             frame_objects_map = {fo.frame_id: fo for fo in frame_objects}
@@ -1544,13 +1543,14 @@ class AppStageProcessor:
 
             range_is_active, range_start_frame, range_end_frame = self.app.funscript_processor.get_effective_scripting_range()
 
+            self.logger.info("Using Stage 2 implementation")
             stage2_results = stage2_module.perform_contact_analysis(
                 video_path_arg=fm.video_path,
                 msgpack_file_path_arg=fm.stage1_output_msgpack_path,
                 preprocessed_video_path_arg=preprocessed_video_path_for_s2,
-                progress_callback=self.on_stage2_progress, # Use the public attribute
-
+                progress_callback=self.on_stage2_progress,
                 stop_event=self.stop_stage_event,
+                app=self.app,
                 ml_model_dir_path_arg=self.app.pose_model_artifacts_dir,
                 output_overlay_msgpack_path=s2_overlay_output_path,
                 parent_logger_arg=self.logger,
@@ -1606,7 +1606,7 @@ class AppStageProcessor:
             self.gui_event_queue.put(("stage2_status_update", error_msg, "Error"))
             return {"success": False, "error": error_msg}
 
-    def _execute_stage3_optical_flow_module(self, atr_segments_objects: List[Any], preprocessed_video_path: Optional[str]) -> bool:
+    def _execute_stage3_optical_flow_module(self, segments_objects: List[Any], preprocessed_video_path: Optional[str]) -> bool:
         """ Wrapper to call the new Stage 3 OF module. """
         fs_proc = self.app.funscript_processor
 
@@ -1677,7 +1677,7 @@ class AppStageProcessor:
         s3_results = stage3_module.perform_stage3_analysis(
             video_path=self.app.file_manager.video_path,
             preprocessed_video_path_arg=preprocessed_video_path,
-            atr_segments_list=atr_segments_objects,
+            atr_segments_list=segments_objects,
             s2_frame_objects_map=self.app.s2_frame_objects_map_for_s3,
             tracker_config=tracker_config_s3,
             common_app_config=common_app_config_s3,
@@ -1744,7 +1744,7 @@ class AppStageProcessor:
             self.gui_event_queue.put(("stage3_status_update", f"S3 Failed: {error_msg}", "Failed"))
             return None
 
-    def _execute_stage3_mixed_module(self, atr_segments_objects: List[Any], preprocessed_video_path: Optional[str], s2_output_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+    def _execute_stage3_mixed_module(self, segments_objects: List[Any], preprocessed_video_path: Optional[str], s2_output_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
         """Execute Mixed Stage 3 processing using stage_3_mixed_processor if available."""
         if stage3_mixed_module is None:
             self.logger.error("Stage 3 Mixed module not available.")
@@ -1773,7 +1773,7 @@ class AppStageProcessor:
             results = stage3_mixed_module.perform_mixed_stage_analysis(
                 video_path=fm.video_path,
                 preprocessed_video_path_arg=preprocessed_video_path,
-                atr_segments_list=atr_segments_objects,
+                atr_segments_list=segments_objects,
                 s2_frame_objects_map=self.app.s2_frame_objects_map_for_s3 or {},  # Legacy fallback
                 tracker_config={},
                 common_app_config=common_app_config,
@@ -1995,6 +1995,9 @@ class AppStageProcessor:
                         fm.load_stage2_overlay_data(overlay_path)
                 elif event_type == "stage3_results_success":
                     packaged_data = data1
+                    if not isinstance(packaged_data, dict):
+                        self.logger.warning(f"stage3_results_success received non-dict data: {type(packaged_data)}")
+                        continue
                     results_dict = packaged_data.get("results_dict", {})
                     
                     # Extract funscript object from Stage 3 results

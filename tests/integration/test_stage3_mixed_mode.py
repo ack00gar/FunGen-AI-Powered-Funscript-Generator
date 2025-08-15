@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from detection.cd.stage_3_mixed_processor import MixedStageProcessor, perform_mixed_stage_analysis
-from detection.cd.data_structures import FrameObject, ATRLockedPenisState
+from detection.cd.data_structures import FrameObject, LockedPenisState
 from application.utils.video_segment import VideoSegment
 from config.constants import TrackerMode
 from funscript.dual_axis_funscript import DualAxisFunscript
@@ -40,13 +40,13 @@ class TestStage3MixedMode:
         frame_obj.pos_0_100 = pos
         
         # Set up locked penis state
-        frame_obj.atr_locked_penis_state = ATRLockedPenisState()
+        frame_obj.locked_penis_state = LockedPenisState()
         if has_penis:
-            frame_obj.atr_locked_penis_state.active = True
-            frame_obj.atr_locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
+            frame_obj.locked_penis_state.active = True
+            frame_obj.locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
         
         # Set up contact boxes
-        frame_obj.atr_detected_contact_boxes = contact_boxes or [
+        frame_obj.detected_contact_boxes = contact_boxes or [
             {'class_name': 'hand', 'confidence': 0.8, 'bbox': (150, 120, 180, 160)}
         ]
         

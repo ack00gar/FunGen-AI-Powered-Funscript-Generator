@@ -1,7 +1,7 @@
 """
 Segment data structures for Stage 2 processing.
 
-This module contains the BaseSegment and ATRSegment classes used for
+This module contains the BaseSegment and Segment classes used for
 grouping and analyzing sequences of frames with similar characteristics.
 """
 
@@ -133,17 +133,17 @@ class BaseSegment:
         return occlusions
 
 
-class ATRSegment(BaseSegment):
+class Segment(BaseSegment):
     """
-    ATR (Automatic Tracking and Recognition) segment for Stage 2 processing.
+    Segment for Stage 2 processing.
     
-    This class extends BaseSegment with ATR-specific functionality for
+    This class extends BaseSegment with functionality for
     position classification and funscript generation.
     """
 
     def __init__(self, start_frame_id: int, end_frame_id: int, major_position: str):
         """
-        Initialize an ATRSegment.
+        Initialize a Segment.
         
         Args:
             start_frame_id: First frame ID in the segment
@@ -153,19 +153,19 @@ class ATRSegment(BaseSegment):
         super().__init__(start_frame_id, end_frame_id)
         
         # DEBUG: Log constructor parameters
-        if hasattr(ATRSegment, '_instance_count'):
-            ATRSegment._instance_count += 1
+        if hasattr(Segment, '_instance_count'):
+            Segment._instance_count += 1
         else:
-            ATRSegment._instance_count = 1
+            Segment._instance_count = 1
         
-        if ATRSegment._instance_count <= 5:
-            _debug_log(f"ATRSegment.__init__ #{ATRSegment._instance_count}: major_position='{major_position}' (type: {type(major_position)})")
+        if Segment._instance_count <= 5:
+            _debug_log(f"Segment.__init__ #{Segment._instance_count}: major_position='{major_position}' (type: {type(major_position)})")
         
         self.major_position = major_position
         
         # DEBUG: Verify what was stored
-        if ATRSegment._instance_count <= 5:
-            _debug_log(f"ATRSegment.__init__ #{ATRSegment._instance_count}: stored self.major_position='{self.major_position}' (type: {type(self.major_position)})")
+        if Segment._instance_count <= 5:
+            _debug_log(f"Segment.__init__ #{Segment._instance_count}: stored self.major_position='{self.major_position}' (type: {type(self.major_position)})")
         
         self.segment_frame_objects: List['FrameObject'] = []
 
@@ -219,7 +219,7 @@ class ATRSegment(BaseSegment):
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Convert ATRSegment to dictionary representation.
+        Convert Segment to dictionary representation.
         
         This method creates a comprehensive dictionary representation of the segment
         suitable for serialization and analysis.
@@ -233,13 +233,13 @@ class ATRSegment(BaseSegment):
         position_long_name_val = self.major_position
 
         # DEBUG: Log to_dict conversion
-        if hasattr(ATRSegment, '_to_dict_count'):
-            ATRSegment._to_dict_count += 1
+        if hasattr(Segment, '_to_dict_count'):
+            Segment._to_dict_count += 1
         else:
-            ATRSegment._to_dict_count = 1
+            Segment._to_dict_count = 1
         
-        if ATRSegment._to_dict_count <= 5:
-            _debug_log(f"ATRSegment.to_dict #{ATRSegment._to_dict_count}: self.major_position='{self.major_position}' (type: {type(self.major_position)})")
+        if Segment._to_dict_count <= 5:
+            _debug_log(f"Segment.to_dict #{Segment._to_dict_count}: self.major_position='{self.major_position}' (type: {type(self.major_position)})")
 
         # 2. To find position_short_name_val, we need to search the dictionary:
         position_short_name_key_val = "NR"  # Default if not found
@@ -247,24 +247,24 @@ class ATRSegment(BaseSegment):
         for key, info in constants.POSITION_INFO_MAPPING.items():
             if info["long_name"] == self.major_position:
                 position_short_name_key_val = key
-                if ATRSegment._to_dict_count <= 5:
-                    _debug_log(f"ATRSegment.to_dict #{ATRSegment._to_dict_count}: FOUND match - key='{key}', long_name='{info['long_name']}'")
+                if Segment._to_dict_count <= 5:
+                    _debug_log(f"Segment.to_dict #{Segment._to_dict_count}: FOUND match - key='{key}', long_name='{info['long_name']}'")
                 break
         else:
-            if ATRSegment._to_dict_count <= 5:
-                _debug_log(f"ATRSegment.to_dict #{ATRSegment._to_dict_count}: NO MATCH found for '{self.major_position}'")
-                _debug_log(f"ATRSegment.to_dict #{ATRSegment._to_dict_count}: Available long_names: {[info['long_name'] for info in constants.POSITION_INFO_MAPPING.values()]}")
+            if Segment._to_dict_count <= 5:
+                _debug_log(f"Segment.to_dict #{Segment._to_dict_count}: NO MATCH found for '{self.major_position}'")
+                _debug_log(f"Segment.to_dict #{Segment._to_dict_count}: Available long_names: {[info['long_name'] for info in constants.POSITION_INFO_MAPPING.values()]}")
 
-        # ATR's funscript generation is 1D. Range/offset might not directly map.
-        # These can be calculated from the self.atr_funscript_distance values within this segment's frames.
+
         raw_range_val_ud = 0
         raw_range_offset_ud = 0
         if self.segment_frame_objects:
-            distances_in_segment = [fo.atr_funscript_distance for fo in self.segment_frame_objects]
+            # Filter out None values before calculating min/max
+            distances_in_segment = [fo.funscript_distance for fo in self.segment_frame_objects 
+                                  if fo.funscript_distance is not None]
             if distances_in_segment:
                 min_d, max_d = min(distances_in_segment), max(distances_in_segment)
                 raw_range_val_ud = max_d - min_d
-                # Offset isn't directly analogous from ATR's logic in a simple way for U/D.
 
         return {
             'start_frame_id': self.start_frame_id, 
@@ -272,14 +272,14 @@ class ATRSegment(BaseSegment):
             'class_name': self.major_position,  # Using major_position as class_name
             'position_long_name': position_long_name_val,
             'position_short_name': position_short_name_key_val,
-            'segment_type': "ATR_Segment", 
+            'segment_type': "Segment", 
             'duration': self.duration,
             'occlusions': occlusion_info,  # Placeholder
             'raw_range_val_ud': raw_range_val_ud,
             'raw_range_offset_ud': raw_range_offset_ud,
-            'raw_range_val_lr': 0  # ATR logic is primarily single axis
+            'raw_range_val_lr': 0  # Stage 2 logic is primarily single axis
         }
 
     def __repr__(self):
-        return (f"ATRSegment(id={self.id}, frames {self.start_frame_id}-{self.end_frame_id}, "
+        return (f"Segment(id={self.id}, frames {self.start_frame_id}-{self.end_frame_id}, "
                 f"pos='{self.major_position}', duration={self.duration})")
