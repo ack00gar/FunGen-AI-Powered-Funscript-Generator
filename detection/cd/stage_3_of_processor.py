@@ -10,7 +10,7 @@ from queue import Empty
 from funscript import DualAxisFunscript
 from video import VideoProcessor
 from tracker import ROITracker
-from detection.cd.data_structures import ATRSegment, FrameObject
+from detection.cd.data_structures import Segment, FrameObject
 from config import constants
 
 
@@ -308,7 +308,7 @@ def stage3_worker_proc(
 def perform_stage3_analysis(
         video_path: str,
         preprocessed_video_path_arg: Optional[str],
-        atr_segments_list: List[ATRSegment],
+        atr_segments_list: List[Segment],
         s2_frame_objects_map: Optional[Dict[int, FrameObject]] = None,
         tracker_config: Dict[str, Any] = None,
         common_app_config: Dict[str, Any] = None,
@@ -366,7 +366,7 @@ def perform_stage3_analysis(
     OVERLAP_SIZE = common_app_config.get("s3_overlap_size", 30)
     logger.info(f"Using chunk size: {CHUNK_SIZE}, overlap: {OVERLAP_SIZE}")
 
-    # Handle both ATRSegment and VideoSegment objects
+    # Handle both Segment and VideoSegment objects
     relevant_segments = []
     for seg in atr_segments_list:
         # Prefer short codes when available

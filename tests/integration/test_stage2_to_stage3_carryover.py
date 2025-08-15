@@ -20,7 +20,7 @@ from application.logic.app_logic import ApplicationLogic
 from application.logic.app_stage_processor import AppStageProcessor
 from application.classes.settings_manager import AppSettings
 from application.utils.video_segment import VideoSegment
-from detection.cd.data_structures import FrameObject, ATRLockedPenisState
+from detection.cd.data_structures import FrameObject, LockedPenisState
 from detection.cd.stage_3_mixed_processor import MixedStageProcessor
 from config.constants import TrackerMode
 
@@ -140,7 +140,7 @@ class TestStage2ToStage3Carryover:
                 frame_obj.pos_0_100 = frame_data['pos_0_100']
             
             # Reconstruct contact boxes
-            frame_obj.atr_detected_contact_boxes = []
+            frame_obj.detected_contact_boxes = []
             if 'yolo_boxes' in frame_data:
                 for box in frame_data['yolo_boxes']:
                     class_name = box.get('class_name', '').lower()
@@ -150,10 +150,10 @@ class TestStage2ToStage3Carryover:
                             'confidence': box.get('confidence', 0.5),
                             'bbox': box.get('bbox', (0, 0, 0, 0))
                         }
-                        frame_obj.atr_detected_contact_boxes.append(contact_box)
+                        frame_obj.detected_contact_boxes.append(contact_box)
             
             # Reconstruct locked penis state
-            frame_obj.atr_locked_penis_state = ATRLockedPenisState()
+            frame_obj.locked_penis_state = LockedPenisState()
             locked_penis_data = None
             for box in frame_data.get('yolo_boxes', []):
                 if box.get('class_name', '').lower() in ['locked_penis', 'penis']:
@@ -161,8 +161,8 @@ class TestStage2ToStage3Carryover:
                     break
             
             if locked_penis_data and locked_penis_data.get('bbox'):
-                frame_obj.atr_locked_penis_state.active = True
-                frame_obj.atr_locked_penis_state.box = locked_penis_data.get('bbox')
+                frame_obj.locked_penis_state.active = True
+                frame_obj.locked_penis_state.box = locked_penis_data.get('bbox')
             
             reconstructed_objects[frame_obj.frame_id] = frame_obj
         
@@ -172,8 +172,8 @@ class TestStage2ToStage3Carryover:
         # Test specific frame
         test_frame = reconstructed_objects[50]
         assert test_frame.pos_0_100 is not None
-        assert test_frame.atr_locked_penis_state.active
-        assert len(test_frame.atr_detected_contact_boxes) == 2  # hand and finger
+        assert test_frame.locked_penis_state.active
+        assert len(test_frame.detected_contact_boxes) == 2  # hand and finger
 
     def test_stage3_mixed_processor_integration(self):
         """Test that Stage 3 mixed processor can use Stage 2 data."""
@@ -193,19 +193,19 @@ class TestStage2ToStage3Carryover:
             frame_obj.pos_0_100 = frame_data.get('pos_0_100', 50)
             
             # Set up locked penis state
-            frame_obj.atr_locked_penis_state = ATRLockedPenisState()
+            frame_obj.locked_penis_state = LockedPenisState()
             for box in frame_data.get('yolo_boxes', []):
                 if box.get('class_name', '').lower() in ['locked_penis', 'penis']:
-                    frame_obj.atr_locked_penis_state.active = True
-                    frame_obj.atr_locked_penis_state.box = box.get('bbox')
+                    frame_obj.locked_penis_state.active = True
+                    frame_obj.locked_penis_state.box = box.get('bbox')
                     break
             
             # Set up contact boxes
-            frame_obj.atr_detected_contact_boxes = []
+            frame_obj.detected_contact_boxes = []
             for box in frame_data.get('yolo_boxes', []):
                 class_name = box.get('class_name', '').lower()
                 if class_name not in ['locked_penis', 'penis']:
-                    frame_obj.atr_detected_contact_boxes.append({
+                    frame_obj.detected_contact_boxes.append({
                         'class_name': box.get('class_name'),
                         'confidence': box.get('confidence'),
                         'bbox': box.get('bbox')
@@ -372,9 +372,9 @@ class TestStage2ToStage3Carryover:
             import math
             frame_obj.pos_0_100 = 50 + 30 * math.sin(frame_id * 0.1)
             
-            frame_obj.atr_locked_penis_state = ATRLockedPenisState()
-            frame_obj.atr_locked_penis_state.active = True
-            frame_obj.atr_locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
+            frame_obj.locked_penis_state = LockedPenisState()
+            frame_obj.locked_penis_state.active = True
+            frame_obj.locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
             
             frame_objects[frame_id] = frame_obj
         
@@ -433,9 +433,9 @@ class TestStage2ToStage3Carryover:
             frame_obj = FrameObject(frame_id=int(frame_id), yolo_input_size=640)
             frame_obj.pos_0_100 = frame_data.get('pos_0_100', 50)
             
-            frame_obj.atr_locked_penis_state = ATRLockedPenisState()
-            frame_obj.atr_locked_penis_state.active = True
-            frame_obj.atr_locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
+            frame_obj.locked_penis_state = LockedPenisState()
+            frame_obj.locked_penis_state.active = True
+            frame_obj.locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
             
             frame_obj.atr_detected_contact_boxes = [
                 {'class_name': 'hand', 'confidence': 0.8, 'bbox': (150, 120, 180, 160)}

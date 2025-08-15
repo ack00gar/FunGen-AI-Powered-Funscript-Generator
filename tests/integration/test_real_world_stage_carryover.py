@@ -188,7 +188,7 @@ class TestRealWorldStageCarryover:
         # Load actual Stage 2 data
         import msgpack
         from detection.cd.stage_3_mixed_processor import MixedStageProcessor
-        from detection.cd.data_structures import FrameObject, ATRLockedPenisState
+        from detection.cd.data_structures import FrameObject, LockedPenisState
         from application.utils.video_segment import VideoSegment
         
         with open(stage2_overlay, 'rb') as f:
@@ -219,9 +219,9 @@ class TestRealWorldStageCarryover:
                 frame_obj = FrameObject(frame_id=int(frame_id), yolo_input_size=640)
                 frame_obj.pos_0_100 = frame_data.get('pos_0_100', 50)
                 
-                frame_obj.atr_locked_penis_state = ATRLockedPenisState()
-                frame_obj.atr_locked_penis_state.active = True
-                frame_obj.atr_locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
+                frame_obj.locked_penis_state = LockedPenisState()
+                frame_obj.locked_penis_state.active = True
+                frame_obj.locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
                 
                 frame_objects[frame_obj.frame_id] = frame_obj
         
@@ -231,9 +231,9 @@ class TestRealWorldStageCarryover:
                 frame_obj = FrameObject(frame_id=i, yolo_input_size=640)
                 frame_obj.pos_0_100 = frame_data.get('pos_0_100', frame_data.get('funscript_pos', 50))
                 
-                frame_obj.atr_locked_penis_state = ATRLockedPenisState()
-                frame_obj.atr_locked_penis_state.active = True
-                frame_obj.atr_locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
+                frame_obj.locked_penis_state = LockedPenisState()
+                frame_obj.locked_penis_state.active = True
+                frame_obj.locked_penis_state.box = (100.0, 100.0, 200.0, 200.0)
                 
                 frame_objects[i] = frame_obj
         

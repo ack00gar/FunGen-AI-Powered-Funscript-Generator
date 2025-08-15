@@ -182,7 +182,7 @@ class StageOutputValidator:
                 tables = [row[0] for row in cursor.fetchall()]
                 
                 # Look for common stage 2 table names
-                expected_tables = ['segments', 'frames', 'frame_objects', 'atr_segments']
+                expected_tables = ['segments', 'frames', 'frame_objects', 's2_segments']
                 has_required_tables = any(table in tables for table in expected_tables)
                 
                 if not has_required_tables:
@@ -391,7 +391,7 @@ class StageOutputValidator:
                         
                         # Check if frame objects have required Stage 3 data
                         # Check for funscript position data (different column names in different schemas)
-                        position_columns = ['pos_0_100', 'atr_funscript_distance', 'funscript_position']
+                        position_columns = ['pos_0_100', 'funscript_distance', 'funscript_position']
                         for col in position_columns:
                             try:
                                 cursor.execute(f"SELECT COUNT(*) FROM frame_objects WHERE {col} IS NOT NULL LIMIT 1")
@@ -401,10 +401,10 @@ class StageOutputValidator:
                             except sqlite3.Error:
                                 continue
                         
-                        # Check for ATR (Advanced Tracking Results) data
-                        # Check different possible column names for ATR data
-                        atr_columns = ['atr_locked_penis_active', 'atr_locked_penis_state', 'locked_penis_state']
-                        for col in atr_columns:
+                        # Check for Stage 2 data
+                        # Check different possible column names for Stage 2 data
+                        stage2_columns = ['locked_penis_active', 'locked_penis_state', 'locked_penis_state']
+                        for col in stage2_columns:
                             try:
                                 cursor.execute(f"SELECT COUNT(*) FROM frame_objects WHERE {col} IS NOT NULL LIMIT 1")
                                 if cursor.fetchone()[0] > 0:
@@ -414,8 +414,8 @@ class StageOutputValidator:
                                 continue
                 
                 # Check for segments table
-                if 'segments' in tables or 'atr_segments' in tables:
-                    segment_table = 'atr_segments' if 'atr_segments' in tables else 'segments'
+                if 'segments' in tables or 's2_segments' in tables:
+                    segment_table = 's2_segments' if 's2_segments' in tables else 'segments'
                     cursor.execute(f"SELECT COUNT(*) FROM {segment_table}")
                     segment_count = cursor.fetchone()[0]
                     if segment_count > 0:
@@ -481,7 +481,7 @@ class StageOutputValidator:
                 if isinstance(frame_data, dict):
                     # Look for Stage 2 specific data structures based on actual overlay format
                     has_boxes = 'yolo_boxes' in frame_data or 'boxes' in frame_data or 'detections' in frame_data
-                    has_position_data = 'atr_assigned_position' in frame_data or 'position' in frame_data
+                    has_position_data = 'assigned_position' in frame_data or 'position' in frame_data
                     has_tracking_data = 'active_interaction_track_id' in frame_data or 'motion_mode' in frame_data
                     
                     if has_boxes or has_position_data or has_tracking_data:

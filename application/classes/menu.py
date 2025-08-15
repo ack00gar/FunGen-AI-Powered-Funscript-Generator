@@ -528,6 +528,7 @@ class MainMenu:
         )
         if clicked:
             app_state.show_video_feed = val
+            self.app.app_settings.set("show_video_feed", val)
             pm.project_dirty = True
             
         imgui.unindent()

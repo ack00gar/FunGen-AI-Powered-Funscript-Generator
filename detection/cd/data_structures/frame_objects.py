@@ -2,7 +2,7 @@
 Frame object and related state structures for Stage 2 processing.
 
 This module contains the FrameObject class which represents all detection
-data for a single frame, along with helper classes like ATRLockedPenisState.
+data for a single frame, along with helper classes like LockedPenisState.
 """
 
 import numpy as np
@@ -11,16 +11,16 @@ from config import constants
 from .box_records import BoxRecord, PoseRecord
 
 
-class ATRLockedPenisState:
+class LockedPenisState:
     """
-    State information for ATR (Automatic Tracking and Recognition) locked penis tracking.
+    State information for locked penis tracking.
     
     This class maintains the state of penis tracking across frames, including
     position, detection statistics, and visibility information.
     """
     
     def __init__(self):
-        """Initialize ATR locked penis state with default values."""
+        """Initialize locked penis state with default values."""
         self.box: Optional[Tuple[float, float, float, float]] = None  # (x1,y1,x2,y2)
         self.active: bool = False
         self.max_height: float = 0.0
@@ -67,14 +67,14 @@ class FrameObject:
 
         # Original Stage 2 attributes
         self.pref_penis: Optional[BoxRecord] = None
-        self.atr_penis_box_kalman: Optional[Tuple[float, float, float, float]] = None
-        self.atr_locked_penis_state = ATRLockedPenisState()
-        self.atr_detected_contact_boxes: List[Dict] = []
-        self.atr_distances_to_penis: List[Dict] = []
+        self.penis_box_kalman: Optional[Tuple[float, float, float, float]] = None
+        self.locked_penis_state = LockedPenisState()
+        self.detected_contact_boxes: List[Dict] = []
+        self.distances_to_penis: List[Dict] = []
         # List to hold all unique-class fallback contributors.
-        self.atr_fallback_contributor_ids: List[int] = []
-        self.atr_assigned_position: str = "Not Relevant"
-        self.atr_funscript_distance: int = 50
+        self.fallback_contributor_ids: List[int] = []
+        self.assigned_position: str = "Not Relevant"
+        self.funscript_distance: int = 50
         self.pos_0_100: int = 50
         self.pos_lr_0_100: int = 50
         self.dominant_pose_id: Optional[int] = None
@@ -154,19 +154,19 @@ class FrameObject:
         """
         frame_data = {
             "frame_id": self.frame_id,
-            "atr_assigned_position": self.atr_assigned_position,
+            "assigned_position": self.assigned_position,
             "dominant_pose_id": self.dominant_pose_id,
             "active_interaction_track_id": self.active_interaction_track_id,
             "is_occluded": self.is_occluded,
             "motion_mode": self.motion_mode,
-            "atr_aligned_fallback_candidate_ids": self.atr_fallback_contributor_ids,
+            "aligned_fallback_candidate_ids": self.fallback_contributor_ids,
             "yolo_boxes": [b.to_dict() for b in self.boxes if not b.is_excluded],
             "poses": [p.to_dict() for p in self.poses]
         }
         
         # Add locked penis state if active
-        if self.atr_locked_penis_state.active and self.atr_locked_penis_state.box:
-            lp_state = self.atr_locked_penis_state
+        if self.locked_penis_state.active and self.locked_penis_state.box:
+            lp_state = self.locked_penis_state
             box_dims = lp_state.box
             w = box_dims[2] - box_dims[0]
             h = box_dims[3] - box_dims[1]
@@ -176,17 +176,17 @@ class FrameObject:
                 "confidence": 1.0,
                 "class_id": -1,
                 "class_name": "locked_penis",
-                "status": "ATR_LOCKED",
+                "status": "LOCKED",
                 "width": w,
                 "height": h,
                 "cx": box_dims[0] + w / 2,
                 "cy": box_dims[1] + h / 2
             }
-            if self.atr_penis_box_kalman:
-                locked_penis_dict["visible_bbox"] = list(self.atr_penis_box_kalman)
+            if self.penis_box_kalman:
+                locked_penis_dict["visible_bbox"] = list(self.penis_box_kalman)
             frame_data["yolo_boxes"].append(locked_penis_dict)
             
         return frame_data
 
     def __repr__(self):
-        return f"FrameObject(id={self.frame_id}, #boxes={len(self.boxes)}, #poses={len(self.poses)}, atr_pos='{self.atr_assigned_position}')"
+        return f"FrameObject(id={self.frame_id}, #boxes={len(self.boxes)}, #poses={len(self.poses)}, pos='{self.assigned_position}')"
