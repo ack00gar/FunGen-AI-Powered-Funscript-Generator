@@ -491,7 +491,7 @@ class ROITracker:
         return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
 
     def set_tracking_mode(self, mode: str):
-        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY"]:
+        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY", "OSCILLATION_DETECTOR_EXPERIMENTAL_2"]:
             if self.tracking_mode != mode:
                 previous_mode = self.tracking_mode
                 # Before switching, update caches from current state
@@ -752,7 +752,7 @@ class ROITracker:
                 self.prev_gray_user_roi_patch = None
                 self.primary_flow_history_smooth.clear()
                 self.secondary_flow_history_smooth.clear()
-        elif self.tracking_mode in ["OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY"]:
+        elif self.tracking_mode in ["OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY", "OSCILLATION_DETECTOR_EXPERIMENTAL_2"]:
             cached_area = self._cache_oscillation.get('area')
             if cached_area:
                 self.oscillation_area_fixed = cached_area
@@ -1473,7 +1473,7 @@ class ROITracker:
 
         # Check and report video source status when tracking starts
         self._check_and_report_video_source_status()
-        if self.tracking_mode in ["OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY"]:
+        if self.tracking_mode in ["OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY", "OSCILLATION_DETECTOR_EXPERIMENTAL_2"]:
             # Update grid size and sensitivity from settings before starting
             self.update_oscillation_grid_size()
             self.update_oscillation_sensitivity()
