@@ -1136,6 +1136,8 @@ class ROITracker:
             return self.process_frame_for_oscillation(frame, frame_time_ms, frame_index)
         elif self.tracking_mode == "OSCILLATION_DETECTOR_LEGACY":
             return self.process_frame_for_oscillation_legacy(frame, frame_time_ms, frame_index)
+        elif self.tracking_mode == "OSCILLATION_DETECTOR_EXPERIMENTAL_2":
+            return self.process_frame_for_oscillation_experimental_2(frame, frame_time_ms, frame_index)
 
         self._update_fps()
         processed_frame = self.preprocess_frame(frame)
@@ -2001,6 +2003,346 @@ class ROITracker:
                         f"fps={self.current_fps:.1f}")
             except Exception:
                 pass
+        return processed_frame, action_log_list if action_log_list else None
+
+    def process_frame_for_oscillation_experimental_2(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> \
+    Tuple[np.ndarray, Optional[List[Dict]]]:
+        """
+        [Experimental 2] Hybrid oscillation detector combining experimental timing precision 
+        with legacy amplification and signal conditioning. Best of both worlds approach:
+        
+        From Experimental:
+        - Zero-crossing analysis for precise peak/valley detection
+        - Adaptive motion logic (sparse/dense paths) 
+        - Global motion cancellation
+        - Advanced frequency/variance scoring
+        
+        From Legacy:
+        - Live dynamic amplification with percentile normalization
+        - Amplitude-aware scaling with natural response
+        - Cohesion analysis for spatial consistency
+        - Proven frequency weighting (2.5Hz optimal)
+        """
+
+        self._update_fps()
+
+        try:
+            target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)('oscillation_processing_target_height', constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT)
+        except Exception:
+            target_height = constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
+
+        if frame is None or frame.size == 0:
+            return frame, None
+
+        src_h, src_w = frame.shape[:2]
+        if target_height and src_h > target_height:
+            scale = float(target_height) / float(src_h)
+            new_w = max(1, int(round(src_w * scale)))
+            processed_input = cv2.resize(frame, (new_w, target_height), interpolation=cv2.INTER_AREA)
+        else:
+            processed_input = frame
+
+        # --- Use oscillation area for detection if set ---
+        use_oscillation_area = self.oscillation_area_fixed is not None
+        if use_oscillation_area:
+            ax, ay, aw, ah = self.oscillation_area_fixed
+            processed_frame = self.preprocess_frame(frame)
+            processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw]
+            if self._gray_roi_buffer is None or self._gray_roi_buffer.shape[:2] != (processed_frame_area.shape[0], processed_frame_area.shape[1]):
+                self._gray_roi_buffer = np.empty((processed_frame_area.shape[0], processed_frame_area.shape[1]), dtype=np.uint8)
+            cv2.cvtColor(processed_frame_area, cv2.COLOR_BGR2GRAY, dst=self._gray_roi_buffer)
+            current_gray = self._gray_roi_buffer
+        else:
+            processed_frame = self.preprocess_frame(frame)
+            target_h, target_w = processed_frame.shape[0], processed_frame.shape[1]
+            if self._gray_full_buffer is None or self._gray_full_buffer.shape[:2] != (target_h, target_w):
+                self._gray_full_buffer = np.empty((target_h, target_w), dtype=np.uint8)
+            cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY, dst=self._gray_full_buffer)
+            current_gray = self._gray_full_buffer
+            processed_frame_area = processed_frame
+            ax, ay = 0, 0
+            aw, ah = processed_frame.shape[1], processed_frame.shape[0]
+
+        action_log_list = []
+        active_blocks = getattr(self, 'oscillation_active_block_positions', set())
+        is_camera_motion = getattr(self, 'is_camera_motion', False)
+
+        # Compute dynamic grid based on current analysis image size
+        img_h, img_w = current_gray.shape[:2]
+        grid_size = max(1, int(self.oscillation_grid_size))
+        local_block_size = max(8, min(img_h // grid_size, img_w // grid_size))
+        if local_block_size <= 0:
+            local_block_size = 8
+        num_rows = max(1, img_h // local_block_size)
+        num_cols = max(1, img_w // local_block_size)
+        min_cell_activation_pixels = (local_block_size * local_block_size) * 0.05
+
+        # --- Visualization: optional static grid blocks overlay ---
+        if getattr(self, 'show_grid_blocks', False):
+            start_x, start_y = ax, ay
+            end_x, end_y = ax + aw, ay + ah
+            if not use_oscillation_area and self._is_vr_video():
+                vr_central_third_start_local = num_cols // 3
+                vr_central_third_end_local = 2 * num_cols // 3
+                start_x = ax + (vr_central_third_start_local * local_block_size)
+                end_x = ax + (vr_central_third_end_local * local_block_size)
+            gray_color = (100, 100, 100)
+            for y in range(start_y, end_y, local_block_size):
+                row_h = min(local_block_size, end_y - y)
+                if row_h <= 0:
+                    break
+                for x in range(start_x, end_x, local_block_size):
+                    col_w = min(local_block_size, end_x - x)
+                    if col_w <= 0:
+                        break
+                    cv2.rectangle(processed_frame, (x, y), (x + col_w, y + row_h), gray_color, 1)
+
+        # --- Detection logic ---
+        if self.prev_gray_oscillation is None or self.prev_gray_oscillation.shape != current_gray.shape:
+            self.prev_gray_oscillation = current_gray.copy()
+            return processed_frame, None
+
+        if not hasattr(self, 'flow_dense_osc') or not self.flow_dense_osc:
+            self.logger.warning("Dense optical flow not available for oscillation detection.")
+            return processed_frame, None
+
+        # --- Step 1: Calculate Global Optical Flow & Global Motion Vector (FROM EXPERIMENTAL) ---
+        flow = self.flow_dense_osc.calc(self.prev_gray_oscillation, current_gray, None)
+        if flow is None:
+            self.prev_gray_oscillation = current_gray.copy()
+            return processed_frame, None
+
+        # Calculate Global Motion to cancel out camera pans/shakes
+        global_dx = np.median(flow[..., 0])
+        global_dy = np.median(flow[..., 1])
+
+        # --- Step 2: Identify Active Cells & Apply VR Focus ---
+        min_motion_threshold = 15
+        frame_diff = cv2.absdiff(current_gray, self.prev_gray_oscillation)
+        _, motion_mask = cv2.threshold(frame_diff, min_motion_threshold, 255, cv2.THRESH_BINARY)
+
+        is_vr = self._is_vr_video()
+        apply_vr_central_focus = is_vr and not use_oscillation_area
+        eff_cols = max(1, min(self.oscillation_grid_size, current_gray.shape[1] // self.oscillation_block_size))
+        vr_central_third_start = eff_cols // 3
+        vr_central_third_end = 2 * eff_cols // 3
+
+        newly_active_cells = set()
+        for r in range(num_rows):
+            for c in range(num_cols):
+                if is_vr and (not use_oscillation_area) and (c < vr_central_third_start or c > vr_central_third_end):
+                    continue
+
+                y_start, x_start = r * local_block_size, c * local_block_size
+                mask_roi = motion_mask[y_start:y_start + local_block_size, x_start:x_start + local_block_size]
+                if mask_roi.size == 0:
+                    continue
+                if cv2.countNonZero(mask_roi) > min_cell_activation_pixels:
+                    newly_active_cells.add((r, c))
+
+        # Update persistence counters
+        for cell_pos in newly_active_cells:
+            self.oscillation_cell_persistence[cell_pos] = self.OSCILLATION_PERSISTENCE_FRAMES
+
+        expired_cells = [pos for pos, timer in self.oscillation_cell_persistence.items() if timer <= 1]
+        for cell_pos in expired_cells:
+            del self.oscillation_cell_persistence[cell_pos]
+
+        for cell_pos in self.oscillation_cell_persistence:
+            self.oscillation_cell_persistence[cell_pos] -= 1
+
+        persistent_active_cells = list(self.oscillation_cell_persistence.keys())
+
+        # --- Step 3: Analyze Localized Motion in Active Cells ---
+        block_motions = []
+        for r, c in persistent_active_cells:
+            y_start = r * local_block_size
+            x_start = c * local_block_size
+
+            flow_patch = flow[y_start:y_start + local_block_size, x_start:x_start + local_block_size]
+
+            if flow_patch.size > 0:
+                # Subtract global motion to get true local motion (FROM EXPERIMENTAL)
+                local_dx = np.median(flow_patch[..., 0]) - global_dx
+                local_dy = np.median(flow_patch[..., 1]) - global_dy
+
+                mag = np.sqrt(local_dx ** 2 + local_dy ** 2)
+                block_motions.append({'dx': local_dx, 'dy': local_dy, 'mag': mag, 'pos': (r, c)})
+                if (r, c) not in self.oscillation_history:
+                    self.oscillation_history[(r, c)] = deque(maxlen=self.oscillation_history_max_len)
+                self.oscillation_history[(r, c)].append({'dx': local_dx, 'dy': local_dy, 'mag': mag})
+
+        # --- Step 4: HYBRID BLOCK SELECTION (EXPERIMENTAL + LEGACY) ---
+        final_dy, final_dx = 0.0, 0.0
+        active_blocks = []
+
+        if block_motions:
+            candidate_blocks = []
+            for motion in block_motions:
+                history = self.oscillation_history.get(motion['pos'])
+                
+                # EXPERIMENTAL: Advanced frequency/variance analysis
+                if history and len(history) > 10 and motion['mag'] > 0.2:
+                    recent_dy = [h['dy'] for h in history]
+                    mean_mag = np.mean([h['mag'] for h in history])
+
+                    # Zero crossing analysis for precise timing (FROM EXPERIMENTAL)
+                    zero_crossings = np.sum(np.diff(np.sign(recent_dy)) != 0)
+                    frequency_score = (zero_crossings / len(recent_dy)) * 10.0
+
+                    # Variance analysis for oscillatory motion detection
+                    variance_score = np.std(recent_dy)
+                    
+                    # Calculate frequency from smoothed data (FROM LEGACY)
+                    smoothed_dys = np.convolve(recent_dy, np.ones(5) / 5, mode='valid')
+                    if len(smoothed_dys) >= 2:
+                        freq = (len(np.where(np.diff(np.sign(smoothed_dys)))[0]) / 2) / self.oscillation_history_seconds
+                        
+                        # LEGACY: Gaussian frequency weighting centered at 2.5Hz
+                        if 0.5 <= freq <= 7.0:
+                            freq_weight = np.exp(-((freq - 2.5) ** 2) / (2 * (1.5 ** 2)))
+                            
+                            # HYBRID SCORING: Combine experimental and legacy approaches
+                            experimental_score = mean_mag * (1 + frequency_score) * (1 + variance_score)
+                            legacy_score = mean_mag * freq * freq_weight
+                            
+                            # Weighted combination: favor experimental but boost with legacy
+                            hybrid_score = (experimental_score * 0.7) + (legacy_score * 0.3)
+                            
+                            if hybrid_score > 0.5:
+                                candidate_blocks.append({**motion, 'score': hybrid_score, 'freq': freq})
+
+            if candidate_blocks:
+                # LEGACY: Cohesion analysis for spatial consistency
+                candidate_pos = {b['pos'] for b in candidate_blocks}
+                for block in candidate_blocks:
+                    r, c = block['pos']
+                    cohesion_boost = 1.0
+                    for dr in [-1, 0, 1]:
+                        for dc in [-1, 0, 1]:
+                            if dr == 0 and dc == 0: continue
+                            if (r + dr, c + dc) in candidate_pos:
+                                cohesion_boost += 0.2  # 20% boost for each active neighbor
+                    block['score'] *= cohesion_boost
+
+                max_score = max(b['score'] for b in candidate_blocks)
+                # Use legacy threshold (60%) for proven stability
+                active_blocks = [b for b in candidate_blocks if b['score'] > max_score * 0.6]
+
+        # --- Step 5: ADAPTIVE MOTION CALCULATION (FROM EXPERIMENTAL) ---
+        SPARSITY_THRESHOLD = 2
+
+        if 0 < len(active_blocks) <= SPARSITY_THRESHOLD:
+            # Sparse Motion Path ("Follow the Leader")
+            if hasattr(self, 'logger'): 
+                self.logger.debug(f"Experimental 2: Sparse motion detected ({len(active_blocks)} blocks). Following the leader.")
+            leader_block = max(active_blocks, key=lambda b: b['mag'])
+            final_dy = leader_block['dy']
+            final_dx = leader_block['dx']
+
+        elif len(active_blocks) > SPARSITY_THRESHOLD:
+            # Dense Motion Path (Weighted Average)
+            if hasattr(self, 'logger'): 
+                self.logger.debug(f"Experimental 2: Dense motion detected ({len(active_blocks)} blocks). Using weighted average.")
+            total_weight = sum(b['score'] for b in active_blocks)
+            if total_weight > 0:
+                final_dy = sum(b['dy'] * b['score'] for b in active_blocks) / total_weight
+                final_dx = sum(b['dx'] * b['score'] for b in active_blocks) / total_weight
+
+        # --- Step 6: LEGACY SIGNAL CONDITIONING ---
+        if active_blocks:
+            # Calculate magnitude for amplitude-aware scaling
+            final_mag = np.sqrt(final_dy ** 2 + final_dx ** 2)
+            
+            # LEGACY: Amplitude-aware scaling with natural response
+            amplitude_scaler = np.clip(final_mag / 4.0, 0.7, 1.5)
+            max_deviation = 49 * self.oscillation_sensitivity * amplitude_scaler
+            scaled_dy = np.clip(final_dy * -10, -max_deviation, max_deviation)
+            scaled_dx = np.clip(final_dx * 10, -max_deviation, max_deviation)
+            new_raw_primary_pos = np.clip(50 + scaled_dy, 0, 100)
+            new_raw_secondary_pos = np.clip(50 + scaled_dx, 0, 100)
+        else:
+            # Decay towards center when no motion
+            new_raw_primary_pos = self.oscillation_last_known_pos * 0.95 + 50 * 0.05
+            new_raw_secondary_pos = self.oscillation_last_known_secondary_pos * 0.95 + 50 * 0.05
+
+        # --- Step 7: LEGACY LIVE DYNAMIC AMPLIFICATION ---
+        self.oscillation_position_history.append(new_raw_primary_pos)
+        final_primary_pos = new_raw_primary_pos
+        final_secondary_pos = new_raw_secondary_pos
+
+        # LEGACY: Live dynamic amplification with percentile normalization (anti-plateau)
+        if self.live_amp_enabled and len(self.oscillation_position_history) > self.oscillation_position_history.maxlen * 0.5:
+            p10 = np.percentile(self.oscillation_position_history, 10)
+            p90 = np.percentile(self.oscillation_position_history, 90)
+            effective_range = p90 - p10
+
+            if effective_range > 15:  # Auto-adapts to prevent plateau
+                normalized_pos = (new_raw_primary_pos - p10) / effective_range
+                final_primary_pos = np.clip(normalized_pos * 100, 0, 100)
+                
+                # Apply same normalization to secondary axis
+                normalized_secondary = (new_raw_secondary_pos - 50) / max(1, effective_range) + 0.5
+                final_secondary_pos = np.clip(normalized_secondary * 100, 0, 100)
+
+        # Apply EMA smoothing to the final calculated positions
+        self.oscillation_last_known_pos = self.oscillation_last_known_pos * (1 - self.oscillation_ema_alpha) + final_primary_pos * self.oscillation_ema_alpha
+        self.oscillation_last_known_secondary_pos = self.oscillation_last_known_secondary_pos * (1 - self.oscillation_ema_alpha) + final_secondary_pos * self.oscillation_ema_alpha
+        self.oscillation_funscript_pos = int(round(self.oscillation_last_known_pos))
+        self.oscillation_funscript_secondary_pos = int(round(self.oscillation_last_known_secondary_pos))
+
+        # --- Step 8: Action Logging ---
+        if self.tracking_active:
+            current_tracking_axis_mode = self.app.tracking_axis_mode if self.app else "both"
+            current_single_axis_output = self.app.single_axis_output_target if self.app else "primary"
+            primary_to_write, secondary_to_write = None, None
+
+            if current_tracking_axis_mode == "both":
+                primary_to_write, secondary_to_write = self.oscillation_funscript_pos, self.oscillation_funscript_secondary_pos
+            elif current_tracking_axis_mode == "vertical":
+                if current_single_axis_output == "primary":
+                    primary_to_write = self.oscillation_funscript_pos
+                else:
+                    secondary_to_write = self.oscillation_funscript_pos
+            elif current_tracking_axis_mode == "horizontal":
+                if current_single_axis_output == "primary":
+                    primary_to_write = self.oscillation_funscript_secondary_pos
+                else:
+                    secondary_to_write = self.oscillation_funscript_secondary_pos
+
+            self.funscript.add_action(timestamp_ms=frame_time_ms, primary_pos=primary_to_write, secondary_pos=secondary_to_write)
+            action_log_list.append({"at": frame_time_ms, "pos": primary_to_write, "secondary_pos": secondary_to_write})
+
+        # --- Step 9: Visualization ---
+        if self.show_masks:
+            active_block_positions = {b['pos'] for b in active_blocks}
+            for r,c in list(self.oscillation_cell_persistence.keys()):
+                x1, y1 = c * local_block_size + ax, r * local_block_size + ay
+                color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
+                cv2.rectangle(processed_frame, (x1, y1), (x1 + local_block_size, y1 + local_block_size), color, 1)
+
+        # Keep reusable prev gray buffer
+        if self._prev_gray_osc_buffer is None or self._prev_gray_osc_buffer.shape != current_gray.shape:
+            self._prev_gray_osc_buffer = np.empty_like(current_gray)
+        np.copyto(self._prev_gray_osc_buffer, current_gray)
+        self.prev_gray_oscillation = self._prev_gray_osc_buffer
+
+        # Debug instrumentation
+        if self.logger and self.logger.isEnabledFor(logging.DEBUG):
+            try:
+                now_sec = time.time()
+                last = getattr(self, '_osc_instr_last_log_sec', 0.0)
+                if now_sec - last >= 1.0:
+                    self._osc_instr_last_log_sec = now_sec
+                    cur_rows = max(1, current_gray.shape[0] // max(1, local_block_size))
+                    cur_cols = max(1, current_gray.shape[1] // max(1, local_block_size))
+                    self.logger.debug(
+                        f"OSC EXP2 perf: area={use_oscillation_area} img={current_gray.shape} grid={cur_rows}x{cur_cols} "
+                        f"active_cells={len(self.oscillation_cell_persistence)} fps={self.current_fps:.1f} "
+                        f"live_amp={self.live_amp_enabled}")
+            except Exception:
+                pass
+
         return processed_frame, action_log_list if action_log_list else None
 
     def process_frame_for_oscillation_legacy(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> \
