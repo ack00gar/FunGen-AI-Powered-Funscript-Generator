@@ -1015,9 +1015,15 @@ class ApplicationLogic:
                     self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
                     self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
                     self.tracker.start_tracking()
+                    self.processor.set_tracker_processing_enabled(True)
                 elif selected_mode == TrackerMode.OSCILLATION_DETECTOR_LEGACY:
                     self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
                     self.tracker.set_tracking_mode("OSCILLATION_DETECTOR_LEGACY")
+                    self.tracker.start_tracking()
+                    self.processor.set_tracker_processing_enabled(True)
+                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2:
+                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
+                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR_EXPERIMENTAL_2")
                     self.tracker.start_tracking()
                     self.processor.set_tracker_processing_enabled(True)
 

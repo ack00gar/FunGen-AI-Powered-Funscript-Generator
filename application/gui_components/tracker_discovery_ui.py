@@ -1,0 +1,390 @@
+#!/usr/bin/env python3
+"""
+UI Tracker Discovery Module
+
+Provides dynamic tracker discovery for GUI components, integrating both
+live and offline tracker systems to replace hardcoded mode lists.
+
+Author: Modular Tracker Architecture
+Version: 1.0.0
+"""
+
+import logging
+import os
+import sys
+from typing import Dict, List, Tuple, Optional, Any
+from enum import Enum
+from dataclasses import dataclass
+
+# Add project root to path for tracker module imports
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Import TrackerMode separately - this should always work
+try:
+    from config.constants import TrackerMode
+except ImportError as e:
+    logging.error(f"TrackerDiscoveryUI: Could not import TrackerMode: {e}")
+    TrackerMode = None
+
+# Import the working tracker registry - this should work
+try:
+    from tracker_modules import tracker_registry, TrackerRegistry
+    TrackerManager = tracker_registry  # Use the registry as the manager
+except ImportError as e:
+    logging.warning(f"TrackerDiscoveryUI: Could not import TrackerRegistry: {e}")
+    TrackerManager = None
+
+# Import offline tracker components - this might fail
+try:
+    from tracker_modules.base_offline_tracker import BaseOfflineTracker, OfflineProcessingStage
+except ImportError as e:
+    logging.warning(f"TrackerDiscoveryUI: Could not import offline tracker components: {e}")
+    BaseOfflineTracker = None
+    OfflineProcessingStage = None
+
+
+class TrackerCategory(Enum):
+    """Categories for organizing trackers in UI."""
+    LIVE = "live"
+    OFFLINE = "offline"
+    COMMUNITY = "community"
+
+
+@dataclass
+class DiscoveredTracker:
+    """Represents a discovered tracker for UI display."""
+    internal_name: str
+    display_name: str 
+    description: str
+    category: TrackerCategory
+    ui_tooltip: str
+    legacy_enum_value: Optional[Any] = None  # For backward compatibility
+    is_available: bool = True
+    error_message: Optional[str] = None
+
+
+class TrackerDiscoveryUI:
+    """
+    Manages dynamic tracker discovery for UI components.
+    
+    Replaces hardcoded tracker mode lists with auto-discovery,
+    supporting both live and offline tracker systems.
+    """
+    
+    def __init__(self, app_instance=None):
+        """
+        Initialize tracker discovery UI.
+        
+        Args:
+            app_instance: Main application instance (optional)
+        """
+        self.logger = logging.getLogger("TrackerDiscoveryUI")
+        self.app_instance = app_instance
+        
+        # Cache for discovered trackers
+        self._live_trackers_cache: Optional[List[DiscoveredTracker]] = None
+        self._offline_trackers_cache: Optional[List[DiscoveredTracker]] = None
+        self._all_trackers_cache: Optional[List[DiscoveredTracker]] = None
+        
+        # Initialize managers
+        self.live_tracker_manager: Optional[TrackerManager] = None
+        self._initialize_managers()
+    
+    def _initialize_managers(self):
+        """Initialize tracker managers if modules are available."""
+        if TrackerManager:
+            try:
+                # TrackerRegistry is already initialized as global instance - just use it directly
+                self.live_tracker_manager = TrackerManager  # This is already the tracker_registry instance
+                self.logger.info("TrackerDiscoveryUI: Tracker registry initialized")
+            except Exception as e:
+                self.logger.warning(f"TrackerDiscoveryUI: Failed to initialize tracker registry: {e}")
+    
+    def discover_live_trackers(self, force_refresh: bool = False) -> List[DiscoveredTracker]:
+        """
+        Discover available live trackers.
+        
+        Args:
+            force_refresh: Force re-discovery ignoring cache
+            
+        Returns:
+            List of discovered live trackers
+        """
+        if self._live_trackers_cache and not force_refresh:
+            return self._live_trackers_cache
+        
+        discovered = []
+        
+        if not self.live_tracker_manager:
+            # No tracker registry available - cannot discover trackers
+            self.logger.error("TrackerRegistry not available - cannot discover live trackers")
+            self._live_trackers_cache = []
+            return []
+        else:
+            try:
+                # Use TrackerRegistry API methods
+                available_tracker_names = self.live_tracker_manager.get_available_names()
+                
+                for tracker_name in available_tracker_names:
+                    try:
+                        metadata = self.live_tracker_manager.get_metadata(tracker_name)
+                        if metadata and metadata.category == "live":
+                            discovered.append(DiscoveredTracker(
+                                internal_name=tracker_name,
+                                display_name=metadata.display_name,
+                                description=metadata.description,
+                                category=TrackerCategory.LIVE,
+                                ui_tooltip=self._generate_live_tracker_tooltip(metadata),
+                                legacy_enum_value=self._map_to_legacy_enum(tracker_name, TrackerCategory.LIVE),
+                                is_available=True
+                            ))
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get metadata for live tracker '{tracker_name}': {e}")
+                        # Add with basic info
+                        discovered.append(DiscoveredTracker(
+                            internal_name=tracker_name,
+                            display_name=tracker_name.replace('_', ' ').title(),
+                            description="Live tracking algorithm",
+                            category=TrackerCategory.LIVE,
+                            ui_tooltip=f"Live tracker: {tracker_name}",
+                            legacy_enum_value=self._map_to_legacy_enum(tracker_name, TrackerCategory.LIVE),
+                            is_available=False,
+                            error_message=str(e)
+                        ))
+            except Exception as e:
+                self.logger.error(f"Failed to discover live trackers: {e}")
+                # Return empty list if discovery fails - no fallback needed
+                discovered = []
+        
+        self._live_trackers_cache = discovered
+        return discovered
+    
+    def discover_offline_trackers(self, force_refresh: bool = False) -> List[DiscoveredTracker]:
+        """
+        Discover available offline trackers.
+        
+        Args:
+            force_refresh: Force re-discovery ignoring cache
+            
+        Returns:
+            List of discovered offline trackers
+        """
+        if self._offline_trackers_cache and not force_refresh:
+            return self._offline_trackers_cache
+        
+        discovered = []
+        
+        if not self.live_tracker_manager:
+            # No tracker registry available - cannot discover trackers
+            self.logger.error("TrackerRegistry not available - cannot discover offline trackers")
+            self._offline_trackers_cache = []
+            return []
+        else:
+            try:
+                # Use TrackerRegistry API methods to find offline trackers
+                available_tracker_names = self.live_tracker_manager.get_available_names()
+                
+                for tracker_name in available_tracker_names:
+                    try:
+                        metadata = self.live_tracker_manager.get_metadata(tracker_name)
+                        if metadata and metadata.category == "offline":
+                            discovered.append(DiscoveredTracker(
+                                internal_name=tracker_name,
+                                display_name=metadata.display_name,
+                                description=metadata.description,
+                                category=TrackerCategory.OFFLINE,
+                                ui_tooltip=self._generate_offline_tracker_tooltip(metadata, None),
+                                legacy_enum_value=self._map_to_legacy_enum(tracker_name, TrackerCategory.OFFLINE),
+                                is_available=True
+                            ))
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get metadata for offline tracker '{tracker_name}': {e}")
+                        # Add with basic info
+                        discovered.append(DiscoveredTracker(
+                            internal_name=tracker_name,
+                            display_name=tracker_name.replace('_', ' ').title(),
+                            description="Offline processing algorithm",
+                            category=TrackerCategory.OFFLINE,
+                            ui_tooltip=f"Offline tracker: {tracker_name}",
+                            legacy_enum_value=self._map_to_legacy_enum(tracker_name, TrackerCategory.OFFLINE),
+                            is_available=False,
+                            error_message=str(e)
+                        ))
+                
+                # Log if no offline trackers found
+                if not discovered:
+                    self.logger.warning("No offline trackers found via discovery")
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to discover offline trackers: {e}")
+                # Return empty list if discovery fails - no fallback needed
+                discovered = []
+        
+        self._offline_trackers_cache = discovered
+        return discovered
+    
+    def get_all_trackers(self, force_refresh: bool = False) -> List[DiscoveredTracker]:
+        """
+        Get all available trackers (live + offline).
+        
+        Args:
+            force_refresh: Force re-discovery ignoring cache
+            
+        Returns:
+            Combined list of all discovered trackers
+        """
+        if self._all_trackers_cache and not force_refresh:
+            return self._all_trackers_cache
+        
+        live_trackers = self.discover_live_trackers(force_refresh)
+        offline_trackers = self.discover_offline_trackers(force_refresh)
+        
+        # Combine and sort by category priority, then alphabetically
+        all_trackers = []
+        all_trackers.extend(live_trackers)
+        all_trackers.extend(offline_trackers)
+        
+        # Sort using the same logic as TrackerRegistry
+        category_priority = {'live': 1, 'offline': 2, 'community': 3}
+        all_trackers.sort(key=lambda t: (category_priority.get(t.category.value, 999), t.display_name))
+        
+        self._all_trackers_cache = all_trackers
+        return all_trackers
+    
+    def get_trackers_for_ui_combo(self, include_offline: bool = True) -> Tuple[List[str], List[DiscoveredTracker]]:
+        """
+        Get tracker lists formatted for imgui combo boxes.
+        
+        Args:
+            include_offline: Whether to include offline trackers
+            
+        Returns:
+            Tuple of (display_names, tracker_objects)
+        """
+        # Use the sorted get_all_trackers method for consistent ordering
+        all_trackers = self.get_all_trackers()
+        
+        if not include_offline:
+            # For simple mode (live only), filter to live trackers with valid enum mappings
+            trackers = [t for t in all_trackers if t.category.value == 'live' and t.legacy_enum_value is not None]
+        else:
+            # Include all trackers (already sorted by get_all_trackers)
+            trackers = all_trackers
+        
+        display_names = [tracker.display_name for tracker in trackers]
+        return display_names, trackers
+    
+    def find_tracker_by_legacy_enum(self, legacy_enum_value: Any) -> Optional[DiscoveredTracker]:
+        """
+        Find a tracker by its legacy enum value for backward compatibility.
+        
+        Args:
+            legacy_enum_value: Legacy TrackerMode enum value
+            
+        Returns:
+            Matching DiscoveredTracker or None
+        """
+        all_trackers = self.get_all_trackers()
+        
+        for tracker in all_trackers:
+            if tracker.legacy_enum_value == legacy_enum_value:
+                return tracker
+        
+        return None
+    
+    def _generate_live_tracker_tooltip(self, metadata) -> str:
+        """Generate tooltip text for live tracker."""
+        tooltip_lines = [
+            f"Live Tracker: {metadata.display_name}",
+            f"Description: {metadata.description}",
+            "",
+            "Capabilities:"
+        ]
+        
+        if hasattr(metadata, 'capabilities'):
+            for capability in metadata.capabilities:
+                tooltip_lines.append(f"• {capability}")
+        
+        if hasattr(metadata, 'requirements') and metadata.requirements:
+            tooltip_lines.append("")
+            tooltip_lines.append("Requirements:")
+            for req in metadata.requirements:
+                tooltip_lines.append(f"• {req}")
+        
+        return "\n".join(tooltip_lines)
+    
+    def _generate_offline_tracker_tooltip(self, metadata, instance) -> str:
+        """Generate tooltip text for offline tracker."""
+        tooltip_lines = [
+            f"Offline Tracker: {metadata.display_name}",
+            f"Description: {metadata.description}",
+            "",
+            "Processing Stages:"
+        ]
+        
+        if hasattr(instance, 'processing_stages'):
+            for stage in instance.processing_stages:
+                tooltip_lines.append(f"• {stage.value.title()}")
+        
+        if hasattr(instance, 'stage_dependencies') and instance.stage_dependencies:
+            tooltip_lines.append("")
+            tooltip_lines.append("Stage Dependencies:")
+            for stage, deps in instance.stage_dependencies.items():
+                if deps:
+                    dep_names = [dep.value for dep in deps]
+                    tooltip_lines.append(f"• {stage.value} requires: {', '.join(dep_names)}")
+        
+        return "\n".join(tooltip_lines)
+    
+    def _map_to_legacy_enum(self, tracker_name: str, category: TrackerCategory) -> Optional[Any]:
+        """Map tracker to legacy enum for backward compatibility."""
+        if not TrackerMode:
+            return None
+        
+        # Mapping from new tracker names to legacy enum values
+        legacy_mapping = {
+            # Live trackers - map actual discovered names to correct enums
+            'oscillation_experimental': TrackerMode.OSCILLATION_DETECTOR,  # The "experimental" is the default
+            'oscillation_legacy': TrackerMode.OSCILLATION_DETECTOR_LEGACY, 
+            'oscillation_experimental_2': TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
+            'yolo_roi': TrackerMode.LIVE_YOLO_ROI,
+            'user_roi': TrackerMode.LIVE_USER_ROI,
+            
+            # Offline trackers
+            'stage2_contact_analysis': TrackerMode.OFFLINE_2_STAGE,
+            'stage3_optical_flow': TrackerMode.OFFLINE_3_STAGE,
+            'stage3_mixed': TrackerMode.OFFLINE_3_STAGE_MIXED
+        }
+        
+        return legacy_mapping.get(tracker_name)
+    
+    
+    
+    def clear_cache(self):
+        """Clear all cached tracker discovery results."""
+        self._live_trackers_cache = None
+        self._offline_trackers_cache = None
+        self._all_trackers_cache = None
+        self.logger.info("TrackerDiscoveryUI: Cache cleared")
+    
+    def get_discovery_status(self) -> Dict[str, Any]:
+        """
+        Get status information about tracker discovery.
+        
+        Returns:
+            Dictionary with discovery status info
+        """
+        live_trackers = self.discover_live_trackers()
+        offline_trackers = self.discover_offline_trackers()
+        
+        return {
+            'live_trackers_count': len(live_trackers),
+            'offline_trackers_count': len(offline_trackers),
+            'total_trackers': len(live_trackers) + len(offline_trackers),
+            'live_available': len([t for t in live_trackers if t.is_available]),
+            'offline_available': len([t for t in offline_trackers if t.is_available]),
+            'has_live_manager': self.live_tracker_manager is not None,
+            'discovery_errors': [t.error_message for t in live_trackers + offline_trackers if t.error_message]
+        }
