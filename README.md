@@ -44,10 +44,6 @@ git clone --branch v0.5.0 https://github.com/ack00gar/FunGen-AI-Powered-Funscrip
 cd FunGenBeta
 ```
 
-### Install the core python requirements
-```bash
-pip install -r core.requirements.txt
-```
 - If you have the original FunGen installed, skip to [Download the YOLO model](#download-the-yolo-model)
 
 ### NVIDIA GPU Setup (CUDA Required)
@@ -61,14 +57,12 @@ pip install -r core.requirements.txt
 
 **For 20xx, 30xx and 40xx-series NVIDIA GPUs:**
 ```bash
-pip install -r cuda.requirements.txt
-pip install tensorrt
+uv sync --extra cuda
 ```
 
 **For 50xx series NVIDIA GPUs (RTX 5070, 5080, 5090):**
 ```bash
-pip install -r cuda.50series.requirements.txt
-pip install tensorrt
+uv sync --extra cuda-rtx50
 ```
 
 **Note:** NVIDIA 10xx series GPUs are not supported.
@@ -82,12 +76,12 @@ python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
 
 ### If your GPU doesn't support cuda
 ```bash
-pip install -r cpu.requirements.txt
+uv sync --extra cpu
 ```
 
 ### If your GPU supports ROCm (AMD Linux Only)
 ```bash
-pip install -r rocm.requirements.txt
+uv sync --extra rocm
 ```
 
 ## Download the YOLO model
@@ -98,7 +92,7 @@ Download from https://docs.ultralytics.com/tasks/pose/ and place in the `models/
 
 ### Start the app
 ```bash
-python3 main.py
+uv run main.py
 ```
 
 We support multiple model formats across Windows, macOS, and Linux.
