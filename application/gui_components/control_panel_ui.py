@@ -434,6 +434,8 @@ class ControlPanelUI:
                         tr.set_tracking_mode("OSCILLATION_DETECTOR")
                     elif new_mode == tracker_mode.OSCILLATION_DETECTOR_LEGACY:
                         tr.set_tracking_mode("OSCILLATION_DETECTOR_LEGACY")
+                    elif new_mode == tracker_mode.OSCILLATION_DETECTOR_EXPERIMENTAL_2:
+                        tr.set_tracking_mode("OSCILLATION_DETECTOR_EXPERIMENTAL_2")
                     else:
                         tr.set_tracking_mode("YOLO_ROI")
 
