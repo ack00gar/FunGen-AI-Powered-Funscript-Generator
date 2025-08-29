@@ -250,12 +250,14 @@ class ControlPanelUI:
         modes_display = [
             "Live Oscillation Detector",
             "Live Oscillation Detector (Legacy)",
+            "Live Oscillation Detector (Experimental 2)",
             "Live Tracking (YOLO ROI)",
             "Offline AI Analysis (3-Stage)",
         ]
         modes_enum = [
             tracker_mode.OSCILLATION_DETECTOR,
             tracker_mode.OSCILLATION_DETECTOR_LEGACY,
+            tracker_mode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
             tracker_mode.LIVE_YOLO_ROI,
             tracker_mode.OFFLINE_3_STAGE,
         ]
@@ -272,6 +274,8 @@ class ControlPanelUI:
         imgui.pop_item_width()
         self._help_tooltip(
             "Live Oscillation Detector: Fast & simple, best for rhythmic motion\n"
+            "Live Oscillation Detector (Legacy): Proven stable version with anti-plateau amplification\n"
+            "Live Oscillation Detector (Experimental 2): Hybrid approach - best timing precision + signal strength\n"
             "Live Tracking (YOLO ROI): Real-time AI tracking with immediate preview\n"
             "Offline AI Analysis: High quality, uses AI for object detection"
         )
@@ -289,6 +293,7 @@ class ControlPanelUI:
                 all_modes = [
                     self.TrackerMode.OSCILLATION_DETECTOR,
                     self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
+                    self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
                     self.TrackerMode.LIVE_YOLO_ROI,
                     self.TrackerMode.OFFLINE_3_STAGE,
                 ]
@@ -311,6 +316,7 @@ class ControlPanelUI:
             self.TrackerMode.LIVE_USER_ROI,
             self.TrackerMode.OSCILLATION_DETECTOR,
             self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
+            self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
         )
         is_playback_active = processor and processor.is_processing and not processor.enable_tracker_processing
 
@@ -354,6 +360,7 @@ class ControlPanelUI:
         modes_enum = [
             tracker_mode.OSCILLATION_DETECTOR,
             tracker_mode.OSCILLATION_DETECTOR_LEGACY,
+            tracker_mode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
             tracker_mode.LIVE_YOLO_ROI,
             tracker_mode.LIVE_USER_ROI,
             tracker_mode.OFFLINE_2_STAGE,
@@ -385,6 +392,8 @@ class ControlPanelUI:
                 self._help_tooltip(
                     "Choose analysis method:\n"
                     "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion\n"
+                    "• Live Oscillation Detector (Legacy): Proven stable version with superior amplification\n"
+                    "• Live Oscillation Detector (Experimental 2): Hybrid - combines timing precision + signal strength\n"
                     "• Live YOLO ROI: AI-powered object detection with real-time tracking\n"
                     "• Live User ROI: Manual region selection for custom tracking\n"
                     "• Offline 2-Stage: GPU-accelerated batch processing\n"
@@ -570,7 +579,7 @@ class ControlPanelUI:
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
                 self._render_class_filtering_content()
 
-        if tmode in [self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
+        if tmode in [self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
             if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 self._render_oscillation_detector_settings()
 
@@ -582,6 +591,7 @@ class ControlPanelUI:
         with_config = {
             self.TrackerMode.OSCILLATION_DETECTOR,
             self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
+            self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
             self.TrackerMode.LIVE_YOLO_ROI,
             self.TrackerMode.LIVE_USER_ROI,
             self.TrackerMode.OFFLINE_2_STAGE,
@@ -1043,7 +1053,7 @@ class ControlPanelUI:
             self._render_stage_progress_ui(stage_proc)
             return
 
-        if mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY):
+        if mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2):
             tr = app.tracker
             imgui.text(">> Tracker Status")
             imgui.separator()
@@ -1059,7 +1069,7 @@ class ControlPanelUI:
                     )
                 elif mode == self.TrackerMode.LIVE_USER_ROI:
                     roi_status = "Set" if getattr(tr, "user_roi_fixed", False) else "Not Set"
-                elif mode in [self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
+                elif mode in [self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
                     roi_status = "Set" if getattr(tr, "oscillation_area_fixed", None) else "Not Set"
             imgui.text(" - ROI Status: %s" % roi_status)
 
@@ -1276,7 +1286,7 @@ class ControlPanelUI:
             if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED, self.TrackerMode.OFFLINE_2_STAGE]:
                 start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
-            elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
+            elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
                 imgui.new_line()
                 start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
                 handler = event_handlers.handle_start_live_tracker_click
@@ -1307,7 +1317,7 @@ class ControlPanelUI:
             else:
                 # Normal start button
                 if imgui.button(start_text, width=button_width):
-                    if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
+                    if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
                         self._start_live_tracking()
                     elif handler: handler()
 
@@ -1321,7 +1331,7 @@ class ControlPanelUI:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
         # Place info note for live methods directly below the buttons
-        if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY]:
+        if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
             imgui.text_ansi_colored("It can take up to 35 seconds to see output on the timelines.\nThis is a known feature.", 0.25, 0.88, 0.82)
 
     def _render_stage_progress_ui(self, stage_proc):
