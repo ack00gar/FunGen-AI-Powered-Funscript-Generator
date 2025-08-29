@@ -2,6 +2,13 @@ import imgui
 import os
 import config
 
+# Import dynamic tracker discovery
+try:
+    from .tracker_discovery_ui import TrackerDiscoveryUI, TrackerCategory
+except ImportError:
+    TrackerDiscoveryUI = None
+    TrackerCategory = None
+
 def _tooltip_if_hovered(text):
     if imgui.is_item_hovered():
         imgui.set_tooltip(text)
@@ -43,6 +50,7 @@ class ControlPanelUI:
         "TrackerMode",
         "AI_modelExtensionsFilter",
         "AI_modelTooltipExtensions",
+        "tracker_discovery",
     )
 
     def __init__(self, app):
@@ -55,8 +63,67 @@ class ControlPanelUI:
         self.TrackerMode = self.constants.TrackerMode
         self.AI_modelExtensionsFilter = self.constants.AI_MODEL_EXTENSIONS_FILTER
         self.AI_modelTooltipExtensions = self.constants.AI_MODEL_TOOLTIP_EXTENSIONS
+        
+        # Initialize dynamic tracker discovery
+        if TrackerDiscoveryUI:
+            self.tracker_discovery = TrackerDiscoveryUI(app)
+        else:
+            self.tracker_discovery = None
 
     # ------- Helpers -------
+
+    def _get_tracker_lists_for_ui(self, simple_mode=False):
+        """Get tracker lists for UI combo boxes."""
+        if self.tracker_discovery:
+            try:
+                # Use dynamic discovery
+                display_names, discovered_trackers = self.tracker_discovery.get_trackers_for_ui_combo(
+                    include_offline=not simple_mode  # Simple mode only shows live trackers
+                )
+                
+                # Extract legacy enum values for backward compatibility
+                legacy_enums = []
+                for tracker in discovered_trackers:
+                    if tracker.legacy_enum_value:
+                        legacy_enums.append(tracker.legacy_enum_value)
+                    else:
+                        # Fallback to first available enum if no mapping
+                        legacy_enums.append(self.TrackerMode.OSCILLATION_DETECTOR)
+                
+                return display_names, legacy_enums, discovered_trackers
+            except Exception as e:
+                if hasattr(self.app, 'logger'):
+                    self.app.logger.warning(f"Dynamic tracker discovery failed: {e}")
+        
+        # If dynamic discovery fails completely, return empty lists
+        self.logger.error("Tracker discovery completely failed - no trackers available")
+        return [], [], None
+    
+    
+    def _generate_combined_tooltip(self, discovered_trackers):
+        """Generate combined tooltip for discovered trackers."""
+        if not discovered_trackers:
+            # Default tooltip when no discovery data available
+            return ("Choose analysis method:\n"
+                   "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion\n"
+                   "• Live Oscillation Detector (Legacy): Proven stable version with superior amplification\n"
+                   "• Live Oscillation Detector (Experimental 2): Hybrid - combines timing precision + signal strength\n"
+                   "• Live YOLO ROI: AI-powered object detection with real-time tracking\n"
+                   "• Live User ROI: Manual region selection for custom tracking\n"
+                   "• Offline 2-Stage: GPU-accelerated batch processing\n"
+                   "• Offline 3-Stage: Full pipeline with advanced post-processing\n"
+                   "• Offline 3-Stage Mixed: Stage 2 signal + ROI tracking for BJ/HJ chapters")
+        
+        tooltip_lines = ["Choose analysis method:"]
+        for tracker in discovered_trackers:
+            status_icon = "✓" if tracker.is_available else "⚠"
+            tooltip_lines.append(f"{status_icon} {tracker.display_name}: {tracker.description}")
+        
+        if any(not t.is_available for t in discovered_trackers):
+            tooltip_lines.append("")
+            tooltip_lines.append("⚠ Some trackers may have initialization issues")
+        
+        return "\n".join(tooltip_lines)
 
     def _help_tooltip(self, text):
         if imgui.is_item_hovered():
@@ -247,38 +314,20 @@ class ControlPanelUI:
                     "Click Start when you're ready to begin analysis",
                 )
 
-        modes_display = [
-            "Live Oscillation Detector",
-            "Live Oscillation Detector (Legacy)",
-            "Live Oscillation Detector (Experimental 2)",
-            "Live Tracking (YOLO ROI)",
-            "Offline AI Analysis (3-Stage)",
-        ]
-        modes_enum = [
-            tracker_mode.OSCILLATION_DETECTOR,
-            tracker_mode.OSCILLATION_DETECTOR_LEGACY,
-            tracker_mode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
-            tracker_mode.LIVE_YOLO_ROI,
-            tracker_mode.OFFLINE_3_STAGE,
-        ]
+        # Use dynamic tracker discovery
+        modes_display, modes_enum, discovered_trackers = self._get_tracker_lists_for_ui(simple_mode=True)
         try:
             cur_idx = modes_enum.index(app_state.selected_tracker_mode)
         except ValueError:
             cur_idx = 0
-            app_state.selected_tracker_mode = tracker_mode.OSCILLATION_DETECTOR
+            app_state.selected_tracker_mode = modes_enum[cur_idx] if modes_enum else self.TrackerMode.OSCILLATION_DETECTOR
 
         imgui.push_item_width(-1)
         clicked, new_idx = imgui.combo(
             "Analysis Method##SimpleTrackerMode", cur_idx, modes_display
         )
         imgui.pop_item_width()
-        self._help_tooltip(
-            "Live Oscillation Detector: Fast & simple, best for rhythmic motion\n"
-            "Live Oscillation Detector (Legacy): Proven stable version with anti-plateau amplification\n"
-            "Live Oscillation Detector (Experimental 2): Hybrid approach - best timing precision + signal strength\n"
-            "Live Tracking (YOLO ROI): Real-time AI tracking with immediate preview\n"
-            "Offline AI Analysis: High quality, uses AI for object detection"
-        )
+        self._help_tooltip(self._generate_combined_tooltip(discovered_trackers))
         if clicked and new_idx != cur_idx:
             new_mode = modes_enum[new_idx]
             # Clear overlays only when switching modes
@@ -357,23 +406,15 @@ class ControlPanelUI:
             or (processor and processor.is_processing and not processor.pause_event.is_set())
         )
 
-        modes_enum = [
-            tracker_mode.OSCILLATION_DETECTOR,
-            tracker_mode.OSCILLATION_DETECTOR_LEGACY,
-            tracker_mode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
-            tracker_mode.LIVE_YOLO_ROI,
-            tracker_mode.LIVE_USER_ROI,
-            tracker_mode.OFFLINE_2_STAGE,
-            tracker_mode.OFFLINE_3_STAGE,
-            tracker_mode.OFFLINE_3_STAGE_MIXED,
-        ]
+        # Use dynamic tracker discovery for full mode
+        modes_display_full, modes_enum, discovered_trackers_full = self._get_tracker_lists_for_ui(simple_mode=False)
 
         open_, _ = imgui.collapsing_header(
             "Choose Analysis Method##SimpleAnalysisMethod",
             flags=imgui.TREE_NODE_DEFAULT_OPEN,
         )
         if open_:
-            modes_display = [m.value for m in modes_enum]
+            modes_display = modes_display_full
 
             processor = app.processor
             disable_combo = (
@@ -389,17 +430,7 @@ class ControlPanelUI:
                     app_state.selected_tracker_mode = modes_enum[cur_idx]
 
                 clicked, new_idx = imgui.combo("##TrackerModeCombo", cur_idx, modes_display)
-                self._help_tooltip(
-                    "Choose analysis method:\n"
-                    "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion\n"
-                    "• Live Oscillation Detector (Legacy): Proven stable version with superior amplification\n"
-                    "• Live Oscillation Detector (Experimental 2): Hybrid - combines timing precision + signal strength\n"
-                    "• Live YOLO ROI: AI-powered object detection with real-time tracking\n"
-                    "• Live User ROI: Manual region selection for custom tracking\n"
-                    "• Offline 2-Stage: GPU-accelerated batch processing\n"
-                    "• Offline 3-Stage: Full pipeline with advanced post-processing\n"
-                    "• Offline 3-Stage Mixed: Stage 2 signal + ROI tracking for BJ/HJ chapters"
-                )
+                self._help_tooltip(self._generate_combined_tooltip(discovered_trackers_full))
 
             if clicked and new_idx != cur_idx:
                 new_mode = modes_enum[new_idx]
