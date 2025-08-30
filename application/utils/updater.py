@@ -564,6 +564,23 @@ class AutoUpdater:
         """Unified method to apply updates using either a git update or git checkout."""
         self.update_in_progress = True
         
+        # Special pre-migration handling for v0.5.0 to main transition
+        if self.MIGRATION_MODE and self.active_branch != self.FALLBACK_BRANCH and not use_pull:
+            self.logger.info("Detected migration update - preparing working directory")
+            self.status_message = "Preparing for migration..."
+            
+            # Stash any local changes to ensure clean migration
+            try:
+                stash_result = subprocess.run(
+                    ['git', 'stash', 'push', '-m', 'Auto-stash before migration update'],
+                    capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                if "No local changes" not in stash_result.stdout:
+                    self.logger.info("Stashed local changes before migration")
+            except Exception as e:
+                self.logger.warning(f"Could not stash changes: {e}")
+        
         if use_pull:
             self.status_message = "Pulling updates..."
             self.logger.info("Attempting to pull updates from origin...")
@@ -639,22 +656,82 @@ class AutoUpdater:
         try:
             # Enhanced checkout logic: if we're migrating branches, ensure proper branch setup
             if self.MIGRATION_MODE and self.active_branch != self.FALLBACK_BRANCH:
-                # We're migrating to main branch - ensure local main branch exists
+                self.logger.info(f"Migration mode: Moving from {self.FALLBACK_BRANCH} to {self.active_branch}")
+                
+                # CRITICAL: For migration, we need to be more aggressive
+                # First, stash any local changes to prevent conflicts
+                try:
+                    stash_result = subprocess.run(
+                        ['git', 'stash', 'push', '-m', 'Auto-stash before v0.5.0 to main migration'],
+                        capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                    if "No local changes" not in stash_result.stdout:
+                        self.logger.info("Stashed local changes before migration")
+                except Exception as e:
+                    self.logger.warning(f"Could not stash changes: {e}")
+                
+                # Ensure we have the latest main branch data
+                try:
+                    self.logger.info("Fetching latest main branch from origin...")
+                    subprocess.run(
+                        ['git', 'fetch', 'origin', 'main'],
+                        check=True, capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                except subprocess.CalledProcessError as e:
+                    self.logger.warning(f"Fetch warning during migration: {e}")
+                
+                # Try to create/update local main branch
                 if self._ensure_local_branch_exists(self.active_branch):
-                    # Switch to the branch first
-                    if self._switch_to_branch(self.active_branch):
-                        # For migration: update branch to the latest commit and STAY ON BRANCH
-                        # Use git reset --hard instead of checkout to stay on the branch
+                    # Use force checkout for migration to bypass any issues
+                    try:
+                        # First try normal checkout
+                        checkout_result = subprocess.run(
+                            ['git', 'checkout', self.active_branch],
+                            capture_output=True, text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        )
+                        if checkout_result.returncode != 0:
+                            # Force checkout if normal fails
+                            self.logger.warning("Normal checkout failed, using force checkout for migration")
+                            subprocess.run(
+                                ['git', 'checkout', '-f', self.active_branch],
+                                check=True, capture_output=True, text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                            )
+                        
+                        # Now reset to the target commit
                         reset_result = subprocess.run(
                             ['git', 'reset', '--hard', commit_hash],
                             check=True, capture_output=True, text=True,
                             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                         )
-                        self.logger.info(f"Git migration successful - now on branch {self.active_branch} at commit {commit_hash[:7]}: {reset_result.stdout}")
+                        self.logger.info(f"Git migration successful - now on branch {self.active_branch} at commit {commit_hash[:7]}")
                         return True
-                    else:
-                        self.logger.error(f"Failed to switch to branch {self.active_branch}")
-                        return False
+                        
+                    except subprocess.CalledProcessError as e:
+                        self.logger.error(f"Migration checkout failed: {e}")
+                        # Last resort: force everything
+                        try:
+                            self.logger.warning("Attempting force migration as last resort...")
+                            # Force checkout to main
+                            subprocess.run(
+                                ['git', 'checkout', '-f', self.active_branch],
+                                check=True, capture_output=True, text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                            )
+                            # Reset hard to target
+                            subprocess.run(
+                                ['git', 'reset', '--hard', commit_hash],
+                                check=True, capture_output=True, text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                            )
+                            self.logger.info("Force migration successful")
+                            return True
+                        except subprocess.CalledProcessError as final_e:
+                            self.logger.error(f"Force migration also failed: {final_e}")
+                            return False
                 else:
                     self.logger.error(f"Failed to ensure local branch {self.active_branch} exists")
                     return False
