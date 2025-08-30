@@ -682,7 +682,12 @@ class AutoUpdater:
                 imgui.text(self.status_message)
                 imgui.text(f"Processing... {self._get_spinner_text()}")
             else:
-                imgui.text("A new update is available for FunGen.")
+                # Show branch information in the update dialog
+                branch_info = f"from {self.active_branch} branch"
+                if self.MIGRATION_MODE and self.active_branch != self.FALLBACK_BRANCH:
+                    branch_info = f"from {self.active_branch} branch (migrated from {self.FALLBACK_BRANCH})"
+                
+                imgui.text(f"A new update is available for FunGen {branch_info}.")
                 imgui.text("Would you like to update and restart the application?")
                 imgui.separator()
 
@@ -701,8 +706,14 @@ class AutoUpdater:
                 remote_date = self.remote_commit_date if self.remote_commit_date else 'N/A'
                 
                 imgui.text_wrapped(f"Your Update: {self.local_commit_hash[:7] if self.local_commit_hash else 'N/A'} ({local_date})")
+                
+                # Show which branch the latest update is from
+                remote_branch_info = f"[{self.active_branch}]"
+                if self.MIGRATION_MODE and self.active_branch != self.FALLBACK_BRANCH:
+                    remote_branch_info = f"[{self.active_branch}] (migrated from {self.FALLBACK_BRANCH})"
+                
                 imgui.text_wrapped(
-                    f"Latest Update: {self.remote_commit_hash[:7] if self.remote_commit_hash else 'N/A'} ({remote_date})")
+                    f"Latest Update: {self.remote_commit_hash[:7] if self.remote_commit_hash else 'N/A'} ({remote_date}) {remote_branch_info}")
                 imgui.separator()
                 if imgui.button("Update and Restart", width=200):
                     self.apply_update_and_restart()
