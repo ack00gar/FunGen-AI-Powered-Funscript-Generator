@@ -70,6 +70,12 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
                 'default': 10,
                 'description': 'Threshold for considering a movement "small" for vibration replacement',
                 'constraints': {'min': 1, 'max': 50}
+            },
+            'selected_indices': {
+                'type': list,
+                'required': False,
+                'default': None,
+                'description': 'List of action indices to apply speed limiting to (None = all actions)'
             }
         }
     
@@ -102,6 +108,21 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
             self.logger.info(f"Not enough points on {axis} axis for speed limiter")
             return
         
+        # Check for selected indices
+        selected_indices = params.get('selected_indices')
+        if selected_indices is not None and len(selected_indices) > 0:
+            # Apply speed limiting only to selected actions
+            indices_to_process = sorted([
+                i for i in selected_indices 
+                if 0 <= i < len(actions_list)
+            ])
+            if len(indices_to_process) < 2:
+                self.logger.info(f"Not enough selected points ({len(indices_to_process)}) on {axis} axis for speed limiter")
+                return
+        else:
+            # Apply to all actions
+            indices_to_process = list(range(len(actions_list)))
+        
         # Work on a deep copy
         actions = copy.deepcopy(actions_list)
         original_count = len(actions)
@@ -111,18 +132,27 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
         speed_threshold = params['speed_threshold']
         small_movement_threshold = params.get('small_movement_threshold', 10)
         
-        # Step 1: Remove actions with short intervals
-        actions = self._remove_short_intervals(actions, min_interval, axis)
-        removed_count = original_count - len(actions)
-        
-        # Step 2: Replace small movements with vibrations
-        if vibe_amount > 0:
-            actions, modified_count = self._add_vibrations(actions, vibe_amount, small_movement_threshold, axis)
+        if selected_indices is not None and len(selected_indices) > 0:
+            # For selected indices, apply only speed limiting (no removal/addition of points)
+            # This preserves the index mapping
+            actions = self._limit_speed_for_selected_indices(actions, speed_threshold, indices_to_process, axis)
+            self.logger.info(f"Speed limiter applied to {len(indices_to_process)} selected points on {axis} axis")
         else:
-            modified_count = 0
-        
-        # Step 3: Apply speed limiting
-        actions = self._limit_speed(actions, speed_threshold, axis)
+            # Apply full speed limiting to all actions
+            # Step 1: Remove actions with short intervals
+            actions = self._remove_short_intervals(actions, min_interval, axis)
+            removed_count = original_count - len(actions)
+            
+            # Step 2: Replace small movements with vibrations
+            if vibe_amount > 0:
+                actions, modified_count = self._add_vibrations(actions, vibe_amount, small_movement_threshold, axis)
+            else:
+                modified_count = 0
+            
+            # Step 3: Apply speed limiting
+            actions = self._limit_speed(actions, speed_threshold, axis)
+            
+            self.logger.info(f"Speed limiter applied to {axis} axis: {original_count} -> {len(actions)} points ({removed_count} removed, {modified_count if vibe_amount > 0 else 0} modified for vibration)")
         
         # Update the funscript IN-PLACE to preserve list identity for undo manager
         actions_target_list = funscript.primary_actions if axis == 'primary' else funscript.secondary_actions
@@ -130,13 +160,6 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
         
         # Invalidate cache
         funscript._invalidate_cache(axis)
-        
-        final_count = len(actions)
-        self.logger.info(
-            f"Speed limiter applied to {axis} axis: "
-            f"{original_count} -> {final_count} points "
-            f"({removed_count} removed, {modified_count} modified for vibration)"
-        )
     
     def _remove_short_intervals(self, actions: List[Dict], min_interval: int, axis: str) -> List[Dict]:
         """Remove actions that are too close together in time."""
@@ -220,6 +243,41 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
         vibrated_pos = base_pos + (vibe_amount * vibe_direction * movement_direction)
         
         return int(np.clip(vibrated_pos, 0, 100))
+    
+    def _limit_speed_for_selected_indices(self, actions: List[Dict], speed_threshold: float, 
+                                        selected_indices: List[int], axis: str) -> List[Dict]:
+        """Apply speed limiting only to selected action indices."""
+        if len(actions) <= 1 or not selected_indices:
+            return actions
+        
+        # Create a set for faster lookup
+        selected_set = set(selected_indices)
+        result_actions = copy.deepcopy(actions)
+        
+        # Process each selected action
+        for i in selected_indices:
+            if i <= 0 or i >= len(result_actions):
+                continue
+                
+            current = result_actions[i]
+            previous = result_actions[i - 1]
+            
+            # Calculate speed between current and previous
+            time_diff = current['at'] - previous['at']
+            if time_diff <= 0:
+                continue
+                
+            pos_diff = abs(current['pos'] - previous['pos'])
+            current_speed = pos_diff / time_diff * 1000  # positions per second
+            
+            if current_speed > speed_threshold:
+                # Adjust position to limit speed
+                max_pos_change = (speed_threshold * time_diff) / 1000
+                direction = 1 if current['pos'] > previous['pos'] else -1
+                new_pos = previous['pos'] + (direction * max_pos_change)
+                result_actions[i]['pos'] = int(np.clip(new_pos, 0, 100))
+        
+        return result_actions
     
     def _limit_speed(self, actions: List[Dict], speed_threshold: float, axis: str) -> List[Dict]:
         """Limit the maximum speed of movements."""
