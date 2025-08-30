@@ -654,6 +654,33 @@ class AutoUpdater:
     def _perform_git_checkout(self, commit_hash: str) -> bool:
         """Performs git checkout operation with branch migration support."""
         try:
+            # CRITICAL: Ensure commit exists locally before attempting checkout
+            # This is essential for migration where commit might be from different branch
+            try:
+                self.logger.info(f"Ensuring commit {commit_hash[:7]} exists locally...")
+                
+                # Fetch all branches to ensure we have the commit
+                subprocess.run(
+                    ['git', 'fetch', 'origin'],
+                    check=True, capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                
+                # Verify commit exists after fetch
+                commit_check = subprocess.run(
+                    ['git', 'cat-file', '-e', commit_hash],
+                    capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                
+                if commit_check.returncode != 0:
+                    self.logger.error(f"Commit {commit_hash[:7]} does not exist even after fetch")
+                    return False
+                    
+            except subprocess.CalledProcessError as e:
+                self.logger.warning(f"Failed to verify commit existence: {e}")
+                # Continue anyway, might still work
+            
             # Enhanced checkout logic: if we're migrating branches, ensure proper branch setup
             if self.MIGRATION_MODE and self.active_branch != self.FALLBACK_BRANCH:
                 self.logger.info(f"Migration mode: Moving from {self.FALLBACK_BRANCH} to {self.active_branch}")
@@ -671,7 +698,7 @@ class AutoUpdater:
                 except Exception as e:
                     self.logger.warning(f"Could not stash changes: {e}")
                 
-                # Ensure we have the latest main branch data
+                # Ensure we have the latest main branch data (additional fetch for safety)
                 try:
                     self.logger.info("Fetching latest main branch from origin...")
                     subprocess.run(
