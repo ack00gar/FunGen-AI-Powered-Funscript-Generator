@@ -718,7 +718,16 @@ class AutoUpdater:
 
     def apply_update_and_restart(self):
         """Pulls the latest changes from git and restarts the application."""
-        self._apply_update(use_pull=True)
+        # During migration, use checkout method to trigger migration logic
+        if self.MIGRATION_MODE and self.active_branch != self.FALLBACK_BRANCH:
+            # Use checkout with target commit hash to trigger migration logic
+            target_hash = self.remote_commit_hash
+            if target_hash:
+                self._apply_update(target_hash=target_hash, use_pull=False)
+            else:
+                self._apply_update(use_pull=True)
+        else:
+            self._apply_update(use_pull=True)
 
     def _get_spinner_text(self) -> str:
         """Returns the current spinner animation text."""
