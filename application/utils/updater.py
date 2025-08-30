@@ -682,14 +682,32 @@ class AutoUpdater:
             )
             
             if branch_name not in result.stdout:
-                # Local branch doesn't exist - create it from remote
-                self.logger.info(f"Local branch '{branch_name}' doesn't exist - creating from remote")
-                subprocess.run(
-                    ['git', 'checkout', '-b', branch_name, f'origin/{branch_name}'], 
-                    check=True, capture_output=True, text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                )
-                self.logger.info(f"Created local branch '{branch_name}' tracking 'origin/{branch_name}'")
+                # Local branch doesn't exist - fetch from remote first to ensure we have the branch data
+                self.logger.info(f"Fetching '{branch_name}' from remote before creating local branch")
+                try:
+                    # Fetch the specific branch from remote
+                    subprocess.run(
+                        ['git', 'fetch', 'origin', f'{branch_name}:{branch_name}'],
+                        check=True, capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                    self.logger.info(f"Successfully fetched and created local branch '{branch_name}' from 'origin/{branch_name}'")
+                except subprocess.CalledProcessError:
+                    # If direct fetch fails, try alternative approach
+                    self.logger.info(f"Direct fetch failed, trying alternative approach")
+                    # First fetch all updates from origin
+                    subprocess.run(
+                        ['git', 'fetch', 'origin'],
+                        check=True, capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                    # Then create local branch from remote
+                    subprocess.run(
+                        ['git', 'checkout', '-b', branch_name, f'origin/{branch_name}'], 
+                        check=True, capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                    self.logger.info(f"Created local branch '{branch_name}' tracking 'origin/{branch_name}'")
             else:
                 self.logger.info(f"Local branch '{branch_name}' already exists")
             
