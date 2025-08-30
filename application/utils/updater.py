@@ -641,15 +641,16 @@ class AutoUpdater:
             if self.MIGRATION_MODE and self.active_branch != self.FALLBACK_BRANCH:
                 # We're migrating to main branch - ensure local main branch exists
                 if self._ensure_local_branch_exists(self.active_branch):
-                    # Switch to the branch first, then update to specific commit
+                    # Switch to the branch first
                     if self._switch_to_branch(self.active_branch):
-                        # Now checkout the specific commit (which will be on the correct branch)
-                        checkout_result = subprocess.run(
-                            ['git', 'checkout', commit_hash],
+                        # For migration: update branch to the latest commit and STAY ON BRANCH
+                        # Use git reset --hard instead of checkout to stay on the branch
+                        reset_result = subprocess.run(
+                            ['git', 'reset', '--hard', commit_hash],
                             check=True, capture_output=True, text=True,
                             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                         )
-                        self.logger.info(f"Git checkout successful (migrated to {self.active_branch}): {checkout_result.stdout}")
+                        self.logger.info(f"Git migration successful - now on branch {self.active_branch} at commit {commit_hash[:7]}: {reset_result.stdout}")
                         return True
                     else:
                         self.logger.error(f"Failed to switch to branch {self.active_branch}")
