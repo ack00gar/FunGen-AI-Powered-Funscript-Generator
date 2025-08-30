@@ -113,7 +113,7 @@ class AutoUpdater:
     # Multi-branch configuration for seamless migration
     PRIMARY_BRANCH = "main"      # Target branch for future updates
     FALLBACK_BRANCH = "v0.5.0"   # Legacy branch for compatibility
-    MIGRATION_MODE = False       # Disable dual-branch checking - fully migrated to main
+    MIGRATION_MODE = False       # Disable dual-branch checking - fully migrated to main (updated post v0.5.0 fix)
     
     # Backward compatibility
     BRANCH = FALLBACK_BRANCH  # Default to v0.5.0 initially
