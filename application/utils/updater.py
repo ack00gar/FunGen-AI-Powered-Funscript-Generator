@@ -683,37 +683,87 @@ class AutoUpdater:
             
             if branch_name not in result.stdout:
                 # Local branch doesn't exist - fetch from remote first to ensure we have the branch data
-                self.logger.info(f"Fetching '{branch_name}' from remote before creating local branch")
+                self.logger.info(f"Local branch '{branch_name}' doesn't exist, fetching from remote...")
+                
+                # First, always fetch all remote branches to ensure we have the latest
                 try:
-                    # Fetch the specific branch from remote
-                    subprocess.run(
-                        ['git', 'fetch', 'origin', f'{branch_name}:{branch_name}'],
-                        check=True, capture_output=True, text=True,
-                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                    )
-                    self.logger.info(f"Successfully fetched and created local branch '{branch_name}' from 'origin/{branch_name}'")
-                except subprocess.CalledProcessError:
-                    # If direct fetch fails, try alternative approach
-                    self.logger.info(f"Direct fetch failed, trying alternative approach")
-                    # First fetch all updates from origin
                     subprocess.run(
                         ['git', 'fetch', 'origin'],
                         check=True, capture_output=True, text=True,
                         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                     )
-                    # Then create local branch from remote
+                    self.logger.info("Fetched latest from origin")
+                except subprocess.CalledProcessError as fetch_err:
+                    self.logger.warning(f"Fetch warning: {fetch_err}")
+                
+                # Check if the remote branch exists
+                remote_check = subprocess.run(
+                    ['git', 'ls-remote', '--heads', 'origin', branch_name],
+                    capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                
+                if not remote_check.stdout.strip():
+                    self.logger.error(f"Remote branch 'origin/{branch_name}' does not exist!")
+                    return False
+                
+                # Try to create local branch from remote
+                try:
+                    # Method 1: Direct fetch to create branch
                     subprocess.run(
-                        ['git', 'checkout', '-b', branch_name, f'origin/{branch_name}'], 
+                        ['git', 'fetch', 'origin', f'{branch_name}:{branch_name}'],
                         check=True, capture_output=True, text=True,
                         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                     )
-                    self.logger.info(f"Created local branch '{branch_name}' tracking 'origin/{branch_name}'")
+                    self.logger.info(f"Successfully fetched and created local branch '{branch_name}'")
+                except subprocess.CalledProcessError as e1:
+                    self.logger.info(f"Direct fetch failed, trying checkout -b approach...")
+                    
+                    # Method 2: Create branch with checkout -b
+                    try:
+                        subprocess.run(
+                            ['git', 'checkout', '-b', branch_name, f'origin/{branch_name}'], 
+                            check=True, capture_output=True, text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        )
+                        self.logger.info(f"Created local branch '{branch_name}' tracking 'origin/{branch_name}'")
+                    except subprocess.CalledProcessError as e2:
+                        # Method 3: Force create branch
+                        self.logger.warning(f"Checkout -b failed, trying force create...")
+                        try:
+                            # Delete any existing ref that might be conflicting
+                            subprocess.run(
+                                ['git', 'branch', '-D', branch_name],
+                                capture_output=True, text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                            )
+                            # Create fresh branch from remote
+                            subprocess.run(
+                                ['git', 'branch', branch_name, f'origin/{branch_name}'],
+                                check=True, capture_output=True, text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                            )
+                            self.logger.info(f"Force created local branch '{branch_name}' from 'origin/{branch_name}'")
+                        except subprocess.CalledProcessError as e3:
+                            self.logger.error(f"All methods to create local branch failed")
+                            self.logger.error(f"Final error stderr: {e3.stderr if hasattr(e3, 'stderr') else 'No stderr'}")
+                            return False
             else:
                 self.logger.info(f"Local branch '{branch_name}' already exists")
+                # Update the branch to track remote if it doesn't already
+                try:
+                    subprocess.run(
+                        ['git', 'branch', '--set-upstream-to', f'origin/{branch_name}', branch_name],
+                        capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                except subprocess.CalledProcessError:
+                    pass  # Branch might already be tracking, that's fine
             
             return True
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Failed to ensure local branch '{branch_name}' exists: {e}")
+            self.logger.error(f"Error details: {e.stderr if hasattr(e, 'stderr') else 'No stderr'}")
             return False
 
     def _switch_to_branch(self, branch_name: str) -> bool:
@@ -733,6 +783,47 @@ class AutoUpdater:
             return True
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Failed to switch to branch '{branch_name}': {e}")
+            self.logger.error(f"Git stderr: {e.stderr}")
+            
+            # Try to handle common failure scenarios
+            if "Your local changes" in e.stderr or "would be overwritten" in e.stderr:
+                self.logger.warning("Local changes detected, attempting to stash and retry...")
+                try:
+                    # Stash any local changes
+                    subprocess.run(
+                        ['git', 'stash', 'push', '-m', 'Auto-stash before branch switch'],
+                        check=True, capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                    self.logger.info("Stashed local changes")
+                    
+                    # Try checkout again
+                    subprocess.run(
+                        ['git', 'checkout', branch_name],
+                        check=True, capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                    self.logger.info(f"Successfully switched to branch '{branch_name}' after stashing")
+                    return True
+                    
+                except subprocess.CalledProcessError as stash_error:
+                    self.logger.error(f"Failed to stash and switch: {stash_error}")
+                    self.logger.error(f"Stash stderr: {stash_error.stderr}")
+                    
+                    # Last resort: force checkout with potential data loss warning
+                    self.logger.warning("Attempting force checkout - uncommitted changes may be lost!")
+                    try:
+                        subprocess.run(
+                            ['git', 'checkout', '-f', branch_name],
+                            check=True, capture_output=True, text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        )
+                        self.logger.info(f"Force switched to branch '{branch_name}'")
+                        return True
+                    except subprocess.CalledProcessError as force_error:
+                        self.logger.error(f"Force checkout also failed: {force_error}")
+                        self.logger.error(f"Force checkout stderr: {force_error.stderr}")
+            
             return False
 
     def apply_update_and_restart(self):
