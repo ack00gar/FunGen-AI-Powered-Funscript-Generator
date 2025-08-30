@@ -33,34 +33,13 @@ class PluginLoader:
     
     def load_builtin_plugins(self) -> Dict[str, bool]:
         """
-        Load all built-in plugins from the plugins directory.
+        Load all built-in plugins from the plugins directory using auto-discovery.
         
         Returns:
             Dictionary mapping plugin names to load success status
         """
         plugins_dir = Path(__file__).parent
-        plugin_files = [
-            'ultimate_autotune_plugin.py',  # First/primary plugin
-            'autotune_plugin.py',
-            'savgol_filter_plugin.py',
-            'rdp_simplify_plugin.py',
-            'speed_limiter_plugin.py',
-            'amplify_plugin.py',
-            'clamp_plugin.py',
-            'invert_plugin.py',
-            'keyframe_plugin.py',
-            'resample_plugin.py'
-        ]
-        
-        results = {}
-        for plugin_file in plugin_files:
-            plugin_path = plugins_dir / plugin_file
-            if plugin_path.exists():
-                success = self.load_plugin_from_file(plugin_path)
-                plugin_name = plugin_file.replace('.py', '')
-                results[plugin_name] = success
-        
-        return results
+        return self.load_plugins_from_directory(str(plugins_dir), recursive=False)
     
     def load_plugins_from_directory(self, directory: str, recursive: bool = False) -> Dict[str, bool]:
         """
@@ -84,6 +63,8 @@ class PluginLoader:
         
         for plugin_file in directory_path.glob(pattern):
             if plugin_file.name.startswith('_'):  # Skip private files
+                continue
+            if plugin_file.name in ['base_plugin.py', 'plugin_loader.py']:  # Skip infrastructure files
                 continue
                 
             success = self.load_plugin_from_file(plugin_file)
