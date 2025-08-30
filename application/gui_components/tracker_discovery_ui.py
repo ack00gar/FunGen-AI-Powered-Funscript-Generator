@@ -38,7 +38,7 @@ except ImportError as e:
 
 # Import offline tracker components - this might fail
 try:
-    from tracker_modules.base_offline_tracker import BaseOfflineTracker, OfflineProcessingStage
+    from tracker_modules.core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingStage
 except ImportError as e:
     logging.warning(f"TrackerDiscoveryUI: Could not import offline tracker components: {e}")
     BaseOfflineTracker = None
