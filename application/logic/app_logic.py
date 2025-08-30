@@ -1473,22 +1473,40 @@ class ApplicationLogic:
             return ["auto", "none"]
 
     def _check_model_paths(self):
-        """Checks essential model paths and logs errors if not found."""
+        """Checks essential model paths and auto-downloads if missing."""
+        models_missing = False
+        
         # Detection model remains essential
         if not self.yolo_det_model_path or not os.path.exists(self.yolo_det_model_path):
-            self.logger.error(
-                f"CRITICAL ERROR: YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Please check settings.",
-                extra={'status_message': True, 'duration': 15.0})
-            # GUI popup: Inform user no detection model is set
-            if getattr(self, "gui_instance", None):
-                self.gui_instance.show_error_popup("Detection Model Missing", "No valid Detection Model is set.\nPlease select a YOLO model file in the UI Configuration tab.")
-            return False
+            self.logger.warning(
+                f"YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Attempting auto-download...",
+                extra={'status_message': True, 'duration': 5.0})
+            models_missing = True
 
-        # Pose model is now optional
+        # Pose model is now optional but we'll try to download it too
         if not self.yolo_pose_model_path or not os.path.exists(self.yolo_pose_model_path):
             self.logger.warning(
-                f"Warning: YOLO Pose Model not found or path not set. Pose-dependent features will be disabled.",
-                extra={'status_message': True, 'duration': 8.0})
+                f"YOLO Pose Model not found or path not set. Attempting auto-download...",
+                extra={'status_message': True, 'duration': 5.0})
+            models_missing = True
+        
+        # Auto-download missing models
+        if models_missing:
+            self.logger.info("Auto-downloading missing models...")
+            self.download_default_models()
+            
+            # Re-check after download
+            if not self.yolo_det_model_path or not os.path.exists(self.yolo_det_model_path):
+                self.logger.error(
+                    f"CRITICAL ERROR: Failed to auto-download or configure detection model.",
+                    extra={'status_message': True, 'duration': 15.0})
+                # GUI popup: Inform user auto-download failed
+                if getattr(self, "gui_instance", None):
+                    self.gui_instance.show_error_popup("Detection Model Missing", "Failed to auto-download detection model.\nPlease select a YOLO model file in the UI Configuration tab or check your internet connection.")
+                return False
+            else:
+                self.logger.info("Detection model successfully configured!", extra={'status_message': True, 'duration': 3.0})
+        
         return True
 
     def set_application_logging_level(self, level_name: str):
@@ -1920,12 +1938,39 @@ class ApplicationLogic:
                             model = YOLO(det_model_path_pt)
                             model.export(format="coreml")
                             self.logger.info(f"Converted detection model to CoreML: {det_model_path_mlpackage}")
+                            # Set the CoreML model path in settings
+                            self.app_settings.set("yolo_det_model_path", det_model_path_mlpackage)
+                            self.yolo_detection_model_path_setting = det_model_path_mlpackage
+                            self.yolo_det_model_path = det_model_path_mlpackage
                         except Exception as e:
                             self.logger.error(f"Failed to convert detection model to CoreML: {e}")
+                            # Fall back to PT model if CoreML conversion fails
+                            self.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                            self.yolo_detection_model_path_setting = det_model_path_pt
+                            self.yolo_det_model_path = det_model_path_pt
+                    else:
+                        # Set the PT model path in settings for non-macOS ARM
+                        self.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                        self.yolo_detection_model_path_setting = det_model_path_pt
+                        self.yolo_det_model_path = det_model_path_pt
                 else:
                     self.logger.error("Failed to download detection model")
             else:
                 self.logger.info("Detection model already exists")
+                # Check if path is not set in settings and auto-configure
+                current_setting = self.app_settings.get("yolo_det_model_path", "")
+                if not current_setting or not os.path.exists(current_setting):
+                    # Prefer .mlpackage on macOS ARM if it exists
+                    if is_mac_arm and os.path.exists(det_model_path_mlpackage):
+                        self.app_settings.set("yolo_det_model_path", det_model_path_mlpackage)
+                        self.yolo_detection_model_path_setting = det_model_path_mlpackage
+                        self.yolo_det_model_path = det_model_path_mlpackage
+                        self.logger.info(f"Auto-configured detection model path to: {det_model_path_mlpackage}")
+                    elif os.path.exists(det_model_path_pt):
+                        self.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                        self.yolo_detection_model_path_setting = det_model_path_pt
+                        self.yolo_det_model_path = det_model_path_pt
+                        self.logger.info(f"Auto-configured detection model path to: {det_model_path_pt}")
 
             # Check and download pose model
             pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
@@ -1946,12 +1991,33 @@ class ApplicationLogic:
                             model = YOLO(pose_model_path_pt)
                             model.export(format="coreml")
                             self.logger.info(f"Converted pose model to CoreML: {pose_model_path_mlpackage}")
+                            # Set the CoreML model path in settings
+                            self.app_settings.set("yolo_pose_model_path", pose_model_path_mlpackage)
+                            self.yolo_pose_model_path_setting = pose_model_path_mlpackage
+                            self.yolo_pose_model_path = pose_model_path_mlpackage
                         except Exception as e:
                             self.logger.error(f"Failed to convert pose model to CoreML: {e}")
+                            # Fall back to PT model if CoreML conversion fails
+                            self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                            self.yolo_pose_model_path_setting = pose_model_path_pt
+                            self.yolo_pose_model_path = pose_model_path_pt
+                    else:
+                        # Set the PT model path in settings for non-macOS ARM
+                        self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                        self.yolo_pose_model_path_setting = pose_model_path_pt
+                        self.yolo_pose_model_path = pose_model_path_pt
                 else:
                     self.logger.error("Failed to download pose model")
             else:
                 self.logger.info("Pose model already exists")
+                # Check if path is not set in settings and auto-configure existing model
+                current_setting = self.app_settings.get("yolo_pose_model_path", "")
+                if not current_setting or not os.path.exists(current_setting):
+                    if os.path.exists(pose_model_path_pt):
+                        self.logger.info("Auto-configuring existing pose model path in settings")
+                        self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                        self.yolo_pose_model_path_setting = pose_model_path_pt
+                        self.yolo_pose_model_path = pose_model_path_pt
 
             # Report results
             if downloaded_models:
