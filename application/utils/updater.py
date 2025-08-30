@@ -1029,6 +1029,10 @@ class AutoUpdater:
             branch_info = f"'{target_branch}'"
             if self.MIGRATION_MODE and target_branch != self.FALLBACK_BRANCH:
                 branch_info += f" (migrated from {self.FALLBACK_BRANCH})"
+            
+            # Show current branch info prominently
+            current_branch = self._get_current_branch() or 'Unknown'
+            imgui.text_colored(f"Current Branch: {current_branch}", 0.8, 0.9, 1.0, 1.0)
             imgui.text(f"Select a commit from branch {branch_info} to switch to:")
             
             # Show branch status info
@@ -1071,10 +1075,11 @@ class AutoUpdater:
                 if is_current:
                     imgui.push_style_color(imgui.COLOR_TEXT, *AppGUIColors.VERSION_CURRENT_HIGHLIGHT)
                 
-                # Create expand/collapse button
+                # Create expand/collapse button with branch info
                 expand_icon = "v" if is_expanded else ">"
-                button_text = f"{expand_icon} {commit_hash[:7]}"
-                if imgui.button(button_text, width=80):
+                branch_tag = f"[{target_branch}]"
+                button_text = f"{expand_icon} {commit_hash[:7]} {branch_tag}"
+                if imgui.button(button_text, width=120):
                     if is_expanded:
                         self.expanded_commits.discard(commit_hash)
                     else:
@@ -1109,7 +1114,7 @@ class AutoUpdater:
                 imgui.same_line()
                 imgui.text("Skip")
                 imgui.same_line()
-                imgui.set_cursor_pos_x(190)  # Position after the expand button and date with more space
+                imgui.set_cursor_pos_x(230)  # Position after the expand button, branch tag, and date with more space
                 
                 # Cache truncated commit message
                 commit_msg = update['name']
