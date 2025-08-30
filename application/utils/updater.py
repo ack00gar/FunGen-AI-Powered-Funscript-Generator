@@ -635,17 +635,85 @@ class AutoUpdater:
             return False
 
     def _perform_git_checkout(self, commit_hash: str) -> bool:
-        """Performs git checkout operation."""
+        """Performs git checkout operation with branch migration support."""
         try:
-            checkout_result = subprocess.run(
-                ['git', 'checkout', commit_hash],
+            # Enhanced checkout logic: if we're migrating branches, ensure proper branch setup
+            if self.MIGRATION_MODE and self.active_branch != self.FALLBACK_BRANCH:
+                # We're migrating to main branch - ensure local main branch exists
+                if self._ensure_local_branch_exists(self.active_branch):
+                    # Switch to the branch first, then update to specific commit
+                    if self._switch_to_branch(self.active_branch):
+                        # Now checkout the specific commit (which will be on the correct branch)
+                        checkout_result = subprocess.run(
+                            ['git', 'checkout', commit_hash],
+                            check=True, capture_output=True, text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        )
+                        self.logger.info(f"Git checkout successful (migrated to {self.active_branch}): {checkout_result.stdout}")
+                        return True
+                    else:
+                        self.logger.error(f"Failed to switch to branch {self.active_branch}")
+                        return False
+                else:
+                    self.logger.error(f"Failed to ensure local branch {self.active_branch} exists")
+                    return False
+            else:
+                # Standard checkout for main branch (migration disabled) or v0.5.0
+                checkout_result = subprocess.run(
+                    ['git', 'checkout', commit_hash],
+                    check=True, capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                self.logger.info(f"Git checkout successful: {checkout_result.stdout}")
+                return True
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Update failed during 'git checkout': {e.stderr}")
+            return False
+
+    def _ensure_local_branch_exists(self, branch_name: str) -> bool:
+        """Ensure a local branch exists and tracks the corresponding remote branch."""
+        try:
+            # Check if local branch exists
+            result = subprocess.run(
+                ['git', 'branch', '--list', branch_name], 
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            
+            if branch_name not in result.stdout:
+                # Local branch doesn't exist - create it from remote
+                self.logger.info(f"Local branch '{branch_name}' doesn't exist - creating from remote")
+                subprocess.run(
+                    ['git', 'checkout', '-b', branch_name, f'origin/{branch_name}'], 
+                    check=True, capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                self.logger.info(f"Created local branch '{branch_name}' tracking 'origin/{branch_name}'")
+            else:
+                self.logger.info(f"Local branch '{branch_name}' already exists")
+            
+            return True
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Failed to ensure local branch '{branch_name}' exists: {e}")
+            return False
+
+    def _switch_to_branch(self, branch_name: str) -> bool:
+        """Switch to a specific branch, creating it locally if needed."""
+        # Ensure the local branch exists
+        if not self._ensure_local_branch_exists(branch_name):
+            return False
+        
+        try:
+            # Switch to the branch
+            subprocess.run(
+                ['git', 'checkout', branch_name], 
                 check=True, capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             )
-            self.logger.info(f"Git checkout successful: {checkout_result.stdout}")
+            self.logger.info(f"Switched to branch '{branch_name}'")
             return True
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Update failed during 'git checkout': {e.stderr}")
+            self.logger.error(f"Failed to switch to branch '{branch_name}': {e}")
             return False
 
     def apply_update_and_restart(self):
