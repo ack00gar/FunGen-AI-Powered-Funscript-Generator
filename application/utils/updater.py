@@ -564,6 +564,49 @@ class AutoUpdater:
         """Unified method to apply updates using either a git update or git checkout."""
         self.update_in_progress = True
         
+        # CRITICAL SELF-BOOTSTRAPPING: Always update current branch first
+        # This ensures users with old updater code get the latest fixes before migration
+        try:
+            self.status_message = "Bootstrapping updater..."
+            self.logger.info("Self-bootstrapping: updating current branch to latest version")
+            
+            # Get current branch
+            current_branch_result = subprocess.run(
+                ['git', 'branch', '--show-current'],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            current_branch = current_branch_result.stdout.strip()
+            
+            if current_branch:  # Only if we're on a branch (not detached HEAD)
+                # Stash changes first
+                try:
+                    subprocess.run(
+                        ['git', 'stash', 'push', '-m', 'Auto-stash for updater bootstrap'],
+                        capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                except:
+                    pass  # Continue even if stash fails
+                
+                # Fetch and update current branch
+                try:
+                    subprocess.run(
+                        ['git', 'fetch', 'origin', current_branch],
+                        check=True, capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                    subprocess.run(
+                        ['git', 'reset', '--hard', f'origin/{current_branch}'],
+                        check=True, capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                    self.logger.info(f"Self-bootstrap successful: updated {current_branch} to latest")
+                except subprocess.CalledProcessError as e:
+                    self.logger.warning(f"Self-bootstrap failed: {e} - continuing anyway")
+        except Exception as e:
+            self.logger.warning(f"Self-bootstrap error: {e} - continuing anyway")
+        
         if use_pull:
             self.status_message = "Pulling updates..."
             self.logger.info("Attempting to pull updates from origin...")
