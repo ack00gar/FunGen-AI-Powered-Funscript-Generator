@@ -87,14 +87,16 @@ class AutoUpdater:
     Handles checking for and applying updates from a Git repository.
     
     Features:
-    - Automatic update checking against the configured branch (v0.5.0)
+    - Automatic update checking against multiple branches (main, v0.5.0)
+    - Intelligent branch selection using newest commit timestamps
     - Manual update selection from available commits
     - Changelog generation for selected commits
     - Background async operations to avoid UI blocking
+    - Seamless branch migration support
     
     Update Picker Usage:
     - Access via Updates menu -> "Select Update Commit"
-    - Shows all available commits from the current branch
+    - Shows all available commits from the active branch
     - Highlights current update in green
     - Allows switching to any commit (upgrade or downgrade)
     - Shows commit details and messages
@@ -107,7 +109,14 @@ class AutoUpdater:
     """
     REPO_OWNER = "ack00gar"
     REPO_NAME = "FunGen-AI-Powered-Funscript-Generator"
-    BRANCH = "v0.5.0"
+    
+    # Multi-branch configuration for seamless migration
+    PRIMARY_BRANCH = "main"      # Target branch for future updates
+    FALLBACK_BRANCH = "v0.5.0"   # Legacy branch for compatibility
+    MIGRATION_MODE = True        # Enable dual-branch checking
+    
+    # Backward compatibility
+    BRANCH = FALLBACK_BRANCH  # Default to v0.5.0 initially
 
     def __init__(self, app_logic):
         self.app = app_logic
@@ -140,8 +149,120 @@ class AutoUpdater:
         self.token_manager = GitHubTokenManager()
         self.github_api = GitHubAPIClient(self.REPO_OWNER, self.REPO_NAME, self.token_manager)
         
+        # Multi-branch migration support
+        self.active_branch = self.FALLBACK_BRANCH  # Start with v0.5.0
+        self.branch_transition_count = 0
+        self.last_branch_check = 0
+        self.branch_comparison_cache = {}  # Cache branch comparisons
+        
         # Load saved skip settings
         self._load_skip_updates()
+    
+    def _get_branch_commit_with_date(self, branch: str) -> dict | None:
+        """Get commit data with parsed date for a specific branch."""
+        commit_data = self.github_api.get_branch_commit(branch)
+        if commit_data:
+            commit_info = commit_data.get('commit', {})
+            author_info = commit_info.get('author', {})
+            date_str = author_info.get('date', '')
+            
+            try:
+                from application.utils import format_github_date
+                parsed_date = format_github_date(date_str, return_datetime=True)
+                return {
+                    'data': commit_data,
+                    'branch': branch,
+                    'date_str': date_str,
+                    'parsed_date': parsed_date,
+                    'sha': commit_data.get('sha')
+                }
+            except Exception as e:
+                self.logger.warning(f"Failed to parse date for branch {branch}: {e}")
+                return {
+                    'data': commit_data,
+                    'branch': branch,
+                    'date_str': date_str,
+                    'parsed_date': None,
+                    'sha': commit_data.get('sha')
+                }
+        return None
+    
+    def _determine_best_branch(self) -> tuple[str, dict | None]:
+        """Determine the best branch to use based on newest commits."""
+        if not self.MIGRATION_MODE:
+            # Migration mode disabled - use primary branch only
+            branch_data = self._get_branch_commit_with_date(self.PRIMARY_BRANCH)
+            return self.PRIMARY_BRANCH, branch_data
+        
+        # Get commits from both branches
+        primary_data = self._get_branch_commit_with_date(self.PRIMARY_BRANCH)
+        fallback_data = self._get_branch_commit_with_date(self.FALLBACK_BRANCH)
+        
+        candidates = []
+        if primary_data and primary_data['parsed_date']:
+            candidates.append(primary_data)
+        if fallback_data and fallback_data['parsed_date']:
+            candidates.append(fallback_data)
+            
+        if not candidates:
+            # Fallback to string comparison if date parsing fails
+            if primary_data:
+                candidates.append(primary_data)
+            if fallback_data:
+                candidates.append(fallback_data)
+        
+        if not candidates:
+            self.logger.error("No accessible branches found")
+            return self.FALLBACK_BRANCH, None
+        
+        # Select newest commit
+        if len(candidates) == 1:
+            selected = candidates[0]
+        else:
+            # Compare by parsed date if available, otherwise by date string
+            selected = max(candidates, key=lambda x: x['parsed_date'] or x['date_str'])
+        
+        selected_branch = selected['branch']
+        
+        # Log branch transition if changed
+        if hasattr(self, 'active_branch') and self.active_branch != selected_branch:
+            self._log_branch_transition(self.active_branch, selected_branch)
+        
+        return selected_branch, selected
+    
+    def _log_branch_transition(self, from_branch: str, to_branch: str):
+        """Log branch transitions for monitoring."""
+        self.logger.info(f"Branch transition: {from_branch} → {to_branch}")
+        self.branch_transition_count += 1
+        
+        # Notify user about significant transitions
+        if to_branch == self.PRIMARY_BRANCH and from_branch == self.FALLBACK_BRANCH:
+            self.logger.info("Migrated to main branch - now receiving latest updates")
+        elif to_branch == self.FALLBACK_BRANCH and from_branch == self.PRIMARY_BRANCH:
+            self.logger.info("Reverted to v0.5.0 branch - using stable release channel")
+    
+    def get_migration_status(self) -> dict:
+        """Get current migration status information."""
+        return {
+            'migration_mode': self.MIGRATION_MODE,
+            'active_branch': self.active_branch,
+            'primary_branch': self.PRIMARY_BRANCH,
+            'fallback_branch': self.FALLBACK_BRANCH,
+            'transition_count': self.branch_transition_count,
+            'is_on_primary': self.active_branch == self.PRIMARY_BRANCH,
+            'is_on_fallback': self.active_branch == self.FALLBACK_BRANCH
+        }
+    
+    def disable_migration_mode(self):
+        """Disable migration mode - use primary branch only."""
+        self.MIGRATION_MODE = False
+        self.active_branch = self.PRIMARY_BRANCH
+        self.logger.info("Migration mode disabled - using primary branch only")
+    
+    def enable_migration_mode(self):
+        """Enable migration mode - check both branches."""
+        self.MIGRATION_MODE = True
+        self.logger.info("Migration mode enabled - checking both branches")
     
     def _load_skip_updates(self):
         """Load skipped commit hashes from file."""
@@ -208,26 +329,33 @@ class AutoUpdater:
             return None
 
     def _get_remote_commit_hash(self) -> str | None:
-        """Gets the latest commit hash from the remote repository via GitHub API."""
-        commit_data = self.github_api.get_branch_commit(self.BRANCH)
-        if commit_data:
-            return commit_data.get('sha')
+        """Gets the latest commit hash from the best available branch."""
+        best_branch, branch_data = self._determine_best_branch()
+        
+        if branch_data and branch_data['sha']:
+            # Update active branch if it changed
+            if self.active_branch != best_branch:
+                self.active_branch = best_branch
+            return branch_data['sha']
         else:
-            self.logger.error("Failed to fetch remote update")
+            self.logger.error(f"Failed to fetch remote update from branches: {self.PRIMARY_BRANCH}, {self.FALLBACK_BRANCH}")
             self.status_message = "Could not connect to check for updates."
             return None
 
     def _get_remote_commit_data(self) -> tuple[str | None, str | None]:
-        """Gets the latest commit hash and date from the remote repository via GitHub API."""
-        commit_data = self.github_api.get_branch_commit(self.BRANCH)
-        if commit_data:
-            commit_hash = commit_data.get('sha')
-            commit_info = commit_data.get('commit', {})
-            author_info = commit_info.get('author', {})
-            commit_date = author_info.get('date', 'Unknown date')
+        """Gets the latest commit hash and date from the best available branch."""
+        best_branch, branch_data = self._determine_best_branch()
+        
+        if branch_data and branch_data['data']:
+            # Update active branch if it changed
+            if self.active_branch != best_branch:
+                self.active_branch = best_branch
+                
+            commit_hash = branch_data['sha']
+            commit_date = branch_data['date_str']
             return commit_hash, commit_date
         else:
-            self.logger.error("Failed to fetch remote update")
+            self.logger.error(f"Failed to fetch remote update from branches: {self.PRIMARY_BRANCH}, {self.FALLBACK_BRANCH}")
             self.status_message = "Could not connect to check for updates."
             return None, None
 
@@ -886,8 +1014,25 @@ class AutoUpdater:
             imgui.text(self.status_message)
             imgui.text(f"Processing... {self._get_spinner_text()}")
         else:
-            target_branch = self.BRANCH
-            imgui.text(f"Select a commit from branch '{target_branch}' to switch to:")
+            target_branch = self.active_branch
+            branch_info = f"'{target_branch}'"
+            if self.MIGRATION_MODE and target_branch != self.FALLBACK_BRANCH:
+                branch_info += f" (migrated from {self.FALLBACK_BRANCH})"
+            imgui.text(f"Select a commit from branch {branch_info} to switch to:")
+            
+            # Show branch status info
+            if self.MIGRATION_MODE:
+                imgui.text_colored(f"Migration Mode: Active | Checking {self.PRIMARY_BRANCH} & {self.FALLBACK_BRANCH}", 0.7, 0.9, 0.7, 1.0)
+                if self.branch_transition_count > 0:
+                    imgui.text_colored(f"Branch transitions: {self.branch_transition_count}", 0.6, 0.8, 1.0, 1.0)
+                    
+                # Add migration status button
+                if imgui.button("Migration Status", width=120):
+                    status = self.get_migration_status()
+                    print(f"\n=== MIGRATION STATUS ===")
+                    for key, value in status.items():
+                        print(f"{key}: {value}")
+                    print("========================\n")
             imgui.separator()
 
             # Update list with inline changelogs
