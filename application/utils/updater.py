@@ -1093,7 +1093,7 @@ class AutoUpdater:
 
         try:
             # Use the configured branch instead of current branch
-            target_branch = self.BRANCH
+            target_branch = self.active_branch
             self.logger.info(f"Fetching commits from branch: {target_branch}")
             
             target_commit_count = custom_count if custom_count else DEFAULT_COMMIT_FETCH_COUNT
@@ -1290,7 +1290,7 @@ class AutoUpdater:
 
         # Set initial size and make resizable
         if not hasattr(self, '_update_settings_window_size'):
-            self._update_settings_window_size = (800, 600)
+            self._update_settings_window_size = (815, 665)
         
         # Set initial position for first time
         if not hasattr(self, '_update_settings_window_pos'):
@@ -1359,6 +1359,36 @@ class AutoUpdater:
             imgui.text(self.status_message)
             imgui.text(f"Processing... {self._get_spinner_text()}")
         else:
+            # Branch selection dropdown
+            imgui.text("Select branch:")
+            imgui.same_line()
+            
+            # Get available branches
+            available_branches = [self.FALLBACK_BRANCH]
+            if self.MIGRATION_MODE:
+                available_branches.append(self.PRIMARY_BRANCH)
+            
+            # Create branch names for display
+            branch_names = []
+            for branch in available_branches:
+                display_name = f"{branch}"
+                if branch == self._get_current_branch():
+                    display_name += " (current)"
+                branch_names.append(display_name)
+            
+            # Show branch dropdown
+            current_branch_idx = available_branches.index(self.active_branch) if self.active_branch in available_branches else 0
+            changed, new_branch_idx = imgui.combo("##branch_select", current_branch_idx, branch_names)
+            
+            # Handle branch change
+            if changed and 0 <= new_branch_idx < len(available_branches):
+                new_branch = available_branches[new_branch_idx]
+                if new_branch != self.active_branch:
+                    self.active_branch = new_branch
+                    # Clear existing updates to trigger reload
+                    self.available_updates = []
+                    self.load_available_updates_async()
+            
             target_branch = self.active_branch
             branch_info = f"'{target_branch}'"
             if self.MIGRATION_MODE and target_branch != self.FALLBACK_BRANCH:
@@ -1367,9 +1397,10 @@ class AutoUpdater:
             
             # Show branch status info
             if self.MIGRATION_MODE:
-                imgui.text_colored(f"Migration Mode: Active | Checking {self.PRIMARY_BRANCH} & {self.FALLBACK_BRANCH}", 0.7, 0.9, 0.7, 1.0)
+                imgui.text_colored(f"Migration Mode: Active | Checking {self.active_branch}", 0.7, 0.9, 0.7, 1.0)
                 if self.branch_transition_count > 0:
                     imgui.text_colored(f"Branch transitions: {self.branch_transition_count}", 0.6, 0.8, 1.0, 1.0)
+                    imgui.text_colored(f"Current branch: {self._get_current_branch()}", 0.6, 0.8, 1.0, 1.0)
                     
                 # Add migration status button
                 if imgui.button("Migration Status", width=120):

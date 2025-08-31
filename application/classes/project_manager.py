@@ -319,10 +319,14 @@ class ProjectManager:
     def _apply_project_state_from_dict(self, project_data: Dict):
         """Applies loaded project data to the relevant app logic sub-modules."""
         # Data for AppLogic itself (or to be passed to AppSettings if they become project-specific)
-        self.app.yolo_detection_model_path_setting = project_data.get("yolo_detection_model_path_setting", self.app.app_settings.get("yolo_det_model_path"))
-        self.app.yolo_det_model_path = self.app.yolo_detection_model_path_setting
-        self.app.yolo_pose_model_path_setting = project_data.get("yolo_pose_model_path_setting", self.app.app_settings.get("yolo_pose_model_path"))
-        self.app.yolo_pose_model_path = self.app.yolo_pose_model_path_setting
+        project_yolo_detection_model_path_setting = project_data.get("yolo_detection_model_path_setting", self.app.app_settings.get("yolo_det_model_path"))
+        project_yolo_pose_model_path_setting = project_data.get("yolo_pose_model_path_setting", self.app.app_settings.get("yolo_pose_model_path"))
+        if os.path.exists(project_yolo_detection_model_path_setting):
+            self.app.yolo_detection_model_path_setting = project_yolo_detection_model_path_setting
+            self.app.yolo_det_model_path = self.app.yolo_detection_model_path_setting
+        if os.path.exists(project_yolo_pose_model_path_setting):
+            self.app.yolo_pose_model_path_setting = project_yolo_pose_model_path_setting
+            self.app.yolo_pose_model_path = self.app.yolo_pose_model_path_setting
         if self.app.tracker:  # Update tracker if it exists
             self.app.tracker.det_model_path = self.app.yolo_det_model_path
             self.app.tracker.pose_model_path = self.app.yolo_pose_model_path
