@@ -20,10 +20,10 @@ class GeneratedFileManagerWindow:
     def render(self):
         """Orchestrates the rendering of the Generated File Manager window UI."""
         app_state = self.app.app_state_ui
-        is_open, is_visible = imgui.begin("Generated File Manager", True)
-        if not is_open:
-            app_state.show_generated_file_manager = False
-        if is_visible:
+        is_open, new_visibility = imgui.begin("Generated File Manager", closable=True, flags=imgui.WINDOW_NO_COLLAPSE)
+        if new_visibility != app_state.show_generated_file_manager:
+            app_state.show_generated_file_manager = new_visibility
+        if is_open:
             # Render header and controls (sticky)
             self._render_header_controls()
             # Begin a scrollable child region for the file/folder list

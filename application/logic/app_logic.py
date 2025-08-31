@@ -16,6 +16,7 @@ from tracker import ROITracker as Tracker
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
 from config.constants import *
+from pathlib import Path
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -122,7 +123,8 @@ class ApplicationLogic:
         status_log_config = {
             logging.INFO: 3.0, logging.WARNING: 6.0, logging.ERROR: 10.0, logging.CRITICAL: 15.0,
         }
-        self.app_log_file_path = 'fungen.log'  # Define app_log_file_path
+        Path("logs").mkdir(exist_ok=True)
+        self.app_log_file_path = 'logs/fungen.log'  # Define app_log_file_path
 
         # --- Start of Log Purge ---
         try:
