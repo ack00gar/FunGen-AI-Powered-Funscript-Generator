@@ -489,4 +489,4 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
                 pass
         
         super().cleanup()
-        self.logger.info("Stage 2 contact analysis tracker cleaned up")
+        # self.logger.info("Stage 2 contact analysis tracker cleaned up")

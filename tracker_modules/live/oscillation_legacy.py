@@ -311,7 +311,7 @@ class OscillationLegacyTracker(BaseTracker):
         self.flow_dense = None
         self.oscillation_history.clear()
         self.oscillation_position_history.clear()
-        self.logger.info("Legacy oscillation detector cleaned up")
+        # self.logger.info("Legacy oscillation detector cleaned up")
     
     # Private helper methods
     

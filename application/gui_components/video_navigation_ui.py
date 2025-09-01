@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from application.utils import _format_time, VideoSegment
-from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS, TrackerMode
+from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS
 from config.element_group_colors import VideoNavigationColors
 from config.constants_colors import CurrentTheme
 
@@ -513,8 +513,13 @@ class VideoNavigationUI:
                     selected_chapter = self.context_selected_chapters[0]
                     
                     if imgui.menu_item("Live Oscillation Detector")[0]:
-                        # Set tracker mode to oscillation detector
-                        self.app.app_state_ui.selected_tracker_mode = TrackerMode.OSCILLATION_DETECTOR
+                        # Find first available live tracker (no user intervention required)
+                        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
+                        discovery = get_tracker_discovery()
+                        live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
+                        if live_trackers:
+                            # Use the first available live tracker
+                            self.app.app_state_ui.selected_tracker_name = live_trackers[0].internal_name
                         # Set scripting range to the selected chapter
                         if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
                             self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
@@ -526,9 +531,23 @@ class VideoNavigationUI:
                         self.context_selected_chapters.clear()
                         imgui.close_current_popup()
                     
-                    if imgui.menu_item("Live Tracking (YOLO ROI)")[0]:
-                        # Set tracker mode to YOLO ROI
-                        self.app.app_state_ui.selected_tracker_mode = TrackerMode.LIVE_YOLO_ROI
+                    if imgui.menu_item("Live Tracking (Auto ROI)")[0]:
+                        # Find live tracker with automatic ROI detection (YOLO, etc.)
+                        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
+                        discovery = get_tracker_discovery()
+                        live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
+                        # Look for trackers that do automatic ROI detection (not oscillation-based)
+                        auto_tracker = None
+                        for tracker in live_trackers:
+                            # Skip pure oscillation detectors, look for ROI/YOLO trackers
+                            if not ("oscillation" in tracker.internal_name.lower()):
+                                auto_tracker = tracker.internal_name
+                                break
+                        if auto_tracker:
+                            self.app.app_state_ui.selected_tracker_name = auto_tracker
+                        elif live_trackers:
+                            # Fallback to any live tracker
+                            self.app.app_state_ui.selected_tracker_name = live_trackers[0].internal_name
                         # Set scripting range to the selected chapter
                         if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
                             self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
@@ -540,9 +559,22 @@ class VideoNavigationUI:
                         self.context_selected_chapters.clear()
                         imgui.close_current_popup()
                     
-                    if imgui.menu_item("Live Tracking (User ROI)")[0]:
-                        # Set tracker mode to User ROI
-                        self.app.app_state_ui.selected_tracker_mode = TrackerMode.LIVE_USER_ROI
+                    if imgui.menu_item("Live Tracking (Manual ROI)")[0]:
+                        # Find manual ROI tracker (requires user setup)
+                        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
+                        discovery = get_tracker_discovery()
+                        intervention_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE_INTERVENTION)
+                        # Prefer trackers that require manual setup
+                        manual_tracker = None
+                        for tracker in intervention_trackers:
+                            if "user" in tracker.internal_name.lower() or "manual" in tracker.internal_name.lower():
+                                manual_tracker = tracker.internal_name
+                                break
+                        if manual_tracker:
+                            self.app.app_state_ui.selected_tracker_name = manual_tracker
+                        elif intervention_trackers:
+                            # Fallback to any intervention tracker
+                            self.app.app_state_ui.selected_tracker_name = intervention_trackers[0].internal_name
                         # Set scripting range to the selected chapter
                         if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
                             self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
