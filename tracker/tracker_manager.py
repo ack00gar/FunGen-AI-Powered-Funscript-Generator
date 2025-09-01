@@ -1,10 +1,11 @@
 """
 Tracker Manager - Main interface for the modular tracker system.
 
-This class replaces the monolithic ROITracker and provides a clean interface
-for managing different tracking algorithms. It handles tracker lifecycle,
-switching between trackers, and provides a unified API that matches the
-original ROITracker interface for seamless integration.
+This class provides a unified interface for the dynamic tracker discovery system.
+It handles tracker lifecycle, switching between trackers, and provides a unified
+API that integrates with the dynamic discovery system for seamless operation.
+
+Updated to use the new dynamic tracker discovery system instead of hardcoded modes.
 """
 
 import logging
@@ -12,7 +13,8 @@ from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
 
 from tracker_modules import tracker_registry, BaseTracker, TrackerMetadata, TrackerResult
-from tracker_modules.base_tracker import TrackerError, TrackerInitializationError, TrackerProcessingError
+from tracker_modules import TrackerError, TrackerValidationError, TrackerSandboxError
+from config.tracker_discovery import get_tracker_discovery, TrackerDisplayInfo
 
 
 class TrackerManager:
@@ -38,6 +40,9 @@ class TrackerManager:
         self.app = app_instance
         self.logger = logging.getLogger("TrackerManager")
         
+        # Get dynamic tracker discovery instance
+        self.discovery = get_tracker_discovery()
+        
         # Current tracker state
         self.current_tracker: Optional[BaseTracker] = None
         self.current_tracker_name: Optional[str] = None
@@ -47,46 +52,46 @@ class TrackerManager:
         self.show_masks = kwargs.get('show_masks', True)
         self.show_roi = kwargs.get('show_roi', True)
         
-        # Default tracker (can be overridden by settings)
-        self.default_tracker_name = kwargs.get('default_tracker', 'oscillation_experimental_2')
+        # Default tracker (resolved dynamically)
+        from config.constants import DEFAULT_TRACKER_NAME
+        self.default_tracker_name = kwargs.get('default_tracker', DEFAULT_TRACKER_NAME)
         
-        self.logger.info(f"TrackerManager initialized with {len(tracker_registry.get_available_names())} available trackers")
+        available_count = len(tracker_registry.get_available_names())
+        self.logger.info(f"TrackerManager initialized with {available_count} available trackers")
         
-        # Report any discovery errors
-        errors = tracker_registry.get_discovery_errors()
-        if errors:
-            self.logger.warning(f"Tracker discovery errors: {len(errors)}")
-            for error in errors:
-                self.logger.debug(f"Discovery error: {error}")
+        # Validate dynamic discovery setup
+        is_valid, errors = self.discovery.validate_setup()
+        if not is_valid:
+            self.logger.error(f"Tracker setup validation failed: {errors}")
+        
+        # Report any registry discovery errors
+        registry_errors = tracker_registry.get_discovery_errors()
+        if registry_errors:
+            self.logger.warning(f"Tracker registry errors: {len(registry_errors)}")
+            for error in registry_errors:
+                self.logger.debug(f"Registry error: {error}")
     
     def set_tracking_mode(self, mode: str) -> bool:
         """
-        Set the tracking mode (for compatibility with existing code).
-        
-        This method maps legacy mode strings to tracker names and switches
-        to the appropriate tracker implementation.
+        Set the tracking mode using dynamic discovery only.
         
         Args:
-            mode: Legacy mode string (e.g., "OSCILLATION_DETECTOR")
+            mode: Mode identifier (CLI alias or internal name)
         
         Returns:
             bool: True if mode was set successfully
         """
-        # Map legacy mode strings to tracker names
-        mode_mapping = {
-            "OSCILLATION_DETECTOR": "oscillation_experimental",
-            "OSCILLATION_DETECTOR_LEGACY": "oscillation_legacy", 
-            "OSCILLATION_DETECTOR_EXPERIMENTAL_2": "oscillation_experimental_2",
-            "YOLO_ROI": "yolo_roi",
-            "USER_FIXED_ROI": "user_roi"
-        }
+        # Resolve using dynamic discovery system
+        tracker_info = self.discovery.get_tracker_info(mode)
+        if tracker_info:
+            return self.set_tracker(tracker_info.internal_name)
         
-        tracker_name = mode_mapping.get(mode)
-        if not tracker_name:
-            self.logger.error(f"Unknown tracking mode: {mode}")
-            return False
+        # Try direct tracker name lookup
+        if tracker_registry.get_tracker(mode):
+            return self.set_tracker(mode)
         
-        return self.set_tracker(tracker_name)
+        self.logger.error(f"Unknown tracking mode: {mode}. Available modes: {self.get_available_mode_names()}")
+        return False
     
     def set_tracker(self, tracker_name: str, **settings) -> bool:
         """
@@ -124,10 +129,10 @@ class TrackerManager:
         try:
             new_tracker = tracker_registry.create_tracker(tracker_name)
             if not new_tracker:
-                raise TrackerInitializationError(f"Failed to create tracker instance: {tracker_name}")
+                raise TrackerValidationError(f"Failed to create tracker instance: {tracker_name}")
             
             if not new_tracker.initialize(self.app, **settings):
-                raise TrackerInitializationError(f"Tracker initialization failed: {tracker_name}")
+                raise TrackerValidationError(f"Tracker initialization failed: {tracker_name}")
             
             self.current_tracker = new_tracker
             self.current_tracker_name = tracker_name
@@ -173,7 +178,7 @@ class TrackerManager:
             result = self.current_tracker.process_frame(frame, frame_time_ms, frame_index)
             
             if not isinstance(result, TrackerResult):
-                raise TrackerProcessingError("Tracker must return TrackerResult instance")
+                raise TrackerError("Tracker must return TrackerResult instance")
             
             # Update status if provided
             if result.status_message:
@@ -302,23 +307,49 @@ class TrackerManager:
         self.current_tracker_name = None
         self.logger.info("TrackerManager cleanup complete")
     
-    # Compatibility properties and methods for existing code
+    # Dynamic discovery API methods
     @property
     def tracking_mode(self) -> str:
-        """Get current tracking mode (for compatibility)."""
+        """Get current tracking mode display name."""
         if not self.current_tracker_name:
-            return "NONE"
+            return "No tracker selected"
         
-        # Map tracker names back to legacy mode strings
-        name_to_mode = {
-            "oscillation_experimental": "OSCILLATION_DETECTOR",
-            "oscillation_legacy": "OSCILLATION_DETECTOR_LEGACY",
-            "oscillation_experimental_2": "OSCILLATION_DETECTOR_EXPERIMENTAL_2",
-            "yolo_roi": "YOLO_ROI",
-            "user_roi": "USER_FIXED_ROI"
-        }
+        tracker_info = self.discovery.get_tracker_info(self.current_tracker_name)
+        return tracker_info.display_name if tracker_info else self.current_tracker_name
+    
+    def get_available_mode_names(self) -> List[str]:
+        """Get list of all available mode names for error messages."""
+        return self.discovery.get_supported_cli_modes()
+    
+    def get_available_trackers_for_gui(self) -> Tuple[List[str], List[str]]:
+        """Get display names and internal names for GUI combo boxes."""
+        return self.discovery.get_gui_display_list()
+    
+    def get_batch_compatible_trackers(self) -> List[TrackerDisplayInfo]:
+        """Get trackers that support batch processing (CLI mode - offline only)."""
+        return self.discovery.get_batch_compatible_trackers()
+    
+    def get_batch_gui_compatible_trackers(self) -> Tuple[List[str], List[str]]:
+        """Get trackers compatible with batch GUI (Live + Offline, no Live Intervention)."""
+        from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.get_batch_gui_compatible_trackers()
+    
+    def get_realtime_compatible_trackers(self) -> List[TrackerDisplayInfo]:
+        """Get trackers that support real-time processing."""
+        return self.discovery.get_realtime_compatible_trackers()
+    
+    def get_current_tracker_category(self) -> Optional[str]:
+        """Get the category of the current tracker."""
+        if not self.current_tracker_name:
+            return None
         
-        return name_to_mode.get(self.current_tracker_name, self.current_tracker_name.upper())
+        tracker_info = self.discovery.get_tracker_info(self.current_tracker_name)
+        return tracker_info.category.value if tracker_info else None
+    
+    def reload_discovery(self):
+        """Reload the dynamic tracker discovery (for development)."""
+        self.discovery.reload()
     
     def update_oscillation_grid_size(self):
         """Compatibility method - delegate to current tracker if applicable."""

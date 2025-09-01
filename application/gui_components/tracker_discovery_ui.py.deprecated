@@ -21,12 +21,8 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Import TrackerMode separately - this should always work
-try:
-    from config.constants import TrackerMode
-except ImportError as e:
-    logging.error(f"TrackerDiscoveryUI: Could not import TrackerMode: {e}")
-    TrackerMode = None
+# Import dynamic tracker discovery system
+from config.tracker_discovery import get_tracker_discovery, TrackerCategory
 
 # Import the working tracker registry - this should work
 try:

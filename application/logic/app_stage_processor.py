@@ -14,6 +14,7 @@ from application.utils.checkpoint_manager import (
     CheckpointManager, ProcessingStage, CheckpointData,
     get_checkpoint_manager, initialize_checkpoint_manager
 )
+from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
 
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
@@ -21,7 +22,7 @@ import detection.cd.stage_3_of_processor as stage3_module
 import detection.cd.stage_3_mixed_processor as stage3_mixed_module
 
 from config import constants
-from config.constants import TrackerMode
+# TrackerMode removed - using dynamic discovery
 from application.utils.stage_output_validator import can_skip_stage2_for_stage3
 from application.utils import VideoSegment
 
@@ -128,7 +129,8 @@ class AppStageProcessor:
         self.logger.info("Stage 1 resume: Restarting with original settings")
         
         # Restore settings and start fresh
-        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        # Use tracker name instead of enum
+        processing_mode = settings.get('processing_mode', 'stage3_optical_flow')
         return self._start_full_analysis_with_settings(processing_mode, settings)
     
     def _resume_stage2(self, checkpoint_data: CheckpointData) -> bool:
@@ -138,7 +140,8 @@ class AppStageProcessor:
         stage_data = checkpoint_data.stage_data
         
         self.logger.info(f"Stage 2 resume: Continuing from {checkpoint_data.progress_percentage:.1f}%")
-        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        # Use tracker name instead of enum
+        processing_mode = settings.get('processing_mode', 'stage3_optical_flow')
         return self._start_full_analysis_with_settings(processing_mode, settings)
     
     def _resume_stage3(self, checkpoint_data: CheckpointData) -> bool:
@@ -148,10 +151,11 @@ class AppStageProcessor:
         stage_data = checkpoint_data.stage_data
         
         self.logger.info(f"Stage 3 resume: Continuing from segment {stage_data.get('current_segment', 0)}")
-        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        # Use tracker name instead of enum
+        processing_mode = settings.get('processing_mode', 'stage3_optical_flow')
         return self._start_full_analysis_with_settings(processing_mode, settings)
     
-    def _start_full_analysis_with_settings(self, processing_mode: "TrackerMode", settings: Dict[str, Any]) -> bool:
+    def _start_full_analysis_with_settings(self, processing_mode: str, settings: Dict[str, Any]) -> bool:
         """Start full analysis with restored settings from checkpoint."""
         try:
             # Restore settings
@@ -197,7 +201,7 @@ class AppStageProcessor:
             progress_percentage = (frame_index / total_frames * 100) if total_frames > 0 else 0
             
             processing_settings = {
-                'processing_mode': getattr(self, 'processing_mode_for_thread', TrackerMode.OFFLINE_3_STAGE).value,
+                'processing_mode': getattr(self, 'processing_mode_for_thread', 'stage3_optical_flow'),
                 'num_producers_override': getattr(self, 'override_producers', None),
                 'num_consumers_override': getattr(self, 'override_consumers', None),
                 'frame_range_override': getattr(self, 'frame_range_override', None),
@@ -514,7 +518,7 @@ class AppStageProcessor:
         }
         self._create_checkpoint_if_needed(ProcessingStage.STAGE_3_FUNSCRIPT_GENERATION,  total_frames_processed_overall, total_frames_to_process_overall, stage_data)
 
-    def start_full_analysis(self, processing_mode: "TrackerMode",
+    def start_full_analysis(self, processing_mode: str,
                             override_producers: Optional[int] = None,
                             override_consumers: Optional[int] = None,
                             completion_event: Optional[threading.Event] = None,
@@ -552,7 +556,7 @@ class AppStageProcessor:
         self.override_producers = override_producers
         self.override_consumers = override_consumers
 
-        selected_mode = self.app.app_state_ui.selected_tracker_mode
+        selected_mode = self.app.app_state_ui.selected_tracker_name
         range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
 
         # --- MODIFIED LOGIC TO CHECK FOR BOTH FILES ---
@@ -602,7 +606,7 @@ class AppStageProcessor:
 
         self.reset_stage_status(stages=("stage2", "stage3"))
         self.stage2_status_text = "Queued..."
-        if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]:
+        if self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode):
             self.stage3_status_text = "Queued..."
 
         self.logger.info("Starting Full Analysis sequence...", extra={'status_message': True})
@@ -746,7 +750,7 @@ class AppStageProcessor:
                 except Exception as e:
                     self.logger.error(f"Error determining S2 overlay path: {e}")
 
-            generate_s2_funscript_actions = selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
+            generate_s2_funscript_actions = self._is_stage2_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)
             is_s1_data_source_ranged = (frame_range_for_s1 is not None)
 
             s2_start_time = time.time()
@@ -772,12 +776,12 @@ class AppStageProcessor:
 
             if self.stop_stage_event.is_set() or not stage2_success:
                 self.logger.info("[Thread] Exiting after Stage 2 due to stop event or failure.")
-                if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED] and "Queued" in self.stage3_status_text:
+                if (self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)) and "Queued" in self.stage3_status_text:
                      self.gui_event_queue.put(("stage3_status_update", "Skipped", "S2 Failed/Aborted"))
                 return
 
             # --- Stage 3 (or Finish) ---
-            if selected_mode == TrackerMode.OFFLINE_2_STAGE:
+            if self._is_stage2_tracker(selected_mode):
                 if stage2_success:
                     packaged_data = {
                         "results_dict": s2_output_data,
@@ -794,7 +798,7 @@ class AppStageProcessor:
                     "video_path": fm.video_path
                 }
                 self.gui_event_queue.put(("analysis_message", completion_payload, None))
-            elif selected_mode == TrackerMode.OFFLINE_3_STAGE or selected_mode == getattr(TrackerMode, 'OFFLINE_3_STAGE_MIXED', TrackerMode.OFFLINE_3_STAGE):
+            elif self._is_stage3_tracker(selected_mode):
                 self.current_analysis_stage = 3
                 segments_objects = s2_output_data.get("segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
@@ -828,7 +832,7 @@ class AppStageProcessor:
 
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 
-                if selected_mode == getattr(TrackerMode, 'OFFLINE_3_STAGE_MIXED', None):
+                if self._is_mixed_stage3_tracker(selected_mode):
                     s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
                 else:
                     s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
@@ -847,7 +851,7 @@ class AppStageProcessor:
                     # Process Stage 3 results immediately
                     self.gui_event_queue.put(("stage3_results_success", packaged_data, None))
 
-            elif selected_mode == TrackerMode.OFFLINE_3_STAGE_MIXED:
+            elif self._is_mixed_stage3_tracker(selected_mode):
                 self.current_analysis_stage = 3
                 segments_objects = s2_output_data.get("segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
@@ -951,7 +955,7 @@ class AppStageProcessor:
                 self.stage_completion_event.set()
 
             # Clean up checkpoints on successful completion
-            if stage1_success and stage2_success and (selected_mode == TrackerMode.OFFLINE_2_STAGE or stage3_success):
+            if stage1_success and stage2_success and (self._is_stage2_tracker(selected_mode) or stage3_success):
                 self._cleanup_checkpoints_on_completion()
 
             # Clear the large data map and SQLite path from memory (if not already cleared)
@@ -965,7 +969,7 @@ class AppStageProcessor:
                 
                 # CRITICAL: Never delete database during 3-stage pipeline until Stage 3 completes
                 # Stage 3 depends on the Stage 2 database for processing
-                is_3_stage_pipeline = selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
+                is_3_stage_pipeline = self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)
                 stage3_completed = stage3_success if is_3_stage_pipeline else True
                 
                 if not retain_database and stage3_completed:
@@ -997,7 +1001,7 @@ class AppStageProcessor:
                         retain_database = self.app_settings.get("retain_stage2_database", True)
                         
                         # Use same logic as database cleanup
-                        is_3_stage_pipeline = selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
+                        is_3_stage_pipeline = self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)
                         stage3_completed = stage3_success if is_3_stage_pipeline else True
                         
                         if not retain_database and stage3_completed:
@@ -2153,6 +2157,26 @@ class AppStageProcessor:
         self.stage_thread = None
 
     # REFACTORED replaces duplicate code in __init__ and deals with edge cases (ie 'None' values)
+    def _is_stage3_tracker(self, tracker_name):
+        """Check if tracker is a 3-stage offline tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_stage3_tracker(tracker_name)
+    
+    def _is_mixed_stage3_tracker(self, tracker_name):
+        """Check if tracker is a mixed 3-stage offline tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_mixed_stage3_tracker(tracker_name)
+    
+    def _is_stage2_tracker(self, tracker_name):
+        """Check if tracker is a 2-stage offline tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_stage2_tracker(tracker_name)
+    
+    def _is_offline_tracker(self, tracker_name):
+        """Check if tracker is any offline tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_offline_tracker(tracker_name)
+
     def update_settings_from_app(self):
         prod_usr = self.app_settings.get("num_producers_stage1")
         cons_usr = self.app_settings.get("num_consumers_stage1")

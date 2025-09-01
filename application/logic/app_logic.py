@@ -15,7 +15,8 @@ from tracker import ROITracker as Tracker
 
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
-from config.constants import *
+from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION
+from config.tracker_discovery import get_tracker_discovery
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -335,17 +336,9 @@ class ApplicationLogic:
 
         # --- Initialize tracker mode from persisted setting; default handled by AppStateUI ---
         if not self.is_cli_mode and self.tracker:
-            # Map enum to tracker string
-            mode = self.app_state_ui.selected_tracker_mode
-            if mode == TrackerMode.LIVE_USER_ROI:
-                tracker_mode_str = "USER_FIXED_ROI"
-            elif mode == TrackerMode.OSCILLATION_DETECTOR:
-                tracker_mode_str = "OSCILLATION_DETECTOR"
-            elif mode == TrackerMode.OSCILLATION_DETECTOR_LEGACY:
-                tracker_mode_str = "OSCILLATION_DETECTOR_LEGACY"
-            else:
-                tracker_mode_str = "YOLO_ROI"
-            self.tracker.set_tracking_mode(tracker_mode_str)
+            # Use dynamic tracker discovery - selected_tracker_name is already the internal name
+            tracker_name = self.app_state_ui.selected_tracker_name
+            self.tracker.set_tracking_mode(tracker_name)
 
     def get_timeline(self, timeline_num: int) -> Optional['InteractiveFunscriptTimeline']:
         """
@@ -580,7 +573,7 @@ class ApplicationLogic:
                 autotune_frame_range = (start_frame, end_frame)
 
                 self.stage_processor.start_full_analysis(
-                    processing_mode=TrackerMode.OFFLINE_3_STAGE,
+                    processing_mode="stage3_mixed",
                     override_producers=p,
                     override_consumers=c,
                     completion_event=completion_event,
@@ -965,20 +958,22 @@ class ApplicationLogic:
                 time.sleep(1.0)
                 if self.stop_batch_event.is_set(): break
 
-                batch_mode_map = {
-                    0: TrackerMode.OFFLINE_3_STAGE,
-                    1: TrackerMode.OFFLINE_2_STAGE,
-                    2: TrackerMode.OSCILLATION_DETECTOR,
-                    3: TrackerMode.OFFLINE_3_STAGE_MIXED
-                }
-                selected_mode = batch_mode_map.get(self.batch_processing_method_idx)
-
-                if selected_mode is None:
-                    self.logger.error(f"Invalid batch processing method index: {self.batch_processing_method_idx}. Skipping video.")
+                # Get batch-compatible trackers dynamically
+                discovery = get_tracker_discovery()
+                batch_compatible_trackers = discovery.get_batch_compatible_trackers()
+                
+                if self.batch_processing_method_idx < 0 or self.batch_processing_method_idx >= len(batch_compatible_trackers):
+                    self.logger.error(f"Invalid batch processing method index: {self.batch_processing_method_idx}. Available trackers: {len(batch_compatible_trackers)}. Skipping video.")
                     continue
+                
+                selected_tracker = batch_compatible_trackers[self.batch_processing_method_idx]
+                selected_mode = selected_tracker.internal_name
 
-                # --- OFFLINE MODES (2-Stage / 3-Stage / 3-Stage-Mixed) ---
-                if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]:
+                # Check tracker category to determine processing mode
+                from config.tracker_discovery import TrackerCategory
+                
+                # --- OFFLINE MODES (Stage-based processing) ---
+                if selected_tracker.category == TrackerCategory.OFFLINE:
                     self.single_video_analysis_complete_event.clear()
                     self.save_and_reset_complete_event.clear()
                     self.stage_processor.start_full_analysis(processing_mode=selected_mode)
@@ -1010,20 +1005,10 @@ class ApplicationLogic:
                     self.save_and_reset_complete_event.wait(timeout=120)
                     self.logger.debug("Batch loop: Save/reset signal received. Proceeding.")
 
-                # --- LIVE MODES (Oscillation Detector) ---
-                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR:
-                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
-                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
-                    self.tracker.start_tracking()
-                    self.processor.set_tracker_processing_enabled(True)
-                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR_LEGACY:
-                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
-                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR_LEGACY")
-                    self.tracker.start_tracking()
-                    self.processor.set_tracker_processing_enabled(True)
-                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2:
-                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
-                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR_EXPERIMENTAL_2")
+                # --- LIVE MODES (Real-time tracking) ---
+                elif selected_tracker.category == TrackerCategory.LIVE:
+                    self.logger.info(f"Running live mode: {selected_tracker.display_name} for {os.path.basename(video_path)}")
+                    self.tracker.set_tracking_mode(selected_mode)
                     self.tracker.start_tracking()
                     self.processor.set_tracker_processing_enabled(True)
 
@@ -1268,7 +1253,11 @@ class ApplicationLogic:
 
         # 5. Handle simple mode
         is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
-        is_offline_analysis = self.app_state_ui.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]
+        # Check if current tracker is offline mode for simple mode auto-enhancements
+        from config.tracker_discovery import TrackerCategory
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(self.app_state_ui.selected_tracker_name)
+        is_offline_analysis = tracker_info and tracker_info.category == TrackerCategory.OFFLINE
 
         if is_simple_mode and is_offline_analysis:
             self.logger.info("Simple Mode: Automatically applying Ultimate Autotune with defaults...")
@@ -1343,7 +1332,11 @@ class ApplicationLogic:
                 
                 # Handle Simple Mode auto ultimate autotune for live sessions
                 is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
-                is_live_mode = self.app_state_ui.selected_tracker_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR, TrackerMode.OSCILLATION_DETECTOR_LEGACY]
+                # Check if current tracker is live mode for simple mode auto-enhancements  
+                from config.tracker_discovery import TrackerCategory
+                discovery = get_tracker_discovery()
+                tracker_info = discovery.get_tracker_info(self.app_state_ui.selected_tracker_name)
+                is_live_mode = tracker_info and tracker_info.category == TrackerCategory.LIVE
                 has_actions = bool(self.funscript_processor.get_actions('primary'))
                 
                 if is_simple_mode and is_live_mode and has_actions and not autotune_enabled:
@@ -1841,16 +1834,32 @@ class ApplicationLogic:
             self.stage_processor.on_stage2_progress = cli_stage2_progress_callback
             self.stage_processor.on_stage3_progress = cli_stage3_progress_callback
 
-            # 2. Configure batch processing from CLI args
-            mode_to_idx_map = {
-                '3-stage': 0,
-                '2-stage': 1,
-                'oscillation-detector': 2,
-                '3-stage-mixed': 3  # Add new mixed mode index
-            }
-            # Set the batch processing index, which the batch thread now uses
-            self.batch_processing_method_idx = mode_to_idx_map.get(args.mode, 0)
-            self.logger.info(f"Processing Mode: {args.mode}")
+            # 2. Configure batch processing from CLI args using dynamic discovery
+            from config.tracker_discovery import get_tracker_discovery
+            discovery = get_tracker_discovery()
+            
+            # Resolve CLI mode to tracker info
+            tracker_info = discovery.get_tracker_info(args.mode)
+            if not tracker_info:
+                self.logger.error(f"Unknown processing mode: {args.mode}")
+                self.logger.error(f"Available modes: {discovery.get_supported_cli_modes()}")
+                return
+            
+            if not tracker_info.supports_batch:
+                self.logger.error(f"Mode '{args.mode}' does not support batch processing")
+                self.logger.error(f"Batch-compatible modes: {[info.cli_aliases[0] for info in discovery.get_batch_compatible_trackers() if info.cli_aliases]}")
+                return
+            
+            # Map tracker to batch processing method index dynamically
+            batch_tracker_map = {}
+            batch_trackers = discovery.get_batch_compatible_trackers()
+            for idx, batch_tracker in enumerate(batch_trackers):
+                for alias in batch_tracker.cli_aliases:
+                    batch_tracker_map[alias] = idx
+                batch_tracker_map[batch_tracker.internal_name] = idx
+            
+            self.batch_processing_method_idx = batch_tracker_map.get(args.mode, 0)
+            self.logger.info(f"Processing Mode: {args.mode} -> {tracker_info.display_name}")
             
             # Set oscillation detector mode for Stage 3 if provided
             if hasattr(args, 'od_mode') and args.od_mode:

@@ -2,7 +2,7 @@ from typing import Tuple
 
 
 from application.utils import VideoSegment, _format_time
-from config.constants import DEFAULT_CHAPTER_FPS, TrackerMode
+from config.constants import DEFAULT_CHAPTER_FPS
 
 
 class AppEventHandlers:
@@ -109,7 +109,7 @@ class AppEventHandlers:
         if not self.app.tracker: self.logger.error("Tracker not initialized."); return
         
         self.app.tracker.set_tracking_mode("YOLO_ROI")  # Ensure correct mode
-        self.app.stage_processor.start_full_analysis(processing_mode=self.app.app_state_ui.selected_tracker_mode)
+        self.app.stage_processor.start_full_analysis(processing_mode=self.app.app_state_ui.selected_tracker_name)
         self.app.energy_saver.reset_activity_timer()
 
     def handle_start_live_tracker_click(self):
@@ -122,24 +122,23 @@ class AppEventHandlers:
             self.logger.error("Tracker not initialized for live tracking.")
             return
 
-        selected_mode_from_ui = self.app.app_state_ui.selected_tracker_mode
+        selected_tracker_name = self.app.app_state_ui.selected_tracker_name
         
-        # Allow .engine models for live modes; handled by direct YOLO loading
+        # Set tracker using dynamic discovery
+        if selected_tracker_name:
+            self.app.tracker.set_tracking_mode(selected_tracker_name)
+
+        # Use dynamic tracker discovery for logging and validation
+        from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
+        tracker_ui = get_dynamic_tracker_ui()
         
-        if selected_mode_from_ui == TrackerMode.LIVE_USER_ROI:
-            self.app.tracker.set_tracking_mode("USER_FIXED_ROI")
-        elif selected_mode_from_ui == TrackerMode.OSCILLATION_DETECTOR:
-            self.app.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
-        elif selected_mode_from_ui == TrackerMode.OSCILLATION_DETECTOR_LEGACY:
-            self.app.tracker.set_tracking_mode("OSCILLATION_DETECTOR_LEGACY")
-        elif selected_mode_from_ui == TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2:
-            self.app.tracker.set_tracking_mode("OSCILLATION_DETECTOR_EXPERIMENTAL_2")
-        elif selected_mode_from_ui == TrackerMode.LIVE_YOLO_ROI:
-            self.app.tracker.set_tracking_mode("YOLO_ROI")
+        # Check if selected tracker is valid for live tracking
+        if not selected_tracker_name or not tracker_ui.is_live_tracker(selected_tracker_name):
+            self.logger.error(f"Invalid live tracker selected: {selected_tracker_name}")
+            return
 
-        current_tracker_mode = self.app.tracker.tracking_mode
-
-        if current_tracker_mode == "USER_FIXED_ROI":
+        # Handle user ROI tracker special case
+        if tracker_ui.is_user_roi_tracker(selected_tracker_name):
             # Check for a global ROI OR a chapter-specific ROI at the current frame
             has_global_roi = bool(
                 self.app.tracker.user_roi_fixed and (
@@ -163,19 +162,13 @@ class AppEventHandlers:
                not self.app.tracker.user_roi_initial_point_relative and \
                self.app.tracker.user_roi_tracked_point_relative:
                 self.app.tracker.user_roi_initial_point_relative = self.app.tracker.user_roi_tracked_point_relative
-            self.logger.info("Starting User Defined ROI tracking.")
-        elif current_tracker_mode == "YOLO_ROI":
-            self.logger.info("Starting Live Tracker (YOLO_ROI mode - if applicable).")
-        elif current_tracker_mode == "OSCILLATION_DETECTOR":
-            self.logger.info("Starting Live Tracker (2D Oscillation Detector mode).")
-        elif current_tracker_mode == "OSCILLATION_DETECTOR_LEGACY":
-            self.logger.info("Starting Live Tracker (2D Oscillation Detector Legacy mode).")
-        elif current_tracker_mode == "OSCILLATION_DETECTOR_EXPERIMENTAL_2":
-            self.logger.info("Starting Live Tracker (2D Oscillation Detector Experimental 2 - Hybrid mode).")
-        
+            
+            display_name = tracker_ui.get_tracker_display_name(selected_tracker_name)
+            self.logger.info(f"Starting {display_name} tracking.")
         else:
-            self.logger.error(f"Unknown tracker mode for live start: {current_tracker_mode}");
-            return
+            # For all other live trackers
+            display_name = tracker_ui.get_tracker_display_name(selected_tracker_name)
+            self.logger.info(f"Starting {display_name} tracking.")
 
         # Explicitly start the tracker before starting video processing
         self.app.tracker.start_tracking()
@@ -190,8 +183,9 @@ class AppEventHandlers:
             self.app.processor.seek_video(start_frame)
 
         self.app.processor.start_processing(start_frame=start_frame, end_frame=end_frame)
+        display_name = tracker_ui.get_tracker_display_name(selected_tracker_name)
         self.logger.info(
-            f"Live tracker ({current_tracker_mode}) started. Range: {'scripting range' if fs_proc.scripting_range_active else 'full video from current'}",
+            f"Live tracker ({display_name}) started. Range: {'scripting range' if fs_proc.scripting_range_active else 'full video from current'}",
             extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 

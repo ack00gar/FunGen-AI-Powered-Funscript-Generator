@@ -640,4 +640,4 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
             self.tracker_manager = None
         
         super().cleanup()
-        self.logger.info("Stage 3 optical flow tracker cleaned up")
+        # self.logger.info("Stage 3 optical flow tracker cleaned up")

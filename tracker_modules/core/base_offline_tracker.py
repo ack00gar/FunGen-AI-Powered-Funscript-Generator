@@ -299,7 +299,8 @@ class BaseOfflineTracker(ABC):
     def cleanup(self):
         """Clean up resources when tracker is being destroyed."""
         self.stop_processing()
-        self.logger.info(f"{self.__class__.__name__} cleanup complete")
+        # Reduced logging verbosity
+        self.logger.debug(f"{self.__class__.__name__} cleanup complete")
 
 
 class OfflineTrackerInitializationError(TrackerError):
