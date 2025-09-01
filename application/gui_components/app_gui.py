@@ -118,6 +118,8 @@ class GUI:
             'right_pressed': False, 
             'last_seek_time': 0.0,
             'seek_interval': 0.033,  # Default fallback, will be updated based on video FPS
+            'initial_press_time': 0.0,  # When key was first pressed
+            'continuous_delay': 0.5,  # Delay before continuous scrolling starts (500ms)
             'cache_warming_active': False,
             'last_cache_warm_time': 0.0
         }
@@ -957,7 +959,7 @@ class GUI:
         elif right_held and not left_held:
             seek_direction = 1
         
-        # Apply navigation with proper timing control
+        # Apply navigation with proper frame-by-frame then continuous logic
         if seek_direction != 0:
             time_since_last = current_time - self.arrow_key_state['last_seek_time']
             key_just_pressed = (left_held and imgui.is_key_pressed(left_key)) or (right_held and imgui.is_key_pressed(right_key))
@@ -965,25 +967,28 @@ class GUI:
             should_navigate = False
             
             if key_just_pressed:
-                # Initial key press - always navigate immediately
+                # INITIAL KEY PRESS: Always navigate immediately (frame-by-frame response)
                 should_navigate = True
-            elif time_since_last >= self.arrow_key_state['seek_interval']:
-                # Continuous hold - navigate based on interval
-                should_navigate = True
+                self.arrow_key_state['initial_press_time'] = current_time
+            else:
+                # KEY HELD DOWN: Check if enough time passed for continuous scrolling
+                time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
+                
+                if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
+                    # Continuous scrolling: only navigate after interval
+                    if time_since_last >= self.arrow_key_state['seek_interval']:
+                        should_navigate = True
+                # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
             
             if should_navigate:
                 self._perform_frame_seek(seek_direction)
                 self.arrow_key_state['last_seek_time'] = current_time
-                
-                # Only trigger cache warming on initial press or every few continuous presses
-                if key_just_pressed or (time_since_last >= self.arrow_key_state['seek_interval'] * 5):
-                    self._warm_cache_predictively(seek_direction)
         else:
             # Stop cache warming when no navigation
             self.arrow_key_state['cache_warming_active'] = False
 
     def _perform_frame_seek(self, delta_frames):
-        """Non-blocking frame seeking that never freezes the UI"""
+        """Optimized frame seeking with immediate visual feedback"""
         if not self.app.processor or not self.app.processor.video_info:
             return
             
@@ -994,7 +999,9 @@ class GUI:
         if new_frame == self.app.processor.current_frame_index:
             return  # No change needed
             
-        # Always try cache first for immediate response
+        # STRATEGY: Always prioritize immediate visual feedback
+        
+        # First: Check cache for instant response
         frame_from_cache = None
         with self.app.processor.frame_cache_lock:
             if new_frame in self.app.processor.frame_cache:
@@ -1002,114 +1009,34 @@ class GUI:
                 self.app.processor.frame_cache.move_to_end(new_frame)
         
         if frame_from_cache is not None:
-            # Cache hit - immediate response
+            # CACHE HIT: Immediate update
             self.app.processor.current_frame_index = new_frame
             self.app.processor.current_frame = frame_from_cache
-            
-            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-            if self.app.project_manager: 
-                self.app.project_manager.project_dirty = True
-            self.app.energy_saver.reset_activity_timer()
         else:
-            # Cache miss - DO NOT block the UI with seek_video
-            # Instead, just update the frame index and skip the frame display
-            # The cache warming system will handle loading it in the background
-            self.app.processor.current_frame_index = new_frame
-            
-            # Optional: Show a "loading" indicator or keep the last frame
-            # For now, just update the timeline position
-            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-            if self.app.project_manager: 
-                self.app.project_manager.project_dirty = True
-            self.app.energy_saver.reset_activity_timer()
-            
-            # Immediately request cache warming for this region
-            self._request_cache_warm_region(new_frame)
+            # CACHE MISS: Use optimized single frame fetch (faster than full seek)
+            try:
+                # Use _get_specific_frame which is optimized for single frame access
+                frame_data = self.app.processor._get_specific_frame(new_frame)
+                if frame_data is not None:
+                    self.app.processor.current_frame = frame_data
+                    # _get_specific_frame already updates current_frame_index and cache
+                else:
+                    # Fallback: just update index, keep previous frame displayed
+                    self.app.processor.current_frame_index = new_frame
+            except Exception as e:
+                # Error loading frame: update index but keep previous frame
+                self.app.logger.warning(f"Frame seek error: {e}")
+                self.app.processor.current_frame_index = new_frame
+        
+        # Always update UI immediately
+        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+        if self.app.project_manager: 
+            self.app.project_manager.project_dirty = True
+        self.app.energy_saver.reset_activity_timer()
 
-    def _warm_cache_predictively(self, seek_direction):
-        """Predictive cache warming based on navigation direction"""
-        if not self.app.processor or not self.app.processor.video_info:
-            return
-            
-        current_time = time.time()
-        
-        # Rate limit cache warming to avoid excessive operations
-        if current_time - self.arrow_key_state['last_cache_warm_time'] < 0.5:  # 0.5s cooldown
-            return
-            
-        self.arrow_key_state['last_cache_warm_time'] = current_time
-        self.arrow_key_state['cache_warming_active'] = True
-        
-        current_frame = self.app.processor.current_frame_index
-        cache_ahead_frames = 60  # Warm 2 seconds ahead at 30fps
-        
-        if seek_direction > 0:  # Moving forward
-            warm_start = current_frame + 1
-            warm_end = min(warm_start + cache_ahead_frames, self.app.processor.total_frames)
-        else:  # Moving backward
-            warm_end = current_frame - 1
-            warm_start = max(warm_end - cache_ahead_frames, 0)
-        
-        if warm_start < warm_end:
-            self._request_cache_warm_region(warm_start, warm_end)
-
-    def _request_cache_warm_region(self, start_frame, end_frame=None):
-        """Request background cache warming for a frame region without blocking UI"""
-        if not self.app.processor or not self.app.processor.video_info:
-            return
-            
-        # If only one frame specified, warm a small region around it
-        if end_frame is None:
-            warm_radius = 30  # Warm 30 frames around target
-            start_frame = max(0, start_frame - warm_radius // 2)
-            end_frame = min(start_frame + warm_radius, self.app.processor.total_frames)
-        
-        # Use the existing background threading system for non-blocking cache warming
-        if hasattr(self, 'processing_thread_manager'):
-            task_id = f"cache_warm_{start_frame}_{end_frame}"
-            self.processing_thread_manager.submit_task(
-                task_id=task_id,
-                task_type=TaskType.PREVIEW_GENERATION,  # Cache warming is similar to preview generation
-                function=self._background_cache_warm,
-                args=(start_frame, end_frame),
-                priority=TaskPriority.LOW  # Low priority to not interfere with other operations
-            )
-
-    def _background_cache_warm(self, start_frame, end_frame):
-        """Background thread function to warm the cache without blocking UI"""
-        try:
-            # Calculate how many frames to fetch in this batch
-            frames_to_warm = end_frame - start_frame
-            if frames_to_warm <= 0:
-                return
-                
-            # Don't warm too many at once to avoid memory issues
-            max_batch_size = 40
-            batch_size = min(frames_to_warm, max_batch_size)
-            
-            # Use VideoProcessor's existing batch fetch system
-            if hasattr(self.app.processor, 'get_frames_batch'):
-                # This is non-blocking for the UI thread since it runs in background
-                warm_frames = self.app.processor.get_frames_batch(start_frame, batch_size)
-                
-                # Add to cache
-                with self.app.processor.frame_cache_lock:
-                    for frame_idx, frame_data in warm_frames.items():
-                        # Only add if not already cached and we have room
-                        if frame_idx not in self.app.processor.frame_cache:
-                            if len(self.app.processor.frame_cache) >= self.app.processor.frame_cache_max_size:
-                                # Remove oldest frames to make room
-                                try:
-                                    self.app.processor.frame_cache.popitem(last=False)
-                                except KeyError:
-                                    pass
-                            self.app.processor.frame_cache[frame_idx] = frame_data
-                            
-                self.app.logger.debug(f"Cache warmed: {len(warm_frames)} frames around {start_frame}")
-                
-        except Exception as e:
-            # Don't let cache warming errors crash the app
-            self.app.logger.warning(f"Cache warming failed: {e}")
+    # Removed complex background cache warming system
+    # The VideoProcessor's existing _get_specific_frame already handles 
+    # batch fetching and caching optimally
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()
