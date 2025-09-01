@@ -111,6 +111,14 @@ class GUI:
 
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
+        
+        # Arrow key navigation state for continuous scrolling
+        self.arrow_key_state = {
+            'left_pressed': False,
+            'right_pressed': False, 
+            'last_seek_time': 0.0,
+            'seek_interval': 0.033  # ~30fps for smooth navigation
+        }
 
         self.batch_videos_data: List[Dict] = []
         self.batch_overwrite_mode_ui: int = 0  # 0: Skip own, 1: Skip any, 2: Overwrite all
@@ -861,6 +869,22 @@ class GUI:
                         return True
             return False
 
+        def check_key_held(shortcut_name):
+            """Check if a key is being held down (for continuous navigation)"""
+            shortcut_str = current_shortcuts.get(shortcut_name)
+            if not shortcut_str:
+                return False
+            map_result = self.app._map_shortcut_to_glfw_key(shortcut_str)
+            if not map_result:
+                return False
+            mapped_key, mapped_mods_from_string = map_result
+            return (imgui.is_key_down(mapped_key) and 
+                   mapped_mods_from_string['ctrl'] == io.key_ctrl and
+                   mapped_mods_from_string['alt'] == io.key_alt and
+                   mapped_mods_from_string['shift'] == io.key_shift and
+                   mapped_mods_from_string['super'] == io.key_super)
+
+        # Handle non-repeating shortcuts first  
         if check_and_run_shortcut("undo_timeline1", fs_proc.perform_undo_redo, 1, 'undo'):
             pass
         elif check_and_run_shortcut("redo_timeline1", fs_proc.perform_undo_redo, 1, 'redo'):
@@ -871,36 +895,92 @@ class GUI:
         ): pass
         elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control, "play_pause"):
             pass
-        elif video_loaded:
-            seek_delta_frames = 0
-            processed_seek = False
-            if check_and_run_shortcut("seek_prev_frame", lambda: None):
-                seek_delta_frames = -1
-                processed_seek = True
-            elif check_and_run_shortcut("seek_next_frame", lambda: None):
-                seek_delta_frames = 1
-                processed_seek = True
-            elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
-                pass
-            elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
-                pass
+        elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
+            pass
+        elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
+            pass
 
-            # Allow seeking if video is loaded, regardless of play/pause state
-            if processed_seek and seek_delta_frames != 0:
-                if self.app.processor and self.app.processor.video_info:
-                    paused_state = False
-                    if hasattr(self.app.processor, 'pause_event'):
-                        paused_state = self.app.processor.pause_event.is_set()
-                    self.app.logger.debug(f"Shortcut seek triggered: {seek_delta_frames} frames (paused={paused_state}, is_processing={self.app.processor.is_processing})")
-                    new_frame = self.app.processor.current_frame_index + seek_delta_frames
-                    total_frames_vid = self.app.processor.total_frames
-                    new_frame = np.clip(new_frame, 0, total_frames_vid - 1 if total_frames_vid > 0 else 0)
+        # Handle continuous arrow key navigation
+        if video_loaded:
+            self._handle_arrow_navigation()
 
-                    if new_frame != self.app.processor.current_frame_index:
-                        self.app.processor.seek_video(new_frame)
-                        app_state.force_timeline_pan_to_current_frame = True
-                        if self.app.project_manager: self.app.project_manager.project_dirty = True
-                        self.app.energy_saver.reset_activity_timer()
+    def _handle_arrow_navigation(self):
+        """Optimized arrow key navigation with continuous scrolling support"""
+        io = imgui.get_io()
+        current_shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+        current_time = time.time()
+        
+        # Get arrow key mappings
+        left_shortcut = current_shortcuts.get("seek_prev_frame", "LEFT_ARROW")
+        right_shortcut = current_shortcuts.get("seek_next_frame", "RIGHT_ARROW")
+        
+        left_map = self.app._map_shortcut_to_glfw_key(left_shortcut)
+        right_map = self.app._map_shortcut_to_glfw_key(right_shortcut)
+        
+        if not left_map or not right_map:
+            return
+            
+        left_key, left_mods = left_map
+        right_key, right_mods = right_map
+        
+        # Check if keys are held down (no modifier keys for arrow navigation)
+        left_held = (imgui.is_key_down(left_key) and 
+                    left_mods['ctrl'] == io.key_ctrl and
+                    left_mods['alt'] == io.key_alt and
+                    left_mods['shift'] == io.key_shift and
+                    left_mods['super'] == io.key_super)
+        
+        right_held = (imgui.is_key_down(right_key) and 
+                     right_mods['ctrl'] == io.key_ctrl and
+                     right_mods['alt'] == io.key_alt and
+                     right_mods['shift'] == io.key_shift and
+                     right_mods['super'] == io.key_super)
+        
+        # Update key state
+        self.arrow_key_state['left_pressed'] = left_held
+        self.arrow_key_state['right_pressed'] = right_held
+        
+        # Determine seek direction and apply rate limiting
+        seek_direction = 0
+        if left_held and not right_held:
+            seek_direction = -1
+        elif right_held and not left_held:
+            seek_direction = 1
+        
+        # Apply navigation if enough time has passed or on initial press
+        if seek_direction != 0:
+            time_since_last = current_time - self.arrow_key_state['last_seek_time']
+            key_just_pressed = (left_held and imgui.is_key_pressed(left_key)) or (right_held and imgui.is_key_pressed(right_key))
+            
+            if key_just_pressed or time_since_last >= self.arrow_key_state['seek_interval']:
+                self._perform_frame_seek(seek_direction)
+                self.arrow_key_state['last_seek_time'] = current_time
+
+    def _perform_frame_seek(self, delta_frames):
+        """Optimized frame seeking with minimal overhead"""
+        if not self.app.processor or not self.app.processor.video_info:
+            return
+            
+        new_frame = self.app.processor.current_frame_index + delta_frames
+        total_frames = self.app.processor.total_frames
+        new_frame = max(0, min(new_frame, total_frames - 1 if total_frames > 0 else 0))
+
+        if new_frame != self.app.processor.current_frame_index:
+            # Use cached frame if available to avoid seeking overhead
+            with self.app.processor.frame_cache_lock:
+                if new_frame in self.app.processor.frame_cache:
+                    # Direct cache access for immediate response
+                    self.app.processor.current_frame_index = new_frame
+                    self.app.processor.current_frame = self.app.processor.frame_cache[new_frame]
+                    self.app.processor.frame_cache.move_to_end(new_frame)
+                else:
+                    # Fall back to normal seek if not cached
+                    self.app.processor.seek_video(new_frame)
+            
+            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            if self.app.project_manager: 
+                self.app.project_manager.project_dirty = True
+            self.app.energy_saver.reset_activity_timer()
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()
@@ -1038,9 +1118,9 @@ class GUI:
     def render_gui(self):
         self.component_render_times.clear()
 
-        self._time_render("EnergySaver+Shortcuts", lambda: (
-            self._handle_energy_saver_interaction_detection(),
-            self._handle_global_shortcuts()))
+        # Separate timing to identify performance bottlenecks
+        self._time_render("EnergyDetection", self._handle_energy_saver_interaction_detection)
+        self._time_render("GlobalShortcuts", self._handle_global_shortcuts)
 
         if self.app.shortcut_manager.is_recording_shortcut_for:
             self._time_render("ShortcutRecordingInput", self.app.shortcut_manager.handle_shortcut_recording_input)
