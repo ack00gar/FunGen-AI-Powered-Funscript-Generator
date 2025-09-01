@@ -1059,7 +1059,7 @@ class GUI:
             task_id = f"cache_warm_{start_frame}_{end_frame}"
             self.processing_thread_manager.submit_task(
                 task_id=task_id,
-                task_type=TaskType.PROCESSING,  # Use appropriate task type
+                task_type=TaskType.PREVIEW_GENERATION,  # Cache warming is similar to preview generation
                 function=self._background_cache_warm,
                 args=(start_frame, end_frame),
                 priority=TaskPriority.LOW  # Low priority to not interfere with other operations
