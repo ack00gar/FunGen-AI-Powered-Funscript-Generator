@@ -957,17 +957,27 @@ class GUI:
         elif right_held and not left_held:
             seek_direction = 1
         
-        # Apply navigation if enough time has passed or on initial press
+        # Apply navigation with proper timing control
         if seek_direction != 0:
             time_since_last = current_time - self.arrow_key_state['last_seek_time']
             key_just_pressed = (left_held and imgui.is_key_pressed(left_key)) or (right_held and imgui.is_key_pressed(right_key))
             
-            if key_just_pressed or time_since_last >= self.arrow_key_state['seek_interval']:
+            should_navigate = False
+            
+            if key_just_pressed:
+                # Initial key press - always navigate immediately
+                should_navigate = True
+            elif time_since_last >= self.arrow_key_state['seek_interval']:
+                # Continuous hold - navigate based on interval
+                should_navigate = True
+            
+            if should_navigate:
                 self._perform_frame_seek(seek_direction)
                 self.arrow_key_state['last_seek_time'] = current_time
                 
-                # Trigger predictive cache warming
-                self._warm_cache_predictively(seek_direction)
+                # Only trigger cache warming on initial press or every few continuous presses
+                if key_just_pressed or (time_since_last >= self.arrow_key_state['seek_interval'] * 5):
+                    self._warm_cache_predictively(seek_direction)
         else:
             # Stop cache warming when no navigation
             self.arrow_key_state['cache_warming_active'] = False
