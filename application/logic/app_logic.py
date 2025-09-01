@@ -259,7 +259,7 @@ class ApplicationLogic:
         # --- Initialize Processor (after tracker and logger/app_state_ui are ready) ---
         # _check_model_paths can be called now before processor if it's critical for processor init
         self._check_model_paths()
-        self.processor = VideoProcessor(self, self.tracker, yolo_input_size=self.yolo_input_size, cache_size=300)
+        self.processor = VideoProcessor(self, self.tracker, yolo_input_size=self.yolo_input_size, cache_size=1000)
 
         # --- Modular Components Initialization ---
         self.file_manager = AppFileManager(self)
