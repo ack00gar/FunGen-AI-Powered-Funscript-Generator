@@ -120,8 +120,9 @@ class GUI:
             'seek_interval': 0.033,  # Default fallback, will be updated based on video FPS
             'initial_press_time': 0.0,  # When key was first pressed
             'continuous_delay': 0.5,  # Delay before continuous scrolling starts (500ms)
-            'cache_warming_active': False,
-            'last_cache_warm_time': 0.0
+            'navigation_direction': 0,  # -1 for backward, 1 for forward, 0 for none
+            'last_predictive_cache_time': 0.0,
+            'predictive_cache_cooldown': 1.0  # Wait 1 second between predictive cache operations
         }
 
         self.batch_videos_data: List[Dict] = []
@@ -983,9 +984,15 @@ class GUI:
             if should_navigate:
                 self._perform_frame_seek(seek_direction)
                 self.arrow_key_state['last_seek_time'] = current_time
+                self.arrow_key_state['navigation_direction'] = seek_direction
+                
+                # Trigger predictive caching only during continuous navigation
+                time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
+                if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
+                    self._maybe_warm_cache_predictively(seek_direction, current_time)
         else:
-            # Stop cache warming when no navigation
-            self.arrow_key_state['cache_warming_active'] = False
+            # Reset navigation state when no keys pressed
+            self.arrow_key_state['navigation_direction'] = 0
 
     def _perform_frame_seek(self, delta_frames):
         """Optimized frame seeking with immediate visual feedback"""
@@ -1034,9 +1041,77 @@ class GUI:
             self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
 
-    # Removed complex background cache warming system
-    # The VideoProcessor's existing _get_specific_frame already handles 
-    # batch fetching and caching optimally
+    def _maybe_warm_cache_predictively(self, seek_direction, current_time):
+        """Smart predictive caching that only reads uncached frames ahead of navigation"""
+        if not self.app.processor or not self.app.processor.video_info:
+            return
+            
+        # Rate limit predictive caching
+        if current_time - self.arrow_key_state['last_predictive_cache_time'] < self.arrow_key_state['predictive_cache_cooldown']:
+            return
+            
+        self.arrow_key_state['last_predictive_cache_time'] = current_time
+        
+        current_frame = self.app.processor.current_frame_index
+        total_frames = self.app.processor.total_frames
+        
+        # Cache ahead based on navigation direction and speed
+        # More frames for faster navigation (higher FPS videos)
+        video_fps = max(15, min(60, self.app.processor.fps))
+        frames_ahead = int(video_fps * 2)  # Cache 2 seconds ahead
+        
+        if seek_direction > 0:  # Forward navigation
+            cache_start = current_frame + 1
+            cache_end = min(cache_start + frames_ahead, total_frames)
+        else:  # Backward navigation  
+            cache_end = current_frame - 1
+            cache_start = max(cache_end - frames_ahead, 0)
+        
+        if cache_start >= cache_end:
+            return
+            
+        # Find which frames are NOT already cached (smart cache-aware approach)
+        uncached_frames = []
+        with self.app.processor.frame_cache_lock:
+            for frame_idx in range(cache_start, cache_end):
+                if frame_idx not in self.app.processor.frame_cache:
+                    uncached_frames.append(frame_idx)
+        
+        if not uncached_frames:
+            return  # All frames already cached!
+            
+        # Batch load only the uncached frames (efficient!)
+        try:
+            # Use smaller batches to avoid blocking UI
+            batch_size = min(30, len(uncached_frames))
+            frames_to_cache = uncached_frames[:batch_size]
+            
+            if len(frames_to_cache) > 0:
+                # Get contiguous ranges for efficient batch loading
+                first_frame = frames_to_cache[0]
+                last_frame = frames_to_cache[-1]
+                
+                # Only if frames are reasonably contiguous
+                if last_frame - first_frame < batch_size * 2:
+                    batch_frames = self.app.processor.get_frames_batch(first_frame, last_frame - first_frame + 1)
+                    
+                    # Add to cache (thread-safe)
+                    with self.app.processor.frame_cache_lock:
+                        for frame_idx, frame_data in batch_frames.items():
+                            if frame_idx not in self.app.processor.frame_cache:
+                                # Make room if needed
+                                if len(self.app.processor.frame_cache) >= self.app.processor.frame_cache_max_size:
+                                    try:
+                                        self.app.processor.frame_cache.popitem(last=False)
+                                    except KeyError:
+                                        pass
+                                self.app.processor.frame_cache[frame_idx] = frame_data
+                    
+                    self.app.logger.debug(f"Predictive cache: loaded {len(batch_frames)} frames ahead of navigation")
+                        
+        except Exception as e:
+            # Don't let predictive caching errors affect navigation
+            self.app.logger.debug(f"Predictive cache warning: {e}")
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()
