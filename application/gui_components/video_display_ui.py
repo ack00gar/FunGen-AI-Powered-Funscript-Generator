@@ -568,7 +568,7 @@ class VideoDisplayUI:
                                 self._render_stage2_overlay(stage_proc, app_state)
 
                             # Mixed mode debug overlay (shows when in mixed mode and debug data is available)
-                            if (app_state.selected_tracker_mode == constants.TrackerMode.OFFLINE_3_STAGE_MIXED and 
+                            if (app_state.selected_tracker_name and "mixed" in app_state.selected_tracker_name.lower() and 
                                 ((hasattr(self.app, 'stage3_mixed_debug_frame_map') and self.app.stage3_mixed_debug_frame_map) or 
                                  (hasattr(self.app, 'mixed_stage_processor') and self.app.mixed_stage_processor))):
                                 draw_list = imgui.get_window_draw_list()
