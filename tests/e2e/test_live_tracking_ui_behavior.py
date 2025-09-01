@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from application.logic.app_logic import ApplicationLogic
-from config.constants import TrackerMode
+from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
 
 
 @pytest.mark.e2e
@@ -56,7 +56,7 @@ class TestLiveTrackingUIWorkflow:
                 self._assert_initial_ui_state(app)
                 
                 # 2. Set live tracking mode
-                app.app_state_ui.selected_tracker_mode = TrackerMode.LIVE_YOLO_ROI
+                app.app_state_ui.selected_tracker_name = 'yolo_roi'
                 
                 # 3. Simulate starting live tracking
                 self._simulate_start_live_tracking(app)
@@ -220,7 +220,7 @@ class TestLiveTrackingUIWorkflow:
                  patch.object(app.processor, 'is_video_open', return_value=True):
                 
                 # Test switching between live tracking modes
-                live_modes = [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR]
+                live_modes = ['yolo_roi', 'user_roi', 'oscillation_experimental_2']
                 
                 for mode in live_modes:
                     app.app_state_ui.selected_tracker_mode = mode
@@ -386,11 +386,11 @@ class TestUIStateManagementEdgeCases:
                  patch.object(app.processor, 'is_video_open', return_value=True):
                 
                 modes = [
-                    TrackerMode.LIVE_YOLO_ROI,
-                    TrackerMode.LIVE_USER_ROI,
-                    TrackerMode.OSCILLATION_DETECTOR,
-                    TrackerMode.OFFLINE_2_STAGE,
-                    TrackerMode.OFFLINE_3_STAGE
+                    'yolo_roi',
+                    'user_roi',
+                    'oscillation_experimental_2',
+                    'stage2_contact_analysis',
+                    'stage3_optical_flow'
                 ]
                 
                 # Rapidly switch between modes

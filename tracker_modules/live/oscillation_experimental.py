@@ -379,7 +379,7 @@ class OscillationExperimentalTracker(BaseTracker):
         self._gray_full_buffer = None
         self._prev_gray_osc_buffer = None
         
-        self.logger.info("Experimental oscillation detector cleaned up")
+        # self.logger.info("Experimental oscillation detector cleaned up")
     
     # Private helper methods
     

@@ -48,7 +48,7 @@ class ROITracker:
                 self.logger.addHandler(logging.NullHandler())
             self.logger.warning("No external logger provided to ROITracker, using fallback NullHandler.", extra={'status_message': False})
 
-        self.tracking_mode: str = "YOLO_ROI"
+        self.tracking_mode: str = "yolo_roi"
         self.user_roi_fixed: Optional[Tuple[int, int, int, int]] = None
         self.user_roi_initial_point_relative: Optional[Tuple[float, float]] = None
         self.user_roi_tracked_point_relative: Optional[Tuple[float, float]] = None
@@ -491,19 +491,39 @@ class ROITracker:
         return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
 
     def set_tracking_mode(self, mode: str):
-        if mode in ["YOLO_ROI", "USER_FIXED_ROI", "OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY", "OSCILLATION_DETECTOR_EXPERIMENTAL_2"]:
-            if self.tracking_mode != mode:
+        # Use dynamic discovery to validate tracker modes
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        all_trackers = discovery.get_all_trackers()
+        
+        # Legacy mode name mapping for backward compatibility
+        legacy_mode_map = {
+            "YOLO_ROI": "yolo_roi",
+            "USER_FIXED_ROI": "user_roi", 
+            "OSCILLATION_DETECTOR": "oscillation_experimental",
+            "OSCILLATION_DETECTOR_LEGACY": "oscillation_legacy",
+            "OSCILLATION_DETECTOR_EXPERIMENTAL_2": "oscillation_experimental_2",
+        }
+        
+        # Try legacy mapping first, then use the mode as-is
+        normalized_mode = legacy_mode_map.get(mode, mode)
+        
+        # Check if normalized mode is valid
+        if normalized_mode in all_trackers:
+            if self.tracking_mode != normalized_mode:
                 previous_mode = self.tracking_mode
                 # Before switching, update caches from current state
                 self._update_roi_caches_from_current()
-                self.tracking_mode = mode
+                self.tracking_mode = normalized_mode
                 self.logger.info(f"Tracker mode changed: {previous_mode} -> {self.tracking_mode}")
                 # Clear ALL drawn overlays when switching modes (ROI rectangles, oscillation area, YOLO ROI box)
                 self.clear_all_drawn_overlays()
                 # After clearing, restore ROI from cache for the target mode (if any)
                 self._restore_roi_for_current_mode()
         else:
-            self.logger.warning(f"Attempted to set invalid tracking mode: {mode}")
+            available_modes = list(all_trackers.keys())[:5]  # Show first 5 for brevity
+            self.logger.warning(f"Attempted to set invalid tracking mode: {mode} (normalized: {normalized_mode}). Available modes: {available_modes}...")
+
 
     def clear_all_drawn_overlays(self) -> None:
         """Clears any visuals drawn on the video (ROI rectangles, oscillation area, YOLO ROI box).
@@ -742,7 +762,7 @@ class ROITracker:
 
     def _restore_roi_for_current_mode(self) -> None:
         """Restore cached ROI state for the active mode after switching."""
-        if self.tracking_mode == "USER_FIXED_ROI":
+        if self.tracking_mode == "user_roi":
             cached_roi = self._cache_user_roi.get('roi')
             if cached_roi:
                 self.user_roi_fixed = cached_roi
@@ -752,7 +772,7 @@ class ROITracker:
                 self.prev_gray_user_roi_patch = None
                 self.primary_flow_history_smooth.clear()
                 self.secondary_flow_history_smooth.clear()
-        elif self.tracking_mode in ["OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY", "OSCILLATION_DETECTOR_EXPERIMENTAL_2"]:
+        elif self.tracking_mode in ["oscillation_experimental", "oscillation_legacy", "oscillation_experimental_2"]:
             cached_area = self._cache_oscillation.get('area')
             if cached_area:
                 self.oscillation_area_fixed = cached_area
@@ -1132,11 +1152,11 @@ class ROITracker:
         return primary_pos, secondary_pos, dy_smooth, dx_smooth, updated_sparse_features_out
 
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None, min_write_frame_id: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
-        if self.tracking_mode == "OSCILLATION_DETECTOR":
+        if self.tracking_mode == "oscillation_experimental":
             return self.process_frame_for_oscillation(frame, frame_time_ms, frame_index)
-        elif self.tracking_mode == "OSCILLATION_DETECTOR_LEGACY":
+        elif self.tracking_mode == "oscillation_legacy":
             return self.process_frame_for_oscillation_legacy(frame, frame_time_ms, frame_index)
-        elif self.tracking_mode == "OSCILLATION_DETECTOR_EXPERIMENTAL_2":
+        elif self.tracking_mode == "oscillation_experimental_2":
             return self.process_frame_for_oscillation_experimental_2(frame, frame_time_ms, frame_index)
 
         self._update_fps()
@@ -1148,7 +1168,7 @@ class ROITracker:
 
         self.current_effective_amp_factor = self._get_effective_amplification_factor()
 
-        if self.tracking_mode == "YOLO_ROI":
+        if self.tracking_mode == "yolo_roi":
             run_detection_this_frame = (
                     (self.internal_frame_counter % self.roi_update_interval == 0)
                     or (self.roi is None)
@@ -1473,7 +1493,7 @@ class ROITracker:
 
         # Check and report video source status when tracking starts
         self._check_and_report_video_source_status()
-        if self.tracking_mode in ["OSCILLATION_DETECTOR", "OSCILLATION_DETECTOR_LEGACY", "OSCILLATION_DETECTOR_EXPERIMENTAL_2"]:
+        if self.tracking_mode in ["oscillation_experimental", "oscillation_legacy", "oscillation_experimental_2"]:
             # Update grid size and sensitivity from settings before starting
             self.update_oscillation_grid_size()
             self.update_oscillation_sensitivity()
@@ -1511,7 +1531,7 @@ class ROITracker:
             self.logger.info(
                 f"Falling back to default motion history window: {self.motion_mode_history_window} frames.")
 
-        if self.tracking_mode == "YOLO_ROI":  # Also applies to S3 like processing
+        if self.tracking_mode == "yolo_roi":  # Also applies to S3 like processing
             self.frames_since_target_lost = 0
             self.penis_max_size_history.clear()
             self.prev_gray_main_roi, self.prev_features_main_roi = None, None
@@ -1529,7 +1549,7 @@ class ROITracker:
 
     def stop_tracking(self):
         self.tracking_active = False
-        if self.tracking_mode == "YOLO_ROI":  # Also for S3-like
+        if self.tracking_mode == "yolo_roi":  # Also for S3-like
             self.prev_gray_main_roi, self.prev_features_main_roi = None, None
 
         # Reset motion mode to undetermined when stopping.
@@ -1561,7 +1581,7 @@ class ROITracker:
         if not preserve_user_roi:
             # Full reset clears any user-defined ROI/point and returns to default mode
             self.clear_user_defined_roi_and_point(silent=True)  # Silent to avoid duplicate messages from clear_all_drawn_overlays
-            self.set_tracking_mode("YOLO_ROI")  # Default mode on full reset
+            self.set_tracking_mode("yolo_roi")  # Default mode on full reset
 
         # Clear all relevant state variables to ensure a clean slate
         self.internal_frame_counter = 0

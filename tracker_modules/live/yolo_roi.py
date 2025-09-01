@@ -367,7 +367,7 @@ class YoloRoiTracker(BaseTracker):
         self.secondary_flow_history_smooth.clear()
         self.penis_max_size_history.clear()
         self.motion_mode_history.clear()
-        self.logger.info("YOLO ROI tracker cleaned up")
+        # self.logger.info("YOLO ROI tracker cleaned up")
     
     # Private helper methods
     
