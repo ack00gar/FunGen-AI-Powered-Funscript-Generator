@@ -159,7 +159,7 @@ class TrackerSecurityValidator:
                         if isinstance(node.args[1], ast.Constant):
                             mode = node.args[1].value
                             if any(dangerous in str(mode) for dangerous in ['w', 'a', 'x']) and 'r' not in str(mode):
-                                self.logger.warning(
+                                self.logger.debug(
                                     f"Write file operation mode '{mode}' detected in {file_path}. "
                                     f"Monitor for potential security risk."
                                 )

@@ -354,7 +354,7 @@ class CommunityExampleTracker(BaseTracker):
             self.action_buffer = []
             self.roi_rect = None
             
-            self.logger.info("Community example tracker cleaned up")
+            # self.logger.info("Community example tracker cleaned up")
             
         except Exception as e:
             self.logger.error(f"Cleanup error: {e}")

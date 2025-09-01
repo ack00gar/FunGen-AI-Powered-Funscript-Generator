@@ -97,7 +97,21 @@ def main():
     # Step 4: Parse command-line arguments
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation")
     parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file or a folder of videos. If omitted, GUI will start.')
-    parser.add_argument('--mode', choices=['2-stage', '3-stage', '3-stage-mixed', 'oscillation-detector'], default='3-stage', help='The processing mode to use for analysis.')
+    
+    # Dynamic mode selection - get available modes from discovery system
+    try:
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        available_modes = discovery.get_supported_cli_modes()
+        batch_modes = [info.cli_aliases[0] for info in discovery.get_batch_compatible_trackers() if info.cli_aliases]
+        default_mode = batch_modes[0] if batch_modes else '3-stage'
+        
+        parser.add_argument('--mode', choices=available_modes, default=default_mode, 
+                          help='The processing mode to use for analysis. Available modes are dynamically discovered.')
+    except Exception as e:
+        # Fallback if discovery system fails
+        parser.add_argument('--mode', default='3-stage', help='Processing mode (discovery system unavailable)')
+    
     parser.add_argument('--od-mode', choices=['current', 'legacy'], default='current', help='Oscillation detector mode to use in Stage 3 (current=experimental, legacy=f5ae40f).')
     parser.add_argument('--overwrite', action='store_true', help='Force processing and overwrite existing funscripts. Default is to skip videos with existing funscripts.')
     parser.add_argument('--no-autotune', action='store_false', dest='autotune', help='Disable applying the default Ultimate Autotune settings after generation.')
