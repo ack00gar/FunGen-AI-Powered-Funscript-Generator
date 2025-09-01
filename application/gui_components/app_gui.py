@@ -112,17 +112,12 @@ class GUI:
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
         
-        # Arrow key navigation state for continuous scrolling
+        # Simple arrow key navigation state
         self.arrow_key_state = {
-            'left_pressed': False,
-            'right_pressed': False, 
             'last_seek_time': 0.0,
-            'seek_interval': 0.033,  # Default fallback, will be updated based on video FPS
+            'seek_interval': 0.033,  # Will be updated based on video FPS
             'initial_press_time': 0.0,  # When key was first pressed
             'continuous_delay': 0.5,  # Delay before continuous scrolling starts (500ms)
-            'navigation_direction': 0,  # -1 for backward, 1 for forward, 0 for none
-            'last_predictive_cache_time': 0.0,
-            'predictive_cache_cooldown': 1.0  # Wait 1 second between predictive cache operations
         }
 
         self.batch_videos_data: List[Dict] = []
@@ -984,18 +979,9 @@ class GUI:
             if should_navigate:
                 self._perform_frame_seek(seek_direction)
                 self.arrow_key_state['last_seek_time'] = current_time
-                self.arrow_key_state['navigation_direction'] = seek_direction
-                
-                # Trigger predictive caching only during continuous navigation
-                time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
-                if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
-                    self._maybe_warm_cache_predictively(seek_direction, current_time)
-        else:
-            # Reset navigation state when no keys pressed
-            self.arrow_key_state['navigation_direction'] = 0
 
     def _perform_frame_seek(self, delta_frames):
-        """Optimized frame seeking with immediate visual feedback"""
+        """SIMPLE frame seeking - cache first, then direct VideoProcessor method"""
         if not self.app.processor or not self.app.processor.video_info:
             return
             
@@ -1006,9 +992,7 @@ class GUI:
         if new_frame == self.app.processor.current_frame_index:
             return  # No change needed
             
-        # STRATEGY: Always prioritize immediate visual feedback
-        
-        # First: Check cache for instant response
+        # SIMPLE STRATEGY: Check cache first, otherwise use VideoProcessor's optimized method
         frame_from_cache = None
         with self.app.processor.frame_cache_lock:
             if new_frame in self.app.processor.frame_cache:
@@ -1016,102 +1000,21 @@ class GUI:
                 self.app.processor.frame_cache.move_to_end(new_frame)
         
         if frame_from_cache is not None:
-            # CACHE HIT: Immediate update
+            # Cache hit: instant update
             self.app.processor.current_frame_index = new_frame
             self.app.processor.current_frame = frame_from_cache
         else:
-            # CACHE MISS: Use optimized single frame fetch (faster than full seek)
-            try:
-                # Use _get_specific_frame which is optimized for single frame access
-                frame_data = self.app.processor._get_specific_frame(new_frame)
-                if frame_data is not None:
-                    self.app.processor.current_frame = frame_data
-                    # _get_specific_frame already updates current_frame_index and cache
-                else:
-                    # Fallback: just update index, keep previous frame displayed
-                    self.app.processor.current_frame_index = new_frame
-            except Exception as e:
-                # Error loading frame: update index but keep previous frame
-                self.app.logger.warning(f"Frame seek error: {e}")
-                self.app.processor.current_frame_index = new_frame
+            # Cache miss: let VideoProcessor handle it optimally
+            self.app.processor.seek_video(new_frame)
         
-        # Always update UI immediately
+        # Update UI
         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
         if self.app.project_manager: 
             self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
 
-    def _maybe_warm_cache_predictively(self, seek_direction, current_time):
-        """Smart predictive caching that only reads uncached frames ahead of navigation"""
-        if not self.app.processor or not self.app.processor.video_info:
-            return
-            
-        # Rate limit predictive caching
-        if current_time - self.arrow_key_state['last_predictive_cache_time'] < self.arrow_key_state['predictive_cache_cooldown']:
-            return
-            
-        self.arrow_key_state['last_predictive_cache_time'] = current_time
-        
-        current_frame = self.app.processor.current_frame_index
-        total_frames = self.app.processor.total_frames
-        
-        # Cache ahead based on navigation direction and speed
-        # More frames for faster navigation (higher FPS videos)
-        video_fps = max(15, min(60, self.app.processor.fps))
-        frames_ahead = int(video_fps * 2)  # Cache 2 seconds ahead
-        
-        if seek_direction > 0:  # Forward navigation
-            cache_start = current_frame + 1
-            cache_end = min(cache_start + frames_ahead, total_frames)
-        else:  # Backward navigation  
-            cache_end = current_frame - 1
-            cache_start = max(cache_end - frames_ahead, 0)
-        
-        if cache_start >= cache_end:
-            return
-            
-        # Find which frames are NOT already cached (smart cache-aware approach)
-        uncached_frames = []
-        with self.app.processor.frame_cache_lock:
-            for frame_idx in range(cache_start, cache_end):
-                if frame_idx not in self.app.processor.frame_cache:
-                    uncached_frames.append(frame_idx)
-        
-        if not uncached_frames:
-            return  # All frames already cached!
-            
-        # Batch load only the uncached frames (efficient!)
-        try:
-            # Use smaller batches to avoid blocking UI
-            batch_size = min(30, len(uncached_frames))
-            frames_to_cache = uncached_frames[:batch_size]
-            
-            if len(frames_to_cache) > 0:
-                # Get contiguous ranges for efficient batch loading
-                first_frame = frames_to_cache[0]
-                last_frame = frames_to_cache[-1]
-                
-                # Only if frames are reasonably contiguous
-                if last_frame - first_frame < batch_size * 2:
-                    batch_frames = self.app.processor.get_frames_batch(first_frame, last_frame - first_frame + 1)
-                    
-                    # Add to cache (thread-safe)
-                    with self.app.processor.frame_cache_lock:
-                        for frame_idx, frame_data in batch_frames.items():
-                            if frame_idx not in self.app.processor.frame_cache:
-                                # Make room if needed
-                                if len(self.app.processor.frame_cache) >= self.app.processor.frame_cache_max_size:
-                                    try:
-                                        self.app.processor.frame_cache.popitem(last=False)
-                                    except KeyError:
-                                        pass
-                                self.app.processor.frame_cache[frame_idx] = frame_data
-                    
-                    self.app.logger.debug(f"Predictive cache: loaded {len(batch_frames)} frames ahead of navigation")
-                        
-        except Exception as e:
-            # Don't let predictive caching errors affect navigation
-            self.app.logger.debug(f"Predictive cache warning: {e}")
+    # Removed complex predictive caching - it was blocking the UI
+    # Keep navigation simple: cache check first, then single frame fetch if needed
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()
