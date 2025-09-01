@@ -109,7 +109,7 @@ class VideoProcessor:
         self.frame_cache = OrderedDict()
         self.frame_cache_max_size = cache_size
         self.frame_cache_lock = threading.Lock()
-        self.batch_fetch_size = 120
+        self.batch_fetch_size = 600
 
     def _clear_cache(self):
         with self.frame_cache_lock:
