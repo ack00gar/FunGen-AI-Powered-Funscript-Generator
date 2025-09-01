@@ -352,7 +352,7 @@ class UserRoiTracker(BaseTracker):
         self.flow_dense = None
         self.primary_flow_history_smooth.clear()
         self.secondary_flow_history_smooth.clear()
-        self.logger.info("User ROI tracker cleaned up")
+        # self.logger.info("User ROI tracker cleaned up")
     
     # Private helper methods
     
