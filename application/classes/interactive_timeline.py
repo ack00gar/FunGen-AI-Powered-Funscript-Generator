@@ -1339,6 +1339,7 @@ class InteractiveFunscriptTimeline:
         # Map filter types to plugin names
         plugin_mapping = {
             "ultimate": "Ultimate Autotune",
+            "autotune": "Ultimate Autotune",  # Fixed: autotune filter maps to same plugin
             # Add other plugins as they're converted
         }
 
