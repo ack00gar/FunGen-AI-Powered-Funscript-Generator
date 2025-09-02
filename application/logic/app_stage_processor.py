@@ -624,7 +624,9 @@ class AppStageProcessor:
 
         # Always use the tracker mode from the UI state, which is the single source of truth.
         selected_mode = self.processing_mode_for_thread
-        self.logger.info(f"[Thread] Using processing mode: {selected_mode.name}")
+        # Handle both string (new dynamic system) and enum (legacy) modes
+        mode_name = selected_mode if isinstance(selected_mode, str) else selected_mode.name
+        self.logger.info(f"[Thread] Using processing mode: {mode_name}")
 
         try:
             # --- Stage 1 ---
