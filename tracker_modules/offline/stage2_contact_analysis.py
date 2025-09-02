@@ -19,9 +19,11 @@ from typing import Dict, Any, Optional, List, Tuple, Callable
 from multiprocessing import Event
 
 try:
-    from ..core.base_offline_tracker import BaseOfflineTracker, TrackerMetadata, OfflineProcessingResult, OfflineProcessingStage
+    from ..core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
+    from ..core.base_tracker import TrackerMetadata, StageDefinition
 except ImportError:
-    from tracker_modules.core.base_offline_tracker import BaseOfflineTracker, TrackerMetadata, OfflineProcessingResult, OfflineProcessingStage
+    from tracker_modules.core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
+    from tracker_modules.core.base_tracker import TrackerMetadata, StageDefinition
 
 # Import Stage 2 processing module
 try:
@@ -85,7 +87,7 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
         return TrackerMetadata(
-            name="stage2_contact_analysis",
+            name="OFFLINE_2_STAGE",
             display_name="Offline Contact Analysis (2-Stage)",
             description="Offline contact detection and analysis using YOLO detection results",
             category="offline",
@@ -93,7 +95,32 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
             author="Stage 2 CD System",
             tags=["offline", "contact-analysis", "pose-estimation", "stage2", "batch"],
             requires_roi=False,
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            stages=[
+                StageDefinition(
+                    stage_number=1,
+                    name="Detection",
+                    description="Object detection and tracking",
+                    produces_funscript=False,
+                    requires_previous=False,
+                    output_type="analysis"
+                ),
+                StageDefinition(
+                    stage_number=2,
+                    name="Contact Analysis & Funscript",
+                    description="Contact analysis and funscript generation",
+                    produces_funscript=True,
+                    requires_previous=True,
+                    output_type="funscript"
+                )
+            ],
+            properties={
+                "produces_funscript_in_stage2": True,
+                "supports_batch": True,
+                "requires_stage1_data": True,
+                "is_stage2_tracker": True,  # Backward compatibility
+                "num_stages": 2
+            }
         )
     
     @property
