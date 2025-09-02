@@ -9,8 +9,8 @@ No legacy fallback - pure modular approach.
 """
 
 import logging
-from typing import Dict, List, Optional, Set, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Set, Tuple, Any
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from tracker_modules import tracker_registry, TrackerMetadata
@@ -35,6 +35,8 @@ class TrackerDisplayInfo:
     requires_intervention: bool = False  # User ROI, oscillation area setup
     supports_batch: bool = True
     supports_realtime: bool = False
+    stages: List = field(default_factory=list)  # List of StageDefinition objects
+    properties: Dict[str, Any] = field(default_factory=dict)  # Tracker properties/capabilities
 
 
 class DynamicTrackerDiscovery:
@@ -103,6 +105,10 @@ class DynamicTrackerDiscovery:
         supports_batch = category in [TrackerCategory.LIVE, TrackerCategory.OFFLINE]  # No intervention trackers
         supports_realtime = category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION]
         
+        # Get stages and properties from metadata if available
+        stages = getattr(metadata, 'stages', [])
+        properties = getattr(metadata, 'properties', {})
+        
         return TrackerDisplayInfo(
             display_name=metadata.display_name,
             internal_name=metadata.name,
@@ -111,7 +117,9 @@ class DynamicTrackerDiscovery:
             cli_aliases=cli_aliases,
             requires_intervention=requires_intervention,
             supports_batch=supports_batch,
-            supports_realtime=supports_realtime
+            supports_realtime=supports_realtime,
+            stages=stages,
+            properties=properties
         )
     
     def _determine_category(self, metadata: TrackerMetadata) -> TrackerCategory:

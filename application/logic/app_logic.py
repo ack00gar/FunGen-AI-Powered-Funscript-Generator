@@ -851,7 +851,8 @@ class ApplicationLogic:
             self._cancel_batch_processing_from_confirmation()
             return
 
-        self.batch_processing_method_idx = gui.selected_batch_method_idx_ui
+        # Use the dynamically selected tracker name
+        self.batch_tracker_name = gui.selected_batch_tracker_name
         self.batch_apply_ultimate_autotune = gui.batch_apply_ultimate_autotune_ui
         self.batch_copy_funscript_to_video_location = gui.batch_copy_funscript_to_video_location_ui
         self.batch_overwrite_mode = gui.batch_overwrite_mode_ui
@@ -958,16 +959,19 @@ class ApplicationLogic:
                 time.sleep(1.0)
                 if self.stop_batch_event.is_set(): break
 
-                # Get batch-compatible trackers dynamically
+                # Use the dynamically selected tracker name
                 discovery = get_tracker_discovery()
-                batch_compatible_trackers = discovery.get_batch_compatible_trackers()
                 
-                if self.batch_processing_method_idx < 0 or self.batch_processing_method_idx >= len(batch_compatible_trackers):
-                    self.logger.error(f"Invalid batch processing method index: {self.batch_processing_method_idx}. Available trackers: {len(batch_compatible_trackers)}. Skipping video.")
+                # Get the selected tracker using the name stored from GUI
+                if hasattr(self, 'batch_tracker_name') and self.batch_tracker_name:
+                    selected_tracker = discovery.get_tracker_info(self.batch_tracker_name)
+                    if not selected_tracker:
+                        self.logger.error(f"Invalid tracker name: {self.batch_tracker_name}. Skipping video.")
+                        continue
+                    selected_mode = selected_tracker.internal_name
+                else:
+                    self.logger.error("No tracker selected for batch processing. Skipping video.")
                     continue
-                
-                selected_tracker = batch_compatible_trackers[self.batch_processing_method_idx]
-                selected_mode = selected_tracker.internal_name
 
                 # Check tracker category to determine processing mode
                 from config.tracker_discovery import TrackerCategory
@@ -1850,15 +1854,8 @@ class ApplicationLogic:
                 self.logger.error(f"Batch-compatible modes: {[info.cli_aliases[0] for info in discovery.get_batch_compatible_trackers() if info.cli_aliases]}")
                 return
             
-            # Map tracker to batch processing method index dynamically
-            batch_tracker_map = {}
-            batch_trackers = discovery.get_batch_compatible_trackers()
-            for idx, batch_tracker in enumerate(batch_trackers):
-                for alias in batch_tracker.cli_aliases:
-                    batch_tracker_map[alias] = idx
-                batch_tracker_map[batch_tracker.internal_name] = idx
-            
-            self.batch_processing_method_idx = batch_tracker_map.get(args.mode, 0)
+            # Store the tracker name directly for batch processing
+            self.batch_tracker_name = tracker_info.internal_name
             self.logger.info(f"Processing Mode: {args.mode} -> {tracker_info.display_name}")
             
             # Set oscillation detector mode for Stage 3 if provided

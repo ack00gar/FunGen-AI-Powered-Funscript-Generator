@@ -7,8 +7,20 @@ allowing community developers to easily create new tracking algorithms.
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List, Tuple
+from dataclasses import dataclass
 import numpy as np
 import logging
+
+
+@dataclass
+class StageDefinition:
+    """Definition of a processing stage in a tracker."""
+    stage_number: int
+    name: str
+    description: str
+    produces_funscript: bool = False
+    requires_previous: bool = False
+    output_type: str = "analysis"  # "analysis", "funscript", "segmentation", "mixed"
 
 
 class TrackerMetadata:
@@ -23,7 +35,9 @@ class TrackerMetadata:
                  author: str,
                  tags: Optional[List[str]] = None,
                  requires_roi: bool = False,
-                 supports_dual_axis: bool = True):
+                 supports_dual_axis: bool = True,
+                 stages: Optional[List[StageDefinition]] = None,
+                 properties: Optional[Dict[str, Any]] = None):
         """
         Initialize tracker metadata.
         
@@ -37,6 +51,8 @@ class TrackerMetadata:
             tags: Optional list of tags for filtering/search
             requires_roi: Whether tracker needs ROI selection
             supports_dual_axis: Whether tracker supports dual-axis output
+            stages: List of processing stages this tracker uses
+            properties: Dictionary of tracker-specific properties/capabilities
         """
         self.name = name
         self.display_name = display_name
@@ -47,6 +63,41 @@ class TrackerMetadata:
         self.tags = tags or []
         self.requires_roi = requires_roi
         self.supports_dual_axis = supports_dual_axis
+        self.stages = stages or []
+        self.properties = properties or {}
+        
+        # Auto-generate properties from name for backward compatibility
+        if not self.properties and self.stages:
+            self._auto_generate_properties()
+    
+    def _auto_generate_properties(self):
+        """Auto-generate properties based on stages for backward compatibility."""
+        self.properties = {
+            "num_stages": len(self.stages),
+            "supports_batch": self.category in ["live", "offline"] and not self.requires_roi,
+            "supports_realtime": self.category == "live",
+            "requires_intervention": self.requires_roi
+        }
+        
+        # Check which stages produce funscripts
+        for stage in self.stages:
+            if stage.produces_funscript:
+                self.properties[f"produces_funscript_in_stage{stage.stage_number}"] = True
+                
+    def has_property(self, property_name: str) -> bool:
+        """Check if tracker has a specific property."""
+        return property_name in self.properties and self.properties[property_name]
+    
+    def get_property(self, property_name: str, default: Any = None) -> Any:
+        """Get a property value with optional default."""
+        return self.properties.get(property_name, default)
+    
+    def get_stage(self, stage_number: int) -> Optional[StageDefinition]:
+        """Get a specific stage definition by number."""
+        for stage in self.stages:
+            if stage.stage_number == stage_number:
+                return stage
+        return None
 
 
 class TrackerResult:

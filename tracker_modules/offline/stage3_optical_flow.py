@@ -19,9 +19,11 @@ from typing import Dict, Any, Optional, List, Tuple, Callable
 from multiprocessing import Event
 
 try:
-    from ..core.base_offline_tracker import BaseOfflineTracker, TrackerMetadata, OfflineProcessingResult, OfflineProcessingStage
+    from ..core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
+    from ..core.base_tracker import TrackerMetadata, StageDefinition
 except ImportError:
-    from tracker_modules.core.base_offline_tracker import BaseOfflineTracker, TrackerMetadata, OfflineProcessingResult, OfflineProcessingStage
+    from tracker_modules.core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
+    from tracker_modules.core.base_tracker import TrackerMetadata, StageDefinition
 
 # Import Stage 3 processing module and live tracker
 try:
@@ -91,7 +93,7 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
         return TrackerMetadata(
-            name="stage3_optical_flow", 
+            name="OFFLINE_3_STAGE", 
             display_name="Offline Optical Flow Analysis (3-Stage)",
             description="Offline optical flow tracking using live tracker algorithms on Stage 2 segments",
             category="offline",
@@ -99,7 +101,40 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
             author="Stage 3 OF System",
             tags=["offline", "optical-flow", "stage3", "batch", "live-tracker-integration"],
             requires_roi=False,
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            stages=[
+                StageDefinition(
+                    stage_number=1,
+                    name="Detection",
+                    description="Object detection and tracking",
+                    produces_funscript=False,
+                    requires_previous=False,
+                    output_type="analysis"
+                ),
+                StageDefinition(
+                    stage_number=2,
+                    name="Segmentation",
+                    description="Video segmentation and scene analysis",
+                    produces_funscript=False,
+                    requires_previous=True,
+                    output_type="segmentation"
+                ),
+                StageDefinition(
+                    stage_number=3,
+                    name="Optical Flow & Funscript",
+                    description="Optical flow analysis and funscript generation",
+                    produces_funscript=True,
+                    requires_previous=True,
+                    output_type="funscript"
+                )
+            ],
+            properties={
+                "produces_funscript_in_stage3": True,
+                "supports_batch": True,
+                "requires_stage2_data": True,
+                "is_stage3_tracker": True,  # Backward compatibility
+                "num_stages": 3
+            }
         )
     
     @property
