@@ -114,19 +114,49 @@ class DynamicTrackerUI:
         """Check if tracker is a 2-stage offline tracker."""
         if not tracker_name:
             return False
-        return "stage2" in tracker_name.lower() or "2_stage" in tracker_name.lower()
+        
+        info = self.discovery.get_tracker_info(tracker_name)
+        if info and info.properties:
+            # Use property if available
+            if "is_stage2_tracker" in info.properties:
+                return info.properties["is_stage2_tracker"]
+            # Check if it produces funscript in stage 2 and has exactly 2 stages
+            if info.properties.get("num_stages") == 2 and info.properties.get("produces_funscript_in_stage2"):
+                return True
+        
+        return False
     
     def is_stage3_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is a 3-stage offline tracker."""
         if not tracker_name:
             return False
-        return ("stage3" in tracker_name.lower() or "3_stage" in tracker_name.lower()) and not self.is_mixed_stage3_tracker(tracker_name)
+        
+        info = self.discovery.get_tracker_info(tracker_name)
+        if info and info.properties:
+            # Use property if available
+            if "is_stage3_tracker" in info.properties:
+                return info.properties["is_stage3_tracker"]
+            # Check if it has 3 stages but is not mixed
+            if info.properties.get("num_stages") == 3 and not info.properties.get("uses_hybrid_approach"):
+                return True
+        
+        return False
     
     def is_mixed_stage3_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is a mixed 3-stage offline tracker."""
         if not tracker_name:
             return False
-        return "mixed" in tracker_name.lower() and ("stage3" in tracker_name.lower() or "3_stage" in tracker_name.lower())
+        
+        info = self.discovery.get_tracker_info(tracker_name)
+        if info and info.properties:
+            # Use property if available
+            if "is_mixed_stage3_tracker" in info.properties:
+                return info.properties["is_mixed_stage3_tracker"]
+            # Check for hybrid approach property
+            if info.properties.get("uses_hybrid_approach"):
+                return True
+        
+        return False
     
     def get_trackers_in_category(self, category: TrackerCategory) -> List[TrackerDisplayInfo]:
         """Get all trackers in a specific category."""

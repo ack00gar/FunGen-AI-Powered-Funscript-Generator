@@ -1117,25 +1117,63 @@ class GUI:
 
             imgui.separator()
             imgui.text("Processing Method:")
-            if imgui.radio_button("3-Stage", self.selected_batch_method_idx_ui == 0):
-                self.selected_batch_method_idx_ui = 0
-            imgui.same_line()
-            if imgui.radio_button("2-Stage", self.selected_batch_method_idx_ui == 1):
-                self.selected_batch_method_idx_ui = 1
-            imgui.same_line()
-            if imgui.radio_button("Oscillation Detector", self.selected_batch_method_idx_ui == 2):
-                self.selected_batch_method_idx_ui = 2
+            
+            # Get available batch-compatible trackers dynamically
+            from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
+            from config.tracker_discovery import TrackerCategory
+            
+            tracker_ui = get_dynamic_tracker_ui()
+            discovery = tracker_ui.discovery
+            
+            # Get live (non-intervention) and offline trackers
+            batch_compatible_trackers = []
+            tracker_internal_names = []
+            
+            # Add offline trackers
+            offline_trackers = discovery.get_trackers_by_category(TrackerCategory.OFFLINE)
+            for tracker in offline_trackers:
+                if tracker.supports_batch:
+                    batch_compatible_trackers.append(tracker.display_name)
+                    tracker_internal_names.append(tracker.internal_name)
+            
+            # Add live trackers (non-intervention only)
+            live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
+            for tracker in live_trackers:
+                if tracker.supports_batch and not tracker.requires_intervention:
+                    batch_compatible_trackers.append(tracker.display_name)
+                    tracker_internal_names.append(tracker.internal_name)
+            
+            # Create dropdown
+            imgui.set_next_item_width(300)
+            changed, self.selected_batch_method_idx_ui = imgui.combo(
+                "##batch_tracker", 
+                self.selected_batch_method_idx_ui,
+                batch_compatible_trackers
+            )
+            
+            # Store the selected tracker's internal name for later use
+            if 0 <= self.selected_batch_method_idx_ui < len(tracker_internal_names):
+                self.selected_batch_tracker_name = tracker_internal_names[self.selected_batch_method_idx_ui]
+            else:
+                self.selected_batch_tracker_name = None
 
             imgui.text("Output Options:")
             _, self.batch_apply_ultimate_autotune_ui = imgui.checkbox("Apply Ultimate Autotune", self.batch_apply_ultimate_autotune_ui)
             imgui.same_line()
             _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video", self.batch_copy_funscript_to_video_location_ui)
             imgui.same_line()
-            is_3_stage = self.selected_batch_method_idx_ui == 0
-            if not is_3_stage:
+            
+            # Check if selected tracker supports roll file generation (3-stage trackers)
+            has_3_stages = False
+            if hasattr(self, 'selected_batch_tracker_name') and self.selected_batch_tracker_name:
+                tracker_info = discovery.get_tracker_info(self.selected_batch_tracker_name)
+                if tracker_info and tracker_info.properties:
+                    has_3_stages = tracker_info.properties.get("num_stages", 0) >= 3
+            
+            if not has_3_stages:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
-            _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if is_3_stage else False)
-            if not is_3_stage:
+            _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if has_3_stages else False)
+            if not has_3_stages:
                 imgui.pop_style_var(); imgui.internal.pop_item_flag()
 
             imgui.separator()
