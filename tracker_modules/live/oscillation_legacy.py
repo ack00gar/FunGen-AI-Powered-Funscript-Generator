@@ -11,6 +11,7 @@ Version: 1.0.0
 """
 
 import logging
+import time
 import numpy as np
 import cv2
 from collections import deque
@@ -65,6 +66,11 @@ class OscillationLegacyTracker(BaseTracker):
         
         # Frame preprocessing
         self.preprocess_frame_enabled = True
+        
+        # FPS tracking (missing from legacy implementation)
+        self.current_fps = 0.0
+        self._fps_update_counter = 0
+        self._fps_last_time = 0.0
     
     @property
     def metadata(self) -> TrackerMetadata:
@@ -147,6 +153,8 @@ class OscillationLegacyTracker(BaseTracker):
         - Percentile-based amplification
         """
         try:
+            self._update_fps()
+            
             processed_frame = self._preprocess_frame(frame) if self.preprocess_frame_enabled else frame.copy()
             current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
             action_log_list = []
@@ -227,7 +235,8 @@ class OscillationLegacyTracker(BaseTracker):
                 'total_blocks': len(block_motions),
                 'camera_motion': is_camera_motion,
                 'amplification_active': self.live_amp_enabled and len(self.oscillation_position_history) > 50,
-                'tracking_active': self.tracking_active
+                'tracking_active': self.tracking_active,
+                'fps': round(self.current_fps, 1)
             }
             
             status_msg = f"Legacy | Pos: {self.oscillation_funscript_pos} | Active blocks: {len(active_blocks)}"
@@ -552,3 +561,13 @@ class OscillationLegacyTracker(BaseTracker):
         if self.tracking_active:
             cv2.putText(frame, "LEGACY TRACKING", (10, frame.shape[0] - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    
+    def _update_fps(self):
+        """Update FPS tracking for control panel display."""
+        self._fps_update_counter += 1
+        if self._fps_update_counter >= 30:  # Update every 30 frames
+            current_time = time.time()
+            if self._fps_last_time > 0:
+                self.current_fps = 30.0 / (current_time - self._fps_last_time)
+            self._fps_last_time = current_time
+            self._fps_update_counter = 0
