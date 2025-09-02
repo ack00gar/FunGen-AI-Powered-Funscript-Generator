@@ -98,6 +98,24 @@ class ControlPanelUI:
         """Check if tracker is in a list of specific tracker names."""
         return tracker_name in target_list
 
+    def _is_stage2_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker is a 2-stage offline tracker."""
+        if self.tracker_ui:
+            return self.tracker_ui.is_stage2_tracker(tracker_name)
+        return False
+
+    def _is_stage3_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker is a 3-stage offline tracker."""
+        if self.tracker_ui:
+            return self.tracker_ui.is_stage3_tracker(tracker_name)
+        return False
+
+    def _is_mixed_stage3_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker is a mixed 3-stage offline tracker."""
+        if self.tracker_ui:
+            return self.tracker_ui.is_mixed_stage3_tracker(tracker_name)
+        return False
+
     def _get_tracker_lists_for_ui(self, simple_mode=False):
         """Get tracker lists for UI combo boxes using dynamic discovery."""
         try:
