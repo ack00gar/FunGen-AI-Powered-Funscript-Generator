@@ -19,8 +19,10 @@ from typing import Dict, Any, Optional, List, Tuple
 
 try:
     from ..core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+    from ..helpers.signal_amplifier import SignalAmplifier
 except ImportError:
     from tracker_modules.core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+    from tracker_modules.helpers.signal_amplifier import SignalAmplifier
 
 # Import constants with fallback
 try:
@@ -130,6 +132,14 @@ class OscillationExperimentalTracker(BaseTracker):
                 
                 self.logger.info(f"Experimental oscillation settings: grid_size={self.oscillation_grid_size}, "
                                f"ema_alpha={self.oscillation_ema_alpha}, sensitivity={self.oscillation_sensitivity}")
+            
+            # Initialize SignalAmplifier helper
+            self.signal_amplifier = SignalAmplifier(
+                history_size=120,  # 4 seconds @ 30fps
+                enable_live_amp=True,
+                smoothing_alpha=self.oscillation_ema_alpha,
+                logger=self.logger
+            )
             
             # Calculate block size based on grid
             if hasattr(app_instance, 'get_video_dimensions'):
@@ -317,6 +327,11 @@ class OscillationExperimentalTracker(BaseTracker):
         
         self.tracking_active = True
         self.oscillation_last_active_time = 0
+        
+        # Reset signal amplifier for new tracking session
+        if hasattr(self, 'signal_amplifier'):
+            self.signal_amplifier.reset()
+            
         self.logger.info("Experimental oscillation tracking started")
         return True
     
@@ -659,39 +674,24 @@ class OscillationExperimentalTracker(BaseTracker):
             # Update last active time for decay mechanism
             self.oscillation_last_active_time = frame_time_ms
             
-            if use_simple_amplification:
-                # Legacy-style simple amplification
-                max_deviation = 49 * self.oscillation_sensitivity
-                new_raw_primary_pos = 50 + np.clip(final_dy * -10, -max_deviation, max_deviation)
-                new_raw_secondary_pos = 50 + np.clip(final_dx * 10, -max_deviation, max_deviation)
-                
-                # Apply EMA smoothing
-                alpha = self.oscillation_ema_alpha
-                self.oscillation_last_known_pos = (self.oscillation_last_known_pos * (1 - alpha) + 
-                                                 new_raw_primary_pos * alpha)
-                self.oscillation_last_known_secondary_pos = (self.oscillation_last_known_secondary_pos * (1 - alpha) + 
-                                                           new_raw_secondary_pos * alpha)
-            else:
-                # Current dynamic scaling approach
-                base_sensitivity_scaler = 2.5
-                intensity_exponent = 0.7
-                
-                dynamic_scaler_y = (base_sensitivity_scaler * (abs(final_dy) ** intensity_exponent) 
-                                  if abs(final_dy) > 0.1 else base_sensitivity_scaler)
-                dynamic_scaler_x = (base_sensitivity_scaler * (abs(final_dx) ** intensity_exponent) 
-                                  if abs(final_dx) > 0.1 else base_sensitivity_scaler)
-                
-                primary_pos_change = -final_dy * dynamic_scaler_y
-                secondary_pos_change = final_dx * dynamic_scaler_x
-                
-                new_primary_pos = self.oscillation_last_known_pos + primary_pos_change
-                new_secondary_pos = self.oscillation_last_known_secondary_pos + secondary_pos_change
-                
-                alpha = self.oscillation_ema_alpha
-                self.oscillation_last_known_pos = ((self.oscillation_last_known_pos * (1 - alpha)) + 
-                                                 (new_primary_pos * alpha))
-                self.oscillation_last_known_secondary_pos = ((self.oscillation_last_known_secondary_pos * (1 - alpha)) + 
-                                                           (new_secondary_pos * alpha))
+            # Use SignalAmplifier for enhanced signal processing
+            raw_primary_pos = 50  # Start from center
+            raw_secondary_pos = 50
+            
+            # Apply enhanced signal mastering using helper module
+            enhanced_primary, enhanced_secondary = self.signal_amplifier.enhance_signal(
+                raw_primary_pos, raw_secondary_pos,
+                final_dy, final_dx,
+                sensitivity=self.oscillation_sensitivity * 10,  # Convert to standard 0-20 scale
+                apply_smoothing=False  # We'll apply our own EMA smoothing
+            )
+            
+            # Apply EMA smoothing as before
+            alpha = self.oscillation_ema_alpha
+            self.oscillation_last_known_pos = (self.oscillation_last_known_pos * (1 - alpha) + 
+                                             enhanced_primary * alpha)
+            self.oscillation_last_known_secondary_pos = (self.oscillation_last_known_secondary_pos * (1 - alpha) + 
+                                                       enhanced_secondary * alpha)
             
             # Clip to valid range
             self.oscillation_last_known_pos = np.clip(self.oscillation_last_known_pos, 0, 100)
