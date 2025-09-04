@@ -15,7 +15,7 @@ from tracker.tracker_manager import create_tracker_manager
 
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
-from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION
+from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION, MODEL_DOWNLOAD_URLS
 from config.tracker_discovery import get_tracker_discovery
 
 from .app_state_ui import AppStateUI
@@ -352,6 +352,10 @@ class ApplicationLogic:
     def _configure_third_party_logging(self):
         """Configure third-party library logging to reduce startup noise."""
         # Suppress/reduce noisy third-party library logging
+        # Suppress scikit-learn warnings from CoreML Tools before any imports
+        import warnings
+        warnings.filterwarnings("ignore", message="scikit-learn version .* is not supported")
+        
         third_party_loggers = {
             'coremltools': logging.ERROR,  # Only show critical errors from CoreML
             'ultralytics': logging.WARNING,  # Reduce ultralytics noise
