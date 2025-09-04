@@ -962,57 +962,6 @@ class YoloRoiTracker(BaseTracker):
 
         return primary_pos, secondary_pos, dy_smooth, dx_smooth, updated_sparse_features_out
     
-    def _apply_enhanced_amplification(self, raw_primary_pos: int, raw_secondary_pos: int, 
-                                    dy_smooth: float, dx_smooth: float) -> Tuple[int, int]:
-        """Apply enhanced signal amplification techniques from Oscillation Experimental 2."""
-        try:
-            # Calculate motion magnitude for amplitude-aware scaling
-            motion_magnitude = np.sqrt(dy_smooth**2 + dx_smooth**2)
-            
-            # Amplitude-aware scaling with natural response (from Experimental 2)
-            amplitude_scaler = np.clip(motion_magnitude / 4.0, 0.7, 1.5)
-            
-            # Enhanced scaling factors (from Experimental 2: -10 and 10 vs smaller factors)
-            sensitivity = self._get_current_sensitivity()
-            max_deviation = 49 * (sensitivity / 10.0) * amplitude_scaler
-            
-            # Apply enhanced scaling with larger base factors
-            enhanced_dy = np.clip(dy_smooth * -10, -max_deviation, max_deviation)  # -10 factor like Experimental 2
-            enhanced_dx = np.clip(dx_smooth * 10, -max_deviation, max_deviation)   # 10 factor like Experimental 2
-            
-            # Calculate enhanced positions 
-            enhanced_primary_raw = np.clip(50 + enhanced_dy, 0, 100)
-            enhanced_secondary_raw = np.clip(50 + enhanced_dx, 0, 100)
-            
-            # --- Live Dynamic Amplification (from Experimental 2) ---
-            self.position_history_amplification.append(enhanced_primary_raw)
-            final_primary_pos = enhanced_primary_raw
-            final_secondary_pos = enhanced_secondary_raw
-            
-            # Apply percentile normalization to prevent plateaus (anti-plateau system)
-            if (self.live_amp_enabled and 
-                len(self.position_history_amplification) > self.position_history_amplification.maxlen * 0.5):
-                
-                p10 = np.percentile(self.position_history_amplification, 10)
-                p90 = np.percentile(self.position_history_amplification, 90)
-                effective_range = p90 - p10
-                
-                # Auto-adapts to prevent plateau (15 threshold like Experimental 2)
-                if effective_range > 15:
-                    normalized_pos = (enhanced_primary_raw - p10) / effective_range
-                    final_primary_pos = np.clip(normalized_pos * 100, 0, 100)
-                    
-                    # Apply same normalization to secondary axis
-                    normalized_secondary = (enhanced_secondary_raw - 50) / max(1, effective_range) + 0.5
-                    final_secondary_pos = np.clip(normalized_secondary * 100, 0, 100)
-            
-            return int(final_primary_pos), int(final_secondary_pos)
-            
-        except Exception as e:
-            self.logger.error(f"Enhanced amplification error: {e}")
-            # Fallback to original values
-            return raw_primary_pos, raw_secondary_pos
-    
     def _apply_final_smoothing(self, primary_pos: int, secondary_pos: int) -> Tuple[int, int]:
         """Apply final layer of smoothing to reduce signal jerkiness."""
         # Exponential moving average for smooth transitions
