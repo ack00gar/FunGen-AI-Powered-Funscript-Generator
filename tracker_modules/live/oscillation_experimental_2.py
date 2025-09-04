@@ -24,9 +24,11 @@ from typing import Optional, Dict, List, Set, Tuple, Any
 
 try:
     from ..core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+    from ..helpers.signal_amplifier import SignalAmplifier
 except ImportError:
     # Fallback for direct execution
     from tracker_modules.core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+    from tracker_modules.helpers.signal_amplifier import SignalAmplifier
 import config.constants as constants
 
 
@@ -97,9 +99,14 @@ class OscillationExperimental2Tracker(BaseTracker):
             self.oscillation_funscript_pos = 50
             self.oscillation_funscript_secondary_pos = 50
             
-            # Live dynamic amplification (from legacy)
-            self.live_amp_enabled = self.app.app_settings.get("live_oscillation_dynamic_amp_enabled", True) if self.app else True
-            self.oscillation_position_history = deque(maxlen=120)  # 4 seconds @ 30fps
+            # Enhanced signal mastering using helper module
+            live_amp = self.app.app_settings.get("live_oscillation_dynamic_amp_enabled", True) if self.app else True
+            self.signal_amplifier = SignalAmplifier(
+                history_size=120,  # 4 seconds @ 30fps
+                enable_live_amp=live_amp,
+                smoothing_alpha=self.oscillation_ema_alpha,  # Use same EMA alpha
+                logger=self.logger
+            )
             
             # Optical flow
             self.flow_dense_osc = None
@@ -154,7 +161,7 @@ class OscillationExperimental2Tracker(BaseTracker):
             'last_position': self.oscillation_last_known_pos,
             'last_secondary_position': self.oscillation_last_known_secondary_pos,
             'active_cells': len(self.oscillation_cell_persistence),
-            'live_amp_enabled': self.live_amp_enabled,
+            'live_amp_enabled': self.signal_amplifier.live_amp_enabled if hasattr(self, 'signal_amplifier') else False,
             'fps': self.current_fps
         }
         
@@ -379,39 +386,24 @@ class OscillationExperimental2Tracker(BaseTracker):
 
         # --- Step 6: LEGACY SIGNAL CONDITIONING ---
         if active_blocks_list:
-            # Calculate magnitude for amplitude-aware scaling
-            final_mag = np.sqrt(final_dy ** 2 + final_dx ** 2)
+            # Use SignalAmplifier for enhanced signal processing
+            # Start with neutral position since we'll use flow to enhance
+            raw_primary_pos = 50
+            raw_secondary_pos = 50
             
-            # LEGACY: Amplitude-aware scaling with natural response
-            amplitude_scaler = np.clip(final_mag / 4.0, 0.7, 1.5)
-            max_deviation = 49 * self.oscillation_sensitivity * amplitude_scaler
-            scaled_dy = np.clip(final_dy * -10, -max_deviation, max_deviation)
-            scaled_dx = np.clip(final_dx * 10, -max_deviation, max_deviation)
-            new_raw_primary_pos = np.clip(50 + scaled_dy, 0, 100)
-            new_raw_secondary_pos = np.clip(50 + scaled_dx, 0, 100)
+            # Apply enhanced signal mastering using helper module
+            final_primary_pos, final_secondary_pos = self.signal_amplifier.enhance_signal(
+                raw_primary_pos, raw_secondary_pos, 
+                final_dy, final_dx,
+                sensitivity=self.oscillation_sensitivity * 10,  # Convert to standard 0-20 scale
+                apply_smoothing=False  # We'll apply our own EMA smoothing below
+            )
         else:
             # Decay towards center when no motion
-            new_raw_primary_pos = self.oscillation_last_known_pos * 0.95 + 50 * 0.05
-            new_raw_secondary_pos = self.oscillation_last_known_secondary_pos * 0.95 + 50 * 0.05
-
-        # --- Step 7: LEGACY LIVE DYNAMIC AMPLIFICATION ---
-        self.oscillation_position_history.append(new_raw_primary_pos)
-        final_primary_pos = new_raw_primary_pos
-        final_secondary_pos = new_raw_secondary_pos
-
-        # LEGACY: Live dynamic amplification with percentile normalization (anti-plateau)
-        if self.live_amp_enabled and len(self.oscillation_position_history) > self.oscillation_position_history.maxlen * 0.5:
-            p10 = np.percentile(self.oscillation_position_history, 10)
-            p90 = np.percentile(self.oscillation_position_history, 90)
-            effective_range = p90 - p10
-
-            if effective_range > 15:  # Auto-adapts to prevent plateau
-                normalized_pos = (new_raw_primary_pos - p10) / effective_range
-                final_primary_pos = np.clip(normalized_pos * 100, 0, 100)
-                
-                # Apply same normalization to secondary axis
-                normalized_secondary = (new_raw_secondary_pos - 50) / max(1, effective_range) + 0.5
-                final_secondary_pos = np.clip(normalized_secondary * 100, 0, 100)
+            decay_primary = self.oscillation_last_known_pos * 0.95 + 50 * 0.05
+            decay_secondary = self.oscillation_last_known_secondary_pos * 0.95 + 50 * 0.05
+            final_primary_pos = decay_primary
+            final_secondary_pos = decay_secondary
 
         # Apply EMA smoothing to the final calculated positions
         self.oscillation_last_known_pos = self.oscillation_last_known_pos * (1 - self.oscillation_ema_alpha) + final_primary_pos * self.oscillation_ema_alpha
@@ -473,8 +465,10 @@ class OscillationExperimental2Tracker(BaseTracker):
                 self.oscillation_history.clear()
             if hasattr(self, 'oscillation_cell_persistence') and self.oscillation_cell_persistence:
                 self.oscillation_cell_persistence.clear()
-            if hasattr(self, 'oscillation_position_history') and self.oscillation_position_history:
-                self.oscillation_position_history.clear()
+            
+            # Reset signal amplifier for new tracking session
+            if hasattr(self, 'signal_amplifier'):
+                self.signal_amplifier.reset()
                 
             # Reset positions
             if hasattr(self, 'oscillation_last_known_pos'):
@@ -570,6 +564,6 @@ class OscillationExperimental2Tracker(BaseTracker):
             "last_secondary": self.oscillation_funscript_secondary_pos,
             "active_cells": len(self.oscillation_cell_persistence),
             "history_size": sum(len(h) for h in self.oscillation_history.values()),
-            "live_amp_enabled": getattr(self, 'live_amp_enabled', False),
+            "live_amp_enabled": self.signal_amplifier.live_amp_enabled if hasattr(self, 'signal_amplifier') else False,
             "fps": self.current_fps
         }
