@@ -223,7 +223,7 @@ class PluginRegistry:
         #    self.logger.warning(f"Plugin '{plugin.name}' is already registered, replacing")
         
         self._plugins[plugin.name] = plugin
-        self.logger.info(f"Registered plugin '{plugin.name}' v{plugin.version}")
+        self.logger.debug(f"Registered plugin '{plugin.name}' v{plugin.version}")
         return True
     
     def unregister(self, plugin_name: str) -> bool:
