@@ -335,14 +335,28 @@ class MixedStageProcessor:
             roi_logger.setLevel(logging.ERROR)  # Only show errors
             
             try:
-                # Lazy import to avoid circular dependency
-                from tracker import ROITracker
-                self.roi_tracker = ROITracker(
-                    app_logic_instance=mock_app, 
-                    tracker_model_path=None,  # No model needed for mixed mode
-                    pose_model_path=None,     # No pose model needed
-                    load_models_on_init=False  # Explicitly disable model loading
-                )
+                # Use TrackerManager API instead of hardcoded ROITracker
+                from tracker.tracker_manager import TrackerManager
+                self.tracker_manager = TrackerManager(mock_app, self.tracker_model_path)
+                
+                # Find a suitable YOLO ROI tracker dynamically
+                from config.tracker_discovery import get_tracker_discovery
+                discovery = get_tracker_discovery()
+                yolo_roi_trackers = []
+                for tracker_name in discovery.get_all_trackers():
+                    info = discovery.get_tracker_info(tracker_name)
+                    if info and 'yolo' in info.display_name.lower() and 'roi' in info.display_name.lower():
+                        yolo_roi_trackers.append((tracker_name, info))
+                
+                if not yolo_roi_trackers:
+                    raise RuntimeError("No YOLO ROI tracker found in discovery system")
+                
+                # Use the first available YOLO ROI tracker
+                selected_tracker = yolo_roi_trackers[0][0]  # tracker_name
+                if not self.tracker_manager.set_tracking_mode(selected_tracker):
+                    raise RuntimeError(f"Failed to initialize tracker: {selected_tracker}")
+                
+                self.roi_tracker = self.tracker_manager._current_tracker
             finally:
                 # Restore original logging level
                 roi_logger.setLevel(original_level)
@@ -463,11 +477,9 @@ class MixedStageProcessor:
         return stage2_position, debug_info
     
     def _initialize_roi_tracker(self, tracker_config: Dict[str, Any] = None):
-        """Initialize ROI tracker for mixed mode processing."""
+        """Initialize ROI tracker for mixed mode processing using TrackerManager."""
         if self.roi_tracker is not None:
             return
-            
-        from tracker import ROITracker
         
         # Use default config if none provided
         if tracker_config is None:
@@ -485,24 +497,28 @@ class MixedStageProcessor:
         
         mock_app = MockApp()
         
-        # Suppress ROI tracker initialization logging
-        roi_logger = logging.getLogger('tracker')
-        original_level = roi_logger.level
-        roi_logger.setLevel(logging.ERROR)  # Only show errors
+        # Use TrackerManager API instead of hardcoded ROITracker
+        from tracker.tracker_manager import TrackerManager
+        self.tracker_manager = TrackerManager(mock_app, self.tracker_model_path)
         
-        try:
-            self.roi_tracker = ROITracker(
-                app_logic_instance=mock_app, 
-                tracker_model_path=self.tracker_model_path,
-                pose_model_path=self.pose_model_path,
-                roi_update_interval=tracker_config.get('roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
-                roi_padding=tracker_config.get('roi_padding', constants.DEFAULT_TRACKER_ROI_PADDING),
-                load_models_on_init=False  # No YOLO model needed for mixed mode
-            )
-            # Set to oscillation detector mode initially, we'll switch to YOLO_ROI when needed
-            self.roi_tracker.tracking_mode = "OSCILLATION_DETECTOR"
-        finally:
-            roi_logger.setLevel(original_level)
+        # Find a suitable YOLO ROI tracker dynamically
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        yolo_roi_trackers = []
+        for tracker_name in discovery.get_all_trackers():
+            info = discovery.get_tracker_info(tracker_name)
+            if info and 'yolo' in info.display_name.lower() and 'roi' in info.display_name.lower():
+                yolo_roi_trackers.append((tracker_name, info))
+        
+        if not yolo_roi_trackers:
+            raise RuntimeError("No YOLO ROI tracker found in discovery system")
+        
+        # Use the first available YOLO ROI tracker
+        selected_tracker = yolo_roi_trackers[0][0]  # tracker_name
+        if not self.tracker_manager.set_tracking_mode(selected_tracker):
+            raise RuntimeError(f"Failed to initialize tracker: {selected_tracker}")
+        
+        self.roi_tracker = self.tracker_manager._current_tracker
 
     def track_frame_with_stage2_data(self, frame_id: int, video_frame: np.ndarray) -> float:
         """
@@ -554,9 +570,8 @@ class MixedStageProcessor:
             if not self.roi_tracker:
                 self._initialize_roi_tracker({})
             
-            # Set tracking mode to YOLO_ROI for proper ROI logic
-            original_mode = self.roi_tracker.tracking_mode
-            self.roi_tracker.tracking_mode = "YOLO_ROI"
+            # The tracker is already properly initialized via TrackerManager
+            # No need to change tracking modes - use the tracker as-is
             
             # Check if we need to update ROI (exact same logic as live tracker)
             run_detection_this_frame = (
@@ -647,14 +662,10 @@ class MixedStageProcessor:
                 # Update tracking state
                 self.roi_tracker.internal_frame_counter += 1
                 
-                # Restore original tracking mode
-                self.roi_tracker.tracking_mode = original_mode
-                
                 # Convert to 0-1 range and return
                 return primary_pos / 100.0
             else:
-                # No ROI available, restore mode and return default
-                self.roi_tracker.tracking_mode = original_mode
+                # No ROI available, return default
                 return 0.5
                 
         except Exception as e:
