@@ -325,15 +325,18 @@ class BeatMarkerTracker(BaseTracker):
             delay_frames = int(get("tracker_delay_frames", 0))
             effective_delay_ms = delay_frames * (1000.0 / max(1.0, self.current_fps))
             
-            if primary_to_write is not None and hasattr(self.app, 'funscript_processor'):
-                self.app.funscript_processor.add_action(
-                    1, frame_time_ms + effective_delay_ms, primary_to_write,
-                    source_info="Beat Marker Live Tracker"
+            if primary_to_write is not None and hasattr(self.app, 'funscript'):
+                self.app.funscript.add_action(
+                    timestamp_ms=frame_time_ms + effective_delay_ms,
+                    primary_pos=primary_to_write,
+                    secondary_pos=secondary_to_write if secondary_to_write is not None else None
                 )
-            if secondary_to_write is not None and hasattr(self.app, 'funscript_processor'):
-                self.app.funscript_processor.add_action(
-                    2, frame_time_ms + effective_delay_ms, secondary_to_write,
-                    source_info="Beat Marker Live Tracker"
+            elif secondary_to_write is not None and hasattr(self.app, 'funscript'):
+                # If only secondary axis, still need to add action
+                self.app.funscript.add_action(
+                    timestamp_ms=frame_time_ms + effective_delay_ms,
+                    primary_pos=None,
+                    secondary_pos=secondary_to_write
                 )
             
             action_log_list.append({
