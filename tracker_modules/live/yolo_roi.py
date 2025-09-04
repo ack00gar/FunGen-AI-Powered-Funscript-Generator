@@ -18,8 +18,10 @@ from typing import Dict, Any, Optional, List, Tuple
 
 try:
     from ..core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+    from ..helpers.signal_amplifier import SignalAmplifier
 except ImportError:
     from tracker_modules.core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+    from tracker_modules.helpers.signal_amplifier import SignalAmplifier
 
 
 class YoloRoiTracker(BaseTracker):
@@ -71,9 +73,13 @@ class YoloRoiTracker(BaseTracker):
         self.last_primary_position = 50
         self.last_secondary_position = 50
         
-        # Enhanced signal mastering (from Oscillation Experimental 2)
-        self.position_history_amplification = deque(maxlen=120)  # 4 seconds @ 30fps for dynamic amplification
-        self.live_amp_enabled = True  # Enable dynamic amplification by default
+        # Enhanced signal mastering using helper module
+        self.signal_amplifier = SignalAmplifier(
+            history_size=120,  # 4 seconds @ 30fps
+            enable_live_amp=True,  # Enable dynamic amplification by default
+            smoothing_alpha=0.3,  # EMA smoothing factor
+            logger=self.logger
+        )
         
         # Adaptive flow range attributes (from original tracker.py)
         self.flow_min_primary_adaptive = -0.1
@@ -464,6 +470,9 @@ class YoloRoiTracker(BaseTracker):
         self.penis_max_size_history.clear()
         self.prev_gray_main_roi, self.prev_features_main_roi = None, None
         self.penis_last_known_box, self.main_interaction_class = None, None
+        
+        # Reset signal amplifier for new tracking session
+        self.signal_amplifier.reset()
         
         # Initialize motion mode tracking
         self.motion_mode = 'undetermined'
@@ -941,8 +950,12 @@ class YoloRoiTracker(BaseTracker):
         # Fix inversion logic: thrusting should be normal (base_primary_pos), riding should be inverted
         raw_primary_pos = base_primary_pos if self.motion_mode == "thrusting" else 100 - base_primary_pos
         
-        # Apply enhanced signal mastering (from Oscillation Experimental 2)
-        enhanced_primary, enhanced_secondary = self._apply_enhanced_amplification(raw_primary_pos, secondary_pos, dy_smooth, dx_smooth)
+        # Apply enhanced signal mastering using helper module
+        sensitivity = self._get_current_sensitivity()
+        enhanced_primary, enhanced_secondary = self.signal_amplifier.enhance_signal(
+            raw_primary_pos, secondary_pos, dy_smooth, dx_smooth, 
+            sensitivity=sensitivity, apply_smoothing=False  # We'll apply our own smoothing
+        )
         
         # Apply additional smoothing to reduce jerkiness
         primary_pos, secondary_pos = self._apply_final_smoothing(enhanced_primary, enhanced_secondary)
