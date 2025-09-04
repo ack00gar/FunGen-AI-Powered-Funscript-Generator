@@ -72,6 +72,11 @@ class TrackerManager:
         self.base_amplification_factor = 1.0
         self.class_specific_amplification_multipliers = {}
         self.flow_history_window_smooth = 10
+        self.y_offset = 0  # Y-axis offset for positioning
+        self.x_offset = 0  # X-axis offset for positioning  
+        self.output_delay_frames = 0  # Frame delay compensation
+        self.current_video_fps_for_delay = 30.0  # FPS for delay calculations
+        self.internal_frame_counter = 0  # Frame counter for processing
         
         # Additional properties that modular trackers might expect
         self.oscillation_history = {}  # Dictionary for oscillation trackers
@@ -177,6 +182,10 @@ class TrackerManager:
             return frame, None
             
         try:
+            # Ensure frame is writable for OpenCV operations
+            if not frame.flags.writeable:
+                frame = frame.copy()
+                
             # Direct call to modular tracker
             result = self._current_tracker.process_frame(frame, frame_time_ms, frame_index)
             
@@ -193,6 +202,58 @@ class TrackerManager:
             
         except Exception as e:
             self.logger.error(f"Error in process_frame with tracker {self._current_mode}: {e}")
+            return frame, None
+
+    def process_frame_for_oscillation(self, frame: np.ndarray, frame_time_ms: int, 
+                                    frame_index: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
+        """Process frame for oscillation detection - delegates to current tracker."""
+        if not self._current_tracker:
+            self.logger.error("No tracker set - call set_tracking_mode() first")
+            return frame, None
+            
+        try:
+            # Ensure frame is writable for OpenCV operations
+            if not frame.flags.writeable:
+                frame = frame.copy()
+            
+            # Try to use the tracker's process_frame method
+            result = self._current_tracker.process_frame(frame, frame_time_ms, frame_index)
+            
+            # Handle TrackerResult object or tuple format
+            processed_frame, action_log = self._extract_result_data(result, frame)
+            
+            # For oscillation trackers, we need to sample positions periodically
+            if 'oscillation' in self._current_mode.lower():
+                # Oscillation trackers maintain continuous position, sample it
+                if hasattr(self._current_tracker, 'oscillation_funscript_pos'):
+                    position = self._current_tracker.oscillation_funscript_pos
+                    
+                    # Only add action if position changed or enough time has passed
+                    last_action = self.funscript.primary_actions[-1] if self.funscript.primary_actions else None
+                    add_action = False
+                    
+                    if last_action is None:
+                        # First action
+                        add_action = True
+                    elif position != last_action['pos']:
+                        # Position changed
+                        add_action = True
+                    elif frame_time_ms - last_action['at'] >= 100:
+                        # At least 100ms since last action (10 Hz sampling)
+                        add_action = True
+                    
+                    if add_action and self.funscript and position is not None:
+                        self.funscript.add_action(frame_time_ms, position)
+                        # Create action_log for compatibility
+                        action_log = [{'at': frame_time_ms, 'pos': position}]
+            else:
+                # Regular trackers use action_log
+                self._add_actions_to_funscript(action_log)
+            
+            return processed_frame, action_log
+                
+        except Exception as e:
+            self.logger.error(f"Error in process_frame_for_oscillation: {e}")
             return frame, None
 
     def reset(self, reason: Optional[str] = None, **kwargs):
