@@ -49,7 +49,8 @@ class TrackerRegistry:
         self._discover_trackers()
         
         if self._trackers:
-            self.logger.info(f"Discovered {len(self._trackers)} trackers: {list(self._trackers.keys())}")
+            # Single concise summary instead of verbose list
+            self.logger.info(f"Discovered {len(self._trackers)} trackers")
         else:
             self.logger.warning("No trackers discovered!")
             
@@ -141,11 +142,10 @@ class TrackerRegistry:
             self._trackers[metadata.name] = tracker_class
             self._metadata_cache[metadata.name] = metadata
             
+            # Log at debug level to reduce verbosity
             category_prefix = "[Community] " if is_community else ""
-            self.logger.info(
-                f"Registered tracker: {category_prefix}{metadata.display_name} "
-                f"(name: {metadata.name}, version: {metadata.version}) "
-                f"[SECURITY: ✅ VALIDATED]"
+            self.logger.debug(
+                f"Registered: {category_prefix}{metadata.display_name} ({metadata.name})"
             )
             
         except TrackerSecurityError as e:

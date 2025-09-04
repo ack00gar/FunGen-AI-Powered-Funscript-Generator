@@ -26,6 +26,7 @@ class PluginUIRenderer:
     def __init__(self, plugin_manager: PluginUIManager, logger: Optional[logging.Logger] = None):
         self.plugin_manager = plugin_manager
         self.logger = logger or logging.getLogger('PluginUIRenderer')
+        self.timeline_reference = None  # Will be set by timeline
         
         if not imgui:
             self.logger.error("ImGui not available - UI rendering will not work")
@@ -43,8 +44,8 @@ class PluginUIRenderer:
         any_button_clicked = False
         available_plugins = self.plugin_manager.get_available_plugins()
         
-        # Sort plugins to ensure consistent order (Ultimate Autotune first)
-        sorted_plugins = sorted(available_plugins, key=lambda x: (x != 'Ultimate Autotune', x))
+        # Sort plugins alphabetically for consistent order
+        sorted_plugins = sorted(available_plugins)
         
         for i, plugin_name in enumerate(sorted_plugins):
             ui_data = self.plugin_manager.get_plugin_ui_data(plugin_name)
@@ -106,7 +107,16 @@ class PluginUIRenderer:
         """Render a single plugin configuration window."""
         window_title = f"{ui_data['display_name']} (Timeline {timeline_num})##Plugin{plugin_name}Window{window_id_suffix}"
         
-        # Set window properties
+        # Set window properties - center on screen
+        if imgui.APPEARING:
+            main_viewport = imgui.get_main_viewport()
+            if main_viewport:
+                # Center the window
+                window_width = 480
+                center_x = main_viewport.pos[0] + (main_viewport.size[0] - window_width) * 0.5
+                center_y = main_viewport.pos[1] + main_viewport.size[1] * 0.3  # Slightly above center
+                imgui.set_next_window_position(center_x, center_y, condition=imgui.APPEARING)
+        
         imgui.set_next_window_size(480, 0, condition=imgui.APPEARING)
         
         window_expanded, window_open = imgui.begin(
@@ -127,9 +137,9 @@ class PluginUIRenderer:
             # Render parameter controls
             parameters_changed = self._render_parameter_controls(plugin_name, ui_data)
             
-            # Update preview if parameters changed
-            if parameters_changed and ui_data['state'] == PluginUIState.PREVIEWING:
-                self._update_plugin_preview(plugin_name)
+            # Auto-generate preview when parameters change or window first opens
+            if parameters_changed or ui_data['state'] == PluginUIState.OPEN:
+                self._start_plugin_preview(plugin_name, timeline_num)
             
             imgui.separator()
             
@@ -143,6 +153,8 @@ class PluginUIRenderer:
                     context = self.plugin_manager.plugin_contexts.get(plugin_name)
                     if context:
                         context.apply_to_selection = apply_to_sel
+                        # Refresh preview when apply_to_selection changes
+                        self._start_plugin_preview(plugin_name, timeline_num)
             
             # Render action buttons
             self._render_action_buttons(plugin_name, ui_data, timeline_num, window_id_suffix)
@@ -279,8 +291,6 @@ class PluginUIRenderer:
         # Apply button
         apply_id = f"Apply##Plugin{plugin_name}Apply{window_id_suffix}"
         if imgui.button(apply_id, width=button_width):
-            # This will be handled by the timeline's callback system
-            # For now, just trigger a preview to show it works
             self._apply_plugin(plugin_name, timeline_num)
         
         imgui.same_line()
@@ -297,10 +307,31 @@ class PluginUIRenderer:
         # This could be determined from plugin metadata in the future
         return True
     
-    def _update_plugin_preview(self, plugin_name: str):
-        """Update preview for a plugin (placeholder - needs timeline integration)."""
-        # This would need to be connected to the timeline's preview system
-        self.logger.debug(f"Preview update requested for plugin: {plugin_name}")
+    def _start_plugin_preview(self, plugin_name: str, timeline_num: int):
+        """Start/update preview for a plugin."""
+        # Get the timeline instance to access funscript and axis
+        if not self.timeline_reference:
+            self.logger.debug("No timeline reference available for preview")
+            return
+        
+        # Get funscript and axis information
+        funscript_instance, axis_name = self.timeline_reference._get_target_funscript_details()
+        if not funscript_instance:
+            self.logger.debug("No funscript available for preview")
+            return
+        
+        # Get selection information from the plugin context
+        context = self.plugin_manager.plugin_contexts.get(plugin_name)
+        selected_indices = None
+        if context and context.apply_to_selection and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
+            selected_indices = list(self.timeline_reference.multi_selected_action_indices) if self.timeline_reference.multi_selected_action_indices else None
+        
+        # Generate preview through the plugin manager
+        success = self.plugin_manager.generate_preview(plugin_name, funscript_instance, axis_name, selected_indices)
+        if success:
+            self.logger.debug(f"Preview generated successfully for {plugin_name}")
+        else:
+            self.logger.debug(f"Failed to generate preview for {plugin_name}")
     
     def _apply_plugin(self, plugin_name: str, timeline_num: int):
         """Apply a plugin through the timeline's callback system."""
@@ -312,6 +343,10 @@ class PluginUIRenderer:
         context = self.plugin_manager.plugin_contexts.get(plugin_name)
         if context:
             context.apply_requested = True
+    
+    def set_timeline_reference(self, timeline):
+        """Set reference to the timeline that owns this renderer."""
+        self.timeline_reference = timeline
     
     def render_preview_line(self, plugin_name: str, draw_list, points_to_draw, color: int):
         """Render preview line for a plugin."""

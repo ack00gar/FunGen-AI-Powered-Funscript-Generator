@@ -4,9 +4,10 @@ import config
 
 # Import dynamic tracker discovery
 try:
-    from .tracker_discovery_ui import TrackerDiscoveryUI, TrackerCategory
+    from .dynamic_tracker_ui import DynamicTrackerUI
+    from config.tracker_discovery import get_tracker_discovery, TrackerCategory
 except ImportError:
-    TrackerDiscoveryUI = None
+    DynamicTrackerUI = None
     TrackerCategory = None
 
 def _tooltip_if_hovered(text):
@@ -47,10 +48,9 @@ class ControlPanelUI:
         "ControlPanelColors",
         "GeneralColors",
         "constants",
-        "TrackerMode",
         "AI_modelExtensionsFilter",
         "AI_modelTooltipExtensions",
-        "tracker_discovery",
+        "tracker_ui",
     )
 
     def __init__(self, app):
@@ -60,70 +60,89 @@ class ControlPanelUI:
         self.ControlPanelColors = config.ControlPanelColors
         self.GeneralColors = config.GeneralColors
         self.constants = config.constants
-        self.TrackerMode = self.constants.TrackerMode
         self.AI_modelExtensionsFilter = self.constants.AI_MODEL_EXTENSIONS_FILTER
         self.AI_modelTooltipExtensions = self.constants.AI_MODEL_TOOLTIP_EXTENSIONS
         
-        # Initialize dynamic tracker discovery
-        if TrackerDiscoveryUI:
-            self.tracker_discovery = TrackerDiscoveryUI(app)
+        # Initialize dynamic tracker UI helper
+        if DynamicTrackerUI:
+            self.tracker_ui = DynamicTrackerUI()
         else:
-            self.tracker_discovery = None
+            self.tracker_ui = None
 
     # ------- Helpers -------
 
+    def _is_tracker_category(self, tracker_name: str, category) -> bool:
+        """Check if tracker belongs to specific category using dynamic discovery."""
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(tracker_name)
+        return tracker_info and tracker_info.category == category
+
+    def _is_live_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker is a live tracker (LIVE or LIVE_INTERVENTION)."""
+        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(tracker_name)
+        return tracker_info and tracker_info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION]
+
+    def _is_offline_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker is an offline tracker."""
+        from config.tracker_discovery import TrackerCategory
+        return self._is_tracker_category(tracker_name, TrackerCategory.OFFLINE)
+
+    def _is_specific_tracker(self, tracker_name: str, target_name: str) -> bool:
+        """Check if tracker matches a specific name."""
+        return tracker_name == target_name
+
+    def _tracker_in_list(self, tracker_name: str, target_list: list) -> bool:
+        """Check if tracker is in a list of specific tracker names."""
+        return tracker_name in target_list
+
+    def _is_stage2_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker is a 2-stage offline tracker."""
+        if self.tracker_ui:
+            return self.tracker_ui.is_stage2_tracker(tracker_name)
+        return False
+
+    def _is_stage3_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker is a 3-stage offline tracker."""
+        if self.tracker_ui:
+            return self.tracker_ui.is_stage3_tracker(tracker_name)
+        return False
+
+    def _is_mixed_stage3_tracker(self, tracker_name: str) -> bool:
+        """Check if tracker is a mixed 3-stage offline tracker."""
+        if self.tracker_ui:
+            return self.tracker_ui.is_mixed_stage3_tracker(tracker_name)
+        return False
+
     def _get_tracker_lists_for_ui(self, simple_mode=False):
-        """Get tracker lists for UI combo boxes."""
-        if self.tracker_discovery:
-            try:
-                # Use dynamic discovery
-                display_names, discovered_trackers = self.tracker_discovery.get_trackers_for_ui_combo(
-                    include_offline=not simple_mode  # Simple mode only shows live trackers
-                )
-                
-                # Extract legacy enum values for backward compatibility
-                legacy_enums = []
-                for tracker in discovered_trackers:
-                    if tracker.legacy_enum_value:
-                        legacy_enums.append(tracker.legacy_enum_value)
-                    else:
-                        # Fallback to first available enum if no mapping
-                        legacy_enums.append(self.TrackerMode.OSCILLATION_DETECTOR)
-                
-                return display_names, legacy_enums, discovered_trackers
-            except Exception as e:
-                if hasattr(self.app, 'logger'):
-                    self.app.logger.warning(f"Dynamic tracker discovery failed: {e}")
-        
-        # If dynamic discovery fails completely, return empty lists
-        self.logger.error("Tracker discovery completely failed - no trackers available")
-        return [], [], None
+        """Get tracker lists for UI combo boxes using dynamic discovery."""
+        try:
+            if simple_mode:
+                # Simple mode: only live trackers
+                display_names, internal_names = self.tracker_ui.get_simple_mode_trackers()
+            else:
+                # Full mode: all trackers
+                display_names, internal_names = self.tracker_ui.get_gui_display_list()
+            
+            # Return display names, internal names, and internal names for tooltip generation
+            return display_names, internal_names, internal_names
+            
+        except Exception as e:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.warning(f"Dynamic tracker discovery failed: {e}")
+            
+            # Return empty lists on failure
+            return [], [], []
     
     
-    def _generate_combined_tooltip(self, discovered_trackers):
+    def _generate_combined_tooltip(self, tracker_names):
         """Generate combined tooltip for discovered trackers."""
-        if not discovered_trackers:
-            # Default tooltip when no discovery data available
-            return ("Choose analysis method:\n"
-                   "• Live Oscillation Detector: Fast, real-time analysis for rhythmic motion\n"
-                   "• Live Oscillation Detector (Legacy): Proven stable version with superior amplification\n"
-                   "• Live Oscillation Detector (Experimental 2): Hybrid - combines timing precision + signal strength\n"
-                   "• Live YOLO ROI: AI-powered object detection with real-time tracking\n"
-                   "• Live User ROI: Manual region selection for custom tracking\n"
-                   "• Offline 2-Stage: GPU-accelerated batch processing\n"
-                   "• Offline 3-Stage: Full pipeline with advanced post-processing\n"
-                   "• Offline 3-Stage Mixed: Stage 2 signal + ROI tracking for BJ/HJ chapters")
+        if not tracker_names:
+            return "No trackers available. Please check your tracker_modules installation."
         
-        tooltip_lines = ["Choose analysis method:"]
-        for tracker in discovered_trackers:
-            status_icon = "✓" if tracker.is_available else "⚠"
-            tooltip_lines.append(f"{status_icon} {tracker.display_name}: {tracker.description}")
-        
-        if any(not t.is_available for t in discovered_trackers):
-            tooltip_lines.append("")
-            tooltip_lines.append("⚠ Some trackers may have initialization issues")
-        
-        return "\n".join(tooltip_lines)
+        return self.tracker_ui.get_combined_tooltip(tracker_names)
 
     def _help_tooltip(self, text):
         if imgui.is_item_hovered():
@@ -259,7 +278,7 @@ class ControlPanelUI:
     def _render_simple_mode_ui(self):
         app = self.app
         app_state = app.app_state_ui
-        tracker_mode = self.TrackerMode
+        # TrackerMode removed - using dynamic discovery system
 
         flags = imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
         imgui.begin("FunGen Simple##SimpleControlPanel", flags=flags)
@@ -317,10 +336,13 @@ class ControlPanelUI:
         # Use dynamic tracker discovery
         modes_display, modes_enum, discovered_trackers = self._get_tracker_lists_for_ui(simple_mode=True)
         try:
-            cur_idx = modes_enum.index(app_state.selected_tracker_mode)
+            cur_idx = modes_enum.index(app_state.selected_tracker_name)
         except ValueError:
             cur_idx = 0
-            app_state.selected_tracker_mode = modes_enum[cur_idx] if modes_enum else self.TrackerMode.OSCILLATION_DETECTOR
+            # Set default to first available tracker or fallback to default
+            from config.constants import DEFAULT_TRACKER_NAME
+            default_tracker = modes_enum[cur_idx] if modes_enum else DEFAULT_TRACKER_NAME
+            app_state.selected_tracker_name = default_tracker
 
         imgui.push_item_width(-1)
         clicked, new_idx = imgui.combo(
@@ -331,26 +353,15 @@ class ControlPanelUI:
         if clicked and new_idx != cur_idx:
             new_mode = modes_enum[new_idx]
             # Clear overlays only when switching modes
-            if app_state.selected_tracker_mode != new_mode:
+            if app_state.selected_tracker_name != new_mode:
                 if hasattr(app, 'logger') and app.logger:
-                    app.logger.info(f"UI(Simple): Mode change requested {app_state.selected_tracker_mode} -> {new_mode}. Clearing overlays.")
+                    app.logger.info(f"UI(Simple): Mode change requested {app_state.selected_tracker_name} -> {new_mode}. Clearing overlays.")
                 if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
                     app.clear_all_overlays_and_ui_drawings()
-            app_state.selected_tracker_mode = new_mode
-            # Persist user choice (store enum index only)
+            app_state.selected_tracker_name = new_mode
+            # Persist user choice (store tracker name directly)
             if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                all_modes = [
-                    self.TrackerMode.OSCILLATION_DETECTOR,
-                    self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
-                    self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
-                    self.TrackerMode.LIVE_YOLO_ROI,
-                    self.TrackerMode.OFFLINE_3_STAGE,
-                ]
-                try:
-                    idx_to_store = all_modes.index(new_mode)
-                except ValueError:
-                    idx_to_store = 0
-                app.app_settings.set("selected_tracker_mode", idx_to_store)
+                app.app_settings.set("selected_tracker_name", new_mode)
 
         self._render_execution_progress_display()
         self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
@@ -359,14 +370,12 @@ class ControlPanelUI:
     def _render_processing_speed_controls(self, app_state):
         app = self.app
         processor = app.processor
-        selected_mode = app_state.selected_tracker_mode
-        is_live_mode = selected_mode in (
-            self.TrackerMode.LIVE_YOLO_ROI,
-            self.TrackerMode.LIVE_USER_ROI,
-            self.TrackerMode.OSCILLATION_DETECTOR,
-            self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
-            self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
-        )
+        selected_mode = app_state.selected_tracker_name
+        # Check if current tracker is a live mode using dynamic discovery
+        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(selected_mode)
+        is_live_mode = tracker_info and tracker_info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION]
         is_playback_active = processor and processor.is_processing and not processor.enable_tracker_processing
 
         if not (is_live_mode or is_playback_active):
@@ -396,7 +405,7 @@ class ControlPanelUI:
         stage_proc = app.stage_processor
         fs_proc = app.funscript_processor
         events = app.event_handlers
-        tracker_mode = self.TrackerMode
+        # TrackerMode removed - using dynamic discovery system
 
         # Ensure this is always defined before any conditional UI blocks use it
         processor = app.processor
@@ -424,10 +433,10 @@ class ControlPanelUI:
             )
             with _DisabledScope(disable_combo):
                 try:
-                    cur_idx = modes_enum.index(app_state.selected_tracker_mode)
+                    cur_idx = modes_enum.index(app_state.selected_tracker_name)
                 except ValueError:
                     cur_idx = 0
-                    app_state.selected_tracker_mode = modes_enum[cur_idx]
+                    app_state.selected_tracker_name = modes_enum[cur_idx]
 
                 clicked, new_idx = imgui.combo("##TrackerModeCombo", cur_idx, modes_display)
                 self._help_tooltip(self._generate_combined_tooltip(discovered_trackers_full))
@@ -435,40 +444,20 @@ class ControlPanelUI:
             if clicked and new_idx != cur_idx:
                 new_mode = modes_enum[new_idx]
                 # Clear all overlays when switching to a different mode
-                if app_state.selected_tracker_mode != new_mode:
+                if app_state.selected_tracker_name != new_mode:
                     if hasattr(app, 'logger') and app.logger:
-                        app.logger.info(f"UI(RunTab): Mode change requested {app_state.selected_tracker_mode} -> {new_mode}. Clearing overlays.")
+                        app.logger.info(f"UI(RunTab): Mode change requested {app_state.selected_tracker_name} -> {new_mode}. Clearing overlays.")
                     if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
                         app.clear_all_overlays_and_ui_drawings()
-                app_state.selected_tracker_mode = new_mode
-                # Persist user choice (store enum index only)
+                app_state.selected_tracker_name = new_mode
+                # Persist user choice (store tracker name directly)
                 if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                    all_modes = [
-                        tracker_mode.OSCILLATION_DETECTOR,
-                        tracker_mode.OSCILLATION_DETECTOR_LEGACY,
-                        tracker_mode.LIVE_YOLO_ROI,
-                        tracker_mode.LIVE_USER_ROI,
-                        tracker_mode.OFFLINE_2_STAGE,
-                        tracker_mode.OFFLINE_3_STAGE,
-                        tracker_mode.OFFLINE_3_STAGE_MIXED,
-                    ]
-                    try:
-                        idx_to_store = all_modes.index(new_mode)
-                    except ValueError:
-                        idx_to_store = 0
-                    app.app_settings.set("selected_tracker_mode", idx_to_store)
+                    app.app_settings.set("selected_tracker_name", new_mode)
+                
+                # Set tracker mode using dynamic discovery
                 tr = app.tracker
                 if tr:
-                    if new_mode == tracker_mode.LIVE_USER_ROI:
-                        tr.set_tracking_mode("USER_FIXED_ROI")
-                    elif new_mode == tracker_mode.OSCILLATION_DETECTOR:
-                        tr.set_tracking_mode("OSCILLATION_DETECTOR")
-                    elif new_mode == tracker_mode.OSCILLATION_DETECTOR_LEGACY:
-                        tr.set_tracking_mode("OSCILLATION_DETECTOR_LEGACY")
-                    elif new_mode == tracker_mode.OSCILLATION_DETECTOR_EXPERIMENTAL_2:
-                        tr.set_tracking_mode("OSCILLATION_DETECTOR_EXPERIMENTAL_2")
-                    else:
-                        tr.set_tracking_mode("YOLO_ROI")
+                    tr.set_tracking_mode(new_mode)
 
             proc = app.processor
             video_loaded = proc and proc.is_video_open()
@@ -487,15 +476,8 @@ class ControlPanelUI:
         if open_:
             self._render_tracking_axes_mode(stage_proc)
 
-        mode = app_state.selected_tracker_mode
-        if mode in (
-            tracker_mode.OFFLINE_2_STAGE,
-            tracker_mode.OFFLINE_3_STAGE,
-            tracker_mode.OFFLINE_3_STAGE_MIXED,
-            tracker_mode.LIVE_YOLO_ROI,
-            tracker_mode.LIVE_USER_ROI,
-            tracker_mode.OSCILLATION_DETECTOR,
-        ):
+        mode = app_state.selected_tracker_name
+        if mode and (self._is_offline_tracker(mode) or self._is_live_tracker(mode)):
             if app_state.show_advanced_options:
                 open_, _ = imgui.collapsing_header(
                     "Analysis Options##RunControlAnalysisOptions",
@@ -505,7 +487,7 @@ class ControlPanelUI:
                     imgui.text("Analysis Range")
                     self._render_range_selection(stage_proc, fs_proc, events)
 
-                    if mode in (tracker_mode.OFFLINE_2_STAGE, tracker_mode.OFFLINE_3_STAGE, tracker_mode.OFFLINE_3_STAGE_MIXED):
+                    if self._is_offline_tracker(mode):
                         imgui.text("Stage Reruns:")
                         with _DisabledScope(disable_combo):
                             _, stage_proc.force_rerun_stage1 = imgui.checkbox(
@@ -584,54 +566,44 @@ class ControlPanelUI:
     def _render_configuration_tab(self):
         app = self.app
         app_state = app.app_state_ui
-        tmode = app_state.selected_tracker_mode
+        tmode = app_state.selected_tracker_name
 
         imgui.text("Configure settings for the selected mode.")
         imgui.spacing()
 
-        if tmode in (
-            self.TrackerMode.LIVE_YOLO_ROI,
-            
-            self.TrackerMode.OFFLINE_2_STAGE,
-            self.TrackerMode.OFFLINE_3_STAGE,
-            self.TrackerMode.OFFLINE_3_STAGE_MIXED,
-        ):
+        # Show AI model settings for live and offline trackers
+        if self._is_live_tracker(tmode) or self._is_offline_tracker(tmode):
             if imgui.collapsing_header("AI Models & Inference##ConfigAIModels")[0]:
                 self._render_ai_model_settings()
 
         adv = app.app_state_ui.show_advanced_options
-        if tmode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI) and adv:
+        if self._is_live_tracker(tmode) and adv:
             self._render_live_tracker_settings()
 
-        if tmode in (
-            self.TrackerMode.LIVE_YOLO_ROI,
-            self.TrackerMode.OFFLINE_2_STAGE,
-            self.TrackerMode.OFFLINE_3_STAGE,
-            self.TrackerMode.OFFLINE_3_STAGE_MIXED,
-        ) and adv:
+        # TEMPORARILY DISABLE SECTIONS WITH HARDCODED TRACKERMODE REFERENCES
+        # TODO: Replace with dynamic discovery logic
+        
+        # Class filtering for advanced users
+        if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
                 self._render_class_filtering_content()
 
-        if tmode in [self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
+        # Oscillation detector settings for oscillation trackers
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(tmode)
+        if tracker_info and 'oscillation' in tracker_info.display_name.lower():
             if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
                 self._render_oscillation_detector_settings()
 
-        # Stage 3 specific settings
-        if tmode == self.TrackerMode.OFFLINE_3_STAGE:
-            if imgui.collapsing_header("Stage 3 Oscillation Detector Mode##ConfigStage3OD", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-                self._render_stage3_oscillation_detector_mode_settings()
+        # Stage 3 specific settings (temporarily disabled - needs proper stage detection)
+        # if tmode == "stage3_optical_flow":
+        #     if imgui.collapsing_header("Stage 3 Oscillation Detector Mode##ConfigStage3OD", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+        #         self._render_stage3_oscillation_detector_mode_settings()
 
-        with_config = {
-            self.TrackerMode.OSCILLATION_DETECTOR,
-            self.TrackerMode.OSCILLATION_DETECTOR_LEGACY,
-            self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2,
-            self.TrackerMode.LIVE_YOLO_ROI,
-            self.TrackerMode.LIVE_USER_ROI,
-            self.TrackerMode.OFFLINE_2_STAGE,
-            self.TrackerMode.OFFLINE_3_STAGE,
-            self.TrackerMode.OFFLINE_3_STAGE_MIXED,
-        }
-        if tmode not in with_config:
+        # Check if configuration is available for this tracker
+        has_config = self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)
+        if not has_config:
             imgui.text_disabled("No configuration available for this mode.")
 
     def _render_settings_tab(self):
@@ -771,8 +743,8 @@ class ControlPanelUI:
             "imputer, and other .joblib model artifacts."
         )
 
-        mode = app.app_state_ui.selected_tracker_mode
-        if mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED):
+        mode = app.app_state_ui.selected_tracker_name
+        if self._is_offline_tracker(mode):
             imgui.text("Stage 1 Inference Workers:")
             imgui.push_item_width(100)
             is_save_pre = getattr(stage_proc, "save_preprocessed_video", False)
@@ -1080,13 +1052,13 @@ class ControlPanelUI:
         app = self.app
         stage_proc = app.stage_processor
         app_state = app.app_state_ui
-        mode = app_state.selected_tracker_mode
+        mode = app_state.selected_tracker_name
 
-        if mode in (self.TrackerMode.OFFLINE_2_STAGE, self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED):
+        if self._is_offline_tracker(mode):
             self._render_stage_progress_ui(stage_proc)
             return
 
-        if mode in (self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2):
+        if self._is_live_tracker(mode):
             tr = app.tracker
             imgui.text(">> Tracker Status")
             imgui.separator()
@@ -1094,19 +1066,19 @@ class ControlPanelUI:
             imgui.text(" - Actual FPS: %.1f" % (fps if isinstance(fps, (int, float)) else 0.0))
             roi_status = "Not Set"
             if tr:
-                if mode == self.TrackerMode.LIVE_YOLO_ROI:
+                if mode == "yolo_roi":
                     roi_status = (
                         "Tracking '%s'" % tr.main_interaction_class
                         if getattr(tr, "main_interaction_class", None)
                         else "Searching..."
                     )
-                elif mode == self.TrackerMode.LIVE_USER_ROI:
+                elif mode == "user_roi":
                     roi_status = "Set" if getattr(tr, "user_roi_fixed", False) else "Not Set"
-                elif mode in [self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
+                elif mode in ["oscillation_experimental", "oscillation_legacy", "oscillation_experimental_2"]:
                     roi_status = "Set" if getattr(tr, "oscillation_area_fixed", None) else "Not Set"
             imgui.text(" - ROI Status: %s" % roi_status)
 
-            if mode == self.TrackerMode.LIVE_USER_ROI:
+            if mode == "user_roi":
                 self._render_user_roi_controls_for_run_tab()
             return
 
@@ -1285,7 +1257,7 @@ class ControlPanelUI:
                 self.app.abort_batch_processing()
             return
 
-        selected_mode = self.app.app_state_ui.selected_tracker_mode
+        selected_mode = self.app.app_state_ui.selected_tracker_name
         button_width = (imgui.get_content_region_available()[0] - imgui.get_style().item_spacing[0]) / 2
 
         if is_any_process_active:
@@ -1313,13 +1285,13 @@ class ControlPanelUI:
             
             # Check for resumable tasks
             resumable_checkpoint = None
-            if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED, self.TrackerMode.OFFLINE_2_STAGE] and self.app.file_manager.video_path:
+            if self._is_offline_tracker(selected_mode) and self.app.file_manager.video_path:
                 resumable_checkpoint = stage_proc.can_resume_video(self.app.file_manager.video_path)
             
-            if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED, self.TrackerMode.OFFLINE_2_STAGE]:
+            if self._is_offline_tracker(selected_mode):
                 start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
                 handler = event_handlers.handle_start_ai_cv_analysis
-            elif selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
+            elif self._is_live_tracker(selected_mode):
                 imgui.new_line()
                 start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
                 handler = event_handlers.handle_start_live_tracker_click
@@ -1350,7 +1322,7 @@ class ControlPanelUI:
             else:
                 # Normal start button
                 if imgui.button(start_text, width=button_width):
-                    if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
+                    if self._is_live_tracker(selected_mode):
                         self._start_live_tracking()
                     elif handler: handler()
 
@@ -1364,12 +1336,12 @@ class ControlPanelUI:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
         # Place info note for live methods directly below the buttons
-        if selected_mode in [self.TrackerMode.LIVE_YOLO_ROI, self.TrackerMode.LIVE_USER_ROI, self.TrackerMode.OSCILLATION_DETECTOR, self.TrackerMode.OSCILLATION_DETECTOR_LEGACY, self.TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2]:
+        if self._is_live_tracker(selected_mode):
             imgui.text_ansi_colored("It can take up to 35 seconds to see output on the timelines.\nThis is a known feature.", 0.25, 0.88, 0.82)
 
     def _render_stage_progress_ui(self, stage_proc):
         is_analysis_running = stage_proc.full_analysis_active
-        selected_mode = self.app.app_state_ui.selected_tracker_mode
+        selected_mode = self.app.app_state_ui.selected_tracker_name
 
         active_progress_color = self.ControlPanelColors.ACTIVE_PROGRESS # Vibrant blue for active
         completed_progress_color = self.ControlPanelColors.COMPLETED_PROGRESS # Vibrant green for completed
@@ -1427,7 +1399,7 @@ class ControlPanelUI:
             imgui.text_wrapped(f"Status: {stage_proc.stage1_status_text}")
 
         # Stage 2
-        s2_title = "Stage 2: Contact Analysis & Funscript" if selected_mode == self.TrackerMode.OFFLINE_2_STAGE else "Stage 2: Segmentation"
+        s2_title = "Stage 2: Contact Analysis & Funscript" if self._is_stage2_tracker(selected_mode) else "Stage 2: Segmentation"
         imgui.text(s2_title)
         if is_analysis_running and stage_proc.current_analysis_stage == 2:
             imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
@@ -1461,8 +1433,8 @@ class ControlPanelUI:
             imgui.text_wrapped(f"Status: {stage_proc.stage2_status_text}")
 
         # Stage 3
-        if selected_mode in [self.TrackerMode.OFFLINE_3_STAGE, self.TrackerMode.OFFLINE_3_STAGE_MIXED]:
-            if selected_mode == self.TrackerMode.OFFLINE_3_STAGE_MIXED:
+        if self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode):
+            if self._is_mixed_stage3_tracker(selected_mode):
                 imgui.text("Stage 3: Mixed Processing")
             else:
                 imgui.text("Stage 3: Per-Segment Optical Flow")

@@ -1,333 +1,561 @@
 """
-Tracker Manager - Main interface for the modular tracker system.
-
-This class replaces the monolithic ROITracker and provides a clean interface
-for managing different tracking algorithms. It handles tracker lifecycle,
-switching between trackers, and provides a unified API that matches the
-original ROITracker interface for seamless integration.
+Tracker manager that directly interfaces with modular trackers.
+Replaces ModularTrackerBridge with clean, scalable architecture.
 """
-
 import logging
-from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
+from typing import List, Dict, Tuple, Optional, Any, Union
 
-from tracker_modules import tracker_registry, BaseTracker, TrackerMetadata, TrackerResult
-from tracker_modules.base_tracker import TrackerError, TrackerInitializationError, TrackerProcessingError
+from config.tracker_discovery import get_tracker_discovery
+from tracker_modules import tracker_registry
+from funscript.dual_axis_funscript import DualAxisFunscript
 
 
 class TrackerManager:
     """
-    Manager for the modular tracker system.
-    
-    This class provides the same interface as the original ROITracker but
-    delegates to pluggable tracker implementations. It handles:
-    - Tracker discovery and selection
-    - Tracker lifecycle management
-    - Unified API for the application
-    - Error handling and fallback
+    Native modular tracker manager with direct instantiation.
+    No bridge layers - direct communication between GUI and trackers.
     """
     
-    def __init__(self, app_instance, **kwargs):
-        """
-        Initialize the tracker manager.
+    def __init__(self, app_logic_instance: Optional[Any], tracker_model_path: str):
+        self.app = app_logic_instance
+        self.tracker_model_path = tracker_model_path
         
-        Args:
-            app_instance: Main application instance
-            **kwargs: Additional initialization parameters
-        """
-        self.app = app_instance
-        self.logger = logging.getLogger("TrackerManager")
+        # Set up logger
+        if app_logic_instance and hasattr(app_logic_instance, 'logger'):
+            self.logger = app_logic_instance.logger
+        else:
+            self.logger = logging.getLogger('NativeTrackerManager')
+            
+        # Current tracker instance and metadata
+        self._current_tracker = None
+        self._current_mode = None
+        self._tracker_info = None
+        self._discovery = get_tracker_discovery()
         
-        # Current tracker state
-        self.current_tracker: Optional[BaseTracker] = None
-        self.current_tracker_name: Optional[str] = None
+        # Create funscript instance for accumulating tracking data
+        self.funscript = DualAxisFunscript(logger=self.logger)
         
-        # Compatibility properties with original ROITracker
+        # Tracking state
         self.tracking_active = False
-        self.show_masks = kwargs.get('show_masks', True)
-        self.show_roi = kwargs.get('show_roi', True)
+        self.current_fps = 0.0
         
-        # Default tracker (can be overridden by settings)
-        self.default_tracker_name = kwargs.get('default_tracker', 'oscillation_experimental_2')
+        # Pending configurations (applied when tracker is instantiated)
+        self._pending_axis_A = None
+        self._pending_axis_B = None
+        self._pending_user_roi = None
+        self._pending_user_point = None
         
-        self.logger.info(f"TrackerManager initialized with {len(tracker_registry.get_available_names())} available trackers")
+        # UI visualization state (for GUI compatibility)
+        self.show_all_boxes = False
+        self.show_flow = False
+        self.show_stats = False
+        self.show_funscript_preview = False
+        self.show_masks = False
+        self.show_roi = False
+        self.show_grid_blocks = False
         
-        # Report any discovery errors
-        errors = tracker_registry.get_discovery_errors()
-        if errors:
-            self.logger.warning(f"Tracker discovery errors: {len(errors)}")
-            for error in errors:
-                self.logger.debug(f"Discovery error: {error}")
-    
-    def set_tracking_mode(self, mode: str) -> bool:
-        """
-        Set the tracking mode (for compatibility with existing code).
+        # Current ROI for visualization overlay
+        self.roi = None
         
-        This method maps legacy mode strings to tracker names and switches
-        to the appropriate tracker implementation.
+        # Additional GUI compatibility attributes that were in the old bridge
+        self.oscillation_area_fixed = None  # Should be None or (x, y, w, h) tuple
+        self.user_roi_fixed = None  # Should be None or (x, y, w, h) tuple
+        self.main_interaction_class = None
+        self.confidence_threshold = 0.7
+        self.roi_padding = 50
+        self.roi_update_interval = 10
+        self.roi_smoothing_factor = 0.1
+        self.max_frames_for_roi_persistence = 30
+        self.use_sparse_flow = False
+        self.sensitivity = 1.0
+        self.base_amplification_factor = 1.0
+        self.class_specific_amplification_multipliers = {}
+        self.flow_history_window_smooth = 10
+        self.y_offset = 0  # Y-axis offset for positioning
+        self.x_offset = 0  # X-axis offset for positioning  
+        self.output_delay_frames = 0  # Frame delay compensation
+        self.current_video_fps_for_delay = 30.0  # FPS for delay calculations
+        self.internal_frame_counter = 0  # Frame counter for processing
         
-        Args:
-            mode: Legacy mode string (e.g., "OSCILLATION_DETECTOR")
+        # Additional properties that modular trackers might expect
+        self.oscillation_history = {}  # Dictionary for oscillation trackers
+        self.user_roi_current_flow_vector = (0.0, 0.0)  # For user ROI trackers
+        self.user_roi_initial_point_relative = None
+        self.user_roi_tracked_point_relative = None
         
-        Returns:
-            bool: True if mode was set successfully
-        """
-        # Map legacy mode strings to tracker names
-        mode_mapping = {
-            "OSCILLATION_DETECTOR": "oscillation_experimental",
-            "OSCILLATION_DETECTOR_LEGACY": "oscillation_legacy", 
-            "OSCILLATION_DETECTOR_EXPERIMENTAL_2": "oscillation_experimental_2",
-            "YOLO_ROI": "yolo_roi",
-            "USER_FIXED_ROI": "user_roi"
-        }
+        # More oscillation tracker properties
+        self.oscillation_cell_persistence = {}  # Dictionary for cell persistence
+        self._gray_full_buffer = None  # Gray frame buffer
+        self.prev_gray = None  # Previous gray frame
+        self.prev_gray_oscillation = None  # Previous gray frame for oscillation detection
+        self.grid_size = (8, 8)  # Grid size for oscillation detection
+        self.oscillation_grid_size = 8  # Integer for compatibility
+        self.oscillation_threshold = 0.5  # Oscillation detection threshold
+        self.initialized = False  # Tracker initialization status
         
-        tracker_name = mode_mapping.get(mode)
-        if not tracker_name:
-            self.logger.error(f"Unknown tracking mode: {mode}")
-            return False
-        
-        return self.set_tracker(tracker_name)
-    
-    def set_tracker(self, tracker_name: str, **settings) -> bool:
-        """
-        Switch to a different tracker implementation.
-        
-        Args:
-            tracker_name: Name of the tracker to switch to
-            **settings: Additional settings to pass to the tracker
-        
-        Returns:
-            bool: True if tracker was set successfully
-        """
-        if tracker_name == self.current_tracker_name:
-            self.logger.debug(f"Already using tracker: {tracker_name}")
-            return True
-        
-        # Validate tracker exists
-        if not tracker_registry.get_tracker(tracker_name):
-            self.logger.error(f"Tracker not found: {tracker_name}")
-            return False
-        
-        # Stop current tracker if running
-        if self.current_tracker and self.tracking_active:
-            self.stop_tracking()
-        
-        # Cleanup previous tracker
-        if self.current_tracker:
-            self.logger.debug(f"Cleaning up previous tracker: {self.current_tracker_name}")
-            try:
-                self.current_tracker.cleanup()
-            except Exception as e:
-                self.logger.warning(f"Error during tracker cleanup: {e}")
-        
-        # Create and initialize new tracker
+        self.logger.info("TrackerManager initialized - Direct modular tracker interface")
+
+    def set_tracking_mode(self, mode_name: str) -> bool:
+        """Set tracking mode with direct tracker instantiation."""
         try:
-            new_tracker = tracker_registry.create_tracker(tracker_name)
-            if not new_tracker:
-                raise TrackerInitializationError(f"Failed to create tracker instance: {tracker_name}")
+            if mode_name == self._current_mode and self._current_tracker:
+                self.logger.debug(f"Already using tracker mode: {mode_name}")
+                return True
+                
+            # Clean up previous tracker
+            self._cleanup_current_tracker()
             
-            if not new_tracker.initialize(self.app, **settings):
-                raise TrackerInitializationError(f"Tracker initialization failed: {tracker_name}")
+            # Get tracker info and class
+            tracker_info = self._discovery.get_tracker_info(mode_name)
+            if not tracker_info:
+                self.logger.error(f"Unknown tracker mode: {mode_name}")
+                return False
+                
+            tracker_class = tracker_registry.get_tracker(mode_name)
+            if not tracker_class:
+                self.logger.error(f"Could not load tracker class for: {mode_name}")
+                return False
+                
+            # Direct instantiation - no bridge layer
+            self._current_tracker = tracker_class()
+            self._current_mode = mode_name
+            self._tracker_info = tracker_info
             
-            self.current_tracker = new_tracker
-            self.current_tracker_name = tracker_name
+            # Set up tracker with app and model path
+            self._setup_tracker_environment()
             
-            metadata = tracker_registry.get_metadata(tracker_name)
-            self.logger.info(f"Switched to tracker: {metadata.display_name if metadata else tracker_name}")
+            # Initialize tracker
+            if not self._initialize_tracker():
+                return False
+                
+            # Apply any pending configurations
+            self._apply_pending_configurations()
             
-            # Clear any overlays when switching trackers
-            if hasattr(self.app, 'clear_all_overlays_and_ui_drawings'):
-                self.app.clear_all_overlays_and_ui_drawings()
-            
+            self.logger.info(f"Native tracker instantiated: {mode_name} ({tracker_info.display_name})")
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to switch to tracker {tracker_name}: {e}")
-            self.current_tracker = None
-            self.current_tracker_name = None
+            self.logger.error(f"Failed to set tracking mode {mode_name}: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-    
+
+    def start_tracking(self) -> bool:
+        """Start tracking with direct tracker call."""
+        if not self._current_tracker:
+            self.logger.error("No tracker set - call set_tracking_mode() first")
+            return False
+            
+        try:
+            self.tracking_active = True
+            if hasattr(self._current_tracker, 'start_tracking'):
+                result = self._current_tracker.start_tracking()
+                # Handle different return types
+                return result if isinstance(result, bool) else True
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to start tracking: {e}")
+            self.tracking_active = False
+            return False
+
+    def stop_tracking(self):
+        """Stop tracking with direct tracker call."""
+        if not self._current_tracker:
+            return
+            
+        try:
+            self.tracking_active = False
+            if hasattr(self._current_tracker, 'stop_tracking'):
+                self._current_tracker.stop_tracking()
+            elif hasattr(self._current_tracker, 'cleanup'):
+                self._current_tracker.cleanup()
+        except Exception as e:
+            self.logger.error(f"Failed to stop tracking: {e}")
+
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, 
                      frame_index: Optional[int] = None, 
                      min_write_frame_id: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
-        """
-        Process a frame using the current tracker.
-        
-        This method maintains compatibility with the original ROITracker interface.
-        
-        Args:
-            frame: Input video frame
-            frame_time_ms: Frame timestamp in milliseconds
-            frame_index: Optional frame index
-            min_write_frame_id: Optional minimum frame ID for writing (unused)
-        
-        Returns:
-            Tuple[np.ndarray, Optional[List[Dict]]]: Processed frame and action log
-        """
-        if not self.current_tracker:
-            # No tracker selected - return frame unchanged
-            self.logger.debug("No tracker selected, returning frame unchanged")
+        """Process frame with direct tracker call."""
+        if not self._current_tracker:
+            self.logger.error("No tracker set for process_frame")
             return frame, None
-        
+            
         try:
-            result = self.current_tracker.process_frame(frame, frame_time_ms, frame_index)
+            # Ensure frame is writable for OpenCV operations
+            if not frame.flags.writeable:
+                frame = frame.copy()
+                
+            # Direct call to modular tracker
+            result = self._current_tracker.process_frame(frame, frame_time_ms, frame_index)
             
-            if not isinstance(result, TrackerResult):
-                raise TrackerProcessingError("Tracker must return TrackerResult instance")
+            # Handle TrackerResult object or tuple format
+            processed_frame, action_log = self._extract_result_data(result, frame)
             
-            # Update status if provided
-            if result.status_message:
-                self.logger.debug(f"Tracker status: {result.status_message}")
+            # Add actions to funscript
+            self._add_actions_to_funscript(action_log)
             
-            return result.processed_frame, result.action_log
+            # Update visualization state
+            self._update_visualization_state()
+            
+            return processed_frame, action_log
             
         except Exception as e:
-            self.logger.error(f"Frame processing error in {self.current_tracker_name}: {e}")
-            # Return original frame on error to prevent crash
+            self.logger.error(f"Error in process_frame with tracker {self._current_mode}: {e}")
             return frame, None
-    
-    def start_tracking(self) -> bool:
-        """
-        Start tracking with the current tracker.
-        
-        Returns:
-            bool: True if tracking started successfully
-        """
-        if not self.current_tracker:
-            self.logger.error("Cannot start tracking: no tracker selected")
-            return False
-        
+
+    def process_frame_for_oscillation(self, frame: np.ndarray, frame_time_ms: int, 
+                                    frame_index: Optional[int] = None) -> Tuple[np.ndarray, Optional[List[Dict]]]:
+        """Process frame for oscillation detection - delegates to current tracker."""
+        if not self._current_tracker:
+            self.logger.error("No tracker set - call set_tracking_mode() first")
+            return frame, None
+            
         try:
-            if self.current_tracker.start_tracking():
-                self.tracking_active = True
-                metadata = tracker_registry.get_metadata(self.current_tracker_name)
-                self.logger.info(f"Started tracking with: {metadata.display_name if metadata else self.current_tracker_name}")
-                return True
+            # Ensure frame is writable for OpenCV operations
+            if not frame.flags.writeable:
+                frame = frame.copy()
+            
+            # Try to use the tracker's process_frame method
+            result = self._current_tracker.process_frame(frame, frame_time_ms, frame_index)
+            
+            # Handle TrackerResult object or tuple format
+            processed_frame, action_log = self._extract_result_data(result, frame)
+            
+            # For oscillation trackers, we need to sample positions periodically
+            if 'oscillation' in self._current_mode.lower():
+                # Oscillation trackers maintain continuous position, sample it
+                if hasattr(self._current_tracker, 'oscillation_funscript_pos'):
+                    position = self._current_tracker.oscillation_funscript_pos
+                    
+                    # Only add action if position changed or enough time has passed
+                    last_action = self.funscript.primary_actions[-1] if self.funscript.primary_actions else None
+                    add_action = False
+                    
+                    if last_action is None:
+                        # First action
+                        add_action = True
+                    elif position != last_action['pos']:
+                        # Position changed
+                        add_action = True
+                    elif frame_time_ms - last_action['at'] >= 100:
+                        # At least 100ms since last action (10 Hz sampling)
+                        add_action = True
+                    
+                    if add_action and self.funscript and position is not None:
+                        self.funscript.add_action(frame_time_ms, position)
+                        # Create action_log for compatibility
+                        action_log = [{'at': frame_time_ms, 'pos': position}]
             else:
-                self.logger.error("Tracker failed to start")
-                return False
+                # Regular trackers use action_log
+                self._add_actions_to_funscript(action_log)
+            
+            return processed_frame, action_log
                 
         except Exception as e:
-            self.logger.error(f"Error starting tracker: {e}")
-            return False
-    
-    def stop_tracking(self) -> bool:
-        """
-        Stop tracking with the current tracker.
-        
-        Returns:
-            bool: True if tracking stopped successfully
-        """
-        if not self.current_tracker:
-            self.logger.debug("No tracker to stop")
-            return True
-        
-        try:
-            result = self.current_tracker.stop_tracking()
-            self.tracking_active = False
-            self.logger.info("Tracking stopped")
-            return result
+            self.logger.error(f"Error in process_frame_for_oscillation: {e}")
+            return frame, None
+
+    def reset(self, reason: Optional[str] = None, **kwargs):
+        """Reset tracker with direct call."""
+        if not self._current_tracker:
+            return
             
-        except Exception as e:
-            self.logger.error(f"Error stopping tracker: {e}")
-            self.tracking_active = False
-            return False
-    
-    def list_available_trackers(self, category: Optional[str] = None) -> List[TrackerMetadata]:
-        """
-        Get list of all available trackers for UI display.
-        
-        Args:
-            category: Optional category filter
-        
-        Returns:
-            List[TrackerMetadata]: Available tracker metadata
-        """
-        return tracker_registry.list_trackers(category)
-    
-    def get_current_tracker_info(self) -> Dict[str, Any]:
-        """
-        Get information about the current tracker.
-        
-        Returns:
-            Dict: Current tracker information for UI display
-        """
-        if not self.current_tracker:
-            return {
-                "name": None,
-                "display_name": "No tracker selected",
-                "active": False,
-                "status": "idle"
-            }
-        
-        metadata = tracker_registry.get_metadata(self.current_tracker_name)
-        status_info = self.current_tracker.get_status_info()
-        
-        return {
-            "name": self.current_tracker_name,
-            "display_name": metadata.display_name if metadata else self.current_tracker_name,
-            "active": self.tracking_active,
-            "status": "tracking" if self.tracking_active else "ready",
-            "metadata": metadata,
-            "custom_status": status_info
-        }
-    
-    def set_roi(self, roi: Tuple[int, int, int, int]) -> bool:
-        """
-        Set region of interest for current tracker if supported.
-        
-        Args:
-            roi: Region of interest as (x, y, width, height)
-        
-        Returns:
-            bool: True if ROI was set successfully
-        """
-        if not self.current_tracker:
-            return False
-        
-        return self.current_tracker.set_roi(roi)
-    
-    def cleanup(self):
-        """Clean up all resources."""
-        if self.tracking_active:
-            self.stop_tracking()
-        
-        if self.current_tracker:
-            try:
-                self.current_tracker.cleanup()
-            except Exception as e:
-                self.logger.warning(f"Error during final cleanup: {e}")
-        
-        self.current_tracker = None
-        self.current_tracker_name = None
-        self.logger.info("TrackerManager cleanup complete")
-    
-    # Compatibility properties and methods for existing code
-    @property
-    def tracking_mode(self) -> str:
-        """Get current tracking mode (for compatibility)."""
-        if not self.current_tracker_name:
-            return "NONE"
-        
-        # Map tracker names back to legacy mode strings
-        name_to_mode = {
-            "oscillation_experimental": "OSCILLATION_DETECTOR",
-            "oscillation_legacy": "OSCILLATION_DETECTOR_LEGACY",
-            "oscillation_experimental_2": "OSCILLATION_DETECTOR_EXPERIMENTAL_2",
-            "yolo_roi": "YOLO_ROI",
-            "user_roi": "USER_FIXED_ROI"
-        }
-        
-        return name_to_mode.get(self.current_tracker_name, self.current_tracker_name.upper())
-    
-    def update_oscillation_grid_size(self):
-        """Compatibility method - delegate to current tracker if applicable."""
-        if self.current_tracker and hasattr(self.current_tracker, 'update_oscillation_grid_size'):
-            self.current_tracker.update_oscillation_grid_size()
-    
-    def __del__(self):
-        """Destructor to ensure cleanup."""
         try:
-            self.cleanup()
-        except Exception:
-            pass  # Avoid errors during destruction
+            if hasattr(self._current_tracker, 'reset'):
+                # Try with parameters first, fallback to no parameters
+                try:
+                    self._current_tracker.reset(reason=reason, **kwargs)
+                except TypeError:
+                    self._current_tracker.reset()
+        except Exception as e:
+            self.logger.error(f"Failed to reset tracker: {e}")
+
+    def cleanup(self):
+        """Clean up current tracker and manager state."""
+        self._cleanup_current_tracker()
+        self.funscript = DualAxisFunscript(logger=self.logger)
+        self.tracking_active = False
+    
+    def update_tracker_settings(self, **kwargs) -> bool:
+        """Update current tracker settings dynamically."""
+        if not self._current_tracker:
+            self.logger.debug("No current tracker to update settings")
+            return False
+            
+        if hasattr(self._current_tracker, 'update_settings'):
+            try:
+                result = self._current_tracker.update_settings(**kwargs)
+                if result:
+                    self.logger.debug(f"Tracker settings updated successfully")
+                else:
+                    self.logger.warning("Tracker settings update failed")
+                return result
+            except Exception as e:
+                self.logger.error(f"Error updating tracker settings: {e}")
+                return False
+        else:
+            self.logger.debug(f"Tracker {type(self._current_tracker).__name__} does not support dynamic settings updates")
+            return False
+
+    # Configuration methods with direct tracker interface
+    def set_user_defined_roi_and_point(self, roi_abs_coords: Tuple[int, int, int, int], 
+                                     point_abs_coords_in_frame: Tuple[int, int], 
+                                     current_frame_for_patch: Optional[np.ndarray] = None) -> bool:
+        """Set user-defined ROI and point with direct tracker call."""
+        if self._current_tracker and hasattr(self._current_tracker, 'set_user_defined_roi_and_point'):
+            try:
+                result = self._current_tracker.set_user_defined_roi_and_point(
+                    roi_abs_coords, point_abs_coords_in_frame, current_frame_for_patch
+                )
+                if result:
+                    self.logger.info(f"✅ User ROI set: ROI={roi_abs_coords}, Point={point_abs_coords_in_frame}")
+                    # Sync manager state for GUI compatibility
+                    self.user_roi_fixed = roi_abs_coords
+                    # Calculate relative point in ROI coordinates
+                    x_rel = point_abs_coords_in_frame[0] - roi_abs_coords[0] 
+                    y_rel = point_abs_coords_in_frame[1] - roi_abs_coords[1]
+                    self.user_roi_initial_point_relative = (x_rel, y_rel)
+                    self.user_roi_tracked_point_relative = (x_rel, y_rel)
+                else:
+                    self.logger.warning("❌ Tracker rejected user ROI setting")
+                return result
+            except Exception as e:
+                self.logger.error(f"Error setting user ROI: {e}")
+                return False
+        else:
+            # Store for later application
+            self._pending_user_roi = roi_abs_coords
+            self._pending_user_point = point_abs_coords_in_frame
+            self.logger.info(f"Stored pending user ROI: {roi_abs_coords}, {point_abs_coords_in_frame}")
+            return True
+
+    def set_axis(self, point_a: Tuple[int, int], point_b: Tuple[int, int]) -> bool:
+        """Set axis points with direct tracker call."""
+        if self._current_tracker and hasattr(self._current_tracker, 'set_axis'):
+            try:
+                result = self._current_tracker.set_axis(point_a, point_b)
+                self.logger.info(f"✅ Axis set: A={point_a}, B={point_b}")
+                return result
+            except Exception as e:
+                self.logger.error(f"Error setting axis: {e}")
+                return False
+        else:
+            # Store for later application
+            self._pending_axis_A = point_a
+            self._pending_axis_B = point_b
+            self.logger.info(f"Stored pending axis: A={point_a}, B={point_b}")
+            return True
+
+    def clear_user_defined_roi_and_point(self):
+        """Clear user ROI with direct tracker call."""
+        self._pending_user_roi = None
+        self._pending_user_point = None
+        if self._current_tracker and hasattr(self._current_tracker, 'clear_user_defined_roi_and_point'):
+            self._current_tracker.clear_user_defined_roi_and_point()
+
+    def clear_oscillation_area_and_point(self):
+        """Clear oscillation area with direct tracker call."""
+        self.oscillation_area_fixed = None
+        if self._current_tracker and hasattr(self._current_tracker, 'clear_oscillation_area_and_point'):
+            self._current_tracker.clear_oscillation_area_and_point()
+
+    # Advanced configuration methods
+    def update_dis_flow_config(self, preset=None, finest_scale=None):
+        """Update optical flow configuration."""
+        if self._current_tracker and hasattr(self._current_tracker, 'update_dis_flow_config'):
+            self._current_tracker.update_dis_flow_config(preset=preset, finest_scale=finest_scale)
+
+    def update_oscillation_grid_size(self):
+        """Update oscillation detection grid size."""
+        if self._current_tracker and hasattr(self._current_tracker, 'update_oscillation_grid_size'):
+            self._current_tracker.update_oscillation_grid_size()
+
+    def update_oscillation_sensitivity(self):
+        """Update oscillation detection sensitivity."""
+        if self._current_tracker and hasattr(self._current_tracker, 'update_oscillation_sensitivity'):
+            self._current_tracker.update_oscillation_sensitivity()
+
+    # Getters for current state
+    def get_current_tracker_name(self) -> Optional[str]:
+        """Get current tracker mode name."""
+        return self._current_mode
+
+    def get_current_tracker(self):
+        """Get current tracker instance."""
+        return self._current_tracker
+
+    def get_tracker_info(self):
+        """Get current tracker metadata."""
+        return self._tracker_info
+
+    def is_tracking_active(self) -> bool:
+        """Check if tracking is currently active."""
+        return self.tracking_active and self._current_tracker is not None
+
+    # Private implementation methods
+    def _cleanup_current_tracker(self):
+        """Clean up current tracker instance."""
+        if self._current_tracker and hasattr(self._current_tracker, 'cleanup'):
+            try:
+                self._current_tracker.cleanup()
+            except Exception as e:
+                self.logger.error(f"Error cleaning up tracker: {e}")
+        
+        self._current_tracker = None
+        self._current_mode = None
+        self._tracker_info = None
+
+    def _setup_tracker_environment(self):
+        """Set up tracker environment with app context."""
+        if not self._current_tracker:
+            return
+            
+        # Set essential attributes
+        self._current_tracker.app = self.app
+        self._current_tracker.model_path = self.tracker_model_path
+        self._current_tracker.logger = self.logger
+        
+        # Provide compatibility attributes for trackers
+        self._provide_tracker_compatibility_attributes()
+
+    def _initialize_tracker(self) -> bool:
+        """Initialize tracker with error handling."""
+        if not self._current_tracker:
+            return False
+            
+        try:
+            if hasattr(self._current_tracker, 'initialize'):
+                init_result = self._current_tracker.initialize(self.app)
+                if isinstance(init_result, bool) and not init_result:
+                    self.logger.error(f"Tracker {self._current_mode} initialization failed")
+                    return False
+            return True
+        except Exception as e:
+            self.logger.error(f"Error initializing tracker {self._current_mode}: {e}")
+            return False
+
+    def _apply_pending_configurations(self):
+        """Apply any pending configurations to the tracker."""
+        if not self._current_tracker:
+            return
+            
+        # Apply pending axis settings
+        if self._pending_axis_A is not None and self._pending_axis_B is not None:
+            if hasattr(self._current_tracker, 'set_axis'):
+                try:
+                    result = self._current_tracker.set_axis(self._pending_axis_A, self._pending_axis_B)
+                    self.logger.info(f"Applied pending axis: A={self._pending_axis_A}, B={self._pending_axis_B}, result={result}")
+                except Exception as e:
+                    self.logger.error(f"Error applying pending axis: {e}")
+            self._pending_axis_A = None
+            self._pending_axis_B = None
+        
+        # Apply pending user ROI settings
+        if self._pending_user_roi is not None and self._pending_user_point is not None:
+            if hasattr(self._current_tracker, 'set_user_defined_roi_and_point'):
+                try:
+                    result = self._current_tracker.set_user_defined_roi_and_point(
+                        self._pending_user_roi, self._pending_user_point, None
+                    )
+                    self.logger.info(f"Applied pending user ROI: ROI={self._pending_user_roi}, Point={self._pending_user_point}, result={result}")
+                except Exception as e:
+                    self.logger.error(f"Error applying pending user ROI: {e}")
+            self._pending_user_roi = None
+            self._pending_user_point = None
+
+    def _extract_result_data(self, result, original_frame) -> Tuple[np.ndarray, Optional[List[Dict]]]:
+        """Extract processed frame and action log from tracker result."""
+        # Handle TrackerResult object
+        if hasattr(result, 'processed_frame') and hasattr(result, 'action_log'):
+            return result.processed_frame, result.action_log
+        
+        # Handle tuple format
+        elif isinstance(result, tuple) and len(result) >= 2:
+            processed_frame, action_log = result[0], result[1]
+            return processed_frame, action_log
+        
+        # Handle single frame return
+        elif isinstance(result, np.ndarray):
+            return result, None
+        
+        # Fallback
+        else:
+            self.logger.warning(f"Unexpected tracker result format: {type(result)}")
+            return original_frame, None
+
+    def _add_actions_to_funscript(self, action_log: Optional[List[Dict]]):
+        """Add action log entries to the funscript."""
+        if not action_log or not self.funscript:
+            return
+            
+        try:
+            for action in action_log:
+                if isinstance(action, dict) and 'at' in action and 'pos' in action:
+                    timestamp_ms = action['at']
+                    position = action['pos']
+                    self.funscript.add_action(timestamp_ms, position)
+        except Exception as e:
+            self.logger.error(f"Error adding actions to funscript: {e}")
+
+    def _update_visualization_state(self):
+        """Update visualization state from current tracker."""
+        if not self._current_tracker:
+            return
+            
+        # Update ROI for visualization overlay
+        if hasattr(self._current_tracker, 'roi'):
+            self.roi = getattr(self._current_tracker, 'roi', None)
+        
+        # Update FPS if available
+        if hasattr(self._current_tracker, 'current_fps'):
+            self.current_fps = getattr(self._current_tracker, 'current_fps', 0.0)
+
+    def _provide_tracker_compatibility_attributes(self):
+        """Provide attributes that modular trackers might expect from the old ROITracker."""
+        if not self._current_tracker:
+            return
+            
+        # Copy manager properties to the tracker instance so it can access them
+        # IMPORTANT: Only set attributes that don't already exist to avoid overwriting tracker's own attributes
+        compatibility_attrs = {
+            'oscillation_history': self.oscillation_history,
+            'oscillation_area_fixed': self.oscillation_area_fixed,
+            'oscillation_cell_persistence': self.oscillation_cell_persistence,
+            '_gray_full_buffer': self._gray_full_buffer,
+            'prev_gray': self.prev_gray,
+            'prev_gray_oscillation': self.prev_gray_oscillation,
+            'grid_size': self.grid_size,
+            'oscillation_grid_size': self.oscillation_grid_size,
+            'oscillation_threshold': self.oscillation_threshold,
+            'user_roi_fixed': self.user_roi_fixed,
+            'user_roi_current_flow_vector': self.user_roi_current_flow_vector,
+            'user_roi_initial_point_relative': self.user_roi_initial_point_relative,
+            'user_roi_tracked_point_relative': self.user_roi_tracked_point_relative,
+            'roi': self.roi,
+            'sensitivity': self.sensitivity,
+            'confidence_threshold': self.confidence_threshold,
+            'show_all_boxes': self.show_all_boxes,
+            'show_flow': self.show_flow,
+            'show_stats': self.show_stats,
+            'funscript': self.funscript,
+            'initialized': self.initialized
+        }
+        
+        for attr_name, attr_value in compatibility_attrs.items():
+            # Only set if not already present in the tracker
+            if not hasattr(self._current_tracker, attr_name):
+                setattr(self._current_tracker, attr_name, attr_value)
+            # Special case: for dictionary attributes, only set if they're None or not initialized
+            elif attr_name in ['oscillation_history', 'oscillation_cell_persistence'] and hasattr(self._current_tracker, attr_name):
+                current_val = getattr(self._current_tracker, attr_name)
+                # Only override if the tracker's value is None or not a dict
+                if current_val is None or not isinstance(current_val, dict):
+                    setattr(self._current_tracker, attr_name, attr_value)
+
+
+# Factory function for creating manager instances
+def create_tracker_manager(app_logic_instance: Optional[Any], 
+                          tracker_model_path: str) -> TrackerManager:
+    """Factory function to create tracker manager instances."""
+    return TrackerManager(app_logic_instance, tracker_model_path)

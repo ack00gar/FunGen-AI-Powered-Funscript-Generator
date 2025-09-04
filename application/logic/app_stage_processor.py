@@ -14,6 +14,7 @@ from application.utils.checkpoint_manager import (
     CheckpointManager, ProcessingStage, CheckpointData,
     get_checkpoint_manager, initialize_checkpoint_manager
 )
+from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
 
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
@@ -21,7 +22,7 @@ import detection.cd.stage_3_of_processor as stage3_module
 import detection.cd.stage_3_mixed_processor as stage3_mixed_module
 
 from config import constants
-from config.constants import TrackerMode
+# TrackerMode removed - using dynamic discovery
 from application.utils.stage_output_validator import can_skip_stage2_for_stage3
 from application.utils import VideoSegment
 
@@ -128,7 +129,8 @@ class AppStageProcessor:
         self.logger.info("Stage 1 resume: Restarting with original settings")
         
         # Restore settings and start fresh
-        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        # Use tracker name instead of enum
+        processing_mode = settings.get('processing_mode', 'stage3_optical_flow')
         return self._start_full_analysis_with_settings(processing_mode, settings)
     
     def _resume_stage2(self, checkpoint_data: CheckpointData) -> bool:
@@ -138,7 +140,8 @@ class AppStageProcessor:
         stage_data = checkpoint_data.stage_data
         
         self.logger.info(f"Stage 2 resume: Continuing from {checkpoint_data.progress_percentage:.1f}%")
-        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        # Use tracker name instead of enum
+        processing_mode = settings.get('processing_mode', 'stage3_optical_flow')
         return self._start_full_analysis_with_settings(processing_mode, settings)
     
     def _resume_stage3(self, checkpoint_data: CheckpointData) -> bool:
@@ -148,10 +151,11 @@ class AppStageProcessor:
         stage_data = checkpoint_data.stage_data
         
         self.logger.info(f"Stage 3 resume: Continuing from segment {stage_data.get('current_segment', 0)}")
-        processing_mode = TrackerMode(settings.get('processing_mode', 'OFFLINE_3_STAGE'))
+        # Use tracker name instead of enum
+        processing_mode = settings.get('processing_mode', 'stage3_optical_flow')
         return self._start_full_analysis_with_settings(processing_mode, settings)
     
-    def _start_full_analysis_with_settings(self, processing_mode: "TrackerMode", settings: Dict[str, Any]) -> bool:
+    def _start_full_analysis_with_settings(self, processing_mode: str, settings: Dict[str, Any]) -> bool:
         """Start full analysis with restored settings from checkpoint."""
         try:
             # Restore settings
@@ -197,7 +201,7 @@ class AppStageProcessor:
             progress_percentage = (frame_index / total_frames * 100) if total_frames > 0 else 0
             
             processing_settings = {
-                'processing_mode': getattr(self, 'processing_mode_for_thread', TrackerMode.OFFLINE_3_STAGE).value,
+                'processing_mode': getattr(self, 'processing_mode_for_thread', 'stage3_optical_flow'),
                 'num_producers_override': getattr(self, 'override_producers', None),
                 'num_consumers_override': getattr(self, 'override_consumers', None),
                 'frame_range_override': getattr(self, 'frame_range_override', None),
@@ -514,7 +518,7 @@ class AppStageProcessor:
         }
         self._create_checkpoint_if_needed(ProcessingStage.STAGE_3_FUNSCRIPT_GENERATION,  total_frames_processed_overall, total_frames_to_process_overall, stage_data)
 
-    def start_full_analysis(self, processing_mode: "TrackerMode",
+    def start_full_analysis(self, processing_mode: str,
                             override_producers: Optional[int] = None,
                             override_consumers: Optional[int] = None,
                             completion_event: Optional[threading.Event] = None,
@@ -552,7 +556,7 @@ class AppStageProcessor:
         self.override_producers = override_producers
         self.override_consumers = override_consumers
 
-        selected_mode = self.app.app_state_ui.selected_tracker_mode
+        selected_mode = self.app.app_state_ui.selected_tracker_name
         range_is_active, range_start_frame, range_end_frame = fs_proc.get_effective_scripting_range()
 
         # --- MODIFIED LOGIC TO CHECK FOR BOTH FILES ---
@@ -602,7 +606,7 @@ class AppStageProcessor:
 
         self.reset_stage_status(stages=("stage2", "stage3"))
         self.stage2_status_text = "Queued..."
-        if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]:
+        if self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode):
             self.stage3_status_text = "Queued..."
 
         self.logger.info("Starting Full Analysis sequence...", extra={'status_message': True})
@@ -620,7 +624,9 @@ class AppStageProcessor:
 
         # Always use the tracker mode from the UI state, which is the single source of truth.
         selected_mode = self.processing_mode_for_thread
-        self.logger.info(f"[Thread] Using processing mode: {selected_mode.name}")
+        # Handle both string (new dynamic system) and enum (legacy) modes
+        mode_name = selected_mode if isinstance(selected_mode, str) else selected_mode.name
+        self.logger.info(f"[Thread] Using processing mode: {mode_name}")
 
         try:
             # --- Stage 1 ---
@@ -746,7 +752,7 @@ class AppStageProcessor:
                 except Exception as e:
                     self.logger.error(f"Error determining S2 overlay path: {e}")
 
-            generate_s2_funscript_actions = selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
+            generate_s2_funscript_actions = self._is_stage2_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)
             is_s1_data_source_ranged = (frame_range_for_s1 is not None)
 
             s2_start_time = time.time()
@@ -772,12 +778,12 @@ class AppStageProcessor:
 
             if self.stop_stage_event.is_set() or not stage2_success:
                 self.logger.info("[Thread] Exiting after Stage 2 due to stop event or failure.")
-                if selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED] and "Queued" in self.stage3_status_text:
+                if (self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)) and "Queued" in self.stage3_status_text:
                      self.gui_event_queue.put(("stage3_status_update", "Skipped", "S2 Failed/Aborted"))
                 return
 
             # --- Stage 3 (or Finish) ---
-            if selected_mode == TrackerMode.OFFLINE_2_STAGE:
+            if self._is_stage2_tracker(selected_mode):
                 if stage2_success:
                     packaged_data = {
                         "results_dict": s2_output_data,
@@ -794,7 +800,7 @@ class AppStageProcessor:
                     "video_path": fm.video_path
                 }
                 self.gui_event_queue.put(("analysis_message", completion_payload, None))
-            elif selected_mode == TrackerMode.OFFLINE_3_STAGE or selected_mode == getattr(TrackerMode, 'OFFLINE_3_STAGE_MIXED', TrackerMode.OFFLINE_3_STAGE):
+            elif self._is_stage3_tracker(selected_mode):
                 self.current_analysis_stage = 3
                 segments_objects = s2_output_data.get("segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
@@ -828,7 +834,7 @@ class AppStageProcessor:
 
                 self.logger.info(f"Starting Stage 3 with {preprocessed_path_for_s3}.")
 
-                if selected_mode == getattr(TrackerMode, 'OFFLINE_3_STAGE_MIXED', None):
+                if self._is_mixed_stage3_tracker(selected_mode):
                     s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
                 else:
                     s3_results_dict = self._execute_stage3_optical_flow_module(segments_for_s3, preprocessed_path_for_s3)
@@ -847,7 +853,7 @@ class AppStageProcessor:
                     # Process Stage 3 results immediately
                     self.gui_event_queue.put(("stage3_results_success", packaged_data, None))
 
-            elif selected_mode == TrackerMode.OFFLINE_3_STAGE_MIXED:
+            elif self._is_mixed_stage3_tracker(selected_mode):
                 self.current_analysis_stage = 3
                 segments_objects = s2_output_data.get("segments_objects", [])
                 video_segments_for_gui = s2_output_data.get("video_segments", [])
@@ -951,7 +957,7 @@ class AppStageProcessor:
                 self.stage_completion_event.set()
 
             # Clean up checkpoints on successful completion
-            if stage1_success and stage2_success and (selected_mode == TrackerMode.OFFLINE_2_STAGE or stage3_success):
+            if stage1_success and stage2_success and (self._is_stage2_tracker(selected_mode) or stage3_success):
                 self._cleanup_checkpoints_on_completion()
 
             # Clear the large data map and SQLite path from memory (if not already cleared)
@@ -965,7 +971,7 @@ class AppStageProcessor:
                 
                 # CRITICAL: Never delete database during 3-stage pipeline until Stage 3 completes
                 # Stage 3 depends on the Stage 2 database for processing
-                is_3_stage_pipeline = selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
+                is_3_stage_pipeline = self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)
                 stage3_completed = stage3_success if is_3_stage_pipeline else True
                 
                 if not retain_database and stage3_completed:
@@ -997,7 +1003,7 @@ class AppStageProcessor:
                         retain_database = self.app_settings.get("retain_stage2_database", True)
                         
                         # Use same logic as database cleanup
-                        is_3_stage_pipeline = selected_mode in [TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]
+                        is_3_stage_pipeline = self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode)
                         stage3_completed = stage3_success if is_3_stage_pipeline else True
                         
                         if not retain_database and stage3_completed:
@@ -1103,6 +1109,10 @@ class AppStageProcessor:
                 return {"success": False, "max_fps": 0.0}
             if result_path and os.path.exists(result_path):
                 fm.stage1_output_msgpack_path = result_path
+                # Store preprocessed video path if it was created
+                if self.save_preprocessed_video and os.path.exists(preprocessed_video_path):
+                    fm.preprocessed_video_path = preprocessed_video_path
+                    self.logger.info(f"Preprocessed video saved: {os.path.basename(preprocessed_video_path)}")
                 final_msg = f"S1 Completed. Output: {os.path.basename(result_path)}"
                 self.gui_event_queue.put(("stage1_status_update", final_msg, "Done"))
                 self.gui_event_queue.put(("stage1_progress_update", 1.0, {"message": "Done", "current": 1, "total": 1}))
@@ -1360,28 +1370,42 @@ class AppStageProcessor:
 
             self.app.logger.info(f"Applying 2-Stage results with axis mode: {axis_mode} and target: {target_timeline}.")
 
+            # Only clear and update timelines if we have actions to write
             if axis_mode == "both":
-                # Overwrite both timelines with the new results.
-                fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
-                fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+                # Overwrite both timelines only if there are actions
+                if primary_actions:
+                    fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
+                else:
+                    self.app.logger.warning("No primary actions - Timeline 1 unchanged")
+                
+                if secondary_actions:
+                    fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+                else:
+                    self.app.logger.warning("No secondary actions - Timeline 2 unchanged")
 
             elif axis_mode == "vertical":
-                # Overwrite ONLY the target timeline, leaving the other one completely untouched.
-                if target_timeline == "primary":
-                    self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
-                else:  # Target is secondary
-                    self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+                # Overwrite ONLY the target timeline if there are actions
+                if primary_actions:
+                    if target_timeline == "primary":
+                        self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
+                    else:  # Target is secondary
+                        self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+                else:
+                    self.app.logger.warning(f"No vertical actions - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
 
             elif axis_mode == "horizontal":
-                # Overwrite ONLY the target timeline with the secondary (horizontal) actions.
-                if target_timeline == "primary":
-                    self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
-                else:  # Target is secondary
-                    self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+                # Overwrite ONLY the target timeline if there are actions
+                if secondary_actions:
+                    if target_timeline == "primary":
+                        self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
+                    else:  # Target is secondary
+                        self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+                else:
+                    self.app.logger.warning(f"No horizontal actions - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
 
                 self.logger.info("Updating chapters with Stage 2 analysis results.")
                 fs_proc.video_chapters.clear()
@@ -1626,7 +1650,7 @@ class AppStageProcessor:
             "roi_update_interval": self.app_settings.get('s3_roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
             "roi_smoothing_factor": self.app_settings.get('tracker_roi_smoothing_factor', constants.DEFAULT_ROI_SMOOTHING_FACTOR),
             "dis_flow_preset": self.app_settings.get('tracker_dis_flow_preset', "ULTRAFAST"),
-            "target_size_preprocess": self.app.tracker.target_size_preprocess if self.app.tracker else (640, 640),
+            "target_size_preprocess": getattr(self.app.tracker, 'target_size_preprocess', (640, 640)) if self.app.tracker else (640, 640),
             "flow_history_window_smooth": self.app_settings.get('tracker_flow_history_window_smooth', 3),
             "adaptive_flow_scale": self.app_settings.get('tracker_adaptive_flow_scale', True),
             "use_sparse_flow": self.app_settings.get('tracker_use_sparse_flow', False),
@@ -1653,8 +1677,8 @@ class AppStageProcessor:
             "yolo_pose_model_path": self.app.yolo_pose_model_path,
             "yolo_input_size": self.app.yolo_input_size,
             "video_fps": video_fps_s3,
-            "output_delay_frames": self.app.tracker.output_delay_frames if self.app.tracker else 0,
-            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10 + (self.app.tracker.output_delay_frames if self.app.tracker else 0)),
+            "output_delay_frames": getattr(self.app.tracker, 'output_delay_frames', 0) if self.app.tracker else 0,
+            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10 + (getattr(self.app.tracker, 'output_delay_frames', 0) if self.app.tracker else 0)),
             "roi_narrow_factor_hjbj": self.app_settings.get("roi_narrow_factor_hjbj", constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ),
             "min_roi_dim_hjbj": self.app_settings.get("min_roi_dim_hjbj", constants.DEFAULT_MIN_ROI_DIM_HJBJ),
             "tracking_axis_mode": self.app.tracking_axis_mode,
@@ -1721,11 +1745,26 @@ class AppStageProcessor:
                 start_ms = fs_proc.frame_to_ms(range_start_f if range_start_f is not None else 0)
                 end_ms = fs_proc.frame_to_ms(range_end_f_effective) if range_end_f_effective is not None else video_duration_ms_s3
                 op_desc_s3_range = f"{op_desc_s3} (Range F{range_start_f or 'Start'}-{range_end_f_effective if range_end_f_effective is not None else 'End'})"
-                fs_proc.clear_actions_in_range_and_inject_new(1, final_s3_primary_actions, start_ms, end_ms, op_desc_s3_range + " (T1)")
-                fs_proc.clear_actions_in_range_and_inject_new(2, final_s3_secondary_actions, start_ms, end_ms, op_desc_s3_range + " (T2)")
+                if final_s3_primary_actions:
+                    fs_proc.clear_actions_in_range_and_inject_new(1, final_s3_primary_actions, start_ms, end_ms, op_desc_s3_range + " (T1)")
+                else:
+                    self.logger.warning("No primary actions from Stage 3 - Timeline 1 range unchanged")
+                
+                if final_s3_secondary_actions:
+                    fs_proc.clear_actions_in_range_and_inject_new(2, final_s3_secondary_actions, start_ms, end_ms, op_desc_s3_range + " (T2)")
+                else:
+                    self.logger.info("No secondary actions from Stage 3 - Timeline 2 range unchanged")
             else:
-                fs_proc.clear_timeline_history_and_set_new_baseline(1, final_s3_primary_actions, op_desc_s3 + " (T1)")
-                fs_proc.clear_timeline_history_and_set_new_baseline(2, final_s3_secondary_actions, op_desc_s3 + " (T2)")
+                # Only update timelines if there are actions
+                if final_s3_primary_actions:
+                    fs_proc.clear_timeline_history_and_set_new_baseline(1, final_s3_primary_actions, op_desc_s3 + " (T1)")
+                else:
+                    self.logger.warning("No primary actions from Stage 3 - Timeline 1 unchanged")
+                
+                if final_s3_secondary_actions:
+                    fs_proc.clear_timeline_history_and_set_new_baseline(2, final_s3_secondary_actions, op_desc_s3 + " (T2)")
+                else:
+                    self.logger.info("No secondary actions from Stage 3 - Timeline 2 unchanged")
 
             self.gui_event_queue.put(("stage3_status_update", "Stage 3 Completed.", "Done"))
             self.app.project_manager.project_dirty = True
@@ -1945,28 +1984,44 @@ class AppStageProcessor:
 
                     self.app.logger.info(f"Applying 2-Stage results with axis mode: {axis_mode} and target: {target_timeline}.")
 
+                    # Only clear and update timelines if we have actions to write
                     if axis_mode == "both":
-                        # Overwrite both timelines with the new results.
-                        fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
-                        fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+                        # Overwrite both timelines with the new results only if there are actions
+                        if primary_actions:
+                            fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
+                            self.app.logger.info(f"Applied {len(primary_actions)} primary actions to Timeline 1")
+                        else:
+                            self.app.logger.warning("No primary actions from Stage 2 - Timeline 1 unchanged")
+                        
+                        if secondary_actions:
+                            fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+                            self.app.logger.info(f"Applied {len(secondary_actions)} secondary actions to Timeline 2")
+                        else:
+                            self.app.logger.warning("No secondary actions from Stage 2 - Timeline 2 unchanged")
 
                     elif axis_mode == "vertical":
-                        # Overwrite ONLY the target timeline, leaving the other one completely untouched.
-                        if target_timeline == "primary":
-                            self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
-                            fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
-                        else:  # Target is secondary
-                            self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
-                            fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+                        # Overwrite ONLY the target timeline if there are actions
+                        if primary_actions:
+                            if target_timeline == "primary":
+                                self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
+                                fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
+                            else:  # Target is secondary
+                                self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
+                                fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+                        else:
+                            self.app.logger.warning(f"No vertical actions from Stage 2 - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
 
                     elif axis_mode == "horizontal":
-                        # Overwrite ONLY the target timeline with the secondary (horizontal) actions.
-                        if target_timeline == "primary":
-                            self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
-                            fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
-                        else:  # Target is secondary
-                            self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
-                            fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+                        # Overwrite ONLY the target timeline with the secondary (horizontal) actions if available
+                        if secondary_actions:
+                            if target_timeline == "primary":
+                                self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
+                                fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
+                            else:  # Target is secondary
+                                self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
+                                fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+                        else:
+                            self.app.logger.warning(f"No horizontal actions from Stage 2 - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
 
                     self.stage2_status_text = "S2 Completed. Results Processed."
                     self.app.project_manager.project_dirty = True
@@ -1999,6 +2054,11 @@ class AppStageProcessor:
                         self.logger.warning(f"stage3_results_success received non-dict data: {type(packaged_data)}")
                         continue
                     results_dict = packaged_data.get("results_dict", {})
+                    
+                    # Validate results_dict is actually a dictionary
+                    if not isinstance(results_dict, dict):
+                        self.logger.error(f"Stage 3 results_dict is not a dictionary: {type(results_dict)} = {results_dict}")
+                        continue
                     
                     # Extract funscript object from Stage 3 results
                     funscript_obj = results_dict.get("funscript")
@@ -2037,18 +2097,33 @@ class AppStageProcessor:
                         
                         self.app.logger.info(f"Applying Stage 3 results with axis mode: {axis_mode} and target: {target_timeline}")
                         
+                        # Only clear and update timelines if we have actions to write
                         if axis_mode == "both":
-                            # Write to both timelines
-                            fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 3 (Primary)")
+                            # Write to both timelines only if there are actions
+                            if primary_actions:
+                                fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 3 (Primary)")
+                                self.logger.info(f"Applied {len(primary_actions)} primary actions to Timeline 1")
+                            else:
+                                self.logger.warning("No primary actions from Stage 3 - Timeline 1 unchanged")
+                            
                             if secondary_actions:
                                 fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 3 (Secondary)")
+                                self.logger.info(f"Applied {len(secondary_actions)} secondary actions to Timeline 2")
+                            else:
+                                self.logger.info("No secondary actions from Stage 3 - Timeline 2 unchanged")
+                                
                         elif axis_mode in ["vertical", "horizontal"]:
-                            # Write to target timeline only
+                            # Write to target timeline only if there are actions
                             actions_to_use = primary_actions  # Stage 3 typically produces primary actions
-                            if target_timeline == "primary":
-                                fs_proc.clear_timeline_history_and_set_new_baseline(1, actions_to_use, "Stage 3")
-                            else:  # secondary
-                                fs_proc.clear_timeline_history_and_set_new_baseline(2, actions_to_use, "Stage 3")
+                            if actions_to_use:
+                                if target_timeline == "primary":
+                                    fs_proc.clear_timeline_history_and_set_new_baseline(1, actions_to_use, "Stage 3")
+                                    self.logger.info(f"Applied {len(actions_to_use)} actions to Timeline 1")
+                                else:  # secondary
+                                    fs_proc.clear_timeline_history_and_set_new_baseline(2, actions_to_use, "Stage 3")
+                                    self.logger.info(f"Applied {len(actions_to_use)} actions to Timeline 2")
+                            else:
+                                self.logger.warning(f"No actions from Stage 3 - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
                         
                         self.stage3_status_text = "S3 Completed. Results Processed."
                         self.app.project_manager.project_dirty = True
@@ -2153,10 +2228,31 @@ class AppStageProcessor:
         self.stage_thread = None
 
     # REFACTORED replaces duplicate code in __init__ and deals with edge cases (ie 'None' values)
+    def _is_stage3_tracker(self, tracker_name):
+        """Check if tracker is a 3-stage offline tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_stage3_tracker(tracker_name)
+    
+    def _is_mixed_stage3_tracker(self, tracker_name):
+        """Check if tracker is a mixed 3-stage offline tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_mixed_stage3_tracker(tracker_name)
+    
+    def _is_stage2_tracker(self, tracker_name):
+        """Check if tracker is a 2-stage offline tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_stage2_tracker(tracker_name)
+    
+    def _is_offline_tracker(self, tracker_name):
+        """Check if tracker is any offline tracker."""
+        tracker_ui = get_dynamic_tracker_ui()
+        return tracker_ui.is_offline_tracker(tracker_name)
+
     def update_settings_from_app(self):
         prod_usr = self.app_settings.get("num_producers_stage1")
         cons_usr = self.app_settings.get("num_consumers_stage1")
-        self.save_preprocessed_video = self.app_settings.get("save_preprocessed_video", False)
+        # Always save preprocessed video for optical flow recovery in Stage 2
+        self.save_preprocessed_video = self.app_settings.get("save_preprocessed_video", True)
 
         if not prod_usr or not cons_usr:
             cpu_cores = os.cpu_count() or 4

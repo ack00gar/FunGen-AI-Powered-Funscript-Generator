@@ -84,6 +84,16 @@ class ProcessingTask:
             self.kwargs = {}
         if self.created_time is None:
             self.created_time = time.time()
+    
+    def __lt__(self, other):
+        """Enable comparison for priority queue sorting."""
+        if not isinstance(other, ProcessingTask):
+            return NotImplemented
+        # First compare by priority value (lower number = higher priority)
+        if self.priority.value != other.priority.value:
+            return self.priority.value > other.priority.value
+        # Then by creation time (older tasks first for same priority)
+        return self.created_time < other.created_time
 
 
 class ProcessingThreadManager:

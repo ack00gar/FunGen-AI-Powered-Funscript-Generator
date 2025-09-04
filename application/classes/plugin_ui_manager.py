@@ -48,11 +48,16 @@ class PluginUIManager:
     - Managing plugin state and parameters
     """
     
+    # Class-level flag to track global plugin initialization
+    _plugins_loaded = False
+    _global_plugin_count = 0
+    
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.logger = logger or logging.getLogger('PluginUIManager')
         self.plugin_contexts: Dict[str, PluginUIContext] = {}
         self.active_preview_plugin: Optional[str] = None
         self._plugin_registry = None
+        self.preview_renderer = None  # Will be set by timeline
     
     def initialize(self):
         """Initialize the plugin system and discover available plugins."""
@@ -62,14 +67,44 @@ class PluginUIManager:
             
             self._plugin_registry = plugin_registry
             
-            # Load all available plugins
-            builtin_results = plugin_loader.load_builtin_plugins()
-            user_results = plugin_loader.load_user_plugins()
+            # Check if plugins are already loaded globally
+            if not PluginUIManager._plugins_loaded:
+                # Load all available plugins only once
+                builtin_results = plugin_loader.load_builtin_plugins()
+                user_results = plugin_loader.load_user_plugins()
+                
+                # Count successful loads
+                builtin_success = sum(builtin_results.values()) if builtin_results else 0
+                user_success = sum(user_results.values()) if user_results else 0
+                total_attempted = len(builtin_results) + len(user_results)
+                total_success = builtin_success + user_success
+                
+                # Store global count and mark as loaded
+                PluginUIManager._global_plugin_count = total_success
+                PluginUIManager._plugins_loaded = True
+                
+                # Log concise summary only on first load
+                if total_success > 0:
+                    summary_parts = []
+                    if builtin_success > 0:
+                        summary_parts.append(f"{builtin_success} built-in")
+                    if user_success > 0:
+                        summary_parts.append(f"{user_success} user")
+                    
+                    summary = " + ".join(summary_parts)
+                    self.logger.info(f"Plugin system ready: {total_success} plugins loaded ({summary})")
+                else:
+                    self.logger.info("Plugin system ready: No plugins loaded")
+                    
+                if total_attempted > total_success:
+                    failed_count = total_attempted - total_success
+                    self.logger.warning(f"{failed_count} plugins failed to load")
+            else:
+                # Plugins already loaded, just log a brief message
+                self.logger.debug(f"Plugin system already initialized ({PluginUIManager._global_plugin_count} plugins)")
             
-            # Create UI contexts for all loaded plugins
+            # Create UI contexts for all loaded plugins (each instance needs its own contexts)
             self._create_plugin_contexts()
-            
-            self.logger.info(f"Initialized plugin UI manager with {len(self.plugin_contexts)} plugins")
             
         except Exception as e:
             self.logger.error(f"Failed to initialize plugin UI manager: {e}")
@@ -172,9 +207,15 @@ class PluginUIManager:
         context = self.plugin_contexts.get(plugin_name)
         return context.state if context else PluginUIState.CLOSED
     
-    def generate_preview(self, plugin_name: str, funscript_obj, axis: str = 'primary') -> bool:
+    def generate_preview(self, plugin_name: str, funscript_obj, axis: str = 'primary', selected_indices: Optional[List[int]] = None) -> bool:
         """
         Generate a preview for the specified plugin.
+        
+        Args:
+            plugin_name: Name of the plugin
+            funscript_obj: Funscript object to preview on
+            axis: Axis to preview ('primary', 'secondary', or 'both')
+            selected_indices: Optional list of selected action indices for "apply to selection"
         
         Returns:
             True if preview was generated successfully, False otherwise
@@ -188,43 +229,93 @@ class PluginUIManager:
             # Clear any previous error
             context.error_message = None
             
-            # Create a copy for preview
-            temp_funscript = copy.deepcopy(funscript_obj)
-            
-            # Validate parameters
+            # Validate parameters and add selection info if applicable
             validated_params = context.plugin_instance.validate_parameters(context.parameters)
+            if selected_indices:
+                validated_params['selected_indices'] = selected_indices
             
-            # Apply transformation
-            result = context.plugin_instance.transform(temp_funscript, axis, **validated_params)
+            # Check if plugin supports new preview generation method
+            if hasattr(context.plugin_instance, 'generate_preview'):
+                # Use the new preview generation method
+                preview_data = context.plugin_instance.generate_preview(funscript_obj, axis, **validated_params)
+                
+                if preview_data and not preview_data.get('error'):
+                    # Send preview data to renderer if available
+                    if self.preview_renderer:
+                        self.preview_renderer.set_preview_data(plugin_name, preview_data)
+                    
+                    context.state = PluginUIState.PREVIEWING
+                    self.active_preview_plugin = plugin_name
+                    
+                    self.logger.debug(f"Generated preview for plugin '{plugin_name}'")
+                    return True
+                else:
+                    error_msg = preview_data.get('error', 'Failed to generate preview') if preview_data else 'Failed to generate preview'
+                    context.error_message = error_msg
+                    self.logger.warning(f"Plugin '{plugin_name}' preview generation failed: {error_msg}")
+                    return False
             
-            if result:
-                # Extract the relevant actions
-                if axis == 'primary':
-                    context.preview_actions = result.primary_actions
-                elif axis == 'secondary':
-                    context.preview_actions = result.secondary_actions
-                else:  # both
-                    # For 'both', we'll preview the primary axis
-                    context.preview_actions = result.primary_actions
-                
-                context.state = PluginUIState.PREVIEWING
-                self.active_preview_plugin = plugin_name
-                
-                self.logger.debug(f"Generated preview for plugin '{plugin_name}' with {len(context.preview_actions or [])} actions")
-                return True
             else:
-                context.error_message = "Plugin failed to generate result"
-                self.logger.warning(f"Plugin '{plugin_name}' failed to generate preview")
-                return False
+                # Fallback to old preview method (creating a copy and transforming)
+                # Create a copy for preview
+                temp_funscript = copy.deepcopy(funscript_obj)
+                
+                # Store original actions for comparison
+                if axis == 'primary':
+                    original_actions = list(temp_funscript.primary_actions)
+                elif axis == 'secondary':
+                    original_actions = list(temp_funscript.secondary_actions)
+                else:  # both - preview primary
+                    original_actions = list(temp_funscript.primary_actions)
+                
+                # Apply transformation
+                result = context.plugin_instance.transform(temp_funscript, axis, **validated_params)
+                
+                # Check if transform modified in-place (result is None) or returned new funscript
+                final_funscript = result if result else temp_funscript
+                
+                # Extract the relevant actions after transformation
+                if axis == 'primary':
+                    transformed_actions = final_funscript.primary_actions
+                elif axis == 'secondary':
+                    transformed_actions = final_funscript.secondary_actions
+                else:  # both
+                    transformed_actions = final_funscript.primary_actions
+                
+                # Create preview data showing the changes
+                preview_data = self._create_fallback_preview_data(
+                    original_actions, transformed_actions, plugin_name, selected_indices
+                )
+                
+                if preview_data:
+                    # Send to preview renderer
+                    if self.preview_renderer:
+                        self.preview_renderer.set_preview_data(plugin_name, preview_data)
+                    
+                    context.state = PluginUIState.PREVIEWING
+                    self.active_preview_plugin = plugin_name
+                    
+                    self.logger.debug(f"Generated fallback preview for plugin '{plugin_name}'")
+                    return True
+                else:
+                    context.error_message = "Plugin failed to generate result"
+                    self.logger.warning(f"Plugin '{plugin_name}' failed to generate preview")
+                    return False
                 
         except Exception as e:
             context.error_message = str(e)
             self.logger.error(f"Error generating preview for plugin '{plugin_name}': {e}")
             return False
     
-    def apply_plugin(self, plugin_name: str, funscript_obj, axis: str = 'primary') -> bool:
+    def apply_plugin(self, plugin_name: str, funscript_obj, axis: str = 'primary', selected_indices: Optional[List[int]] = None) -> bool:
         """
         Apply the specified plugin to the funscript.
+        
+        Args:
+            plugin_name: Name of the plugin
+            funscript_obj: Funscript object to apply plugin to
+            axis: Axis to apply to ('primary', 'secondary', or 'both')
+            selected_indices: Optional list of selected action indices for "apply to selection"
         
         Returns:
             True if plugin was applied successfully, False otherwise
@@ -238,8 +329,10 @@ class PluginUIManager:
             # Clear any previous error
             context.error_message = None
             
-            # Validate parameters
+            # Validate parameters and add selection info if applicable
             validated_params = context.plugin_instance.validate_parameters(context.parameters)
+            if selected_indices:
+                validated_params['selected_indices'] = selected_indices
             
             # Apply transformation
             result = context.plugin_instance.transform(funscript_obj, axis, **validated_params)
@@ -265,6 +358,9 @@ class PluginUIManager:
                     context.state = PluginUIState.OPEN
                 if self.active_preview_plugin == plugin_name:
                     self.active_preview_plugin = None
+                # Clear preview in renderer if available
+                if self.preview_renderer:
+                    self.preview_renderer.clear_preview(plugin_name)
         else:
             # Clear all previews
             for context in self.plugin_contexts.values():
@@ -272,6 +368,9 @@ class PluginUIManager:
                 if context.state == PluginUIState.PREVIEWING:
                     context.state = PluginUIState.CLOSED
             self.active_preview_plugin = None
+            # Clear all previews in renderer if available
+            if self.preview_renderer:
+                self.preview_renderer.clear_all_previews()
     
     def get_preview_actions(self, plugin_name: str) -> Optional[List[Dict]]:
         """Get preview actions for a plugin."""
@@ -295,6 +394,86 @@ class PluginUIManager:
         """Check if any plugin windows are currently open."""
         return any(context.state != PluginUIState.CLOSED 
                   for context in self.plugin_contexts.values())
+    
+    def _create_fallback_preview_data(self, original_actions: List[Dict], 
+                                    transformed_actions: List[Dict], 
+                                    plugin_name: str, 
+                                    selected_indices: Optional[List[int]] = None) -> Optional[Dict[str, Any]]:
+        """Create preview data by comparing original and transformed actions."""
+        try:
+            # Create lookup for original actions by timestamp
+            original_by_time = {action['at']: action for action in original_actions}
+            transformed_by_time = {action['at']: action for action in transformed_actions}
+            
+            preview_points = []
+            
+            # If we have selected indices, create a set of selected timestamps for filtering
+            selected_timestamps = None
+            if selected_indices is not None and len(selected_indices) > 0:
+                selected_timestamps = set()
+                for idx in selected_indices:
+                    if 0 <= idx < len(original_actions):
+                        selected_timestamps.add(original_actions[idx]['at'])
+            
+            # Check all transformed actions for new/modified points
+            for action in transformed_actions:
+                timestamp = action['at']
+                new_pos = action['pos']
+                
+                # Determine if this point is in the selection
+                is_selected = selected_timestamps is None or timestamp in selected_timestamps
+                
+                if timestamp in original_by_time:
+                    # Existing point - check if modified
+                    original_pos = original_by_time[timestamp]['pos']
+                    if new_pos != original_pos and is_selected:
+                        # Modified point (only if selected)
+                        preview_points.append({
+                            'at': timestamp,
+                            'pos': new_pos,
+                            'is_modified': True,
+                            'original_pos': original_pos,
+                            'is_selected': is_selected
+                        })
+                    else:
+                        # Unchanged point or unselected point - show for context
+                        preview_points.append({
+                            'at': timestamp,
+                            'pos': new_pos,
+                            'is_modified': False,
+                            'is_selected': is_selected
+                        })
+                else:
+                    # New point (only if selected)
+                    if is_selected:
+                        preview_points.append({
+                            'at': timestamp,
+                            'pos': new_pos,
+                            'is_new': True,
+                            'is_selected': is_selected
+                        })
+            
+            # For plugins that remove many points, show all remaining points
+            # This gives visual feedback about what will remain after the filter
+            if len(transformed_actions) < len(original_actions) * 0.8:  # Significant reduction
+                self.logger.debug(f"Plugin {plugin_name} reduced points significantly: {len(original_actions)} -> {len(transformed_actions)}")
+            
+            # Always return preview data if we have any transformation
+            if preview_points or len(transformed_actions) != len(original_actions):
+                # Use consistent 'default' style for all plugins - orange color
+                return {
+                    'preview_points': preview_points if preview_points else [
+                        {'at': action['at'], 'pos': action['pos'], 'is_modified': False}
+                        for action in transformed_actions
+                    ],
+                    'style': 'default'
+                }
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create fallback preview data: {e}")
+            return None
     
     def has_any_active_previews(self) -> bool:
         """Check if any plugins have active previews."""

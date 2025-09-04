@@ -111,6 +111,14 @@ class GUI:
 
         self.last_mouse_pos_for_energy_saver = (0, 0)
         self.app.energy_saver.reset_activity_timer()
+        
+        # Simple arrow key navigation state
+        self.arrow_key_state = {
+            'last_seek_time': 0.0,
+            'seek_interval': 0.033,  # Will be updated based on video FPS
+            'initial_press_time': 0.0,  # When key was first pressed
+            'continuous_delay': 0.5,  # Delay before continuous scrolling starts (500ms)
+        }
 
         self.batch_videos_data: List[Dict] = []
         self.batch_overwrite_mode_ui: int = 0  # 0: Skip own, 1: Skip any, 2: Overwrite all
@@ -861,6 +869,22 @@ class GUI:
                         return True
             return False
 
+        def check_key_held(shortcut_name):
+            """Check if a key is being held down (for continuous navigation)"""
+            shortcut_str = current_shortcuts.get(shortcut_name)
+            if not shortcut_str:
+                return False
+            map_result = self.app._map_shortcut_to_glfw_key(shortcut_str)
+            if not map_result:
+                return False
+            mapped_key, mapped_mods_from_string = map_result
+            return (imgui.is_key_down(mapped_key) and 
+                   mapped_mods_from_string['ctrl'] == io.key_ctrl and
+                   mapped_mods_from_string['alt'] == io.key_alt and
+                   mapped_mods_from_string['shift'] == io.key_shift and
+                   mapped_mods_from_string['super'] == io.key_super)
+
+        # Handle non-repeating shortcuts first  
         if check_and_run_shortcut("undo_timeline1", fs_proc.perform_undo_redo, 1, 'undo'):
             pass
         elif check_and_run_shortcut("redo_timeline1", fs_proc.perform_undo_redo, 1, 'redo'):
@@ -871,36 +895,126 @@ class GUI:
         ): pass
         elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control, "play_pause"):
             pass
-        elif video_loaded:
-            seek_delta_frames = 0
-            processed_seek = False
-            if check_and_run_shortcut("seek_prev_frame", lambda: None):
-                seek_delta_frames = -1
-                processed_seek = True
-            elif check_and_run_shortcut("seek_next_frame", lambda: None):
-                seek_delta_frames = 1
-                processed_seek = True
-            elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
-                pass
-            elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
-                pass
+        elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
+            pass
+        elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
+            pass
 
-            # Allow seeking if video is loaded, regardless of play/pause state
-            if processed_seek and seek_delta_frames != 0:
-                if self.app.processor and self.app.processor.video_info:
-                    paused_state = False
-                    if hasattr(self.app.processor, 'pause_event'):
-                        paused_state = self.app.processor.pause_event.is_set()
-                    self.app.logger.debug(f"Shortcut seek triggered: {seek_delta_frames} frames (paused={paused_state}, is_processing={self.app.processor.is_processing})")
-                    new_frame = self.app.processor.current_frame_index + seek_delta_frames
-                    total_frames_vid = self.app.processor.total_frames
-                    new_frame = np.clip(new_frame, 0, total_frames_vid - 1 if total_frames_vid > 0 else 0)
+        # Handle continuous arrow key navigation
+        if video_loaded:
+            self._handle_arrow_navigation()
 
-                    if new_frame != self.app.processor.current_frame_index:
-                        self.app.processor.seek_video(new_frame)
-                        app_state.force_timeline_pan_to_current_frame = True
-                        if self.app.project_manager: self.app.project_manager.project_dirty = True
-                        self.app.energy_saver.reset_activity_timer()
+    def _handle_arrow_navigation(self):
+        """Optimized arrow key navigation with continuous scrolling support"""
+        io = imgui.get_io()
+        current_shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+        current_time = time.time()
+        
+        # Update seek interval based on video FPS for natural navigation speed
+        if self.app.processor and self.app.processor.fps > 0:
+            # Use video FPS but cap at reasonable limits for responsiveness
+            video_fps = self.app.processor.fps
+            # Allow faster navigation for high FPS videos, slower for low FPS
+            target_nav_fps = max(15, min(60, video_fps))  
+            self.arrow_key_state['seek_interval'] = 1.0 / target_nav_fps
+        
+        # Get arrow key mappings
+        left_shortcut = current_shortcuts.get("seek_prev_frame", "LEFT_ARROW")
+        right_shortcut = current_shortcuts.get("seek_next_frame", "RIGHT_ARROW")
+        
+        left_map = self.app._map_shortcut_to_glfw_key(left_shortcut)
+        right_map = self.app._map_shortcut_to_glfw_key(right_shortcut)
+        
+        if not left_map or not right_map:
+            return
+            
+        left_key, left_mods = left_map
+        right_key, right_mods = right_map
+        
+        # Check if keys are held down (no modifier keys for arrow navigation)
+        left_held = (imgui.is_key_down(left_key) and 
+                    left_mods['ctrl'] == io.key_ctrl and
+                    left_mods['alt'] == io.key_alt and
+                    left_mods['shift'] == io.key_shift and
+                    left_mods['super'] == io.key_super)
+        
+        right_held = (imgui.is_key_down(right_key) and 
+                     right_mods['ctrl'] == io.key_ctrl and
+                     right_mods['alt'] == io.key_alt and
+                     right_mods['shift'] == io.key_shift and
+                     right_mods['super'] == io.key_super)
+        
+        # Update key state
+        self.arrow_key_state['left_pressed'] = left_held
+        self.arrow_key_state['right_pressed'] = right_held
+        
+        # Determine seek direction and apply rate limiting
+        seek_direction = 0
+        if left_held and not right_held:
+            seek_direction = -1
+        elif right_held and not left_held:
+            seek_direction = 1
+        
+        # Apply navigation with proper frame-by-frame then continuous logic
+        if seek_direction != 0:
+            time_since_last = current_time - self.arrow_key_state['last_seek_time']
+            key_just_pressed = (left_held and imgui.is_key_pressed(left_key)) or (right_held and imgui.is_key_pressed(right_key))
+            
+            should_navigate = False
+            
+            if key_just_pressed:
+                # INITIAL KEY PRESS: Always navigate immediately (frame-by-frame response)
+                should_navigate = True
+                self.arrow_key_state['initial_press_time'] = current_time
+            else:
+                # KEY HELD DOWN: Check if enough time passed for continuous scrolling
+                time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
+                
+                if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
+                    # Continuous scrolling: only navigate after interval
+                    if time_since_last >= self.arrow_key_state['seek_interval']:
+                        should_navigate = True
+                # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
+            
+            if should_navigate:
+                self._perform_frame_seek(seek_direction)
+                self.arrow_key_state['last_seek_time'] = current_time
+
+    def _perform_frame_seek(self, delta_frames):
+        """SIMPLE frame seeking - cache first, then direct VideoProcessor method"""
+        if not self.app.processor or not self.app.processor.video_info:
+            return
+            
+        new_frame = self.app.processor.current_frame_index + delta_frames
+        total_frames = self.app.processor.total_frames
+        new_frame = max(0, min(new_frame, total_frames - 1 if total_frames > 0 else 0))
+
+        if new_frame == self.app.processor.current_frame_index:
+            return  # No change needed
+            
+        # SIMPLE STRATEGY: Check cache first, otherwise use VideoProcessor's optimized method
+        frame_from_cache = None
+        with self.app.processor.frame_cache_lock:
+            if new_frame in self.app.processor.frame_cache:
+                frame_from_cache = self.app.processor.frame_cache[new_frame]
+                self.app.processor.frame_cache.move_to_end(new_frame)
+        
+        if frame_from_cache is not None:
+            # Cache hit: instant update
+            self.app.processor.current_frame_index = new_frame
+            self.app.processor.current_frame = frame_from_cache
+        else:
+            # Cache miss: let VideoProcessor handle it optimally
+            self.app.processor.seek_video(new_frame)
+        
+        # Update UI
+        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+        if self.app.project_manager: 
+            self.app.project_manager.project_dirty = True
+        self.app.energy_saver.reset_activity_timer()
+
+    # Removed complex predictive caching - it was blocking the UI
+    # Keep navigation simple: cache check first, then single frame fetch if needed
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()
@@ -1003,25 +1117,63 @@ class GUI:
 
             imgui.separator()
             imgui.text("Processing Method:")
-            if imgui.radio_button("3-Stage", self.selected_batch_method_idx_ui == 0):
-                self.selected_batch_method_idx_ui = 0
-            imgui.same_line()
-            if imgui.radio_button("2-Stage", self.selected_batch_method_idx_ui == 1):
-                self.selected_batch_method_idx_ui = 1
-            imgui.same_line()
-            if imgui.radio_button("Oscillation Detector", self.selected_batch_method_idx_ui == 2):
-                self.selected_batch_method_idx_ui = 2
+            
+            # Get available batch-compatible trackers dynamically
+            from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
+            from config.tracker_discovery import TrackerCategory
+            
+            tracker_ui = get_dynamic_tracker_ui()
+            discovery = tracker_ui.discovery
+            
+            # Get live (non-intervention) and offline trackers
+            batch_compatible_trackers = []
+            tracker_internal_names = []
+            
+            # Add offline trackers
+            offline_trackers = discovery.get_trackers_by_category(TrackerCategory.OFFLINE)
+            for tracker in offline_trackers:
+                if tracker.supports_batch:
+                    batch_compatible_trackers.append(tracker.display_name)
+                    tracker_internal_names.append(tracker.internal_name)
+            
+            # Add live trackers (non-intervention only)
+            live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
+            for tracker in live_trackers:
+                if tracker.supports_batch and not tracker.requires_intervention:
+                    batch_compatible_trackers.append(tracker.display_name)
+                    tracker_internal_names.append(tracker.internal_name)
+            
+            # Create dropdown
+            imgui.set_next_item_width(300)
+            changed, self.selected_batch_method_idx_ui = imgui.combo(
+                "##batch_tracker", 
+                self.selected_batch_method_idx_ui,
+                batch_compatible_trackers
+            )
+            
+            # Store the selected tracker's internal name for later use
+            if 0 <= self.selected_batch_method_idx_ui < len(tracker_internal_names):
+                self.selected_batch_tracker_name = tracker_internal_names[self.selected_batch_method_idx_ui]
+            else:
+                self.selected_batch_tracker_name = None
 
             imgui.text("Output Options:")
             _, self.batch_apply_ultimate_autotune_ui = imgui.checkbox("Apply Ultimate Autotune", self.batch_apply_ultimate_autotune_ui)
             imgui.same_line()
             _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video", self.batch_copy_funscript_to_video_location_ui)
             imgui.same_line()
-            is_3_stage = self.selected_batch_method_idx_ui == 0
-            if not is_3_stage:
+            
+            # Check if selected tracker supports roll file generation (3-stage trackers)
+            has_3_stages = False
+            if hasattr(self, 'selected_batch_tracker_name') and self.selected_batch_tracker_name:
+                tracker_info = discovery.get_tracker_info(self.selected_batch_tracker_name)
+                if tracker_info and tracker_info.properties:
+                    has_3_stages = tracker_info.properties.get("num_stages", 0) >= 3
+            
+            if not has_3_stages:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
-            _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if is_3_stage else False)
-            if not is_3_stage:
+            _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if has_3_stages else False)
+            if not has_3_stages:
                 imgui.pop_style_var(); imgui.internal.pop_item_flag()
 
             imgui.separator()
@@ -1038,9 +1190,9 @@ class GUI:
     def render_gui(self):
         self.component_render_times.clear()
 
-        self._time_render("EnergySaver+Shortcuts", lambda: (
-            self._handle_energy_saver_interaction_detection(),
-            self._handle_global_shortcuts()))
+        # Separate timing to identify performance bottlenecks
+        self._time_render("EnergyDetection", self._handle_energy_saver_interaction_detection)
+        self._time_render("GlobalShortcuts", self._handle_global_shortcuts)
 
         if self.app.shortcut_manager.is_recording_shortcut_for:
             self._time_render("ShortcutRecordingInput", self.app.shortcut_manager.handle_shortcut_recording_input)

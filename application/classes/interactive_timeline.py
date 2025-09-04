@@ -9,6 +9,7 @@ from typing import Optional, List, Dict, Tuple
 from bisect import bisect_left, bisect_right
 from .plugin_ui_manager import PluginUIManager, PluginUIState
 from .plugin_ui_renderer import PluginUIRenderer
+from .plugin_preview_renderer import PluginPreviewRenderer
 
 from application.utils import _format_time
 from config.element_group_colors import TimelineColors
@@ -54,6 +55,13 @@ class InteractiveFunscriptTimeline:
         # New Plugin System
         self.plugin_manager = PluginUIManager(logger=self.app.logger)
         self.plugin_renderer = PluginUIRenderer(self.plugin_manager, logger=self.app.logger)
+        self.plugin_preview_renderer = PluginPreviewRenderer(logger=self.app.logger)
+        
+        # Connect preview renderer to plugin manager
+        self.plugin_manager.preview_renderer = self.plugin_preview_renderer
+        
+        # Connect timeline reference to plugin renderer
+        self.plugin_renderer.set_timeline_reference(self)
         
         # Initialize plugin system
         self.plugin_manager.initialize()
@@ -1279,8 +1287,14 @@ class InteractiveFunscriptTimeline:
             op_desc = f"Applied {plugin_name}"
             fs_proc._record_timeline_action(self.timeline_num, op_desc)
             
+            # Get selection information for apply to selection
+            context = self.plugin_manager.plugin_contexts.get(plugin_name)
+            selected_indices = None
+            if context and context.apply_to_selection and self.multi_selected_action_indices:
+                selected_indices = list(self.multi_selected_action_indices)
+            
             # Apply the plugin
-            result = self.plugin_manager.apply_plugin(plugin_name, funscript_instance, axis_name)
+            result = self.plugin_manager.apply_plugin(plugin_name, funscript_instance, axis_name, selected_indices)
             
             if result:
                 # Finalize the action and update UI
@@ -1325,6 +1339,7 @@ class InteractiveFunscriptTimeline:
         # Map filter types to plugin names
         plugin_mapping = {
             "ultimate": "Ultimate Autotune",
+            "autotune": "Ultimate Autotune",  # Fixed: autotune filter maps to same plugin
             # Add other plugins as they're converted
         }
 
@@ -3182,6 +3197,25 @@ class InteractiveFunscriptTimeline:
                     px = time_to_x(action['at'])
                     py = pos_to_y(action['pos'])
                     draw_list.add_circle_filled(px, py, preview_point_radius, preview_point_color)
+            
+            # --- Draw Plugin Preview Overlays ---
+            # Render preview overlays from the new plugin system
+            if self.plugin_preview_renderer:
+                # Calculate visible time range in milliseconds
+                visible_start_ms = int(app_state.timeline_pan_offset_ms)
+                visible_end_ms = int(app_state.timeline_pan_offset_ms + canvas_size[0] * app_state.timeline_zoom_factor_ms_per_px)
+                
+                # Render all active plugin previews
+                self.plugin_preview_renderer.render_preview_overlay(
+                    draw_list,
+                    canvas_abs_pos[0],  # timeline_x
+                    canvas_abs_pos[1],  # timeline_y
+                    canvas_size[0],     # timeline_width
+                    canvas_size[1],     # timeline_height
+                    visible_start_ms,
+                    visible_end_ms,
+                    None  # Render all active previews
+                )
 
             # --- Draw Marquee Selection ---
             if self.is_marqueeing and self.marquee_start_screen_pos and self.marquee_end_screen_pos:
