@@ -18,8 +18,10 @@ from typing import Dict, Any, Optional, List, Tuple
 
 try:
     from ..core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+    from ..helpers.signal_amplifier import SignalAmplifier
 except ImportError:
     from tracker_modules.core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+    from tracker_modules.helpers.signal_amplifier import SignalAmplifier
 
 
 class UserRoiTracker(BaseTracker):
@@ -62,9 +64,13 @@ class UserRoiTracker(BaseTracker):
         self.last_primary_position = 50
         self.last_secondary_position = 50
         
-        # Enhanced signal mastering (from Oscillation Experimental 2)
-        self.position_history_amplification = deque(maxlen=120)  # 4 seconds @ 30fps for dynamic amplification
-        self.live_amp_enabled = True  # Enable dynamic amplification by default
+        # Enhanced signal mastering using helper module
+        self.signal_amplifier = SignalAmplifier(
+            history_size=120,  # 4 seconds @ 30fps
+            enable_live_amp=True,  # Enable dynamic amplification by default
+            smoothing_alpha=0.3,  # EMA smoothing factor
+            logger=self.logger
+        )
         
         # Adaptive flow range attributes (from original tracker.py)
         self.flow_min_primary_adaptive = -0.1
@@ -265,6 +271,9 @@ class UserRoiTracker(BaseTracker):
         self.primary_flow_history_smooth.clear()
         self.secondary_flow_history_smooth.clear()
         self.user_roi_current_flow_vector = (0.0, 0.0)
+        
+        # Reset signal amplifier for new tracking session
+        self.signal_amplifier.reset()
         
         self.logger.info("User ROI tracking started")
         return True
@@ -576,8 +585,12 @@ class UserRoiTracker(BaseTracker):
         # Update flow vector
         self.user_roi_current_flow_vector = (dx_smooth, dy_smooth)
         
-        # Apply enhanced signal mastering (from Oscillation Experimental 2)
-        enhanced_primary, enhanced_secondary = self._apply_enhanced_amplification(base_primary_pos, secondary_pos, dy_smooth, dx_smooth)
+        # Apply enhanced signal mastering using helper module
+        sensitivity = self._get_current_sensitivity()
+        enhanced_primary, enhanced_secondary = self.signal_amplifier.enhance_signal(
+            base_primary_pos, secondary_pos, dy_smooth, dx_smooth,
+            sensitivity=sensitivity, apply_smoothing=False  # We'll apply our own smoothing
+        )
         
         # Apply final smoothing to reduce jerkiness
         final_primary_pos, final_secondary_pos = self._apply_final_smoothing(enhanced_primary, enhanced_secondary)
