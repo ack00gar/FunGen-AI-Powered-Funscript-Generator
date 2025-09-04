@@ -11,11 +11,12 @@ from datetime import datetime, timedelta
 from ultralytics import YOLO
 
 from video import VideoProcessor
-from tracker import ROITracker as Tracker
+from tracker.tracker_manager import create_tracker_manager
 
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
-from config.constants import *
+from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION, MODEL_DOWNLOAD_URLS
+from config.tracker_discovery import get_tracker_discovery
 
 from .app_state_ui import AppStateUI
 from .app_file_manager import AppFileManager
@@ -243,12 +244,10 @@ class ApplicationLogic:
         self.undo_manager_t1: Optional[UndoRedoManager] = None
         self.undo_manager_t2: Optional[UndoRedoManager] = None
 
-        # --- Initialize Tracker ---
-        self.tracker = Tracker(
-            app_logic_instance = self,
-            tracker_model_path = self.yolo_detection_model_path_setting,
-            pose_model_path = self.yolo_pose_model_path_setting,
-            logger = self.logger)
+        # --- Initialize Tracker Manager ---
+        self.tracker = create_tracker_manager(
+            app_logic_instance=self,
+            tracker_model_path=self.yolo_detection_model_path_setting)
         if self.tracker:
             self.tracker.show_stats = False  # Default internal tracker states
             self.tracker.show_funscript_preview = False
@@ -259,7 +258,7 @@ class ApplicationLogic:
         # --- Initialize Processor (after tracker and logger/app_state_ui are ready) ---
         # _check_model_paths can be called now before processor if it's critical for processor init
         self._check_model_paths()
-        self.processor = VideoProcessor(self, self.tracker, yolo_input_size=self.yolo_input_size)
+        self.processor = VideoProcessor(self, self.tracker, yolo_input_size=self.yolo_input_size, cache_size=1000)
 
         # --- Modular Components Initialization ---
         self.file_manager = AppFileManager(self)
@@ -335,17 +334,9 @@ class ApplicationLogic:
 
         # --- Initialize tracker mode from persisted setting; default handled by AppStateUI ---
         if not self.is_cli_mode and self.tracker:
-            # Map enum to tracker string
-            mode = self.app_state_ui.selected_tracker_mode
-            if mode == TrackerMode.LIVE_USER_ROI:
-                tracker_mode_str = "USER_FIXED_ROI"
-            elif mode == TrackerMode.OSCILLATION_DETECTOR:
-                tracker_mode_str = "OSCILLATION_DETECTOR"
-            elif mode == TrackerMode.OSCILLATION_DETECTOR_LEGACY:
-                tracker_mode_str = "OSCILLATION_DETECTOR_LEGACY"
-            else:
-                tracker_mode_str = "YOLO_ROI"
-            self.tracker.set_tracking_mode(tracker_mode_str)
+            # Use dynamic tracker discovery - selected_tracker_name is already the internal name
+            tracker_name = self.app_state_ui.selected_tracker_name
+            self.tracker.set_tracking_mode(tracker_name)
 
     def get_timeline(self, timeline_num: int) -> Optional['InteractiveFunscriptTimeline']:
         """
@@ -361,6 +352,10 @@ class ApplicationLogic:
     def _configure_third_party_logging(self):
         """Configure third-party library logging to reduce startup noise."""
         # Suppress/reduce noisy third-party library logging
+        # Suppress scikit-learn warnings from CoreML Tools before any imports
+        import warnings
+        warnings.filterwarnings("ignore", message="scikit-learn version .* is not supported")
+        
         third_party_loggers = {
             'coremltools': logging.ERROR,  # Only show critical errors from CoreML
             'ultralytics': logging.WARNING,  # Reduce ultralytics noise
@@ -580,7 +575,7 @@ class ApplicationLogic:
                 autotune_frame_range = (start_frame, end_frame)
 
                 self.stage_processor.start_full_analysis(
-                    processing_mode=TrackerMode.OFFLINE_3_STAGE,
+                    processing_mode="stage3_mixed",
                     override_producers=p,
                     override_consumers=c,
                     completion_event=completion_event,
@@ -858,7 +853,8 @@ class ApplicationLogic:
             self._cancel_batch_processing_from_confirmation()
             return
 
-        self.batch_processing_method_idx = gui.selected_batch_method_idx_ui
+        # Use the dynamically selected tracker name
+        self.batch_tracker_name = gui.selected_batch_tracker_name
         self.batch_apply_ultimate_autotune = gui.batch_apply_ultimate_autotune_ui
         self.batch_copy_funscript_to_video_location = gui.batch_copy_funscript_to_video_location_ui
         self.batch_overwrite_mode = gui.batch_overwrite_mode_ui
@@ -965,20 +961,25 @@ class ApplicationLogic:
                 time.sleep(1.0)
                 if self.stop_batch_event.is_set(): break
 
-                batch_mode_map = {
-                    0: TrackerMode.OFFLINE_3_STAGE,
-                    1: TrackerMode.OFFLINE_2_STAGE,
-                    2: TrackerMode.OSCILLATION_DETECTOR,
-                    3: TrackerMode.OFFLINE_3_STAGE_MIXED
-                }
-                selected_mode = batch_mode_map.get(self.batch_processing_method_idx)
-
-                if selected_mode is None:
-                    self.logger.error(f"Invalid batch processing method index: {self.batch_processing_method_idx}. Skipping video.")
+                # Use the dynamically selected tracker name
+                discovery = get_tracker_discovery()
+                
+                # Get the selected tracker using the name stored from GUI
+                if hasattr(self, 'batch_tracker_name') and self.batch_tracker_name:
+                    selected_tracker = discovery.get_tracker_info(self.batch_tracker_name)
+                    if not selected_tracker:
+                        self.logger.error(f"Invalid tracker name: {self.batch_tracker_name}. Skipping video.")
+                        continue
+                    selected_mode = selected_tracker.internal_name
+                else:
+                    self.logger.error("No tracker selected for batch processing. Skipping video.")
                     continue
 
-                # --- OFFLINE MODES (2-Stage / 3-Stage / 3-Stage-Mixed) ---
-                if selected_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE, TrackerMode.OFFLINE_3_STAGE_MIXED]:
+                # Check tracker category to determine processing mode
+                from config.tracker_discovery import TrackerCategory
+                
+                # --- OFFLINE MODES (Stage-based processing) ---
+                if selected_tracker.category == TrackerCategory.OFFLINE:
                     self.single_video_analysis_complete_event.clear()
                     self.save_and_reset_complete_event.clear()
                     self.stage_processor.start_full_analysis(processing_mode=selected_mode)
@@ -1010,20 +1011,30 @@ class ApplicationLogic:
                     self.save_and_reset_complete_event.wait(timeout=120)
                     self.logger.debug("Batch loop: Save/reset signal received. Proceeding.")
 
-                # --- LIVE MODES (Oscillation Detector) ---
-                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR:
-                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
-                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR")
-                    self.tracker.start_tracking()
-                    self.processor.set_tracker_processing_enabled(True)
-                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR_LEGACY:
-                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
-                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR_LEGACY")
-                    self.tracker.start_tracking()
-                    self.processor.set_tracker_processing_enabled(True)
-                elif selected_mode == TrackerMode.OSCILLATION_DETECTOR_EXPERIMENTAL_2:
-                    self.logger.info(f"Running in {selected_mode.name} mode for {os.path.basename(video_path)}")
-                    self.tracker.set_tracking_mode("OSCILLATION_DETECTOR_EXPERIMENTAL_2")
+                # --- LIVE MODES (Real-time tracking) ---
+                elif selected_tracker.category == TrackerCategory.LIVE:
+                    self.logger.info(f"Running live mode: {selected_tracker.display_name} for {os.path.basename(video_path)}")
+                    
+                    # Set processing speed to MAX_SPEED for batch/CLI live tracking
+                    from config.constants import ProcessingSpeedMode
+                    original_speed_mode = self.app_state_ui.selected_processing_speed_mode
+                    self.app_state_ui.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
+                    self.logger.info("Set processing speed to MAX_SPEED for batch live tracking")
+                    
+                    self.tracker.set_tracking_mode(selected_mode)
+                    
+                    # Auto-set axis for axis projection trackers in CLI/batch mode
+                    if "axis_projection" in selected_mode:
+                        current_tracker = self.tracker.get_current_tracker()
+                        if current_tracker and hasattr(current_tracker, 'set_axis'):
+                            # Set default horizontal axis across middle of frame for VR SBS videos
+                            margin = 50
+                            width, height = 640, 640  # Processing frame size
+                            axis_A = (margin, height // 2)  # Left side
+                            axis_B = (width - margin, height // 2)  # Right side
+                            result = current_tracker.set_axis(axis_A, axis_B)
+                            self.logger.info(f"Auto-set axis for {selected_mode}: A={axis_A}, B={axis_B}, result={result}")
+                    
                     self.tracker.start_tracking()
                     self.processor.set_tracker_processing_enabled(True)
 
@@ -1037,6 +1048,10 @@ class ApplicationLogic:
                     # Block until the live processing thread finishes
                     if self.processor.processing_thread and self.processor.processing_thread.is_alive():
                         self.processor.processing_thread.join()
+
+                    # Restore original processing speed mode
+                    self.app_state_ui.selected_processing_speed_mode = original_speed_mode
+                    self.logger.info("Restored original processing speed mode")
 
                     # This call now handles all post-processing AND saving/copying
                     self.on_processing_stopped(was_scripting_session=True)
@@ -1110,11 +1125,12 @@ class ApplicationLogic:
                         current_display_frame = self.processor.current_frame.copy()
 
                 if current_display_frame is not None:
-                    self.tracker.set_user_defined_roi_and_point(roi_rect_video_coords, point_video_coords, current_display_frame)
-                    # Tracker mode is usually set via UI combo, but ensure it if not already.
-                    if self.tracker.tracking_mode != "USER_FIXED_ROI":
-                        self.tracker.set_tracking_mode("USER_FIXED_ROI")
-                    self.logger.info("User defined ROI and point have been set in the tracker.", extra={'status_message': True})
+                    # Legacy USER_FIXED_ROI mode removed - ModularTrackerBridge doesn't use this mode
+                    if hasattr(self.tracker, 'set_user_defined_roi_and_point'):
+                        self.tracker.set_user_defined_roi_and_point(roi_rect_video_coords, point_video_coords, current_display_frame)
+                        self.logger.info("User defined ROI and point have been set in the tracker.", extra={'status_message': True})
+                    else:
+                        self.logger.info("Current tracker doesn't support user-defined ROI functionality.", extra={'status_message': True})
                 else:
                     self.logger.error("Could not get current frame to set user ROI patch. ROI not set.", extra={'status_message': True})
             else:
@@ -1268,7 +1284,11 @@ class ApplicationLogic:
 
         # 5. Handle simple mode
         is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
-        is_offline_analysis = self.app_state_ui.selected_tracker_mode in [TrackerMode.OFFLINE_2_STAGE, TrackerMode.OFFLINE_3_STAGE]
+        # Check if current tracker is offline mode for simple mode auto-enhancements
+        from config.tracker_discovery import TrackerCategory
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(self.app_state_ui.selected_tracker_name)
+        is_offline_analysis = tracker_info and tracker_info.category == TrackerCategory.OFFLINE
 
         if is_simple_mode and is_offline_analysis:
             self.logger.info("Simple Mode: Automatically applying Ultimate Autotune with defaults...")
@@ -1343,7 +1363,11 @@ class ApplicationLogic:
                 
                 # Handle Simple Mode auto ultimate autotune for live sessions
                 is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
-                is_live_mode = self.app_state_ui.selected_tracker_mode in [TrackerMode.LIVE_YOLO_ROI, TrackerMode.LIVE_USER_ROI, TrackerMode.OSCILLATION_DETECTOR, TrackerMode.OSCILLATION_DETECTOR_LEGACY]
+                # Check if current tracker is live mode for simple mode auto-enhancements  
+                from config.tracker_discovery import TrackerCategory
+                discovery = get_tracker_discovery()
+                tracker_info = discovery.get_tracker_info(self.app_state_ui.selected_tracker_name)
+                is_live_mode = tracker_info and tracker_info.category == TrackerCategory.LIVE
                 has_actions = bool(self.funscript_processor.get_actions('primary'))
                 
                 if is_simple_mode and is_live_mode and has_actions and not autotune_enabled:
@@ -1473,22 +1497,40 @@ class ApplicationLogic:
             return ["auto", "none"]
 
     def _check_model_paths(self):
-        """Checks essential model paths and logs errors if not found."""
+        """Checks essential model paths and auto-downloads if missing."""
+        models_missing = False
+        
         # Detection model remains essential
         if not self.yolo_det_model_path or not os.path.exists(self.yolo_det_model_path):
-            self.logger.error(
-                f"CRITICAL ERROR: YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Please check settings.",
-                extra={'status_message': True, 'duration': 15.0})
-            # GUI popup: Inform user no detection model is set
-            if getattr(self, "gui_instance", None):
-                self.gui_instance.show_error_popup("Detection Model Missing", "No valid Detection Model is set.\nPlease select a YOLO model file in the UI Configuration tab.")
-            return False
+            self.logger.warning(
+                f"YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Attempting auto-download...",
+                extra={'status_message': True, 'duration': 5.0})
+            models_missing = True
 
-        # Pose model is now optional
+        # Pose model is now optional but we'll try to download it too
         if not self.yolo_pose_model_path or not os.path.exists(self.yolo_pose_model_path):
             self.logger.warning(
-                f"Warning: YOLO Pose Model not found or path not set. Pose-dependent features will be disabled.",
-                extra={'status_message': True, 'duration': 8.0})
+                f"YOLO Pose Model not found or path not set. Attempting auto-download...",
+                extra={'status_message': True, 'duration': 5.0})
+            models_missing = True
+        
+        # Auto-download missing models
+        if models_missing:
+            self.logger.info("Auto-downloading missing models...")
+            self.download_default_models()
+            
+            # Re-check after download
+            if not self.yolo_det_model_path or not os.path.exists(self.yolo_det_model_path):
+                self.logger.error(
+                    f"CRITICAL ERROR: Failed to auto-download or configure detection model.",
+                    extra={'status_message': True, 'duration': 15.0})
+                # GUI popup: Inform user auto-download failed
+                if getattr(self, "gui_instance", None):
+                    self.gui_instance.show_error_popup("Detection Model Missing", "Failed to auto-download detection model.\nPlease select a YOLO model file in the UI Configuration tab or check your internet connection.")
+                return False
+            else:
+                self.logger.info("Detection model successfully configured!", extra={'status_message': True, 'duration': 3.0})
+        
         return True
 
     def set_application_logging_level(self, level_name: str):
@@ -1823,16 +1865,25 @@ class ApplicationLogic:
             self.stage_processor.on_stage2_progress = cli_stage2_progress_callback
             self.stage_processor.on_stage3_progress = cli_stage3_progress_callback
 
-            # 2. Configure batch processing from CLI args
-            mode_to_idx_map = {
-                '3-stage': 0,
-                '2-stage': 1,
-                'oscillation-detector': 2,
-                '3-stage-mixed': 3  # Add new mixed mode index
-            }
-            # Set the batch processing index, which the batch thread now uses
-            self.batch_processing_method_idx = mode_to_idx_map.get(args.mode, 0)
-            self.logger.info(f"Processing Mode: {args.mode}")
+            # 2. Configure batch processing from CLI args using dynamic discovery
+            from config.tracker_discovery import get_tracker_discovery
+            discovery = get_tracker_discovery()
+            
+            # Resolve CLI mode to tracker info
+            tracker_info = discovery.get_tracker_info(args.mode)
+            if not tracker_info:
+                self.logger.error(f"Unknown processing mode: {args.mode}")
+                self.logger.error(f"Available modes: {discovery.get_supported_cli_modes()}")
+                return
+            
+            if not tracker_info.supports_batch:
+                self.logger.error(f"Mode '{args.mode}' does not support batch processing")
+                self.logger.error(f"Batch-compatible modes: {[info.cli_aliases[0] for info in discovery.get_batch_compatible_trackers() if info.cli_aliases]}")
+                return
+            
+            # Store the tracker name directly for batch processing
+            self.batch_tracker_name = tracker_info.internal_name
+            self.logger.info(f"Processing Mode: {args.mode} -> {tracker_info.display_name}")
             
             # Set oscillation detector mode for Stage 3 if provided
             if hasattr(args, 'od_mode') and args.od_mode:
@@ -1920,12 +1971,39 @@ class ApplicationLogic:
                             model = YOLO(det_model_path_pt)
                             model.export(format="coreml")
                             self.logger.info(f"Converted detection model to CoreML: {det_model_path_mlpackage}")
+                            # Set the CoreML model path in settings
+                            self.app_settings.set("yolo_det_model_path", det_model_path_mlpackage)
+                            self.yolo_detection_model_path_setting = det_model_path_mlpackage
+                            self.yolo_det_model_path = det_model_path_mlpackage
                         except Exception as e:
                             self.logger.error(f"Failed to convert detection model to CoreML: {e}")
+                            # Fall back to PT model if CoreML conversion fails
+                            self.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                            self.yolo_detection_model_path_setting = det_model_path_pt
+                            self.yolo_det_model_path = det_model_path_pt
+                    else:
+                        # Set the PT model path in settings for non-macOS ARM
+                        self.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                        self.yolo_detection_model_path_setting = det_model_path_pt
+                        self.yolo_det_model_path = det_model_path_pt
                 else:
                     self.logger.error("Failed to download detection model")
             else:
                 self.logger.info("Detection model already exists")
+                # Check if path is not set in settings and auto-configure
+                current_setting = self.app_settings.get("yolo_det_model_path", "")
+                if not current_setting or not os.path.exists(current_setting):
+                    # Prefer .mlpackage on macOS ARM if it exists
+                    if is_mac_arm and os.path.exists(det_model_path_mlpackage):
+                        self.app_settings.set("yolo_det_model_path", det_model_path_mlpackage)
+                        self.yolo_detection_model_path_setting = det_model_path_mlpackage
+                        self.yolo_det_model_path = det_model_path_mlpackage
+                        self.logger.info(f"Auto-configured detection model path to: {det_model_path_mlpackage}")
+                    elif os.path.exists(det_model_path_pt):
+                        self.app_settings.set("yolo_det_model_path", det_model_path_pt)
+                        self.yolo_detection_model_path_setting = det_model_path_pt
+                        self.yolo_det_model_path = det_model_path_pt
+                        self.logger.info(f"Auto-configured detection model path to: {det_model_path_pt}")
 
             # Check and download pose model
             pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
@@ -1946,12 +2024,33 @@ class ApplicationLogic:
                             model = YOLO(pose_model_path_pt)
                             model.export(format="coreml")
                             self.logger.info(f"Converted pose model to CoreML: {pose_model_path_mlpackage}")
+                            # Set the CoreML model path in settings
+                            self.app_settings.set("yolo_pose_model_path", pose_model_path_mlpackage)
+                            self.yolo_pose_model_path_setting = pose_model_path_mlpackage
+                            self.yolo_pose_model_path = pose_model_path_mlpackage
                         except Exception as e:
                             self.logger.error(f"Failed to convert pose model to CoreML: {e}")
+                            # Fall back to PT model if CoreML conversion fails
+                            self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                            self.yolo_pose_model_path_setting = pose_model_path_pt
+                            self.yolo_pose_model_path = pose_model_path_pt
+                    else:
+                        # Set the PT model path in settings for non-macOS ARM
+                        self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                        self.yolo_pose_model_path_setting = pose_model_path_pt
+                        self.yolo_pose_model_path = pose_model_path_pt
                 else:
                     self.logger.error("Failed to download pose model")
             else:
                 self.logger.info("Pose model already exists")
+                # Check if path is not set in settings and auto-configure existing model
+                current_setting = self.app_settings.get("yolo_pose_model_path", "")
+                if not current_setting or not os.path.exists(current_setting):
+                    if os.path.exists(pose_model_path_pt):
+                        self.logger.info("Auto-configuring existing pose model path in settings")
+                        self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
+                        self.yolo_pose_model_path_setting = pose_model_path_pt
+                        self.yolo_pose_model_path = pose_model_path_pt
 
             # Report results
             if downloaded_models:

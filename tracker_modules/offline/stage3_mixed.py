@@ -19,9 +19,11 @@ from typing import Dict, Any, Optional, List, Tuple, Callable
 from multiprocessing import Event
 
 try:
-    from ..core.base_offline_tracker import BaseOfflineTracker, TrackerMetadata, OfflineProcessingResult, OfflineProcessingStage
+    from ..core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
+    from ..core.base_tracker import TrackerMetadata, StageDefinition
 except ImportError:
-    from tracker_modules.core.base_offline_tracker import BaseOfflineTracker, TrackerMetadata, OfflineProcessingResult, OfflineProcessingStage
+    from tracker_modules.core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
+    from tracker_modules.core.base_tracker import TrackerMetadata, StageDefinition
 
 # Import Stage 3 Mixed processing module and dependencies
 try:
@@ -110,7 +112,7 @@ class Stage3MixedTracker(BaseOfflineTracker):
     def metadata(self) -> TrackerMetadata:
         """Return metadata describing this tracker."""
         return TrackerMetadata(
-            name="stage3_mixed",
+            name="OFFLINE_3_STAGE_MIXED",
             display_name="Offline Mixed Processing (3-Stage)",
             description="Hybrid approach: Stage 2 signals + selective live ROI tracking for BJ/HJ chapters",
             category="offline",
@@ -118,7 +120,42 @@ class Stage3MixedTracker(BaseOfflineTracker):
             author="Stage 3 Mixed System",
             tags=["offline", "mixed", "hybrid", "stage3", "selective-tracking", "intelligent"],
             requires_roi=False,
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            stages=[
+                StageDefinition(
+                    stage_number=1,
+                    name="Detection",
+                    description="Object detection and tracking",
+                    produces_funscript=False,
+                    requires_previous=False,
+                    output_type="analysis"
+                ),
+                StageDefinition(
+                    stage_number=2,
+                    name="Contact Analysis & Funscript",
+                    description="Contact analysis with initial funscript generation",
+                    produces_funscript=True,
+                    requires_previous=True,
+                    output_type="funscript"
+                ),
+                StageDefinition(
+                    stage_number=3,
+                    name="Mixed Processing",
+                    description="Hybrid Stage 2 signals + selective live tracking",
+                    produces_funscript=True,
+                    requires_previous=True,
+                    output_type="mixed"
+                )
+            ],
+            properties={
+                "produces_funscript_in_stage2": True,
+                "produces_funscript_in_stage3": True,
+                "supports_batch": True,
+                "requires_stage2_data": True,
+                "is_mixed_stage3_tracker": True,  # Backward compatibility
+                "uses_hybrid_approach": True,
+                "num_stages": 3
+            }
         )
     
     @property
@@ -742,4 +779,4 @@ class Stage3MixedTracker(BaseOfflineTracker):
             self.tracker_manager = None
         
         super().cleanup()
-        self.logger.info("Stage 3 Mixed tracker cleaned up")
+        # self.logger.info("Stage 3 Mixed tracker cleaned up")
