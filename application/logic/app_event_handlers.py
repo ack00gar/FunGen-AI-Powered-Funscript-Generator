@@ -145,6 +145,12 @@ class AppEventHandlers:
                     self.app.tracker.user_roi_initial_point_relative or self.app.tracker.user_roi_tracked_point_relative
                 )
             )
+            
+            # Debug logging for ROI validation
+            self.logger.info(f"🔍 User ROI validation: user_roi_fixed={self.app.tracker.user_roi_fixed}, "
+                           f"initial_point={self.app.tracker.user_roi_initial_point_relative}, "
+                           f"tracked_point={self.app.tracker.user_roi_tracked_point_relative}, "
+                           f"has_global_roi={has_global_roi}")
 
             has_chapter_roi_at_current_frame = False
             if not has_global_roi:
@@ -169,6 +175,25 @@ class AppEventHandlers:
             # For all other live trackers
             display_name = tracker_ui.get_tracker_display_name(selected_tracker_name)
             self.logger.info(f"Starting {display_name} tracking.")
+
+        # Auto-set axis for axis projection trackers if not already set
+        if "axis_projection" in selected_tracker_name:
+            current_tracker = self.app.tracker.get_current_tracker()
+            if current_tracker and hasattr(current_tracker, 'set_axis'):
+                # Check if axis is already set
+                axis_already_set = False
+                if hasattr(current_tracker, 'axis_point_A') and hasattr(current_tracker, 'axis_point_B'):
+                    axis_already_set = (current_tracker.axis_point_A is not None and 
+                                      current_tracker.axis_point_B is not None)
+                
+                if not axis_already_set:
+                    # Set default horizontal axis across middle of frame
+                    margin = 50
+                    width, height = 640, 640  # Processing frame size
+                    axis_A = (margin, height // 2)  # Left side
+                    axis_B = (width - margin, height // 2)  # Right side
+                    result = current_tracker.set_axis(axis_A, axis_B)
+                    self.logger.info(f"Auto-set axis for {selected_tracker_name}: A={axis_A}, B={axis_B}, result={result}")
 
         # Explicitly start the tracker before starting video processing
         self.app.tracker.start_tracking()

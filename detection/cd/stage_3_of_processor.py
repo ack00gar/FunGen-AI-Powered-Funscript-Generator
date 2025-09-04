@@ -9,7 +9,6 @@ from queue import Empty
 
 from funscript import DualAxisFunscript
 from video import VideoProcessor
-from tracker import ROITracker
 from detection.cd.data_structures import Segment, FrameObject
 from config import constants
 
@@ -125,6 +124,8 @@ def stage3_worker_proc(
     determined_video_type = video_processor.determined_video_type
 
     try:
+        # Lazy import to avoid circular dependency
+        from tracker import ROITracker
         roi_tracker_instance = ROITracker(
             app_logic_instance=None,
             tracker_model_path=common_app_config.get('yolo_det_model_path', ''),

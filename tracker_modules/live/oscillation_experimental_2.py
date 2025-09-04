@@ -61,11 +61,17 @@ class OscillationExperimental2Tracker(BaseTracker):
             self.current_fps = 30.0
             
             # Initialize funscript connection
-            if hasattr(self.app, 'funscript') and self.app.funscript:
+            # First check if funscript is provided through compatibility attributes (from bridge)
+            if hasattr(self, 'funscript') and self.funscript:
+                # Already have funscript from bridge
+                pass
+            elif hasattr(self.app, 'funscript') and self.app.funscript:
                 self.funscript = self.app.funscript
             else:
-                self.logger.error("No funscript instance available")
-                return False
+                # Create our own funscript instance if not provided
+                from funscript.dual_axis_funscript import DualAxisFunscript
+                self.funscript = DualAxisFunscript(logger=self.logger)
+                self.logger.info("Created local funscript instance for Oscillation Experimental 2")
             
             # Visual settings
             self.show_masks = kwargs.get('show_masks', True)
@@ -123,14 +129,16 @@ class OscillationExperimental2Tracker(BaseTracker):
     def _initialize_optical_flow(self):
         """Initialize dense optical flow for oscillation detection."""
         try:
-            self.flow_dense_osc = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize DIS optical flow: {e}")
+            # Try ultrafast preset first for better performance
+            self.flow_dense_osc = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
+            self.logger.info("DIS optical flow initialized (ultrafast preset) for Oscillation Experimental 2")
+        except AttributeError:
             try:
-                self.flow_dense_osc = cv2.calcOpticalFlowPyrLK
-                self.logger.info("Fell back to Lucas-Kanade optical flow")
-            except Exception as e2:
-                self.logger.error(f"Failed to initialize any optical flow method: {e2}")
+                # Fallback to medium preset
+                self.flow_dense_osc = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+                self.logger.info("DIS optical flow initialized (medium preset) for Oscillation Experimental 2")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize DIS optical flow: {e}")
                 self.flow_dense_osc = None
     
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, 
@@ -206,7 +214,14 @@ class OscillationExperimental2Tracker(BaseTracker):
 
         # Compute dynamic grid based on current analysis image size
         img_h, img_w = current_gray.shape[:2]
-        grid_size = max(1, int(self.oscillation_grid_size))
+        # Handle both tuple (8, 8) and integer 8 formats for grid_size
+        if hasattr(self, 'oscillation_grid_size'):
+            if isinstance(self.oscillation_grid_size, (tuple, list)):
+                grid_size = max(1, int(self.oscillation_grid_size[0]))  # Use first element of tuple
+            else:
+                grid_size = max(1, int(self.oscillation_grid_size))
+        else:
+            grid_size = 8  # Default fallback
         local_block_size = max(8, min(img_h // grid_size, img_w // grid_size))
         if local_block_size <= 0:
             local_block_size = 8
@@ -445,15 +460,27 @@ class OscillationExperimental2Tracker(BaseTracker):
     def start_tracking(self) -> bool:
         """Start oscillation tracking."""
         try:
+            # Check if properly initialized
+            if not self._initialized:
+                self.logger.error("Cannot start tracking - tracker not initialized")
+                return False
+                
             self.tracking_active = True
             self.oscillation_last_active_time = 0
             
-            # Reset tracking state
-            self.oscillation_history.clear()
-            self.oscillation_cell_persistence.clear()
-            self.oscillation_position_history.clear()
-            self.oscillation_last_known_pos = 50.0
-            self.oscillation_last_known_secondary_pos = 50.0
+            # Reset tracking state (check each exists first)
+            if hasattr(self, 'oscillation_history') and self.oscillation_history:
+                self.oscillation_history.clear()
+            if hasattr(self, 'oscillation_cell_persistence') and self.oscillation_cell_persistence:
+                self.oscillation_cell_persistence.clear()
+            if hasattr(self, 'oscillation_position_history') and self.oscillation_position_history:
+                self.oscillation_position_history.clear()
+                
+            # Reset positions
+            if hasattr(self, 'oscillation_last_known_pos'):
+                self.oscillation_last_known_pos = 50.0
+            if hasattr(self, 'oscillation_last_known_secondary_pos'):
+                self.oscillation_last_known_secondary_pos = 50.0
             
             self.logger.info("Oscillation Experimental 2 tracking started")
             return True
