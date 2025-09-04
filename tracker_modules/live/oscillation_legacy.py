@@ -11,6 +11,7 @@ Version: 1.0.0
 """
 
 import logging
+import time
 import numpy as np
 import cv2
 from collections import deque
@@ -65,6 +66,11 @@ class OscillationLegacyTracker(BaseTracker):
         
         # Frame preprocessing
         self.preprocess_frame_enabled = True
+        
+        # FPS tracking (missing from legacy implementation)
+        self.current_fps = 0.0
+        self._fps_update_counter = 0
+        self._fps_last_time = 0.0
     
     @property
     def metadata(self) -> TrackerMetadata:
@@ -90,13 +96,15 @@ class OscillationLegacyTracker(BaseTracker):
             if hasattr(app_instance, 'app_settings'):
                 settings = app_instance.app_settings
                 
-                self.oscillation_grid_size = settings.get('oscillation_grid_size', 8)
-                self.live_amp_enabled = settings.get('live_amp_enabled', True)
+                # Use exact same setting names as original tracker
+                self.oscillation_grid_size = settings.get('oscillation_detector_grid_size', 20)
+                self.live_amp_enabled = settings.get('live_oscillation_dynamic_amp_enabled', True)
+                self.oscillation_sensitivity = settings.get('oscillation_detector_sensitivity', 1.0)
                 self.oscillation_ema_alpha = settings.get('oscillation_ema_alpha', 0.3)
                 self.preprocess_frame_enabled = settings.get('preprocess_frame_enabled', True)
                 
                 self.logger.info(f"Legacy oscillation settings: grid_size={self.oscillation_grid_size}, "
-                               f"live_amp={self.live_amp_enabled}, ema_alpha={self.oscillation_ema_alpha}")
+                               f"live_amp={self.live_amp_enabled}, sensitivity={self.oscillation_sensitivity}, ema_alpha={self.oscillation_ema_alpha}")
             
             # Calculate block size based on grid
             if hasattr(app_instance, 'get_video_dimensions'):
@@ -107,16 +115,17 @@ class OscillationLegacyTracker(BaseTracker):
             if self.oscillation_block_size <= 0:
                 self.oscillation_block_size = 80  # Default fallback
             
-            # Initialize optical flow
+            # Initialize optical flow - use DIS with ultrafast preset for better performance
             try:
-                self.flow_dense = cv2.optflow.createOptFlow_DualTVL1()
-                self.logger.info("DualTVL1 optical flow initialized")
+                self.flow_dense = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
+                self.logger.info("DIS optical flow initialized (ultrafast preset) for legacy oscillation")
             except AttributeError:
                 try:
-                    self.flow_dense = cv2.FarnebackOpticalFlow_create()
-                    self.logger.info("Farneback optical flow initialized as fallback")
+                    # Fallback to medium preset if ultrafast not available
+                    self.flow_dense = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+                    self.logger.info("DIS optical flow initialized (medium preset) for legacy oscillation")
                 except AttributeError:
-                    self.logger.error("No optical flow implementation available")
+                    self.logger.error("No DIS optical flow implementation available")
                     return False
             
             # Reset state
@@ -147,7 +156,31 @@ class OscillationLegacyTracker(BaseTracker):
         - Percentile-based amplification
         """
         try:
-            processed_frame = self._preprocess_frame(frame) if self.preprocess_frame_enabled else frame.copy()
+            self._update_fps()
+            
+            # Match experimental 2's preprocessing exactly
+            try:
+                target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)('oscillation_processing_target_height', 360) if self.app else 360
+            except Exception:
+                target_height = 360  # Default from constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
+            
+            if frame is None or frame.size == 0:
+                return TrackerResult(
+                    processed_frame=frame,
+                    action_log=None,
+                    debug_info={'error': 'Invalid frame'},
+                    status_message="Error: Invalid frame"
+                )
+            
+            # Resize frame for performance (same as experimental 2)
+            src_h, src_w = frame.shape[:2]
+            if target_height and src_h > target_height:
+                scale = float(target_height) / float(src_h)
+                new_w = max(1, int(round(src_w * scale)))
+                processed_frame = cv2.resize(frame, (new_w, target_height), interpolation=cv2.INTER_AREA)
+            else:
+                processed_frame = frame
+            
             current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
             action_log_list = []
             
@@ -227,7 +260,8 @@ class OscillationLegacyTracker(BaseTracker):
                 'total_blocks': len(block_motions),
                 'camera_motion': is_camera_motion,
                 'amplification_active': self.live_amp_enabled and len(self.oscillation_position_history) > 50,
-                'tracking_active': self.tracking_active
+                'tracking_active': self.tracking_active,
+                'fps': round(self.current_fps, 1)
             }
             
             status_msg = f"Legacy | Pos: {self.oscillation_funscript_pos} | Active blocks: {len(active_blocks)}"
@@ -311,13 +345,13 @@ class OscillationLegacyTracker(BaseTracker):
         self.flow_dense = None
         self.oscillation_history.clear()
         self.oscillation_position_history.clear()
-        self.logger.info("Legacy oscillation detector cleaned up")
+        # self.logger.info("Legacy oscillation detector cleaned up")
     
     # Private helper methods
     
     def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Basic frame preprocessing."""
-        return frame.copy()  # Placeholder - implement actual preprocessing if needed
+        """Basic frame preprocessing - kept for compatibility but not used."""
+        return frame  # Preprocessing is done inline in process_frame method
     
     def _detect_active_area(self, gray_frame: np.ndarray) -> Tuple[int, int, int, int]:
         """Detect active video area to ignore black bars."""
@@ -552,3 +586,13 @@ class OscillationLegacyTracker(BaseTracker):
         if self.tracking_active:
             cv2.putText(frame, "LEGACY TRACKING", (10, frame.shape[0] - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    
+    def _update_fps(self):
+        """Update FPS tracking for control panel display."""
+        self._fps_update_counter += 1
+        if self._fps_update_counter >= 30:  # Update every 30 frames
+            current_time = time.time()
+            if self._fps_last_time > 0:
+                self.current_fps = 30.0 / (current_time - self._fps_last_time)
+            self._fps_last_time = current_time
+            self._fps_update_counter = 0

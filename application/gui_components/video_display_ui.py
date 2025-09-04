@@ -538,29 +538,7 @@ class VideoDisplayUI:
 
                                 # Do not draw the block grid outline here. Grid visualization is handled in-frame or elsewhere.
 
-                            # Visualization of active User Fixed ROI (even when not setting)
-                            if self.app.tracker and self.app.tracker.tracking_mode == "USER_FIXED_ROI" and \
-                                    self.app.tracker.user_roi_fixed and not self.app.is_setting_user_roi_mode:
-                                draw_list = imgui.get_window_draw_list()
-                                urx_vid, ury_vid, urw_vid, urh_vid = self.app.tracker.user_roi_fixed
-
-                                roi_start_screen = self._video_to_screen_coords(urx_vid, ury_vid)
-                                roi_end_screen = self._video_to_screen_coords(urx_vid + urw_vid, ury_vid + urh_vid)
-
-                                if roi_start_screen and roi_end_screen:
-                                    draw_list.add_rect(roi_start_screen[0],roi_start_screen[1],roi_end_screen[0],roi_end_screen[1],imgui.get_color_u32_rgba(*VideoDisplayColors.ROI_BORDER),thickness=2)
-                                if self.app.tracker.user_roi_tracked_point_relative: # UPDATED TO USE TRACKED POINT
-                                    abs_tracked_x_vid = self.app.tracker.user_roi_fixed[0] + int(self.app.tracker.user_roi_tracked_point_relative[0])
-                                    abs_tracked_y_vid = self.app.tracker.user_roi_fixed[1] + int(self.app.tracker.user_roi_tracked_point_relative[1])
-                                    point_screen_coords = self._video_to_screen_coords(abs_tracked_x_vid,abs_tracked_y_vid)
-                                    if point_screen_coords:
-                                        draw_list.add_circle_filled(point_screen_coords[0], point_screen_coords[1], 5, imgui.get_color_u32_rgba(*VideoDisplayColors.TRACKING_POINT)) # Green moving dot
-                                        if self.app.tracker.show_flow:
-                                            dx_flow_vid, dy_flow_vid = self.app.tracker.user_roi_current_flow_vector
-                                            flow_end_vid_x, flow_end_vid_y = abs_tracked_x_vid + int(dx_flow_vid * 10), abs_tracked_y_vid+int(dy_flow_vid*10)
-                                            flow_end_screen_coords = self._video_to_screen_coords(flow_end_vid_x,flow_end_vid_y)
-                                            if flow_end_screen_coords:
-                                                draw_list.add_line(point_screen_coords[0], point_screen_coords[1], flow_end_screen_coords[0], flow_end_screen_coords[1], imgui.get_color_u32_rgba(*VideoDisplayColors.FLOW_VECTOR), thickness=2)
+                            # Legacy User Fixed ROI visualization removed - ModularTrackerBridge doesn't use this mode
                             self._handle_video_mouse_interaction(app_state)
 
                             if app_state.show_stage2_overlay and stage_proc.stage2_overlay_data_map and self.app.processor and \
@@ -568,7 +546,7 @@ class VideoDisplayUI:
                                 self._render_stage2_overlay(stage_proc, app_state)
 
                             # Mixed mode debug overlay (shows when in mixed mode and debug data is available)
-                            if (app_state.selected_tracker_mode == constants.TrackerMode.OFFLINE_3_STAGE_MIXED and 
+                            if (app_state.selected_tracker_name and "mixed" in app_state.selected_tracker_name.lower() and 
                                 ((hasattr(self.app, 'stage3_mixed_debug_frame_map') and self.app.stage3_mixed_debug_frame_map) or 
                                  (hasattr(self.app, 'mixed_stage_processor') and self.app.mixed_stage_processor))):
                                 draw_list = imgui.get_window_draw_list()
