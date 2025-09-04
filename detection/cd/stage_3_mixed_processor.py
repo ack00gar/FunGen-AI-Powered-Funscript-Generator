@@ -18,7 +18,6 @@ from typing import Optional, List, Dict, Any, Tuple, Union
 from multiprocessing import Event
 
 from funscript import DualAxisFunscript
-from tracker import ROITracker
 from detection.cd.data_structures import FrameObject
 from application.utils.video_segment import VideoSegment
 from config import constants
@@ -41,7 +40,7 @@ class MixedStageProcessor:
         self.stage2_segments: List[VideoSegment] = []
         
         # ROI Tracker (initialized when needed)
-        self.roi_tracker: Optional[ROITracker] = None
+        self.roi_tracker = None  # Lazy import to avoid circular dependency
         
         # Processing state
         self.current_roi: Optional[Tuple[int, int, int, int]] = None
@@ -336,6 +335,8 @@ class MixedStageProcessor:
             roi_logger.setLevel(logging.ERROR)  # Only show errors
             
             try:
+                # Lazy import to avoid circular dependency
+                from tracker import ROITracker
                 self.roi_tracker = ROITracker(
                     app_logic_instance=mock_app, 
                     tracker_model_path=None,  # No model needed for mixed mode

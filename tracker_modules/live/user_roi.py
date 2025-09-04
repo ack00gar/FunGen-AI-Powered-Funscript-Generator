@@ -51,16 +51,35 @@ class UserRoiTracker(BaseTracker):
         self.prev_gray_user_roi_patch = None
         self.use_sparse_flow = False
         
-        # Motion tracking and smoothing
-        self.primary_flow_history_smooth = deque(maxlen=10)
-        self.secondary_flow_history_smooth = deque(maxlen=10)
-        self.flow_history_window_smooth = 10
+        # Motion tracking and smoothing (minimal for responsiveness)
+        self.flow_history_window_smooth = 3  # Minimal smoothing for maximum responsiveness
+        self.primary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
+        self.secondary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
         self.user_roi_current_flow_vector = (0.0, 0.0)
+        
+        # Additional smoothing layers for jerk reduction
+        self.position_history_smooth = deque(maxlen=3)
+        self.last_primary_position = 50
+        self.last_secondary_position = 50
+        
+        # Enhanced signal mastering (from Oscillation Experimental 2)
+        self.position_history_amplification = deque(maxlen=120)  # 4 seconds @ 30fps for dynamic amplification
+        self.live_amp_enabled = True  # Enable dynamic amplification by default
+        
+        # Adaptive flow range attributes (from original tracker.py)
+        self.flow_min_primary_adaptive = -0.1
+        self.flow_max_primary_adaptive = 0.1
+        self.flow_min_secondary_adaptive = -0.1
+        self.flow_max_secondary_adaptive = 0.1
+        
+        # Size factor tracking (from original - used even for User ROI)
+        self.penis_max_size_history = deque(maxlen=30)
+        self.penis_last_known_box = None
         
         # Position and scaling
         self.sensitivity = 10.0
         self.current_effective_amp_factor = 1.0
-        self.adaptive_flow_scale = False
+        self.adaptive_flow_scale = True  # Enable by default like original
         self.y_offset = 0
         self.x_offset = 0
         
@@ -119,16 +138,17 @@ class UserRoiTracker(BaseTracker):
             self.primary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
             self.secondary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
             
-            # Initialize optical flow
+            # Initialize optical flow - use DIS with ultrafast preset for better performance
             try:
-                self.flow_dense = cv2.optflow.createOptFlow_DualTVL1()
-                self.logger.info("DualTVL1 optical flow initialized for User ROI")
+                self.flow_dense = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
+                self.logger.info("DIS optical flow initialized (ultrafast preset) for User ROI")
             except AttributeError:
                 try:
-                    self.flow_dense = cv2.FarnebackOpticalFlow_create()
-                    self.logger.info("Farneback optical flow initialized as fallback")
+                    # Fallback to medium preset if ultrafast not available
+                    self.flow_dense = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+                    self.logger.info("DIS optical flow initialized (medium preset) for User ROI")
                 except AttributeError:
-                    self.logger.error("No optical flow implementation available")
+                    self.logger.error("No DIS optical flow implementation available")
                     return False
             
             # Reset state
@@ -297,6 +317,50 @@ class UserRoiTracker(BaseTracker):
             
         except Exception as e:
             self.logger.error(f"Failed to set ROI: {e}")
+            return False
+    
+    def set_user_defined_roi_and_point(self, roi_abs_coords: Tuple[int, int, int, int], 
+                                       point_abs_coords_in_frame: Tuple[int, int], 
+                                       current_frame_for_patch: Optional[np.ndarray] = None):
+        """
+        Set the user-defined ROI and tracking point.
+        
+        This method is called from app_logic when the user finishes drawing ROI and clicking point.
+        
+        Args:
+            roi_abs_coords: ROI in video coordinates (x, y, width, height)
+            point_abs_coords_in_frame: Point coordinates in video space (x, y)
+            current_frame_for_patch: Current video frame (unused, kept for compatibility)
+        """
+        try:
+            # Set the ROI
+            self.user_roi_fixed = roi_abs_coords
+            x, y, w, h = roi_abs_coords
+            self.logger.info(f"User ROI set to: {roi_abs_coords}")
+            
+            # Calculate point relative to ROI
+            point_x, point_y = point_abs_coords_in_frame
+            rel_x = float(point_x - x)
+            rel_y = float(point_y - y)
+            
+            # Clamp point to be within ROI bounds
+            rel_x = max(0, min(rel_x, w - 1))
+            rel_y = max(0, min(rel_y, h - 1))
+            
+            self.user_roi_tracked_point_relative = (rel_x, rel_y)
+            self.logger.info(f"Tracked point set to: {self.user_roi_tracked_point_relative} (relative to ROI)")
+            
+            # Reset tracking state
+            self.prev_gray_user_roi_patch = None
+            
+            # Start tracking if not already active
+            if not self.tracking_active:
+                self.start_tracking()
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to set ROI and point: {e}")
             return False
     
     def validate_settings(self, settings: Dict[str, Any]) -> bool:
@@ -481,10 +545,16 @@ class UserRoiTracker(BaseTracker):
         return 0.0, 0.0, None, None
     
     def _apply_motion_processing(self, dy_raw: float, dx_raw: float) -> Tuple[int, int]:
-        """Apply motion smoothing and scaling to raw flow values."""
+        """Apply motion smoothing and scaling using original tracker.py algorithm."""
         # Add to smoothing history
         self.primary_flow_history_smooth.append(dy_raw)
         self.secondary_flow_history_smooth.append(dx_raw)
+        
+        # Limit history size
+        if len(self.primary_flow_history_smooth) > self.flow_history_window_smooth:
+            self.primary_flow_history_smooth.pop(0)
+        if len(self.secondary_flow_history_smooth) > self.flow_history_window_smooth:
+            self.secondary_flow_history_smooth.pop(0)
         
         # Apply smoothing
         dy_smooth = (np.median(self.primary_flow_history_smooth) 
@@ -492,20 +562,107 @@ class UserRoiTracker(BaseTracker):
         dx_smooth = (np.median(self.secondary_flow_history_smooth) 
                     if self.secondary_flow_history_smooth else dx_raw)
         
-        # Apply scaling
+        # Calculate the base positions using original algorithm
+        size_factor = self.get_current_penis_size_factor()
         if self.adaptive_flow_scale:
-            final_primary_pos = self._apply_adaptive_scaling(dy_smooth, is_primary=True)
-            final_secondary_pos = self._apply_adaptive_scaling(dx_smooth, is_primary=False)
+            base_primary_pos = self._apply_adaptive_scaling_original(dy_smooth, "flow_min_primary_adaptive", "flow_max_primary_adaptive", size_factor, True)
+            secondary_pos = self._apply_adaptive_scaling_original(dx_smooth, "flow_min_secondary_adaptive", "flow_max_secondary_adaptive", size_factor, False)
         else:
             effective_amp_factor = self._get_effective_amplification_factor()
-            manual_scale_multiplier = (self.sensitivity / 10.0) * effective_amp_factor
-            final_primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
-            final_secondary_pos = int(np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
-        
+            manual_scale_multiplier = (self._get_current_sensitivity() / 10.0) * (1.0 / size_factor) * effective_amp_factor
+            base_primary_pos = int(np.clip(50 + dy_smooth * manual_scale_multiplier + self.y_offset, 0, 100))
+            secondary_pos = int(np.clip(50 + dx_smooth * manual_scale_multiplier + self.x_offset, 0, 100))
+
         # Update flow vector
         self.user_roi_current_flow_vector = (dx_smooth, dy_smooth)
         
+        # Apply enhanced signal mastering (from Oscillation Experimental 2)
+        enhanced_primary, enhanced_secondary = self._apply_enhanced_amplification(base_primary_pos, secondary_pos, dy_smooth, dx_smooth)
+        
+        # Apply final smoothing to reduce jerkiness
+        final_primary_pos, final_secondary_pos = self._apply_final_smoothing(enhanced_primary, enhanced_secondary)
+        
         return final_primary_pos, final_secondary_pos
+    
+    def _apply_enhanced_amplification(self, raw_primary_pos: int, raw_secondary_pos: int, 
+                                    dy_smooth: float, dx_smooth: float) -> Tuple[int, int]:
+        """Apply enhanced signal amplification techniques from Oscillation Experimental 2."""
+        try:
+            # Calculate motion magnitude for amplitude-aware scaling
+            motion_magnitude = np.sqrt(dy_smooth**2 + dx_smooth**2)
+            
+            # Amplitude-aware scaling with natural response (from Experimental 2)
+            amplitude_scaler = np.clip(motion_magnitude / 4.0, 0.7, 1.5)
+            
+            # Enhanced scaling factors (from Experimental 2: -10 and 10 vs smaller factors)
+            sensitivity = self._get_current_sensitivity()
+            max_deviation = 49 * (sensitivity / 10.0) * amplitude_scaler
+            
+            # Apply enhanced scaling with larger base factors
+            enhanced_dy = np.clip(dy_smooth * -10, -max_deviation, max_deviation)  # -10 factor like Experimental 2
+            enhanced_dx = np.clip(dx_smooth * 10, -max_deviation, max_deviation)   # 10 factor like Experimental 2
+            
+            # Calculate enhanced positions 
+            enhanced_primary_raw = np.clip(50 + enhanced_dy, 0, 100)
+            enhanced_secondary_raw = np.clip(50 + enhanced_dx, 0, 100)
+            
+            # --- Live Dynamic Amplification (from Experimental 2) ---
+            self.position_history_amplification.append(enhanced_primary_raw)
+            final_primary_pos = enhanced_primary_raw
+            final_secondary_pos = enhanced_secondary_raw
+            
+            # Apply percentile normalization to prevent plateaus (anti-plateau system)
+            if (self.live_amp_enabled and 
+                len(self.position_history_amplification) > self.position_history_amplification.maxlen * 0.5):
+                
+                p10 = np.percentile(self.position_history_amplification, 10)
+                p90 = np.percentile(self.position_history_amplification, 90)
+                effective_range = p90 - p10
+                
+                # Auto-adapts to prevent plateau (15 threshold like Experimental 2)
+                if effective_range > 15:
+                    normalized_pos = (enhanced_primary_raw - p10) / effective_range
+                    final_primary_pos = np.clip(normalized_pos * 100, 0, 100)
+                    
+                    # Apply same normalization to secondary axis
+                    normalized_secondary = (enhanced_secondary_raw - 50) / max(1, effective_range) + 0.5
+                    final_secondary_pos = np.clip(normalized_secondary * 100, 0, 100)
+            
+            return int(final_primary_pos), int(final_secondary_pos)
+            
+        except Exception as e:
+            self.logger.error(f"Enhanced amplification error: {e}")
+            # Fallback to original values
+            return raw_primary_pos, raw_secondary_pos
+    
+    def _apply_final_smoothing(self, primary_pos: int, secondary_pos: int) -> Tuple[int, int]:
+        """Apply final layer of smoothing to reduce signal jerkiness."""
+        # Exponential moving average for smooth transitions
+        alpha = 0.3  # Smoothing factor (0 = max smoothing, 1 = no smoothing)
+        
+        # Apply EMA smoothing
+        smoothed_primary = int(alpha * primary_pos + (1 - alpha) * self.last_primary_position)
+        smoothed_secondary = int(alpha * secondary_pos + (1 - alpha) * self.last_secondary_position)
+        
+        # Store position history for additional median smoothing
+        self.position_history_smooth.append((smoothed_primary, smoothed_secondary))
+        
+        # Apply median smoothing over position history for even smoother results
+        if len(self.position_history_smooth) >= 3:
+            primary_values = [pos[0] for pos in list(self.position_history_smooth)]
+            secondary_values = [pos[1] for pos in list(self.position_history_smooth)]
+            
+            final_primary = int(np.median(primary_values))
+            final_secondary = int(np.median(secondary_values))
+        else:
+            final_primary = smoothed_primary
+            final_secondary = smoothed_secondary
+        
+        # Update last positions
+        self.last_primary_position = final_primary
+        self.last_secondary_position = final_secondary
+        
+        return final_primary, final_secondary
     
     def _apply_adaptive_scaling(self, flow_value: float, is_primary: bool = True) -> int:
         """Apply adaptive scaling to flow values (simplified version)."""
@@ -628,7 +785,69 @@ class UserRoiTracker(BaseTracker):
             cv2.putText(processed_frame, "USER ROI TRACKING", (10, processed_frame.shape[0] - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
     
+    def get_current_penis_size_factor(self) -> float:
+        """Calculate current penis size factor (EXACT original method adapted for User ROI)."""
+        # For User ROI, use ROI size as proxy for object size
+        if not self.user_roi_fixed:
+            return 1.0
+            
+        # Use ROI dimensions as size history
+        _, _, w, h = self.user_roi_fixed
+        roi_size = w * h
+        
+        # Add to history
+        if len(self.penis_max_size_history) == 0:
+            self.penis_max_size_history.append(roi_size)
+        
+        max_hist = max(self.penis_max_size_history) if self.penis_max_size_history else roi_size
+        if max_hist < 1:
+            return 1.0
+            
+        return np.clip(roi_size / max_hist, 0.1, 1.5)
+    
+    def _apply_adaptive_scaling_original(self, value: float, min_val_attr: str, max_val_attr: str, size_factor: float, is_primary: bool) -> int:
+        """Security-compliant adaptive scaling method - EXACT original algorithm"""
+        # Direct attribute access instead of setattr to comply with security restrictions
+        if min_val_attr == "flow_min_primary_adaptive":
+            min_h = self.flow_min_primary_adaptive
+            self.flow_min_primary_adaptive = min(min_h * 0.995, value * 0.9 if value < -0.1 else value * 1.1)
+            min_h = min(self.flow_min_primary_adaptive, -0.2)
+        else:  # flow_min_secondary_adaptive
+            min_h = self.flow_min_secondary_adaptive
+            self.flow_min_secondary_adaptive = min(min_h * 0.995, value * 0.9 if value < -0.1 else value * 1.1)
+            min_h = min(self.flow_min_secondary_adaptive, -0.2)
+            
+        if max_val_attr == "flow_max_primary_adaptive":
+            max_h = self.flow_max_primary_adaptive
+            self.flow_max_primary_adaptive = max(max_h * 0.995, value * 1.1 if value > 0.1 else value * 0.9)
+            max_h = max(self.flow_max_primary_adaptive, 0.2)
+        else:  # flow_max_secondary_adaptive
+            max_h = self.flow_max_secondary_adaptive
+            self.flow_max_secondary_adaptive = max(max_h * 0.995, value * 1.1 if value > 0.1 else value * 0.9)
+            max_h = max(self.flow_max_secondary_adaptive, 0.2)
+            
+        flow_range = max_h - min_h
+        if abs(flow_range) < 0.1: 
+            flow_range = np.sign(flow_range) * 0.1 if flow_range != 0 else 0.1
+        normalized_centered_flow = (2 * (value - min_h) / flow_range) - 1.0 if flow_range != 0 else 0.0
+        normalized_centered_flow = np.clip(normalized_centered_flow, -1.0, 1.0)
+        effective_amp_factor = self._get_effective_amplification_factor()
+        max_deviation = (self._get_current_sensitivity() / 2.5) * effective_amp_factor
+        pos_offset = self.y_offset if is_primary else self.x_offset
+        return int(np.clip(50 + normalized_centered_flow * max_deviation + pos_offset, 0, 100))
+
     def _get_effective_amplification_factor(self) -> float:
-        """Calculate effective amplification factor."""
-        # Simplified version - real implementation would consider more factors
-        return 1.0
+        """Calculate effective amplification factor with real-time settings updates."""
+        # Read from app settings in real-time for control panel responsiveness
+        if hasattr(self.app, 'app_settings') and self.app.app_settings:
+            base_factor = self.app.app_settings.get('live_tracker_base_amplification', 1.0)
+        else:
+            base_factor = 1.0
+        return base_factor
+    
+    def _get_current_sensitivity(self) -> float:
+        """Get current sensitivity with real-time settings updates."""
+        if hasattr(self.app, 'app_settings') and self.app.app_settings:
+            return self.app.app_settings.get('live_tracker_sensitivity', self.sensitivity)
+        else:
+            return self.sensitivity

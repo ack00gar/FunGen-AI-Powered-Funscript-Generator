@@ -1109,6 +1109,10 @@ class AppStageProcessor:
                 return {"success": False, "max_fps": 0.0}
             if result_path and os.path.exists(result_path):
                 fm.stage1_output_msgpack_path = result_path
+                # Store preprocessed video path if it was created
+                if self.save_preprocessed_video and os.path.exists(preprocessed_video_path):
+                    fm.preprocessed_video_path = preprocessed_video_path
+                    self.logger.info(f"Preprocessed video saved: {os.path.basename(preprocessed_video_path)}")
                 final_msg = f"S1 Completed. Output: {os.path.basename(result_path)}"
                 self.gui_event_queue.put(("stage1_status_update", final_msg, "Done"))
                 self.gui_event_queue.put(("stage1_progress_update", 1.0, {"message": "Done", "current": 1, "total": 1}))
@@ -2182,7 +2186,8 @@ class AppStageProcessor:
     def update_settings_from_app(self):
         prod_usr = self.app_settings.get("num_producers_stage1")
         cons_usr = self.app_settings.get("num_consumers_stage1")
-        self.save_preprocessed_video = self.app_settings.get("save_preprocessed_video", False)
+        # Always save preprocessed video for optical flow recovery in Stage 2
+        self.save_preprocessed_video = self.app_settings.get("save_preprocessed_video", True)
 
         if not prod_usr or not cons_usr:
             cpu_cores = os.cpu_count() or 4
