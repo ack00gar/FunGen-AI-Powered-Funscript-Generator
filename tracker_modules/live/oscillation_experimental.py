@@ -140,16 +140,17 @@ class OscillationExperimentalTracker(BaseTracker):
             if self.oscillation_block_size <= 0:
                 self.oscillation_block_size = 80  # Default fallback
             
-            # Initialize optical flow
+            # Initialize optical flow - use DIS with ultrafast preset for better performance
             try:
-                self.flow_dense_osc = cv2.optflow.createOptFlow_DualTVL1()
-                self.logger.info("DualTVL1 optical flow initialized for experimental oscillation")
+                self.flow_dense_osc = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST)
+                self.logger.info("DIS optical flow initialized (ultrafast preset) for experimental oscillation")
             except AttributeError:
                 try:
-                    self.flow_dense_osc = cv2.FarnebackOpticalFlow_create()
-                    self.logger.info("Farneback optical flow initialized as fallback")
+                    # Fallback to medium preset if ultrafast not available
+                    self.flow_dense_osc = cv2.DISOpticalFlow.create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+                    self.logger.info("DIS optical flow initialized (medium preset) for experimental oscillation")
                 except AttributeError:
-                    self.logger.error("No optical flow implementation available")
+                    self.logger.error("No DIS optical flow implementation available")
                     return False
             
             # Reset state
