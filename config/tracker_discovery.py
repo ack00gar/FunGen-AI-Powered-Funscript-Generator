@@ -251,7 +251,7 @@ class DynamicTrackerDiscovery:
     
     def reload(self):
         """Reload tracker discovery (for development/testing)."""
-        self.logger.info("Reloading dynamic tracker discovery...")
+        self.logger.debug("Reloading dynamic tracker discovery...")
         tracker_registry.reload_trackers()
         self._discover_and_categorize()
     
