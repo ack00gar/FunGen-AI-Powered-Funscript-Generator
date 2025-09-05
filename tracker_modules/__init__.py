@@ -49,8 +49,8 @@ class TrackerRegistry:
         self._discover_trackers()
         
         if self._trackers:
-            # Single concise summary instead of verbose list
-            self.logger.info(f"Discovered {len(self._trackers)} trackers")
+            # Single concise summary - debug level to reduce startup noise
+            self.logger.debug(f"Discovered {len(self._trackers)} trackers")
         else:
             self.logger.warning("No trackers discovered!")
             
@@ -240,7 +240,7 @@ class TrackerRegistry:
     
     def reload_trackers(self):
         """Reload all trackers (useful for development)."""
-        self.logger.info("Reloading trackers...")
+        self.logger.debug("Reloading trackers...")
         self._trackers.clear()
         self._metadata_cache.clear()
         self._discovery_errors.clear()
