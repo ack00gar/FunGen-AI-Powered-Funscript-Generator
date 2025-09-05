@@ -123,7 +123,7 @@ class PluginLoader:
                     success_count += 1
             
             if success_count > 0:
-                self.logger.info(f"Loaded {success_count} plugin(s) from: {file_path}")
+                self.logger.debug(f"Loaded {success_count} plugin(s) from: {file_path}")
                 return True
             else:
                 self.logger.error(f"Failed to register any plugins from: {file_path}")
@@ -188,11 +188,11 @@ class PluginLoader:
         user_plugins_path = Path(user_plugins_dir)
         
         if not user_plugins_path.exists():
-            self.logger.info(f"User plugins directory does not exist: {user_plugins_path}")
-            self.logger.info("Create this directory and add your custom plugins there")
+            self.logger.debug(f"User plugins directory does not exist: {user_plugins_path}")
+            self.logger.debug("Create this directory and add your custom plugins there")
             return {}
         
-        self.logger.info(f"Loading user plugins from: {user_plugins_path}")
+        self.logger.debug(f"Loading user plugins from: {user_plugins_path}")
         return self.load_plugins_from_directory(str(user_plugins_path), recursive=True)
     
     def reload_plugin(self, plugin_name: str, file_path: str) -> bool:
@@ -245,7 +245,7 @@ class PluginLoader:
             template_content = self._get_template_plugin_content()
             template_file.write_text(template_content)
         
-        self.logger.info(f"Created user plugins directory: {user_plugins_dir}")
+        self.logger.debug(f"Created user plugins directory: {user_plugins_dir}")
         return user_plugins_dir
     
     def _get_template_plugin_content(self) -> str:
@@ -339,7 +339,7 @@ class TemplatePlugin(FunscriptTransformationPlugin):
         # Invalidate cache after modification
         funscript._invalidate_cache(axis)
         
-        self.logger.info(f"Applied template transformation to {axis} axis with parameter {example_parameter}")
+        self.logger.debug(f"Applied template transformation to {axis} axis with parameter {example_parameter}")
     
     def get_preview(self, funscript, axis: str = 'both', **parameters) -> Dict[str, Any]:
         """Generate a preview of the transformation effect."""
