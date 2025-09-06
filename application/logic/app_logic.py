@@ -1183,7 +1183,7 @@ class ApplicationLogic:
             self.gui_instance.video_display_ui.drawn_oscillation_area_video_coords = None
             self.gui_instance.video_display_ui.waiting_for_oscillation_point_click = False
 
-        self.logger.info("Setting Oscillation Area: Draw rectangle on video, then click point inside.", extra={'status_message': True, 'duration': 5.0})
+        self.logger.info("Setting Oscillation Area: Draw rectangle on video to define detection region.", extra={'status_message': True, 'duration': 5.0})
         self.energy_saver.reset_activity_timer()
 
     def exit_set_oscillation_area_mode(self):

@@ -360,6 +360,26 @@ class TrackerManager:
         if self._current_tracker and hasattr(self._current_tracker, 'clear_oscillation_area_and_point'):
             self._current_tracker.clear_oscillation_area_and_point()
 
+    def set_oscillation_area_and_point(self, area_rect_video_coords, point_video_coords, current_frame):
+        """Set oscillation area and point - delegates to current tracker."""
+        if self._current_tracker and hasattr(self._current_tracker, 'set_oscillation_area_and_point'):
+            self._current_tracker.set_oscillation_area_and_point(area_rect_video_coords, point_video_coords, current_frame)
+        elif self._current_tracker and hasattr(self._current_tracker, 'set_user_defined_roi_and_point'):
+            # Fallback for trackers that use the user-defined ROI method
+            self._current_tracker.set_user_defined_roi_and_point(area_rect_video_coords, point_video_coords, current_frame)
+        else:
+            self.logger.warning(f"Current tracker {self._current_mode} does not support setting oscillation area")
+
+    def set_oscillation_area(self, area_rect_video_coords):
+        """Set oscillation area only (no point needed) - delegates to current tracker."""
+        if self._current_tracker and hasattr(self._current_tracker, 'set_oscillation_area'):
+            self._current_tracker.set_oscillation_area(area_rect_video_coords)
+        elif self._current_tracker and hasattr(self._current_tracker, 'set_roi'):
+            # Fallback for trackers that use set_roi method
+            self._current_tracker.set_roi(area_rect_video_coords)
+        else:
+            self.logger.warning(f"Current tracker {self._current_mode} does not support setting oscillation area")
+
     # Advanced configuration methods
     def update_dis_flow_config(self, preset=None, finest_scale=None):
         """Update optical flow configuration."""

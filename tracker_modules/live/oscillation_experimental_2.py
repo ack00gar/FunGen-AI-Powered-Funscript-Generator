@@ -503,6 +503,28 @@ class OscillationExperimental2Tracker(BaseTracker):
         except Exception as e:
             self.logger.error(f"Failed to set ROI: {e}")
             return False
+
+    def set_oscillation_area_and_point(self, area_rect_video_coords, point_video_coords, current_frame):
+        """Set oscillation area and point for user-defined region detection."""
+        try:
+            self.oscillation_area_fixed = area_rect_video_coords
+            self.logger.info(f"Set oscillation area: {area_rect_video_coords}")
+            self.logger.info(f"Set oscillation point: {point_video_coords}")
+            # Note: Point is logged but not used in oscillation detection (uses grid-based approach)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to set oscillation area and point: {e}")
+            return False
+
+    def set_oscillation_area(self, area_rect_video_coords):
+        """Set oscillation area only (preferred method for oscillation detection)."""
+        try:
+            self.oscillation_area_fixed = area_rect_video_coords
+            self.logger.info(f"Set oscillation detection area: {area_rect_video_coords}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to set oscillation area: {e}")
+            return False
     
     def cleanup(self):
         """Clean up resources."""
