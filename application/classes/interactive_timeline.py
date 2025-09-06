@@ -158,6 +158,11 @@ class InteractiveFunscriptTimeline:
 
         # Stores the index of the point that was right-clicked to open the context menu
         self.context_menu_point_idx: int = -1
+        
+        # ALT+Drag range selection state
+        self.range_selecting = False
+        self.range_selection_start_time = 0
+        self.range_selection_end_time = 0
 
         # --- Persistent Ultimate Autotune Preview ---
         # In simple mode, always enable ultimate autotune preview
@@ -3225,6 +3230,23 @@ class InteractiveFunscriptTimeline:
                     self.marquee_start_screen_pos[1], self.marquee_end_screen_pos[1])
                 draw_list.add_rect_filled(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_FILL))
                 draw_list.add_rect(min_x, min_y, max_x, max_y, imgui.get_color_u32_rgba(*TimelineColors.MARQUEE_SELECTION_BORDER))
+                
+            # --- Draw ALT+Drag Range Selection ---
+            if self.range_selecting:
+                start_x = time_to_x(self.range_selection_start_time)
+                end_x = time_to_x(self.range_selection_end_time)
+                min_x, max_x = min(start_x, end_x), max(start_x, end_x)
+                
+                # Draw a vertical band across the full height of the timeline
+                top_y = canvas_abs_pos[1]
+                bottom_y = canvas_abs_pos[1] + canvas_size[1]
+                
+                # Use a different color for range selection (more blue/cyan tint)
+                range_fill_color = imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.2)  # Cyan with transparency
+                range_border_color = imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.8)  # Cyan border
+                
+                draw_list.add_rect_filled(min_x, top_y, max_x, bottom_y, range_fill_color)
+                draw_list.add_rect(min_x, top_y, max_x, bottom_y, range_border_color, thickness=2.0)
 
             # --- Mouse Interactions ---
             if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and not io.key_shift:
@@ -3272,13 +3294,22 @@ class InteractiveFunscriptTimeline:
                             np.clip(target_frame_on_click, 0, self.app.processor.total_frames - 1))
                         app_state.force_timeline_pan_to_current_frame = True
                 elif is_timeline_hovered_for_marquee_start:  # Use the relaxed hover check here for marquee
-                    # Start marquee
-                    self.is_marqueeing = True
-                    self.marquee_start_screen_pos = mouse_pos
-                    self.marquee_end_screen_pos = mouse_pos
-                    if not io.key_ctrl:
-                        self.multi_selected_action_indices.clear()
-                        self.selected_action_idx = -1
+                    if io.key_alt:
+                        # Start ALT+drag range selection by time
+                        self.range_selecting = True
+                        self.range_selection_start_time = x_to_time(mouse_pos[0])
+                        self.range_selection_end_time = self.range_selection_start_time
+                        if not io.key_ctrl:
+                            self.multi_selected_action_indices.clear()
+                            self.selected_action_idx = -1
+                    else:
+                        # Start marquee
+                        self.is_marqueeing = True
+                        self.marquee_start_screen_pos = mouse_pos
+                        self.marquee_end_screen_pos = mouse_pos
+                        if not io.key_ctrl:
+                            self.multi_selected_action_indices.clear()
+                            self.selected_action_idx = -1
 
             # Context Menu (only when strictly hovered over the canvas, not the padding)
             if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT) and is_timeline_hovered:
@@ -3324,6 +3355,10 @@ class InteractiveFunscriptTimeline:
             # Marquee Drag
             if self.is_marqueeing and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT) and not io.key_shift:
                 self.marquee_end_screen_pos = mouse_pos
+                
+            # ALT+Drag Range Selection
+            if self.range_selecting and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT) and io.key_alt:
+                self.range_selection_end_time = x_to_time(mouse_pos[0])
 
             # Handle Mouse Release for Marquee Selection
             if imgui.is_mouse_released(glfw.MOUSE_BUTTON_LEFT) and self.is_marqueeing:
@@ -3364,6 +3399,33 @@ class InteractiveFunscriptTimeline:
                 # Reset marquee state
                 self.marquee_start_screen_pos = None
                 self.marquee_end_screen_pos = None
+
+            # Handle Mouse Release for ALT+Drag Range Selection
+            if imgui.is_mouse_released(glfw.MOUSE_BUTTON_LEFT) and self.range_selecting:
+                self.range_selecting = False
+                if actions_list:
+                    # Get time range
+                    start_time = min(self.range_selection_start_time, self.range_selection_end_time)
+                    end_time = max(self.range_selection_start_time, self.range_selection_end_time)
+                    
+                    # Find all points within the time range
+                    newly_selected = set()
+                    for i, action in enumerate(actions_list):
+                        if start_time <= action['at'] <= end_time:
+                            newly_selected.add(i)
+                    
+                    # Update selection
+                    if io.key_ctrl:
+                        self.multi_selected_action_indices.symmetric_difference_update(newly_selected)
+                    else:
+                        self.multi_selected_action_indices = newly_selected
+                    
+                    self.selected_action_idx = min(self.multi_selected_action_indices) if self.multi_selected_action_indices else -1
+                    
+                    # Log the selection
+                    num_selected = len(newly_selected)
+                    if num_selected > 0:
+                        self.app.logger.info(f"T{self.timeline_num}: ALT+Drag selected {num_selected} points in time range {start_time:.0f}-{end_time:.0f}ms.")
 
                 if self.dragging_action_idx != -1 and allow_editing_timeline:
                     dragged_action_ref = actions_list[self.dragging_action_idx]
@@ -3477,7 +3539,7 @@ class InteractiveFunscriptTimeline:
                             end_idx = max(self.selection_anchor_idx, self.context_menu_point_idx)
 
                             new_selection = set(range(start_idx, end_idx + 1))
-                            self.multi_selected_action_indices.update(new_selection)
+                            self.multi_selected_action_indices = new_selection
                             self.selected_action_idx = self.context_menu_point_idx  # Set the last clicked as primary
                             self.selection_anchor_idx = -1  # Reset anchor
                             self.app.logger.info(f"T{self.timeline_num}: Selected points from {start_idx} to {end_idx}.")
