@@ -42,17 +42,17 @@ class OscillationLegacyTracker(BaseTracker):
         self.prev_gray_oscillation = None
         self.flow_dense = None
         
-        # Grid configuration
-        self.oscillation_grid_size = 8
-        self.oscillation_block_size = 80
+        # Grid configuration - use smaller grid for better performance
+        self.oscillation_grid_size = 10  # Match Experimental 2's performance
+        self.oscillation_block_size = 64  # Will be calculated dynamically
         
-        # Oscillation detection state
+        # Oscillation detection state (matches original tracker.py exactly)
         self.oscillation_history = {}
-        self.oscillation_history_max_len = 40
+        self.oscillation_history_max_len = 60  # Original: 60 frames (2s * 30fps)
         self.oscillation_history_seconds = 2.0
         
-        # Position tracking
-        self.oscillation_position_history = deque(maxlen=100)
+        # Position tracking (matches original tracker.py exactly)
+        self.oscillation_position_history = deque(maxlen=120)  # Original: 4 seconds @ 30fps
         self.oscillation_last_known_pos = 50.0
         self.oscillation_last_known_secondary_pos = 50.0
         self.oscillation_funscript_pos = 50
@@ -69,7 +69,6 @@ class OscillationLegacyTracker(BaseTracker):
         
         # FPS tracking (missing from legacy implementation)
         self.current_fps = 0.0
-        self._fps_update_counter = 0
         self._fps_last_time = 0.0
     
     @property
@@ -96,8 +95,8 @@ class OscillationLegacyTracker(BaseTracker):
             if hasattr(app_instance, 'app_settings'):
                 settings = app_instance.app_settings
                 
-                # Use exact same setting names as original tracker
-                self.oscillation_grid_size = settings.get('oscillation_detector_grid_size', 20)
+                # Use smaller grid size for better performance (can be overridden in settings)
+                self.oscillation_grid_size = settings.get('oscillation_detector_grid_size', 10)
                 self.live_amp_enabled = settings.get('live_oscillation_dynamic_amp_enabled', True)
                 self.oscillation_sensitivity = settings.get('oscillation_detector_sensitivity', 1.0)
                 self.oscillation_ema_alpha = settings.get('oscillation_ema_alpha', 0.3)
@@ -106,11 +105,15 @@ class OscillationLegacyTracker(BaseTracker):
                 self.logger.info(f"Legacy oscillation settings: grid_size={self.oscillation_grid_size}, "
                                f"live_amp={self.live_amp_enabled}, sensitivity={self.oscillation_sensitivity}, ema_alpha={self.oscillation_ema_alpha}")
             
-            # Calculate block size based on grid
-            if hasattr(app_instance, 'get_video_dimensions'):
-                width, height = app_instance.get_video_dimensions()
-                if width and height:
-                    self.oscillation_block_size = min(width, height) // self.oscillation_grid_size
+            # Calculate block size exactly like original tracker.py
+            try:
+                from config import constants
+                self.oscillation_block_size = constants.YOLO_INPUT_SIZE // self.oscillation_grid_size
+                self.logger.info(f"Block size calculated: {constants.YOLO_INPUT_SIZE} // {self.oscillation_grid_size} = {self.oscillation_block_size}")
+            except ImportError:
+                # Fallback if constants not available
+                self.oscillation_block_size = 640 // self.oscillation_grid_size
+                self.logger.warning(f"Using fallback YOLO_INPUT_SIZE=640, block size: {self.oscillation_block_size}")
             
             if self.oscillation_block_size <= 0:
                 self.oscillation_block_size = 80  # Default fallback
@@ -158,11 +161,7 @@ class OscillationLegacyTracker(BaseTracker):
         try:
             self._update_fps()
             
-            # Match experimental 2's preprocessing exactly
-            try:
-                target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)('oscillation_processing_target_height', 360) if self.app else 360
-            except Exception:
-                target_height = 360  # Default from constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
+            # No target height needed - video processor handles scaling
             
             if frame is None or frame.size == 0:
                 return TrackerResult(
@@ -172,14 +171,8 @@ class OscillationLegacyTracker(BaseTracker):
                     status_message="Error: Invalid frame"
                 )
             
-            # Resize frame for performance (same as experimental 2)
-            src_h, src_w = frame.shape[:2]
-            if target_height and src_h > target_height:
-                scale = float(target_height) / float(src_h)
-                new_w = max(1, int(round(src_w * scale)))
-                processed_frame = cv2.resize(frame, (new_w, target_height), interpolation=cv2.INTER_AREA)
-            else:
-                processed_frame = frame
+            # No resizing - video processor handles frame scaling via ffmpeg
+            processed_frame = frame
             
             current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
             action_log_list = []
@@ -292,9 +285,29 @@ class OscillationLegacyTracker(BaseTracker):
             self.logger.error("Tracker not initialized")
             return False
         
+        # Calculate dynamic history length based on FPS like original tracker.py
+        fps = 30.0  # Default FPS
+        if hasattr(self.app, 'processor') and self.app.processor and self.app.processor.fps > 0:
+            fps = self.app.processor.fps
+        
+        # Update history max length dynamically (matches original)
+        self.oscillation_history_max_len = int(self.oscillation_history_seconds * fps)
+        
+        # Update amplification history size (matches original)
+        amp_window_ms = 4000  # Default 4 seconds
+        if hasattr(self.app, 'app_settings'):
+            amp_window_ms = self.app.app_settings.get("live_oscillation_amp_window_ms", 4000)
+        new_maxlen = int((amp_window_ms / 1000.0) * fps)
+        self.oscillation_position_history = deque(maxlen=new_maxlen)
+        
         self.tracking_active = True
-        self.oscillation_position_history.clear()
-        self.logger.info("Legacy oscillation tracking started")
+        self.oscillation_history.clear()
+        self.prev_gray_oscillation = None
+        self.oscillation_funscript_pos = 50
+        
+        self.logger.info(f"Legacy oscillation tracking started - FPS: {fps}, "
+                        f"history_max_len: {self.oscillation_history_max_len}, "
+                        f"position_history_maxlen: {new_maxlen}")
         return True
     
     def stop_tracking(self) -> bool:
@@ -579,20 +592,14 @@ class OscillationLegacyTracker(BaseTracker):
             
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
         
-        # Draw position indicator
-        pos_text = f"Legacy: {self.oscillation_funscript_pos}, {self.oscillation_funscript_secondary_pos}"
-        cv2.putText(frame, pos_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        if self.tracking_active:
-            cv2.putText(frame, "LEGACY TRACKING", (10, frame.shape[0] - 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        # Add tracking indicator
+        self._draw_tracking_indicator(frame)
     
     def _update_fps(self):
-        """Update FPS tracking for control panel display."""
-        self._fps_update_counter += 1
-        if self._fps_update_counter >= 30:  # Update every 30 frames
-            current_time = time.time()
-            if self._fps_last_time > 0:
-                self.current_fps = 30.0 / (current_time - self._fps_last_time)
-            self._fps_last_time = current_time
-            self._fps_update_counter = 0
+        """Update FPS calculation using high-performance delta time method."""
+        current_time_sec = time.time()
+        if self._fps_last_time > 0:
+            delta_time = current_time_sec - self._fps_last_time
+            if delta_time > 0.001:  # Avoid division by zero
+                self.current_fps = 1.0 / delta_time
+        self._fps_last_time = current_time_sec

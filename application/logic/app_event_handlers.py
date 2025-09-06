@@ -207,7 +207,15 @@ class AppEventHandlers:
             end_frame = fs_proc.scripting_end_frame
             self.app.processor.seek_video(start_frame)
 
+        # Check if MAX_SPEED mode is selected - if so, use CLI pipeline for maximum performance
+        from config.constants import ProcessingSpeedMode
+        is_max_speed = (hasattr(self.app, 'app_state_ui') and 
+                       hasattr(self.app.app_state_ui, 'selected_processing_speed_mode') and
+                       self.app.app_state_ui.selected_processing_speed_mode == ProcessingSpeedMode.MAX_SPEED)
+        
+        # Normal processing for all modes - let the video processor handle optimizations
         self.app.processor.start_processing(start_frame=start_frame, end_frame=end_frame)
+            
         display_name = tracker_ui.get_tracker_display_name(selected_tracker_name)
         self.logger.info(
             f"Live tracker ({display_name}) started. Range: {'scripting range' if fs_proc.scripting_range_active else 'full video from current'}",

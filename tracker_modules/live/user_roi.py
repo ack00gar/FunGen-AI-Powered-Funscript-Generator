@@ -11,6 +11,7 @@ Version: 1.0.0
 """
 
 import logging
+import time
 import numpy as np
 import cv2
 from collections import deque
@@ -43,20 +44,20 @@ class UserRoiTracker(BaseTracker):
         # ROI configuration
         self.user_roi_fixed = None  # User-defined ROI (x, y, w, h)
         
-        # Sub-tracking configuration
-        self.enable_user_roi_sub_tracking = False
+        # Sub-tracking configuration (matches original tracker.py performance)
+        self.enable_user_roi_sub_tracking = True  # Default enabled like original
         self.user_roi_tracked_point_relative = None  # (x, y) relative to ROI
-        self.user_roi_tracking_box_size = (40, 40)  # (w, h) of tracking box
+        self.user_roi_tracking_box_size = (5, 5)  # Match original 5x5 pixel box
         
         # Optical flow
         self.flow_dense = None
         self.prev_gray_user_roi_patch = None
         self.use_sparse_flow = False
         
-        # Motion tracking and smoothing (minimal for responsiveness)
-        self.flow_history_window_smooth = 3  # Minimal smoothing for maximum responsiveness
-        self.primary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
-        self.secondary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
+        # Motion tracking and smoothing (matches original tracker)
+        self.flow_history_window_smooth = 3  # Fixed at 3 frames for responsiveness
+        self.primary_flow_history_smooth = []  # Use list like original, not deque
+        self.secondary_flow_history_smooth = []  # Use list like original, not deque
         self.user_roi_current_flow_vector = (0.0, 0.0)
         
         # Additional smoothing layers for jerk reduction
@@ -94,6 +95,8 @@ class UserRoiTracker(BaseTracker):
         
         # Performance tracking
         self.current_fps = 30.0
+        self._fps_counter = 0
+        self._fps_last_time = time.time()
         self.stats_display = []
         
         # Output delay compensation
@@ -123,12 +126,13 @@ class UserRoiTracker(BaseTracker):
             if hasattr(app_instance, 'app_settings'):
                 settings = app_instance.app_settings
                 
-                self.enable_user_roi_sub_tracking = settings.get('enable_user_roi_sub_tracking', False)
+                self.enable_user_roi_sub_tracking = settings.get('enable_user_roi_sub_tracking', True)  # Original default: True
                 self.user_roi_tracking_box_size = (
-                    settings.get('user_roi_tracking_box_width', 40),
-                    settings.get('user_roi_tracking_box_height', 40)
+                    settings.get('user_roi_tracking_box_width', 5),  # Original default: 5x5 pixels
+                    settings.get('user_roi_tracking_box_height', 5)
                 )
-                self.flow_history_window_smooth = settings.get('flow_history_window_smooth', 10)
+                # Keep flow history window at 3 for responsiveness (matches original tracker)
+                self.flow_history_window_smooth = 3  # Don't override with settings
                 self.sensitivity = settings.get('sensitivity', 10.0)
                 self.adaptive_flow_scale = settings.get('adaptive_flow_scale', False)
                 self.y_offset = settings.get('y_offset', 0)
@@ -187,6 +191,7 @@ class UserRoiTracker(BaseTracker):
         6. Generates funscript actions based on motion
         """
         try:
+            self._update_fps()
             processed_frame = self._preprocess_frame(frame)
             current_frame_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
             
@@ -388,8 +393,8 @@ class UserRoiTracker(BaseTracker):
             box_width = settings.get('user_roi_tracking_box_width', self.user_roi_tracking_box_size[0])
             box_height = settings.get('user_roi_tracking_box_height', self.user_roi_tracking_box_size[1])
             if (not isinstance(box_width, int) or not isinstance(box_height, int) or 
-                box_width < 10 or box_height < 10 or box_width > 200 or box_height > 200):
-                self.logger.error("Tracking box dimensions must be between 10 and 200 pixels")
+                box_width < 3 or box_height < 3 or box_width > 200 or box_height > 200):
+                self.logger.error("Tracking box dimensions must be between 3 and 200 pixels")
                 return False
             
             return True
@@ -504,15 +509,19 @@ class UserRoiTracker(BaseTracker):
                         dx_raw = np.median(sub_flow[..., 0])
                         dy_raw = np.median(sub_flow[..., 1])
             
-            # Update tracked point position
+            # Update tracked point position based on optical flow (for visualization)
             if self.user_roi_tracked_point_relative:
-                prev_x_rel, prev_y_rel = self.user_roi_tracked_point_relative
-                new_x_rel = prev_x_rel + dx_raw
-                new_y_rel = prev_y_rel + dy_raw
-                self.user_roi_tracked_point_relative = (
-                    max(0.0, min(new_x_rel, float(roi_w))), 
-                    max(0.0, min(new_y_rel, float(roi_h)))
-                )
+                rel_x, rel_y = self.user_roi_tracked_point_relative
+                
+                # Update position with flow values, keeping within ROI boundaries  
+                new_x = rel_x + dx_raw
+                new_y = rel_y + dy_raw
+                
+                # Constrain to ROI boundaries
+                new_x = max(0.0, min(new_x, float(roi_w - 1)))
+                new_y = max(0.0, min(new_y, float(roi_h - 1)))
+                
+                self.user_roi_tracked_point_relative = (new_x, new_y)
         
         return self._apply_motion_processing(dy_raw, dx_raw)
     
@@ -585,17 +594,9 @@ class UserRoiTracker(BaseTracker):
         # Update flow vector
         self.user_roi_current_flow_vector = (dx_smooth, dy_smooth)
         
-        # Apply enhanced signal mastering using helper module
-        sensitivity = self._get_current_sensitivity()
-        enhanced_primary, enhanced_secondary = self.signal_amplifier.enhance_signal(
-            base_primary_pos, secondary_pos, dy_smooth, dx_smooth,
-            sensitivity=sensitivity, apply_smoothing=False  # We'll apply our own smoothing
-        )
-        
-        # Apply final smoothing to reduce jerkiness
-        final_primary_pos, final_secondary_pos = self._apply_final_smoothing(enhanced_primary, enhanced_secondary)
-        
-        return final_primary_pos, final_secondary_pos
+        # Return directly without extra smoothing layers (matches original tracker)
+        # The flow history median smoothing is sufficient
+        return base_primary_pos, secondary_pos
     
     def _apply_final_smoothing(self, primary_pos: int, secondary_pos: int) -> Tuple[int, int]:
         """Apply final layer of smoothing to reduce signal jerkiness."""
@@ -709,43 +710,21 @@ class UserRoiTracker(BaseTracker):
             color = (0, 255, 255)  # Yellow for user ROI
             cv2.rectangle(processed_frame, (urx, ury), (urx + urw, ury + urh), color, 2)
             
-            # Draw ROI label
-            cv2.putText(processed_frame, "User ROI", (urx, ury - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            # ROI label removed for cleaner display
             
-            # Draw tracking box if sub-tracking is enabled
-            if (self.enable_user_roi_sub_tracking and 
-                self.user_roi_tracked_point_relative and 
-                self.user_roi_tracking_box_size):
-                
-                track_w, track_h = self.user_roi_tracking_box_size
+            # Draw the tracked point moving with optical flow (blue, bold)
+            if self.user_roi_tracked_point_relative:
                 rel_x, rel_y = self.user_roi_tracked_point_relative
                 
                 # Convert relative coordinates to absolute
                 abs_x = urx + rel_x
                 abs_y = ury + rel_y
                 
-                # Draw tracking box
-                box_x1 = int(abs_x - track_w / 2)
-                box_y1 = int(abs_y - track_h / 2)
-                box_x2 = box_x1 + track_w
-                box_y2 = box_y1 + track_h
-                
-                tracking_color = (255, 0, 255)  # Magenta for tracking box
-                cv2.rectangle(processed_frame, (box_x1, box_y1), (box_x2, box_y2), tracking_color, 1)
-                
-                # Draw center point
-                cv2.circle(processed_frame, (int(abs_x), int(abs_y)), 3, tracking_color, -1)
+                # Draw bold blue point that moves with optical flow
+                cv2.circle(processed_frame, (int(abs_x), int(abs_y)), 6, (255, 0, 0), -1)  # Bold blue dot
         
-        # Draw stats display
-        for i, stat in enumerate(self.stats_display):
-            cv2.putText(processed_frame, stat, (10, 30 + i * 25), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        # Draw tracking status
-        if self.tracking_active:
-            cv2.putText(processed_frame, "USER ROI TRACKING", (10, processed_frame.shape[0] - 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        # Add tracking indicator
+        self._draw_tracking_indicator(processed_frame)
     
     def get_current_penis_size_factor(self) -> float:
         """Calculate current penis size factor (EXACT original method adapted for User ROI)."""
@@ -806,6 +785,15 @@ class UserRoiTracker(BaseTracker):
         else:
             base_factor = 1.0
         return base_factor
+
+    def _update_fps(self):
+        """Update FPS calculation using high-performance delta time method."""
+        current_time_sec = time.time()
+        if self._fps_last_time > 0:
+            delta_time = current_time_sec - self._fps_last_time
+            if delta_time > 0.001:  # Avoid division by zero
+                self.current_fps = 1.0 / delta_time
+        self._fps_last_time = current_time_sec
     
     def _get_current_sensitivity(self) -> float:
         """Get current sensitivity with real-time settings updates."""

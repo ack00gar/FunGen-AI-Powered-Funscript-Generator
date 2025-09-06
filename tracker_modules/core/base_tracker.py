@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 import numpy as np
 import logging
+import cv2
 
 
 @dataclass
@@ -101,7 +102,7 @@ class TrackerMetadata:
 
 
 class TrackerResult:
-    """Result returned by tracker processing."""
+    """Result returned by tracker processing with backward compatibility for tuple access."""
     
     def __init__(self, 
                  processed_frame: np.ndarray,
@@ -121,6 +122,24 @@ class TrackerResult:
         self.action_log = action_log
         self.debug_info = debug_info
         self.status_message = status_message
+    
+    def __getitem__(self, index: int):
+        """Support tuple-like access for backward compatibility with video processor."""
+        if index == 0:
+            return self.processed_frame
+        elif index == 1:
+            return self.action_log
+        else:
+            raise IndexError(f"TrackerResult index out of range: {index} (only 0 and 1 supported)")
+    
+    def __iter__(self):
+        """Support tuple-like unpacking for backward compatibility."""
+        yield self.processed_frame
+        yield self.action_log
+    
+    def __len__(self):
+        """Support len() for tuple-like behavior."""
+        return 2
 
 
 class BaseTracker(ABC):
@@ -296,6 +315,18 @@ class BaseTracker(ABC):
             Dict: JSON schema for tracker settings
         """
         return {}
+    
+    def _draw_tracking_indicator(self, frame: np.ndarray) -> None:
+        """
+        Draw simple 'Tracking' indicator in bottom right when active.
+        
+        Args:
+            frame: Frame to draw on (modified in-place)
+        """
+        if self.tracking_active:
+            h, w = frame.shape[:2]
+            cv2.putText(frame, "Tracking", (w - 80, h - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
 
 class TrackerError(Exception):

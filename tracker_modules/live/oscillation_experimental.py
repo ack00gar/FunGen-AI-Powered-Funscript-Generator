@@ -92,8 +92,7 @@ class OscillationExperimentalTracker(BaseTracker):
         
         # Performance tracking
         self.current_fps = 30.0
-        self._fps_update_counter = 0
-        self._fps_last_time = time.time()
+        self._fps_last_time = 0.0
         self._osc_instr_last_log_sec = 0.0
         
         # DisFlow settings (for performance logging)
@@ -199,14 +198,7 @@ class OscillationExperimentalTracker(BaseTracker):
         try:
             self._update_fps()
             
-            # Get target processing height
-            try:
-                target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)(
-                    'oscillation_processing_target_height', 
-                    constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
-                )
-            except Exception:
-                target_height = constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
+            # No target height needed - video processor handles scaling
             
             if frame is None or frame.size == 0:
                 return TrackerResult(
@@ -217,7 +209,7 @@ class OscillationExperimentalTracker(BaseTracker):
                 )
             
             # Frame preprocessing and ROI handling
-            processed_frame, current_gray, use_oscillation_area, ax, ay, aw, ah = self._preprocess_frame_and_roi(frame, target_height)
+            processed_frame, current_gray, use_oscillation_area, ax, ay, aw, ah = self._preprocess_frame_and_roi(frame)
             
             # Initialize on first frame
             if self.prev_gray_oscillation is None or self.prev_gray_oscillation.shape != current_gray.shape:
@@ -400,25 +392,18 @@ class OscillationExperimentalTracker(BaseTracker):
     # Private helper methods
     
     def _update_fps(self):
-        """Update FPS tracking."""
-        self._fps_update_counter += 1
-        if self._fps_update_counter >= 30:  # Update every 30 frames
-            current_time = time.time()
-            if self._fps_last_time > 0:
-                self.current_fps = 30.0 / (current_time - self._fps_last_time)
-            self._fps_last_time = current_time
-            self._fps_update_counter = 0
+        """Update FPS calculation using high-performance delta time method."""
+        current_time_sec = time.time()
+        if self._fps_last_time > 0:
+            delta_time = current_time_sec - self._fps_last_time
+            if delta_time > 0.001:  # Avoid division by zero
+                self.current_fps = 1.0 / delta_time
+        self._fps_last_time = current_time_sec
     
-    def _preprocess_frame_and_roi(self, frame: np.ndarray, target_height: int) -> Tuple:
+    def _preprocess_frame_and_roi(self, frame: np.ndarray) -> Tuple:
         """Preprocess frame and handle ROI/full-frame processing."""
-        # Frame resizing if needed
-        src_h, src_w = frame.shape[:2]
-        if target_height and src_h > target_height:
-            scale = float(target_height) / float(src_h)
-            new_w = max(1, int(round(src_w * scale)))
-            processed_input = cv2.resize(frame, (new_w, target_height), interpolation=cv2.INTER_AREA)
-        else:
-            processed_input = frame
+        # No resizing - video processor handles frame scaling via ffmpeg
+        processed_frame = frame
         
         # Check for oscillation area (ROI)
         oscillation_area_fixed = getattr(self.app, 'oscillation_area_fixed', None)
@@ -426,7 +411,6 @@ class OscillationExperimentalTracker(BaseTracker):
         
         if use_oscillation_area:
             ax, ay, aw, ah = oscillation_area_fixed
-            processed_frame = self._preprocess_frame(frame)
             processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw]
             
             # Reuse/allocate ROI gray buffer
@@ -437,7 +421,6 @@ class OscillationExperimentalTracker(BaseTracker):
             cv2.cvtColor(processed_frame_area, cv2.COLOR_BGR2GRAY, dst=self._gray_roi_buffer)
             current_gray = self._gray_roi_buffer
         else:
-            processed_frame = self._preprocess_frame(frame)
             target_h, target_w = processed_frame.shape[0], processed_frame.shape[1]
             
             if (self._gray_full_buffer is None or 
@@ -505,7 +488,10 @@ class OscillationExperimentalTracker(BaseTracker):
     
     def _calculate_flow_with_global_motion(self, current_gray: np.ndarray) -> Tuple[np.ndarray, float, float]:
         """Calculate optical flow and detect global motion."""
-        flow = self.flow_dense_osc.calc(self.prev_gray_oscillation, current_gray, None)
+        # Critical performance optimization: ensure contiguous arrays for OpenCV
+        prev_gray_cont = np.ascontiguousarray(self.prev_gray_oscillation)
+        current_gray_cont = np.ascontiguousarray(current_gray)
+        flow = self.flow_dense_osc.calc(prev_gray_cont, current_gray_cont, None)
         
         if flow is None:
             return None, 0.0, 0.0
@@ -769,13 +755,8 @@ class OscillationExperimentalTracker(BaseTracker):
             color = (0, 255, 0) if (r, c) in active_block_positions else (180, 100, 100)
             cv2.rectangle(processed_frame, (x1, y1), (x1 + local_block_size, y1 + local_block_size), color, 1)
         
-        # Draw position indicator
-        pos_text = f"Exp: {self.oscillation_funscript_pos}, {self.oscillation_funscript_secondary_pos}"
-        cv2.putText(processed_frame, pos_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        if self.tracking_active:
-            cv2.putText(processed_frame, "EXPERIMENTAL TRACKING", (10, processed_frame.shape[0] - 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        # Add tracking indicator
+        self._draw_tracking_indicator(processed_frame)
     
     def _update_previous_frame_buffer(self, current_gray: np.ndarray):
         """Update previous frame buffer for next iteration."""
