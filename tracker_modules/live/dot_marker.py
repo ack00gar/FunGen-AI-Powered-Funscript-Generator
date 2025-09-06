@@ -9,7 +9,6 @@ Port from legacy DOT_TRACKER mode to modular tracker system.
 """
 
 import logging
-import time
 import cv2
 import numpy as np
 from typing import Optional, Tuple, List, Dict, Any
@@ -55,22 +54,15 @@ class DOTMarkerTracker(BaseTracker):
         self.show_stats: bool = True
         self.stats_display: List[str] = []
         self.internal_frame_counter: int = 0
-        self.tracking_active: bool = False
-        
-        # FPS calculation
-        self._fps_update_counter: int = 0
-        self._fps_last_time: float = 0.0
         
     def initialize(self, app_instance, **kwargs) -> bool:
         """Initialize the tracker with application instance."""
         try:
             self.app = app_instance
-            self._initialized = True
             self.logger.info("DOT Marker tracker initialized")
             return True
         except Exception as e:
             self.logger.error(f"Failed to initialize DOT Marker tracker: {e}")
-            self._initialized = False
             return False
     
     def start_tracking(self) -> bool:
@@ -79,13 +71,11 @@ class DOTMarkerTracker(BaseTracker):
             self.logger.warning("DOT Marker: No point selected. Please click on a point first.")
             return False
         
-        self.tracking_active = True
         self.logger.info("DOT Marker tracking started")
         return True
     
     def stop_tracking(self) -> bool:
         """Stop DOT tracking."""
-        self.tracking_active = False
         self.logger.info("DOT Marker tracking stopped")
         return True
     
@@ -212,27 +202,9 @@ class DOTMarkerTracker(BaseTracker):
         return result
     
     def _update_fps(self):
-        """Update FPS calculation with actual timing."""
-        current_time = time.time()
-        self._fps_update_counter += 1
-        
-        # Update FPS every 30 frames
-        if self._fps_update_counter >= 30:
-            if self._fps_last_time > 0:
-                time_diff = current_time - self._fps_last_time
-                if time_diff > 0:
-                    self.current_fps = self._fps_update_counter / time_diff
-                else:
-                    self.current_fps = 30.0
-            else:
-                self.current_fps = 30.0
-            
-            self._fps_update_counter = 0
-            self._fps_last_time = current_time
-        
-        # Default assumption if no timing data
-        if self.current_fps <= 0:
-            self.current_fps = 30.0
+        """Update FPS calculation."""
+        # Simple FPS estimation - could be improved with timing
+        self.current_fps = 30.0  # Default assumption
     
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> TrackerResult:
         """Process frame for DOT tracking."""
@@ -316,9 +288,9 @@ class DOTMarkerTracker(BaseTracker):
         if self.app:
             get = (self.app.app_settings.get if hasattr(self.app, 'app_settings') else (lambda k, d=None: d))
             preview_write = bool(get('dot_preview_write_enabled', True))
-            can_write_now = bool(self.tracking_active or preview_write)
+            can_write_now = bool(getattr(self, 'tracking_active', False) or preview_write)
         
-        if can_write_now and self.app and (hasattr(self.app, 'funscript') or hasattr(self.app, 'funscript_processor')):
+        if can_write_now and self.app and hasattr(self.app, 'funscript_processor'):
             # Get axis settings
             current_tracking_axis_mode = getattr(self.app, 'tracking_axis_mode', 'both')
             current_single_axis_output = getattr(self.app, 'single_axis_output_target', 'primary')
@@ -378,156 +350,21 @@ class DOTMarkerTracker(BaseTracker):
         
         self.internal_frame_counter += 1
         
-        # Prepare debug info
-        debug_info = {
-            "dot_selected": self.dot_selected_x is not None,
-            "dot_position": self.dot_selected_x,
-            "hsv_sample": self.dot_hsv_sample,
-            "boundary_rect": self.dot_boundary_rect,
-            "last_detected": self.dot_last_detected_xy,
-            "smoothed_position": self.dot_smoothed_xy,
-            "primary_pos": final_primary_pos,
-            "secondary_pos": final_secondary_pos,
-            "fps": self.current_fps,
-            "tracking_active": self.tracking_active
-        }
-        
         return TrackerResult(
             processed_frame=processed_frame,
             action_log=action_log_list if action_log_list else None,
-            debug_info=debug_info,
             status_message=f"DOT Marker: {len(action_log_list)} actions"
         )
     
     def get_status_info(self) -> Dict[str, Any]:
         """Get current tracker status."""
         return {
-            "tracker": self.metadata.display_name,
-            "active": self.tracking_active,
-            "initialized": self._initialized,
             "dot_selected": self.dot_selected_x is not None,
             "dot_hsv_sample": self.dot_hsv_sample,
             "boundary_rect": self.dot_boundary_rect,
             "last_detected": self.dot_last_detected_xy,
-            "smoothed_position": self.dot_smoothed_xy,
-            "fps": self.current_fps
+            "smoothed_position": self.dot_smoothed_xy
         }
-    
-    def validate_settings(self, settings: Dict[str, Any]) -> bool:
-        """Validate DOT marker settings."""
-        try:
-            # Validate smooth alpha
-            if 'dot_smooth_alpha' in settings:
-                alpha = float(settings['dot_smooth_alpha'])
-                if alpha <= 0 or alpha > 1.0:
-                    self.logger.error(f"Invalid smooth_alpha: {alpha}. Must be 0-1")
-                    return False
-            
-            # Validate HSV tolerance
-            if 'dot_hsv_tolerance' in settings:
-                tolerance = int(settings['dot_hsv_tolerance'])
-                if tolerance < 1 or tolerance > 179:
-                    self.logger.error(f"Invalid HSV tolerance: {tolerance}. Must be 1-179")
-                    return False
-            
-            # Validate min contour area
-            if 'dot_min_contour_area' in settings:
-                area = int(settings['dot_min_contour_area'])
-                if area < 1 or area > 10000:
-                    self.logger.error(f"Invalid min contour area: {area}. Must be 1-10000")
-                    return False
-            
-            return True
-        except (ValueError, TypeError) as e:
-            self.logger.error(f"Settings validation error: {e}")
-            return False
-    
-    def get_settings_schema(self) -> Dict[str, Any]:
-        """Get JSON schema for DOT marker settings."""
-        return {
-            "type": "object",
-            "title": "DOT Marker Settings",
-            "properties": {
-                "dot_smooth_alpha": {
-                    "type": "number",
-                    "title": "Position Smoothing",
-                    "description": "Position smoothing factor (0-1, higher = more responsive)",
-                    "minimum": 0.01,
-                    "maximum": 1.0,
-                    "default": 0.3
-                },
-                "dot_hsv_tolerance": {
-                    "type": "integer",
-                    "title": "Color Tolerance",
-                    "description": "HSV color matching tolerance (1-179)",
-                    "minimum": 1,
-                    "maximum": 179,
-                    "default": 20
-                },
-                "dot_min_contour_area": {
-                    "type": "integer",
-                    "title": "Min Detection Area",
-                    "description": "Minimum contour area for detection (pixels)",
-                    "minimum": 1,
-                    "maximum": 10000,
-                    "default": 10
-                },
-                "dot_preview_write_enabled": {
-                    "type": "boolean",
-                    "title": "Enable Preview Mode",
-                    "description": "Generate funscript actions in preview mode",
-                    "default": True
-                }
-            },
-            "additionalProperties": False
-        }
-    
-    def set_roi(self, roi: Tuple[int, int, int, int]) -> bool:
-        """Set boundary rectangle for DOT detection."""
-        try:
-            if len(roi) != 4:
-                self.logger.error("ROI must be (x, y, width, height)")
-                return False
-            
-            x, y, w, h = roi
-            if w <= 0 or h <= 0:
-                self.logger.error("ROI width and height must be positive")
-                return False
-            
-            self.dot_boundary_rect = roi
-            self.logger.info(f"DOT Marker boundary ROI set: {roi}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to set ROI: {e}")
-            return False
-    
-    def handle_mouse_click(self, x: int, y: int, frame: Optional[np.ndarray] = None) -> bool:
-        """Handle mouse click to select DOT point.
-        
-        Args:
-            x: X coordinate of click
-            y: Y coordinate of click 
-            frame: Current frame for HSV sampling
-            
-        Returns:
-            bool: True if point was set successfully
-        """
-        return self.set_dot_initial_point(x, y, frame)
-    
-    def is_ready_for_tracking(self) -> bool:
-        """Check if tracker is ready to start tracking."""
-        return (self.dot_selected_x is not None and 
-                self.dot_hsv_sample is not None and
-                self._initialized)
-    
-    def reset_selection(self):
-        """Reset DOT selection and tracking state."""
-        self.dot_smoothed_xy = None
-        self.dot_last_detected_xy = None
-        self.dot_selected_x = None
-        self.dot_hsv_sample = None
-        self.tracking_active = False
-        self.logger.info("DOT selection reset")
     
     def cleanup(self):
         """Clean up resources."""
@@ -536,5 +373,3 @@ class DOTMarkerTracker(BaseTracker):
         self.dot_selected_x = None
         self.dot_hsv_sample = None
         self.dot_boundary_rect = None
-        self.tracking_active = False
-        self._initialized = False

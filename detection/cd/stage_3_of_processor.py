@@ -9,7 +9,6 @@ from queue import Empty
 
 from funscript import DualAxisFunscript
 from video import VideoProcessor
-from tracker import ROITracker
 from detection.cd.data_structures import Segment, FrameObject
 from config import constants
 
@@ -125,21 +124,12 @@ def stage3_worker_proc(
     determined_video_type = video_processor.determined_video_type
 
     try:
+        # Lazy import to avoid circular dependency
+        from tracker import ROITracker
+        # ROITracker is now TrackerManager, use correct constructor
         roi_tracker_instance = ROITracker(
             app_logic_instance=None,
-            tracker_model_path=common_app_config.get('yolo_det_model_path', ''),
-            pose_model_path=common_app_config.get('yolo_pose_model_path', ''),
-            load_models_on_init=False,
-            confidence_threshold=tracker_config.get('confidence_threshold', 0.4),
-            roi_padding=tracker_config.get('roi_padding', 20),
-            roi_update_interval=tracker_config.get('roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
-            roi_smoothing_factor=tracker_config.get('roi_smoothing_factor', constants.DEFAULT_ROI_SMOOTHING_FACTOR),
-            base_amplification_factor=tracker_config.get('base_amplification_factor', constants.DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION),
-            dis_flow_preset=tracker_config.get('dis_flow_preset', "ULTRAFAST"),
-            adaptive_flow_scale=tracker_config.get('adaptive_flow_scale', True),
-            use_sparse_flow=tracker_config.get('use_sparse_flow', False),
-            logger=worker_logger.getChild("OscillationDetector"),
-            video_type_override=determined_video_type
+            tracker_model_path=common_app_config.get('yolo_det_model_path', '')
         )
         # Set tracker properties for oscillation detector
         roi_tracker_instance.y_offset = tracker_config.get('y_offset', constants.DEFAULT_LIVE_TRACKER_Y_OFFSET)
@@ -150,9 +140,16 @@ def stage3_worker_proc(
         # Configure oscillation detector mode based on settings
         od_mode = common_app_config.get('stage3_oscillation_detector_mode', 'current')
         if od_mode == "legacy":
-            roi_tracker_instance.tracking_mode = "OSCILLATION_DETECTOR_LEGACY"
+            if not roi_tracker_instance.set_tracking_mode("oscillation_legacy"):
+                worker_logger.error("Failed to set legacy oscillation detector mode")
+                return  # Exit worker process
         else:
-            roi_tracker_instance.tracking_mode = "OSCILLATION_DETECTOR"
+            # Try experimental modes first, fallback to legacy
+            if not roi_tracker_instance.set_tracking_mode("oscillation_experimental_2"):
+                if not roi_tracker_instance.set_tracking_mode("oscillation_experimental"):
+                    if not roi_tracker_instance.set_tracking_mode("oscillation_legacy"):
+                        worker_logger.error("Failed to set any oscillation detector mode")
+                        return  # Exit worker process
         roi_tracker_instance.oscillation_grid_size = tracker_config.get('oscillation_grid_size', 20)
         roi_tracker_instance.oscillation_sensitivity = tracker_config.get('oscillation_sensitivity', 1.0)
         

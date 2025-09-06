@@ -84,7 +84,7 @@ class ProcessingSpeedMode(Enum):
 # See config/tracker_discovery.py for the new dynamic approach
 
 # Default tracker will be resolved dynamically from available trackers
-DEFAULT_TRACKER_NAME = "oscillation_experimental_2"  # Internal name, resolved at runtime
+DEFAULT_TRACKER_NAME = "axis_projection_working"  # Internal name, resolved at runtime
 
 ####################################################################################################
 # AI & MODELS

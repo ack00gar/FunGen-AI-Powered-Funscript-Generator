@@ -1183,9 +1183,9 @@ class VideoProcessor:
                             if not self.tracker.tracking_active:
                                 self.tracker.start_tracking()
                         elif current_chapter is None and self.tracker.tracking_active:
-                            if self.tracker.tracking_mode != "USER_FIXED_ROI":
-                                self.tracker.stop_tracking()
-                                self.logger.info("Tracker stopped due to entering a gap between chapters.")
+                            # Legacy USER_FIXED_ROI check removed - all trackers can be stopped in chapter gaps
+                            self.tracker.stop_tracking()
+                            self.logger.info("Tracker stopped due to entering a gap between chapters.")
                     self.last_processed_chapter_id = current_chapter_id
 
                 if current_chapter and self.tracker and not self.tracker.tracking_active and current_chapter.user_roi_fixed:

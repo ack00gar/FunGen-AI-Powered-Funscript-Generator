@@ -9,7 +9,6 @@ Port from legacy BEAT_MARKER mode to modular tracker system.
 """
 
 import logging
-import time
 import cv2
 import numpy as np
 from typing import Optional, Tuple, List, Dict, Any
@@ -65,13 +64,6 @@ class BeatMarkerTracker(BaseTracker):
         self.stats_display: List[str] = []
         self.tracking_active: bool = False
         
-        # FPS calculation
-        self._fps_update_counter: int = 0
-        self._fps_last_time: float = 0.0
-        
-        # User ROI support
-        self.user_roi_fixed: Optional[Tuple[int, int, int, int]] = None
-        
         # Debug logging throttling
         self.last_audio_env_dbg_log_ms: float = 0
         
@@ -79,12 +71,10 @@ class BeatMarkerTracker(BaseTracker):
         """Initialize the tracker with application instance."""
         try:
             self.app = app_instance
-            self._initialized = True
             self.logger.info("Beat Marker tracker initialized")
             return True
         except Exception as e:
             self.logger.error(f"Failed to initialize Beat Marker tracker: {e}")
-            self._initialized = False
             return False
     
     def start_tracking(self) -> bool:
@@ -112,27 +102,9 @@ class BeatMarkerTracker(BaseTracker):
         return frame  # Beat marker doesn't need complex preprocessing
     
     def _update_fps(self):
-        """Update FPS calculation with actual timing."""
-        current_time = time.time()
-        self._fps_update_counter += 1
-        
-        # Update FPS every 30 frames
-        if self._fps_update_counter >= 30:
-            if self._fps_last_time > 0:
-                time_diff = current_time - self._fps_last_time
-                if time_diff > 0:
-                    self.current_fps = self._fps_update_counter / time_diff
-                else:
-                    self.current_fps = 30.0
-            else:
-                self.current_fps = 30.0
-            
-            self._fps_update_counter = 0
-            self._fps_last_time = current_time
-        
-        # Default assumption if no timing data
-        if self.current_fps <= 0:
-            self.current_fps = 30.0
+        """Update FPS calculation."""
+        # Simple FPS estimation - could be improved with timing
+        self.current_fps = 30.0  # Default assumption
     
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> TrackerResult:
         """Process frame for beat detection and action generation."""
@@ -206,13 +178,8 @@ class BeatMarkerTracker(BaseTracker):
             if hasattr(self.app, 'processor') and self.app.processor is not None:
                 try:
                     signal = float(self.app.processor.get_audio_envelope_value(frame_time_ms))
-                    if not isinstance(signal, (int, float)) or np.isnan(signal):
-                        signal = 0.0
-                except (AttributeError, TypeError, ValueError) as e:
-                    self.logger.warning(f"Audio envelope unavailable: {e}")
-                    signal = 0.0
                 except Exception as e:
-                    self.logger.error(f"Unexpected error getting audio envelope: {e}")
+                    self.logger.warning(f"Audio envelope unavailable: {e}")
                     signal = 0.0
             else:
                 signal = 0.0
@@ -403,225 +370,21 @@ class BeatMarkerTracker(BaseTracker):
                 cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, RGBColors.TEAL, 1)
         
-        # Prepare debug info
-        debug_info = {
-            "source": source,
-            "signal": signal,
-            "z_score": z,
-            "armed": self.beat_armed,
-            "triggered": triggered,
-            "last_tick_ms": self.beat_last_tick_time_ms,
-            "next_tick_ms": getattr(self, 'beat_next_tick_time_ms', None),
-            "toggle_state": self.beat_toggle_high,
-            "last_output": self.beat_last_output_pos,
-            "fps": self.current_fps,
-            "roi_used": self.user_roi_fixed is not None
-        }
-        
         return TrackerResult(
             processed_frame=processed_frame,
             action_log=action_log_list if action_log_list else None,
-            debug_info=debug_info,
             status_message=f"Beat Marker: {len(action_log_list)} beats"
         )
     
     def get_status_info(self) -> Dict[str, Any]:
         """Get current tracker status."""
         return {
-            "tracker": self.metadata.display_name,
-            "active": self.tracking_active,
-            "initialized": self._initialized,
             "beat_armed": self.beat_armed,
             "last_tick_time": self.beat_last_tick_time_ms,
             "toggle_state": self.beat_toggle_high,
             "last_output": self.beat_last_output_pos,
-            "signal_history_length": len(self.beat_brightness_history) if hasattr(self, 'beat_brightness_history') else 0,
-            "fps": self.current_fps,
-            "user_roi_set": self.user_roi_fixed is not None
+            "signal_history_length": len(self.beat_brightness_history) if hasattr(self, 'beat_brightness_history') else 0
         }
-    
-    def validate_settings(self, settings: Dict[str, Any]) -> bool:
-        """Validate beat marker settings."""
-        try:
-            # Validate BPM
-            if 'beat_bpm' in settings:
-                bpm = float(settings['beat_bpm'])
-                if bpm <= 0 or bpm > 1000:
-                    self.logger.error(f"Invalid BPM: {bpm}. Must be between 1-1000")
-                    return False
-            
-            # Validate amplitudes
-            if 'beat_amp_min' in settings:
-                amp_min = int(settings['beat_amp_min'])
-                if amp_min < 0 or amp_min > 100:
-                    self.logger.error(f"Invalid amp_min: {amp_min}. Must be 0-100")
-                    return False
-            
-            if 'beat_amp_max' in settings:
-                amp_max = int(settings['beat_amp_max'])
-                if amp_max < 0 or amp_max > 100:
-                    self.logger.error(f"Invalid amp_max: {amp_max}. Must be 0-100")
-                    return False
-            
-            # Validate source
-            if 'beat_source' in settings:
-                source = str(settings['beat_source']).lower().strip()
-                if source not in ['visual', 'audio', 'metronome']:
-                    self.logger.error(f"Invalid beat source: {source}")
-                    return False
-            
-            # Validate subdivision
-            if 'beat_subdivision' in settings:
-                sub = int(settings['beat_subdivision'])
-                if sub < 1 or sub > 16:
-                    self.logger.error(f"Invalid subdivision: {sub}. Must be 1-16")
-                    return False
-            
-            # Validate threshold sigma
-            if 'beat_threshold_sigma' in settings:
-                sigma = float(settings['beat_threshold_sigma'])
-                if sigma < 0.1 or sigma > 10.0:
-                    self.logger.error(f"Invalid threshold sigma: {sigma}. Must be 0.1-10.0")
-                    return False
-            
-            return True
-        except (ValueError, TypeError) as e:
-            self.logger.error(f"Settings validation error: {e}")
-            return False
-    
-    def get_settings_schema(self) -> Dict[str, Any]:
-        """Get JSON schema for beat marker settings."""
-        return {
-            "type": "object",
-            "title": "Beat Marker Settings",
-            "properties": {
-                "beat_source": {
-                    "type": "string",
-                    "title": "Beat Source",
-                    "description": "Source for beat detection",
-                    "enum": ["visual", "audio", "metronome"],
-                    "default": "visual"
-                },
-                "beat_bpm": {
-                    "type": "number",
-                    "title": "BPM (Metronome)",
-                    "description": "Beats per minute for metronome source",
-                    "minimum": 1,
-                    "maximum": 1000,
-                    "default": 120
-                },
-                "beat_subdivision": {
-                    "type": "integer",
-                    "title": "Beat Subdivision",
-                    "description": "Subdivide each beat (1=quarter, 2=eighth, etc.)",
-                    "minimum": 1,
-                    "maximum": 16,
-                    "default": 1
-                },
-                "beat_amp_min": {
-                    "type": "integer", 
-                    "title": "Min Amplitude",
-                    "description": "Minimum funscript position (0-100)",
-                    "minimum": 0,
-                    "maximum": 100,
-                    "default": 10
-                },
-                "beat_amp_max": {
-                    "type": "integer",
-                    "title": "Max Amplitude", 
-                    "description": "Maximum funscript position (0-100)",
-                    "minimum": 0,
-                    "maximum": 100,
-                    "default": 90
-                },
-                "beat_waveform": {
-                    "type": "string",
-                    "title": "Waveform",
-                    "description": "Output waveform pattern",
-                    "enum": ["step"],
-                    "default": "step"
-                },
-                "beat_threshold_sigma": {
-                    "type": "number",
-                    "title": "Detection Threshold",
-                    "description": "Z-score threshold for beat detection",
-                    "minimum": 0.1,
-                    "maximum": 10.0,
-                    "default": 2.0
-                },
-                "beat_hysteresis_ratio": {
-                    "type": "number",
-                    "title": "Hysteresis Ratio",
-                    "description": "Re-arm threshold ratio (prevents false triggers)",
-                    "minimum": 0.1,
-                    "maximum": 1.0,
-                    "default": 0.6
-                },
-                "beat_min_interval_ms": {
-                    "type": "number",
-                    "title": "Min Beat Interval (ms)",
-                    "description": "Minimum time between beats",
-                    "minimum": 50,
-                    "maximum": 5000,
-                    "default": 250
-                },
-                "beat_swing_percent": {
-                    "type": "number",
-                    "title": "Swing Percentage",
-                    "description": "Swing timing variation (0-50%)",
-                    "minimum": 0,
-                    "maximum": 50,
-                    "default": 0
-                },
-                "beat_phase_deg": {
-                    "type": "number",
-                    "title": "Phase Offset (degrees)",
-                    "description": "Phase offset for metronome sync",
-                    "minimum": -180,
-                    "maximum": 180,
-                    "default": 0
-                },
-                "beat_use_user_roi": {
-                    "type": "boolean",
-                    "title": "Use Custom ROI",
-                    "description": "Use user-selected ROI for visual detection",
-                    "default": False
-                },
-                "beat_preview_write_enabled": {
-                    "type": "boolean",
-                    "title": "Enable Preview Mode",
-                    "description": "Generate funscript actions in preview mode",
-                    "default": True
-                },
-                "beat_audio_ema_alpha": {
-                    "type": "number",
-                    "title": "Audio EMA Alpha",
-                    "description": "Audio envelope smoothing factor",
-                    "minimum": 0.01,
-                    "maximum": 0.9,
-                    "default": 0.2
-                }
-            }
-        }
-    
-    def set_roi(self, roi: Tuple[int, int, int, int]) -> bool:
-        """Set user ROI for visual beat detection."""
-        try:
-            if len(roi) != 4:
-                self.logger.error("ROI must be (x, y, width, height)")
-                return False
-            
-            x, y, w, h = roi
-            if w <= 0 or h <= 0:
-                self.logger.error("ROI width and height must be positive")
-                return False
-            
-            self.user_roi_fixed = roi
-            self.logger.info(f"Beat Marker ROI set: {roi}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to set ROI: {e}")
-            return False
     
     def cleanup(self):
         """Clean up resources."""
@@ -632,5 +395,3 @@ class BeatMarkerTracker(BaseTracker):
         if hasattr(self, 'beat_audio_novelty_history') and self.beat_audio_novelty_history:
             self.beat_audio_novelty_history.clear()
         self.audio_beat_analyzer = None
-        self.user_roi_fixed = None
-        self._initialized = False

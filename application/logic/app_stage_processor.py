@@ -1109,6 +1109,10 @@ class AppStageProcessor:
                 return {"success": False, "max_fps": 0.0}
             if result_path and os.path.exists(result_path):
                 fm.stage1_output_msgpack_path = result_path
+                # Store preprocessed video path if it was created
+                if self.save_preprocessed_video and os.path.exists(preprocessed_video_path):
+                    fm.preprocessed_video_path = preprocessed_video_path
+                    self.logger.info(f"Preprocessed video saved: {os.path.basename(preprocessed_video_path)}")
                 final_msg = f"S1 Completed. Output: {os.path.basename(result_path)}"
                 self.gui_event_queue.put(("stage1_status_update", final_msg, "Done"))
                 self.gui_event_queue.put(("stage1_progress_update", 1.0, {"message": "Done", "current": 1, "total": 1}))
@@ -1366,28 +1370,42 @@ class AppStageProcessor:
 
             self.app.logger.info(f"Applying 2-Stage results with axis mode: {axis_mode} and target: {target_timeline}.")
 
+            # Only clear and update timelines if we have actions to write
             if axis_mode == "both":
-                # Overwrite both timelines with the new results.
-                fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
-                fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+                # Overwrite both timelines only if there are actions
+                if primary_actions:
+                    fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
+                else:
+                    self.app.logger.warning("No primary actions - Timeline 1 unchanged")
+                
+                if secondary_actions:
+                    fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+                else:
+                    self.app.logger.warning("No secondary actions - Timeline 2 unchanged")
 
             elif axis_mode == "vertical":
-                # Overwrite ONLY the target timeline, leaving the other one completely untouched.
-                if target_timeline == "primary":
-                    self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
-                else:  # Target is secondary
-                    self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+                # Overwrite ONLY the target timeline if there are actions
+                if primary_actions:
+                    if target_timeline == "primary":
+                        self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
+                    else:  # Target is secondary
+                        self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+                else:
+                    self.app.logger.warning(f"No vertical actions - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
 
             elif axis_mode == "horizontal":
-                # Overwrite ONLY the target timeline with the secondary (horizontal) actions.
-                if target_timeline == "primary":
-                    self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
-                else:  # Target is secondary
-                    self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
-                    fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+                # Overwrite ONLY the target timeline if there are actions
+                if secondary_actions:
+                    if target_timeline == "primary":
+                        self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
+                    else:  # Target is secondary
+                        self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
+                        fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+                else:
+                    self.app.logger.warning(f"No horizontal actions - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
 
                 self.logger.info("Updating chapters with Stage 2 analysis results.")
                 fs_proc.video_chapters.clear()
@@ -1632,7 +1650,7 @@ class AppStageProcessor:
             "roi_update_interval": self.app_settings.get('s3_roi_update_interval', constants.DEFAULT_ROI_UPDATE_INTERVAL),
             "roi_smoothing_factor": self.app_settings.get('tracker_roi_smoothing_factor', constants.DEFAULT_ROI_SMOOTHING_FACTOR),
             "dis_flow_preset": self.app_settings.get('tracker_dis_flow_preset', "ULTRAFAST"),
-            "target_size_preprocess": self.app.tracker.target_size_preprocess if self.app.tracker else (640, 640),
+            "target_size_preprocess": getattr(self.app.tracker, 'target_size_preprocess', (640, 640)) if self.app.tracker else (640, 640),
             "flow_history_window_smooth": self.app_settings.get('tracker_flow_history_window_smooth', 3),
             "adaptive_flow_scale": self.app_settings.get('tracker_adaptive_flow_scale', True),
             "use_sparse_flow": self.app_settings.get('tracker_use_sparse_flow', False),
@@ -1659,8 +1677,8 @@ class AppStageProcessor:
             "yolo_pose_model_path": self.app.yolo_pose_model_path,
             "yolo_input_size": self.app.yolo_input_size,
             "video_fps": video_fps_s3,
-            "output_delay_frames": self.app.tracker.output_delay_frames if self.app.tracker else 0,
-            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10 + (self.app.tracker.output_delay_frames if self.app.tracker else 0)),
+            "output_delay_frames": getattr(self.app.tracker, 'output_delay_frames', 0) if self.app.tracker else 0,
+            "num_warmup_frames_s3": self.app_settings.get('s3_num_warmup_frames', 10 + (getattr(self.app.tracker, 'output_delay_frames', 0) if self.app.tracker else 0)),
             "roi_narrow_factor_hjbj": self.app_settings.get("roi_narrow_factor_hjbj", constants.DEFAULT_ROI_NARROW_FACTOR_HJBJ),
             "min_roi_dim_hjbj": self.app_settings.get("min_roi_dim_hjbj", constants.DEFAULT_MIN_ROI_DIM_HJBJ),
             "tracking_axis_mode": self.app.tracking_axis_mode,
@@ -1727,11 +1745,26 @@ class AppStageProcessor:
                 start_ms = fs_proc.frame_to_ms(range_start_f if range_start_f is not None else 0)
                 end_ms = fs_proc.frame_to_ms(range_end_f_effective) if range_end_f_effective is not None else video_duration_ms_s3
                 op_desc_s3_range = f"{op_desc_s3} (Range F{range_start_f or 'Start'}-{range_end_f_effective if range_end_f_effective is not None else 'End'})"
-                fs_proc.clear_actions_in_range_and_inject_new(1, final_s3_primary_actions, start_ms, end_ms, op_desc_s3_range + " (T1)")
-                fs_proc.clear_actions_in_range_and_inject_new(2, final_s3_secondary_actions, start_ms, end_ms, op_desc_s3_range + " (T2)")
+                if final_s3_primary_actions:
+                    fs_proc.clear_actions_in_range_and_inject_new(1, final_s3_primary_actions, start_ms, end_ms, op_desc_s3_range + " (T1)")
+                else:
+                    self.logger.warning("No primary actions from Stage 3 - Timeline 1 range unchanged")
+                
+                if final_s3_secondary_actions:
+                    fs_proc.clear_actions_in_range_and_inject_new(2, final_s3_secondary_actions, start_ms, end_ms, op_desc_s3_range + " (T2)")
+                else:
+                    self.logger.info("No secondary actions from Stage 3 - Timeline 2 range unchanged")
             else:
-                fs_proc.clear_timeline_history_and_set_new_baseline(1, final_s3_primary_actions, op_desc_s3 + " (T1)")
-                fs_proc.clear_timeline_history_and_set_new_baseline(2, final_s3_secondary_actions, op_desc_s3 + " (T2)")
+                # Only update timelines if there are actions
+                if final_s3_primary_actions:
+                    fs_proc.clear_timeline_history_and_set_new_baseline(1, final_s3_primary_actions, op_desc_s3 + " (T1)")
+                else:
+                    self.logger.warning("No primary actions from Stage 3 - Timeline 1 unchanged")
+                
+                if final_s3_secondary_actions:
+                    fs_proc.clear_timeline_history_and_set_new_baseline(2, final_s3_secondary_actions, op_desc_s3 + " (T2)")
+                else:
+                    self.logger.info("No secondary actions from Stage 3 - Timeline 2 unchanged")
 
             self.gui_event_queue.put(("stage3_status_update", "Stage 3 Completed.", "Done"))
             self.app.project_manager.project_dirty = True
@@ -1951,28 +1984,44 @@ class AppStageProcessor:
 
                     self.app.logger.info(f"Applying 2-Stage results with axis mode: {axis_mode} and target: {target_timeline}.")
 
+                    # Only clear and update timelines if we have actions to write
                     if axis_mode == "both":
-                        # Overwrite both timelines with the new results.
-                        fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
-                        fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+                        # Overwrite both timelines with the new results only if there are actions
+                        if primary_actions:
+                            fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Primary)")
+                            self.app.logger.info(f"Applied {len(primary_actions)} primary actions to Timeline 1")
+                        else:
+                            self.app.logger.warning("No primary actions from Stage 2 - Timeline 1 unchanged")
+                        
+                        if secondary_actions:
+                            fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Secondary)")
+                            self.app.logger.info(f"Applied {len(secondary_actions)} secondary actions to Timeline 2")
+                        else:
+                            self.app.logger.warning("No secondary actions from Stage 2 - Timeline 2 unchanged")
 
                     elif axis_mode == "vertical":
-                        # Overwrite ONLY the target timeline, leaving the other one completely untouched.
-                        if target_timeline == "primary":
-                            self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
-                            fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
-                        else:  # Target is secondary
-                            self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
-                            fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+                        # Overwrite ONLY the target timeline if there are actions
+                        if primary_actions:
+                            if target_timeline == "primary":
+                                self.app.logger.info("Writing to Timeline 1, Timeline 2 is untouched.")
+                                fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (Vertical)")
+                            else:  # Target is secondary
+                                self.app.logger.info("Writing to Timeline 2, Timeline 1 is untouched.")
+                                fs_proc.clear_timeline_history_and_set_new_baseline(2, primary_actions, "Stage 2 (Vertical)")
+                        else:
+                            self.app.logger.warning(f"No vertical actions from Stage 2 - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
 
                     elif axis_mode == "horizontal":
-                        # Overwrite ONLY the target timeline with the secondary (horizontal) actions.
-                        if target_timeline == "primary":
-                            self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
-                            fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
-                        else:  # Target is secondary
-                            self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
-                            fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+                        # Overwrite ONLY the target timeline with the secondary (horizontal) actions if available
+                        if secondary_actions:
+                            if target_timeline == "primary":
+                                self.app.logger.info("Writing horizontal data to Timeline 1, Timeline 2 is untouched.")
+                                fs_proc.clear_timeline_history_and_set_new_baseline(1, secondary_actions, "Stage 2 (Horizontal)")
+                            else:  # Target is secondary
+                                self.app.logger.info("Writing horizontal data to Timeline 2, Timeline 1 is untouched.")
+                                fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (Horizontal)")
+                        else:
+                            self.app.logger.warning(f"No horizontal actions from Stage 2 - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
 
                     self.stage2_status_text = "S2 Completed. Results Processed."
                     self.app.project_manager.project_dirty = True
@@ -2005,6 +2054,11 @@ class AppStageProcessor:
                         self.logger.warning(f"stage3_results_success received non-dict data: {type(packaged_data)}")
                         continue
                     results_dict = packaged_data.get("results_dict", {})
+                    
+                    # Validate results_dict is actually a dictionary
+                    if not isinstance(results_dict, dict):
+                        self.logger.error(f"Stage 3 results_dict is not a dictionary: {type(results_dict)} = {results_dict}")
+                        continue
                     
                     # Extract funscript object from Stage 3 results
                     funscript_obj = results_dict.get("funscript")
@@ -2043,18 +2097,33 @@ class AppStageProcessor:
                         
                         self.app.logger.info(f"Applying Stage 3 results with axis mode: {axis_mode} and target: {target_timeline}")
                         
+                        # Only clear and update timelines if we have actions to write
                         if axis_mode == "both":
-                            # Write to both timelines
-                            fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 3 (Primary)")
+                            # Write to both timelines only if there are actions
+                            if primary_actions:
+                                fs_proc.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 3 (Primary)")
+                                self.logger.info(f"Applied {len(primary_actions)} primary actions to Timeline 1")
+                            else:
+                                self.logger.warning("No primary actions from Stage 3 - Timeline 1 unchanged")
+                            
                             if secondary_actions:
                                 fs_proc.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 3 (Secondary)")
+                                self.logger.info(f"Applied {len(secondary_actions)} secondary actions to Timeline 2")
+                            else:
+                                self.logger.info("No secondary actions from Stage 3 - Timeline 2 unchanged")
+                                
                         elif axis_mode in ["vertical", "horizontal"]:
-                            # Write to target timeline only
+                            # Write to target timeline only if there are actions
                             actions_to_use = primary_actions  # Stage 3 typically produces primary actions
-                            if target_timeline == "primary":
-                                fs_proc.clear_timeline_history_and_set_new_baseline(1, actions_to_use, "Stage 3")
-                            else:  # secondary
-                                fs_proc.clear_timeline_history_and_set_new_baseline(2, actions_to_use, "Stage 3")
+                            if actions_to_use:
+                                if target_timeline == "primary":
+                                    fs_proc.clear_timeline_history_and_set_new_baseline(1, actions_to_use, "Stage 3")
+                                    self.logger.info(f"Applied {len(actions_to_use)} actions to Timeline 1")
+                                else:  # secondary
+                                    fs_proc.clear_timeline_history_and_set_new_baseline(2, actions_to_use, "Stage 3")
+                                    self.logger.info(f"Applied {len(actions_to_use)} actions to Timeline 2")
+                            else:
+                                self.logger.warning(f"No actions from Stage 3 - Timeline {1 if target_timeline == 'primary' else 2} unchanged")
                         
                         self.stage3_status_text = "S3 Completed. Results Processed."
                         self.app.project_manager.project_dirty = True
@@ -2182,7 +2251,8 @@ class AppStageProcessor:
     def update_settings_from_app(self):
         prod_usr = self.app_settings.get("num_producers_stage1")
         cons_usr = self.app_settings.get("num_consumers_stage1")
-        self.save_preprocessed_video = self.app_settings.get("save_preprocessed_video", False)
+        # Always save preprocessed video for optical flow recovery in Stage 2
+        self.save_preprocessed_video = self.app_settings.get("save_preprocessed_video", True)
 
         if not prod_usr or not cons_usr:
             cpu_cores = os.cpu_count() or 4

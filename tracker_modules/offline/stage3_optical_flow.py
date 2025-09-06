@@ -191,14 +191,16 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
                     from tracker.tracker_manager import TrackerManager as TM
                     TrackerManager = TM
                 
-                self.tracker_manager = TrackerManager(app_instance)
-                if not self.tracker_manager.set_tracker(self.live_tracker_name, **self.live_tracker_settings):
+                # Get tracker model path from app instance
+                tracker_model_path = getattr(app_instance, 'yolo_det_model_path', '') or ''
+                self.tracker_manager = TrackerManager(app_instance, tracker_model_path)
+                if not self.tracker_manager.set_tracking_mode(self.live_tracker_name):
                     self.logger.warning(f"Failed to set live tracker {self.live_tracker_name}, using default")
                     # Try fallback trackers
                     fallback_trackers = ['oscillation_experimental', 'oscillation_legacy']
                     tracker_set = False
                     for fallback in fallback_trackers:
-                        if self.tracker_manager.set_tracker(fallback, **self.live_tracker_settings):
+                        if self.tracker_manager.set_tracking_mode(fallback):
                             self.live_tracker_name = fallback
                             tracker_set = True
                             break
