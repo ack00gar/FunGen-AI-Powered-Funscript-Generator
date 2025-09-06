@@ -921,7 +921,33 @@ class VideoProcessor:
         start_time_seconds = start_frame_abs_idx / self.video_info['fps']
         self.current_stream_start_frame_abs = start_frame_abs_idx
         self.frames_read_from_current_stream = 0
+        
+        # Optimize ffmpeg for MAX_SPEED processing
         common_ffmpeg_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
+        
+        # Add MAX_SPEED optimizations if in MAX_SPEED mode
+        if (hasattr(self.app, 'app_state_ui') and 
+            hasattr(self.app.app_state_ui, 'selected_processing_speed_mode') and
+            self.app.app_state_ui.selected_processing_speed_mode == constants.ProcessingSpeedMode.MAX_SPEED):
+            # Optimize ffmpeg for maximum decode speed:
+            # Hardware acceleration: Handled by individual pipe paths (don't add to common prefix)
+            # -fflags +genpts+fastseek: Generate timestamps and enable fast seeking
+            # -threads 0: Use optimal number of threads
+            # -preset ultrafast: Fastest decode preset
+            # -tune zerolatency: Minimize decode latency
+            # -probesize 32: Smaller probe for faster startup
+            # -analyzeduration 1: Faster stream analysis
+            # No -re flag: Don't limit to real-time (decode as fast as possible)
+            
+            # Add speed optimizations (hardware acceleration handled by pipe-specific code)
+            # NOTE: -preset and -tune are encoding options, not decoding options
+            common_ffmpeg_prefix.extend([
+                '-fflags', '+genpts+fastseek', 
+                '-threads', '0',
+                '-probesize', '32',
+                '-analyzeduration', '1'
+            ])
+            self.logger.info("FFmpeg optimized for MAX_SPEED processing with fast decode")
 
         if self._is_10bit_cuda_pipe_needed():
             self.logger.info("Using 2-pipe FFmpeg command for 10-bit CUDA video.")
@@ -955,7 +981,15 @@ class VideoProcessor:
                 self.ffmpeg_pipe1_process = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if self.ffmpeg_pipe1_process.stdout is None:
                     raise IOError("Pipe 1 stdout is None.")
-                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * 5, creationflags=creation_flags)
+                # Use larger buffer for MAX_SPEED mode to improve throughput
+                if (hasattr(self.app, 'app_state_ui') and 
+                    hasattr(self.app.app_state_ui, 'selected_processing_speed_mode') and
+                    self.app.app_state_ui.selected_processing_speed_mode == constants.ProcessingSpeedMode.MAX_SPEED):
+                    buffer_multiplier = 20  # Match CLI streaming buffer size
+                else:
+                    buffer_multiplier = 5   # Normal buffer size
+                    
+                self.ffmpeg_process = subprocess.Popen(cmd2, stdin=self.ffmpeg_pipe1_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * buffer_multiplier, creationflags=creation_flags)
                 self.ffmpeg_pipe1_process.stdout.close()
                 return True
             except Exception as e:
@@ -978,7 +1012,15 @@ class VideoProcessor:
             self.logger.info(f"Single Pipe CMD: {' '.join(shlex.quote(str(x)) for x in cmd)}")
             try:
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                self.ffmpeg_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * 5, creationflags=creation_flags)
+                # Use larger buffer for MAX_SPEED mode to improve throughput
+                if (hasattr(self.app, 'app_state_ui') and 
+                    hasattr(self.app.app_state_ui, 'selected_processing_speed_mode') and
+                    self.app.app_state_ui.selected_processing_speed_mode == constants.ProcessingSpeedMode.MAX_SPEED):
+                    buffer_multiplier = 20  # Match CLI streaming buffer size
+                else:
+                    buffer_multiplier = 5   # Normal buffer size
+                    
+                self.ffmpeg_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * buffer_multiplier, creationflags=creation_flags)
                 return True
             except Exception as e:
                 self.logger.error(f"Failed to start FFmpeg: {e}", exc_info=True)
@@ -1166,12 +1208,28 @@ class VideoProcessor:
 
                 # The original logic of the loop continues below
                 speed_mode = self.app.app_state_ui.selected_processing_speed_mode
+                
+                # Debug: Log speed mode selection for MAX_SPEED troubleshooting
+                if hasattr(self, '_last_logged_speed_mode') and self._last_logged_speed_mode != speed_mode:
+                    self.logger.info(f"Processing speed mode changed to: {speed_mode}")
+                    self._last_logged_speed_mode = speed_mode
+                elif not hasattr(self, '_last_logged_speed_mode'):
+                    self.logger.info(f"Initial processing speed mode: {speed_mode}")
+                    self._last_logged_speed_mode = speed_mode
+                
                 if speed_mode == constants.ProcessingSpeedMode.REALTIME:
                     target_delay = 1.0 / self.fps if self.fps > 0 else (1.0 / 30.0)
                 elif speed_mode == constants.ProcessingSpeedMode.SLOW_MOTION:
                     target_delay = 1.0 / 10.0  # Fixed 10 FPS for slow-mo
                 else:  # Max Speed
                     target_delay = 0.0
+                    
+                # Debug: Log target_delay for MAX_SPEED troubleshooting
+                if speed_mode == constants.ProcessingSpeedMode.MAX_SPEED and target_delay != 0.0:
+                    self.logger.error(f"MAX_SPEED mode but target_delay = {target_delay} (should be 0.0)")
+                elif speed_mode == constants.ProcessingSpeedMode.MAX_SPEED and not hasattr(self, '_max_speed_logged'):
+                    self.logger.info(f"MAX_SPEED mode active: target_delay = {target_delay}")
+                    self._max_speed_logged = True
 
                 current_chapter = self.app.funscript_processor.get_chapter_at_frame(self.current_frame_index)
                 current_chapter_id = current_chapter.unique_id if current_chapter else None
@@ -1257,6 +1315,7 @@ class VideoProcessor:
                 if self.tracker and self.tracker.tracking_active:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
                         time.time() * 1000)
+                    
                     try:
                         processed_frame_for_gui = self.tracker.process_frame(frame_np.copy(), timestamp_ms)[0]
                     except Exception as e:
@@ -1273,16 +1332,18 @@ class VideoProcessor:
                     self.last_fps_update_time = current_time_fps_calc
                     self.frames_for_fps_calc = 0
 
-                current_time = time.perf_counter()
-                sleep_duration = next_frame_target_time - current_time
+                # Apply timing control only if not in MAX_SPEED mode
+                if target_delay > 0:
+                    current_time = time.perf_counter()
+                    sleep_duration = next_frame_target_time - current_time
 
-                if sleep_duration > 0:
-                    time.sleep(sleep_duration)
+                    if sleep_duration > 0:
+                        time.sleep(sleep_duration)
 
-                if next_frame_target_time < current_time - target_delay:
-                    next_frame_target_time = current_time + target_delay
-                else:
-                    next_frame_target_time += target_delay
+                    if next_frame_target_time < current_time - target_delay:
+                        next_frame_target_time = current_time + target_delay
+                    else:
+                        next_frame_target_time += target_delay
         finally:
             self.logger.info(f"_processing_loop ending. is_processing: {self.is_processing}, stop_event: {self.stop_event.is_set()}")
             self._terminate_ffmpeg_processes()
@@ -1298,7 +1359,26 @@ class VideoProcessor:
             return False
 
         start_time_seconds = start_frame_abs_idx / self.video_info['fps']
+        
+        # Optimize ffmpeg for MAX_SPEED processing (segment streaming)
         common_ffmpeg_prefix = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
+        
+        # Add MAX_SPEED optimizations if in MAX_SPEED mode
+        if (hasattr(self.app, 'app_state_ui') and 
+            hasattr(self.app.app_state_ui, 'selected_processing_speed_mode') and
+            self.app.app_state_ui.selected_processing_speed_mode == constants.ProcessingSpeedMode.MAX_SPEED):
+            # Same aggressive optimizations for segment streaming
+            # Hardware acceleration: Handled by individual pipe paths (don't add to common prefix)
+            
+            # Add speed optimizations (hardware acceleration handled by pipe-specific code)
+            # NOTE: -preset and -tune are encoding options, not decoding options
+            common_ffmpeg_prefix.extend([
+                '-fflags', '+genpts+fastseek', 
+                '-threads', '0',
+                '-probesize', '32',
+                '-analyzeduration', '1'
+            ])
+            self.logger.info("FFmpeg segment streaming optimized for MAX_SPEED with fast decode")
 
         if self._is_10bit_cuda_pipe_needed():
             self.logger.info("Using 2-pipe FFmpeg command for 10-bit CUDA segment streaming.")
