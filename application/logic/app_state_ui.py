@@ -34,7 +34,12 @@ class AppStateUI:
             "selected_tracker_name", 
             defaults.get("selected_tracker_name", DEFAULT_TRACKER_NAME)
         )
-        self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode.REALTIME
+        # Load saved processing speed mode, default to REALTIME
+        saved_speed_mode = self.app_settings.get("selected_processing_speed_mode", "REALTIME")
+        try:
+            self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode[saved_speed_mode]
+        except KeyError:
+            self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode.REALTIME
 
         # UI visibility states
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
@@ -489,3 +494,4 @@ class AppStateUI:
         self.app_settings.set("lr_dial_window_size_h", int(self.lr_dial_window_size[1]))
 
         self.app_settings.set("interactive_refinement_mode_enabled", self.interactive_refinement_mode_enabled)
+        self.app_settings.set("selected_processing_speed_mode", self.selected_processing_speed_mode.name)

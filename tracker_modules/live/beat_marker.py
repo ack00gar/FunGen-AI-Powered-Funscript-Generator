@@ -16,6 +16,7 @@ from typing import Optional, Tuple, List, Dict, Any
 from collections import deque
 
 from tracker_modules.core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
+from tracker_modules.helpers.signal_amplifier import SignalAmplifier
 from config.constants_colors import RGBColors
 
 
@@ -71,6 +72,14 @@ class BeatMarkerTracker(BaseTracker):
         
         # User ROI support
         self.user_roi_fixed: Optional[Tuple[int, int, int, int]] = None
+        
+        # Enhanced signal mastering using helper module
+        self.signal_amplifier = SignalAmplifier(
+            history_size=120,  # 4 seconds @ 30fps
+            enable_live_amp=True,  # Enable dynamic amplification by default
+            smoothing_alpha=0.3,  # EMA smoothing factor
+            logger=self.logger
+        )
         
         # Debug logging throttling
         self.last_audio_env_dbg_log_ms: float = 0
@@ -398,10 +407,8 @@ class BeatMarkerTracker(BaseTracker):
             f"BPM:{bpm:.1f} Sub:{subdivision} Swing:{swing_pct:.1f}% Phase:{phase_deg:.1f}"
         ]
         
-        if self.show_stats:
-            for i, stat_text in enumerate(self.stats_display):
-                cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.35, RGBColors.TEAL, 1)
+        # Add tracking indicator
+        self._draw_tracking_indicator(processed_frame)
         
         # Prepare debug info
         debug_info = {

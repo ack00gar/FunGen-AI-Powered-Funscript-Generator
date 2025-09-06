@@ -113,7 +113,10 @@ def compute_DIS_flow(prev_gray: np.ndarray, gray: np.ndarray, dis) -> Tuple[np.n
     Returns:
         Tuple of (flow, magnitude, angle)
     """
-    flow = dis.calc(prev_gray, gray, None)  # HxWx2 float32
+    # Critical performance optimization: ensure contiguous arrays for OpenCV
+    prev_gray_cont = np.ascontiguousarray(prev_gray)
+    gray_cont = np.ascontiguousarray(gray)
+    flow = dis.calc(prev_gray_cont, gray_cont, None)  # HxWx2 float32
     mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1], angleInDegrees=False)
     return flow, mag, ang
 
@@ -445,14 +448,13 @@ class AxisProjectionTracker(BaseTracker):
         return to_0_100(t01)
     
     def _update_fps(self):
-        """Update FPS tracking."""
-        self._fps_update_counter += 1
-        if self._fps_update_counter >= 30:
-            current_time = time.time()
-            if self._fps_last_time > 0:
-                self.current_fps = 30.0 / (current_time - self._fps_last_time)
-            self._fps_last_time = current_time
-            self._fps_update_counter = 0
+        """Update FPS calculation using high-performance delta time method."""
+        current_time_sec = time.time()
+        if self._fps_last_time > 0:
+            delta_time = current_time_sec - self._fps_last_time
+            if delta_time > 0.001:  # Avoid division by zero
+                self.current_fps = 1.0 / delta_time
+        self._fps_last_time = current_time_sec
     
     def process_frame(self, frame: np.ndarray, frame_time_ms: int,
                      frame_index: Optional[int] = None) -> TrackerResult:
@@ -662,14 +664,8 @@ class AxisProjectionTracker(BaseTracker):
                 cv2.circle(vis, (int(self.prev_pos_px[0]), int(self.prev_pos_px[1])),
                           radius, (0, 0, 255), 1)
         
-        # Overlay text
-        text = f"Pos: {self.current_position}/100 Conf: {confidence:.2f} Act: {self.activity_smooth:.2f}"
-        cv2.putText(vis, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                   0.7, (20, 220, 20), 2)
-        
-        if self.tracking_active:
-            cv2.putText(vis, "TRACKING", (10, 60), cv2.FONT_HERSHEY_SIMPLEX,
-                       0.6, (0, 255, 0), 2)
+        # Add tracking indicator
+        self._draw_tracking_indicator(vis)
         
         return vis
     

@@ -11,6 +11,7 @@ Version: 1.0.0
 """
 
 import logging
+import time
 import numpy as np
 import cv2
 from collections import deque
@@ -120,6 +121,8 @@ class YoloRoiTracker(BaseTracker):
         
         # Performance tracking
         self.current_fps = 30.0
+        self._fps_counter = 0
+        self._fps_last_time = time.time()
         self.stats_display = []
         
         # Motion inversion detection
@@ -371,6 +374,7 @@ class YoloRoiTracker(BaseTracker):
         """
         try:
             self.internal_frame_counter += 1
+            self._update_fps()
             processed_frame = self._preprocess_frame(frame)
             current_frame_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
             
@@ -1305,20 +1309,9 @@ class YoloRoiTracker(BaseTracker):
                 self.main_interaction_class or ("penis" if self.penis_last_known_box else "persisting")
             )
             cv2.rectangle(processed_frame, (rx, ry), (rx + rw, ry + rh), color, 2)
-            
-            # Draw status text
-            status_text = self.main_interaction_class or ('P' if self.penis_last_known_box else 'Lost...')
-            cv2.putText(processed_frame, status_text, (rx, ry - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
         
-        # Draw stats display
-        for i, stat in enumerate(self.stats_display):
-            cv2.putText(processed_frame, stat, (10, 30 + i * 25), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        if self.tracking_active:
-            cv2.putText(processed_frame, "YOLO ROI TRACKING", (10, processed_frame.shape[0] - 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        # Add tracking indicator
+        self._draw_tracking_indicator(processed_frame)
     
     def _draw_detections(self, frame: np.ndarray, detections: List[Dict]):
         """Draw detection bounding boxes and labels."""
@@ -1446,6 +1439,19 @@ class YoloRoiTracker(BaseTracker):
         """Update oscillation detection sensitivity (compatibility method)."""
         # Not applicable for YOLO ROI but required for interface compatibility
         pass
+
+    def _update_fps(self):
+        """Update FPS calculation based on actual frame processing rate."""
+        current_time = time.time()
+        self._fps_counter += 1
+        
+        # Update FPS every 30 frames or every second, whichever comes first
+        time_diff = current_time - self._fps_last_time
+        if self._fps_counter >= 30 or time_diff >= 1.0:
+            if time_diff > 0:
+                self.current_fps = self._fps_counter / time_diff
+                self._fps_counter = 0
+                self._fps_last_time = current_time
         
     def update_oscillation_grid_size(self):
         """Update oscillation grid size (compatibility method).""" 
