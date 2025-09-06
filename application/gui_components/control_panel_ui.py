@@ -1341,9 +1341,6 @@ class ControlPanelUI:
         if not is_any_process_active:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
-        # Place info note for live methods directly below the buttons
-        if self._is_live_tracker(selected_mode):
-            imgui.text_ansi_colored("It can take up to 35 seconds to see output on the timelines.\nThis is a known feature.", 0.25, 0.88, 0.82)
 
     def _render_stage_progress_ui(self, stage_proc):
         is_analysis_running = stage_proc.full_analysis_active

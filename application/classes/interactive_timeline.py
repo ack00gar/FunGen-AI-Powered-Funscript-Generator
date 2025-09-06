@@ -2985,12 +2985,18 @@ class InteractiveFunscriptTimeline:
                     if visible_actions_indices_range:
                         s_idx, e_idx = visible_actions_indices_range
 
-                    # Decimate for line drawing
-                    draw_step = max(1, int(points_per_pixel / 4.0))
-                    indices_to_draw = range(s_idx, e_idx, draw_step)
-                    last_visible_idx = e_idx - 1
-                    if last_visible_idx >= s_idx and last_visible_idx not in indices_to_draw:
-                        indices_to_draw = list(indices_to_draw) + [last_visible_idx]
+                    # CRITICAL FIX: Always show points when dataset is small (<1000 points)
+                    # This prevents the timeline from being blank during early tracking stages
+                    if len(actions_to_render) < 1000:
+                        # For small datasets, show all visible points regardless of zoom level
+                        indices_to_draw = range(s_idx, e_idx)
+                    else:
+                        # Only apply LOD decimation for larger datasets
+                        draw_step = max(1, int(points_per_pixel / 4.0))
+                        indices_to_draw = range(s_idx, e_idx, draw_step)
+                        last_visible_idx = e_idx - 1
+                        if last_visible_idx >= s_idx and last_visible_idx not in indices_to_draw:
+                            indices_to_draw = list(indices_to_draw) + [last_visible_idx]
                 # --- END: LOD OPTIMIZATION ---
 
                 # --- Draw Lines OR Dense Envelope (Vectorized) ---
@@ -3076,14 +3082,16 @@ class InteractiveFunscriptTimeline:
 
                 # Render points unless fast scrolling
                 # except for key interaction states or low density
+                # CRITICAL FIX: Always render points for small datasets (<1000 points)
                 should_render_points = (
-                    not is_fast_scrolling and (
+                    len(actions_list) < 1000 or  # Always show points for small datasets
+                    (not is_fast_scrolling and (
                         points_per_pixel < 2.0 or
                         visible_count <= 4 or
                         self.selected_action_idx >= 0 or
                         len(self.multi_selected_action_indices) > 0 or
                         self.dragging_action_idx >= 0
-                    )
+                    ))
                 )
 
                 # Visual indicator for optimization modes (optional debug info, optimized)
