@@ -11,11 +11,11 @@ from datetime import datetime, timedelta
 from ultralytics import YOLO
 
 from video import VideoProcessor
-from tracker import ROITracker as Tracker
+from tracker.tracker_manager import create_tracker_manager
 
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
 from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
-from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION
+from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION, MODEL_DOWNLOAD_URLS
 from config.tracker_discovery import get_tracker_discovery
 
 from .app_state_ui import AppStateUI
@@ -244,12 +244,10 @@ class ApplicationLogic:
         self.undo_manager_t1: Optional[UndoRedoManager] = None
         self.undo_manager_t2: Optional[UndoRedoManager] = None
 
-        # --- Initialize Tracker ---
-        self.tracker = Tracker(
-            app_logic_instance = self,
-            tracker_model_path = self.yolo_detection_model_path_setting,
-            pose_model_path = self.yolo_pose_model_path_setting,
-            logger = self.logger)
+        # --- Initialize Tracker Manager ---
+        self.tracker = create_tracker_manager(
+            app_logic_instance=self,
+            tracker_model_path=self.yolo_detection_model_path_setting)
         if self.tracker:
             self.tracker.show_stats = False  # Default internal tracker states
             self.tracker.show_funscript_preview = False
@@ -354,6 +352,10 @@ class ApplicationLogic:
     def _configure_third_party_logging(self):
         """Configure third-party library logging to reduce startup noise."""
         # Suppress/reduce noisy third-party library logging
+        # Suppress scikit-learn warnings from CoreML Tools before any imports
+        import warnings
+        warnings.filterwarnings("ignore", message="scikit-learn version .* is not supported")
+        
         third_party_loggers = {
             'coremltools': logging.ERROR,  # Only show critical errors from CoreML
             'ultralytics': logging.WARNING,  # Reduce ultralytics noise
@@ -1012,7 +1014,27 @@ class ApplicationLogic:
                 # --- LIVE MODES (Real-time tracking) ---
                 elif selected_tracker.category == TrackerCategory.LIVE:
                     self.logger.info(f"Running live mode: {selected_tracker.display_name} for {os.path.basename(video_path)}")
+                    
+                    # Set processing speed to MAX_SPEED for batch/CLI live tracking
+                    from config.constants import ProcessingSpeedMode
+                    original_speed_mode = self.app_state_ui.selected_processing_speed_mode
+                    self.app_state_ui.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
+                    self.logger.info("Set processing speed to MAX_SPEED for batch live tracking")
+                    
                     self.tracker.set_tracking_mode(selected_mode)
+                    
+                    # Auto-set axis for axis projection trackers in CLI/batch mode
+                    if "axis_projection" in selected_mode:
+                        current_tracker = self.tracker.get_current_tracker()
+                        if current_tracker and hasattr(current_tracker, 'set_axis'):
+                            # Set default horizontal axis across middle of frame for VR SBS videos
+                            margin = 50
+                            width, height = 640, 640  # Processing frame size
+                            axis_A = (margin, height // 2)  # Left side
+                            axis_B = (width - margin, height // 2)  # Right side
+                            result = current_tracker.set_axis(axis_A, axis_B)
+                            self.logger.info(f"Auto-set axis for {selected_mode}: A={axis_A}, B={axis_B}, result={result}")
+                    
                     self.tracker.start_tracking()
                     self.processor.set_tracker_processing_enabled(True)
 
@@ -1026,6 +1048,10 @@ class ApplicationLogic:
                     # Block until the live processing thread finishes
                     if self.processor.processing_thread and self.processor.processing_thread.is_alive():
                         self.processor.processing_thread.join()
+
+                    # Restore original processing speed mode
+                    self.app_state_ui.selected_processing_speed_mode = original_speed_mode
+                    self.logger.info("Restored original processing speed mode")
 
                     # This call now handles all post-processing AND saving/copying
                     self.on_processing_stopped(was_scripting_session=True)
@@ -1099,11 +1125,12 @@ class ApplicationLogic:
                         current_display_frame = self.processor.current_frame.copy()
 
                 if current_display_frame is not None:
-                    self.tracker.set_user_defined_roi_and_point(roi_rect_video_coords, point_video_coords, current_display_frame)
-                    # Tracker mode is usually set via UI combo, but ensure it if not already.
-                    if self.tracker.tracking_mode != "USER_FIXED_ROI":
-                        self.tracker.set_tracking_mode("USER_FIXED_ROI")
-                    self.logger.info("User defined ROI and point have been set in the tracker.", extra={'status_message': True})
+                    # Legacy USER_FIXED_ROI mode removed - ModularTrackerBridge doesn't use this mode
+                    if hasattr(self.tracker, 'set_user_defined_roi_and_point'):
+                        self.tracker.set_user_defined_roi_and_point(roi_rect_video_coords, point_video_coords, current_display_frame)
+                        self.logger.info("User defined ROI and point have been set in the tracker.", extra={'status_message': True})
+                    else:
+                        self.logger.info("Current tracker doesn't support user-defined ROI functionality.", extra={'status_message': True})
                 else:
                     self.logger.error("Could not get current frame to set user ROI patch. ROI not set.", extra={'status_message': True})
             else:
