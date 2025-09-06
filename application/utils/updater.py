@@ -113,7 +113,7 @@ class AutoUpdater:
     # Multi-branch configuration for seamless migration
     PRIMARY_BRANCH = "main"      # Target branch for future updates
     FALLBACK_BRANCH = "v0.5.0"   # Legacy branch for compatibility
-    MIGRATION_MODE = False       # Migration complete on main branch (2025-08-30)
+    MIGRATION_MODE = True        # Enable migration warnings for v0.5.0 users
     
     # Backward compatibility
     BRANCH = FALLBACK_BRANCH  # Default to v0.5.0 initially
@@ -160,7 +160,7 @@ class AutoUpdater:
         self.migration_warning_dismissed = False
         self.migration_warning_file = "migration_warning_dismissed.json"
         self.v050_deprecation_date = "2025-10-01"  # v0.5.0 deprecation date
-        self.migration_reminder_shown = False
+        self.migration_warning_triggered = False  # Prevent infinite triggering
         
         # Load saved skip settings and migration state
         self._load_skip_updates()
@@ -1064,9 +1064,11 @@ class AutoUpdater:
 
     def render_migration_warning_dialog(self):
         """Renders migration warning dialog for v0.5.0 users."""
-        # Check if we should show the migration warning
-        if not self.show_migration_warning and self._check_should_show_migration_warning():
+        # Check if we should show the migration warning (only trigger once)
+        if not self.migration_warning_triggered and not self.show_migration_warning and self._check_should_show_migration_warning():
+            self.logger.info("🚨 Migration warning triggered for v0.5.0 user")
             self.show_migration_warning = True
+            self.migration_warning_triggered = True  # Prevent retriggering
         
         if self.show_migration_warning:
             imgui.open_popup("Important: Branch Migration Required")
@@ -1197,6 +1199,13 @@ class AutoUpdater:
         except Exception as e:
             self.logger.error(f"One-click migration failed: {e}")
             self.status_message = f"Migration failed: {str(e)}"
+
+    def trigger_migration_warning_for_testing(self):
+        """Force trigger migration warning for testing purposes."""
+        self.migration_warning_triggered = False
+        self.migration_warning_dismissed = False
+        self.show_migration_warning = True
+        self.logger.info("🧪 Migration warning manually triggered for testing")
 
     def _get_available_updates(self, custom_count: int = None) -> List[Dict]:
         """Fetches available commits (merge commits and direct pushes) from the configured branch (v0.5.0)."""
