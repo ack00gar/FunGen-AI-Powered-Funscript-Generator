@@ -61,12 +61,21 @@ class PluginLoader:
         
         pattern = "**/*.py" if recursive else "*.py"
         
+        # Collect all plugin files first
+        plugin_files = []
         for plugin_file in directory_path.glob(pattern):
             if plugin_file.name.startswith('_'):  # Skip private files
                 continue
             if plugin_file.name in ['base_plugin.py', 'plugin_loader.py']:  # Skip infrastructure files
                 continue
-                
+            plugin_files.append(plugin_file)
+        
+        # Log summary of what we're loading
+        if plugin_files:
+            self.logger.info(f"Loading {len(plugin_files)} plugins from: {directory}")
+        
+        # Load each plugin
+        for plugin_file in plugin_files:
             success = self.load_plugin_from_file(plugin_file)
             results[plugin_file.name] = success
         
@@ -126,7 +135,7 @@ class PluginLoader:
                 self.logger.debug(f"Loaded {success_count} plugin(s) from: {file_path}")
                 return True
             else:
-                self.logger.error(f"Failed to register any plugins from: {file_path}")
+                self.logger.warning(f"Failed to register any plugins from: {file_path}")
                 return False
                 
         except Exception as e:
