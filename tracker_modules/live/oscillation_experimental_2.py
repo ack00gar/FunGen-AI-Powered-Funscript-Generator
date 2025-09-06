@@ -61,6 +61,7 @@ class OscillationExperimental2Tracker(BaseTracker):
             # Core tracking state
             self.tracking_active = False
             self.current_fps = 30.0
+            self._fps_last_time = 0.0
             
             # Initialize funscript connection
             # First check if funscript is provided through compatibility attributes (from bridge)
@@ -152,6 +153,8 @@ class OscillationExperimental2Tracker(BaseTracker):
                      frame_index: Optional[int] = None) -> TrackerResult:
         """Process frame using hybrid oscillation detection."""
         
+        self._update_fps()
+        
         processed_frame, action_log = self._process_oscillation_experimental_2(
             frame, frame_time_ms, frame_index
         )
@@ -177,36 +180,23 @@ class OscillationExperimental2Tracker(BaseTracker):
         [Experimental 2] Hybrid oscillation detector combining experimental timing precision 
         with legacy amplification and signal conditioning.
         """
-        self._update_fps()
-
-        try:
-            target_height = getattr(self.app.app_settings, 'get', lambda k, d=None: d)('oscillation_processing_target_height', constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT) if self.app else constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
-        except Exception:
-            target_height = constants.DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT
 
         if frame is None or frame.size == 0:
             return frame, None
 
-        src_h, src_w = frame.shape[:2]
-        if target_height and src_h > target_height:
-            scale = float(target_height) / float(src_h)
-            new_w = max(1, int(round(src_w * scale)))
-            processed_input = cv2.resize(frame, (new_w, target_height), interpolation=cv2.INTER_AREA)
-        else:
-            processed_input = frame
+        # No resizing - video processor handles frame scaling via ffmpeg  
+        processed_frame = frame
 
         # --- Use oscillation area for detection if set ---
         use_oscillation_area = self.oscillation_area_fixed is not None
         if use_oscillation_area:
             ax, ay, aw, ah = self.oscillation_area_fixed
-            processed_frame = self._preprocess_frame(frame)
             processed_frame_area = processed_frame[ay:ay+ah, ax:ax+aw]
             if self._gray_roi_buffer is None or self._gray_roi_buffer.shape[:2] != (processed_frame_area.shape[0], processed_frame_area.shape[1]):
                 self._gray_roi_buffer = np.empty((processed_frame_area.shape[0], processed_frame_area.shape[1]), dtype=np.uint8)
             cv2.cvtColor(processed_frame_area, cv2.COLOR_BGR2GRAY, dst=self._gray_roi_buffer)
             current_gray = self._gray_roi_buffer
         else:
-            processed_frame = self._preprocess_frame(frame)
             target_h, target_w = processed_frame.shape[0], processed_frame.shape[1]
             if self._gray_full_buffer is None or self._gray_full_buffer.shape[:2] != (target_h, target_w):
                 self._gray_full_buffer = np.empty((target_h, target_w), dtype=np.uint8)
@@ -246,7 +236,10 @@ class OscillationExperimental2Tracker(BaseTracker):
             return processed_frame, None
 
         # --- Step 1: Calculate Global Optical Flow & Global Motion Vector (FROM EXPERIMENTAL) ---
-        flow = self.flow_dense_osc.calc(self.prev_gray_oscillation, current_gray, None)
+        # Critical performance optimization: ensure contiguous arrays for OpenCV
+        prev_gray_cont = np.ascontiguousarray(self.prev_gray_oscillation)
+        current_gray_cont = np.ascontiguousarray(current_gray)
+        flow = self.flow_dense_osc.calc(prev_gray_cont, current_gray_cont, None)
         if flow is None:
             self.prev_gray_oscillation = current_gray.copy()
             return processed_frame, None
@@ -555,9 +548,13 @@ class OscillationExperimental2Tracker(BaseTracker):
     
     # Helper methods
     def _update_fps(self):
-        """Update current FPS estimate."""
-        # Simple FPS calculation - could be improved
-        self.current_fps = 30.0  # Default assumption
+        """Update FPS calculation using high-performance delta time method."""
+        current_time_sec = time.time()
+        if self._fps_last_time > 0:
+            delta_time = current_time_sec - self._fps_last_time
+            if delta_time > 0.001:  # Avoid division by zero
+                self.current_fps = 1.0 / delta_time
+        self._fps_last_time = current_time_sec
     
     def _is_vr_video(self) -> bool:
         """Check if the video appears to be VR format."""

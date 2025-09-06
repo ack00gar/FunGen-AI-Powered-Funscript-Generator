@@ -1062,8 +1062,14 @@ class ControlPanelUI:
             tr = app.tracker
             imgui.text(">> Tracker Status")
             imgui.separator()
-            fps = (tr.current_fps if tr else 0.0)
-            imgui.text(" - Actual FPS: %.1f" % (fps if isinstance(fps, (int, float)) else 0.0))
+            # Show video processor FPS (more accurate for MAX_SPEED performance)
+            video_fps = (app.processor.actual_fps if app.processor and hasattr(app.processor, 'actual_fps') else 0.0)
+            tracker_fps = (tr.current_fps if tr else 0.0)
+            
+            # Prefer video processor FPS for accuracy, fallback to tracker FPS
+            display_fps = video_fps if video_fps > 0 else tracker_fps
+            imgui.text(" - Video FPS: %.1f" % (video_fps if isinstance(video_fps, (int, float)) else 0.0))
+            imgui.text(" - Tracker FPS: %.1f" % (tracker_fps if isinstance(tracker_fps, (int, float)) else 0.0))
             roi_status = "Not Set"
             if tr:
                 if mode == "yolo_roi":

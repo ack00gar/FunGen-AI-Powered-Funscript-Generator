@@ -130,7 +130,10 @@ class MultiScaleTracker:
                 scaled_prev = cv2.resize(prev_gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
                 scaled_curr = cv2.resize(gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
             
-            flow = self.dis_flows[scale].calc(scaled_prev, scaled_curr, None)
+            # Critical performance optimization: ensure contiguous arrays for OpenCV
+            scaled_prev_cont = np.ascontiguousarray(scaled_prev)
+            scaled_curr_cont = np.ascontiguousarray(scaled_curr)
+            flow = self.dis_flows[scale].calc(scaled_prev_cont, scaled_curr_cont, None)
             
             # Scale flow back to original resolution
             if scale != 1.0:
@@ -779,25 +782,8 @@ class AxisProjectionEnhancedTracker(BaseTracker):
             cv2.circle(vis, (pos_x, pos_y), uncertainty_radius, (255, color_intensity, 0), -1)
         
         # Enhanced status display
-        y_offset = 25
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        
-        # Main status
-        text = f"Enhanced Axis | Pos: {self.current_position}/100"
-        cv2.putText(vis, text, (10, y_offset), font, 0.7, (20, 220, 20), 2)
-        y_offset += 25
-        
-        # Quality metrics
-        text = f"Conf: {self.current_confidence:.2f} | Unc: {self.current_uncertainty:.1f} | Q: {self.tracking_quality:.2f}"
-        cv2.putText(vis, text, (10, y_offset), font, 0.6, (20, 200, 200), 2)
-        y_offset += 25
-        
-        # Performance metrics
-        if self.processing_times and self.detection_success_rate:
-            avg_time = np.mean(self.processing_times) * 1000
-            success_rate = np.mean(self.detection_success_rate) * 100
-            text = f"Perf: {avg_time:.1f}ms | Success: {success_rate:.1f}%"
-            cv2.putText(vis, text, (10, y_offset), font, 0.5, (100, 100, 200), 1)
+        # Add tracking indicator
+        self._draw_tracking_indicator(vis)
         
         return vis
     
@@ -811,14 +797,13 @@ class AxisProjectionEnhancedTracker(BaseTracker):
         )
     
     def _update_fps(self):
-        """Update FPS counter."""
-        self._fps_update_counter += 1
-        if self._fps_update_counter >= 30:
-            current_time = time.time()
-            if self._fps_last_time > 0:
-                self.current_fps = 30.0 / (current_time - self._fps_last_time)
-            self._fps_last_time = current_time
-            self._fps_update_counter = 0
+        """Update FPS calculation using high-performance delta time method."""
+        current_time_sec = time.time()
+        if self._fps_last_time > 0:
+            delta_time = current_time_sec - self._fps_last_time
+            if delta_time > 0.001:  # Avoid division by zero
+                self.current_fps = 1.0 / delta_time
+        self._fps_last_time = current_time_sec
     
     def set_axis(self, point_a: Tuple[int, int], point_b: Tuple[int, int]) -> bool:
         """Set axis with enhanced validation."""

@@ -212,27 +212,13 @@ class DOTMarkerTracker(BaseTracker):
         return result
     
     def _update_fps(self):
-        """Update FPS calculation with actual timing."""
-        current_time = time.time()
-        self._fps_update_counter += 1
-        
-        # Update FPS every 30 frames
-        if self._fps_update_counter >= 30:
-            if self._fps_last_time > 0:
-                time_diff = current_time - self._fps_last_time
-                if time_diff > 0:
-                    self.current_fps = self._fps_update_counter / time_diff
-                else:
-                    self.current_fps = 30.0
-            else:
-                self.current_fps = 30.0
-            
-            self._fps_update_counter = 0
-            self._fps_last_time = current_time
-        
-        # Default assumption if no timing data
-        if self.current_fps <= 0:
-            self.current_fps = 30.0
+        """Update FPS calculation using high-performance delta time method."""
+        current_time_sec = time.time()
+        if self._fps_last_time > 0:
+            delta_time = current_time_sec - self._fps_last_time
+            if delta_time > 0.001:  # Avoid division by zero
+                self.current_fps = 1.0 / delta_time
+        self._fps_last_time = current_time_sec
     
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, frame_index: Optional[int] = None) -> TrackerResult:
         """Process frame for DOT tracking."""
@@ -371,10 +357,8 @@ class DOTMarkerTracker(BaseTracker):
             f"Output: P:{final_primary_pos} S:{final_secondary_pos}"
         ]
         
-        if self.show_stats:
-            for i, stat_text in enumerate(self.stats_display):
-                cv2.putText(processed_frame, stat_text, (5, 15 + i * 12), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.35, RGBColors.TEAL, 1)
+        # Add tracking indicator
+        self._draw_tracking_indicator(processed_frame)
         
         self.internal_frame_counter += 1
         
