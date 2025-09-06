@@ -234,17 +234,22 @@ class AppFileManager:
             return
 
         # --- Backup logic before saving ---
+        base, _ = os.path.splitext(filepath)
+        if base.endswith(".roll"):
+            base = base[:-5]
+        path_next_to_vid, _ = os.path.splitext(self.video_path)
         if os.path.exists(filepath):
-            try:
-                check_write_access(filepath)
-                # Create a unique backup filename with a Unix timestamp
-                backup_path = f"{filepath}.{int(time.time())}.bak"
-                os.rename(filepath, backup_path)
-                self.logger.info(f"Created backup of existing file: {os.path.basename(backup_path)}")
-            except Exception as e:
-                self.logger.error(f"Failed to create backup for {os.path.basename(filepath)}: {e}")
-                # We can decide whether to proceed with the overwrite or not.
-                # For safety, let's proceed but the user is warned.
+            if not base == path_next_to_vid:
+                try:
+                    check_write_access(filepath)
+                    # Create a unique backup filename with a Unix timestamp
+                    backup_path = f"{filepath}.{int(time.time())}.bak"
+                    os.rename(filepath, backup_path)
+                    self.logger.info(f"Created backup of existing file: {os.path.basename(backup_path)}")
+                except Exception as e:
+                    self.logger.error(f"Failed to create backup for {os.path.basename(filepath)}: {e}")
+                    # We can decide whether to proceed with the overwrite or not.
+                    # For safety, let's proceed but the user is warned.
 
         sanitized_actions = [ {'at': int(action['at']), 'pos': int(action['pos'])} for action in actions]
 
