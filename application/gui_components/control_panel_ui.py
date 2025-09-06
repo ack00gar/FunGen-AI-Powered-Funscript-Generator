@@ -1093,7 +1093,7 @@ class ControlPanelUI:
 
         settings = app.app_settings
 
-        if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu"):
+        if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu")[0]:
             cur_conf = settings.get("live_tracker_confidence_threshold")
             ch, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", cur_conf, 0.1, 0.95, "%.2f")
             if ch and new_conf != cur_conf:
@@ -1130,7 +1130,7 @@ class ControlPanelUI:
                     settings.set("live_tracker_roi_persistence_frames", v)
                     tr.max_frames_for_roi_persistence = v
 
-        if imgui.collapsing_header("Optical Flow##ROIFlowTrackerMenu"):
+        if imgui.collapsing_header("Optical Flow##ROIFlowTrackerMenu")[0]:
             cur_sparse = settings.get("live_tracker_use_sparse_flow")
             ch, new_sparse = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu", cur_sparse)
             if ch:
