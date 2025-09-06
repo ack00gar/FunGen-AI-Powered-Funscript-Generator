@@ -113,10 +113,10 @@ class AutoUpdater:
     # Multi-branch configuration for seamless migration
     PRIMARY_BRANCH = "main"      # Target branch for future updates
     FALLBACK_BRANCH = "v0.5.0"   # Legacy branch for compatibility
-    MIGRATION_MODE = True        # Enable migration warnings for v0.5.0 users
+    MIGRATION_MODE = False       # Disable migration warnings for main branch users
     
-    # Backward compatibility
-    BRANCH = FALLBACK_BRANCH  # Default to v0.5.0 initially
+    # Default branch configuration for main branch
+    BRANCH = PRIMARY_BRANCH  # Use main branch for updates
 
     def __init__(self, app_logic):
         self.app = app_logic
@@ -1483,10 +1483,8 @@ class AutoUpdater:
             imgui.text("Select branch:")
             imgui.same_line()
             
-            # Get available branches
-            available_branches = [self.FALLBACK_BRANCH]
-            if self.MIGRATION_MODE:
-                available_branches.append(self.PRIMARY_BRANCH)
+            # Get available branches - always show both branches for user choice
+            available_branches = [self.PRIMARY_BRANCH, self.FALLBACK_BRANCH]
             
             # Create branch names for display
             branch_names = []
