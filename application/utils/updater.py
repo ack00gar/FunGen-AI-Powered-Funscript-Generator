@@ -113,7 +113,7 @@ class AutoUpdater:
     # Multi-branch configuration for seamless migration
     PRIMARY_BRANCH = "main"      # Target branch for future updates
     FALLBACK_BRANCH = "v0.5.0"   # Legacy branch for compatibility
-    MIGRATION_MODE = False       # Migration complete on main branch (2025-08-30)
+    MIGRATION_MODE = True        # Enable migration warnings for v0.5.0 users
     
     # Backward compatibility
     BRANCH = FALLBACK_BRANCH  # Default to v0.5.0 initially
@@ -155,8 +155,16 @@ class AutoUpdater:
         self.last_branch_check = 0
         self.branch_comparison_cache = {}  # Cache branch comparisons
         
-        # Load saved skip settings
+        # Migration notification system
+        self.show_migration_warning = False
+        self.migration_warning_dismissed = False
+        self.migration_warning_file = "migration_warning_dismissed.json"
+        self.v050_deprecation_date = "2025-10-01"  # v0.5.0 deprecation date
+        self.migration_warning_triggered = False  # Prevent infinite triggering
+        
+        # Load saved skip settings and migration state
         self._load_skip_updates()
+        self._load_migration_state()
     
     def _get_branch_commit_with_date(self, branch: str) -> dict | None:
         """Get commit data with parsed date for a specific branch."""
@@ -287,6 +295,40 @@ class AutoUpdater:
                 json.dump(list(self.skipped_commits), f)
         except (IOError, OSError) as e:
             self.logger.error(f"Failed to save skip settings: {e}")
+    
+    def _load_migration_state(self):
+        """Load migration warning state from file."""
+        try:
+            if os.path.exists(self.migration_warning_file):
+                with open(self.migration_warning_file, 'r') as f:
+                    data = json.load(f)
+                    self.migration_warning_dismissed = data.get('dismissed', False)
+            else:
+                self.migration_warning_dismissed = False
+        except (json.JSONDecodeError, IOError, OSError) as e:
+            self.logger.warning(f"Failed to load migration state: {e}")
+            self.migration_warning_dismissed = False
+    
+    def _save_migration_state(self):
+        """Save migration warning state to file."""
+        try:
+            with open(self.migration_warning_file, 'w') as f:
+                json.dump({'dismissed': self.migration_warning_dismissed}, f)
+        except (IOError, OSError) as e:
+            self.logger.error(f"Failed to save migration state: {e}")
+    
+    def _check_should_show_migration_warning(self) -> bool:
+        """Check if migration warning should be shown to v0.5.0 users."""
+        if self.migration_warning_dismissed:
+            return False
+            
+        # Only show to users currently on v0.5.0 branch
+        current_branch = self._get_current_branch()
+        if current_branch != self.FALLBACK_BRANCH:
+            return False
+        
+        # Show warning if MIGRATION_MODE is enabled (meaning we want users to migrate)
+        return self.MIGRATION_MODE
     
     def _update_skip_state(self, commit_hash: str, skipped: bool):
         """Update the skip state for a commit hash."""
@@ -1020,13 +1062,158 @@ class AutoUpdater:
                 imgui.close_current_popup()
             imgui.end_popup()
 
+    def render_migration_warning_dialog(self):
+        """Renders migration warning dialog for v0.5.0 users."""
+        # Check if we should show the migration warning (only trigger once)
+        if not self.migration_warning_triggered and not self.show_migration_warning and self._check_should_show_migration_warning():
+            self.logger.info("🚨 Migration warning triggered for v0.5.0 user")
+            self.show_migration_warning = True
+            self.migration_warning_triggered = True  # Prevent retriggering
+        
+        if self.show_migration_warning:
+            imgui.open_popup("Important: Branch Migration Required")
+            self.show_migration_warning = False
+
+        if not hasattr(self, '_migration_dialog_pos'):
+            main_viewport = imgui.get_main_viewport()
+            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
+                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
+            self._migration_dialog_pos = (popup_pos[0] - 300, popup_pos[1] - 200)
+
+        imgui.set_next_window_size_constraints((600, 400), (800, 600))
+        imgui.set_next_window_position(*self._migration_dialog_pos, condition=imgui.ONCE)
+
+        if imgui.begin_popup_modal("Important: Branch Migration Required", True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+            window_pos = imgui.get_window_position()
+            if window_pos[0] > 0 and window_pos[1] > 0:
+                self._migration_dialog_pos = window_pos
+            
+            # Warning header
+            imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.7, 0.0, 1.0)  # Orange text
+            imgui.text("⚠️ IMPORTANT MIGRATION NOTICE")
+            imgui.pop_style_color()
+            
+            imgui.separator()
+            imgui.spacing()
+            
+            # Main message
+            imgui.text_wrapped(
+                f"You are currently using the v0.5.0 branch, which will be "
+                f"discontinued on {self.v050_deprecation_date}."
+            )
+            imgui.spacing()
+            
+            imgui.text_wrapped(
+                "To continue receiving updates and new features, you need to "
+                "migrate to the main branch. This migration is automatic and safe."
+            )
+            imgui.spacing()
+            
+            # Timeline warning
+            try:
+                from datetime import datetime
+                deprecation_date = datetime.strptime(self.v050_deprecation_date, "%Y-%m-%d")
+                days_left = (deprecation_date - datetime.now()).days
+                
+                if days_left > 0:
+                    imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.8, 0.0, 1.0)  # Yellow
+                    imgui.text(f"📅 Time remaining: {days_left} days")
+                    imgui.pop_style_color()
+                else:
+                    imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.3, 0.3, 1.0)  # Red
+                    imgui.text("⏰ Migration deadline has passed!")
+                    imgui.pop_style_color()
+            except:
+                pass  # Skip date calculation if parsing fails
+                
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+            
+            # Benefits section
+            imgui.text("✅ Benefits of migrating to main branch:")
+            imgui.bullet_text("Latest features and improvements")
+            imgui.bullet_text("Continued security updates")
+            imgui.bullet_text("Bug fixes and stability improvements")  
+            imgui.bullet_text("Community contributions and enhancements")
+            
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+            
+            # Action buttons
+            button_width = 180
+            
+            # Migrate Now button (prominent)
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2, 1.0)  # Green
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.9, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.7, 0.1, 1.0)
+            
+            if imgui.button("🚀 Migrate Now", width=button_width):
+                self._perform_one_click_migration()
+                imgui.close_current_popup()
+            
+            imgui.pop_style_color(3)
+            
+            imgui.same_line()
+            
+            # Later button
+            if imgui.button("Remind me later", width=120):
+                imgui.close_current_popup()
+            
+            imgui.same_line()
+            
+            # Don't show again button  
+            if imgui.button("Don't show again", width=130):
+                self.migration_warning_dismissed = True
+                self._save_migration_state()
+                imgui.close_current_popup()
+
+            imgui.end_popup()
+
+    def _perform_one_click_migration(self):
+        """Perform automatic migration from v0.5.0 to main branch."""
+        try:
+            self.logger.info("Starting one-click migration from v0.5.0 to main")
+            
+            # Set active branch to main to trigger migration logic
+            self.active_branch = self.PRIMARY_BRANCH
+            
+            # Get latest commit from main branch
+            main_commit_data = self._get_branch_commit_with_date(self.PRIMARY_BRANCH)
+            if main_commit_data and main_commit_data.get('sha'):
+                target_commit = main_commit_data['sha']
+                
+                # Trigger migration using existing update mechanism
+                self._apply_update(target_hash=target_commit, use_pull=False)
+                
+                # Mark migration as completed
+                self.migration_warning_dismissed = True
+                self._save_migration_state()
+                
+                self.logger.info("One-click migration initiated successfully")
+            else:
+                self.logger.error("Failed to get main branch commit for migration")
+                self.status_message = "Migration failed: Cannot reach main branch"
+                
+        except Exception as e:
+            self.logger.error(f"One-click migration failed: {e}")
+            self.status_message = f"Migration failed: {str(e)}"
+
+    def trigger_migration_warning_for_testing(self):
+        """Force trigger migration warning for testing purposes."""
+        self.migration_warning_triggered = False
+        self.migration_warning_dismissed = False
+        self.show_migration_warning = True
+        self.logger.info("🧪 Migration warning manually triggered for testing")
+
     def _get_available_updates(self, custom_count: int = None) -> List[Dict]:
         """Fetches available commits (merge commits and direct pushes) from the configured branch (v0.5.0)."""
         updates = []
 
         try:
             # Use the configured branch instead of current branch
-            target_branch = self.BRANCH
+            target_branch = self.active_branch
             self.logger.info(f"Fetching commits from branch: {target_branch}")
             
             target_commit_count = custom_count if custom_count else DEFAULT_COMMIT_FETCH_COUNT
@@ -1223,7 +1410,7 @@ class AutoUpdater:
 
         # Set initial size and make resizable
         if not hasattr(self, '_update_settings_window_size'):
-            self._update_settings_window_size = (800, 600)
+            self._update_settings_window_size = (815, 665)
         
         # Set initial position for first time
         if not hasattr(self, '_update_settings_window_pos'):
@@ -1292,6 +1479,36 @@ class AutoUpdater:
             imgui.text(self.status_message)
             imgui.text(f"Processing... {self._get_spinner_text()}")
         else:
+            # Branch selection dropdown
+            imgui.text("Select branch:")
+            imgui.same_line()
+            
+            # Get available branches
+            available_branches = [self.FALLBACK_BRANCH]
+            if self.MIGRATION_MODE:
+                available_branches.append(self.PRIMARY_BRANCH)
+            
+            # Create branch names for display
+            branch_names = []
+            for branch in available_branches:
+                display_name = f"{branch}"
+                if branch == self._get_current_branch():
+                    display_name += " (current)"
+                branch_names.append(display_name)
+            
+            # Show branch dropdown
+            current_branch_idx = available_branches.index(self.active_branch) if self.active_branch in available_branches else 0
+            changed, new_branch_idx = imgui.combo("##branch_select", current_branch_idx, branch_names)
+            
+            # Handle branch change
+            if changed and 0 <= new_branch_idx < len(available_branches):
+                new_branch = available_branches[new_branch_idx]
+                if new_branch != self.active_branch:
+                    self.active_branch = new_branch
+                    # Clear existing updates to trigger reload
+                    self.available_updates = []
+                    self.load_available_updates_async()
+            
             target_branch = self.active_branch
             branch_info = f"'{target_branch}'"
             if self.MIGRATION_MODE and target_branch != self.FALLBACK_BRANCH:
@@ -1304,9 +1521,10 @@ class AutoUpdater:
             
             # Show branch status info
             if self.MIGRATION_MODE:
-                imgui.text_colored(f"Migration Mode: Active | Checking {self.PRIMARY_BRANCH} & {self.FALLBACK_BRANCH}", 0.7, 0.9, 0.7, 1.0)
+                imgui.text_colored(f"Migration Mode: Active | Checking {self.active_branch}", 0.7, 0.9, 0.7, 1.0)
                 if self.branch_transition_count > 0:
                     imgui.text_colored(f"Branch transitions: {self.branch_transition_count}", 0.6, 0.8, 1.0, 1.0)
+                    imgui.text_colored(f"Current branch: {self._get_current_branch()}", 0.6, 0.8, 1.0, 1.0)
                     
                 # Add migration status button
                 if imgui.button("Migration Status", width=120):
