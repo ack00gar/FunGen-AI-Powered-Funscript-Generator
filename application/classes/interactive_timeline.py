@@ -46,6 +46,7 @@ class InteractiveFunscriptTimeline:
         self._cached_actions_data = None  # Stores pre-computed arrays
         self._cached_actions_hash = None  # Hash of actions_list to detect changes
         self._cached_arrays_initialized = False
+        self._last_cached_length = 0  # Track length for incremental updates
 
         # RADICAL OPTIMIZATION: Motion-based temporal culling
         self._last_pan_offset = 0
@@ -147,6 +148,7 @@ class InteractiveFunscriptTimeline:
         self.is_interacting: bool = False
         self.is_panning_active: bool = False
         self.is_zooming_active: bool = False
+        self.zoom_without_pan: bool = False  # Track zoom-only interactions to prevent video seeking
 
         self.zoom_action_request: Optional[float] = None
 
@@ -246,42 +248,45 @@ class InteractiveFunscriptTimeline:
 
     def _get_or_compute_cached_arrays(self, actions_list: List[Dict]) -> Dict:
         """
-        PERFORMANCE OPTIMIZATION: Get or compute cached arrays to avoid recreating them every frame.
-        Returns pre-computed arrays for timestamps, positions for efficient timeline rendering.
+        PERFORMANCE OPTIMIZATION: Get or compute cached arrays with incremental updates.
+        For live tracking with 300k+ points, this avoids recreating massive arrays every frame.
         """
         if not actions_list:
             return {"ats": np.array([]), "poss": np.array([])}
 
-        # Create a simple hash of the actions list to detect changes
-        # Using length + first/last elements as a fast approximation
-        if len(actions_list) >= 2:
-            actions_hash = (
-                len(actions_list), actions_list[0]["at"],
-                actions_list[0]["pos"],
-                actions_list[-1]["at"],
-                actions_list[-1]["pos"]
-            )
-        else:
-            actions_hash = (
-                len(actions_list),
-                actions_list[0]["at"] if actions_list else 0,
-                actions_list[0]["pos"] if actions_list else 0
-            )
-
-        # Check if we need to recompute the cache
-        if (
-            self._cached_actions_hash != actions_hash or
-            self._cached_actions_data is None or
-            not self._cached_arrays_initialized
-        ):
-            # Recompute cached arrays
+        current_length = len(actions_list)
+        
+        # Initialize cache on first run
+        if self._cached_actions_data is None or not self._cached_arrays_initialized:
             self._cached_actions_data = {
                 "ats": np.array([action["at"] for action in actions_list], dtype=float),
                 "poss": np.array([action["pos"] for action in actions_list], dtype=float),
             }
-            self._cached_actions_hash = actions_hash
+            self._last_cached_length = current_length
             self._cached_arrays_initialized = True
+            return self._cached_actions_data
 
+        # INCREMENTAL UPDATE: Only append new points instead of recreating entire arrays
+        if current_length > self._last_cached_length:
+            # New points were added - append them to existing arrays
+            new_points = actions_list[self._last_cached_length:]
+            new_ats = np.array([action["at"] for action in new_points], dtype=float)
+            new_poss = np.array([action["pos"] for action in new_points], dtype=float)
+            
+            # Concatenate with existing arrays (much faster than recreating from scratch)
+            self._cached_actions_data["ats"] = np.concatenate([self._cached_actions_data["ats"], new_ats])
+            self._cached_actions_data["poss"] = np.concatenate([self._cached_actions_data["poss"], new_poss])
+            self._last_cached_length = current_length
+            
+        elif current_length < self._last_cached_length:
+            # Points were removed - need full rebuild (rare case)
+            self._cached_actions_data = {
+                "ats": np.array([action["at"] for action in actions_list], dtype=float),
+                "poss": np.array([action["pos"] for action in actions_list], dtype=float),
+            }
+            self._last_cached_length = current_length
+            
+        # If length is same, assume no changes (common case during rendering)
         return self._cached_actions_data
 
     def _render_dense_envelope(
@@ -2400,9 +2405,19 @@ class InteractiveFunscriptTimeline:
                     min_ms_per_px,
                     min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, max_ms_per_px),
                 )
-                app_state.timeline_pan_offset_ms = anchor_time_ms_local - (
-                    canvas_size[0] / 2.0
-                ) * app_state.timeline_zoom_factor_ms_per_px
+                
+                # Calculate desired pan offset to keep anchor centered
+                desired_pan_offset = anchor_time_ms_local - (canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
+                
+                # Calculate boundaries for this zoom level to prevent later clamping issues
+                center_marker_offset_ms_new = (canvas_size[0] / 2.0) * app_state.timeline_zoom_factor_ms_per_px
+                min_pan_allowed_new = -center_marker_offset_ms_new
+                max_pan_allowed_new = effective_total_duration_ms - center_marker_offset_ms_new
+                if max_pan_allowed_new < min_pan_allowed_new: 
+                    max_pan_allowed_new = min_pan_allowed_new
+                
+                # Apply pan offset respecting boundaries to prevent frame changes from later clamping
+                app_state.timeline_pan_offset_ms = np.clip(desired_pan_offset, min_pan_allowed_new, max_pan_allowed_new)
 
             def pos_to_y(val: int) -> float:
                 if canvas_size[1] == 0:
@@ -2429,6 +2444,7 @@ class InteractiveFunscriptTimeline:
                 apply_zoom_with_center(self.zoom_action_request)
                 app_state.timeline_interaction_active = True
                 self.is_zooming_active = True
+                self.zoom_without_pan = True  # Mark as zoom-only interaction
 
                 self.zoom_action_request = None 
 
@@ -2444,8 +2460,10 @@ class InteractiveFunscriptTimeline:
             # Reset pan and zoom flags at the start of each frame
             was_panning_active = self.is_panning_active
             was_zooming_active = self.is_zooming_active
+            was_zoom_without_pan = self.zoom_without_pan
             self.is_panning_active = False
             self.is_zooming_active = False
+            self.zoom_without_pan = False
 
             # Hover checks for timeline interaction and marquee selection
             strict_bounds = (
@@ -2738,7 +2756,8 @@ class InteractiveFunscriptTimeline:
                 is_paused = hasattr(self.app.processor, "pause_event") and self.app.processor.pause_event.is_set()
 
             # Detect end of panning interaction to seek video (do not seek after pure zoom)
-            if was_panning_active and not self.is_panning_active and not self.is_zooming_active:
+            # Only seek if there was actual panning, not zoom-only interactions
+            if was_panning_active and not self.is_panning_active and not self.is_zooming_active and not was_zoom_without_pan:
                 # Allow seeking if stopped or paused (not actively playing)
                 if video_loaded and (not self.app.processor.is_processing or is_paused):
                     center_x_marker = canvas_abs_pos[0] + canvas_size[0] / 2.0
@@ -2985,15 +3004,33 @@ class InteractiveFunscriptTimeline:
                     if visible_actions_indices_range:
                         s_idx, e_idx = visible_actions_indices_range
 
+                    # PERFORMANCE: Detect live tracking/processing for aggressive LOD
+                    is_live_processing = hasattr(self.app, 'stage_processor') and self.app.stage_processor.full_analysis_active
+                    is_batch_processing = hasattr(self.app, 'is_batch_processing_active') and self.app.is_batch_processing_active
+                    is_heavy_processing = is_live_processing or is_batch_processing
+                    
                     # CRITICAL FIX: Always show points when dataset is small (<1000 points)
                     # This prevents the timeline from being blank during early tracking stages
                     if len(actions_to_render) < 1000:
                         # For small datasets, show all visible points regardless of zoom level
                         indices_to_draw = range(s_idx, e_idx)
                     else:
-                        # Only apply LOD decimation for larger datasets
-                        draw_step = max(1, int(points_per_pixel / 4.0))
+                        # Apply LOD decimation for larger datasets
+                        if is_heavy_processing and len(actions_to_render) >= 10000:
+                            # AGGRESSIVE LOD during live tracking: Show only every 8th point minimum
+                            # This prevents FPS drops when processing 300k+ points
+                            base_step = max(8, int(points_per_pixel / 2.0))  # Much more aggressive
+                            draw_step = base_step
+                        elif len(actions_to_render) >= 50000:
+                            # Very large datasets: More aggressive even when not processing
+                            draw_step = max(4, int(points_per_pixel / 3.0))
+                        else:
+                            # Normal LOD for medium datasets
+                            draw_step = max(1, int(points_per_pixel / 4.0))
+                            
                         indices_to_draw = range(s_idx, e_idx, draw_step)
+                        
+                        # Always include the last visible point for visual continuity
                         last_visible_idx = e_idx - 1
                         if last_visible_idx >= s_idx and last_visible_idx not in indices_to_draw:
                             indices_to_draw = list(indices_to_draw) + [last_visible_idx]
@@ -3080,19 +3117,13 @@ class InteractiveFunscriptTimeline:
                     else len(actions_list)
                 )
 
-                # Render points unless fast scrolling
-                # except for key interaction states or low density
-                # CRITICAL FIX: Always render points for small datasets (<1000 points)
-                should_render_points = (
-                    len(actions_list) < 1000 or  # Always show points for small datasets
-                    (not is_fast_scrolling and (
-                        points_per_pixel < 2.0 or
-                        visible_count <= 4 or
-                        self.selected_action_idx >= 0 or
-                        len(self.multi_selected_action_indices) > 0 or
-                        self.dragging_action_idx >= 0
-                    ))
-                )
+                # PERFORMANCE: We need to always check for hover to allow selection,
+                # but only RENDER points that are actually interactive
+                has_selection = (self.selected_action_idx >= 0 or len(self.multi_selected_action_indices) > 0 or self.dragging_action_idx >= 0)
+                
+                # Always check for hover detection (but we'll only render interactive points)
+                should_check_hover = not is_fast_scrolling
+                should_render_points = should_check_hover  # We'll filter during the render loop
 
                 # Visual indicator for optimization modes (optional debug info, optimized)
                 show_opt = self.app.app_settings.get("show_timeline_optimization_indicator", False)
@@ -3100,11 +3131,14 @@ class InteractiveFunscriptTimeline:
                     # Early exit if indicator is not enabled
                     pass
                 else:
+                    # Get processing state for indicator
+                    is_live_processing = hasattr(self.app, 'stage_processor') and self.app.stage_processor.full_analysis_active
+                    is_batch_processing = hasattr(self.app, 'is_batch_processing_active') and self.app.is_batch_processing_active
+                    is_heavy_processing = is_live_processing or is_batch_processing
+                    
                     opt_text = (
                         "Fast Scroll Mode" if is_fast_scrolling else
-                        "Envelope Mode" if points_per_pixel >= 4.0 and (e_idx - s_idx) >= 2000 else
-                        "Lines-Only Mode" if points_per_pixel >= 2.0 else
-                        f"LOD Active ({len(indices_to_draw)}/{len(actions_list)})" if len(indices_to_draw) != len(actions_list) else
+                        "Interactive Points Only" if len(actions_list) > 0 else
                         ""
                     )
                     if opt_text:
@@ -3135,6 +3169,19 @@ class InteractiveFunscriptTimeline:
                             is_primary_selected = (original_list_idx == self.selected_action_idx)
                             is_in_multi_selection = (original_list_idx in self.multi_selected_action_indices)
                             is_being_dragged = (original_list_idx == self.dragging_action_idx)
+                            
+                            # PERFORMANCE: ONLY render interactive points (hovered/selected/dragged)
+                            # This dramatically improves performance by not rendering non-interactive points
+                            is_interactive = (is_primary_selected or is_in_multi_selection or is_being_dragged or is_hovered_pt)
+                            
+                            # Track hovered point for mouse interaction even if we don't render it
+                            if is_hovered_pt and self.dragging_action_idx == -1:
+                                hovered_action_idx_current_timeline = original_list_idx
+                            
+                            # Skip rendering ALL non-interactive points
+                            if not is_interactive:
+                                continue  # Skip rendering this point
+                            
                             point_radius_draw = app_state.timeline_point_radius
                             pt_color_tuple = TimelineColors.POINT_DEFAULT
 
