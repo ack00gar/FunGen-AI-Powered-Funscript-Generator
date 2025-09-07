@@ -3048,9 +3048,19 @@ class InteractiveFunscriptTimeline:
 
             # Fallback to optimized CPU rendering if GPU failed or unavailable
             if not gpu_render_success:
+                # --- START: LOD OPTIMIZATION ---
+                # CRITICAL FIX: Prevent timeline from going blank when preview_actions is None/empty
+                # This happens during Ultimate Autotune application and causes "points disappeared" bug
+                if self.is_previewing and self.preview_actions:
+                    actions_to_render = self.preview_actions
+                else:
+                    actions_to_render = actions_list
+
+                # CRITICAL FIX: Calculate visible range using the same data that will be rendered
+                # This prevents mismatched ranges when preview_actions differs from actions_list
                 visible_actions_indices_range = None
-                if actions_list:
-                    action_times = [action["at"] for action in actions_list]
+                if actions_to_render:
+                    action_times = [action["at"] for action in actions_to_render]
                     margin_ms_act = 2000
                     search_start_time = app_state.timeline_pan_offset_ms - margin_ms_act
                     search_end_time = app_state.timeline_pan_offset_ms + canvas_size[
@@ -3059,9 +3069,6 @@ class InteractiveFunscriptTimeline:
                     end_idx = bisect_right(action_times, search_end_time)
                     if start_idx < end_idx:
                         visible_actions_indices_range = (start_idx, end_idx)
-
-                # --- START: LOD OPTIMIZATION ---
-                actions_to_render = self.preview_actions if self.is_previewing else actions_list
                 indices_to_draw = []
                 avg_interval_ms = 0
                 points_per_pixel = 1.0
@@ -3087,8 +3094,9 @@ class InteractiveFunscriptTimeline:
                     # CRITICAL FIX: Always show points when dataset is small (<1000 points)
                     # This prevents the timeline from being blank during early tracking stages
                     if len(actions_to_render) < 1000:
-                        # For small datasets, show all visible points regardless of zoom level
-                        indices_to_draw = range(s_idx, e_idx)
+                        # For small datasets, show ALL points regardless of zoom level or visible range
+                        # This ensures first 1000 points are always visible during initial tracking
+                        indices_to_draw = range(0, len(actions_to_render))
                     else:
                         # Apply LOD decimation for larger datasets
                         if is_heavy_processing and len(actions_to_render) >= 10000:
