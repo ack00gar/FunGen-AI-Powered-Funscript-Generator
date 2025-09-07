@@ -163,8 +163,8 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
 
     # 2. Detect GPU environment and select appropriate requirements
     requirements_file, env_description = detect_gpu_environment()
-    logger.info(f"Detected environment: {env_description}")
-    logger.info(f"Using requirements file: {requirements_file}")
+    logger.debug(f"Detected environment: {env_description}")
+    logger.debug(f"Using requirements file: {requirements_file}")
 
     # 3. Load and install core requirements first
     try:

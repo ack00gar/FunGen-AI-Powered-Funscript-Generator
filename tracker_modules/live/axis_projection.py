@@ -702,4 +702,4 @@ class AxisProjectionTracker(BaseTracker):
         """Clean up resources."""
         self.prev_gray = None
         self.dis = None
-        self.logger.info("Axis projection tracker cleaned up")
+        self.logger.debug("Axis projection tracker cleaned up")
