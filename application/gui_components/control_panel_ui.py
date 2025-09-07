@@ -59,6 +59,13 @@ class ControlPanelUI:
         self.timeline_editor2 = None
         self.ControlPanelColors = config.ControlPanelColors
         self.GeneralColors = config.GeneralColors
+        
+        # PERFORMANCE OPTIMIZATIONS: Smart rendering and caching
+        self._last_tab_hash = None  # Track tab changes
+        self._cached_tab_content = {}  # Cache expensive tab rendering
+        self._widget_visibility_cache = {}  # Cache widget visibility states
+        self._update_throttle_counter = 0  # Throttle expensive updates
+        self._heavy_operation_frame_skip = 0  # Skip frames during heavy ops
         self.constants = config.constants
         self.AI_modelExtensionsFilter = self.constants.AI_MODEL_EXTENSIONS_FILTER
         self.AI_modelTooltipExtensions = self.constants.AI_MODEL_TOOLTIP_EXTENSIONS

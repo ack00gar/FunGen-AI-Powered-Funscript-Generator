@@ -119,8 +119,13 @@ class ProjectManager:
             self.app.logger.warning("WARNING: Unsaved changes in current project. Loading new project will discard them.")
 
         try:
+            # Track disk I/O performance
+            io_start = time.perf_counter()
             with open(filepath, 'rb') as f:
                 project_data = orjson.loads(f.read())
+            io_time = (time.perf_counter() - io_start) * 1000
+            if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                self.app.gui_instance.track_disk_io_time("ProjectLoad", io_time)
 
             # Reset application state before loading new project data
             self.app.reset_project_state(for_new_project=False)  # False indicates it's for loading
@@ -205,8 +210,13 @@ class ProjectManager:
         project_data["version"] = APP_VERSION
 
         try:
+            # Track disk I/O performance
+            io_start = time.perf_counter()
             with open(filepath, 'wb') as f:
                 f.write(orjson.dumps(project_data, default=numpy_default_handler))
+            io_time = (time.perf_counter() - io_start) * 1000
+            if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                self.app.gui_instance.track_disk_io_time("ProjectSave", io_time)
             self.project_file_path = filepath
             self.project_dirty = False
 
