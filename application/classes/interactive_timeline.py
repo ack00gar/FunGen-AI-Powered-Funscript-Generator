@@ -3114,12 +3114,29 @@ class InteractiveFunscriptTimeline:
                             # Normal LOD for medium datasets
                             draw_step = max(1, int(points_per_pixel / 4.0))
                             
-                        indices_to_draw = range(s_idx, e_idx, draw_step)
+                        indices_to_draw = list(range(s_idx, e_idx, draw_step))
                         
                         # Always include the last visible point for visual continuity
                         last_visible_idx = e_idx - 1
                         if last_visible_idx >= s_idx and last_visible_idx not in indices_to_draw:
-                            indices_to_draw = list(indices_to_draw) + [last_visible_idx]
+                            indices_to_draw.append(last_visible_idx)
+                            
+                        # CRITICAL FIX: Always include selected/dragged points even if LOD would skip them
+                        # This ensures selected points remain visible and interactive
+                        interactive_indices = set()
+                        if self.selected_action_idx >= 0:
+                            interactive_indices.add(self.selected_action_idx)
+                        interactive_indices.update(self.multi_selected_action_indices)
+                        if self.dragging_action_idx >= 0:
+                            interactive_indices.add(self.dragging_action_idx)
+                            
+                        # Add any interactive indices that are in the visible range but not in indices_to_draw
+                        for idx in interactive_indices:
+                            if s_idx <= idx < e_idx and idx not in indices_to_draw:
+                                indices_to_draw.append(idx)
+                                
+                        # Sort to maintain proper order for rendering
+                        indices_to_draw.sort()
                 # --- END: LOD OPTIMIZATION ---
 
                 # --- Draw Lines OR Dense Envelope (Vectorized) ---
