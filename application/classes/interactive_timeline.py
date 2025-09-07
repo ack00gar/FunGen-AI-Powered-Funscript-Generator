@@ -190,6 +190,39 @@ class InteractiveFunscriptTimeline:
         """Marks the ultimate autotune preview as dirty, forcing recalculation."""
         self._ultimate_preview_dirty = True
 
+    def _compute_actions_hash(self, actions_list: List[Dict]) -> int:
+        """
+        Compute a fast hash of actions list for change detection.
+        Uses first few points, last few points, and length for performance.
+        Not cryptographically secure - just for detecting content changes.
+        """
+        if not actions_list:
+            return 0
+        
+        # Sample strategy: hash first 3, last 3, and middle point + length
+        length = len(actions_list)
+        sample_points = []
+        
+        # Always include length
+        hash_data = [length]
+        
+        # Add first few points
+        for i in range(min(3, length)):
+            hash_data.extend([actions_list[i]['at'], actions_list[i]['pos']])
+        
+        # Add last few points (if different from first)
+        if length > 6:
+            for i in range(max(3, length - 3), length):
+                hash_data.extend([actions_list[i]['at'], actions_list[i]['pos']])
+        
+        # Add middle point (if enough points)
+        if length > 10:
+            mid = length // 2
+            hash_data.extend([actions_list[mid]['at'], actions_list[mid]['pos']])
+        
+        # Simple hash - convert to string and use Python's hash
+        return hash(tuple(hash_data))
+
     def _update_ultimate_autotune_preview(self):
         """
         Recalculates the ultimate autotune preview if it's enabled and dirty.
@@ -250,20 +283,26 @@ class InteractiveFunscriptTimeline:
         """
         PERFORMANCE OPTIMIZATION: Get or compute cached arrays with incremental updates.
         For live tracking with 300k+ points, this avoids recreating massive arrays every frame.
+        
+        FIXED: Ultimate Autotune bug - when UA results in same number of points but different 
+        content, the cache now detects this and rebuilds properly.
         """
         if not actions_list:
             return {"ats": np.array([]), "poss": np.array([])}
 
         current_length = len(actions_list)
         
-        # Initialize cache on first run
-        if self._cached_actions_data is None or not self._cached_arrays_initialized:
+        # Check if cache was manually invalidated (most common case for UA)
+        if self._cached_actions_hash is None or not self._cached_arrays_initialized:
+            # Cache was invalidated - force full rebuild
             self._cached_actions_data = {
                 "ats": np.array([action["at"] for action in actions_list], dtype=float),
                 "poss": np.array([action["pos"] for action in actions_list], dtype=float),
             }
             self._last_cached_length = current_length
             self._cached_arrays_initialized = True
+            # Generate hash to detect future content changes  
+            self._cached_actions_hash = self._compute_actions_hash(actions_list)
             return self._cached_actions_data
 
         # INCREMENTAL UPDATE: Only append new points instead of recreating entire arrays
@@ -277,6 +316,7 @@ class InteractiveFunscriptTimeline:
             self._cached_actions_data["ats"] = np.concatenate([self._cached_actions_data["ats"], new_ats])
             self._cached_actions_data["poss"] = np.concatenate([self._cached_actions_data["poss"], new_poss])
             self._last_cached_length = current_length
+            self._cached_actions_hash = self._compute_actions_hash(actions_list)
             
         elif current_length < self._last_cached_length:
             # Points were removed - need full rebuild (rare case)
@@ -285,8 +325,21 @@ class InteractiveFunscriptTimeline:
                 "poss": np.array([action["pos"] for action in actions_list], dtype=float),
             }
             self._last_cached_length = current_length
+            self._cached_actions_hash = self._compute_actions_hash(actions_list)
             
-        # If length is same, assume no changes (common case during rendering)
+        else:
+            # Length is same - but content might have changed (Ultimate Autotune case!)
+            # Use lightweight hash check to detect if content actually changed
+            current_hash = self._compute_actions_hash(actions_list)
+            if current_hash != self._cached_actions_hash:
+                # Same length but different content - Ultimate Autotune case detected!
+                self.app.logger.debug(f"T{self.timeline_num}: Timeline points disappeared bug fixed - same length but content changed (UA applied)")
+                self._cached_actions_data = {
+                    "ats": np.array([action["at"] for action in actions_list], dtype=float),
+                    "poss": np.array([action["pos"] for action in actions_list], dtype=float),
+                }
+                self._cached_actions_hash = current_hash
+        
         return self._cached_actions_data
 
     def _render_dense_envelope(
