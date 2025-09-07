@@ -1529,17 +1529,17 @@ class GUI:
         if getattr(app_state, 'show_lr_dial_window', False):
             self.lr_dial_window_ui.render()
         
-        # Batch confirmation dialog (lightweight check)
+        # Batch confirmation dialog (has internal visibility check)
         self._render_batch_confirmation_dialog()
         
         # File dialog only if open
         if self.file_dialog.open:
             self.file_dialog.draw()
         
-        # Status message (already has internal visibility check)
+        # Status message (has internal visibility check)
         self._render_status_message(app_state)
         
-        # Updater dialogs (only render if they have something to show)
+        # Updater dialogs (now have early returns to avoid expensive ImGui calls when not visible)
         self.app.updater.render_update_dialog()
         self.app.updater.render_update_error_dialog()
         self.app.updater.render_migration_warning_dialog()
