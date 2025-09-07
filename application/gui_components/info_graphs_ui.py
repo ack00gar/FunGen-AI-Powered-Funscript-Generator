@@ -296,8 +296,10 @@ class InfoGraphsUI:
                 self._render_content_undo_redo_history()
         elif tab_selected == "performance":
             imgui.spacing()
-            # Performance Panel Performance at the top
-            self.perf_monitor.render_info(show_detailed=True)
+            # OPTIMIZATION: Only render performance data if tab is actually visible and focused
+            if performance_tab_now_active:
+                # Performance Panel Performance at the top
+                self.perf_monitor.render_info(show_detailed=True)
             imgui.separator()
             if imgui.collapsing_header(
                 "System Monitor##PerformanceSection",
