@@ -107,7 +107,7 @@ def main():
         default_mode = batch_modes[0] if batch_modes else '3-stage'
         
         parser.add_argument('--mode', choices=available_modes, default=default_mode, 
-                          help='The processing mode to use for analysis. Available modes are dynamically discovered.')
+                        help='The processing mode to use for analysis. Available modes are dynamically discovered.')
     except Exception as e:
         # Fallback if discovery system fails
         parser.add_argument('--mode', default='3-stage', help='Processing mode (discovery system unavailable)')
