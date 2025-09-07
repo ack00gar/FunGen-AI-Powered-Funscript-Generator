@@ -487,7 +487,9 @@ class TrackerManager:
         """Clean up current tracker instance."""
         if self._current_tracker and hasattr(self._current_tracker, 'cleanup'):
             try:
+                tracker_name = getattr(self._tracker_info, 'display_name', 'Unknown') if self._tracker_info else 'Unknown'
                 self._current_tracker.cleanup()
+                self.logger.debug(f"Tracker cleaned up: {tracker_name}")
             except Exception as e:
                 self.logger.error(f"Error cleaning up tracker: {e}")
         

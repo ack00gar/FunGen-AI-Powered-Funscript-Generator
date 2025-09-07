@@ -420,22 +420,21 @@ class ControlPanelUI:
         app = self.app
         processor = app.processor
         selected_mode = app_state.selected_tracker_name
-        # Check if current tracker is a live mode using dynamic discovery
+        
+        # Always show processing speed controls as they affect basic video playback
+        # Check if current tracker is a live mode for tooltip information
         from config.tracker_discovery import get_tracker_discovery, TrackerCategory
         discovery = get_tracker_discovery()
         tracker_info = discovery.get_tracker_info(selected_mode)
         is_live_mode = tracker_info and tracker_info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION]
-        is_playback_active = processor and processor.is_processing and not processor.enable_tracker_processing
-
-        if not (is_live_mode or is_playback_active):
-            return
-
-        if not app_state.show_video_feed:  # video feed not visible
-            app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.MAX_SPEED
-            return
-
         
-        self._section_header(">> Processing Speed", "Control the processing speed for live analysis")
+        # Update tooltip based on context
+        if is_live_mode:
+            tooltip = "Control the processing speed for live analysis and video playback"
+        else:
+            tooltip = "Control the video playback speed"
+        
+        self._section_header(">> Processing Speed", tooltip)
 
         current_speed_mode = app_state.selected_processing_speed_mode
  
@@ -516,7 +515,9 @@ class ControlPanelUI:
             with _DisabledScope(disable_after):
 
                 self._render_execution_progress_display()
-            self._render_processing_speed_controls(app_state)
+            
+        # Always show processing speed controls as they affect basic video playback
+        self._render_processing_speed_controls(app_state)
 
         open_, _ = imgui.collapsing_header(
             "Tracking##SimpleTracking",

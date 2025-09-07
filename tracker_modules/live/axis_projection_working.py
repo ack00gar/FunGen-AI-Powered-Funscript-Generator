@@ -479,4 +479,4 @@ class WorkingAxisProjectionTracker(BaseTracker):
     def cleanup(self):
         """Clean up resources."""
         self.prev_gray = None
-        self.logger.info("Working axis projection tracker cleaned up")
+        self.logger.debug("Working axis projection tracker cleaned up")
