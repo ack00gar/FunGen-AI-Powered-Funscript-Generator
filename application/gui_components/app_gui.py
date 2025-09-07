@@ -32,6 +32,7 @@ class GUI:
         self.frame_texture_id = 0
         self.heatmap_texture_id = 0
         self.funscript_preview_texture_id = 0
+        self.enhanced_preview_texture_id = 0  # Dedicated texture for enhanced preview tooltips
 
         # --- Advanced Threading Architecture ---
         # Decoupled, non-blocking preview/heatmap pipeline with larger queues and background workers
@@ -508,6 +509,15 @@ class GUI:
         dummy_pixel_fs_preview = np.array([0, 0, 0, 0], dtype=np.uint8).tobytes()
         gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, 1, 1, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, dummy_pixel_fs_preview)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+
+        # Initialize dedicated enhanced preview texture (isolated from main video display)
+        self.enhanced_preview_texture_id = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.enhanced_preview_texture_id)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         return True
 
     def handle_window_close(self, window):
@@ -693,11 +703,77 @@ class GUI:
                         seek_frame = int(normalized_pos * (total_frames - 1))
                         self.app.event_handlers.handle_seek_bar_drag(seek_frame)
                     else:
-                        # Show tooltip with time
-                        total_duration = self.app.processor.video_info.get('duration_s', 0)
+                        # Show enhanced tooltip with zoom preview and video frame
+                        total_duration = total_duration_s  # Use the parameter passed to this function
                         if total_duration > 0:
                             hover_time_s = normalized_pos * total_duration
-                            imgui.set_tooltip(f"{_format_time(self.app, hover_time_s)} / {_format_time(self.app, total_duration)}")
+                            hover_frame = int(normalized_pos * (total_frames - 1))
+                            
+                            # Initialize hover tracking attributes if needed
+                            if not hasattr(self, '_preview_hover_start_time'):
+                                self._preview_hover_start_time = None
+                                self._preview_hover_pos = None
+                                self._preview_cached_tooltip_data = None
+                                self._preview_cached_pos = None
+                            
+                            # Check if we're hovering on the same position
+                            position_tolerance = 0.005  # ~0.5% tolerance for position stability
+                            position_changed = (self._preview_hover_pos is None or 
+                                              abs(self._preview_hover_pos - normalized_pos) > position_tolerance)
+                            
+                            if position_changed:
+                                self._preview_hover_pos = normalized_pos
+                                self._preview_hover_start_time = time.time()
+                                # Clear cached data when position changes
+                                self._preview_cached_tooltip_data = None
+                                self._preview_cached_pos = None
+                            
+                            # Show enhanced preview logic
+                            hover_duration = time.time() - self._preview_hover_start_time if self._preview_hover_start_time else 0
+                            enhanced_preview_enabled = self.app.app_settings.get("enable_enhanced_funscript_preview", True)
+                            
+                            if enhanced_preview_enabled:
+                                # Always show timestamp + script zoom instantly, then add video frame after delay
+                                show_video_frame = hover_duration > 0.3  # Video frame only after 300ms for responsiveness
+                                
+                                # Check if we have cached data for this position
+                                if (self._preview_cached_tooltip_data is not None and 
+                                    self._preview_cached_pos is not None and 
+                                    abs(self._preview_cached_pos - normalized_pos) <= position_tolerance):
+                                    
+                                    # If we need video frame but cached data doesn't have it, update the cache
+                                    cached_frame_data = self._preview_cached_tooltip_data.get('frame_data')
+                                    if show_video_frame and (cached_frame_data is None or cached_frame_data.size == 0):
+                                        try:
+                                            # Use fast direct cv2 extraction
+                                            frame_data = self._get_frame_direct_cv2(hover_frame)
+                                            if frame_data is not None and frame_data.size > 0:
+                                                self._preview_cached_tooltip_data['frame_data'] = frame_data
+                                        except Exception as e:
+                                            pass  # Frame extraction failed, tooltip will show error message
+                                    
+                                    # Use cached tooltip data
+                                    self._render_instant_enhanced_tooltip(self._preview_cached_tooltip_data, show_video_frame)
+                                else:
+                                    # Generate new tooltip data (without slow video frame extraction initially)
+                                    try:
+                                        tooltip_data = self._generate_instant_tooltip_data(
+                                            hover_time_s, hover_frame, total_duration, normalized_pos, show_video_frame
+                                        )
+                                        self._preview_cached_tooltip_data = tooltip_data
+                                        self._preview_cached_pos = normalized_pos
+                                        self._render_instant_enhanced_tooltip(tooltip_data, show_video_frame)
+                                    except Exception as e:
+                                        # Fallback to simple tooltip
+                                        imgui.set_tooltip(f"{_format_time(self.app, hover_time_s)} / {_format_time(self.app, total_duration)}")
+                            else:
+                                # Show simple time tooltip immediately
+                                imgui.set_tooltip(f"{_format_time(self.app, hover_time_s)} / {_format_time(self.app, total_duration)}")
+        else:
+            # Reset hover tracking when mouse leaves
+            if hasattr(self, '_preview_hover_start_time'):
+                self._preview_hover_start_time = None
+                self._preview_hover_pos = None
 
         # Draw playback marker over the image
         if self.app.file_manager.video_path and self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0:
@@ -1497,6 +1573,241 @@ class GUI:
             self.shutdown_event.set()
             
             # Shutdown ProcessingThreadManager first
+    def _generate_instant_tooltip_data(self, hover_time_s: float, hover_frame: int, total_duration: float, normalized_pos: float, include_frame: bool = False):
+        """Generate cached tooltip data with instant funscript zoom and optional delayed video frame."""
+        tooltip_data = {
+            'hover_time_s': hover_time_s,
+            'hover_frame': hover_frame,
+            'total_duration': total_duration,
+            'zoom_actions': [],
+            'zoom_start_s': 0,
+            'zoom_end_s': 0,
+            'frame_data': None,
+            'frame_loading': False
+        }
+        
+        # Funscript zoom preview (±2 seconds window around hover point) - INSTANT
+        zoom_window_s = 4.0  # Total window size in seconds
+        zoom_start_s = max(0, hover_time_s - zoom_window_s/2)
+        zoom_end_s = min(total_duration, hover_time_s + zoom_window_s/2)
+        tooltip_data['zoom_start_s'] = zoom_start_s
+        tooltip_data['zoom_end_s'] = zoom_end_s
+        
+        # Get funscript actions in zoom window - FAST operation
+        actions = self.app.funscript_processor.get_actions('primary')
+        if actions:
+            zoom_actions = []
+            for action in actions:
+                action_time_s = action['at'] / 1000.0
+                if zoom_start_s <= action_time_s <= zoom_end_s:
+                    zoom_actions.append(action)
+            tooltip_data['zoom_actions'] = zoom_actions
+        
+        # Only extract video frame if requested (after delay)
+        if include_frame:
+            try:
+                # Use direct cv2 frame reading for better performance
+                frame_data = self._get_frame_direct_cv2(hover_frame)
+                if frame_data is not None and frame_data.size > 0:
+                    tooltip_data['frame_data'] = frame_data
+                else:
+                    tooltip_data['frame_loading'] = True
+            except Exception as e:
+                tooltip_data['frame_loading'] = False
+        
+        return tooltip_data
+    
+    def _get_frame_direct_cv2(self, frame_index: int):
+        """Fast direct cv2 frame extraction with VR panel selection support."""
+        if not self.app.processor or not self.app.processor.video_path:
+            return None
+            
+        import cv2
+        import numpy as np
+        
+        try:
+            # Open video directly with cv2 for fast frame access
+            cap = cv2.VideoCapture(self.app.processor.video_path)
+            if not cap.isOpened():
+                return None
+            
+            # Seek to specific frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+            ret, frame = cap.read()
+            cap.release()
+            
+            if not ret or frame is None:
+                return None
+            
+            # Keep frame in BGR format - update_texture will handle BGR→RGB conversion
+            
+            # Apply VR panel selection if enabled (user override controls)
+            if hasattr(self.app, 'app_settings') and self.app.app_settings:
+                vr_enabled = self.app.app_settings.get('vr_mode_enabled', False)
+                vr_panel = self.app.app_settings.get('vr_panel_selection', 'full')  # 'left', 'right', 'full'
+                
+                if vr_enabled and vr_panel != 'full':
+                    height, width = frame.shape[:2]
+                    
+                    if vr_panel == 'left':
+                        # Take left half for preview
+                        frame = frame[:, :width//2]
+                    elif vr_panel == 'right':
+                        # Take right half for preview  
+                        frame = frame[:, width//2:]
+            
+            # Resize for preview (keep aspect ratio)
+            height, width = frame.shape[:2]
+            aspect_ratio = width / height if height > 0 else 16/9
+            
+            # For VR content, make preview larger since it's typically wider
+            if aspect_ratio > 1.5:  # Likely VR content (wider than standard 16:9)
+                preview_width = 240  # Bigger for VR
+                preview_height = int(preview_width / aspect_ratio)
+            else:
+                preview_width = 200  # Standard content
+                preview_height = int(preview_width / aspect_ratio)
+            
+            # Resize frame for preview
+            frame_resized = cv2.resize(frame, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
+            
+            return frame_resized
+            
+        except Exception as e:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.debug(f"Direct cv2 frame extraction failed: {e}")
+            return None
+    
+    def _render_instant_enhanced_tooltip(self, tooltip_data: dict, show_video_frame: bool = True):
+        """Render enhanced tooltip using cached data."""
+        imgui.begin_tooltip()
+        
+        try:
+            # Time information header
+            imgui.text(f"{_format_time(self.app, tooltip_data['hover_time_s'])} / {_format_time(self.app, tooltip_data['total_duration'])}")
+            imgui.text(f"Frame: {tooltip_data['hover_frame']}")
+            imgui.separator()
+            
+            # Funscript zoom preview
+            zoom_actions = tooltip_data.get('zoom_actions', [])
+            if zoom_actions:
+                imgui.text("Funscript Preview (±2s):")
+                
+                # Draw mini graph
+                zoom_width = 300
+                zoom_height = 80
+                draw_list = imgui.get_window_draw_list()
+                graph_pos = imgui.get_cursor_screen_pos()
+                
+                # Background
+                draw_list.add_rect_filled(
+                    graph_pos[0], graph_pos[1],
+                    graph_pos[0] + zoom_width, graph_pos[1] + zoom_height,
+                    imgui.get_color_u32_rgba(0.1, 0.1, 0.1, 1.0)
+                )
+                
+                # Draw funscript curve
+                zoom_start_s = tooltip_data['zoom_start_s']
+                zoom_end_s = tooltip_data['zoom_end_s']
+                hover_time_s = tooltip_data['hover_time_s']
+                
+                if len(zoom_actions) > 1:
+                    for i in range(len(zoom_actions) - 1):
+                        # Calculate positions
+                        t1 = (zoom_actions[i]['at'] / 1000.0 - zoom_start_s) / (zoom_end_s - zoom_start_s)
+                        t2 = (zoom_actions[i+1]['at'] / 1000.0 - zoom_start_s) / (zoom_end_s - zoom_start_s)
+                        y1 = 1.0 - (zoom_actions[i]['pos'] / 100.0)
+                        y2 = 1.0 - (zoom_actions[i+1]['pos'] / 100.0)
+                        
+                        x1 = graph_pos[0] + t1 * zoom_width
+                        x2 = graph_pos[0] + t2 * zoom_width
+                        py1 = graph_pos[1] + y1 * zoom_height
+                        py2 = graph_pos[1] + y2 * zoom_height
+                        
+                        # Draw line segment
+                        draw_list.add_line(
+                            x1, py1, x2, py2,
+                            imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0),
+                            2.0
+                        )
+                    
+                    # Draw points
+                    for action in zoom_actions:
+                        t = (action['at'] / 1000.0 - zoom_start_s) / (zoom_end_s - zoom_start_s)
+                        y = 1.0 - (action['pos'] / 100.0)
+                        x = graph_pos[0] + t * zoom_width
+                        py = graph_pos[1] + y * zoom_height
+                        
+                        # Highlight if near hover position
+                        is_near_hover = abs(action['at'] / 1000.0 - hover_time_s) < 0.1
+                        color = imgui.get_color_u32_rgba(1.0, 1.0, 0.0, 1.0) if is_near_hover else imgui.get_color_u32_rgba(0.4, 1.0, 0.4, 1.0)
+                        radius = 4 if is_near_hover else 3
+                        
+                        draw_list.add_circle_filled(x, py, radius, color)
+                
+                # Draw vertical line at hover position
+                hover_x = graph_pos[0] + ((hover_time_s - zoom_start_s) / (zoom_end_s - zoom_start_s)) * zoom_width
+                draw_list.add_line(
+                    hover_x, graph_pos[1],
+                    hover_x, graph_pos[1] + zoom_height,
+                    imgui.get_color_u32_rgba(1.0, 0.5, 0.0, 0.8),
+                    1.0
+                )
+                
+                imgui.dummy(zoom_width, zoom_height)
+            
+            # Video frame preview (only show if requested after delay)
+            if show_video_frame:
+                imgui.separator()
+                imgui.text("Video Frame:")
+                
+                frame_data = tooltip_data.get('frame_data')
+                frame_loading = tooltip_data.get('frame_loading', False)
+                
+                if frame_data is not None:
+                    # Display cached frame using dedicated enhanced preview texture
+                    if hasattr(self, 'enhanced_preview_texture_id') and self.enhanced_preview_texture_id:
+                        # Only update texture once per cached tooltip data
+                        if not hasattr(tooltip_data, '_frame_texture_updated'):
+                            self.update_texture(self.enhanced_preview_texture_id, frame_data)
+                            tooltip_data['_frame_texture_updated'] = True
+                        
+                        # Use the actual frame dimensions since cv2 method already resizes
+                        frame_height, frame_width = frame_data.shape[:2]
+                        
+                        imgui.image(self.enhanced_preview_texture_id, frame_width, frame_height)
+                        
+                        # Show frame info with VR panel indication if applicable
+                        frame_info = f"Frame {tooltip_data['hover_frame']} ({frame_width}x{frame_height})"
+                        if hasattr(self.app, 'app_settings') and self.app.app_settings:
+                            vr_enabled = self.app.app_settings.get('vr_mode_enabled', False)
+                            vr_panel = self.app.app_settings.get('vr_panel_selection', 'full')
+                            if vr_enabled and vr_panel != 'full':
+                                frame_info += f" [{vr_panel.upper()} panel]"
+                        
+                        imgui.text(frame_info)
+                    else:
+                        imgui.text_disabled(f"[Frame {tooltip_data['hover_frame']} - no texture available]")
+                elif frame_loading:
+                    imgui.text_disabled(f"[Frame {tooltip_data['hover_frame']} - loading...]")
+                else:
+                    # More helpful error message
+                    if not self.app.processor:
+                        imgui.text_disabled("[No video processor available]")
+                    elif not self.app.processor.video_path:
+                        imgui.text_disabled("[No video loaded]")
+                    else:
+                        imgui.text_disabled(f"[Frame {tooltip_data['hover_frame']} - extraction failed]")
+            
+        except Exception as e:
+            imgui.text(f"Preview Error: {str(e)[:50]}")
+            if hasattr(self.app, 'logger'):
+                self.app.logger.error(f"Enhanced preview tooltip error: {e}")
+        
+        imgui.end_tooltip()
+
+    def cleanup(self):
+        try:
             self.app.logger.info("Shutting down ProcessingThreadManager...")
             self.processing_thread_manager.shutdown(timeout=3.0)
             
@@ -1518,4 +1829,6 @@ class GUI:
             if self.window: glfw.destroy_window(self.window)
             glfw.terminate()
             self.app.logger.info("GUI terminated.", extra={'status_message': False})
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
             

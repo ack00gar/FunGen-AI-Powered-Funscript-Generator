@@ -445,6 +445,13 @@ class MainMenu:
         if clicked and new_val != use_simplified:
             settings.set("use_simplified_funscript_preview", new_val)
             app.app_state_ui.funscript_preview_dirty = True
+
+        enhanced_preview = settings.get("enable_enhanced_funscript_preview", True)
+        clicked, new_val = imgui.menu_item(
+            "Enhanced Funscript Preview (Zoom + Video Frame)", selected=enhanced_preview
+        )
+        if clicked and new_val != enhanced_preview:
+            settings.set("enable_enhanced_funscript_preview", new_val)
         imgui.separator()
 
         for label, attr, key in (
