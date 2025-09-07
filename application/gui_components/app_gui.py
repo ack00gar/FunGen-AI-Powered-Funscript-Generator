@@ -75,6 +75,13 @@ class GUI:
             'frame_count': 0,
             'timestamp': time.time()
         })
+        
+        # Extended monitoring capabilities
+        self.video_decode_times = deque(maxlen=100)  # Track video decoding
+        self.gpu_memory_usage = 0
+        self.last_gpu_check = 0
+        self.disk_io_times = deque(maxlen=50)  # Track file operations
+        self.network_operation_times = deque(maxlen=30)  # Track network calls
 
         # Standard Components (owned by GUI)
         self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
@@ -415,6 +422,72 @@ class GUI:
         if component_name not in self.perf_accumulated_times:
             self.perf_accumulated_times[component_name] = 0.0
         self.perf_accumulated_times[component_name] += duration_ms
+
+    def get_performance_summary(self):
+        """Get comprehensive performance analysis."""
+        if not self.component_render_times:
+            return {"status": "No performance data available"}
+        
+        current_total = sum(self.component_render_times.values())
+        sorted_components = sorted(
+            self.component_render_times.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        
+        # Categorize performance
+        if current_total < 8.33:  # 120 FPS
+            status = "EXCELLENT"
+            color = (0.0, 1.0, 0.0, 1.0)
+        elif current_total < 16.67:  # 60 FPS
+            status = "GOOD"
+            color = (0.4, 0.8, 0.4, 1.0)
+        elif current_total < 33.33:  # 30 FPS
+            status = "OK"
+            color = (1.0, 0.8, 0.2, 1.0)
+        else:
+            status = "SLOW"
+            color = (1.0, 0.2, 0.2, 1.0)
+        
+        return {
+            "status": status,
+            "color": color,
+            "total_ms": current_total,
+            "components": sorted_components,
+            "frame_budget_60fps": 16.67,
+            "frame_budget_used_percent": (current_total / 16.67) * 100
+        }
+
+    def track_video_decode_time(self, decode_time_ms):
+        """Track video decoding performance."""
+        self.video_decode_times.append(decode_time_ms)
+        self.component_render_times["VideoDecoding"] = decode_time_ms
+
+    def track_disk_io_time(self, operation_name, io_time_ms):
+        """Track disk I/O operations."""
+        self.disk_io_times.append(io_time_ms)
+        self.component_render_times[f"DiskIO_{operation_name}"] = io_time_ms
+
+    def track_network_time(self, operation_name, network_time_ms):
+        """Track network operations."""
+        self.network_operation_times.append(network_time_ms)
+        self.component_render_times[f"Network_{operation_name}"] = network_time_ms
+
+    def update_gpu_memory_usage(self):
+        """Update GPU memory usage (called periodically)."""
+        try:
+            import GPUtil
+            gpus = GPUtil.getGPUs()
+            if gpus:
+                # Get memory usage from first GPU
+                gpu = gpus[0]
+                self.gpu_memory_usage = gpu.memoryUsed / gpu.memoryTotal * 100
+                self.component_render_times["GPU_MemoryUsage"] = self.gpu_memory_usage
+            else:
+                self.gpu_memory_usage = 0
+        except (ImportError, Exception):
+            # GPUtil not available or GPU not accessible
+            self.gpu_memory_usage = 0
 
     def _log_performance(self):
         """Log performance statistics and reset accumulators."""
@@ -1445,9 +1518,10 @@ class GUI:
         # Continuously update frontend queue with current data
         self._update_frontend_perf_queue()
 
-        imgui.render()
+        # Track final rendering operations
+        self._time_render("ImGuiRender", imgui.render)
         if self.impl:
-            self.impl.render(imgui.get_draw_data())
+            self._time_render("OpenGLRender", self.impl.render, imgui.get_draw_data())
 
     def _update_frontend_perf_queue(self):
         """
@@ -1569,10 +1643,17 @@ class GUI:
         try:
             while not glfw.window_should_close(self.window):
                 frame_start_time = time.time()
+                
+                # Track frame setup operations
+                event_start = time.perf_counter()
                 glfw.poll_events()
                 if self.impl: self.impl.process_inputs()
                 gl.glClearColor(*colors.BACKGROUND_CLEAR)
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+                event_time = (time.perf_counter() - event_start) * 1000
+                self.component_render_times["FrameSetup"] = event_time
+                
+                # GUI rendering (internally timed)
                 self.render_gui()
                 if (
                     self.app.app_settings.get("autosave_enabled", True)
@@ -1580,7 +1661,19 @@ class GUI:
                 ):
                     self.app.project_manager.perform_autosave()
                 self.app.energy_saver.check_and_update_energy_saver()
+                
+                # Track buffer swap (GPU synchronization)
+                swap_start = time.perf_counter()
                 glfw.swap_buffers(self.window)
+                swap_time = (time.perf_counter() - swap_start) * 1000
+                self.component_render_times["BufferSwap"] = swap_time
+                
+                # Update GPU memory usage every 30 frames (~0.5s at 60fps)
+                if self.perf_frame_count % 30 == 0:
+                    gpu_start = time.perf_counter()
+                    self.update_gpu_memory_usage()
+                    gpu_time = (time.perf_counter() - gpu_start) * 1000
+                    self.component_render_times["GPU_Monitor"] = gpu_time
                 current_target_duration = target_frame_duration_energy_saver if self.app.energy_saver.energy_saver_active else target_frame_duration_normal
                 elapsed_time_for_frame = time.time() - frame_start_time
                 sleep_duration = current_target_duration - elapsed_time_for_frame

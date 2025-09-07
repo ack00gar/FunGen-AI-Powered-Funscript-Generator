@@ -1129,6 +1129,165 @@ class InfoGraphsUI:
         else:
             imgui.text_disabled("No current frame data available")
 
+        # Enhanced breakdown with visual indicators  
+        if current_stats:
+            imgui.spacing()
+            imgui.text("Component Breakdown - All Components:")
+            imgui.spacing()
+            
+            # Show ALL components with columns for better organization
+            imgui.columns(3, "AllComponentColumns", True)
+            imgui.text("Component")
+            imgui.next_column()
+            imgui.text("Time (ms)")
+            imgui.next_column() 
+            imgui.text("% of Total")
+            imgui.next_column()
+            imgui.separator()
+            
+            # Show all components sorted by time (most expensive first)
+            for component, time_ms in current_stats:
+                percentage = (time_ms / current_total) * 100 if current_total > 0 else 0
+                
+                # Color code the component name based on impact
+                if time_ms > 5.0:
+                    imgui.text_colored(component, 1.0, 0.2, 0.2, 1.0)  # Red - high impact
+                elif time_ms > 1.0:
+                    imgui.text_colored(component, 1.0, 0.8, 0.2, 1.0)  # Yellow - moderate impact
+                else:
+                    imgui.text_colored(component, 0.2, 0.8, 0.2, 1.0)  # Green - low impact
+                
+                imgui.next_column()
+                imgui.text(f"{time_ms:.3f}")
+                imgui.next_column()
+                imgui.text(f"{percentage:.1f}%")
+                imgui.next_column()
+            
+            imgui.columns(1)
+            
+            # Optional: Visual bars for top components
+            imgui.spacing()
+            if len(current_stats) > 5 and imgui.collapsing_header("Visual Performance Bars##PerfBars")[0]:
+                imgui.text("Top Performance Impact:")
+                # Show top 5 with visual bars
+                for component, time_ms in current_stats[:5]:
+                    percentage = (time_ms / current_total) * 100 if current_total > 0 else 0
+                    
+                    # Color code based on performance impact
+                    if time_ms > 5.0:
+                        color = (1.0, 0.2, 0.2, 1.0)  # Red
+                    elif time_ms > 1.0:
+                        color = (1.0, 0.8, 0.2, 1.0)  # Yellow
+                    else:
+                        color = (0.2, 0.8, 0.2, 1.0)  # Green
+                    
+                    imgui.text(f"{component}: {time_ms:.2f}ms ({percentage:.1f}%)")
+                    
+                    # Progress bar visualization
+                    bar_width = min(percentage / 100.0, 1.0)
+                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *color)
+                    imgui.progress_bar(bar_width, size=(300, 0))
+                    imgui.pop_style_color()
+
+        # Extended Performance Monitoring Section
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        
+        if imgui.collapsing_header("Extended Performance Monitoring##ExtendedPerf")[0]:
+            gui = app.gui_instance if hasattr(app, "gui_instance") else None
+            if gui:
+                imgui.columns(2, "ExtendedPerfColumns", True)
+                
+                # Video Decoding Performance
+                imgui.text_colored("Video Decoding:", 0.8, 0.9, 1.0, 1.0)
+                imgui.next_column()
+                if hasattr(gui, 'video_decode_times') and gui.video_decode_times:
+                    avg_decode = sum(gui.video_decode_times) / len(gui.video_decode_times)
+                    recent_decode = gui.video_decode_times[-1] if gui.video_decode_times else 0
+                    imgui.text(f"Recent: {recent_decode:.2f}ms | Avg: {avg_decode:.2f}ms")
+                else:
+                    imgui.text_disabled("No decode data available")
+                imgui.next_column()
+                
+                # GPU Memory Usage
+                imgui.text_colored("GPU Memory:", 0.8, 0.9, 1.0, 1.0)
+                imgui.next_column()
+                if hasattr(gui, 'gpu_memory_usage') and gui.gpu_memory_usage > 0:
+                    if gui.gpu_memory_usage < 50:
+                        color = (0.2, 0.8, 0.2, 1.0)  # Green
+                    elif gui.gpu_memory_usage < 80:
+                        color = (1.0, 0.8, 0.2, 1.0)  # Yellow
+                    else:
+                        color = (1.0, 0.2, 0.2, 1.0)  # Red
+                    imgui.text_colored(f"{gui.gpu_memory_usage:.1f}% used", *color)
+                else:
+                    imgui.text_disabled("GPU monitoring unavailable")
+                imgui.next_column()
+                
+                # Disk I/O Performance
+                imgui.text_colored("Disk I/O:", 0.8, 0.9, 1.0, 1.0)
+                imgui.next_column()
+                if hasattr(gui, 'disk_io_times') and gui.disk_io_times:
+                    recent_io = gui.disk_io_times[-1] if gui.disk_io_times else 0
+                    avg_io = sum(gui.disk_io_times) / len(gui.disk_io_times)
+                    if avg_io < 5.0:
+                        color = (0.2, 0.8, 0.2, 1.0)
+                    elif avg_io < 20.0:
+                        color = (1.0, 0.8, 0.2, 1.0)
+                    else:
+                        color = (1.0, 0.2, 0.2, 1.0)
+                    imgui.text_colored(f"Recent: {recent_io:.2f}ms | Avg: {avg_io:.2f}ms", *color)
+                else:
+                    imgui.text_disabled("No I/O data available")
+                imgui.next_column()
+                
+                # Network Operations
+                imgui.text_colored("Network Ops:", 0.8, 0.9, 1.0, 1.0)
+                imgui.next_column()
+                if hasattr(gui, 'network_operation_times') and gui.network_operation_times:
+                    recent_net = gui.network_operation_times[-1] if gui.network_operation_times else 0
+                    avg_net = sum(gui.network_operation_times) / len(gui.network_operation_times)
+                    if avg_net < 100.0:
+                        color = (0.2, 0.8, 0.2, 1.0)
+                    elif avg_net < 500.0:
+                        color = (1.0, 0.8, 0.2, 1.0)
+                    else:
+                        color = (1.0, 0.2, 0.2, 1.0)
+                    imgui.text_colored(f"Recent: {recent_net:.1f}ms | Avg: {avg_net:.1f}ms", *color)
+                else:
+                    imgui.text_disabled("No network data available")
+                imgui.next_column()
+                
+                imgui.columns(1)
+                
+                # Performance Budget Analysis
+                imgui.spacing()
+                imgui.text_colored("Frame Budget Analysis (60fps = 16.67ms):", 0.9, 0.9, 0.3, 1.0)
+                if current_total > 0:
+                    budget_used = (current_total / 16.67) * 100
+                    remaining = max(0, 16.67 - current_total)
+                    
+                    if budget_used < 60:
+                        budget_color = (0.2, 0.8, 0.2, 1.0)
+                        status = "PLENTY OF HEADROOM"
+                    elif budget_used < 90:
+                        budget_color = (1.0, 0.8, 0.2, 1.0)
+                        status = "GOOD PERFORMANCE"
+                    else:
+                        budget_color = (1.0, 0.2, 0.2, 1.0)
+                        status = "FRAME BUDGET EXCEEDED"
+                    
+                    imgui.text(f"Budget used: ")
+                    imgui.same_line()
+                    imgui.text_colored(f"{budget_used:.1f}% ({status})", *budget_color)
+                    imgui.text(f"Remaining budget: {remaining:.2f}ms")
+                    
+                    # Visual budget bar
+                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *budget_color)
+                    imgui.progress_bar(min(budget_used / 100.0, 1.0), size=(300, 0), overlay=f"{budget_used:.1f}%")
+                    imgui.pop_style_color()
+
         imgui.spacing()
         imgui.separator()
         imgui.spacing()

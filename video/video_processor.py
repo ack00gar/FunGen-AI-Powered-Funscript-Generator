@@ -375,6 +375,7 @@ class VideoProcessor:
         Fetches a batch of frames using FFmpeg.
         This method now supports 2-pipe 10-bit CUDA processing.
         """
+        decode_start = time.perf_counter()  # Performance tracking
         frames_batch: Dict[int, np.ndarray] = {}
         if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0 or num_frames_to_fetch <= 0:
             self.logger.warning("get_frames_batch: Video not properly opened or invalid params.")
@@ -468,8 +469,13 @@ class VideoProcessor:
             if local_p2_proc:
                 self._terminate_process(local_p2_proc, "Batch Pipe 2/Main")
 
+        # Performance tracking completion
+        decode_time = (time.perf_counter() - decode_start) * 1000
+        if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+            self.app.gui_instance.track_video_decode_time(decode_time)
+        
         self.logger.debug(
-            f"get_frames_batch: Complete. Got {len(frames_batch)} frames for start {start_frame_num} (requested {num_frames_to_fetch}).")
+            f"get_frames_batch: Complete. Got {len(frames_batch)} frames for start {start_frame_num} (requested {num_frames_to_fetch}). Decode time: {decode_time:.2f}ms")
         return frames_batch
 
     def _get_specific_frame(self, frame_index_abs: int) -> Optional[np.ndarray]:

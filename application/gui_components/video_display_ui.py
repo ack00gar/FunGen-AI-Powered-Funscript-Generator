@@ -13,6 +13,14 @@ class VideoDisplayUI:
         self._video_display_rect_min = (0, 0)
         self._video_display_rect_max = (0, 0)
         self._actual_video_image_rect_on_screen = {'min_x': 0, 'min_y': 0, 'max_x': 0, 'max_y': 0, 'w': 0, 'h': 0}
+        
+        # PERFORMANCE OPTIMIZATIONS: Video display caching and smart rendering
+        self._last_frame_texture_id = None  # Track texture changes
+        self._cached_overlay_data = None  # Cache overlay rendering data
+        self._overlay_dirty = True  # Flag for overlay re-rendering
+        self._last_overlay_hash = None  # Detect overlay changes
+        self._render_quality_mode = "auto"  # auto/high/medium/low
+        self._frame_skip_counter = 0  # Skip expensive operations during load
 
         # ROI Drawing state for User Defined ROI
         self.is_drawing_user_roi: bool = False
