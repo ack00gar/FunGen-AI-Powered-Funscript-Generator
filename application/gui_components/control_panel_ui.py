@@ -64,12 +64,28 @@ class ControlPanelUI:
         self.AI_modelTooltipExtensions = self.constants.AI_MODEL_TOOLTIP_EXTENSIONS
         
         # Initialize dynamic tracker UI helper
-        if DynamicTrackerUI:
-            self.tracker_ui = DynamicTrackerUI()
-        else:
-            self.tracker_ui = None
+        self.tracker_ui = None
+        self._try_reinitialize_tracker_ui()
 
     # ------- Helpers -------
+    
+    def _try_reinitialize_tracker_ui(self):
+        """Try to initialize or reinitialize the dynamic tracker UI."""
+        if self.tracker_ui is not None:
+            return  # Already initialized
+        
+        try:
+            if DynamicTrackerUI:
+                self.tracker_ui = DynamicTrackerUI()
+                if hasattr(self.app, 'logger'):
+                    self.app.logger.debug("Dynamic tracker UI initialized successfully")
+            else:
+                if hasattr(self.app, 'logger'):
+                    self.app.logger.warning("DynamicTrackerUI class not available (import failed)")
+        except Exception as e:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.error(f"Failed to initialize dynamic tracker UI: {e}")
+            self.tracker_ui = None
 
     def _is_tracker_category(self, tracker_name: str, category) -> bool:
         """Check if tracker belongs to specific category using dynamic discovery."""
@@ -100,20 +116,40 @@ class ControlPanelUI:
 
     def _is_stage2_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is a 2-stage offline tracker."""
+        if not self.tracker_ui:
+            # Try to reinitialize if it failed during __init__
+            self._try_reinitialize_tracker_ui()
+        
         if self.tracker_ui:
             return self.tracker_ui.is_stage2_tracker(tracker_name)
+        
+        # If still failing, log error but don't crash
+        if hasattr(self.app, 'logger'):
+            self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is stage2 tracker")
         return False
 
     def _is_stage3_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is a 3-stage offline tracker."""
+        if not self.tracker_ui:
+            self._try_reinitialize_tracker_ui()
+        
         if self.tracker_ui:
             return self.tracker_ui.is_stage3_tracker(tracker_name)
+        
+        if hasattr(self.app, 'logger'):
+            self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is stage3 tracker")
         return False
 
     def _is_mixed_stage3_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is a mixed 3-stage offline tracker."""
+        if not self.tracker_ui:
+            self._try_reinitialize_tracker_ui()
+        
         if self.tracker_ui:
             return self.tracker_ui.is_mixed_stage3_tracker(tracker_name)
+        
+        if hasattr(self.app, 'logger'):
+            self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is mixed stage3 tracker")
         return False
 
     def _get_tracker_lists_for_ui(self, simple_mode=False):
