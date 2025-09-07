@@ -1,7 +1,35 @@
 import logging
 import inspect
+import subprocess
+import os
 from logging.handlers import RotatingFileHandler
 from config import constants
+
+
+def get_git_info():
+    """Get current git branch and commit hash for logging."""
+    try:
+        # Get current branch
+        branch_result = subprocess.run(
+            ['git', 'branch', '--show-current'], 
+            capture_output=True, text=True, timeout=2
+        )
+        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else 'unknown'
+        
+        # Get current commit hash (short version)
+        commit_result = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'], 
+            capture_output=True, text=True, timeout=2
+        )
+        commit = commit_result.stdout.strip() if commit_result.returncode == 0 else 'unknown'
+        
+        return f"{branch}@{commit}"
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+        return "nogit@unknown"
+
+
+# Cache git info at import time (launch) to avoid repeated subprocess calls
+_GIT_INFO = get_git_info()
 
 
 class StatusMessageHandler(logging.Handler):
@@ -64,7 +92,7 @@ class ColoredFormatter(logging.Formatter):
     BOLD_RED = "\x1b[31;1m"  # Bold Red
     RESET = "\x1b[0m"  # Reset all attributes
 
-    log_format_base = "%(asctime)s - %(name)s - %(levelname)-8s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s"
+    log_format_base = f"%(asctime)s - [{_GIT_INFO}] - %(name)s - %(levelname)-8s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s"
 
     FORMATS = {
         logging.DEBUG: GREY + log_format_base + RESET,
@@ -122,7 +150,7 @@ class AppLogger:
             )
             fh.setLevel(level)
             file_formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)-8s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s",
+                f"%(asctime)s - [{_GIT_INFO}] - %(name)s - %(levelname)-8s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s",
                 datefmt='%Y-%m-%d %H:%M:%S'
             )
             fh.setFormatter(file_formatter)
