@@ -2040,9 +2040,6 @@ class InteractiveFunscriptTimeline:
             ultimate_window_title = f"Ultimate Autotune (Timeline {self.timeline_num})##UltimateSettingsWindow{window_id_suffix}"
             if self.show_ultimate_autotune_popup:
                 if not self.is_previewing:
-                    # CRITICAL FIX: Ensure cache is fresh before generating UA preview 
-                    # This prevents working with stale data during live tracking pause
-                    self.invalidate_cache()
                     self._update_preview('ultimate')
 
                 imgui.set_next_window_size(480, 0, condition=imgui.APPEARING)
@@ -2058,13 +2055,12 @@ class InteractiveFunscriptTimeline:
                     button_width = (imgui.get_content_region_available_width() - imgui.get_style().item_spacing[0]) / 2.0
 
                     if imgui.button("Apply##UltimateApply", width=button_width):
-                        # CRITICAL FIX: Ensure timeline cache is fresh before UA during pause/live states
-                        # This prevents UA "points disappearing" bug when clicked during live tracking  
-                        self.invalidate_cache()
-                        
                         op_desc = "Applied Ultimate Autotune"
                         fs_proc._record_timeline_action(self.timeline_num, op_desc)
                         if self._perform_ultimate_autotune():
+                            # CRITICAL FIX: Invalidate cache AFTER UA completes to ensure fresh rendering
+                            # This prevents both UA points disappearing bug AND 1000-point threshold issues
+                            self.invalidate_cache()
                             fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
                             self.app.logger.info("✨ Ultimate Autotune applied successfully.", extra={'status_message': True})
                         # On failure, the recorded action is automatically discarded by the undo manager.
