@@ -1521,7 +1521,15 @@ class GUI:
         # Track final rendering operations
         self._time_render("ImGuiRender", imgui.render)
         if self.impl:
-            self._time_render("OpenGLRender", self.impl.render, imgui.get_draw_data())
+            # Only measure OpenGL render time if it's likely to be significant
+            # Skip timing for very simple frames to reduce overhead
+            draw_data = imgui.get_draw_data()
+            if draw_data.total_vtx_count > 100 or draw_data.cmd_lists_count > 5:
+                self._time_render("OpenGLRender", self.impl.render, draw_data)
+            else:
+                # Simple frame - render without timing overhead
+                self.impl.render(draw_data)
+                self.component_render_times["OpenGLRender"] = 0.0
 
     def _update_frontend_perf_queue(self):
         """
@@ -1668,12 +1676,14 @@ class GUI:
                 swap_time = (time.perf_counter() - swap_start) * 1000
                 self.component_render_times["BufferSwap"] = swap_time
                 
-                # Update GPU memory usage every 30 frames (~0.5s at 60fps)
-                if self.perf_frame_count % 30 == 0:
+                # Update GPU memory usage every 120 frames (~2s at 60fps) - reduced frequency  
+                if self.perf_frame_count % 120 == 0:
                     gpu_start = time.perf_counter()
                     self.update_gpu_memory_usage()
                     gpu_time = (time.perf_counter() - gpu_start) * 1000
-                    self.component_render_times["GPU_Monitor"] = gpu_time
+                    # Only track if it's actually expensive (>1ms)
+                    if gpu_time > 1.0:
+                        self.component_render_times["GPU_Monitor"] = gpu_time
                 current_target_duration = target_frame_duration_energy_saver if self.app.energy_saver.energy_saver_active else target_frame_duration_normal
                 elapsed_time_for_frame = time.time() - frame_start_time
                 sleep_duration = current_target_duration - elapsed_time_for_frame

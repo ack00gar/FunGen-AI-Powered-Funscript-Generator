@@ -51,6 +51,12 @@ class ControlPanelUI:
         "AI_modelExtensionsFilter",
         "AI_modelTooltipExtensions",
         "tracker_ui",
+        # Performance optimization attributes
+        "_last_tab_hash",
+        "_cached_tab_content", 
+        "_widget_visibility_cache",
+        "_update_throttle_counter",
+        "_heavy_operation_frame_skip",
     )
 
     def __init__(self, app):
