@@ -1548,7 +1548,7 @@ class GUI:
         # Status message (has internal visibility check)
         self._render_status_message(app_state)
         
-        # Updater dialogs (now have early returns to avoid expensive ImGui calls when not visible)
+        # Updater dialogs (have early returns to avoid expensive ImGui calls when not visible)
         self.app.updater.render_update_dialog()
         self.app.updater.render_update_error_dialog()
         self.app.updater.render_migration_warning_dialog()
