@@ -714,6 +714,8 @@ class ApplicationLogic:
         # 2. Apply Ultimate Autotune using the plugin system
         try:
             from funscript.plugins.base_plugin import plugin_registry
+            # Import the plugin to ensure it's registered
+            from funscript.plugins import ultimate_autotune_plugin
             ultimate_plugin = plugin_registry.get_plugin('Ultimate Autotune')
             
             if ultimate_plugin:
@@ -1896,7 +1898,20 @@ class ApplicationLogic:
             self.batch_overwrite_mode = 2 if args.overwrite else 1
             self.batch_apply_ultimate_autotune = args.autotune
             self.batch_copy_funscript_to_video_location = args.copy
-            self.batch_apply_post_processing = True  # Assume always on for CLI
+            
+            # Post-processing and Ultimate Autotune are mutually exclusive to avoid double simplification
+            # Priority: Ultimate Autotune > Auto Post-processing
+            if args.autotune:
+                # When Ultimate Autotune is enabled, disable post-processing to avoid double simplification
+                self.batch_apply_post_processing = False
+                self.logger.info("Ultimate Autotune enabled - auto post-processing disabled to prevent double simplification")
+            else:
+                # When Ultimate Autotune is disabled, allow post-processing based on settings
+                self.batch_apply_post_processing = self.app_settings.get("enable_auto_post_processing", False)
+                if self.batch_apply_post_processing:
+                    self.logger.info("Ultimate Autotune disabled - auto post-processing enabled from settings")
+                else:
+                    self.logger.info("Both Ultimate Autotune and auto post-processing disabled")
             self.batch_generate_roll_file = (args.mode in ['3-stage', '3-stage-mixed'])
 
             self.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
