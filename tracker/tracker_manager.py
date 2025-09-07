@@ -63,6 +63,14 @@ class TrackerManager:
         self.user_roi_fixed = None  # Should be None or (x, y, w, h) tuple
         self.main_interaction_class = None
         self.confidence_threshold = 0.7
+        
+        # Model paths for GUI compatibility (set by control panel when models change)
+        self.det_model_path = self.tracker_model_path  # Detection model path
+        self.pose_model_path = None  # Pose model path (if used)
+        
+        # Live tracker GUI compatibility attributes
+        self.enable_inversion_detection = False  # Motion mode feature
+        self.motion_mode = "normal"  # Motion mode state
         self.roi_padding = 50
         self.roi_update_interval = 10
         self.roi_smoothing_factor = 0.1
@@ -396,6 +404,67 @@ class TrackerManager:
         if self._current_tracker and hasattr(self._current_tracker, 'update_oscillation_sensitivity'):
             self._current_tracker.update_oscillation_sensitivity()
 
+    def _load_models(self):
+        """Reload models in current tracker after model paths change."""
+        if not self._current_tracker:
+            self.logger.debug("No current tracker to reload models for")
+            return
+        
+        try:
+            # Try to reinitialize the tracker if it supports model reloading
+            if hasattr(self._current_tracker, '_load_models'):
+                self._current_tracker._load_models()
+                self.logger.info(f"Models reloaded for tracker {self._current_mode}")
+            elif hasattr(self._current_tracker, 'reinitialize'):
+                self._current_tracker.reinitialize()
+                self.logger.info(f"Tracker {self._current_mode} reinitialized after model path change")
+            elif hasattr(self._current_tracker, 'initialize'):
+                # Fallback: reinitialize the tracker
+                result = self._current_tracker.initialize(self.app)
+                if result:
+                    self.logger.info(f"Tracker {self._current_mode} reinitialized successfully")
+                else:
+                    self.logger.warning(f"Tracker {self._current_mode} reinitialization failed")
+            else:
+                self.logger.info(f"Tracker {self._current_mode} does not support model reloading")
+        except Exception as e:
+            self.logger.error(f"Error reloading models for tracker {self._current_mode}: {e}")
+
+    def _is_vr_video(self) -> bool:
+        """Check if current video is VR format."""
+        # First, try to delegate to current tracker if it has the method
+        if self._current_tracker and hasattr(self._current_tracker, '_is_vr_video'):
+            try:
+                return self._current_tracker._is_vr_video()
+            except Exception as e:
+                self.logger.warning(f"Error calling tracker's _is_vr_video: {e}")
+        
+        # Fallback implementation using app video dimensions
+        try:
+            if self.app and hasattr(self.app, 'get_video_dimensions'):
+                width, height = self.app.get_video_dimensions()
+                if width and height:
+                    aspect_ratio = width / height
+                    # VR videos typically have aspect ratios >= 1.8
+                    is_vr = aspect_ratio >= 1.8
+                    self.logger.debug(f"VR detection: {width}x{height} (ratio {aspect_ratio:.2f}) -> {'VR' if is_vr else 'standard'}")
+                    return is_vr
+            
+            # Try alternative method using processor
+            if self.app and hasattr(self.app, 'processor') and self.app.processor:
+                width = getattr(self.app.processor, 'frame_width', None)
+                height = getattr(self.app.processor, 'frame_height', None)
+                if width and height:
+                    aspect_ratio = width / height
+                    is_vr = aspect_ratio >= 1.8
+                    self.logger.debug(f"VR detection (processor): {width}x{height} (ratio {aspect_ratio:.2f}) -> {'VR' if is_vr else 'standard'}")
+                    return is_vr
+        except Exception as e:
+            self.logger.warning(f"Error in VR video detection: {e}")
+        
+        # Default to non-VR if detection fails
+        return False
+
     # Getters for current state
     def get_current_tracker_name(self) -> Optional[str]:
         """Get current tracker mode name."""
@@ -530,6 +599,14 @@ class TrackerManager:
         # Update FPS if available
         if hasattr(self._current_tracker, 'current_fps'):
             self.current_fps = getattr(self._current_tracker, 'current_fps', 0.0)
+        
+        # Update live tracker GUI attributes for motion mode overlay
+        if hasattr(self._current_tracker, 'enable_inversion_detection'):
+            self.enable_inversion_detection = getattr(self._current_tracker, 'enable_inversion_detection', False)
+        if hasattr(self._current_tracker, 'motion_mode'):
+            self.motion_mode = getattr(self._current_tracker, 'motion_mode', 'normal')
+        if hasattr(self._current_tracker, 'main_interaction_class'):
+            self.main_interaction_class = getattr(self._current_tracker, 'main_interaction_class', None)
 
     def _provide_tracker_compatibility_attributes(self):
         """Provide attributes that modular trackers might expect from the old ROITracker."""
