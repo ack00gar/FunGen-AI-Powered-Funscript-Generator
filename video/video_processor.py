@@ -197,6 +197,9 @@ class VideoProcessor:
                 self.logger.info("Now using original video - filters will be applied on-the-fly")
 
     def open_video(self, video_path: str, from_project_load: bool = False) -> bool:
+        video_filename = os.path.basename(video_path)
+        self.logger.info(f"Opening video: {video_filename}...", extra={'status_message': True, 'duration': 2.0})
+        
         self.stop_processing()
         self.video_path = video_path # This will always be the ORIGINAL video path
         self._clear_cache()
@@ -257,7 +260,9 @@ class VideoProcessor:
         self.current_stream_start_frame_abs = 0
         self.stop_event.clear()
         self.seek_request_frame_index = None
-        self.current_frame = self._get_specific_frame(0)
+        # CRITICAL OPTIMIZATION: Don't load frame during video open - defer until actually needed
+        # This eliminates 14+ second delay from expensive 8K VR frame processing at startup
+        self.current_frame = None
 
         if self.tracker:
             reset_reason = "project_load_preserve_actions" if from_project_load else None
@@ -290,7 +295,7 @@ class VideoProcessor:
             has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
 
             self.determined_video_type = 'VR' if is_sbs_resolution or is_tb_resolution or has_vr_keyword else '2D'
-            self.logger.info(
+            self.logger.debug(
                 f"Auto-detected video type: {self.determined_video_type} (SBS Res: {is_sbs_resolution}, TB Res: {is_tb_resolution}, Keyword: {has_vr_keyword})")
         else:
             self.determined_video_type = self.video_type_setting
@@ -324,7 +329,7 @@ class VideoProcessor:
 
                 final_suggested_vr_input_format = f"{suggested_base}{suggested_layout}"
 
-                self.logger.info(
+                self.logger.debug(
                     f"Auto-detection suggests VR format: {final_suggested_vr_input_format} for '{os.path.basename(self.video_path)}'. Setting it."
                 )
                 self.vr_input_format = final_suggested_vr_input_format
@@ -656,7 +661,7 @@ class VideoProcessor:
                 elif any(fmt in pix_fmt for fmt in ['10le', 'p010', '10be']):
                     bit_depth = 10
 
-            self.logger.info(
+            self.logger.debug(
                 f"Detected video properties: width={stream_info.get('width', 0)}, height={stream_info.get('height', 0)}, fps={fps:.2f}, bit_depth={bit_depth}")
 
             return {"duration": duration, "total_frames": total_frames, "fps": fps,
@@ -789,7 +794,7 @@ class VideoProcessor:
             crop_w = original_width / 2
             crop_h = original_height
             vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
-            self.logger.info(f"Applying SBS pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
+            self.logger.debug(f"Applying SBS pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
         elif is_tb_format and original_width > 0 and original_height > 0:
             crop_w = original_width
             crop_h = original_height / 2
@@ -830,7 +835,7 @@ class VideoProcessor:
         final_filter_chain_parts.extend(software_filter_segments)
         ffmpeg_filter = ",".join(final_filter_chain_parts)
 
-        self.logger.info(
+        self.logger.debug(
             f"Built FFmpeg filter (effective for single pipe, or pipe2 of 10bit-CUDA): {ffmpeg_filter if ffmpeg_filter else 'No explicit filter, direct output.'}")
         return ffmpeg_filter
 

@@ -878,4 +878,4 @@ class AxisProjectionEnhancedTracker(BaseTracker):
         self.prev_gray = None
         self.frame_history.clear()
         self.multi_scale_tracker = None
-        self.logger.info("Enhanced axis projection tracker cleaned up")
+        self.logger.debug("Enhanced axis projection tracker cleaned up")
