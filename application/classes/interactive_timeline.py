@@ -3440,10 +3440,8 @@ class InteractiveFunscriptTimeline:
                     self.selected_action_idx = min(
                         self.multi_selected_action_indices) if self.multi_selected_action_indices else -1
 
-                    self.dragging_action_idx = hovered_action_idx_current_timeline
-                    if not self.drag_undo_recorded and allow_editing_timeline:
-                        fs_proc._record_timeline_action(self.timeline_num, "Start Point Drag")
-                        self.drag_undo_recorded = True
+                    # Don't start dragging immediately on click - only when actually dragging
+                    # This prevents points from moving with every mouse movement after selection
 
                     if video_loaded and not self.app.processor.is_processing and video_fps_for_calc > 0:
                         target_frame_on_click = int(round(
@@ -3468,6 +3466,12 @@ class InteractiveFunscriptTimeline:
                         if not io.key_ctrl:
                             self.multi_selected_action_indices.clear()
                             self.selected_action_idx = -1
+                else:
+                    # CRITICAL FIX: Click on empty timeline space should deselect all points
+                    if is_timeline_hovered and not io.key_ctrl:
+                        self.multi_selected_action_indices.clear()
+                        self.selected_action_idx = -1
+                        self.dragging_action_idx = -1  # Also stop any dragging
 
             # Context Menu (only when strictly hovered over the canvas, not the padding)
             if imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT) and is_timeline_hovered:
@@ -3488,27 +3492,36 @@ class InteractiveFunscriptTimeline:
                     self.selected_action_idx = self.context_menu_point_idx
                 imgui.open_popup(context_popup_id)
 
-            # Point Drag
-            if self.dragging_action_idx != -1 and imgui.is_mouse_dragging(
-                    glfw.MOUSE_BUTTON_LEFT) and allow_editing_timeline and not io.key_shift:
-                if 0 <= self.dragging_action_idx < len(actions_list):
-                    action_to_drag = actions_list[self.dragging_action_idx]
-                    new_time_cand_ms = x_to_time(mouse_pos[0])
-                    new_pos_cand = y_to_pos(mouse_pos[1])
-                    snap_time = app_state.snap_to_grid_time_ms if app_state.snap_to_grid_time_ms > 0 else 1
-                    snap_pos = app_state.snap_to_grid_pos if app_state.snap_to_grid_pos > 0 else 1
-                    snapped_new_at = max(0, int(round(new_time_cand_ms / snap_time)) * snap_time)
-                    snapped_new_pos = min(100, max(0, int(round(new_pos_cand / snap_pos)) * snap_pos))
+            # Point Drag - only start dragging if mouse is being dragged from a selected point
+            if imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT) and allow_editing_timeline and not io.key_shift:
+                # Start dragging if we're hovering over a selected point and not already dragging
+                if (self.dragging_action_idx == -1 and hovered_action_idx_current_timeline != -1 and 
+                    hovered_action_idx_current_timeline in self.multi_selected_action_indices):
+                    self.dragging_action_idx = hovered_action_idx_current_timeline
+                    if not self.drag_undo_recorded:
+                        fs_proc._record_timeline_action(self.timeline_num, "Start Point Drag")
+                        self.drag_undo_recorded = True
+                
+                # Continue dragging if already started
+                if self.dragging_action_idx != -1:
+                    if 0 <= self.dragging_action_idx < len(actions_list):
+                        action_to_drag = actions_list[self.dragging_action_idx]
+                        new_time_cand_ms = x_to_time(mouse_pos[0])
+                        new_pos_cand = y_to_pos(mouse_pos[1])
+                        snap_time = app_state.snap_to_grid_time_ms if app_state.snap_to_grid_time_ms > 0 else 1
+                        snap_pos = app_state.snap_to_grid_pos if app_state.snap_to_grid_pos > 0 else 1
+                        snapped_new_at = max(0, int(round(new_time_cand_ms / snap_time)) * snap_time)
+                        snapped_new_pos = min(100, max(0, int(round(new_pos_cand / snap_pos)) * snap_pos))
 
-                    effective_prev_at_lim = actions_list[self.dragging_action_idx - 1]["at"] + 1 if self.dragging_action_idx > 0 else 0
-                    effective_next_at_lim = actions_list[self.dragging_action_idx + 1]["at"] - 1 if self.dragging_action_idx < len(actions_list) - 1 else float('inf')
-                    action_to_drag["at"] = int(np.clip(float(snapped_new_at), float(effective_prev_at_lim), float(effective_next_at_lim)))
-                    action_to_drag["pos"] = snapped_new_pos
+                        effective_prev_at_lim = actions_list[self.dragging_action_idx - 1]["at"] + 1 if self.dragging_action_idx > 0 else 0
+                        effective_next_at_lim = actions_list[self.dragging_action_idx + 1]["at"] - 1 if self.dragging_action_idx < len(actions_list) - 1 else float('inf')
+                        action_to_drag["at"] = int(np.clip(float(snapped_new_at), float(effective_prev_at_lim), float(effective_next_at_lim)))
+                        action_to_drag["pos"] = snapped_new_pos
 
-                    self.app.project_manager.project_dirty = True
-                    if self.timeline_num == 1:
-                        app_state.heatmap_dirty = True
-                        app_state.funscript_preview_dirty = True
+                        self.app.project_manager.project_dirty = True
+                        if self.timeline_num == 1:
+                            app_state.heatmap_dirty = True
+                            app_state.funscript_preview_dirty = True
 
             # Marquee Drag
             if self.is_marqueeing and imgui.is_mouse_dragging(glfw.MOUSE_BUTTON_LEFT) and not io.key_shift:
