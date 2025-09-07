@@ -7,6 +7,21 @@ import logging
 
 def _setup_bootstrap_logger():
     """Set up early bootstrap logger for startup phase before full logger initialization."""
+    # Get git info for bootstrap logging
+    try:
+        import subprocess
+        branch_result = subprocess.run(['git', 'branch', '--show-current'], 
+                                     capture_output=True, text=True, timeout=2)
+        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else 'unknown'
+        
+        commit_result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
+                                     capture_output=True, text=True, timeout=2)
+        commit = commit_result.stdout.strip() if commit_result.returncode == 0 else 'unknown'
+        
+        git_info = f"{branch}@{commit}"
+    except:
+        git_info = "nogit@unknown"
+    
     # Set up a minimal colored console handler for startup
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
@@ -24,7 +39,7 @@ def _setup_bootstrap_logger():
         BOLD_RED = "\x1b[31;1m"
         RESET = "\x1b[0m"
         
-        format_base = "%(levelname)-8s - %(message)s"
+        format_base = f"[{git_info}] - %(levelname)-8s - %(message)s"
         
         FORMATS = {
             logging.DEBUG: GREY + format_base + RESET,
