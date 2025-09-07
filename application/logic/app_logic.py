@@ -1359,6 +1359,17 @@ class ApplicationLogic:
                 self.logger.info("Live session ended. Saving raw funscript before post-processing.")
                 self.file_manager.save_raw_funscripts_after_generation(video_path)
 
+                # CRITICAL FIX: Ensure timeline cache reflects final live tracking data
+                # This prevents UA "points disappearing" bug when clicked right after generation
+                timeline1 = getattr(self, 'interactive_timeline1', None)
+                if timeline1 and hasattr(timeline1, 'invalidate_cache'):
+                    timeline1.invalidate_cache()
+                    self.logger.debug("Timeline 1 cache invalidated after live session completion")
+                timeline2 = getattr(self, 'interactive_timeline2', None)
+                if timeline2 and hasattr(timeline2, 'invalidate_cache'):
+                    timeline2.invalidate_cache()
+                    self.logger.debug("Timeline 2 cache invalidated after live session completion")
+
                 # 2. PROCEED WITH POST-PROCESSING (if enabled)
                 post_processing_enabled = self.app_settings.get("enable_auto_post_processing", False)
                 autotune_enabled = False  # Default to false
