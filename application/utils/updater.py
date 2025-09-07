@@ -973,6 +973,10 @@ class AutoUpdater:
             imgui.open_popup("Update Available")
             self.show_update_dialog = False
 
+        # Early return if no dialog to show - avoid expensive ImGui calls
+        if not imgui.is_popup_open("Update Available"):
+            return
+
         if not hasattr(self, '_update_dialog_pos'):
             main_viewport = imgui.get_main_viewport()
             popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
@@ -1039,6 +1043,10 @@ class AutoUpdater:
             imgui.open_popup("Update Check Failed")
             self.show_update_error_dialog = False
 
+        # Early return if no dialog to show - avoid expensive ImGui calls
+        if not imgui.is_popup_open("Update Check Failed"):
+            return
+
         if not hasattr(self, '_update_error_dialog_pos'):
             main_viewport = imgui.get_main_viewport()
             popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
@@ -1064,6 +1072,10 @@ class AutoUpdater:
 
     def render_migration_warning_dialog(self):
         """Renders migration warning dialog for v0.5.0 users."""
+        # Early return if already dismissed or triggered - avoid expensive operations
+        if self.migration_warning_dismissed or (self.migration_warning_triggered and not self.show_migration_warning):
+            return
+            
         # Check if we should show the migration warning (only trigger once)
         if not self.migration_warning_triggered and not self.show_migration_warning and self._check_should_show_migration_warning():
             self.logger.info("🚨 Migration warning triggered for v0.5.0 user")
@@ -1401,6 +1413,10 @@ class AutoUpdater:
             # Initialize commit count to default if not set
             if not hasattr(self, '_custom_commit_count'):
                 self._custom_commit_count = str(DEFAULT_COMMIT_FETCH_COUNT)
+
+        # Early return if no dialog to show - avoid expensive operations
+        if not imgui.is_popup_open("Updates & GitHub Token"):
+            return
 
         # Initialize buffers if needed
         if not hasattr(self, '_github_token_buffer'):
