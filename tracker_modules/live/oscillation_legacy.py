@@ -70,6 +70,10 @@ class OscillationLegacyTracker(BaseTracker):
         # FPS tracking (missing from legacy implementation)
         self.current_fps = 0.0
         self._fps_last_time = 0.0
+        
+        # Buffer management for optimization (like experimental tracker)
+        self._gray_buffer = None
+        self._prev_gray_osc_buffer = None
     
     @property
     def metadata(self) -> TrackerMetadata:
@@ -174,12 +178,26 @@ class OscillationLegacyTracker(BaseTracker):
             # No resizing - video processor handles frame scaling via ffmpeg
             processed_frame = frame
             
-            current_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
+            # Use buffer reuse optimization for performance
+            target_h, target_w = processed_frame.shape[0], processed_frame.shape[1]
+            
+            if (self._gray_buffer is None or 
+                self._gray_buffer.shape[:2] != (target_h, target_w)):
+                self._gray_buffer = np.empty((target_h, target_w), dtype=np.uint8)
+            
+            cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY, dst=self._gray_buffer)
+            current_gray = self._gray_buffer
             action_log_list = []
             
             # Initialize on first frame
             if self.prev_gray_oscillation is None or self.prev_gray_oscillation.shape != current_gray.shape:
-                self.prev_gray_oscillation = current_gray
+                # Use buffer for previous frame to avoid memory allocation
+                if (self._prev_gray_osc_buffer is None or 
+                    self._prev_gray_osc_buffer.shape[:2] != (target_h, target_w)):
+                    self._prev_gray_osc_buffer = np.empty((target_h, target_w), dtype=np.uint8)
+                
+                self._prev_gray_osc_buffer[:] = current_gray  # Copy data
+                self.prev_gray_oscillation = self._prev_gray_osc_buffer
                 return TrackerResult(
                     processed_frame=processed_frame,
                     action_log=None,
@@ -204,7 +222,8 @@ class OscillationLegacyTracker(BaseTracker):
             flow = self.flow_dense.calc(prev_gray_cont, current_gray_cont, None)
             
             if flow is None:
-                self.prev_gray_oscillation = current_gray
+                # Update previous frame using buffer copy for performance
+                self._prev_gray_osc_buffer[:] = current_gray
                 return TrackerResult(
                     processed_frame=processed_frame,
                     action_log=None,
@@ -261,7 +280,8 @@ class OscillationLegacyTracker(BaseTracker):
             if is_camera_motion:
                 status_msg += " | Camera motion detected"
             
-            self.prev_gray_oscillation = current_gray
+            # Update previous frame using buffer copy for performance
+            self._prev_gray_osc_buffer[:] = current_gray
             
             return TrackerResult(
                 processed_frame=processed_frame,
