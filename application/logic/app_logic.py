@@ -863,6 +863,19 @@ class ApplicationLogic:
         self.batch_copy_funscript_to_video_location = gui.batch_copy_funscript_to_video_location_ui
         self.batch_overwrite_mode = gui.batch_overwrite_mode_ui
         self.batch_generate_roll_file = gui.batch_generate_roll_file_ui
+        
+        # Apply same mutual exclusion logic for GUI batch processing
+        if gui.batch_apply_ultimate_autotune_ui:
+            # When Ultimate Autotune is enabled, disable post-processing to avoid double simplification
+            self.batch_apply_post_processing = False
+            self.logger.info("GUI Batch: Ultimate Autotune enabled - auto post-processing disabled to prevent double simplification")
+        else:
+            # When Ultimate Autotune is disabled, allow post-processing based on settings
+            self.batch_apply_post_processing = self.app_settings.get("enable_auto_post_processing", False)
+            if self.batch_apply_post_processing:
+                self.logger.info("GUI Batch: Ultimate Autotune disabled - auto post-processing enabled from settings")
+            else:
+                self.logger.info("GUI Batch: Both Ultimate Autotune and auto post-processing disabled")
 
         self.logger.info(f"User confirmed. Starting batch with {len(videos_to_process)} videos.")
         self.batch_video_paths = videos_to_process # Now a list of dicts
