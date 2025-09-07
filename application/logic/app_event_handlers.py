@@ -23,16 +23,16 @@ class AppEventHandlers:
         app_state_ui = self.app.app_state_ui
 
         if action_name == "jump_start":
-            processor.seek_video(0)
+            self.seek_video_with_sync(0)
             return
         if action_name == "jump_end":
-            processor.seek_video(total_frames - 1)
+            self.seek_video_with_sync(total_frames - 1)
             return
         if action_name == "prev_frame":
-            processor.seek_video(max(0, current_frame - 1))
+            self.seek_video_with_sync(max(0, current_frame - 1))
             return
         if action_name == "next_frame":
-            processor.seek_video(min(total_frames - 1, current_frame + 1))
+            self.seek_video_with_sync(min(total_frames - 1, current_frame + 1))
             return
         if action_name == "play_pause":
             is_currently_playing = processor.is_processing and not processor.pause_event.is_set()
@@ -82,8 +82,7 @@ class AppEventHandlers:
             if total_frames > 0:
                 target_frame = min(target_frame, total_frames - 1)
 
-            self.app.processor.seek_video(target_frame)
-            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            self.seek_video_with_sync(target_frame)
             self.app.energy_saver.reset_activity_timer()
         else:
             self.logger.info(f"No {direction} point found to jump to.", extra={'status_message': True})
@@ -311,14 +310,24 @@ class AppEventHandlers:
         self.app.energy_saver.reset_activity_timer()
         # No status message unless it's a significant change or from a settings panel
 
-    def handle_seek_bar_drag(self, frame_index: int):
+    def seek_video_with_sync(self, frame_index: int, mark_dirty: bool = True):
+        """
+        Central method for seeking video with guaranteed timeline synchronization.
+        ALWAYS use this method instead of calling processor.seek_video() directly
+        to ensure all UI elements stay synchronized.
+        """
         if self.app.processor:
             self.app.processor.seek_video(frame_index)
-            # If not actively processing (playing/tracking), force timeline to sync
-            if not self.app.processor.is_processing:
-                self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-            self.app.project_manager.project_dirty = True  # Seeking can be considered a change
+            # ALWAYS force timeline synchronization after seeking to ensure all timelines stay in sync
+            # This is critical for maintaining synchronization between video, timeline 1, timeline 2, and any future timelines
+            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            if mark_dirty and self.app.project_manager:
+                self.app.project_manager.project_dirty = True  # Seeking can be considered a change
             self.app.energy_saver.reset_activity_timer()
+
+    def handle_seek_bar_drag(self, frame_index: int):
+        """Handle seeking from UI elements like the timeline preview bar."""
+        self.seek_video_with_sync(frame_index)
 
     def handle_chapter_bar_segment_click(self, segment: VideoSegment, is_currently_selected: bool):
         fs_proc = self.app.funscript_processor

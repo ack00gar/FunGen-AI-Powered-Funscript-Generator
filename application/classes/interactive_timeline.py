@@ -2773,8 +2773,15 @@ class InteractiveFunscriptTimeline:
 
             # Auto-pan logic (for playback or forced sync)
             is_playing = video_loaded and self.app.processor.is_processing and not is_paused
-            pan_to_current_frame = video_loaded and not is_playing and app_state.force_timeline_pan_to_current_frame
-            if (is_playing or pan_to_current_frame) and not app_state.timeline_interaction_active:
+            # ALWAYS honor forced sync, regardless of playback state - this ensures timeline stays synchronized
+            force_sync_requested = video_loaded and app_state.force_timeline_pan_to_current_frame
+            pan_to_current_frame = video_loaded and not is_playing and force_sync_requested
+            
+            # Timeline should sync during playback OR when explicitly requested (even during playback)
+            # However, if force sync is requested, we should honor it even during interaction (for critical sync needs)
+            critical_sync_needed = force_sync_requested and not (self.is_panning_active or self.is_zooming_active)
+            should_sync_timeline = (is_playing or pan_to_current_frame or critical_sync_needed) and not app_state.timeline_interaction_active
+            if should_sync_timeline:
                 # No manual interaction right now
                 current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
                 # Using effective center of screen
@@ -2784,8 +2791,23 @@ class InteractiveFunscriptTimeline:
                     max_pan_allowed
                 )
 
-                if pan_to_current_frame:
+                # Clear the force sync flag after we've processed it (for both playback and manual sync)
+                if force_sync_requested:
                     app_state.force_timeline_pan_to_current_frame = False
+            
+            # Additional sync check: if video position significantly differs from timeline center, suggest sync
+            # This helps catch edge cases where sync might be needed but wasn't triggered
+            elif video_loaded and not app_state.timeline_interaction_active:
+                current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
+                time_at_center = x_to_time(center_x_marker)
+                time_diff_ms = abs(current_video_time_ms - time_at_center)
+                
+                # If video time is more than 2 seconds off from timeline center, auto-sync
+                if time_diff_ms > 2000.0 and not is_playing:
+                    target_pan_offset = current_video_time_ms - center_marker_offset_ms
+                    app_state.timeline_pan_offset_ms = np.clip(
+                        target_pan_offset, min_pan_allowed, max_pan_allowed
+                    )
 
             marker_color_fixed = imgui.get_color_u32_rgba(*TimelineColors.CENTER_MARKER)
             draw_list.add_line(center_x_marker, canvas_abs_pos[1], center_x_marker, canvas_abs_pos[1] + canvas_size[1], marker_color_fixed, 1.5)

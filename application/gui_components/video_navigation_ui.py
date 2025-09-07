@@ -299,6 +299,8 @@ class VideoNavigationUI:
                             self.app.processor.seek_video(segment.end_frame_id)
                         else:
                             self.app.processor.seek_video(segment.start_frame_id)
+                        # Ensure timeline synchronization after seeking
+                        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
                 elif imgui.is_item_clicked(0):
                     action_on_segment_this_frame = True
                     io = imgui.get_io()
@@ -434,12 +436,16 @@ class VideoNavigationUI:
                     selected_chapter = self.context_selected_chapters[0]
                     if self.app.processor:
                         self.app.processor.seek_video(selected_chapter.start_frame_id)
+                        # Ensure timeline synchronization after seeking
+                        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
 
             if imgui.menu_item("Seek to End of Chapter", enabled=can_select_one)[0]:
                 if can_select_one:
                     selected_chapter = self.context_selected_chapters[0]
                     if self.app.processor:
                         self.app.processor.seek_video(selected_chapter.end_frame_id)
+                        # Ensure timeline synchronization after seeking
+                        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
 
             imgui.separator()
 
@@ -473,6 +479,8 @@ class VideoNavigationUI:
                     # Seek to the start of the chapter to make it easy for the user
                     if self.app.processor:
                         self.app.processor.seek_video(selected_chapter.start_frame_id)
+                        # Ensure timeline synchronization after seeking
+                        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
 
             can_delete = num_selected > 0
             delete_label = f"Delete Selected Chapter(s) ({num_selected})" if num_selected > 0 else "Delete Selected Chapter(s)"
