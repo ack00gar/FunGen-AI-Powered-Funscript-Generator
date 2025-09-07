@@ -42,79 +42,15 @@ class InteractiveFunscriptTimeline:
         self.amp_scale_factor = self.app.app_settings.get(f"timeline{self.timeline_num}_amp_default_scale", 1.5)
         self.amp_center_value = self.app.app_settings.get(f"timeline{self.timeline_num}_amp_default_center", 50)
 
-        # PERFORMANCE OPTIMIZATION: Advanced caching and rendering optimizations
+        # PERFORMANCE OPTIMIZATION: Cache pre-computed arrays to avoid recreating them every frame
         self._cached_actions_data = None  # Stores pre-computed arrays
         self._cached_actions_hash = None  # Hash of actions_list to detect changes
         self._cached_arrays_initialized = False
         self._last_cached_length = 0  # Track length for incremental updates
-        
-        # TIER 1 OPTIMIZATIONS: Viewport-based rendering
-        self._viewport_cache = {}  # Cache rendered segments by viewport
-        self._last_viewport_hash = None  # Track viewport changes
-        self._visible_actions_cache = []  # Cache only visible actions
-        self._render_lod_enabled = True  # Level-of-Detail rendering
-        self._last_zoom_level = -1  # Track zoom changes for LOD
-        
-        # TIER 2 OPTIMIZATIONS: Smart refresh and dirty tracking
-        self._needs_full_refresh = True  # Flag for complete re-render
-        self._dirty_regions = []  # Track specific areas that need updates
-        self._frame_skip_counter = 0  # Skip frames during heavy operations
 
         # RADICAL OPTIMIZATION: Motion-based temporal culling
         self._last_pan_offset = 0
         self._last_frame_time = time.time()
-
-    def _calculate_viewport_hash(self, pan_offset, zoom_level, window_width):
-        """Calculate hash for current viewport to enable caching."""
-        return hash((round(pan_offset, 2), round(zoom_level, 3), int(window_width / 10)))
-
-    def _get_visible_actions_optimized(self, actions_list, pan_offset, zoom_level, window_width):
-        """Get only actions visible in current viewport with smart caching."""
-        viewport_hash = self._calculate_viewport_hash(pan_offset, zoom_level, window_width)
-        
-        # Return cached result if viewport hasn't changed
-        if viewport_hash == self._last_viewport_hash and self._visible_actions_cache:
-            return self._visible_actions_cache
-            
-        # Calculate visible time range with padding for smooth scrolling
-        pixels_per_second = zoom_level
-        visible_time_start = max(0, pan_offset / pixels_per_second - 5.0)  # 5s padding
-        visible_time_end = pan_offset / pixels_per_second + (window_width / pixels_per_second) + 5.0
-        
-        # Binary search for efficient range finding
-        if actions_list:
-            start_idx = max(0, bisect_left([a.at for a in actions_list], visible_time_start * 1000) - 1)
-            end_idx = min(len(actions_list), bisect_right([a.at for a in actions_list], visible_time_end * 1000) + 1)
-            visible_actions = actions_list[start_idx:end_idx]
-        else:
-            visible_actions = []
-            
-        # Cache results
-        self._last_viewport_hash = viewport_hash
-        self._visible_actions_cache = visible_actions
-        return visible_actions
-
-    def _should_use_lod_rendering(self, zoom_level, num_visible_actions):
-        """Determine if Level-of-Detail rendering should be used."""
-        # Use LOD when zoomed out or too many actions visible
-        return zoom_level < 50 or num_visible_actions > 1000
-
-    def _render_with_lod(self, actions_list, zoom_level, window_width):
-        """Render with Level-of-Detail optimization."""
-        if zoom_level < 10:
-            # Very zoomed out: render every 10th action
-            step = 10
-        elif zoom_level < 25:
-            # Moderately zoomed out: render every 5th action
-            step = 5
-        elif zoom_level < 50:
-            # Slightly zoomed out: render every 2nd action
-            step = 2
-        else:
-            # Normal zoom: render all actions
-            step = 1
-            
-        return actions_list[::step] if actions_list else []
         self._pan_velocity = 0
         
         # New Plugin System
@@ -1572,8 +1508,6 @@ class InteractiveFunscriptTimeline:
         self.app.logger.info(op_desc, extra={"status_message": True})
 
     def render(self, timeline_y_start_coord: float = 0, timeline_render_height: float = 0, view_mode: str = 'expert'):
-        # PERFORMANCE: Early exit optimizations
-        render_start = time.perf_counter()
         app_state = self.app.app_state_ui
         is_floating = app_state.ui_layout_mode == "floating"
 
@@ -1582,13 +1516,6 @@ class InteractiveFunscriptTimeline:
 
         if not is_visible:
             return
-            
-        # OPTIMIZATION: Frame skipping during heavy operations
-        current_time = time.perf_counter()
-        if self._frame_skip_counter > 0:
-            self._frame_skip_counter -= 1
-            if (current_time - render_start) * 1000 > 16.67:  # Skip if already over 60fps budget
-                return
 
         # --- Window Creation (Begin) ---
         should_render_content = True
