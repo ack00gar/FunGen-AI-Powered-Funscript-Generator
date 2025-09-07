@@ -260,9 +260,17 @@ class VideoProcessor:
         self.current_stream_start_frame_abs = 0
         self.stop_event.clear()
         self.seek_request_frame_index = None
-        # CRITICAL OPTIMIZATION: Don't load frame during video open - defer until actually needed
-        # This eliminates 14+ second delay from expensive 8K VR frame processing at startup
-        self.current_frame = None
+        # OPTIMIZATION: Load first frame with minimal processing to avoid startup delay
+        # Use a smaller batch size for initial frame to speed up video opening
+        original_batch_size = self.batch_fetch_size
+        self.batch_fetch_size = 1  # Fetch only 1 frame for startup
+        try:
+            self.current_frame = self._get_specific_frame(0)
+        except Exception as e:
+            self.logger.warning(f"Could not load initial frame: {e}")
+            self.current_frame = None
+        finally:
+            self.batch_fetch_size = original_batch_size  # Restore normal batch size
 
         if self.tracker:
             reset_reason = "project_load_preserve_actions" if from_project_load else None
