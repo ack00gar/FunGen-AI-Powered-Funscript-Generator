@@ -386,6 +386,7 @@ class AutoUpdater:
 
     def _get_remote_commit_data(self) -> tuple[str | None, str | None]:
         """Gets the latest commit hash and date from the best available branch."""
+        network_start = time.perf_counter()  # Performance tracking
         best_branch, branch_data = self._determine_best_branch()
         
         if branch_data and branch_data['data']:
@@ -395,8 +396,19 @@ class AutoUpdater:
                 
             commit_hash = branch_data['sha']
             commit_date = branch_data['date_str']
+            
+            # Track network performance
+            network_time = (time.perf_counter() - network_start) * 1000
+            if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                self.app.gui_instance.track_network_time("GitHubAPI", network_time)
+                
             return commit_hash, commit_date
         else:
+            # Track failed network performance too
+            network_time = (time.perf_counter() - network_start) * 1000
+            if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
+                self.app.gui_instance.track_network_time("GitHubAPI_Failed", network_time)
+                
             self.logger.error(f"Failed to fetch remote update from branches: {self.PRIMARY_BRANCH}, {self.FALLBACK_BRANCH}")
             self.status_message = "Could not connect to check for updates."
             return None, None
