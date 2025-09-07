@@ -1421,18 +1421,7 @@ class GUI:
 
         if hasattr(app_state, 'show_chapter_list_window') and app_state.show_chapter_list_window:
             self._time_render("ChapterListWindow", self.chapter_list_window_ui.render)
-        self._time_render("Popups", lambda: (
-            self.gauge_window_ui_t1.render(),
-            self.gauge_window_ui_t2.render(),
-            self.lr_dial_window_ui.render(),
-            self._render_batch_confirmation_dialog(),
-            self.file_dialog.draw() if self.file_dialog.open else None,
-            self._render_status_message(app_state),
-            self.app.updater.render_update_dialog(),
-            self.app.updater.render_update_error_dialog(),
-            self.app.updater.render_migration_warning_dialog(),
-            self.app.updater.render_update_settings_dialog()
-        ))
+        self._time_render("Popups", self._render_all_popups)
         self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
 
         # TODO: Move this to a separate class/error management module
@@ -1525,7 +1514,36 @@ class GUI:
         elif app_state.status_message:
             app_state.status_message = ""
 
-
+    def _render_all_popups(self):
+        """Optimized popup rendering - only renders visible/active popups."""
+        app_state = self.app.app_state_ui
+        
+        # Only render gauge windows if they're shown
+        if getattr(app_state, 'show_gauge_window_timeline1', False):
+            self.gauge_window_ui_t1.render()
+            
+        if getattr(app_state, 'show_gauge_window_timeline2', False):
+            self.gauge_window_ui_t2.render()
+            
+        # Only render LR dial window if shown
+        if getattr(app_state, 'show_lr_dial_window', False):
+            self.lr_dial_window_ui.render()
+        
+        # Batch confirmation dialog (lightweight check)
+        self._render_batch_confirmation_dialog()
+        
+        # File dialog only if open
+        if self.file_dialog.open:
+            self.file_dialog.draw()
+        
+        # Status message (already has internal visibility check)
+        self._render_status_message(app_state)
+        
+        # Updater dialogs (only render if they have something to show)
+        self.app.updater.render_update_dialog()
+        self.app.updater.render_update_error_dialog()
+        self.app.updater.render_migration_warning_dialog()
+        self.app.updater.render_update_settings_dialog()
 
     def run(self):
         colors = self.colors
