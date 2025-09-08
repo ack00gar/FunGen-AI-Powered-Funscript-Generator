@@ -346,6 +346,65 @@ class AppFunscriptProcessor:
                     f"Overlap detected: Proposed [{start_frame}-{end_frame}] with existing '{chapter.unique_id}' [{chapter.start_frame_id}-{chapter.end_frame_id}]")
                 return True
         return False
+    
+    def _auto_adjust_chapter_range(self, start_frame: int, end_frame: int) -> tuple[int, int]:
+        """Auto-adjust chapter range to avoid overlaps, keeping as close as possible to original location."""
+        if not self.video_chapters:
+            return start_frame, end_frame
+        
+        chapters_sorted = sorted(self.video_chapters, key=lambda c: c.start_frame_id)
+        original_duration = end_frame - start_frame
+        
+        # Find overlapping chapters
+        overlapping_chapters = []
+        for chapter in chapters_sorted:
+            if max(start_frame, chapter.start_frame_id) <= min(end_frame, chapter.end_frame_id):
+                overlapping_chapters.append(chapter)
+        
+        if not overlapping_chapters:
+            return start_frame, end_frame  # No overlaps, keep original
+        
+        # Strategy 1: Try to fit right before the first overlapping chapter
+        first_overlapping = min(overlapping_chapters, key=lambda c: c.start_frame_id)
+        if first_overlapping.start_frame_id >= original_duration:
+            adjusted_end = first_overlapping.start_frame_id - 1
+            adjusted_start = adjusted_end - original_duration + 1
+            if adjusted_start >= 0:
+                return adjusted_start, adjusted_end
+        
+        # Strategy 2: Try to fit right after the last overlapping chapter  
+        last_overlapping = max(overlapping_chapters, key=lambda c: c.end_frame_id)
+        adjusted_start = last_overlapping.end_frame_id + 1
+        adjusted_end = adjusted_start + original_duration - 1
+        
+        # Check if this position conflicts with any other chapters
+        conflicts = False
+        for chapter in chapters_sorted:
+            if chapter in overlapping_chapters:
+                continue  # Skip the chapters we're trying to avoid
+            if max(adjusted_start, chapter.start_frame_id) <= min(adjusted_end, chapter.end_frame_id):
+                conflicts = True
+                break
+        
+        if not conflicts:
+            return adjusted_start, adjusted_end
+        
+        # Strategy 3: Find the first available gap that can fit our duration
+        for i in range(len(chapters_sorted) - 1):
+            current_chapter = chapters_sorted[i]
+            next_chapter = chapters_sorted[i + 1]
+            
+            gap_start = current_chapter.end_frame_id + 1
+            gap_end = next_chapter.start_frame_id - 1
+            gap_size = gap_end - gap_start + 1
+            
+            if gap_size >= original_duration:
+                return gap_start, gap_start + original_duration - 1
+        
+        # Strategy 4: Place after the last chapter
+        last_chapter = chapters_sorted[-1]
+        final_start = last_chapter.end_frame_id + 1
+        return final_start, final_start + original_duration - 1
 
     def _add_chapter_if_unique(self, chapter: 'VideoSegment') -> bool:
         """Add a chapter only if it doesn't duplicate an existing one. Returns True if added."""
@@ -372,8 +431,11 @@ class AppFunscriptProcessor:
                 return None if return_chapter_object else None  # Explicitly return None
 
             if self._check_chapter_overlap(start_frame, end_frame):
-                self.logger.error("New chapter overlaps with an existing chapter.")
-                return None if return_chapter_object else None  # Explicitly return None
+                # Auto-adjust the chapter range to avoid overlap
+                original_start, original_end = start_frame, end_frame
+                start_frame, end_frame = self._auto_adjust_chapter_range(start_frame, end_frame)
+                self.logger.info(f"Auto-adjusted chapter range to avoid overlap: [{original_start}-{original_end}] → [{start_frame}-{end_frame}]", 
+                               extra={'status_message': True})
             
             # Check for duplicate chapters (same frame range and position)
             pos_short_key = data.get("position_short_name_key")
