@@ -3361,7 +3361,7 @@ class InteractiveFunscriptTimeline:
                 preview_point_color = imgui.get_color_u32_rgba(*TimelineColors.PREVIEW_POINTS)
                 preview_point_radius = app_state.timeline_point_radius
 
-                # Draw preview lines and points using the self.preview_actions list
+                # Draw preview lines (always visible) but NOT points (unless hovered/selected)
                 if len(self.preview_actions) > 1:
                     p_ats = np.array([a['at'] for a in self.preview_actions])
                     p_poss = np.array([a['pos'] for a in self.preview_actions])
@@ -3370,10 +3370,8 @@ class InteractiveFunscriptTimeline:
                     for i in range(len(pxs) - 1):
                         draw_list.add_line(pxs[i], pys[i], pxs[i + 1], pys[i + 1], preview_line_color, 2.0)
 
-                for action in self.preview_actions:
-                    px = time_to_x(action['at'])
-                    py = pos_to_y(action['pos'])
-                    draw_list.add_circle_filled(px, py, preview_point_radius, preview_point_color)
+                # REMOVED: No longer rendering preview points unconditionally
+                # Points should only be shown when hovered or selected, even for previews
             
             # --- Draw Plugin Preview Overlays ---
             # Render preview overlays from the new plugin system
