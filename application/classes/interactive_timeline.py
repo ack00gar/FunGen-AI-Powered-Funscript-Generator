@@ -3009,11 +3009,25 @@ class InteractiveFunscriptTimeline:
             # --- Draw Actions (Points and Lines) with GPU Acceleration ---
             hovered_action_idx_current_timeline = -1
 
+            # CRITICAL FIX: Determine actions_to_render BEFORE any rendering attempts
+            # This ensures both GPU and CPU paths use the correct data
+            if self.is_previewing and self.preview_actions:
+                actions_to_render = self.preview_actions
+            else:
+                actions_to_render = actions_list
+            
+            # Debug logging for < 1000 points issue
+            if hasattr(self.app, 'logger'):
+                if not actions_to_render or len(actions_to_render) == 0:
+                    self.app.logger.debug(f"Timeline {self.timeline_num}: No points to render (actions_to_render is empty)")
+                elif len(actions_to_render) < 1000:
+                    self.app.logger.debug(f"Timeline {self.timeline_num}: Rendering {len(actions_to_render)} points (< 1000)")
+
             # Try GPU rendering first (if available and enabled)
             gpu_render_success = False
             if (self.gpu_integration and
                     self.app.app_settings.get("timeline_gpu_enabled", False) and
-                    actions_list):
+                    actions_to_render):
 
                 # Gather selected/hovered indices for GPU rendering
                 selected_indices = list(self.multi_selected_action_indices)
@@ -3022,7 +3036,7 @@ class InteractiveFunscriptTimeline:
 
                 # Attempt GPU rendering
                 gpu_render_success = self.gpu_integration.render_timeline_optimized(
-                    actions_list=actions_list,
+                    actions_list=actions_to_render,
                     canvas_abs_pos=canvas_abs_pos,
                     canvas_size=canvas_size,
                     app_state=app_state,
@@ -3052,12 +3066,7 @@ class InteractiveFunscriptTimeline:
             # Fallback to optimized CPU rendering if GPU failed or unavailable
             if not gpu_render_success:
                 # --- START: LOD OPTIMIZATION ---
-                # CRITICAL FIX: Prevent timeline from going blank when preview_actions is None/empty
-                # This happens during Ultimate Autotune application and causes "points disappeared" bug
-                if self.is_previewing and self.preview_actions:
-                    actions_to_render = self.preview_actions
-                else:
-                    actions_to_render = actions_list
+                # Note: actions_to_render is already set before GPU attempt above
 
                 # CRITICAL FIX: Calculate visible range using the same data that will be rendered
                 # This prevents mismatched ranges when preview_actions differs from actions_list
@@ -3143,7 +3152,8 @@ class InteractiveFunscriptTimeline:
                 # CRITICAL FIX: Use actions_to_render consistently throughout rendering
                 # This fixes the bug where < 1000 points don't show when indices are based on
                 # actions_to_render but cached data is from actions_list
-                if len(actions_to_render) > 1:
+                # Changed from > 1 to >= 2 for clarity (need at least 2 points for a line)
+                if len(actions_to_render) >= 2:
                     cached_data = self._get_or_compute_cached_arrays(actions_to_render)
                     use_envelope = False
                     if s_idx < e_idx:
