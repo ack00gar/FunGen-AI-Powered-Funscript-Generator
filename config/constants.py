@@ -107,6 +107,8 @@ DEFAULT_SHORTCUTS = {
     "pan_timeline_right": "ALT+RIGHT_ARROW",
     "delete_selected_point": "DELETE",
     "delete_selected_point_alt": "BACKSPACE",
+    "delete_selected_chapter": "DELETE",
+    "delete_selected_chapter_alt": "BACKSPACE",
     "select_all_points": f"{MOD_KEY}+A",
     "undo_timeline1": f"{MOD_KEY}+Z",
     "redo_timeline1": f"{MOD_KEY}+Y",
@@ -126,6 +128,10 @@ DEFAULT_SHORTCUTS = {
     "add_point_80" : "8",
     "add_point_90" : "9",
     "add_point_100" : "°",
+    
+    # Chapter Creation Shortcuts (Video Editing Style)
+    "set_chapter_start": "I",      # In-point (start of chapter)
+    "set_chapter_end": "O",        # Out-point (end of chapter)
 }
 
 
