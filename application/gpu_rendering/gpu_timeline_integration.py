@@ -294,6 +294,7 @@ class GPUTimelineIntegration:
                     draw_list.add_line(x1, y1, x2, y2, final_color, thickness)
             
             # GPU-style batch processing for points - SAME COLORS AS CPU
+            # CRITICAL FIX: Only render INTERACTIVE points (hovered/selected/dragged)
             if points_per_pixel < 4.0:  # Only draw points when not too dense
                 point_radius = getattr(app_state, 'timeline_point_radius', 4)
                 
@@ -301,12 +302,6 @@ class GPUTimelineIntegration:
                 from config.element_group_colors import TimelineColors
                 
                 for idx in render_indices:
-                    x, y = x_coords[idx], y_coords[idx]
-                    
-                    # Use EXACT same point coloring logic as CPU rendering
-                    point_radius_draw = point_radius
-                    pt_color_tuple = TimelineColors.POINT_DEFAULT
-                    
                     # Check if point is being dragged (not implemented in this simple version)
                     is_being_dragged = False  # Could implement if needed
                     
@@ -316,6 +311,20 @@ class GPUTimelineIntegration:
                     
                     # Check if point is hovered (simplified version)
                     is_hovered_pt = (idx == hovered_index)
+                    
+                    # PERFORMANCE: ONLY render interactive points (hovered/selected/dragged)
+                    # This matches CPU rendering behavior exactly
+                    is_interactive = (is_primary_selected or is_in_multi_selection or is_being_dragged or is_hovered_pt)
+                    
+                    # Skip rendering ALL non-interactive points
+                    if not is_interactive:
+                        continue  # Skip rendering this point
+                    
+                    x, y = x_coords[idx], y_coords[idx]
+                    
+                    # Use EXACT same point coloring logic as CPU rendering
+                    point_radius_draw = point_radius
+                    pt_color_tuple = TimelineColors.POINT_DEFAULT
                     
                     # Apply SAME color logic as CPU rendering
                     if is_being_dragged:
@@ -341,7 +350,10 @@ class GPUTimelineIntegration:
             # Update performance stats
             render_time = (time.perf_counter() - start_time) * 1000
             self.render_stats['gpu_details']['render_time_ms'] = render_time
-            self.render_stats['gpu_details']['points_rendered'] = len(render_indices)
+            # Count only interactive points that were actually rendered
+            interactive_count = len([idx for idx in render_indices 
+                                    if idx == hovered_index or idx in selected_indices])
+            self.render_stats['gpu_details']['points_rendered'] = interactive_count
             self.render_stats['gpu_details']['lines_rendered'] = max(0, len(render_indices) - 1)
             
             return True
