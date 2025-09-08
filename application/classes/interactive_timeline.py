@@ -3140,8 +3140,11 @@ class InteractiveFunscriptTimeline:
                 # --- END: LOD OPTIMIZATION ---
 
                 # --- Draw Lines OR Dense Envelope (Vectorized) ---
-                if len(actions_list) > 1:
-                    cached_data = self._get_or_compute_cached_arrays(actions_list)
+                # CRITICAL FIX: Use actions_to_render consistently throughout rendering
+                # This fixes the bug where < 1000 points don't show when indices are based on
+                # actions_to_render but cached data is from actions_list
+                if len(actions_to_render) > 1:
+                    cached_data = self._get_or_compute_cached_arrays(actions_to_render)
                     use_envelope = False
                     if s_idx < e_idx:
                         visible_count = (e_idx - s_idx)
@@ -3251,9 +3254,10 @@ class InteractiveFunscriptTimeline:
                             opt_text
                         )
 
-                if actions_list and should_render_points:
+                # CRITICAL FIX: Use actions_to_render consistently to match indices_to_draw
+                if actions_to_render and should_render_points:
                     if indices_to_draw:
-                        cached_data = self._get_or_compute_cached_arrays(actions_list)
+                        cached_data = self._get_or_compute_cached_arrays(actions_to_render)
                         all_ats, all_poss = cached_data["ats"], cached_data["poss"]
 
                         point_indices = np.array(list(indices_to_draw))
