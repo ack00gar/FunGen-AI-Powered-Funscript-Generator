@@ -1048,6 +1048,10 @@ class GUI:
             pass
         elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
             pass
+        elif check_and_run_shortcut("set_chapter_start", self._handle_set_chapter_start_shortcut):
+            pass
+        elif check_and_run_shortcut("set_chapter_end", self._handle_set_chapter_end_shortcut):
+            pass
 
         # Handle continuous arrow key navigation
         if video_loaded:
@@ -1164,6 +1168,73 @@ class GUI:
 
     # Removed complex predictive caching - it was blocking the UI
     # Keep navigation simple: cache check first, then single frame fetch if needed
+
+    def _handle_set_chapter_start_shortcut(self):
+        """Handle keyboard shortcut for setting chapter start (I key)"""
+        current_frame = self._get_current_frame_for_chapter()
+        if hasattr(self, 'video_navigation_ui') and self.video_navigation_ui:
+            # If chapter dialog is open, update it
+            if self.video_navigation_ui.show_create_chapter_dialog or self.video_navigation_ui.show_edit_chapter_dialog:
+                self.video_navigation_ui.chapter_edit_data["start_frame_str"] = str(current_frame)
+                self.app.logger.info(f"Chapter start set to frame {current_frame}", extra={'status_message': True})
+            else:
+                # Store for future chapter creation
+                self._stored_chapter_start_frame = current_frame
+                self.app.logger.info(f"Chapter start marked at frame {current_frame} (Press O to set end, then Shift+C to create)", extra={'status_message': True})
+    
+    def _handle_set_chapter_end_shortcut(self):
+        """Handle keyboard shortcut for setting chapter end (O key)"""
+        current_frame = self._get_current_frame_for_chapter()
+        if hasattr(self, 'video_navigation_ui') and self.video_navigation_ui:
+            # If chapter dialog is open, update it
+            if self.video_navigation_ui.show_create_chapter_dialog or self.video_navigation_ui.show_edit_chapter_dialog:
+                self.video_navigation_ui.chapter_edit_data["end_frame_str"] = str(current_frame)
+                self.app.logger.info(f"Chapter end set to frame {current_frame}", extra={'status_message': True})
+            else:
+                # Store for future chapter creation and auto-create if start is set
+                self._stored_chapter_end_frame = current_frame
+                if hasattr(self, '_stored_chapter_start_frame'):
+                    self._auto_create_chapter_from_stored_frames()
+                else:
+                    self.app.logger.info(f"Chapter end marked at frame {current_frame} (Press I to set start, then Shift+C to create)", extra={'status_message': True})
+    
+    def _get_current_frame_for_chapter(self) -> int:
+        """Get current video frame for chapter operations"""
+        if self.app.processor and hasattr(self.app.processor, 'current_frame_index'):
+            return max(0, self.app.processor.current_frame_index)
+        return 0
+    
+    def _auto_create_chapter_from_stored_frames(self):
+        """Automatically create chapter when both start and end frames are marked"""
+        if not (hasattr(self, '_stored_chapter_start_frame') and hasattr(self, '_stored_chapter_end_frame')):
+            return
+        
+        start_frame = self._stored_chapter_start_frame
+        end_frame = self._stored_chapter_end_frame
+        
+        # Ensure start is before end
+        if start_frame > end_frame:
+            start_frame, end_frame = end_frame, start_frame
+        
+        # Create chapter data
+        if hasattr(self, 'video_navigation_ui') and self.video_navigation_ui and self.app.funscript_processor:
+            default_pos_key = self.video_navigation_ui.position_short_name_keys[0] if self.video_navigation_ui.position_short_name_keys else "N/A"
+            chapter_data = {
+                "start_frame_str": str(start_frame),
+                "end_frame_str": str(end_frame),
+                "segment_type": "SexAct",
+                "position_short_name_key": default_pos_key,
+                "source": "keyboard_shortcut"
+            }
+            
+            self.app.funscript_processor.create_new_chapter_from_data(chapter_data)
+            self.app.logger.info(f"Chapter created: frames {start_frame} to {end_frame}", extra={'status_message': True})
+            
+            # Clear stored frames
+            if hasattr(self, '_stored_chapter_start_frame'):
+                delattr(self, '_stored_chapter_start_frame')
+            if hasattr(self, '_stored_chapter_end_frame'):
+                delattr(self, '_stored_chapter_end_frame')
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()
