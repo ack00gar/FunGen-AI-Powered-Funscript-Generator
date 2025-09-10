@@ -37,6 +37,7 @@ class TrackerDisplayInfo:
     supports_realtime: bool = False
     stages: List = field(default_factory=list)  # List of StageDefinition objects
     properties: Dict[str, Any] = field(default_factory=dict)  # Tracker properties/capabilities
+    folder_name: str = ""  # Source folder name for prefixing (live, offline, experimental, community)
 
 
 class DynamicTrackerDiscovery:
@@ -109,6 +110,9 @@ class DynamicTrackerDiscovery:
         stages = getattr(metadata, 'stages', [])
         properties = getattr(metadata, 'properties', {})
         
+        # Determine folder name for display prefixing
+        folder_name = self._determine_folder_name(metadata, category)
+        
         return TrackerDisplayInfo(
             display_name=metadata.display_name,
             internal_name=metadata.name,
@@ -119,8 +123,30 @@ class DynamicTrackerDiscovery:
             supports_batch=supports_batch,
             supports_realtime=supports_realtime,
             stages=stages,
-            properties=properties
+            properties=properties,
+            folder_name=folder_name
         )
+    
+    def _determine_folder_name(self, metadata: TrackerMetadata, category: TrackerCategory) -> str:
+        """Determine the source folder name for display prefixing."""
+        
+        # Get the actual folder name from the tracker registry
+        from tracker_modules import tracker_registry
+        actual_folder = tracker_registry.get_tracker_folder(metadata.name)
+        
+        if actual_folder:
+            return actual_folder
+        
+        # Fallback: use category as folder name for standard trackers
+        if category == TrackerCategory.LIVE or category == TrackerCategory.LIVE_INTERVENTION:
+            return "live"
+        elif category == TrackerCategory.OFFLINE:
+            return "offline"
+        elif category == TrackerCategory.COMMUNITY:
+            return "community"
+        
+        # Default fallback
+        return "live"
     
     def _determine_category(self, metadata: TrackerMetadata) -> TrackerCategory:
         """Determine tracker category from metadata."""
@@ -222,17 +248,42 @@ class DynamicTrackerDiscovery:
         display_names = []
         internal_names = []
         
-        # Order: Live, Live+Intervention, Offline, Community
+        # Collect all trackers from all categories
+        all_trackers = []
         for category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION, 
                         TrackerCategory.OFFLINE, TrackerCategory.COMMUNITY]:
-            
             category_trackers = self.get_trackers_by_category(category)
-            # Sort alphabetically within category
-            category_trackers.sort(key=lambda t: t.display_name)
+            all_trackers.extend(category_trackers)
+        
+        # Filter out example trackers
+        all_trackers = [t for t in all_trackers if "example" not in t.internal_name.lower() and "example" not in t.display_name.lower()]
+        
+        # Sort all trackers alphabetically by display name (with folder prefix applied for sorting)
+        def get_sort_key(tracker_info):
+            folder_prefix = tracker_info.folder_name.title() + " - " if tracker_info.folder_name else ""
+            display_name = tracker_info.display_name
+            if not display_name.startswith(folder_prefix):
+                prefixed_display_name = folder_prefix + display_name
+            else:
+                prefixed_display_name = display_name
+            return prefixed_display_name
+        
+        all_trackers.sort(key=get_sort_key)
+        
+        # Build the final lists with proper prefixing
+        for tracker_info in all_trackers:
+            # Add folder prefix to display name (but avoid duplicates)
+            folder_prefix = tracker_info.folder_name.title() + " - " if tracker_info.folder_name else ""
+            display_name = tracker_info.display_name
             
-            for tracker_info in category_trackers:
-                display_names.append(tracker_info.display_name)
-                internal_names.append(tracker_info.internal_name)
+            # Don't add prefix if display name already starts with it
+            if not display_name.startswith(folder_prefix):
+                prefixed_display_name = folder_prefix + display_name
+            else:
+                prefixed_display_name = display_name
+                
+            display_names.append(prefixed_display_name)
+            internal_names.append(tracker_info.internal_name)
         
         return display_names, internal_names
     
@@ -246,8 +297,16 @@ class DynamicTrackerDiscovery:
         return [info for info in self._display_info_cache.values() if info.supports_realtime]
     
     def get_supported_cli_modes(self) -> List[str]:
-        """Get all supported CLI mode aliases."""
-        return list(self._cli_alias_map.keys())
+        """Get all supported CLI mode aliases, excluding example trackers."""
+        # Filter out CLI aliases that map to example trackers
+        filtered_aliases = []
+        for alias, tracker_name in self._cli_alias_map.items():
+            tracker_info = self.get_tracker_info(tracker_name)
+            if (tracker_info and 
+                "example" not in tracker_info.internal_name.lower() and
+                "example" not in tracker_info.display_name.lower()):
+                filtered_aliases.append(alias)
+        return filtered_aliases
     
     def reload(self):
         """Reload tracker discovery (for development/testing)."""

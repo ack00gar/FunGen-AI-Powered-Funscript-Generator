@@ -27,7 +27,7 @@ class BeatMarkerTracker(BaseTracker):
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
             name="beat_marker",
-            display_name="Live Beat Marker (Visual/Audio)",
+            display_name="Beat Marker (Visual/Audio)",
             description="Generates actions from visual brightness changes, audio beats, or metronome",
             category="live",
             version="1.0.0",

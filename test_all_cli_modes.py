@@ -14,31 +14,23 @@ from datetime import datetime
 TEST_VIDEO = "/Users/k00gar/Downloads/test/test_koogar_extra_short_A.mp4"
 OUTPUT_DIR = "/Users/k00gar/PycharmProjects/VR-Funscript-AI-Generator/output/test_koogar_extra_short_A"
 
-# All available modes from --help
-MODES = [
-    "axis_projection",
-    "axis_projection_enhanced", 
-    "beat_marker",
-    "oscillation_experimental_2",
-    "oscillation",
-    "osc",
-    "live-osc",
-    "oscillation-experimental",
-    "oscillation_experimental",
-    "oscillation_legacy",
-    "oscillation-legacy",
-    "user_roi",
-    "yolo_roi",
-    "yolo",
-    "live-yolo",
-    "auto-roi",
-    "axis_projection_working",
-    "OFFLINE_2_STAGE",
-    "OFFLINE_3_STAGE_MIXED",
-    "OFFLINE_3_STAGE",
-    "community_example",
-    "dot_marker"
-]
+# Auto-discover all available modes (excluding examples)
+def get_available_modes():
+    """Dynamically discover all available CLI modes, excluding examples."""
+    try:
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        
+        # Get filtered CLI modes (examples already filtered out)
+        return discovery.get_supported_cli_modes()
+        
+    except Exception as e:
+        print(f"Error discovering modes: {e}")
+        # Fallback to empty list - will be handled by caller
+        return []
+
+# Get all modes dynamically
+MODES = get_available_modes()
 
 # Modes that support od-mode option (offline modes with stage 3)
 MODES_WITH_OD = ["OFFLINE_3_STAGE", "OFFLINE_3_STAGE_MIXED"]

@@ -342,7 +342,7 @@ class AxisProjectionEnhancedTracker(BaseTracker):
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
             name="axis_projection_enhanced",
-            display_name="Enhanced Axis Projection Tracker",
+            display_name="Experimental - Enhanced Axis Projection Tracker",
             description="Production-grade motion tracking with multi-scale analysis, temporal coherence, and adaptive thresholding",
             category="live",
             version="2.0.0",
