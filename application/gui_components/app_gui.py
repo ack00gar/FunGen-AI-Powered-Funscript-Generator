@@ -773,14 +773,14 @@ class GUI:
                 total_frames = self.app.processor.video_info.get('total_frames', 0)
                 if total_frames > 0:
                     if (imgui.is_mouse_dragging(0) or imgui.is_mouse_down(0)):
-                        seek_frame = int(normalized_pos * (total_frames - 1))
+                        seek_frame = round(normalized_pos * (total_frames - 1))
                         self.app.event_handlers.handle_seek_bar_drag(seek_frame)
                     else:
                         # Show enhanced tooltip with zoom preview and video frame
                         total_duration = total_duration_s  # Use the parameter passed to this function
                         if total_duration > 0:
                             hover_time_s = normalized_pos * total_duration
-                            hover_frame = int(normalized_pos * (total_frames - 1))
+                            hover_frame = round(normalized_pos * (total_frames - 1))
                             
                             # Initialize hover tracking attributes if needed
                             if not hasattr(self, '_preview_hover_start_time'):
@@ -819,9 +819,10 @@ class GUI:
                                     if show_video_frame and (cached_frame_data is None or cached_frame_data.size == 0):
                                         try:
                                             # Use fast direct cv2 extraction
-                                            frame_data = self._get_frame_direct_cv2(hover_frame)
+                                            frame_data, actual_frame = self._get_frame_direct_cv2(hover_frame)
                                             if frame_data is not None and frame_data.size > 0:
                                                 self._preview_cached_tooltip_data['frame_data'] = frame_data
+                                                self._preview_cached_tooltip_data['actual_frame'] = actual_frame
                                         except Exception as e:
                                             pass  # Frame extraction failed, tooltip will show error message
                                     
@@ -1784,7 +1785,8 @@ class GUI:
             'zoom_start_s': 0,
             'zoom_end_s': 0,
             'frame_data': None,
-            'frame_loading': False
+            'frame_loading': False,
+            'actual_frame': None  # Track actual frame if different from requested
         }
         
         # Funscript zoom preview (±2 seconds window around hover point) - INSTANT
@@ -1808,9 +1810,10 @@ class GUI:
         if include_frame:
             try:
                 # Use direct cv2 frame reading for better performance
-                frame_data = self._get_frame_direct_cv2(hover_frame)
+                frame_data, actual_frame = self._get_frame_direct_cv2(hover_frame)
                 if frame_data is not None and frame_data.size > 0:
                     tooltip_data['frame_data'] = frame_data
+                    tooltip_data['actual_frame'] = actual_frame
                 else:
                     tooltip_data['frame_loading'] = True
             except Exception as e:
@@ -1819,27 +1822,33 @@ class GUI:
         return tooltip_data
     
     def _get_frame_direct_cv2(self, frame_index: int):
-        """Fast direct cv2 frame extraction with VR panel selection support."""
+        """Fast direct frame extraction using video processor's existing infrastructure.
+        Returns: (frame_data, actual_frame_index) or (None, None) on error
+        """
         if not self.app.processor or not self.app.processor.video_path:
-            return None
+            return None, None
             
-        import cv2
         import numpy as np
         
         try:
-            # Open video directly with cv2 for fast frame access
-            cap = cv2.VideoCapture(self.app.processor.video_path)
-            if not cap.isOpened():
-                return None
+            # Use the video processor's existing frame fetching with small batch
+            # This leverages its FFmpeg-based accurate frame extraction
+            original_batch_size = self.app.processor.batch_fetch_size
             
-            # Seek to specific frame
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-            ret, frame = cap.read()
-            cap.release()
+            # Temporarily set batch size to 1 for single frame fetch
+            self.app.processor.batch_fetch_size = 1
             
-            if not ret or frame is None:
-                return None
+            # Get the specific frame using video processor's method
+            frame = self.app.processor._get_specific_frame(frame_index)
             
+            # Restore original batch size
+            self.app.processor.batch_fetch_size = original_batch_size
+            
+            if frame is None:
+                return None, None
+            
+            # Frame is exact, no mismatch
+            actual_frame = frame_index
             # Keep frame in BGR format - update_texture will handle BGR→RGB conversion
             
             # Apply VR panel selection if enabled (user override controls)
@@ -1872,12 +1881,12 @@ class GUI:
             # Resize frame for preview
             frame_resized = cv2.resize(frame, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
             
-            return frame_resized
+            return frame_resized, actual_frame
             
         except Exception as e:
             if hasattr(self.app, 'logger'):
                 self.app.logger.debug(f"Direct cv2 frame extraction failed: {e}")
-            return None
+            return None, None
     
     def _render_instant_enhanced_tooltip(self, tooltip_data: dict, show_video_frame: bool = True):
         """Render enhanced tooltip using cached data."""
@@ -1887,15 +1896,15 @@ class GUI:
             # Time information header
             imgui.text(f"{_format_time(self.app, tooltip_data['hover_time_s'])} / {_format_time(self.app, tooltip_data['total_duration'])}")
             imgui.text(f"Frame: {tooltip_data['hover_frame']}")
+            
             imgui.separator()
             
             # Funscript zoom preview
             zoom_actions = tooltip_data.get('zoom_actions', [])
             if zoom_actions:
-                imgui.text("Funscript Preview (±2s):")
-                
-                # Draw mini graph
-                zoom_width = 300
+                # Get tooltip window width for centering
+                window_width = imgui.get_window_width()
+                zoom_width = min(300, window_width - 20)  # Match popup width with padding
                 zoom_height = 80
                 draw_list = imgui.get_window_draw_list()
                 graph_pos = imgui.get_cursor_screen_pos()
@@ -1960,7 +1969,6 @@ class GUI:
             # Video frame preview (only show if requested after delay)
             if show_video_frame:
                 imgui.separator()
-                imgui.text("Video Frame:")
                 
                 frame_data = tooltip_data.get('frame_data')
                 frame_loading = tooltip_data.get('frame_loading', False)
@@ -1973,24 +1981,37 @@ class GUI:
                             self.update_texture(self.enhanced_preview_texture_id, frame_data)
                             tooltip_data['_frame_texture_updated'] = True
                         
-                        # Use the actual frame dimensions since cv2 method already resizes
+                        # Calculate dimensions to fit popup width
                         frame_height, frame_width = frame_data.shape[:2]
+                        window_width = imgui.get_window_width()
+                        max_width = min(300, window_width - 20)  # Match graph width
                         
-                        imgui.image(self.enhanced_preview_texture_id, frame_width, frame_height)
+                        # Scale frame to fit if needed
+                        if frame_width > max_width:
+                            scale = max_width / frame_width
+                            display_width = max_width
+                            display_height = int(frame_height * scale)
+                        else:
+                            display_width = frame_width
+                            display_height = frame_height
                         
-                        # Show frame info with VR panel indication if applicable
-                        frame_info = f"Frame {tooltip_data['hover_frame']} ({frame_width}x{frame_height})"
+                        # Center the image
+                        available_width = imgui.get_content_region_available()[0]
+                        if display_width < available_width:
+                            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (available_width - display_width) / 2)
+                        
+                        imgui.image(self.enhanced_preview_texture_id, display_width, display_height)
+                        
+                        # Show VR panel info only if relevant
                         if hasattr(self.app, 'app_settings') and self.app.app_settings:
                             vr_enabled = self.app.app_settings.get('vr_mode_enabled', False)
                             vr_panel = self.app.app_settings.get('vr_panel_selection', 'full')
                             if vr_enabled and vr_panel != 'full':
-                                frame_info += f" [{vr_panel.upper()} panel]"
-                        
-                        imgui.text(frame_info)
+                                imgui.text(f"[{vr_panel.upper()} panel]")
                     else:
                         imgui.text_disabled(f"[Frame {tooltip_data['hover_frame']} - no texture available]")
                 elif frame_loading:
-                    imgui.text_disabled(f"[Frame {tooltip_data['hover_frame']} - loading...]")
+                    imgui.text_disabled(f"[Loading...]")
                 else:
                     # More helpful error message
                     if not self.app.processor:
@@ -1998,7 +2019,7 @@ class GUI:
                     elif not self.app.processor.video_path:
                         imgui.text_disabled("[No video loaded]")
                     else:
-                        imgui.text_disabled(f"[Frame {tooltip_data['hover_frame']} - extraction failed]")
+                        imgui.text_disabled(f"[Frame extraction failed]")
             
         except Exception as e:
             imgui.text(f"Preview Error: {str(e)[:50]}")
