@@ -32,9 +32,11 @@ class DynamicTrackerUI:
         display_names = []
         internal_names = []
         
-        # Get live trackers only for simple mode
+        # Get live trackers only for simple mode, excluding examples
         for name, info in all_trackers.items():
-            if info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION]:
+            if (info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION] and
+                "example" not in info.internal_name.lower() and 
+                "example" not in info.display_name.lower()):
                 display_names.append(info.display_name)
                 internal_names.append(info.internal_name)
         
@@ -49,8 +51,11 @@ class DynamicTrackerUI:
         
         # Include Live (automatic) and Offline trackers
         # Exclude Live Intervention (requires user setup - not compatible with batch)
+        # Exclude example trackers
         for name, info in all_trackers.items():
-            if info.category in [TrackerCategory.LIVE, TrackerCategory.OFFLINE]:
+            if (info.category in [TrackerCategory.LIVE, TrackerCategory.OFFLINE] and
+                "example" not in info.internal_name.lower() and
+                "example" not in info.display_name.lower()):
                 display_names.append(info.display_name)
                 internal_names.append(info.internal_name)
         

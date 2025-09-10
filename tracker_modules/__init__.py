@@ -43,6 +43,7 @@ class TrackerRegistry:
         self.logger = logging.getLogger("TrackerRegistry")
         self._trackers: Dict[str, Type] = {}
         self._metadata_cache: Dict[str, TrackerMetadata] = {}
+        self._folder_map: Dict[str, str] = {}  # tracker_name -> folder_name
         self._discovery_errors: List[str] = []
         
         # Perform initial discovery
@@ -64,39 +65,44 @@ class TrackerRegistry:
         # Scan live trackers subdirectory
         live_dir = os.path.join(tracker_dir, 'live')
         if os.path.exists(live_dir):
-            self._scan_directory(live_dir, is_community=False)
+            self._scan_directory(live_dir, folder_name='live', is_community=False)
         
         # Scan offline trackers subdirectory
         offline_dir = os.path.join(tracker_dir, 'offline')
         if os.path.exists(offline_dir):
-            self._scan_directory(offline_dir, is_community=False)
+            self._scan_directory(offline_dir, folder_name='offline', is_community=False)
+        
+        # Scan experimental trackers subdirectory
+        experimental_dir = os.path.join(tracker_dir, 'experimental')
+        if os.path.exists(experimental_dir):
+            self._scan_directory(experimental_dir, folder_name='experimental', is_community=False)
         
         # Scan community subdirectory
         community_dir = os.path.join(tracker_dir, 'community')
         if os.path.exists(community_dir):
-            self._scan_directory(community_dir, is_community=True)
+            self._scan_directory(community_dir, folder_name='community', is_community=True)
         
         self.logger.debug(f"Discovery complete. Found {len(self._trackers)} trackers.")
     
-    def _scan_directory(self, directory: str, is_community: bool = False):
+    def _scan_directory(self, directory: str, folder_name: str, is_community: bool = False):
         """Scan a directory for tracker modules."""
         try:
             for filename in os.listdir(directory):
                 if filename.endswith('.py') and filename not in ['__init__.py']:
                     file_path = os.path.join(directory, filename)
-                    self._load_tracker_module(file_path, filename, is_community)
+                    self._load_tracker_module(file_path, filename, folder_name, is_community)
         except OSError as e:
             error_msg = f"Failed to scan directory {directory}: {e}"
             self._discovery_errors.append(error_msg)
             self.logger.error(error_msg)
     
-    def _load_tracker_module(self, file_path: str, filename: str, is_community: bool):
+    def _load_tracker_module(self, file_path: str, filename: str, folder_name: str, is_community: bool):
         """Load and validate a single tracker module with security checks."""
         try:
             # Use secure loading with validation and sandboxing
             tracker_class = load_tracker_safely(file_path, filename)
             if tracker_class:
-                self._register_tracker(tracker_class, is_community, file_path)
+                self._register_tracker(tracker_class, folder_name, is_community, file_path)
             else:
                 self.logger.debug(f"No valid tracker classes found in {filename}")
                 
@@ -112,7 +118,7 @@ class TrackerRegistry:
             self.logger.warning(error_msg)
     
     
-    def _register_tracker(self, tracker_class: Type, is_community: bool, file_path: str):
+    def _register_tracker(self, tracker_class: Type, folder_name: str, is_community: bool, file_path: str):
         """Register a validated tracker class with resource management."""
         temp_instance = None
         try:
@@ -141,6 +147,7 @@ class TrackerRegistry:
             # Register the tracker
             self._trackers[metadata.name] = tracker_class
             self._metadata_cache[metadata.name] = metadata
+            self._folder_map[metadata.name] = folder_name
             
             # Log at debug level to reduce verbosity
             category_prefix = "[Community] " if is_community else ""
@@ -238,11 +245,16 @@ class TrackerRegistry:
         """Get list of errors encountered during discovery."""
         return self._discovery_errors.copy()
     
+    def get_tracker_folder(self, name: str) -> Optional[str]:
+        """Get folder name for a specific tracker."""
+        return self._folder_map.get(name)
+    
     def reload_trackers(self):
         """Reload all trackers (useful for development)."""
         self.logger.debug("Reloading trackers...")
         self._trackers.clear()
         self._metadata_cache.clear()
+        self._folder_map.clear()
         self._discovery_errors.clear()
         self._discover_trackers()
 

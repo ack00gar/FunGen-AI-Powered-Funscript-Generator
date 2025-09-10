@@ -160,7 +160,7 @@ class YoloRoiTracker(BaseTracker):
         """Return metadata describing this tracker."""
         return TrackerMetadata(
             name="yolo_roi",
-            display_name="Live YOLO ROI Tracker",
+            display_name="YOLO ROI Tracker",
             description="Automatic ROI detection using YOLO object detection with optical flow tracking",
             category="live",
             version="1.0.0",

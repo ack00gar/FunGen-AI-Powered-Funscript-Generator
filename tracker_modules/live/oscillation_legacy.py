@@ -80,7 +80,7 @@ class OscillationLegacyTracker(BaseTracker):
         """Return metadata describing this tracker."""
         return TrackerMetadata(
             name="oscillation_legacy",
-            display_name="Live Oscillation Detector (Legacy)",
+            display_name="Oscillation Detector (Legacy)",
             description="Original oscillation tracker with cohesion analysis and superior amplification",
             category="live",
             version="1.0.0",

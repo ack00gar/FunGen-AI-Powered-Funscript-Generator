@@ -107,7 +107,7 @@ class UserRoiTracker(BaseTracker):
         """Return metadata describing this tracker."""
         return TrackerMetadata(
             name="user_roi",
-            display_name="Live User ROI Tracker",
+            display_name="User ROI Tracker",
             description="Manual ROI definition with optical flow tracking and optional sub-tracking",
             category="live",
             version="1.0.0",
