@@ -3,6 +3,11 @@
 /logs/*
 config.json
 
+# Test and audit files that shouldn't be in the repo
+test_timeline_fixes.py
+test_complete_ua_fix.py
+audit_launch_logging.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
