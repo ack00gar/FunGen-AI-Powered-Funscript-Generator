@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 import time
 import logging
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from collections import deque
 
 from tracker_modules.core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
@@ -62,6 +62,9 @@ class WorkingAxisProjectionTracker(BaseTracker):
         # Debug info
         self.debug_motion_pixels = 0
         self.debug_motion_center = None
+        self.debug_centroids = []
+        self.debug_areas = []
+        self.global_movement_factor = 1.0
         
         # Adaptive thresholding state
         self.background_level = 0
@@ -87,15 +90,24 @@ class WorkingAxisProjectionTracker(BaseTracker):
         try:
             self.app = app_instance
             
-            # Set default horizontal axis if video dimensions available
+            # Set default axis based on tracking mode if video dimensions available
             if hasattr(app_instance, 'get_video_dimensions'):
                 width, height = app_instance.get_video_dimensions()
                 if width and height:
-                    # Horizontal axis across center of frame
+                    # Check tracking axis mode (like other trackers)
+                    tracking_axis_mode = getattr(app_instance, 'tracking_axis_mode', 'horizontal')
+                    
                     margin = int(0.1 * width)
-                    self.axis_A = (margin, height // 2)
-                    self.axis_B = (width - margin, height // 2)
-                    self.logger.info(f"Default axis set: A={self.axis_A}, B={self.axis_B}")
+                    if tracking_axis_mode == 'vertical':
+                        # Vertical axis down center of frame
+                        self.axis_A = (width // 2, margin)
+                        self.axis_B = (width // 2, height - margin)
+                        self.logger.info(f"Default VERTICAL axis set: A={self.axis_A}, B={self.axis_B}")
+                    else:
+                        # Default to horizontal axis across center of frame
+                        self.axis_A = (margin, height // 2)
+                        self.axis_B = (width - margin, height // 2)
+                        self.logger.info(f"Default HORIZONTAL axis set: A={self.axis_A}, B={self.axis_B}")
             
             # Load settings if available
             if hasattr(app_instance, 'app_settings'):
@@ -152,15 +164,15 @@ class WorkingAxisProjectionTracker(BaseTracker):
         
         return gray, frame_small
     
-    def _detect_motion(self, gray: np.ndarray) -> Tuple[bool, Optional[Tuple[float, float]], int]:
+    def _detect_motion_multi_centroid(self, gray: np.ndarray) -> Tuple[bool, List[Tuple[float, float]], List[int], Tuple[float, float], int]:
         """
-        Detect motion with adaptive thresholding for real video content.
+        Enhanced motion detection with multiple centroids for better amplitude.
         
         Returns:
-            (motion_detected, motion_center, motion_area)
+            (motion_detected, centroids_list, areas_list, best_centroid, total_motion_area)
         """
         if self.prev_gray is None:
-            return False, None, 0
+            return False, [], [], (0, 0), 0
         
         self.frame_count += 1
         
@@ -203,28 +215,46 @@ class WorkingAxisProjectionTracker(BaseTracker):
             kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
             motion_mask = cv2.morphologyEx(motion_mask, cv2.MORPH_DILATE, kernel_dilate)
         
-        # Find largest motion blob
+        # Find ALL motion blobs for multi-centroid tracking
         contours, _ = cv2.findContours(motion_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         if not contours:
-            return False, None, 0
+            return False, [], [], (0, 0), 0
         
-        # Get largest contour
-        largest_contour = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(largest_contour)
+        # Get top 3 largest contours for multi-centroid tracking
+        contour_data = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area >= self.min_motion_area:  # Only consider significant blobs
+                M = cv2.moments(contour)
+                if M["m00"] > 0:
+                    cx = M["m10"] / M["m00"]
+                    cy = M["m01"] / M["m00"]
+                    contour_data.append((area, (cx, cy)))
         
-        if area < self.min_motion_area:
-            return False, None, int(area)
+        if not contour_data:
+            return False, [], [], (0, 0), 0
         
-        # Calculate centroid
-        M = cv2.moments(largest_contour)
-        if M["m00"] == 0:
-            return False, None, int(area)
+        # Sort by area (largest first) and take top 3
+        contour_data.sort(key=lambda x: x[0], reverse=True)
+        top_contours = contour_data[:3]  # Up to 3 largest centroids
         
-        cx = M["m10"] / M["m00"]
-        cy = M["m01"] / M["m00"]
+        # Extract centroids and areas
+        centroids = [data[1] for data in top_contours]
+        areas = [int(data[0]) for data in top_contours]
+        total_area = sum(areas)
         
-        return True, (cx, cy), int(area)
+        # Calculate weighted centroid as the "best" centroid for fallback
+        if len(centroids) == 1:
+            best_centroid = centroids[0]
+        else:
+            # Weight by area
+            total_weight = sum(areas)
+            weighted_x = sum(c[0] * a for c, a in zip(centroids, areas)) / total_weight
+            weighted_y = sum(c[1] * a for c, a in zip(centroids, areas)) / total_weight
+            best_centroid = (weighted_x, weighted_y)
+        
+        return True, centroids, areas, best_centroid, total_area
     
     def _project_to_axis(self, point: Tuple[float, float]) -> float:
         """
@@ -259,15 +289,100 @@ class WorkingAxisProjectionTracker(BaseTracker):
         # Clamp to [0, 1] and convert to [0, 100]
         t = max(0.0, min(1.0, t))
         return t * 100.0
+
+    def _analyze_multi_centroid_motion(self, centroids: List[Tuple[float, float]], areas: List[int]) -> Tuple[float, float, float]:
+        """
+        Analyze multiple centroids to determine best tracking position and confidence.
+        
+        Args:
+            centroids: List of centroid positions
+            areas: Corresponding areas for each centroid
+            
+        Returns:
+            (best_position, confidence, global_movement_factor)
+        """
+        if not centroids:
+            return 50.0, 0.0, 1.0
+        
+        # Project each centroid to axis
+        axis_positions = [self._project_to_axis(c) for c in centroids]
+        
+        if len(centroids) == 1:
+            # Single centroid - straightforward
+            return axis_positions[0], 0.8, 1.0
+        
+        # Multiple centroids - analyze for best tracking
+        total_area = sum(areas)
+        
+        # Strategy 1: Find the most extreme positions (indicating larger movements)
+        position_range = max(axis_positions) - min(axis_positions)
+        
+        # Strategy 2: Weight by area for dominant motion
+        weighted_position = sum(pos * area for pos, area in zip(axis_positions, areas)) / total_area
+        
+        # Strategy 3: Check for consistent movement direction
+        if len(self.position_history) >= 3:
+            recent_positions = list(self.position_history)[-3:]
+            recent_trend = recent_positions[-1] - recent_positions[0]  # Overall direction
+            
+            # Find centroid that best matches the trend
+            if abs(recent_trend) > 2:  # Only if there's a clear trend
+                trend_scores = []
+                for pos in axis_positions:
+                    trend_alignment = abs(pos - recent_positions[-1] - recent_trend)
+                    trend_scores.append(1.0 / (1.0 + trend_alignment))  # Lower distance = higher score
+                
+                # Use the position that best continues the trend
+                best_trend_idx = trend_scores.index(max(trend_scores))
+                trend_position = axis_positions[best_trend_idx]
+                
+                # Blend weighted and trend-based positions
+                final_position = 0.6 * weighted_position + 0.4 * trend_position
+            else:
+                final_position = weighted_position
+        else:
+            final_position = weighted_position
+        
+        # Calculate enhanced confidence
+        # Higher confidence for:
+        # 1. Larger total motion area
+        # 2. Good position range (indicates clear movement)
+        # 3. Multiple significant centroids
+        
+        area_confidence = min(1.0, total_area / 500.0)  # Normalize to reasonable motion area
+        range_confidence = min(1.0, position_range / 20.0)  # Reward larger movements
+        multi_centroid_bonus = 0.1 * (len(centroids) - 1)  # Bonus for multiple centroids
+        
+        final_confidence = min(0.95, area_confidence + range_confidence + multi_centroid_bonus)
+        
+        # Global movement factor - higher when we have significant spread
+        # This can be used to amplify the signal when there's clear motion
+        global_movement_factor = 1.0 + min(0.5, position_range / 40.0)  # Up to 1.5x amplification
+        
+        return final_position, final_confidence, global_movement_factor
     
-    def _update_position(self, new_position: float, confidence: float):
-        """Update position with smoothing."""
+    def _update_position(self, new_position: float, confidence: float, global_movement_factor: float = 1.0):
+        """Update position with smoothing and global movement adjustment."""
         self.position_history.append(new_position)
         
         if confidence > 0.1:  # Only smooth if we have reasonable confidence
-            # Simple exponential smoothing
-            self.smoothed_position = (self.smoothing_alpha * new_position + 
-                                    (1 - self.smoothing_alpha) * self.smoothed_position)
+            # Apply global movement factor for amplitude enhancement
+            # Factor amplifies movement away from center (50)
+            center_offset = new_position - 50.0
+            amplified_offset = center_offset * global_movement_factor
+            amplified_position = 50.0 + amplified_offset
+            
+            # Clamp to valid range
+            amplified_position = max(0.0, min(100.0, amplified_position))
+            
+            # Adaptive smoothing - less smoothing for high confidence and large movements
+            adaptive_alpha = self.smoothing_alpha
+            if confidence > 0.7 and abs(amplified_offset) > 10:
+                adaptive_alpha = min(0.6, self.smoothing_alpha * 1.5)  # More responsive for strong signals
+            
+            # Simple exponential smoothing with amplitude enhancement
+            self.smoothed_position = (adaptive_alpha * amplified_position + 
+                                    (1 - adaptive_alpha) * self.smoothed_position)
         else:
             # Low confidence - decay toward center
             self.smoothed_position = (0.95 * self.smoothed_position + 0.05 * 50.0)
@@ -275,7 +390,37 @@ class WorkingAxisProjectionTracker(BaseTracker):
         # Ensure position is properly clamped to funscript range
         self.current_position = int(round(max(0, min(100, self.smoothed_position))))
         self.confidence = confidence
+        
+        # Store global movement factor for debugging
+        self.global_movement_factor = global_movement_factor
     
+    def _update_axis_for_tracking_mode(self):
+        """Update axis based on current tracking mode (like other trackers)."""
+        if not self.app or not hasattr(self.app, 'get_video_dimensions'):
+            return
+            
+        width, height = self.app.get_video_dimensions()
+        if not width or not height:
+            return
+            
+        tracking_axis_mode = getattr(self.app, 'tracking_axis_mode', 'horizontal')
+        margin = int(0.1 * width)
+        
+        if tracking_axis_mode == 'vertical':
+            # Vertical axis down center of frame
+            new_axis_A = (width // 2, margin)
+            new_axis_B = (width // 2, height - margin)
+        else:
+            # Horizontal axis across center of frame  
+            new_axis_A = (margin, height // 2)
+            new_axis_B = (width - margin, height // 2)
+        
+        # Only update if axis actually changed
+        if self.axis_A != new_axis_A or self.axis_B != new_axis_B:
+            self.axis_A = new_axis_A
+            self.axis_B = new_axis_B
+            self.logger.info(f"Axis updated for {tracking_axis_mode.upper()} mode: A={self.axis_A}, B={self.axis_B}")
+
     def _update_fps(self):
         """Update FPS counter."""
         self._fps_counter += 1
@@ -291,6 +436,9 @@ class WorkingAxisProjectionTracker(BaseTracker):
         """Process frame with working motion tracking."""
         try:
             self._update_fps()
+            
+            # Update axis based on current tracking mode
+            self._update_axis_for_tracking_mode()
             
             # Debug: Log that we're being called
             if frame_index and frame_index == 1:
@@ -309,39 +457,21 @@ class WorkingAxisProjectionTracker(BaseTracker):
                     status_message="Initializing working axis tracker..."
                 )
             
-            # Detect motion
-            motion_detected, motion_center, motion_area = self._detect_motion(gray)
+            # Enhanced multi-centroid motion detection
+            motion_detected, centroids, areas, best_centroid, total_area = self._detect_motion_multi_centroid(gray)
             
             # Store debug info
-            self.debug_motion_pixels = motion_area
-            self.debug_motion_center = motion_center
+            self.debug_motion_pixels = total_area
+            self.debug_motion_center = best_centroid
+            self.debug_centroids = centroids
+            self.debug_areas = areas
             
-            if motion_detected and motion_center:
-                # Project to axis
-                axis_position = self._project_to_axis(motion_center)
+            if motion_detected and centroids:
+                # Analyze multi-centroid motion for enhanced tracking
+                axis_position, enhanced_confidence, global_movement_factor = self._analyze_multi_centroid_motion(centroids, areas)
                 
-                # Calculate confidence based on motion area, intensity, and consistency
-                # Scale area confidence more aggressively for smaller areas
-                area_confidence = min(1.0, motion_area / 300.0)  # Lower normalization for real videos
-                
-                # Motion intensity confidence (how much motion vs just noise)
-                if self.adaptive_threshold and len(self.motion_variance_history) >= 3:
-                    recent_std = np.mean(list(self.motion_variance_history)[-3:])
-                    intensity_confidence = min(1.0, recent_std / 10.0)  # Based on motion variance
-                else:
-                    intensity_confidence = 0.5
-                
-                # Consistency with recent history
-                consistency_confidence = 1.0
-                if len(self.position_history) >= 3:
-                    recent_positions = list(self.position_history)[-3:]
-                    position_std = np.std(recent_positions)
-                    consistency_confidence = max(0.3, np.exp(-position_std / 15.0))  # More forgiving
-                
-                final_confidence = 0.4 * area_confidence + 0.3 * intensity_confidence + 0.3 * consistency_confidence
-                
-                # Update position
-                self._update_position(axis_position, final_confidence)
+                # Update position with global movement adjustment
+                self._update_position(axis_position, enhanced_confidence, global_movement_factor)
             else:
                 # No motion detected - maintain current position with reduced confidence
                 self._update_position(self.current_position, max(0.0, self.confidence * 0.9))
@@ -360,21 +490,26 @@ class WorkingAxisProjectionTracker(BaseTracker):
                     axis_info = f"A={self.axis_A}, B={self.axis_B}" if (self.axis_A and self.axis_B) else "NOT SET"
                     self.logger.info(f"AXIS DEBUG Frame {self.frame_count}: pos={self.current_position}, conf={self.confidence:.3f}, axis={axis_info}")
                     if motion_detected:
-                        self.logger.info(f"AXIS DEBUG Frame {self.frame_count}: motion_center={motion_center}, area={motion_area}")
+                        num_centroids = len(centroids)
+                        self.logger.info(f"AXIS DEBUG Frame {self.frame_count}: motion_center={best_centroid}, area={total_area}, centroids={num_centroids}")
                     else:
                         self.logger.info(f"AXIS DEBUG Frame {self.frame_count}: NO MOTION DETECTED")
             
             # Draw visualization
-            vis_frame = self._draw_visualization(frame_small, motion_center)
+            vis_frame = self._draw_visualization(frame_small, best_centroid)
             
-            # Enhanced debug info
+            # Enhanced debug info with multi-centroid data
             debug_info = {
                 'position': self.current_position,
                 'raw_position': self.smoothed_position,
                 'confidence': self.confidence,
                 'motion_detected': motion_detected,
-                'motion_area': motion_area,
-                'motion_center': motion_center,
+                'motion_area': total_area,
+                'motion_center': best_centroid,
+                'num_centroids': len(centroids),
+                'centroids': centroids,
+                'centroid_areas': areas,
+                'global_movement_factor': getattr(self, 'global_movement_factor', 1.0),
                 'fps': round(self.current_fps, 1),
                 'tracking_active': self.tracking_active,
                 'axis_defined': self.axis_A is not None and self.axis_B is not None,
@@ -385,7 +520,10 @@ class WorkingAxisProjectionTracker(BaseTracker):
             
             status_msg = f"Working Axis | Pos: {self.current_position} | Conf: {self.confidence:.2f}"
             if motion_detected:
-                status_msg += f" | Motion: {motion_area}px"
+                num_centroids = len(centroids)
+                status_msg += f" | Motion: {total_area}px ({num_centroids}c)"
+                if getattr(self, 'global_movement_factor', 1.0) > 1.0:
+                    status_msg += f" | Amp: {self.global_movement_factor:.2f}x"
             
             # Update previous frame
             self.prev_gray = gray.copy()
@@ -437,21 +575,43 @@ class WorkingAxisProjectionTracker(BaseTracker):
                     radius = int(5 + 10 * self.confidence)
                     cv2.circle(vis, (pos_x, pos_y), radius, (255, color_intensity, 0), 1)
             
-            # Draw motion center if detected
-            if motion_center:
-                cv2.circle(vis, (int(motion_center[0]), int(motion_center[1])), 5, (0, 0, 255), -1)
-                cv2.circle(vis, (int(motion_center[0]), int(motion_center[1])), 15, (0, 0, 255), 2)
+            # Draw multiple motion centroids if detected
+            if self.debug_centroids:
+                for i, (centroid, area) in enumerate(zip(self.debug_centroids, self.debug_areas)):
+                    # Color code: red for largest, orange for others
+                    color = (0, 0, 255) if i == 0 else (0, 165, 255)  # Red for primary, orange for secondary
+                    
+                    # Size based on area
+                    size = min(10, max(3, int(area / 50)))
+                    cv2.circle(vis, (int(centroid[0]), int(centroid[1])), size, color, -1)
+                    cv2.circle(vis, (int(centroid[0]), int(centroid[1])), size + 5, color, 1)
+                    
+                    # Show area as text
+                    cv2.putText(vis, f"{area}", 
+                               (int(centroid[0]) + 8, int(centroid[1]) - 8), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+            
+            # Draw best/weighted centroid
+            if self.debug_motion_center and self.debug_motion_center != (0, 0):
+                cv2.circle(vis, (int(self.debug_motion_center[0]), int(self.debug_motion_center[1])), 3, (255, 255, 0), -1)  # Yellow center
             
             # Status text
-            cv2.putText(vis, f"Working Axis Tracker", (10, 25), 
+            tracking_mode = getattr(self.app, 'tracking_axis_mode', 'horizontal') if self.app else 'horizontal'
+            cv2.putText(vis, f"Working Axis Tracker ({tracking_mode.upper()})", (10, 25), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
             cv2.putText(vis, f"Pos: {self.current_position}/100  Conf: {self.confidence:.2f}", 
                        (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
             if self.debug_motion_pixels > 0:
-                cv2.putText(vis, f"Motion: {self.debug_motion_pixels}px", 
+                num_centroids = len(self.debug_centroids)
+                cv2.putText(vis, f"Motion: {self.debug_motion_pixels}px ({num_centroids} centroids)", 
                            (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                
+                # Show global movement factor
+                if hasattr(self, 'global_movement_factor') and self.global_movement_factor > 1.0:
+                    cv2.putText(vis, f"Amp: {self.global_movement_factor:.2f}x", 
+                               (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
             
             if self.tracking_active:
                 cv2.putText(vis, "TRACKING", (10, 100), 

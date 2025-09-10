@@ -773,14 +773,22 @@ class GUI:
                 total_frames = self.app.processor.video_info.get('total_frames', 0)
                 if total_frames > 0:
                     if (imgui.is_mouse_dragging(0) or imgui.is_mouse_down(0)):
-                        seek_frame = round(normalized_pos * (total_frames - 1))
+                        # Use time-based calculation consistent with timeline and funscript timing
+                        click_time_s = normalized_pos * total_duration_s
+                        fps = self.app.processor.fps if self.app.processor and self.app.processor.fps > 0 else 30.0
+                        seek_frame = int(round(click_time_s * fps))
+                        seek_frame = max(0, min(seek_frame, total_frames - 1))  # Clamp to valid range
+                        
                         self.app.event_handlers.handle_seek_bar_drag(seek_frame)
                     else:
                         # Show enhanced tooltip with zoom preview and video frame
                         total_duration = total_duration_s  # Use the parameter passed to this function
                         if total_duration > 0:
                             hover_time_s = normalized_pos * total_duration
-                            hover_frame = round(normalized_pos * (total_frames - 1))
+                            # Use consistent time-based frame calculation for hover too
+                            fps = self.app.processor.fps if self.app.processor and self.app.processor.fps > 0 else 30.0
+                            hover_frame = int(round(hover_time_s * fps))
+                            hover_frame = max(0, min(hover_frame, total_frames - 1))
                             
                             # Initialize hover tracking attributes if needed
                             if not hasattr(self, '_preview_hover_start_time'):
@@ -789,8 +797,9 @@ class GUI:
                                 self._preview_cached_tooltip_data = None
                                 self._preview_cached_pos = None
                             
-                            # Check if we're hovering on the same position
-                            position_tolerance = 0.005  # ~0.5% tolerance for position stability
+                            # Use much tighter tolerance to avoid frame/video mismatches
+                            # With 10k frames, 0.0001 = ~1 frame tolerance instead of ~50 frames
+                            position_tolerance = 0.0001  # ~0.01% tolerance for position stability
                             position_changed = (self._preview_hover_pos is None or 
                                               abs(self._preview_hover_pos - normalized_pos) > position_tolerance)
                             
@@ -809,7 +818,7 @@ class GUI:
                                 # Always show timestamp + script zoom instantly, then add video frame after delay
                                 show_video_frame = hover_duration > 0.3  # Video frame only after 300ms for responsiveness
                                 
-                                # Check if we have cached data for this position
+                                # Check if we have cached data for this position (with tight tolerance)
                                 if (self._preview_cached_tooltip_data is not None and 
                                     self._preview_cached_pos is not None and 
                                     abs(self._preview_cached_pos - normalized_pos) <= position_tolerance):
@@ -818,15 +827,16 @@ class GUI:
                                     cached_frame_data = self._preview_cached_tooltip_data.get('frame_data')
                                     if show_video_frame and (cached_frame_data is None or cached_frame_data.size == 0):
                                         try:
-                                            # Use fast direct cv2 extraction
-                                            frame_data, actual_frame = self._get_frame_direct_cv2(hover_frame)
+                                            # Use the cached frame number to avoid mismatch
+                                            cached_hover_frame = self._preview_cached_tooltip_data.get('hover_frame', hover_frame)
+                                            frame_data, actual_frame = self._get_frame_direct_cv2(cached_hover_frame)
                                             if frame_data is not None and frame_data.size > 0:
                                                 self._preview_cached_tooltip_data['frame_data'] = frame_data
                                                 self._preview_cached_tooltip_data['actual_frame'] = actual_frame
                                         except Exception as e:
                                             pass  # Frame extraction failed, tooltip will show error message
                                     
-                                    # Use cached tooltip data
+                                    # Use cached tooltip data (frame number and video frame are consistent)
                                     self._render_instant_enhanced_tooltip(self._preview_cached_tooltip_data, show_video_frame)
                                 else:
                                     # Generate new tooltip data (without slow video frame extraction initially)
@@ -853,7 +863,10 @@ class GUI:
         if self.app.file_manager.video_path and self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0:
             total_frames = self.app.processor.video_info.get('total_frames', 0)
             if total_frames > 0:
-                normalized_pos = self.app.processor.current_frame_index / (total_frames - 1.0)
+                # Use time-based calculation for consistency with timeline and seeking
+                fps = self.app.processor.fps if self.app.processor.fps > 0 else 30.0
+                current_time_s = self.app.processor.current_frame_index / fps
+                normalized_pos = current_time_s / total_duration_s if total_duration_s > 0 else 0
                 marker_x = (canvas_p1_x + style.frame_padding[0]) + (normalized_pos * (current_bar_width_float - style.frame_padding[0] * 2))
                 marker_color = imgui.get_color_u32_rgba(*colors.MARKER)
                 draw_list_marker = imgui.get_window_draw_list()
@@ -1838,8 +1851,8 @@ class GUI:
             # Temporarily set batch size to 1 for single frame fetch
             self.app.processor.batch_fetch_size = 1
             
-            # Get the specific frame using video processor's method
-            frame = self.app.processor._get_specific_frame(frame_index)
+            # Get the specific frame using video processor's method (without updating current frame index for preview)
+            frame = self.app.processor._get_specific_frame(frame_index, update_current_index=False)
             
             # Restore original batch size
             self.app.processor.batch_fetch_size = original_batch_size
@@ -1895,7 +1908,19 @@ class GUI:
         try:
             # Time information header
             imgui.text(f"{_format_time(self.app, tooltip_data['hover_time_s'])} / {_format_time(self.app, tooltip_data['total_duration'])}")
-            imgui.text(f"Frame: {tooltip_data['hover_frame']}")
+            
+            # Show frame number with visual indicator if video frame is available and matching
+            frame_text = f"Frame: {tooltip_data['hover_frame']}"
+            has_frame_data = tooltip_data.get('frame_data') is not None and tooltip_data.get('frame_data').size > 0
+            actual_frame = tooltip_data.get('actual_frame', tooltip_data['hover_frame'])
+            frames_match = actual_frame == tooltip_data['hover_frame']
+            
+            if show_video_frame and has_frame_data and frames_match:
+                imgui.text_colored(frame_text, 0.0, 1.0, 0.0, 1.0)  # Green = frame and video are synchronized
+            elif show_video_frame and has_frame_data and not frames_match:
+                imgui.text_colored(f"{frame_text} (video: {actual_frame})", 1.0, 1.0, 0.0, 1.0)  # Yellow = mismatch warning
+            else:
+                imgui.text(frame_text)  # Normal color = no video preview yet
             
             imgui.separator()
             

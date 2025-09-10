@@ -101,6 +101,44 @@ def largest_component_centroid(mask: np.ndarray) -> Tuple[Optional[Tuple[float, 
     return (float(cx), float(cy)), area, idx
 
 
+def multi_component_centroids(mask: np.ndarray, max_components: int = 3) -> Tuple[List[Tuple[float, float]], List[int]]:
+    """
+    Find centroids of multiple largest connected components for enhanced tracking.
+    
+    Args:
+        mask: Binary mask
+        max_components: Maximum number of components to return
+    
+    Returns:
+        Tuple of (centroids_list, areas_list) sorted by area (largest first)
+    """
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    
+    if num_labels <= 1:
+        return [], []
+    
+    # Skip label 0 (background), get all components with areas
+    component_data = []
+    for idx in range(1, num_labels):
+        area = int(stats[idx, cv2.CC_STAT_AREA])
+        if area > 0:  # Valid component
+            cx, cy = centroids[idx]
+            component_data.append((area, (float(cx), float(cy))))
+    
+    if not component_data:
+        return [], []
+    
+    # Sort by area (largest first) and take top components
+    component_data.sort(key=lambda x: x[0], reverse=True)
+    top_components = component_data[:max_components]
+    
+    # Extract centroids and areas
+    centroids_list = [data[1] for data in top_components]
+    areas_list = [data[0] for data in top_components]
+    
+    return centroids_list, areas_list
+
+
 def compute_DIS_flow(prev_gray: np.ndarray, gray: np.ndarray, dis) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute DIS optical flow between frames.
@@ -284,6 +322,11 @@ class AxisProjectionTracker(BaseTracker):
         # Output
         self.current_position = 50
         self.current_confidence = 0.0
+        
+        # Multi-centroid debug info
+        self.debug_centroids = []
+        self.debug_areas = []
+        self.global_movement_factor = 1.0
     
     @property
     def metadata(self) -> TrackerMetadata:
@@ -321,10 +364,20 @@ class AxisProjectionTracker(BaseTracker):
             if hasattr(app_instance, 'get_video_dimensions'):
                 width, height = app_instance.get_video_dimensions()
                 if width and height:
-                    # Default axis: horizontal line at center
-                    self.axis_A = (int(0.1 * width), int(0.5 * height))
-                    self.axis_B = (int(0.9 * width), int(0.5 * height))
-                    self.logger.info(f"Default axis set: A={self.axis_A}, B={self.axis_B}")
+                    # Set axis based on tracking mode (like other trackers)
+                    tracking_axis_mode = getattr(app_instance, 'tracking_axis_mode', 'horizontal')
+                    margin = int(0.1 * min(width, height))
+                    
+                    if tracking_axis_mode == 'vertical':
+                        # Vertical axis down center of frame
+                        self.axis_A = (int(0.5 * width), margin)
+                        self.axis_B = (int(0.5 * width), height - margin)
+                        self.logger.info(f"Default VERTICAL axis set: A={self.axis_A}, B={self.axis_B}")
+                    else:
+                        # Default horizontal axis across center of frame
+                        self.axis_A = (margin, int(0.5 * height))
+                        self.axis_B = (width - margin, int(0.5 * height))
+                        self.logger.info(f"Default HORIZONTAL axis set: A={self.axis_A}, B={self.axis_B}")
             
             # Load settings if available
             if hasattr(app_instance, 'app_settings'):
@@ -393,6 +446,33 @@ class AxisProjectionTracker(BaseTracker):
         except Exception as e:
             self.logger.error(f"Failed to set axis: {e}")
             return False
+
+    def _update_axis_for_tracking_mode(self):
+        """Update axis based on current tracking mode (like other trackers)."""
+        if not self.app or not hasattr(self.app, 'get_video_dimensions'):
+            return
+            
+        width, height = self.app.get_video_dimensions()
+        if not width or not height:
+            return
+            
+        tracking_axis_mode = getattr(self.app, 'tracking_axis_mode', 'horizontal')
+        margin = int(0.1 * min(width, height))
+        
+        if tracking_axis_mode == 'vertical':
+            # Vertical axis down center of frame
+            new_axis_A = (int(0.5 * width), margin)
+            new_axis_B = (int(0.5 * width), height - margin)
+        else:
+            # Horizontal axis across center of frame  
+            new_axis_A = (margin, int(0.5 * height))
+            new_axis_B = (width - margin, int(0.5 * height))
+        
+        # Only update if axis actually changed
+        if self.axis_A != new_axis_A or self.axis_B != new_axis_B:
+            self.axis_A = new_axis_A
+            self.axis_B = new_axis_B
+            self.logger.info(f"Axis updated for {tracking_axis_mode.upper()} mode: A={self.axis_A}, B={self.axis_B}")
     
     def _prepare_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -471,6 +551,9 @@ class AxisProjectionTracker(BaseTracker):
         try:
             self._update_fps()
             
+            # Update axis based on current tracking mode
+            self._update_axis_for_tracking_mode()
+            
             now = time.time()
             gray, frame_small = self._prepare_frame(frame)
             h, w = gray.shape[:2]
@@ -497,14 +580,47 @@ class AxisProjectionTracker(BaseTracker):
                     status_message="Initializing axis projection tracker..."
                 )
             
-            # 1) Frame differencing mask
+            # 1) Enhanced multi-centroid frame differencing
             diff_mask = get_frame_diff_mask(self.prev_gray, gray, 
                                            thresh=self.diff_thresh, k_open=3, k_close=7)
-            centroid_d, area_d, _ = largest_component_centroid(diff_mask)
             
-            # Confidence from diff: area fraction
-            area_frac = float(area_d) / float(w * h) if area_d > 0 else 0.0
-            conf_d = min(1.0, 5.0 * area_frac)  # boost small areas less
+            # Get multiple centroids for enhanced tracking
+            centroids_d, areas_d = multi_component_centroids(diff_mask, max_components=3)
+            
+            # Store debug info
+            self.debug_centroids = centroids_d
+            self.debug_areas = areas_d
+            
+            # Use largest centroid as primary (for compatibility with existing logic)
+            if centroids_d:
+                centroid_d = centroids_d[0]  # Largest
+                area_d = areas_d[0]
+                
+                # Enhanced confidence from multiple centroids
+                total_area = sum(areas_d)
+                num_centroids = len(centroids_d)
+                
+                # Base confidence from area fraction
+                area_frac = float(total_area) / float(w * h)
+                conf_d = min(1.0, 5.0 * area_frac)
+                
+                # Bonus confidence for multiple centroids (indicates complex motion)
+                multi_centroid_bonus = 0.1 * (num_centroids - 1)
+                conf_d = min(1.0, conf_d + multi_centroid_bonus)
+                
+                # Calculate global movement factor for amplification
+                if num_centroids > 1:
+                    # Project all centroids to axis for spread analysis
+                    axis_positions = [self._project_px_to_0_100(c) for c in centroids_d]
+                    position_range = max(axis_positions) - min(axis_positions)
+                    self.global_movement_factor = 1.0 + min(0.3, position_range / 60.0)  # Up to 1.3x
+                else:
+                    self.global_movement_factor = 1.0
+            else:
+                centroid_d = None
+                area_d = 0
+                conf_d = 0.0
+                self.global_movement_factor = 1.0
             
             # 2) DIS optical flow
             flow, mag, _ = compute_DIS_flow(self.prev_gray, gray, self.dis)
@@ -565,6 +681,15 @@ class AxisProjectionTracker(BaseTracker):
                 # 6) Alpha-beta filter update
                 pos_norm_0_100, _ = self.filter_1d.update(z, dt)
                 confidence = float(min(1.0, sum(weights) / len(weights)))
+            
+            # Apply global movement amplification for enhanced signal
+            if confidence > 0.1 and self.global_movement_factor > 1.0:
+                # Amplify movement away from center (50)
+                center_offset = pos_norm_0_100 - 50.0
+                amplified_offset = center_offset * self.global_movement_factor
+                amplified_position = 50.0 + amplified_offset
+                # Clamp to valid range
+                pos_norm_0_100 = max(0.0, min(100.0, amplified_position))
             
             # Update position and confidence
             self.current_position = int(round(pos_norm_0_100))
@@ -653,21 +778,67 @@ class AxisProjectionTracker(BaseTracker):
             axis_y = A_proc[1] + t * (B_proc[1] - A_proc[1])
             cv2.circle(vis, (int(axis_x), int(axis_y)), 8, (255, 255, 0), -1)
         
+        # Draw multiple detected centroids
+        if self.debug_centroids:
+            for i, (centroid, area) in enumerate(zip(self.debug_centroids, self.debug_areas)):
+                # Convert to processed coordinates
+                proc_centroid = (centroid[0] * self.scale, centroid[1] * self.scale)
+                
+                # Color code: red for largest, orange for others
+                color = (0, 0, 255) if i == 0 else (0, 165, 255)  # Red for primary, orange for secondary
+                
+                # Size based on area
+                size = min(8, max(3, int(area / 100)))
+                cv2.circle(vis, (int(proc_centroid[0]), int(proc_centroid[1])), size, color, -1)
+                cv2.circle(vis, (int(proc_centroid[0]), int(proc_centroid[1])), size + 3, color, 1)
+                
+                # Show area as text
+                cv2.putText(vis, f"{area}", 
+                           (int(proc_centroid[0]) + 6, int(proc_centroid[1]) - 6), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+        
         # Draw current 2D tracking point
         if self.show_tracking_point and self.prev_pos_px is not None:
             cv2.circle(vis, (int(self.prev_pos_px[0]), int(self.prev_pos_px[1])), 
-                      6, (0, 0, 255), -1)
+                      6, (255, 255, 0), -1)  # Yellow for main tracking point
             
             # Draw confidence circle
             radius = int(self.roi_radius * self.scale * confidence)
             if radius > 0:
                 cv2.circle(vis, (int(self.prev_pos_px[0]), int(self.prev_pos_px[1])),
-                          radius, (0, 0, 255), 1)
+                          radius, (255, 255, 0), 1)
         
         # Add tracking indicator
         self._draw_tracking_indicator(vis)
         
         return vis
+    
+    def _draw_tracking_indicator(self, vis: np.ndarray):
+        """Draw enhanced tracking indicator with multi-centroid info."""
+        # Basic position and confidence
+        tracking_mode = getattr(self.app, 'tracking_axis_mode', 'horizontal') if hasattr(self, 'app') and self.app else 'horizontal'
+        cv2.putText(vis, f"Standard Axis Tracker ({tracking_mode.upper()})", (10, 25), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        cv2.putText(vis, f"Pos: {self.current_position}/100  Conf: {self.current_confidence:.2f}", 
+                   (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Multi-centroid info
+        if self.debug_centroids:
+            num_centroids = len(self.debug_centroids)
+            total_area = sum(self.debug_areas)
+            cv2.putText(vis, f"Motion: {total_area}px ({num_centroids} centroids)", 
+                       (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+            
+            # Show global movement factor
+            if self.global_movement_factor > 1.0:
+                cv2.putText(vis, f"Amp: {self.global_movement_factor:.2f}x", 
+                           (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+        
+        # Tracking status
+        if self.tracking_active:
+            cv2.putText(vis, "TRACKING", (10, 100), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     
     def start_tracking(self):
         """Start tracking and generating funscript actions."""

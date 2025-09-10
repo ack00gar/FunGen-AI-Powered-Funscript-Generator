@@ -2842,6 +2842,8 @@ class InteractiveFunscriptTimeline:
                 current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
                 # Using effective center of screen
                 target_pan_offset = current_video_time_ms - center_marker_offset_ms
+                
+                
                 app_state.timeline_pan_offset_ms = np.clip(
                     target_pan_offset, min_pan_allowed,
                     max_pan_allowed
@@ -2881,6 +2883,8 @@ class InteractiveFunscriptTimeline:
             frame_str_display = ""
 
             if video_loaded and video_fps_for_calc > 0:
+                # Use the same time-to-frame calculation as the timeline sync logic
+                # This ensures perfect consistency between sync and display
                 frame_at_center = int(round((time_at_center_ms_display / 1000.0) * video_fps_for_calc))
                 frame_str_display = f" (F: {frame_at_center})"
 
