@@ -42,7 +42,7 @@ class OscillationExperimental2Tracker(BaseTracker):
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
             name="oscillation_experimental_2",
-            display_name="Live Oscillation Detector (Experimental 2)",
+            display_name="Oscillation Detector (Experimental 2)",
             description="Hybrid approach combining experimental timing precision with legacy amplification and signal conditioning",
             category="live",
             version="1.0.0",

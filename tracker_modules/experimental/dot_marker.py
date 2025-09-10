@@ -26,7 +26,7 @@ class DOTMarkerTracker(BaseTracker):
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
             name="dot_marker",
-            display_name="Live DOT Marker (Manual Point)",
+            display_name="DOT Marker (Manual Point)",
             description="Tracks a manually selected colored dot/point on screen",
             category="live_intervention",  # Requires user to click/select point
             version="1.0.0",

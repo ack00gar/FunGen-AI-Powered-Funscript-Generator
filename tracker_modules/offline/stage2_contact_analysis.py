@@ -88,7 +88,7 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
         """Return metadata describing this tracker."""
         return TrackerMetadata(
             name="OFFLINE_2_STAGE",
-            display_name="Offline Contact Analysis (2-Stage)",
+            display_name="Contact Analysis (2-Stage)",
             description="Offline contact detection and analysis using YOLO detection results",
             category="offline",
             version="1.0.0", 

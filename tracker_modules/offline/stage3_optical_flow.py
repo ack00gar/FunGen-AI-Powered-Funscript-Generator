@@ -94,7 +94,7 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
         """Return metadata describing this tracker."""
         return TrackerMetadata(
             name="OFFLINE_3_STAGE", 
-            display_name="Offline Optical Flow Analysis (3-Stage)",
+            display_name="Optical Flow Analysis (3-Stage)",
             description="Offline optical flow tracking using live tracker algorithms on Stage 2 segments",
             category="offline",
             version="1.0.0",
