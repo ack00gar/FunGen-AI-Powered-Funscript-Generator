@@ -2455,7 +2455,7 @@ def perform_contact_analysis(
     main_steps_list_base = [
         ("Step 1: Tracking Objects", resilient_tracker_step0),
         ("Step 2: Interpolate Short Gaps", pass_1_interpolate_boxes),
-        ("Step 3: Recover Long Gaps (OF)", pass_1c_recover_lost_tracks_with_of),
+        # ("Step 3: Recover Long Gaps (OF)", pass_1c_recover_lost_tracks_with_of),  # TEMPORARILY DISABLED
         ("Step 4: Smooth All Tracked Boxes", pass_1b_smooth_all_tracks),
         ("Step 5: Kalman Filter & Lock State", pass_3_kalman_and_lock_state),
         ("Step 6: Assign Positions & Segments", pass_4_assign_positions_and_segments),

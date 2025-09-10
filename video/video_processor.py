@@ -491,10 +491,11 @@ class VideoProcessor:
             f"get_frames_batch: Complete. Got {len(frames_batch)} frames for start {start_frame_num} (requested {num_frames_to_fetch}). Decode time: {decode_time:.2f}ms")
         return frames_batch
 
-    def _get_specific_frame(self, frame_index_abs: int) -> Optional[np.ndarray]:
+    def _get_specific_frame(self, frame_index_abs: int, update_current_index: bool = True) -> Optional[np.ndarray]:
         if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0:
             self.logger.warning("Cannot get frame: video not loaded/invalid FPS.")
-            self.current_frame_index = frame_index_abs
+            if update_current_index:
+                self.current_frame_index = frame_index_abs
             return None
 
         with self.frame_cache_lock:
@@ -502,7 +503,8 @@ class VideoProcessor:
                 self.logger.debug(f"Cache HIT for frame {frame_index_abs}")
                 frame = self.frame_cache[frame_index_abs]
                 self.frame_cache.move_to_end(frame_index_abs)
-                self.current_frame_index = frame_index_abs
+                if update_current_index:
+                    self.current_frame_index = frame_index_abs
                 return frame
 
         if self.logger.isEnabledFor(logging.DEBUG):
@@ -541,7 +543,8 @@ class VideoProcessor:
             if retrieved_frame is not None and frame_index_abs in self.frame_cache:
                 self.frame_cache.move_to_end(frame_index_abs)
 
-        self.current_frame_index = frame_index_abs
+        if update_current_index:
+            self.current_frame_index = frame_index_abs
         if retrieved_frame is not None:
             self.logger.debug(f"Successfully retrieved frame {frame_index_abs} via get_frames_batch and cached.")
             return retrieved_frame
@@ -1167,6 +1170,7 @@ class VideoProcessor:
 
         with self.frame_lock:
             self.current_frame = new_frame
+        
 
         if new_frame is None:
             self.logger.warning(f"Seek to frame {target_frame} failed to retrieve frame.")

@@ -334,6 +334,10 @@ class AxisProjectionEnhancedTracker(BaseTracker):
         self.current_uncertainty = 25.0
         self.tracking_quality = 0.0
         
+        # Debug info for visualization
+        self.debug_candidates = []
+        self.debug_selected_candidate = None
+        
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
@@ -357,8 +361,21 @@ class AxisProjectionEnhancedTracker(BaseTracker):
             if hasattr(app_instance, 'get_video_dimensions'):
                 width, height = app_instance.get_video_dimensions()
                 if width and height:
-                    self.axis_A = (int(0.1 * width), int(0.5 * height))
-                    self.axis_B = (int(0.9 * width), int(0.5 * height))
+                    # Set axis based on tracking mode (like other trackers)
+                    tracking_axis_mode = getattr(app_instance, 'tracking_axis_mode', 'horizontal')
+                    margin = int(0.1 * min(width, height))
+                    
+                    if tracking_axis_mode == 'vertical':
+                        # Vertical axis down center of frame
+                        self.axis_A = (int(0.5 * width), margin)
+                        self.axis_B = (int(0.5 * width), height - margin)
+                        self.logger.info(f"Enhanced VERTICAL axis set: A={self.axis_A}, B={self.axis_B}")
+                    else:
+                        # Default horizontal axis across center of frame
+                        self.axis_A = (margin, int(0.5 * height))
+                        self.axis_B = (width - margin, int(0.5 * height))
+                        self.logger.info(f"Enhanced HORIZONTAL axis set: A={self.axis_A}, B={self.axis_B}")
+                    
                     self._calculate_axis_properties()
             
             # Load enhanced settings
@@ -410,6 +427,9 @@ class AxisProjectionEnhancedTracker(BaseTracker):
         try:
             self._update_fps()
             
+            # Update axis based on current tracking mode
+            self._update_axis_for_tracking_mode()
+            
             # Debug: Log that we're being called
             if frame_index and frame_index == 1:
                 self.logger.info("ENHANCED AXIS DEBUG: process_frame() called - tracker is active in GUI")
@@ -434,8 +454,12 @@ class AxisProjectionEnhancedTracker(BaseTracker):
             # Generate tracking candidates from multiple sources
             candidates = self._generate_tracking_candidates(gray, multi_flows, diff_thresh)
             
+            # Store candidates for visualization
+            self.debug_candidates = candidates
+            
             # Object persistence tracking
             persistent_candidate = self.persistence_tracker.update(candidates)
+            self.debug_selected_candidate = persistent_candidate
             
             if persistent_candidate:
                 # Project to axis and update filter
@@ -475,18 +499,25 @@ class AxisProjectionEnhancedTracker(BaseTracker):
             
             self.last_update_time = time.time()
             
-            # Generate output (match standard format for GUI compatibility)
+            # Generate output only when we have very confident detections with significant motion
             action_log = None
-            if self.tracking_active:
+            recent_success = np.mean(list(self.detection_success_rate)[-5:]) if len(self.detection_success_rate) >= 5 else 0.0
+            
+            if (self.tracking_active and 
+                persistent_candidate and 
+                self.current_confidence > 0.6 and  # Even higher confidence threshold
+                self.tracking_quality > 0.4 and   # Higher quality threshold
+                recent_success > 0.5):  # Require sustained detection success
                 action_log = [{
                     "at": int(frame_time_ms),
                     "pos": int(max(0, min(100, self.current_position)))
                 }]  # Use standard format without extra fields
                 
-                # Debug logging for GUI troubleshooting  
-                if frame_index and frame_index % 30 == 0:  # Log every 30th frame
-                    axis_info = f"A={self.axis_A}, B={self.axis_B}" if (self.axis_A and self.axis_B) else "NOT SET"
-                    self.logger.info(f"ENHANCED AXIS DEBUG Frame {frame_index}: pos={self.current_position}, conf={self.current_confidence:.3f}, axis={axis_info}")
+            # Debug logging for GUI troubleshooting  
+            if frame_index and frame_index % 30 == 0:  # Log every 30th frame
+                axis_info = f"A={self.axis_A}, B={self.axis_B}" if (self.axis_A and self.axis_B) else "NOT SET"
+                action_status = "ACTION" if action_log else "NO_ACTION"
+                self.logger.info(f"ENHANCED AXIS DEBUG Frame {frame_index}: pos={self.current_position}, conf={self.current_confidence:.3f}, {action_status}, axis={axis_info}")
             
             # Visualization
             vis_frame = self._draw_enhanced_visualization(frame_small)
@@ -758,34 +789,82 @@ class AxisProjectionEnhancedTracker(BaseTracker):
         return float(t * 100.0)
     
     def _draw_enhanced_visualization(self, frame: np.ndarray) -> np.ndarray:
-        """Draw enhanced visualization."""
+        """Draw enhanced visualization with motion centroids (no axis line/marker)."""
         vis = frame.copy()
         
-        # Draw axis if defined
-        if self.axis_A and self.axis_B:
-            A_proc = (int(self.axis_A[0] * self.scale), int(self.axis_A[1] * self.scale))
-            B_proc = (int(self.axis_B[0] * self.scale), int(self.axis_B[1] * self.scale))
+        # Draw only high-quality motion candidates to reduce flickering
+        if self.debug_candidates:
+            # Filter for stable, high-confidence candidates only
+            stable_candidates = [c for c in self.debug_candidates 
+                               if c.confidence > 0.3]  # Much higher threshold
             
-            # Draw axis with gradient indicating direction
-            cv2.line(vis, A_proc, B_proc, (0, 200, 0), 3)
-            cv2.circle(vis, A_proc, 6, (0, 255, 0), -1)  # Start point
-            cv2.circle(vis, B_proc, 6, (0, 0, 255), -1)  # End point
+            # Limit to top 5 candidates max to reduce clutter
+            stable_candidates = stable_candidates[:5]
             
-            # Draw current position with uncertainty
-            t = self.current_position / 100.0
-            pos_x = int(A_proc[0] + t * (B_proc[0] - A_proc[0]))
-            pos_y = int(A_proc[1] + t * (B_proc[1] - A_proc[1]))
-            
-            # Draw uncertainty as ellipse size
-            uncertainty_radius = max(3, int(self.current_uncertainty / 5))
-            color_intensity = int(255 * self.current_confidence)
-            cv2.circle(vis, (pos_x, pos_y), uncertainty_radius, (255, color_intensity, 0), -1)
+            for i, candidate in enumerate(stable_candidates):
+                # Convert to processed coordinates
+                pos_x = int(candidate.position_2d[0] * self.scale)
+                pos_y = int(candidate.position_2d[1] * self.scale)
+                
+                # Color based on confidence and type - more muted colors
+                confidence_color = int(180 + 75 * candidate.confidence)  # Brighter, less flickering
+                if candidate.source == 'diff':
+                    color = (0, 0, confidence_color)  # Red for frame diff
+                elif candidate.source == 'flow':
+                    color = (0, confidence_color//2, confidence_color)  # Orange for optical flow
+                else:
+                    color = (confidence_color//2, 0, confidence_color)  # Purple for template/other
+                
+                # Consistent size to reduce flickering
+                size = max(4, min(6, int(4 + 2 * candidate.confidence)))
+                cv2.circle(vis, (pos_x, pos_y), size, color, -1)
+                cv2.circle(vis, (pos_x, pos_y), size + 1, color, 1)
+                
+                # Show confidence as text only for top 2 candidates
+                if i < 2:  # Reduced from 3 to 2
+                    cv2.putText(vis, f"{candidate.confidence:.1f}", 
+                               (pos_x + 6, pos_y - 6), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.25, color, 1)
         
-        # Enhanced status display
-        # Add tracking indicator
-        self._draw_tracking_indicator(vis)
+        # Highlight the selected/persistent candidate - only if high confidence
+        if self.debug_selected_candidate and self.debug_selected_candidate.confidence > 0.4:
+            pos_x = int(self.debug_selected_candidate.position_2d[0] * self.scale)
+            pos_y = int(self.debug_selected_candidate.position_2d[1] * self.scale)
+            
+            # Draw stable yellow circle for selected candidate
+            cv2.circle(vis, (pos_x, pos_y), 10, (0, 255, 255), 2)  # Yellow ring (slightly smaller)
+            cv2.circle(vis, (pos_x, pos_y), 3, (0, 255, 255), -1)  # Yellow center
+        
+        # Enhanced status display (no axis info)
+        self._draw_enhanced_tracking_indicator(vis)
         
         return vis
+    
+    def _draw_enhanced_tracking_indicator(self, vis: np.ndarray):
+        """Draw enhanced tracking indicator with motion detection info."""
+        # Basic tracker info
+        tracking_mode = getattr(self.app, 'tracking_axis_mode', 'horizontal') if hasattr(self, 'app') and self.app else 'horizontal'
+        cv2.putText(vis, f"Enhanced Axis Tracker ({tracking_mode.upper()})", (10, 25), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        cv2.putText(vis, f"Pos: {self.current_position}/100  Conf: {self.current_confidence:.2f}", 
+                   (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Motion detection info
+        if self.debug_candidates:
+            num_candidates = len(self.debug_candidates)
+            high_conf_candidates = sum(1 for c in self.debug_candidates if c.confidence > 0.5)
+            cv2.putText(vis, f"Motion: {num_candidates} candidates ({high_conf_candidates} high-conf)", 
+                       (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+            
+            # Show uncertainty and tracking quality
+            cv2.putText(vis, f"Uncertainty: {self.current_uncertainty:.1f}  Quality: {self.tracking_quality:.2f}", 
+                       (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+        
+        # Tracking status
+        if self.tracking_active:
+            cv2.putText(vis, "TRACKING", (10, 100), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     
     def _create_initialization_result(self, frame: np.ndarray, frame_time_ms: int) -> TrackerResult:
         """Create initialization result."""
@@ -834,6 +913,34 @@ class AxisProjectionEnhancedTracker(BaseTracker):
         except Exception as e:
             self.logger.error(f"Failed to set enhanced axis: {e}")
             return False
+
+    def _update_axis_for_tracking_mode(self):
+        """Update axis based on current tracking mode (like other trackers)."""
+        if not self.app or not hasattr(self.app, 'get_video_dimensions'):
+            return
+            
+        width, height = self.app.get_video_dimensions()
+        if not width or not height:
+            return
+            
+        tracking_axis_mode = getattr(self.app, 'tracking_axis_mode', 'horizontal')
+        margin = int(0.1 * min(width, height))
+        
+        if tracking_axis_mode == 'vertical':
+            # Vertical axis down center of frame
+            new_axis_A = (int(0.5 * width), margin)
+            new_axis_B = (int(0.5 * width), height - margin)
+        else:
+            # Horizontal axis across center of frame  
+            new_axis_A = (margin, int(0.5 * height))
+            new_axis_B = (width - margin, int(0.5 * height))
+        
+        # Only update if axis actually changed
+        if self.axis_A != new_axis_A or self.axis_B != new_axis_B:
+            self.axis_A = new_axis_A
+            self.axis_B = new_axis_B
+            self._calculate_axis_properties()
+            self.logger.info(f"Enhanced axis updated for {tracking_axis_mode.upper()} mode: A={self.axis_A}, B={self.axis_B}")
     
     def start_tracking(self):
         """Start enhanced tracking."""

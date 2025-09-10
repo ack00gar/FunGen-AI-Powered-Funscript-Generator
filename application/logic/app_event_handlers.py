@@ -321,6 +321,8 @@ class AppEventHandlers:
             # ALWAYS force timeline synchronization after seeking to ensure all timelines stay in sync
             # This is critical for maintaining synchronization between video, timeline 1, timeline 2, and any future timelines
             self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            # Clear any timeline interaction flag to ensure sync happens immediately
+            self.app.app_state_ui.timeline_interaction_active = False
             if mark_dirty and self.app.project_manager:
                 self.app.project_manager.project_dirty = True  # Seeking can be considered a change
             self.app.energy_saver.reset_activity_timer()
