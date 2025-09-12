@@ -732,7 +732,9 @@ class VideoNavigationUI:
 
             can_delete = num_selected > 0
             delete_label = f"Delete Selected Chapter(s) ({num_selected})" if num_selected > 0 else "Delete Selected Chapter(s)"
-            if imgui.menu_item(delete_label, enabled=can_delete)[0]:
+            shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+            delete_shortcut = shortcuts.get("delete_selected_chapter", "Delete")
+            if imgui.menu_item(delete_label, shortcut=delete_shortcut, enabled=can_delete)[0]:
                 if can_delete and self.context_selected_chapters:
                     ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
                     fs_proc.delete_video_chapters_by_ids(ch_ids)
@@ -747,7 +749,8 @@ class VideoNavigationUI:
             imgui.separator()
 
             can_select_points = num_selected > 0
-            if imgui.begin_menu("Select Points in Chapter(s)", enabled=can_select_points):
+            select_points_label = f"Select Points in {num_selected} Chapter{'s' if num_selected != 1 else ''}" if num_selected > 0 else "Select Points in Chapter(s)"
+            if imgui.begin_menu(select_points_label, enabled=can_select_points):
                 if imgui.menu_item("On Timeline 1")[0]:
                     if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
                         self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='primary')
@@ -763,8 +766,9 @@ class VideoNavigationUI:
                 imgui.end_menu()
 
             # --- Apply Plugin to Chapter submenu ---
-            can_apply_plugin = num_selected > 0
-            if imgui.begin_menu("Apply Plugin to Chapter", enabled=can_apply_plugin):
+            can_apply_plugin = num_selected > 0  
+            plugin_label = f"Apply Plugin to {num_selected} Chapter{'s' if num_selected != 1 else ''}" if num_selected > 0 else "Apply Plugin to Chapter(s)"
+            if imgui.begin_menu(plugin_label, enabled=can_apply_plugin):
                 if can_apply_plugin and self.context_selected_chapters:
                     # Timeline selection submenus with plugin lists
                     if imgui.begin_menu("Timeline 1 (Primary)"):
@@ -782,82 +786,7 @@ class VideoNavigationUI:
             can_analyze = num_selected == 1
             if imgui.begin_menu("Chapter Analysis", enabled=can_analyze):
                 if can_analyze and self.context_selected_chapters:
-                    selected_chapter = self.context_selected_chapters[0]
-                    
-                    if imgui.menu_item("Live Oscillation Detector")[0]:
-                        # Find first available live tracker (no user intervention required)
-                        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
-                        discovery = get_tracker_discovery()
-                        live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
-                        if live_trackers:
-                            # Use the first available live tracker
-                            self.app.app_state_ui.selected_tracker_name = live_trackers[0].internal_name
-                        # Set scripting range to the selected chapter
-                        if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
-                            self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
-                            self._start_live_tracking(
-                                success_info=f"Started Live Oscillation Detector analysis for chapter: {selected_chapter.position_short_name}"
-                            )
-                        else:
-                            self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
-                        self.context_selected_chapters.clear()
-                        imgui.close_current_popup()
-                    
-                    if imgui.menu_item("Live Tracking (Auto ROI)")[0]:
-                        # Find live tracker with automatic ROI detection (YOLO, etc.)
-                        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
-                        discovery = get_tracker_discovery()
-                        live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
-                        # Look for trackers that do automatic ROI detection (not oscillation-based)
-                        auto_tracker = None
-                        for tracker in live_trackers:
-                            # Skip pure oscillation detectors, look for ROI/YOLO trackers
-                            if not ("oscillation" in tracker.internal_name.lower()):
-                                auto_tracker = tracker.internal_name
-                                break
-                        if auto_tracker:
-                            self.app.app_state_ui.selected_tracker_name = auto_tracker
-                        elif live_trackers:
-                            # Fallback to any live tracker
-                            self.app.app_state_ui.selected_tracker_name = live_trackers[0].internal_name
-                        # Set scripting range to the selected chapter
-                        if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
-                            self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
-                            self._start_live_tracking(
-                                success_info=f"Started Live Tracking (YOLO ROI) analysis for chapter: {selected_chapter.position_short_name}"
-                            )
-                        else:
-                            self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
-                        self.context_selected_chapters.clear()
-                        imgui.close_current_popup()
-                    
-                    if imgui.menu_item("Live Tracking (Manual ROI)")[0]:
-                        # Find manual ROI tracker (requires user setup)
-                        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
-                        discovery = get_tracker_discovery()
-                        intervention_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE_INTERVENTION)
-                        # Prefer trackers that require manual setup
-                        manual_tracker = None
-                        for tracker in intervention_trackers:
-                            if "user" in tracker.internal_name.lower() or "manual" in tracker.internal_name.lower():
-                                manual_tracker = tracker.internal_name
-                                break
-                        if manual_tracker:
-                            self.app.app_state_ui.selected_tracker_name = manual_tracker
-                        elif intervention_trackers:
-                            # Fallback to any intervention tracker
-                            self.app.app_state_ui.selected_tracker_name = intervention_trackers[0].internal_name
-                        # Set scripting range to the selected chapter
-                        if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
-                            self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
-                            self._start_live_tracking(
-                                success_info=f"Started Live Tracking (User ROI) analysis for chapter: {selected_chapter.position_short_name}"
-                            )
-                        else:
-                            self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
-                        self.context_selected_chapters.clear()
-                        imgui.close_current_popup()
-                
+                    self._render_dynamic_chapter_analysis_menu()
                 imgui.end_menu()
 
             imgui.separator()
@@ -1388,6 +1317,91 @@ class VideoNavigationUI:
             self.app.logger.error(f"Error applying plugin {plugin_name} to chapters: {e}")
             import traceback
             traceback.print_exc()
+
+    def _render_dynamic_chapter_analysis_menu(self):
+        """Render dynamic chapter analysis menu with all available trackers."""
+        if not self.context_selected_chapters:
+            imgui.text_disabled("No chapter selected")
+            return
+            
+        selected_chapter = self.context_selected_chapters[0]
+        
+        try:
+            from config.tracker_discovery import get_tracker_discovery, TrackerCategory
+            discovery = get_tracker_discovery()
+            
+            # Get all tracker categories
+            live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
+            live_intervention_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE_INTERVENTION)
+            offline_trackers = discovery.get_trackers_by_category(TrackerCategory.OFFLINE)
+            
+            # Group trackers by category for better organization
+            tracker_groups = [
+                ("Live Trackers", live_trackers),
+                ("Live Intervention Trackers", live_intervention_trackers), 
+                ("Offline Trackers", offline_trackers)
+            ]
+            
+            tracker_found = False
+            
+            for group_name, trackers in tracker_groups:
+                if not trackers:
+                    continue
+                    
+                if tracker_found:  # Add separator between groups
+                    imgui.separator()
+                    
+                # Render group header (non-clickable)
+                imgui.text_colored(group_name, 0.7, 0.7, 0.7, 1.0)
+                
+                for tracker in trackers:
+                    display_name = getattr(tracker, 'display_name', tracker.internal_name)
+                    description = getattr(tracker, 'description', '')
+                    
+                    # Create descriptive menu item
+                    menu_text = display_name
+                    if description:
+                        menu_text += f" - {description[:50]}..." if len(description) > 50 else f" - {description}"
+                    
+                    if imgui.menu_item(menu_text)[0]:
+                        self._apply_tracker_to_chapter(tracker, selected_chapter)
+                        imgui.close_current_popup()
+                        
+                    # Add tooltip for full description
+                    if imgui.is_item_hovered() and description:
+                        imgui.set_tooltip(description)
+                
+                tracker_found = True
+            
+            if not tracker_found:
+                imgui.text_disabled("No trackers available")
+                
+        except Exception as e:
+            self.app.logger.error(f"Error loading trackers for chapter analysis: {e}")
+            imgui.text_colored("Error loading trackers", 1.0, 0.3, 0.3, 1.0)
+            
+    def _apply_tracker_to_chapter(self, tracker, chapter):
+        """Apply a specific tracker to a chapter."""
+        try:
+            # Set the selected tracker
+            self.app.app_state_ui.selected_tracker_name = tracker.internal_name
+            
+            # Set scripting range to the selected chapter
+            if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
+                self.app.funscript_processor.set_scripting_range_from_chapter(chapter)
+                
+                # Start tracking with descriptive message
+                display_name = getattr(tracker, 'display_name', tracker.internal_name)
+                self._start_live_tracking(
+                    success_info=f"Started {display_name} analysis for chapter: {chapter.position_short_name}"
+                )
+                
+                self.context_selected_chapters.clear()
+            else:
+                self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
+                
+        except Exception as e:
+            self.app.logger.error(f"Error applying tracker {tracker.internal_name} to chapter: {e}")
 
 
 class ChapterListWindow:

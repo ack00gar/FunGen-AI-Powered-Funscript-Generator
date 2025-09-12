@@ -110,6 +110,7 @@ DEFAULT_SHORTCUTS = {
     "delete_selected_chapter": "DELETE",
     "delete_selected_chapter_alt": "BACKSPACE",
     "select_all_points": f"{MOD_KEY}+A",
+    "deselect_all_points": f"{MOD_KEY}+D",
     "undo_timeline1": f"{MOD_KEY}+Z",
     "redo_timeline1": f"{MOD_KEY}+Y",
     "undo_timeline2": f"{MOD_KEY}+ALT+Z",
