@@ -1422,16 +1422,18 @@ class ApplicationLogic:
             return
 
         # If a model is already loaded for active tracking, use its class names.
-        if self.tracker and self.tracker.yolo and hasattr(self.tracker.yolo, 'names'):
-            self.logger.info("Model already loaded for tracking, using its class names for cache.")
-            model_names = self.tracker.yolo.names
-            if isinstance(model_names, dict):
-                self.cached_class_names = sorted(list(model_names.values()))
-            elif isinstance(model_names, list):
-                self.cached_class_names = sorted(model_names)
-            else:
-                self.logger.warning("Tracker model names format not recognized while caching.")
-            return
+        if self.tracker and hasattr(self.tracker, '_current_tracker') and self.tracker._current_tracker:
+            current_tracker = self.tracker._current_tracker
+            if hasattr(current_tracker, 'yolo_model') and current_tracker.yolo_model and hasattr(current_tracker.yolo_model, 'names'):
+                self.logger.info("Model already loaded for tracking, using its class names for cache.")
+                model_names = current_tracker.yolo_model.names
+                if isinstance(model_names, dict):
+                    self.cached_class_names = sorted(list(model_names.values()))
+                elif isinstance(model_names, list):
+                    self.cached_class_names = sorted(model_names)
+                else:
+                    self.logger.warning("Tracker model names format not recognized while caching.")
+                return
 
         model_path = self.yolo_det_model_path
         if not model_path or not os.path.exists(model_path):
