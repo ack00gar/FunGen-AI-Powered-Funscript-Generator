@@ -425,24 +425,8 @@ class InteractiveFunscriptTimeline:
         self._load_plugins()
     
     def _get_available_plugins(self):
-        """Get the loaded plugins list, filtering out template/example plugins."""
-        if not self._available_plugins:
-            return []
-        
-        # Filter out plugins with 'template' or 'example' in their name
-        filtered_plugins = []
-        for plugin in self._available_plugins:
-            plugin_name = plugin.get('name', '').lower()
-            plugin_display_name = plugin.get('display_name', '').lower()
-            
-            # Skip plugins with 'template' or 'example' in name or display name
-            if ('template' in plugin_name or 'example' in plugin_name or 
-                'template' in plugin_display_name or 'example' in plugin_display_name):
-                continue
-                
-            filtered_plugins.append(plugin)
-        
-        return filtered_plugins
+        """Get the loaded plugins list."""
+        return self._available_plugins or []
 
     def _get_plugin_display_name(self, plugin_info):
         """Generate a user-friendly display name for a plugin."""
