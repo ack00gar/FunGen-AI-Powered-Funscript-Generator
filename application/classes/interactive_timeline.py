@@ -1240,6 +1240,62 @@ class InteractiveFunscriptTimeline:
 
         self.app.logger.info(op_desc, extra={"status_message": True})
 
+    def _handle_delete_selected_points(self):
+        """Delete all currently selected points."""
+        actions_list_ref = self._get_actions_list_ref()
+        if not actions_list_ref or not self.multi_selected_action_indices:
+            self.app.logger.warning(f"T{self.timeline_num}: No points selected to delete.", extra={"status_message": True})
+            return
+
+        # Sort indices in reverse order to maintain correct positions during deletion
+        sorted_indices = sorted(self.multi_selected_action_indices, reverse=True)
+        delete_count = len(sorted_indices)
+        
+        op_desc = f"Deleted {delete_count} Point{'s' if delete_count != 1 else ''}"
+        self.app.funscript_processor._record_timeline_action(self.timeline_num, op_desc)
+        
+        # Delete the selected points
+        for idx in sorted_indices:
+            if 0 <= idx < len(actions_list_ref):
+                del actions_list_ref[idx]
+        
+        # Clear selection after deletion
+        self.multi_selected_action_indices.clear()
+        self.selected_action_idx = -1
+        
+        # Invalidate cache
+        funscript_instance, axis_name = self._get_target_funscript_details()
+        if funscript_instance and axis_name:
+            funscript_instance._invalidate_cache(axis_name)
+        
+        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, op_desc)
+        self.app.logger.info(f"Deleted {delete_count} point{'s' if delete_count != 1 else ''}.", extra={"status_message": True})
+
+    def _handle_select_all_points(self):
+        """Select all points on the timeline."""
+        actions_list_ref = self._get_actions_list_ref()
+        if not actions_list_ref:
+            self.app.logger.warning(f"T{self.timeline_num}: No points to select.", extra={"status_message": True})
+            return
+        
+        # Select all points
+        self.multi_selected_action_indices = set(range(len(actions_list_ref)))
+        self.selected_action_idx = 0 if actions_list_ref else -1
+        
+        point_count = len(actions_list_ref)
+        self.app.logger.info(f"T{self.timeline_num}: Selected all {point_count} point{'s' if point_count != 1 else ''}.", extra={"status_message": True})
+
+    def _handle_deselect_all_points(self):
+        """Deselect all currently selected points."""
+        if not self.multi_selected_action_indices:
+            return
+            
+        selected_count = len(self.multi_selected_action_indices)
+        self.multi_selected_action_indices.clear()
+        self.selected_action_idx = -1
+        
+        self.app.logger.info(f"T{self.timeline_num}: Deselected {selected_count} point{'s' if selected_count != 1 else ''}.", extra={"status_message": True})
+
     def render(self, timeline_y_start_coord: float = 0, timeline_render_height: float = 0, view_mode: str = 'expert'):
         app_state = self.app.app_state_ui
         is_floating = app_state.ui_layout_mode == "floating"
@@ -3315,6 +3371,7 @@ class InteractiveFunscriptTimeline:
                 imgui.text(f"Timeline {self.timeline_num} @ Time: {self.new_point_candidate_at}ms, Pos: {self.new_point_candidate_pos}")
                 imgui.separator()
 
+                # === POINT OPERATIONS ===
                 if allow_editing_timeline:
                     if imgui.menu_item(f"Add Point Here##CTXMenuAdd{window_id_suffix}")[0]:
                         op_desc = "Added Point (Menu)"
@@ -3338,56 +3395,18 @@ class InteractiveFunscriptTimeline:
                 else:
                     imgui.menu_item("Add Point Here", enabled=False)
 
-                imgui.separator()
-
-                other_timeline_num = 2 if self.timeline_num == 1 else 1
-
-                # Option 1: Copy this entire timeline over to the other one
-                if imgui.menu_item(f"Copy All to Timeline {other_timeline_num}##CTXCopyFull",
-                                   enabled=allow_editing_timeline)[0]:
-                    if allow_editing_timeline:
-                        self._handle_copy_full_timeline_to_other()
+                # Point Management Actions (Delete Selected)
+                can_delete = allow_editing_timeline and bool(self.multi_selected_action_indices)
+                delete_count = len(self.multi_selected_action_indices) if self.multi_selected_action_indices else 0
+                delete_label = f"Delete {delete_count} Selected Point{'s' if delete_count != 1 else ''}" if delete_count > 0 else "Delete Selected Points"
+                if imgui.menu_item(delete_label, shortcut=shortcuts.get("delete_selected_point", "Delete"), enabled=can_delete)[0]:
+                    if can_delete: self._handle_delete_selected_points()
                     imgui.close_current_popup()
-
-                # Option 2: Swap the contents of the two timelines
-                if imgui.menu_item(f"Swap with Timeline {other_timeline_num}##CTXSwap", enabled=allow_editing_timeline)[
-                    0]:
-                    if allow_editing_timeline:
-                        self._handle_swap_with_other_timeline()
-                    imgui.close_current_popup()
-                imgui.separator()
-
-                can_copy_to_other = allow_editing_timeline and bool(self.multi_selected_action_indices)
-                copy_dest_t_num = 2 if self.timeline_num == 1 else 1
-
-                if imgui.menu_item(f"Copy Selected to Timeline {copy_dest_t_num}", enabled=can_copy_to_other)[0]:
-                    if can_copy_to_other:
-                        self._handle_copy_to_other_timeline()
-                    imgui.close_current_popup()
-                imgui.separator()
-
-                # --- Selection Filtering ---
-                can_filter_selection = len(self.multi_selected_action_indices) >= 3
-                if imgui.menu_item("Select Top Points", enabled=can_filter_selection)[0]:
-                    if can_filter_selection:
-                        self._handle_selection_filtering(self._select_top_points)
-                    imgui.close_current_popup()
-
-                if imgui.menu_item("Select Bottom Points", enabled=can_filter_selection)[0]:
-                    if can_filter_selection:
-                        self._handle_selection_filtering(self._select_bottom_points)
-                    imgui.close_current_popup()
-
-                if imgui.menu_item("Select Mid Points", enabled=can_filter_selection)[0]:
-                    if can_filter_selection:
-                        self._handle_selection_filtering(self._select_mid_points)
-                    imgui.close_current_popup()
-                # --- End Selection Filtering ---
 
                 imgui.separator()
 
-                # --- New "Start Selection" / "End Selection" Context Menu Items ---
-                # Use self.context_menu_point_idx here
+                # === SELECTION TOOLS ===
+                # Point-based selection (when hovering over a specific point)
                 if self.context_menu_point_idx != -1:
                     # Only show "Start selection" if no anchor is set or if clicking the same anchor point again
                     if self.selection_anchor_idx == -1 or self.selection_anchor_idx == self.context_menu_point_idx:
@@ -3414,10 +3433,35 @@ class InteractiveFunscriptTimeline:
                 else:  # If not hovering over a point when the context menu was opened
                     imgui.menu_item(f"Start Selection Here", enabled=False)
                     imgui.menu_item(f"End Selection Here", enabled=False)
-                # --- End new items ---
+
+                # Global selection management
+                has_actions = bool(actions_list) and len(actions_list) > 0
+                can_select_all = has_actions and (not self.multi_selected_action_indices or len(self.multi_selected_action_indices) < len(actions_list))
+                can_deselect_all = bool(self.multi_selected_action_indices)
+                
+                if imgui.menu_item("Select All Points", shortcut=shortcuts.get("select_all_points", "Ctrl+A"), enabled=can_select_all)[0]:
+                    if can_select_all: self._handle_select_all_points()
+                    imgui.close_current_popup()
+                    
+                if imgui.menu_item("Deselect All Points", shortcut=shortcuts.get("deselect_all_points", "Ctrl+D"), enabled=can_deselect_all)[0]:
+                    if can_deselect_all: self._handle_deselect_all_points()
+                    imgui.close_current_popup()
+
+                # Selection filtering tools
+                if imgui.begin_menu("Filter Selection", enabled=len(self.multi_selected_action_indices) >= 3):
+                    if imgui.menu_item("Keep Top Points")[0]:
+                        self._handle_selection_filtering(self._select_top_points)
+                        imgui.close_current_popup()
+                    if imgui.menu_item("Keep Bottom Points")[0]:
+                        self._handle_selection_filtering(self._select_bottom_points)
+                        imgui.close_current_popup()
+                    if imgui.menu_item("Keep Mid Points")[0]:
+                        self._handle_selection_filtering(self._select_mid_points)
+                        imgui.close_current_popup()
+                    imgui.end_menu()
                 imgui.separator()
 
-                # --- Apply Plugins to Selection ---
+                # === PLUGINS ===
                 has_multi_selection = bool(self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
                 if has_multi_selection:
                     selection_count = len(self.multi_selected_action_indices)
@@ -3429,16 +3473,37 @@ class InteractiveFunscriptTimeline:
                 
                 imgui.separator()
 
+                # === TIMELINE OPERATIONS ===
+                other_timeline_num = 2 if self.timeline_num == 1 else 1
+                
+                if imgui.menu_item(f"Copy All to Timeline {other_timeline_num}", enabled=allow_editing_timeline)[0]:
+                    if allow_editing_timeline: self._handle_copy_full_timeline_to_other()
+                    imgui.close_current_popup()
+
+                if imgui.menu_item(f"Swap with Timeline {other_timeline_num}", enabled=allow_editing_timeline)[0]:
+                    if allow_editing_timeline: self._handle_swap_with_other_timeline()
+                    imgui.close_current_popup()
+
+                can_copy_to_other = allow_editing_timeline and bool(self.multi_selected_action_indices)
+                if imgui.menu_item(f"Copy Selected to Timeline {other_timeline_num}", enabled=can_copy_to_other)[0]:
+                    if can_copy_to_other: self._handle_copy_to_other_timeline()
+                    imgui.close_current_popup()
+
+                imgui.separator()
+
+                # === CLIPBOARD ===
                 can_copy = allow_editing_timeline and (bool(self.multi_selected_action_indices) or self.selected_action_idx != -1)
-                if imgui.menu_item(f"Copy Selected##CTXMenuCopy", shortcut=shortcuts.get("copy_selection", "Ctrl+C"), enabled=can_copy)[0]:
+                if imgui.menu_item(f"Copy Selected", shortcut=shortcuts.get("copy_selection", "Ctrl+C"), enabled=can_copy)[0]:
                     if can_copy: self._handle_copy_selection()
                     imgui.close_current_popup()
+                    
                 can_paste = allow_editing_timeline and self.app.funscript_processor.clipboard_has_actions()
-                if imgui.menu_item(f"Paste at Cursor##CTXMenuPaste", shortcut=shortcuts.get("paste_selection", "Ctrl+V"), enabled=can_paste)[0]:
+                if imgui.menu_item(f"Paste at Cursor", shortcut=shortcuts.get("paste_selection", "Ctrl+V"), enabled=can_paste)[0]:
                     if can_paste: self._handle_paste_actions(self.new_point_candidate_at)
                     imgui.close_current_popup()
+
                 imgui.separator()
-                if imgui.menu_item(f"Cancel##CTXMenuCancel")[0]: imgui.close_current_popup()
+                if imgui.menu_item(f"Cancel")[0]: imgui.close_current_popup()
                 imgui.end_popup()
 
             if hovered_action_idx_current_timeline != -1 and self.dragging_action_idx == -1 and not imgui.is_popup_open(
