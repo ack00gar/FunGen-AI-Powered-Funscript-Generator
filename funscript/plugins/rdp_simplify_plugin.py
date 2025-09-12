@@ -47,7 +47,7 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
                 'required': False,
                 'default': 8.0,
                 'description': 'Distance tolerance for point removal (higher = more aggressive)',
-                'constraints': {'min': 0.1}
+                'constraints': {'min': 0.1, 'max': 20.0}
             },
             'start_time_ms': {
                 'type': int,
