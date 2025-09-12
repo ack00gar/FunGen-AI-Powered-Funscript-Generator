@@ -265,7 +265,8 @@ class PluginRegistry:
                 'parameters_schema': plugin.parameters_schema,
                 'requires_scipy': plugin.requires_scipy,
                 'requires_rdp': plugin.requires_rdp,
-                'modifies_inplace': plugin.modifies_inplace
+                'modifies_inplace': plugin.modifies_inplace,
+                'ui_preference': plugin.ui_preference
             }
             for plugin in self._plugins.values()
             if plugin.name not in hidden_plugin_names 

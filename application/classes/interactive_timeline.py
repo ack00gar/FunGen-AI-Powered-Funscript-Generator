@@ -67,10 +67,6 @@ class InteractiveFunscriptTimeline:
         # Initialize plugin system
         self.plugin_manager.initialize()
         
-        # Legacy plugin system state (will be removed)
-        self._available_plugins = None
-        self._load_plugins()
-        self.plugin_popups = {}  # Store plugin popup states
 
         # --- KEYFRAME STATE ---
         self.show_keyframe_settings_popup = False
@@ -407,26 +403,53 @@ class InteractiveFunscriptTimeline:
             # Filled thin rect for the envelope column
             draw_list.add_rect_filled(x0_screen, y0, x0_screen + step_px, y1, color_u32)
 
-    def _load_plugins(self):
-        """Load plugins once at startup."""
-        target_funscript, _ = self._get_target_funscript_details()
-        if target_funscript and hasattr(target_funscript, 'list_available_plugins'):
-            try:
-                self._available_plugins = target_funscript.list_available_plugins()
-            except Exception as e:
-                if hasattr(self.app, 'logger'):
-                    self.app.logger.warning(f"Error loading plugins: {e}")
-                self._available_plugins = []
-        else:
-            self._available_plugins = []
     
-    def _reload_plugins(self):
-        """Manually reload plugins (callable from menu)."""
-        self._load_plugins()
-    
-    def _get_available_plugins(self):
-        """Get the loaded plugins list."""
-        return self._available_plugins or []
+
+    def _render_selection_plugin_menu(self, target_funscript, axis_name, fs_proc):
+        """Render plugin options for selected points."""
+        if not target_funscript or not axis_name:
+            imgui.text_disabled("No active timeline")
+            return
+            
+        available_plugins = self.plugin_renderer.plugin_manager.get_available_plugins()
+        if not available_plugins:
+            imgui.text_disabled("No plugins available")
+            return
+            
+        selected_indices = list(self.multi_selected_action_indices) if self.multi_selected_action_indices else []
+        if len(selected_indices) < 2:
+            imgui.text_disabled("Need 2+ selected points")
+            return
+        
+        for plugin_name in sorted(available_plugins):
+            ui_data = self.plugin_renderer.plugin_manager.get_plugin_ui_data(plugin_name)
+            if not ui_data or not ui_data['available']:
+                continue
+            display_name = ui_data['display_name']
+            
+            if imgui.menu_item(display_name)[0]:
+                # Use EXACT same system as plugin buttons (PluginUIRenderer)
+                ui_data = self.plugin_renderer.plugin_manager.get_plugin_ui_data(plugin_name)
+                
+                if ui_data and self.plugin_renderer._should_apply_directly(plugin_name, ui_data):
+                    # Apply directly (like Invert) - same as button
+                    context = self.plugin_renderer.plugin_manager.plugin_contexts.get(plugin_name)
+                    if context:
+                        context.apply_requested = True
+                        # Set selection context for this plugin
+                        if hasattr(context, 'apply_to_selection'):
+                            context.apply_to_selection = True
+                else:
+                    # Open configuration window (like Ultimate Autotune) - same as button  
+                    from .plugin_ui_manager import PluginUIState
+                    self.plugin_renderer.plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
+                    
+                    # Force apply_to_selection for selection context
+                    context = self.plugin_renderer.plugin_manager.plugin_contexts.get(plugin_name)
+                    if context and hasattr(context, 'apply_to_selection'):
+                        context.apply_to_selection = True
+                        
+                imgui.close_current_popup()
 
     def _get_plugin_display_name(self, plugin_info):
         """Generate a user-friendly display name for a plugin."""
@@ -448,165 +471,8 @@ class InteractiveFunscriptTimeline:
         
         return display_names.get(name, name.replace('_', ' ').title())
 
-    def _requires_parameters(self, plugin_info):
-        """Check if plugin requires parameters (has non-optional parameters)."""
-        schema = plugin_info.get('parameters_schema', {})
-        # Generic logic: return True if any parameters are required
-        # This ensures consistency with the new plugin renderer system
-        return any(param.get('required', False) for param in schema.values())
 
-    def _apply_plugin_directly(self, plugin_name, target_funscript, axis_name, fs_proc, selected_indices=None):
-        """Apply a plugin directly with default parameters."""
-        try:
-            # Get default parameters from schema
-            plugin_info = None
-            for plugin in self._get_available_plugins():
-                if plugin['name'] == plugin_name:
-                    plugin_info = plugin
-                    break
-
-            if not plugin_info:
-                return False
-
-            # Build default parameters
-            default_params = {}
-            schema = plugin_info.get('parameters_schema', {})
-            for param_name, param_info in schema.items():
-                if 'default' in param_info and param_info['default'] is not None:
-                    # Honor explicit defaults only
-                    default_params[param_name] = param_info['default']
-                elif param_info.get('required', False):
-                    # Can't apply directly if required params have no defaults
-                    return False
-                # For optional params with no default, DO NOT inject synthetic values;
-                # omitting them ensures full-script behavior by default (e.g., no time range).
-
-            # Only pass selected_indices when 2+ points are selected; else omit to apply to full script
-            if selected_indices and len(selected_indices) >= 2:
-                default_params['selected_indices'] = selected_indices
-
-            # Apply plugin using the appropriate method based on plugin name
-            success = self._apply_plugin_by_name(target_funscript, plugin_name, axis_name, default_params)
-            return success
-
-        except Exception as e:
-            self.app.logger.error(f"Error applying plugin {plugin_name}: {e}")
-            return False
-
-    def _apply_plugin_by_name(self, target_funscript, plugin_name, axis_name, params):
-        """Apply a plugin by name using the standardized plugin system."""
-        try:
-            # Use the standardized plugin system instead of hardcoded implementations
-            return target_funscript.apply_plugin(plugin_name, axis=axis_name, **params)
-            
-        except Exception as e:
-            self.app.logger.error(f"Error applying plugin '{plugin_name}': {e}")
-            return False
-
-    def _render_dynamic_plugin_buttons(
-            self,
-            window_id_suffix,
-            allow_editing_timeline,
-            has_actions,
-            target_funscript_instance_for_render,
-            axis_name_for_render,
-            fs_proc,
-        ):
-        """Render buttons for all available plugins dynamically."""
-        if not target_funscript_instance_for_render:
-            return
-            
-        available_plugins = self._get_available_plugins()
-        if not available_plugins:
-            # Fallback text if no plugins available
-            imgui.text("No plugins available")
-            return
         
-        # Render buttons for each plugin
-        for plugin_info in available_plugins:
-            plugin_name = plugin_info.get('name', 'unknown')
-            display_name = self._get_plugin_display_name(plugin_info)
-            
-            # Determine if plugin is disabled
-            plugin_disabled = not allow_editing_timeline or not has_actions
-            
-            # Set disabled styling
-            if plugin_disabled:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-            
-            # Create button
-            button_id = f"{display_name}##{plugin_name}{window_id_suffix}"
-            if imgui.button(button_id):
-                if not plugin_disabled:
-                    # Check if plugin requires parameters
-                    if self._requires_parameters(plugin_info):
-                        # Show popup for parameter input
-                        popup_key = f"{plugin_name}_popup"
-                        if popup_key not in self.plugin_popups:
-                            # Initialize with proper default parameters
-                            default_params = {}
-                            schema = plugin_info.get('parameters_schema', {})
-                            # Precompute type->default mapping for performance
-                            type_defaults = {
-                                int: lambda constraints: constraints.get('min', 0),
-                                float: lambda constraints: constraints.get('min', 0.0),
-                                bool: lambda constraints: False,
-                                str: lambda constraints: "",
-                            }
-                            for param_name, param_info in schema.items():
-                                default = param_info.get('default')
-                                if default is not None:
-                                    default_params[param_name] = default
-                                    continue
-                                param_type = param_info.get('type', str)
-                                constraints = param_info.get('constraints', {})
-                                default_params[param_name] = type_defaults.get(param_type, lambda constraints: None)(constraints)
-                            
-                            self.plugin_popups[popup_key] = {
-                                'show': False,
-                                'apply_to_selection': bool(self.multi_selected_action_indices),
-                                'params': default_params
-                            }
-                        self.plugin_popups[popup_key]['show'] = True
-                        self.plugin_popups[popup_key]['apply_to_selection'] = bool(
-                            self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
-                    else:
-                        # Apply plugin directly with default parameters
-                        selected_indices = list(self.multi_selected_action_indices) if self.multi_selected_action_indices else None
-                        
-                        suffix = " to selection" if selected_indices else ""
-                        op_desc = f"Applied {display_name}{suffix}"
-                        
-                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                        if self._apply_plugin_directly(
-                            plugin_name,
-                            target_funscript_instance_for_render,
-                            axis_name_for_render,
-                            fs_proc,
-                            selected_indices,
-                        ):
-                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                            self.app.logger.info(
-                                f"{op_desc} on T{self.timeline_num}.",
-                                extra={"status_message": True},
-                            )
-            
-            # Remove disabled styling
-            if plugin_disabled:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
-            
-            # Add same line for horizontal layout
-            imgui.same_line()
-        
-        # Render plugin popups
-        self._render_plugin_popups(
-            window_id_suffix,
-            target_funscript_instance_for_render,
-            axis_name_for_render,
-            fs_proc,
-        )
 
     def _update_plugin_preview(self, plugin_name, params, apply_to_selection):
         """Update preview for a specific plugin with given parameters."""
@@ -647,192 +513,6 @@ class InteractiveFunscriptTimeline:
             self.app.logger.warning(f"Error generating preview for {plugin_name}: {e}")
             self.clear_preview()
 
-    def _render_plugin_popups(self, window_id_suffix, target_funscript, axis_name, fs_proc):
-        """Render parameter input popups for plugins that require them."""
-        for popup_key, popup_state in self.plugin_popups.items():
-            if not popup_state['show']:
-                continue
-                
-            plugin_name = popup_key.replace('_popup', '')
-            
-            # Find plugin info
-            plugin_info = None
-            for plugin in self._get_available_plugins():
-                if plugin['name'] == plugin_name:
-                    plugin_info = plugin
-                    break
-            
-            if not plugin_info:
-                popup_state['show'] = False
-                continue
-            
-            display_name = self._get_plugin_display_name(plugin_info)
-            popup_title = f"{display_name} Settings (Timeline {self.timeline_num})##{plugin_name}Settings{window_id_suffix}"
-            
-            # Initialize preview state if not exists
-            if 'show_preview' not in popup_state:
-                popup_state['show_preview'] = True
-                popup_state['preview_initialized'] = False
-            
-            # Initialize preview immediately when popup opens
-            if not popup_state['preview_initialized'] and popup_state['show_preview']:
-                self._update_plugin_preview(plugin_name, popup_state['params'], popup_state.get('apply_to_selection', False))
-                popup_state['preview_initialized'] = True
-            
-            # Create popup window
-            main_viewport = imgui.get_main_viewport()
-            popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 450) * 0.5
-            popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 350) * 0.5
-            
-            imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
-            imgui.set_next_window_size(450, 350, condition=imgui.APPEARING)
-            
-            is_open, _ = imgui.begin(popup_title, closable=True)
-            if not is_open:
-                popup_state['show'] = False
-                self.clear_preview()  # Clear preview when popup closes
-                imgui.end()
-                continue
-            
-            # Track parameter changes to update preview
-            params_changed = False
-            
-            # Render parameter inputs based on schema
-            schema = plugin_info.get('parameters_schema', {})
-            for param_name, param_info in schema.items():
-                param_type = param_info.get('type', str)
-                param_desc = param_info.get('description', param_name)
-                default_value = param_info.get('default', 0)
-                current_value = popup_state['params'].get(param_name, default_value)
-                
-                imgui.text(f"{param_desc}:")
-                
-                old_value = current_value
-                try:
-                    if param_type == float:
-                        constraints = param_info.get('constraints', {})
-                        min_val = float(constraints.get('min', 0.0))
-                        max_val = float(constraints.get('max', 100.0))
-                        # Ensure current_value is float
-                        current_value = float(current_value) if current_value is not None else min_val
-                        _, new_value = imgui.slider_float(f"##{param_name}", current_value, min_val, max_val)
-                        popup_state['params'][param_name] = new_value
-                    elif param_type == int:
-                        constraints = param_info.get('constraints', {})
-                        min_val = int(constraints.get('min', 0))
-                        max_val = int(constraints.get('max', 100))
-                        # Ensure current_value is int
-                        current_value = int(current_value) if current_value is not None else min_val
-                        _, new_value = imgui.slider_int(f"##{param_name}", current_value, min_val, max_val)
-                        popup_state['params'][param_name] = new_value
-                    elif param_type == bool:
-                        # Ensure current_value is bool
-                        current_value = bool(current_value) if current_value is not None else False
-                        _, new_value = imgui.checkbox(f"##{param_name}", current_value)
-                        popup_state['params'][param_name] = new_value
-                    else:
-                        # For string or other types, use text input
-                        current_value = str(current_value) if current_value is not None else ""
-                        _, new_value = imgui.input_text(f"##{param_name}", current_value, 256)
-                        popup_state['params'][param_name] = new_value
-                        
-                except (ValueError, TypeError) as e:
-                    # Fallback for type conversion errors
-                    self.app.logger.warning(f"Parameter type error for {param_name}: {e}")
-                    default_map = {float: 0.0, int: 0, bool: False, str: ""}
-                    new_value = default_map.get(param_type, "")
-                    popup_state['params'][param_name] = new_value
-                    imgui.text_colored(f"Error: Invalid {param_type.__name__} value", 1.0, 0.4, 0.4, 1.0)
-                
-                if new_value != old_value:
-                    params_changed = True
-                    # Force preview update when parameters change
-                    if popup_state.get('show_preview', False):
-                        self._update_plugin_preview(
-                            plugin_name,
-                            popup_state["params"],
-                            popup_state.get("apply_to_selection", False),
-                        )
-            imgui.separator()
-            
-            # Apply to selection checkbox
-            old_selection = popup_state['apply_to_selection']
-            has_selection = self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2
-            
-            if has_selection:
-                _, popup_state["apply_to_selection"] = imgui.checkbox(
-                    f"Apply to {len(self.multi_selected_action_indices)} selected points only",
-                    popup_state["apply_to_selection"],
-                )
-            else:
-                imgui.text_disabled("Apply to: Full Timeline (no selection)")
-                popup_state['apply_to_selection'] = False
-            
-            if popup_state['apply_to_selection'] != old_selection:
-                params_changed = True
-                # Force preview update when selection changes
-                if popup_state['show_preview']:
-                    self._update_plugin_preview(plugin_name, popup_state['params'], popup_state['apply_to_selection'])
-            
-            # Preview checkbox
-            preview_changed, popup_state['show_preview'] = imgui.checkbox(
-                "Show Preview", popup_state['show_preview'])
-            if preview_changed:
-                params_changed = True
-                # Force preview update when preview is toggled
-                if popup_state['show_preview']:
-                    self._update_plugin_preview(plugin_name, popup_state['params'], popup_state['apply_to_selection'])
-                    popup_state['preview_initialized'] = True
-            
-            # Update preview if parameters changed or first time
-            if (params_changed or not popup_state['preview_initialized']) and popup_state['show_preview']:
-                self._update_plugin_preview(plugin_name, popup_state['params'], popup_state['apply_to_selection'])
-                popup_state['preview_initialized'] = True
-            elif not popup_state['show_preview']:
-                self.clear_preview()
-            imgui.separator()
-            
-            # Apply and Cancel buttons
-            if imgui.button("Apply"):
-                selected_indices = (
-                    list(self.multi_selected_action_indices)
-                    if popup_state["apply_to_selection"] and self.multi_selected_action_indices
-                    else None
-                )
-
-                params = popup_state['params'].copy()
-                if selected_indices:
-                    params['selected_indices'] = selected_indices
-                
-                suffix = " to selection" if selected_indices else ""
-                op_desc = f"Applied {display_name}{suffix}"
-                
-                fs_proc._record_timeline_action(self.timeline_num, op_desc)
-                try:
-                    success = target_funscript.apply_plugin(plugin_name, axis=axis_name, **params)
-                    if success:
-                        fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                        self.app.logger.info(
-                            f"{op_desc} on T{self.timeline_num}.",
-                            extra={"status_message": True},
-                        )
-                        popup_state['show'] = False
-                        self.clear_preview()
-                    else:
-                        self.app.logger.error(f"Failed to apply {display_name}")
-                except Exception as e:
-                    self.app.logger.error(f"Error applying {display_name}: {e}")
-            
-            imgui.same_line()
-            if imgui.button("Cancel"):
-                popup_state['show'] = False
-                self.clear_preview()
-            imgui.end()
-        
-        # Clear preview if no popups are showing
-        any_popup_showing = any(state['show'] for state in self.plugin_popups.values())
-        if not any_popup_showing and self.is_previewing:
-            self.clear_preview()
 
     def _perform_time_shift(self, frame_delta: int):
         fs_proc = self.app.funscript_processor
@@ -3735,6 +3415,18 @@ class InteractiveFunscriptTimeline:
                     imgui.menu_item(f"Start Selection Here", enabled=False)
                     imgui.menu_item(f"End Selection Here", enabled=False)
                 # --- End new items ---
+                imgui.separator()
+
+                # --- Apply Plugins to Selection ---
+                has_multi_selection = bool(self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2)
+                if has_multi_selection:
+                    selection_count = len(self.multi_selected_action_indices)
+                    if imgui.begin_menu(f"Apply Plugin to {selection_count} Selected Points"):
+                        self._render_selection_plugin_menu(target_funscript_instance_for_render, axis_name_for_render, fs_proc)
+                        imgui.end_menu()
+                else:
+                    imgui.text_disabled("Apply Plugin to Selection (need 2+ selected points)")
+                
                 imgui.separator()
 
                 can_copy = allow_editing_timeline and (bool(self.multi_selected_action_indices) or self.selected_action_idx != -1)
