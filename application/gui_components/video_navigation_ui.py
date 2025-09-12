@@ -762,6 +762,22 @@ class VideoNavigationUI:
                         self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='both')
                 imgui.end_menu()
 
+            # --- Apply Plugin to Chapter submenu ---
+            can_apply_plugin = num_selected > 0
+            if imgui.begin_menu("Apply Plugin to Chapter", enabled=can_apply_plugin):
+                if can_apply_plugin and self.context_selected_chapters:
+                    # Timeline selection submenus with plugin lists
+                    if imgui.begin_menu("Timeline 1 (Primary)"):
+                        self._render_chapter_plugin_menu('primary')
+                        imgui.end_menu()
+                    
+                    # Only show Timeline 2 if it's visible
+                    timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
+                    if imgui.begin_menu("Timeline 2 (Secondary)", enabled=timeline2_visible):
+                        self._render_chapter_plugin_menu('secondary')
+                        imgui.end_menu()
+                imgui.end_menu()
+
             # --- Analysis submenu ---
             can_analyze = num_selected == 1
             if imgui.begin_menu("Chapter Analysis", enabled=can_analyze):
@@ -1238,6 +1254,140 @@ class VideoNavigationUI:
         end_t_tt = segment.end_frame_id / fps_tt if fps_tt > 0 else 0
         imgui.text(f"Time: {_format_time(self.app, start_t_tt)} - {_format_time(self.app, end_t_tt)}")
         imgui.end_tooltip()
+
+    def _render_chapter_plugin_menu(self, target_timeline: str):
+        """Render plugin selection menu for chapter-based plugin application.
+        
+        Args:
+            target_timeline: 'primary' or 'secondary' - which timeline to target
+        """
+        if not self.context_selected_chapters:
+            imgui.text_disabled("No chapters selected")
+            return
+            
+        # Get the appropriate timeline instance
+        timeline_instance = None
+        timeline_num = None
+        
+        if target_timeline == 'primary':
+            timeline_instance = self.gui_instance.timeline_editor1
+            timeline_num = 1
+        elif target_timeline == 'secondary':
+            timeline_instance = self.gui_instance.timeline_editor2
+            timeline_num = 2
+        else:
+            imgui.text_disabled("Invalid timeline")
+            return
+            
+        # Get funscript and axis using the same method as timeline
+        target_funscript, axis_name = self.app.funscript_processor._get_target_funscript_object_and_axis(timeline_num)
+            
+        if not timeline_instance or not target_funscript:
+            imgui.text_disabled("Timeline not available")
+            return
+            
+        # Get available plugins from the timeline's plugin renderer
+        if not hasattr(timeline_instance, 'plugin_renderer') or not timeline_instance.plugin_renderer:
+            imgui.text_disabled("Plugin system not available")
+            return
+            
+        plugin_manager = timeline_instance.plugin_renderer.plugin_manager
+        available_plugins = plugin_manager.get_available_plugins()
+        
+        if not available_plugins:
+            imgui.text_disabled("No plugins available")
+            return
+            
+        chapter_count = len(self.context_selected_chapters)
+        chapter_text = "chapter" if chapter_count == 1 else f"{chapter_count} chapters"
+        
+        # Render plugin menu items
+        for plugin_name in sorted(available_plugins):
+            ui_data = plugin_manager.get_plugin_ui_data(plugin_name)
+            if not ui_data or not ui_data['available']:
+                continue
+                
+            display_name = ui_data['display_name']
+            if imgui.menu_item(f"{display_name}")[0]:
+                # Apply plugin to chapter(s) using the same logic as timeline selection
+                self._apply_plugin_to_chapters(
+                    plugin_name, 
+                    target_timeline, 
+                    timeline_instance,
+                    plugin_manager
+                )
+                imgui.close_current_popup()
+                
+    def _apply_plugin_to_chapters(self, plugin_name: str, target_timeline: str, 
+                                 timeline_instance, plugin_manager):
+        """Apply a plugin to all points within selected chapter(s).
+        
+        This method:
+        1. Selects all points within the chapter time ranges on the target timeline
+        2. Uses the exact same PluginUIRenderer code paths as timeline selection menu
+        """
+        try:
+            # Step 1: Select all points in the chapters on the target timeline
+            if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
+                # Use the existing method to select points in chapters
+                self.app.funscript_processor.select_points_in_chapters(
+                    self.context_selected_chapters, 
+                    target_timeline=target_timeline
+                )
+            else:
+                self.app.logger.error("select_points_in_chapters method not available")
+                return
+                
+            # Step 2: Get the selected indices from the timeline
+            selected_indices = list(timeline_instance.multi_selected_action_indices) if timeline_instance.multi_selected_action_indices else []
+            
+            if len(selected_indices) < 2:
+                chapter_names = [ch.position_short_name for ch in self.context_selected_chapters]
+                self.app.logger.warning(f"No points found in chapter(s) {chapter_names} on {target_timeline} timeline")
+                return
+                
+            # Step 3: Apply plugin using EXACT same logic as timeline selection menu
+            ui_data = plugin_manager.get_plugin_ui_data(plugin_name)
+            
+            if ui_data and timeline_instance.plugin_renderer._should_apply_directly(plugin_name, ui_data):
+                # Direct application (like Invert, Ultimate Autotune)
+                context = plugin_manager.plugin_contexts.get(plugin_name)
+                if context:
+                    context.apply_requested = True
+                    # Force apply_to_selection for chapter context  
+                    if hasattr(context, 'apply_to_selection'):
+                        context.apply_to_selection = True
+                    
+                    chapter_names = [ch.position_short_name for ch in self.context_selected_chapters]
+                    chapter_text = chapter_names[0] if len(chapter_names) == 1 else f"{len(chapter_names)} chapters"
+                    self.app.logger.info(
+                        f"Applied {ui_data['display_name']} to {len(selected_indices)} points in {chapter_text} on {target_timeline} timeline",
+                        extra={"status_message": True}
+                    )
+            else:
+                # Open configuration window (like other filters)
+                from application.classes.plugin_ui_manager import PluginUIState
+                plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
+                
+                # Force apply_to_selection for chapter context
+                context = plugin_manager.plugin_contexts.get(plugin_name)
+                if context and hasattr(context, 'apply_to_selection'):
+                    context.apply_to_selection = True
+                    
+                chapter_names = [ch.position_short_name for ch in self.context_selected_chapters]
+                chapter_text = chapter_names[0] if len(chapter_names) == 1 else f"{len(chapter_names)} chapters"
+                self.app.logger.info(
+                    f"Opened {ui_data['display_name']} configuration for {len(selected_indices)} points in {chapter_text} on {target_timeline} timeline",
+                    extra={"status_message": True}
+                )
+            
+            # Clear chapter selection
+            self.context_selected_chapters.clear()
+            
+        except Exception as e:
+            self.app.logger.error(f"Error applying plugin {plugin_name} to chapters: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 class ChapterListWindow:
