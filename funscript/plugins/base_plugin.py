@@ -253,6 +253,9 @@ class PluginRegistry:
         Returns:
             List of dictionaries with plugin information
         """
+        # Hidden plugins that should not appear in UI
+        hidden_plugin_names = {'template_plugin', 'advanced_template', 'simple_scale'}
+        
         return [
             {
                 'name': plugin.name,
@@ -265,6 +268,9 @@ class PluginRegistry:
                 'modifies_inplace': plugin.modifies_inplace
             }
             for plugin in self._plugins.values()
+            if plugin.name not in hidden_plugin_names 
+            and 'template' not in plugin.name.lower() 
+            and 'example' not in plugin.name.lower()
         ]
     
     def get_plugins_by_capability(self, requires_scipy: Optional[bool] = None, 
