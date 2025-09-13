@@ -195,11 +195,8 @@ class HybridIntelligenceTracker(BaseTracker):
             # Performance monitoring
             self.processing_times = deque(maxlen=30)
             
-            # Verify that we have the new overlay methods
-            if hasattr(self, 'get_overlay_data'):
-                self.logger.info("Hybrid Intelligence Tracker initialized with NEW overlay system")
-            else:
-                self.logger.warning("Hybrid Intelligence Tracker missing new overlay methods - using old BaseTracker?")
+            # Modern overlay system is now implemented
+            self.logger.info("Hybrid Intelligence Tracker initialized with modern overlay system")
             
             # Visualization system configuration
             self.use_external_visualization = False  # Use internal overlays by default
@@ -652,6 +649,49 @@ class HybridIntelligenceTracker(BaseTracker):
             self.logger.info("Hybrid Intelligence Tracker cleaned up")
         except Exception as e:
             self.logger.error(f"Cleanup error: {e}")
+    
+    # Modern overlay system methods
+    def get_overlay_data(self) -> Dict[str, Any]:
+        """
+        Get overlay data for frame rendering.
+        
+        Returns rich visualization data prepared by TrackerVisualizationHelper
+        for drawing on the video frame, including detections, regions, flow vectors, 
+        and tracking state.
+        
+        Returns:
+            Dict containing all overlay visualization data
+        """
+        return getattr(self, 'overlay_data', {
+            'yolo_boxes': [],
+            'poses': [], 
+            'change_regions': [],
+            'flow_vectors': [],
+            'motion_mode': 'hybrid',
+            'locked_penis_box': None,
+            'contact_info': {},
+            'oscillation_grid_active': False,
+            'oscillation_sensitivity': 1.0,
+            'tracking_active': self.tracking_active
+        })
+    
+    def get_debug_window_data(self) -> Dict[str, Any]:
+        """
+        Get debug window data for external rendering.
+        
+        Returns structured debug information organized into metrics,
+        progress bars, and status information for display.
+        
+        Returns:
+            Dict containing debug window visualization data
+        """
+        return getattr(self, 'debug_window_data', {
+            'tracker_name': 'Hybrid Intelligence',
+            'metrics': {'Status': {'Initializing': 'Please wait...'}},
+            'progress_bars': {},
+            'show_graphs': False,
+            'graphs': None
+        })
     
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, 
                      frame_index: Optional[int] = None) -> TrackerResult:
