@@ -147,14 +147,26 @@ class HybridIntelligenceTracker(BaseTracker):
             self.yolo_high_motion_threshold = kwargs.get('yolo_high_motion_threshold', 0.5)
             self.yolo_low_motion_threshold = kwargs.get('yolo_low_motion_threshold', 0.1)
             
-            # Semantic priorities (higher = more important)
+            # VR POV optimized priorities (using actual YOLO class names from constants.py)
             self.class_priorities = {
-                'penis': 10, 'locked_penis': 10,
-                'pussy': 9, 'vagina': 9,
-                'ass': 8, 'anus': 8,
-                'hand': 5, 'finger': 5,
-                'mouth': 4, 'face': 3,
-                'breast': 2, 'body': 1
+                # CRITICAL genital regions (highest priority for VR POV)
+                'penis': 15, 'locked_penis': 15,  # HIGHEST priority
+                'glans': 14,                       # Glans is critical for depth detection
+                'pussy': 12,                       # Very high priority for penetration
+                'butt': 10, 'anus': 10,          # High priority for anal scenes
+                
+                # Contact regions (important for interaction)
+                'hand': 8,                         # Hand contact important
+                'face': 6,                         # Face for oral scenes
+                'breast': 4,                       # Moderate priority
+                
+                # Support regions (lower priority)
+                'navel': 3,                        # Core movement indicator
+                'foot': 2,                         # Footjob scenes
+                'hips center': 2,                  # Hip movement
+                
+                # Generic classes (lowest priority)
+                'person': 1, 'body': 1            # Fallback detections
             }
             
             # === 3. OPTICAL FLOW PARAMETERS ===
@@ -503,8 +515,8 @@ class HybridIntelligenceTracker(BaseTracker):
             'oscillation': 0.1
         }
         
-        # Final output state
-        self.last_primary_position = 50.0
+        # Final output state - VR POV semantics: 100=no action, 0=full insertion
+        self.last_primary_position = 50.0  # Middle position (50% insertion)
         self.last_secondary_position = 50.0
         
         self.logger.debug("Signal processing initialized")
@@ -1814,8 +1826,8 @@ class HybridIntelligenceTracker(BaseTracker):
             return flow_analyses
         
         try:
-            # Process more regions since we have CPU/GPU headroom
-            for i, (change_region, semantics) in enumerate(priority_regions[:10]):  # Process top 10 for better coverage (was 5)
+            # VR POV optimization: Focus on top 5 regions (genital regions prioritized)
+            for i, (change_region, semantics) in enumerate(priority_regions[:5]):  # Top 5 regions for VR POV focus
                 # Extract ROI
                 x, y, w, h = change_region.x, change_region.y, change_region.width, change_region.height
                 
@@ -1869,136 +1881,44 @@ class HybridIntelligenceTracker(BaseTracker):
         return flow_analyses
     
     def _analyze_oscillation_patterns(self) -> float:
-        """Advanced oscillation analysis using FFT for frequency domain detection."""
-        if self.prev_frame_gray is None or self.current_frame_gray is None:
+        """⚡ OPTIMIZED: Simple motion derivative oscillation analysis (FFT eliminated)."""
+        if self.prev_frame_gray is None or self.current_frame_gray is None or not self.change_regions:
             return 0.0
         
         try:
-            # SMART OPTIMIZATION: Grid-based oscillation with movement-focused analysis
-            frame_h, frame_w = self.current_frame_gray.shape
+            # Use existing change regions instead of expensive grid analysis
+            motion_derivatives = []
             
-            # Pre-compute frame difference for movement detection (PERFORMANCE BOOST)
-            frame_diff = cv2.absdiff(self.prev_frame_gray, self.current_frame_gray)
+            for region in self.change_regions[:3]:  # Process only top 3 regions for speed
+                # Use region intensity as motion signal
+                current_intensity = region.intensity / 255.0
+                
+                # Update motion history for this region
+                region_key = f"{region.x}_{region.y}"
+                if region_key not in self.oscillation_history:
+                    self.oscillation_history[region_key] = deque(maxlen=15)  # 0.5 seconds at 30fps
+                
+                self.oscillation_history[region_key].append(current_intensity)
+                history = list(self.oscillation_history[region_key])
+                
+                # Simple derivative-based oscillation detection (much faster than FFT)
+                if len(history) >= 5:
+                    derivatives = np.diff(history[-8:])  # Use last 8 frames only
+                    if len(derivatives) > 0:
+                        sign_changes = np.sum(np.diff(np.sign(derivatives)) != 0)
+                        oscillation_strength = sign_changes / len(derivatives)
+                        motion_derivatives.append(oscillation_strength * current_intensity)
             
-            # SMART THRESHOLDING: Different thresholds for different zones
-            base_movement_threshold = 5  # Base threshold for interaction zones
-            global_movement_threshold = 15  # Higher threshold for non-interaction areas
-            
-            # Get interaction regions for person-penis proximity (SMART LIMITING)
-            interaction_regions = self._get_interaction_regions()
-            
-            oscillation_scores = []
-            processed_cells = 0
-            skipped_cells = 0
-            
-            for grid_y in range(0, frame_h - self.oscillation_block_size, self.oscillation_block_size):
-                for grid_x in range(0, frame_w - self.oscillation_block_size, self.oscillation_block_size):
-                    # MOVEMENT-FOCUSED OPTIMIZATION: Skip areas with no significant movement
-                    y1, y2 = grid_y, grid_y + self.oscillation_block_size
-                    x1, x2 = grid_x, grid_x + self.oscillation_block_size
-                    
-                    # Check if this cell has enough movement to warrant FFT analysis
-                    cell_movement = np.mean(frame_diff[y1:y2, x1:x2])
-                    
-                    # INTERACTION-BASED OPTIMIZATION: Different thresholds for different zones
-                    cell_center = (grid_x + self.oscillation_block_size // 2, grid_y + self.oscillation_block_size // 2)
-                    is_in_interaction_zone = self._is_cell_in_interaction_zone(cell_center, interaction_regions)
-                    
-                    if is_in_interaction_zone:
-                        # Lower threshold for interaction zones - catch subtle oscillations
-                        if cell_movement < base_movement_threshold:
-                            skipped_cells += 1
-                            continue  # Skip FFT for static interaction areas
-                    else:
-                        # Higher threshold for non-interaction areas - be more selective
-                        if cell_movement < global_movement_threshold:
-                            skipped_cells += 1
-                            continue  # Skip FFT for static non-interaction areas
-                    
-                    # Extract grid cell for analysis
-                    motion_score = cell_movement / 255.0
-                    
-                    # Track oscillation history for this cell (with cleanup)
-                    cell_key = (grid_x, grid_y)
-                    if cell_key not in self.oscillation_history:
-                        self.oscillation_history[cell_key] = deque(maxlen=self.oscillation_history_max_len)
-                    
-                    self.oscillation_history[cell_key].append(motion_score)
-                    processed_cells += 1
-                    
-                    # Advanced FFT-based oscillation analysis
-                    if len(self.oscillation_history[cell_key]) >= 30:  # Need enough history for FFT
-                        history = np.array(list(self.oscillation_history[cell_key]))
-                        
-                        # Apply windowing to reduce spectral leakage
-                        windowed_history = history * np.hanning(len(history))
-                        
-                        # Compute FFT
-                        fft = np.fft.fft(windowed_history)
-                        freqs = np.fft.fftfreq(len(history), d=1.0/30.0)  # Assuming 30 fps
-                        
-                        # Focus on oscillation frequencies (0.5-5 Hz typical for sexual activity)
-                        valid_freq_mask = (np.abs(freqs) >= 0.5) & (np.abs(freqs) <= 5.0)
-                        
-                        if np.any(valid_freq_mask):
-                            # Find dominant frequency in the valid range
-                            power_spectrum = np.abs(fft[valid_freq_mask])
-                            max_power = np.max(power_spectrum)
-                            
-                            # Calculate oscillation strength based on:
-                            # 1. Peak power in frequency domain
-                            # 2. Ratio of peak power to mean power (spectral contrast)
-                            mean_power = np.mean(power_spectrum)
-                            spectral_contrast = max_power / (mean_power + 1e-6)
-                            
-                            # Oscillation score combines both factors
-                            oscillation_score = min((max_power / len(history)) * spectral_contrast, 2.0)
-                            oscillation_scores.append(oscillation_score)
-                        
-                        else:
-                            # Fallback to simple std dev if no valid frequencies
-                            oscillation_score = min(np.std(history) * motion_score * 2, 1.0)
-                            oscillation_scores.append(oscillation_score)
-                    
-                    elif len(self.oscillation_history[cell_key]) > 10:
-                        # Simple fallback for insufficient FFT data
-                        history = np.array(list(self.oscillation_history[cell_key]))
-                        oscillation_score = min(np.std(history) * motion_score * 2, 1.0)
-                        oscillation_scores.append(oscillation_score)
-            
-            # Log optimization stats occasionally (time-based to avoid frame_count dependency)
-            total_cells = processed_cells + skipped_cells
-            current_time = time.time()
-            if hasattr(self, '_last_optimization_log_time'):
-                if current_time - self._last_optimization_log_time > 10.0:  # Every 10 seconds
-                    skip_percent = (skipped_cells / total_cells * 100) if total_cells > 0 else 0
-                    self.logger.info(f"Smart optimization: skipped {skip_percent:.1f}% of cells, processed {processed_cells}/{total_cells}")
-                    self._last_optimization_log_time = current_time
+            # Calculate final oscillation signal
+            if motion_derivatives:
+                final_oscillation = np.mean(motion_derivatives)
+                final_oscillation *= (self.oscillation_sensitivity / 10.0)  # Apply sensitivity
+                return min(final_oscillation, 1.0)
             else:
-                self._last_optimization_log_time = current_time
-            
-            # Return average oscillation across all cells
-            return np.mean(oscillation_scores) if oscillation_scores else 0.0
-            
+                return 0.0
+                
         except Exception as e:
-            self.logger.warning(f"Advanced oscillation analysis failed, using fallback: {e}")
-            return self._analyze_oscillation_fallback()
-    
-    def _analyze_oscillation_fallback(self) -> float:
-        """Simple fallback oscillation analysis when FFT fails."""
-        try:
-            oscillation_scores = []
-            
-            for cell_key, history in self.oscillation_history.items():
-                if len(history) > 5:
-                    history_array = np.array(list(history))
-                    oscillation_score = np.std(history_array) * np.mean(history_array)
-                    oscillation_scores.append(min(oscillation_score, 1.0))
-            
-            return np.mean(oscillation_scores) if oscillation_scores else 0.0
-            
-        except Exception as e:
-            self.logger.warning(f"Even fallback oscillation analysis failed: {e}")
+            self.logger.warning(f"Oscillation analysis failed: {e}")
             return 0.0
     
     def _get_interaction_regions(self) -> List[Tuple[int, int, int, int]]:
@@ -2226,8 +2146,8 @@ class HybridIntelligenceTracker(BaseTracker):
             # Final signal combines base + enhanced pose activity
             fused_signal = (base_fused_signal * pose_boost_factor) + (pose_contribution * 0.3)
             
-            # Map to funscript position (0-100)
-            primary_pos = fused_signal * 100.0
+            # Map to VR POV funscript position (100=no action, 0=full insertion)
+            primary_pos = 100.0 - (fused_signal * 100.0)  # INVERTED for VR POV
             
             # For secondary axis, use optical flow direction if available
             secondary_pos = self.last_secondary_position  # Start with current position
