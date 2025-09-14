@@ -22,6 +22,7 @@ import cv2
 from collections import deque
 from typing import Dict, Any, Optional, List, Tuple, Set
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import traceback
 from dataclasses import dataclass
 
@@ -209,12 +210,15 @@ class HybridIntelligenceTracker(BaseTracker):
             self.yolo_base_update_interval = kwargs.get('yolo_base_interval', 3)  # Base: every 3 frames
             self.yolo_confidence_threshold = kwargs.get('yolo_confidence_threshold', 0.2)  # Lower threshold
             
-            # Adaptive YOLO frequency based on motion intensity
-            self.yolo_adaptive_frequency = kwargs.get('yolo_adaptive_frequency', True)
-            self.yolo_motion_history = deque(maxlen=10)  # Track motion over 10 frames
+            # Adaptive YOLO frequency - simplified
+            self.yolo_motion_history = deque(maxlen=5)  # Reduced history
             self.yolo_current_interval = self.yolo_base_update_interval
-            self.yolo_high_motion_threshold = kwargs.get('yolo_high_motion_threshold', 0.5)
-            self.yolo_low_motion_threshold = kwargs.get('yolo_low_motion_threshold', 0.1)
+            
+            # Thread pool for parallel processing  
+            self.executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="HI")
+            
+            # Memory pool for ROI operations
+            self.roi_pool = {}
             
             # VR POV optimized priorities (using actual YOLO class names from constants.py)
             self.class_priorities = {
@@ -274,10 +278,8 @@ class HybridIntelligenceTracker(BaseTracker):
             self.semantic_regions: List[SemanticRegion] = []
             self.flow_analyses: List[FlowAnalysis] = []
             
-            # History tracking for graphical debug window
-            self.position_history = deque(maxlen=120)  # 2-4 seconds at 30-60fps
-            self.change_regions_history = deque(maxlen=60)  # 1-2 seconds
-            self.flow_intensity_history = deque(maxlen=60)  # 1-2 seconds
+            # History tracking for debug
+            self.position_history = deque(maxlen=60)  # Reduced history
             
             # Performance monitoring
             self.processing_times = deque(maxlen=30)
@@ -668,51 +670,22 @@ class HybridIntelligenceTracker(BaseTracker):
             return False
     
     def _perform_memory_cleanup(self):
-        """Periodic memory cleanup to prevent unbounded growth."""
+        """Lean memory cleanup."""
         try:
-            # CRITICAL FIX: Aggressive oscillation history cleanup
-            if hasattr(self, 'oscillation_history') and self.oscillation_history:
-                max_history = 50  # Reduced from 200 to prevent memory explosion
-                current_count = len(self.oscillation_history)
+            # Aggressive oscillation history cleanup
+            if hasattr(self, 'oscillation_history') and len(self.oscillation_history) > 30:
+                # Keep only top 20 most active cells
+                active_cells = [(k, np.mean(list(v)[-3:]) if v else 0) for k, v in self.oscillation_history.items()]
+                active_cells.sort(key=lambda x: x[1], reverse=True)
+                self.oscillation_history = {k: self.oscillation_history[k] for k, _ in active_cells[:20]}
                 
-                if current_count > max_history:
-                    # Smart cleanup: keep only cells with recent activity and good history
-                    cells_by_activity = []
-                    
-                    for cell_key, history in self.oscillation_history.items():
-                        if len(history) > 5:  # Only consider cells with some data
-                            # Calculate activity score (recent variance + mean motion)
-                            recent_history = list(history)[-10:] if len(history) >= 10 else list(history)
-                            activity_score = np.std(recent_history) + np.mean(recent_history)
-                            cells_by_activity.append((cell_key, activity_score, len(history)))
-                    
-                    # Sort by activity score (descending) and keep top entries
-                    cells_by_activity.sort(key=lambda x: x[1], reverse=True)
-                    keys_to_keep = set(cell[0] for cell in cells_by_activity[:max_history])
-                    
-                    # Remove inactive cells
-                    keys_to_remove = [k for k in self.oscillation_history.keys() if k not in keys_to_keep]
-                    removed_count = len(keys_to_remove)
-                    
-                    for key in keys_to_remove:
-                        del self.oscillation_history[key]
-                    
-                    if removed_count > 100:  # Log major cleanups
-                        self.logger.info(f"Memory cleanup: removed {removed_count} inactive oscillation cells")
-            
-            # Limit processing times history (check if exists)
-            if hasattr(self, 'processing_times') and self.processing_times:
-                if len(self.processing_times) > 100:
-                    self.processing_times = self.processing_times[-50:]  # Keep last 50
-                    
-            # Limit signal histories (check if exists)
-            if hasattr(self, 'primary_signal_history') and self.primary_signal_history:
-                if len(self.primary_signal_history) > 300:
-                    self.primary_signal_history = self.primary_signal_history[-150:]
-                    
-            if hasattr(self, 'secondary_signal_history') and self.secondary_signal_history:
-                if len(self.secondary_signal_history) > 300:
-                    self.secondary_signal_history = self.secondary_signal_history[-150:]
+            # Trim histories aggressively
+            if hasattr(self, 'processing_times') and len(self.processing_times) > 30:
+                self.processing_times = self.processing_times[-15:]
+            if hasattr(self, 'primary_signal_history') and len(self.primary_signal_history) > 100:
+                self.primary_signal_history = self.primary_signal_history[-50:]
+            if hasattr(self, 'secondary_signal_history') and len(self.secondary_signal_history) > 100:
+                self.secondary_signal_history = self.secondary_signal_history[-50:]
                 
         except Exception as e:
             self.logger.warning(f"Memory cleanup error: {e}")
@@ -722,12 +695,10 @@ class HybridIntelligenceTracker(BaseTracker):
         try:
             self.stop_tracking()
             
-            # Perform final memory cleanup
+            # Cleanup resources
             self._perform_memory_cleanup()
-            
-            # Clear GPU resources  
-            if hasattr(self, 'gpu_flow') and self.gpu_flow:
-                del self.gpu_flow
+            if hasattr(self, 'executor'): self.executor.shutdown(wait=False)
+            if hasattr(self, 'gpu_flow') and self.gpu_flow: del self.gpu_flow
             
             # Clear pose model
             if hasattr(self, 'pose_model') and self.pose_model:
@@ -810,36 +781,39 @@ class HybridIntelligenceTracker(BaseTracker):
             # Convert to grayscale for processing
             self.current_frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             
-            # === STEP 1: FRAME DIFFERENTIATION ===
+            # === PARALLEL PROCESSING PIPELINE ===
+            futures = []
+            
             if self.prev_frame_gray is not None:
-                self.change_regions = self._detect_frame_changes(
-                    self.prev_frame_gray, self.current_frame_gray
-                )
+                # Frame diff + motion tracking
+                diff_future = self.executor.submit(self._detect_frame_changes_fast, self.prev_frame_gray, self.current_frame_gray)
+                futures.append(('diff', diff_future))
                 
-                # Track motion intensity for adaptive YOLO
-                total_motion = sum(region.intensity * region.area for region in self.change_regions) / 1000000.0
-                self.yolo_motion_history.append(min(total_motion, 2.0))  # Clamp to reasonable range
-                
-                # Update graphical debug history
-                self.change_regions_history.append(self.change_regions.copy())
-                flow_intensity = sum(analysis.flow_magnitude for analysis in self.flow_analyses)
-                self.flow_intensity_history.append(flow_intensity)
+                # YOLO detection (if needed)
+                if self._should_run_yolo():
+                    yolo_future = self.executor.submit(self._detect_semantic_objects, frame)
+                    futures.append(('yolo', yolo_future))
+                    
+                # Pose estimation
+                pose_future = self.executor.submit(self._estimate_pose, frame)
+                futures.append(('pose', pose_future))
             else:
                 self.change_regions = []
+                pose_data = self._estimate_pose(frame)
             
-            # === STEP 2: YOLO DETECTION ===
-            should_run = self._should_run_yolo()
-            if should_run:
-                self.logger.debug(f"Running YOLO detection (frame {self.frame_count}, interval={self.yolo_current_interval})")
-                self.semantic_regions = self._detect_semantic_objects(frame)
-                self.logger.debug(f"YOLO detected {len(self.semantic_regions)} semantic regions")
-            else:
-                # Keep previous detections if not running YOLO this frame
-                # self.semantic_regions already contains previous detections
-                self.logger.debug(f"Skipping YOLO (frame {self.frame_count} % {self.yolo_current_interval} = {self.frame_count % self.yolo_current_interval}), keeping {len(self.semantic_regions)} previous regions")
-            
-            # === STEP 2.5: POSE ESTIMATION ===
-            pose_data = self._estimate_pose(frame)
+            # Collect parallel results
+            for task, future in futures:
+                try:
+                    if task == 'diff':
+                        self.change_regions = future.result(timeout=0.05)
+                        total_motion = sum(r.intensity * r.area for r in self.change_regions) / 1000000.0
+                        self.yolo_motion_history.append(min(total_motion, 2.0))
+                    elif task == 'yolo':
+                        self.semantic_regions = future.result(timeout=0.05)
+                    elif task == 'pose':
+                        pose_data = future.result(timeout=0.05)
+                except Exception as e:
+                    self.logger.debug(f"Parallel task {task} failed: {e}")
             
             # === STEP 3: REGION PRIORITIZATION ===
             priority_regions = self._prioritize_regions(pose_data)
@@ -882,7 +856,7 @@ class HybridIntelligenceTracker(BaseTracker):
                 self.logger.debug(f"Overlay prepared: {boxes_count} boxes, {poses_count} poses, {change_regions_count} regions, {flow_vectors_count} flows")
             else:
                 # Use internal visualization - ensure overlays are visible
-                display_frame = self._create_debug_overlay(frame.copy())
+                display_frame = self._create_debug_overlay(frame)
                 
                 # Debug logging to understand overlay status
                 if hasattr(self, 'overlay_data') and self.overlay_data:
@@ -895,8 +869,8 @@ class HybridIntelligenceTracker(BaseTracker):
                 else:
                     self.logger.debug("No overlay data prepared")
             
-            # Update state for next frame
-            self.prev_frame_gray = self.current_frame_gray.copy()
+            # Update state for next frame (avoid copy)
+            self.prev_frame_gray = self.current_frame_gray
             
             # Performance tracking
             processing_time = time.time() - start_time
@@ -927,6 +901,36 @@ class HybridIntelligenceTracker(BaseTracker):
                 debug_info={"error": str(e)},
                 status_message=f"Error: {str(e)}"
             )
+    
+    def _detect_frame_changes_fast(self, prev_gray: np.ndarray, curr_gray: np.ndarray) -> List[ChangeRegion]:
+        """Fast frame difference using minimal operations."""
+        try:
+            # Vectorized operations only
+            diff = np.abs(curr_gray.astype(np.int16) - prev_gray.astype(np.int16)).astype(np.uint8)
+            diff_blurred = cv2.GaussianBlur(diff, (5, 5), 0)
+            binary_mask = (diff_blurred > self.frame_diff_threshold).astype(np.uint8) * 255
+            binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, self.morph_kernel)
+            
+            contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            regions = []
+            
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area > 50:  # Filter small regions
+                    x, y, w, h = cv2.boundingRect(contour)
+                    intensity = np.mean(diff[y:y+h, x:x+w])
+                    regions.append(ChangeRegion(
+                        x=x, y=y, width=w, height=h,
+                        area=int(area),
+                        intensity=float(intensity),
+                        bbox=(x, y, x+w, y+h)
+                    ))
+                    
+            return sorted(regions, key=lambda r: r.intensity * r.area, reverse=True)[:10]  # Top 10 only
+            
+        except Exception as e:
+            self.logger.warning(f"Fast frame diff failed: {e}")
+            return []
     
     def _detect_frame_changes(self, prev_gray: np.ndarray, curr_gray: np.ndarray) -> List[ChangeRegion]:
         """🚀 OPTIMIZED: Detect regions of significant change using powerful numpy operations."""
@@ -984,26 +988,13 @@ class HybridIntelligenceTracker(BaseTracker):
             return []
     
     def _should_run_yolo(self) -> bool:
-        """Determine if YOLO detection should run this frame with adaptive frequency."""
+        """Adaptive YOLO frequency based on motion."""
         self.yolo_frame_counter += 1
         
-        if not self.yolo_adaptive_frequency:
-            # Original fixed frequency
-            return self.yolo_frame_counter % self.yolo_base_update_interval == 0
-        
-        # Update adaptive frequency based on recent motion
-        if len(self.yolo_motion_history) >= 3:  # Need some history
+        # Simplified adaptive logic
+        if len(self.yolo_motion_history) >= 3:
             avg_motion = np.mean(list(self.yolo_motion_history))
-            
-            if avg_motion > self.yolo_high_motion_threshold:
-                # High motion: Check every frame
-                self.yolo_current_interval = 1
-            elif avg_motion > self.yolo_low_motion_threshold:
-                # Medium motion: Use base interval
-                self.yolo_current_interval = self.yolo_base_update_interval
-            else:
-                # Low motion: Check every 10 frames (save processing)
-                self.yolo_current_interval = 10
+            self.yolo_current_interval = 1 if avg_motion > 0.3 else (3 if avg_motion > 0.1 else 8)
         
         return self.yolo_frame_counter % self.yolo_current_interval == 0
     
@@ -1917,11 +1908,17 @@ class HybridIntelligenceTracker(BaseTracker):
                 w = min(w, frame_w - x)
                 h = min(h, frame_h - y)
                 
-                if w < 10 or h < 10:  # Skip tiny regions
+                if w < 12 or h < 12:  # Skip tiny regions (DIS flow requires >= 12)
                     continue
                 
-                prev_roi = prev_gray[y:y+h, x:x+w].copy()  # Ensure contiguous
-                curr_roi = curr_gray[y:y+h, x:x+w].copy()  # Ensure contiguous
+                # Memory pool for ROI operations
+                roi_key = (w, h)
+                if roi_key not in self.roi_pool:
+                    self.roi_pool[roi_key] = (np.empty((h, w), dtype=np.uint8), np.empty((h, w), dtype=np.uint8))
+                    
+                prev_roi, curr_roi = self.roi_pool[roi_key]
+                prev_roi[:] = prev_gray[y:y+h, x:x+w]
+                curr_roi[:] = curr_gray[y:y+h, x:x+w]
                 
                 # 🚀 OPTIMIZED: CPU DIS ULTRAFAST optical flow (10-50x faster than GPU Farneback)
                 flow = self.flow_dense.calc(prev_roi, curr_roi, None)
@@ -2318,117 +2315,6 @@ class HybridIntelligenceTracker(BaseTracker):
         
         return action_log
     
-    def _create_debug_overlay(self, frame: np.ndarray) -> np.ndarray:
-        """Create visual debug overlay showing all processing stages."""
-        if not self.show_debug_overlay:
-            return frame
-        
-        try:
-            # === DRAW CHANGE REGIONS (REDUCED CLUTTER) ===
-            if self.show_change_regions and len(self.change_regions) <= 15:  # Only show if not too cluttered
-                for region in self.change_regions:
-                    if region.intensity > 20:  # Only show significant changes
-                        cv2.rectangle(frame, (region.x, region.y), 
-                                    (region.x + region.width, region.y + region.height),
-                                    (0, 180, 180), 1)  # Dimmer teal rectangles
-                        
-                        # Simplified label - no "??..." confusion
-                        if region.intensity > 35:  # Only label high-intensity regions
-                            label = f"Δ{region.intensity:.0f}"
-                            cv2.putText(frame, label, (region.x, region.y - 3),
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 180, 180), 1)
-            
-            # === DRAW YOLO DETECTIONS (CLEANER) ===
-            if self.show_yolo_detections:
-                for sem_region in self.semantic_regions:
-                    x1, y1, x2, y2 = sem_region.bbox
-                    
-                    # Highlight only important detections (penis, person, etc.)
-                    important_classes = ['penis', 'locked_penis', 'person', 'hand', 'breast']
-                    if sem_region.class_name.lower() in important_classes:
-                        # Color based on priority (red=high, blue=low)
-                        priority_ratio = min(sem_region.priority / 10.0, 1.0)
-                        color = (
-                            int(255 * (1 - priority_ratio)),  # Blue component
-                            int(128 * priority_ratio),         # Green component  
-                            int(255 * priority_ratio)          # Red component
-                        )
-                        
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                        
-                        # Clear, readable label with enhanced visibility for target classes
-                        label = f"{sem_region.class_name}:{sem_region.confidence:.2f}"
-                        label_color = color
-                        if sem_region.class_name.lower() in ['penis', 'locked_penis', 'pussy', 'butt']:
-                            label_color = (0, 255, 255)  # Bright cyan for target classes
-                        cv2.putText(frame, label, (x1, y1 - 5),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.4, label_color, 1)
-            
-            # === DRAW FLOW VECTORS ===
-            if self.show_flow_vectors:
-                for i, flow_analysis in enumerate(self.flow_analyses):
-                    # Draw flow vector at region center
-                    if i < len(self.change_regions):
-                        region = self.change_regions[i]
-                        center_x = region.x + region.width // 2
-                        center_y = region.y + region.height // 2
-                        
-                        # Scale flow direction for visualization
-                        flow_scale = 30.0 * flow_analysis.flow_magnitude
-                        end_x = int(center_x + flow_analysis.flow_direction[0] * flow_scale)
-                        end_y = int(center_y + flow_analysis.flow_direction[1] * flow_scale)
-                        
-                        # Color based on confidence
-                        conf_color = (
-                            0,
-                            int(255 * flow_analysis.confidence),
-                            int(255 * (1 - flow_analysis.confidence))
-                        )
-                        
-                        cv2.arrowedLine(frame, (center_x, center_y), (end_x, end_y),
-                                      conf_color, 2)
-            
-            # === OSCILLATION GRID OVERLAY ===
-            if hasattr(self, 'show_oscillation_grid') and getattr(self, 'show_oscillation_grid', True):
-                self._draw_oscillation_grid(frame)
-            
-            # === POSE VISUALIZATION ===
-            if hasattr(self, 'last_pose_data') and self.last_pose_data:
-                frame = self._draw_pose_visualization(frame, self.last_pose_data)
-            
-            # === STATUS OVERLAY ===
-            # FPS info removed - will be passed to control panel via debug_info
-            
-            # Show target tracking status when locked box is active
-            current_time = time.time()
-            if (self.locked_penis_box and 
-                (current_time - self.locked_penis_last_seen) < self.locked_penis_persistence_duration):
-                time_since_seen = current_time - self.locked_penis_last_seen
-                target_text = f"LOCKED TARGET (seen {time_since_seen:.1f}s ago)"
-                cv2.putText(frame, target_text, (10, 25),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-            
-            # Debug: Show YOLO detection count for troubleshooting
-            if len(self.semantic_regions) > 0:
-                yolo_debug_text = f"YOLO: {len(self.semantic_regions)} objects detected"
-                cv2.putText(frame, yolo_debug_text, (10, 50),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 128, 128), 1)
-            
-            # Position text overlay removed - data available via debug_info
-            
-            # Simplified fusion weights - move to bottom right
-            if hasattr(self, '_show_detailed_debug') and self._show_detailed_debug:
-                weights_text = f"W: FD={self.fusion_weights['frame_diff']:.1f} YL={self.fusion_weights['yolo_weighted']:.1f} OF={self.fusion_weights['optical_flow']:.1f}"
-                text_size_w = cv2.getTextSize(weights_text, cv2.FONT_HERSHEY_SIMPLEX, 0.3, 1)[0]
-                text_x_w = frame_w - text_size_w[0] - 10
-                text_y_w = frame_h - 30
-                cv2.putText(frame, weights_text, (text_x_w, text_y_w),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.3, (150, 150, 150), 1)
-        
-        except Exception as e:
-            self.logger.warning(f"Debug overlay creation failed: {e}")
-        
-        return frame
     
     def _draw_oscillation_grid(self, frame: np.ndarray):
         """Draw oscillation detection grid overlay."""
@@ -3137,6 +3023,37 @@ class HybridIntelligenceTracker(BaseTracker):
                 return frame
                 
             overlay_frame = frame.copy()
+            
+            # === RENDER YOLO BOXES ===
+            for box in self.overlay_data.get('yolo_boxes', []):
+                # Get color (RGB to BGR for OpenCV)
+                color = box.get('color_override') or (128, 128, 128)
+                bgr_color = (color[2], color[1], color[0])  # RGB to BGR
+
+                # Get bounding box coordinates
+                bbox = box.get('bbox', [0, 0, 0, 0])
+                x1, y1, x2, y2 = map(int, bbox)
+
+                # Draw bounding box
+                thickness = int(box.get('thickness_override', 2))
+                cv2.rectangle(overlay_frame,
+                            (x1, y1),
+                            (x2, y2),
+                            bgr_color, thickness)
+
+                # Draw label with class name and confidence
+                class_name = box.get('class_name', 'unknown')
+                confidence = box.get('confidence', 0.0)
+                label = f"{class_name}:{confidence:.2f}"
+
+                label_suffix = box.get('label_suffix')
+                if label_suffix:
+                    label += f" {label_suffix}"
+
+                label_color = (0, 255, 255) if class_name.lower() in ['penis', 'locked_penis', 'pussy', 'butt'] else bgr_color
+                cv2.putText(overlay_frame, label,
+                          (x1, y1 - 5),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.4, label_color, 1)
             
             # === RENDER COMPUTATION vs DISREGARDED AREAS ===
             for area in self.overlay_data.get('computation_areas', []):

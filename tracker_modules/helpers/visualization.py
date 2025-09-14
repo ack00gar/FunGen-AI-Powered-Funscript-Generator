@@ -270,19 +270,20 @@ class TrackerVisualizationHelper:
                 bbox = region.get('bbox', (0, 0, 0, 0))
                 confidence = region.get('confidence', 0.0)
             
-            # Color based on priority (red=high, blue=low)
-            priority_ratio = min(priority / 10.0, 1.0)
-            color = (
-                int(255 * (1 - priority_ratio)),  # Blue
-                int(128 * priority_ratio),         # Green
-                int(255 * priority_ratio)          # Red
-            )
-            
-            # Use official class colors for known detection classes
-            if class_name.lower() in CLASS_COLORS:
-                color = CLASS_COLORS[class_name.lower()]
-            elif class_name.lower() == 'locked_penis':
-                color = CLASS_COLORS.get('locked_penis', (0, 255, 255))
+            # Use class-specific colors from constants, fallback to priority-based
+            class_key = class_name.lower()
+            if class_key in cls.COLORS:
+                color = cls.COLORS[class_key]
+            elif class_key in CLASS_COLORS:
+                color = CLASS_COLORS[class_key]
+            else:
+                # Fallback: priority-based color for unknown classes
+                priority_ratio = min(priority / 10.0, 1.0)
+                color = (
+                    int(255 * priority_ratio),         # Red
+                    int(128 * priority_ratio),         # Green  
+                    int(255 * (1 - priority_ratio))   # Blue
+                )
             
             # bbox is already extracted above
             box = BoundingBox(
