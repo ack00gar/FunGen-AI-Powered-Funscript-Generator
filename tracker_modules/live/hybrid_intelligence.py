@@ -26,6 +26,12 @@ import traceback
 from dataclasses import dataclass
 
 try:
+    from scipy import signal as scipy_signal
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+
+try:
     from ..core.base_tracker import BaseTracker, TrackerMetadata, TrackerResult
     from ..helpers.signal_amplifier import SignalAmplifier
     from ..helpers.visualization import (
@@ -39,6 +45,69 @@ except ImportError:
     )
 
 import config.constants as constants
+
+
+class ButterworthFilter:
+    """Low-pass Butterworth filter for smooth signal filtering without phase lag."""
+    
+    def __init__(self, cutoff_freq: float = 2.0, fs: float = 30.0, order: int = 2):
+        """
+        Initialize Butterworth filter.
+        
+        Args:
+            cutoff_freq: Cutoff frequency in Hz
+            fs: Sampling frequency in Hz (frame rate)
+            order: Filter order (higher = steeper rolloff)
+        """
+        self.cutoff_freq = cutoff_freq
+        self.fs = fs
+        self.order = order
+        
+        if SCIPY_AVAILABLE:
+            # Design the Butterworth filter
+            nyquist = fs / 2
+            normalized_cutoff = cutoff_freq / nyquist
+            self.b, self.a = scipy_signal.butter(order, normalized_cutoff, btype='low', analog=False)
+            
+            # Initialize filter state for continuous filtering
+            self.zi_primary = scipy_signal.lfilter_zi(self.b, self.a)
+            self.zi_secondary = scipy_signal.lfilter_zi(self.b, self.a)
+        else:
+            # Fallback to simple EMA if scipy not available
+            self.alpha = min(cutoff_freq / (fs / 2), 0.5)  # Convert to EMA alpha
+            self.last_primary = None
+            self.last_secondary = None
+    
+    def filter(self, primary_pos: float, secondary_pos: float) -> Tuple[float, float]:
+        """Apply Butterworth filter to positions."""
+        if SCIPY_AVAILABLE:
+            # Use proper Butterworth filter
+            filtered_primary, self.zi_primary = scipy_signal.lfilter(
+                self.b, self.a, [primary_pos], zi=self.zi_primary
+            )
+            filtered_secondary, self.zi_secondary = scipy_signal.lfilter(
+                self.b, self.a, [secondary_pos], zi=self.zi_secondary
+            )
+            return float(filtered_primary[0]), float(filtered_secondary[0])
+        else:
+            # Fallback to EMA
+            if self.last_primary is None:
+                self.last_primary = primary_pos
+                self.last_secondary = secondary_pos
+            
+            self.last_primary = self.alpha * primary_pos + (1 - self.alpha) * self.last_primary
+            self.last_secondary = self.alpha * secondary_pos + (1 - self.alpha) * self.last_secondary
+            
+            return self.last_primary, self.last_secondary
+    
+    def reset(self):
+        """Reset filter state."""
+        if SCIPY_AVAILABLE:
+            self.zi_primary = scipy_signal.lfilter_zi(self.b, self.a)
+            self.zi_secondary = scipy_signal.lfilter_zi(self.b, self.a)
+        else:
+            self.last_primary = None
+            self.last_secondary = None
 
 
 @dataclass
@@ -182,7 +251,13 @@ class HybridIntelligenceTracker(BaseTracker):
             
             # === 5. SIGNAL FUSION PARAMETERS ===
             self.signal_fusion_method = kwargs.get('signal_fusion_method', 'weighted_average')
-            self.temporal_smoothing_alpha = kwargs.get('temporal_smoothing_alpha', 0.25)
+            
+            # Butterworth filter for superior temporal smoothing (replaces EMA)
+            self.butterworth_filter = ButterworthFilter(
+                cutoff_freq=2.0,  # 2 Hz cutoff - smooth but responsive
+                fs=30.0,          # 30 fps assumed frame rate
+                order=2           # 2nd order filter
+            )
             
             # Initialize components
             self._init_frame_differentiation()
@@ -499,7 +574,7 @@ class HybridIntelligenceTracker(BaseTracker):
         self.signal_amplifier = SignalAmplifier(
             history_size=120,  # 4 seconds @ 30fps
             enable_live_amp=True,
-            smoothing_alpha=self.temporal_smoothing_alpha,
+            smoothing_alpha=0.3,  # SignalAmplifier uses internal EMA for different purpose
             logger=self.logger
         )
         
@@ -516,8 +591,8 @@ class HybridIntelligenceTracker(BaseTracker):
         }
         
         # Final output state - VR POV semantics: 100=no action, 0=full insertion
-        self.last_primary_position = 50.0  # Middle position (50% insertion)
-        self.last_secondary_position = 50.0
+        self.last_primary_position = 100.0  # Start at no action (VR POV default)
+        self.last_secondary_position = 50.0   # Secondary centered
         
         self.logger.debug("Signal processing initialized")
     
@@ -537,6 +612,10 @@ class HybridIntelligenceTracker(BaseTracker):
             # Reset signal history
             self.primary_signal_history.clear()
             self.secondary_signal_history.clear()
+            
+            # Reset Butterworth filter state
+            if hasattr(self, 'butterworth_filter'):
+                self.butterworth_filter.reset()
             
             # Reset oscillation tracking
             self.oscillation_history.clear()
@@ -580,7 +659,7 @@ class HybridIntelligenceTracker(BaseTracker):
             # This prevents decay when tracking stops at end of video
             
             # Log final positions if available
-            primary_pos = getattr(self, 'last_primary_position', 50.0)
+            primary_pos = getattr(self, 'last_primary_position', 100.0)  # VR POV default
             secondary_pos = getattr(self, 'last_secondary_position', 50.0)
             self.logger.info(f"Hybrid Intelligence Tracker stopped at final positions: P={primary_pos:.1f}, S={secondary_pos:.1f}")
             return True
@@ -1921,6 +2000,7 @@ class HybridIntelligenceTracker(BaseTracker):
             self.logger.warning(f"Oscillation analysis failed: {e}")
             return 0.0
     
+    
     def _get_interaction_regions(self) -> List[Tuple[int, int, int, int]]:
         """Get regions where person interactions with locked penis occur."""
         interaction_regions = []
@@ -2159,15 +2239,18 @@ class HybridIntelligenceTracker(BaseTracker):
                     secondary_pos = 50.0 + (avg_horizontal * 25.0)  # Scale to ±25 around center
                     secondary_pos = max(0.0, min(100.0, secondary_pos))  # Clamp to valid range
             
-            # Apply temporal smoothing only when we have active signals
-            alpha = self.temporal_smoothing_alpha
-            primary_pos = alpha * primary_pos + (1 - alpha) * self.last_primary_position
-            secondary_pos = alpha * secondary_pos + (1 - alpha) * self.last_secondary_position
+            # Apply Butterworth low-pass filter for superior smoothing (no phase lag)
+            primary_pos, secondary_pos = self.butterworth_filter.filter(primary_pos, secondary_pos)
             
         else:
-            # No motion detected - maintain current positions (no decay)
-            primary_pos = self.last_primary_position
-            secondary_pos = self.last_secondary_position
+            # No motion detected - gradual decay to VR POV "no action" position (100)
+            decay_rate = 0.02  # 2% decay per frame towards 100 (no action)
+            target_primary = 100.0  # VR POV: 100 = no action/withdrawal
+            target_secondary = 50.0  # Secondary stays centered
+            
+            # Gradual exponential decay towards target
+            primary_pos = self.last_primary_position + (target_primary - self.last_primary_position) * decay_rate
+            secondary_pos = self.last_secondary_position + (target_secondary - self.last_secondary_position) * decay_rate
         
         # Update history
         self.last_primary_position = primary_pos
@@ -2430,10 +2513,18 @@ class HybridIntelligenceTracker(BaseTracker):
                     joint_color = (150, 40, 150)
                 
                 # Draw pose skeleton
+                # Improved pose connections with anatomical facial structure
                 pose_connections = [
                     (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),  # Arms
                     (11, 12), (5, 11), (6, 12),               # Torso
-                    (11, 13), (13, 15), (12, 14), (14, 16)    # Legs
+                    (11, 13), (13, 15), (12, 14), (14, 16),   # Legs
+                    # Facial connections:
+                    (0, 1),  # Nose to left eye
+                    (0, 2),  # Nose to right eye
+                    (1, 3),  # Left eye to left ear
+                    (2, 4),  # Right eye to right ear
+                    (3, 5),  # Left ear to left shoulder
+                    (4, 6)   # Right ear to right shoulder
                 ]
                 
                 for connection in pose_connections:
@@ -2441,7 +2532,10 @@ class HybridIntelligenceTracker(BaseTracker):
                     if pt1_idx < len(keypoints) and pt2_idx < len(keypoints):
                         pt1, pt2 = keypoints[pt1_idx], keypoints[pt2_idx]
                         
-                        if pt1[2] > 0.5 and pt2[2] > 0.5:
+                        # Check confidence AND that keypoints are not at (0,0)
+                        if (pt1[2] > 0.5 and pt2[2] > 0.5 and
+                            (pt1[0] != 0 or pt1[1] != 0) and
+                            (pt2[0] != 0 or pt2[1] != 0)):
                             x1, y1 = int(pt1[0]), int(pt1[1])
                             x2, y2 = int(pt2[0]), int(pt2[1])
                             thickness = 3 if is_primary else 2
@@ -2449,7 +2543,8 @@ class HybridIntelligenceTracker(BaseTracker):
                 
                 # Draw keypoints
                 for keypoint in keypoints:
-                    if keypoint[2] > 0.5:
+                    # Only draw confident keypoints that are not at (0,0)
+                    if keypoint[2] > 0.5 and (keypoint[0] != 0 or keypoint[1] != 0):
                         x, y = int(keypoint[0]), int(keypoint[1])
                         radius = 5 if is_primary else 3
                         cv2.circle(frame, (x, y), radius, joint_color, -1)
@@ -2684,12 +2779,16 @@ class HybridIntelligenceTracker(BaseTracker):
         Prepare overlay data in standardized format for VideoDisplayUI.
         This replaces the internal _create_debug_overlay method.
         """
-        # Convert semantic regions to bounding boxes
-        self.logger.debug(f"Converting {len(self.semantic_regions)} semantic regions to boxes")
-        boxes = TrackerVisualizationHelper.convert_semantic_regions_to_boxes(
-            self.semantic_regions
-        )
-        self.logger.debug(f"Converted to {len(boxes)} bounding boxes")
+        try:
+            # Convert semantic regions to bounding boxes
+            self.logger.debug(f"Converting {len(self.semantic_regions)} semantic regions to boxes")
+            boxes = TrackerVisualizationHelper.convert_semantic_regions_to_boxes(
+                self.semantic_regions
+            )
+            self.logger.debug(f"Converted to {len(boxes)} bounding boxes")
+        except Exception as e:
+            self.logger.error(f"Error converting semantic regions to boxes: {e}")
+            boxes = []
         
         # Add locked penis box if available
         if self.locked_penis_box:
@@ -2697,32 +2796,41 @@ class HybridIntelligenceTracker(BaseTracker):
             if isinstance(self.locked_penis_box, dict) and 'bbox' in self.locked_penis_box:
                 bbox = self.locked_penis_box['bbox']
                 confidence = self.locked_penis_box.get('confidence', self.penis_tracker_confidence)
-                locked_box = BoundingBox(
-                    x1=bbox[0],
-                    y1=bbox[1],
-                    x2=bbox[2],
-                    y2=bbox[3],
-                    class_name="locked_penis",
-                    confidence=confidence,
-                    color_override=(0, 255, 255),  # Bright cyan
-                    thickness_override=3.0,
-                    label_suffix="*** LOCKED ***"
-                )
-                boxes.append(locked_box)
+                
+                # Ensure bbox has exactly 4 values to prevent unpacking errors
+                if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                    locked_box = BoundingBox(
+                        x1=bbox[0],
+                        y1=bbox[1],
+                        x2=bbox[2],
+                        y2=bbox[3],
+                        class_name="locked_penis",
+                        confidence=confidence,
+                        color_override=(0, 255, 255),  # Bright cyan
+                        thickness_override=3.0,
+                        label_suffix="*** LOCKED ***"
+                    )
+                    boxes.append(locked_box)
+                else:
+                    self.logger.warning(f"Invalid locked_penis_box bbox format: {bbox} (type: {type(bbox)}, len: {len(bbox) if hasattr(bbox, '__len__') else 'N/A'})")
             else:
                 self.logger.warning(f"Invalid locked_penis_box format: {type(self.locked_penis_box)}")
         
         # Convert pose data to keypoints
         pose_keypoints = []
         if pose_data:
-            self.logger.debug(f"Pose data keys: {list(pose_data.keys())}")
-            primary_person = pose_data.get('primary_person')
-            all_persons = pose_data.get('all_persons', [])
-            self.logger.debug(f"Primary person: {primary_person is not None}")
-            self.logger.debug(f"All persons: {len(all_persons)} items")
-            
-            pose_keypoints = TrackerVisualizationHelper.convert_pose_data_to_keypoints(pose_data)
-            self.logger.debug(f"Converted pose keypoints: {len(pose_keypoints)}")
+            try:
+                self.logger.debug(f"Pose data keys: {list(pose_data.keys())}")
+                primary_person = pose_data.get('primary_person')
+                all_persons = pose_data.get('all_persons', [])
+                self.logger.debug(f"Primary person: {primary_person is not None}")
+                self.logger.debug(f"All persons: {len(all_persons)} items")
+                
+                pose_keypoints = TrackerVisualizationHelper.convert_pose_data_to_keypoints(pose_data)
+                self.logger.debug(f"Converted pose keypoints: {len(pose_keypoints)}")
+            except Exception as e:
+                self.logger.error(f"Error converting pose data to keypoints: {e}")
+                pose_keypoints = []
             
             # Debug the actual keypoint data when detected
             if pose_keypoints:
@@ -2849,8 +2957,13 @@ class HybridIntelligenceTracker(BaseTracker):
                     start_point = (320, 320)
                 
                 # Calculate end point from magnitude and direction
-                end_x = start_point[0] + magnitude * math.cos(direction) * 20  # Scale for visibility
-                end_y = start_point[1] + magnitude * math.sin(direction) * 20
+                # Ensure start_point has exactly 2 elements
+                if isinstance(start_point, (list, tuple)) and len(start_point) >= 2:
+                    end_x = start_point[0] + magnitude * math.cos(direction) * 20  # Scale for visibility
+                    end_y = start_point[1] + magnitude * math.sin(direction) * 20
+                else:
+                    self.logger.warning(f"Invalid start_point format: {start_point}, skipping flow vector")
+                    continue
                 
                 flow_vectors_data.append({
                     'start_point': start_point,
@@ -3007,197 +3120,6 @@ class HybridIntelligenceTracker(BaseTracker):
         
         return debug_info
     
-    # ========================================
-    # ENHANCED VISUALIZATION SYSTEM
-    # ========================================
-    
-    def _prepare_overlay_data(self, priority_regions: List, pose_data: Dict[str, Any]):
-        """
-        Prepare comprehensive overlay data for external visualization.
-        
-        This provides clear visual indicators for:
-        - Computation areas vs disregarded areas
-        - Centroids vs actual action points
-        - Flow vectors showing movement
-        - Contact regions and interaction zones
-        """
-        self.overlay_data = {
-            'computation_areas': [],
-            'disregarded_areas': [],
-            'action_points': [],
-            'centroids': [],
-            'flow_vectors': [],
-            'contact_regions': [],
-            'interaction_zones': [],
-            'locked_penis_state': None,
-            'oscillation_grid': [],
-            'signal_source_indicators': []
-        }
-        
-        try:
-            # === COMPUTATION vs DISREGARDED AREAS ===
-            if hasattr(self, 'change_regions'):
-                for region in self.change_regions:
-                    area_data = {
-                        'bbox': (region.x, region.y, region.x + region.width, region.y + region.height),
-                        'intensity': region.intensity,
-                        'area': region.area,
-                        'type': 'change_region'
-                    }
-                    
-                    # Smart classification based on interaction zones and thresholds
-                    region_center = (region.x + region.width // 2, region.y + region.height // 2)
-                    interaction_regions = self._get_interaction_regions()
-                    is_in_interaction_zone = self._is_cell_in_interaction_zone(region_center, interaction_regions)
-                    
-                    # Use smart thresholds matching oscillation detection
-                    threshold = 5 if is_in_interaction_zone else 15
-                    
-                    if region.intensity > threshold:
-                        area_data['status'] = 'computed'
-                        area_data['color'] = (0, 255, 0, 80)  # Green overlay for computed areas
-                        area_data['zone_type'] = 'interaction' if is_in_interaction_zone else 'global'
-                        self.overlay_data['computation_areas'].append(area_data)
-                    else:
-                        area_data['status'] = 'disregarded'  
-                        area_data['color'] = (128, 128, 128, 40)  # Gray overlay for disregarded
-                        area_data['zone_type'] = 'interaction' if is_in_interaction_zone else 'global'
-                        self.overlay_data['disregarded_areas'].append(area_data)
-            
-            # === INTERACTION ZONES ===
-            interaction_regions = self._get_interaction_regions()
-            for i, (x1, y1, x2, y2) in enumerate(interaction_regions):
-                zone_data = {
-                    'bbox': (x1, y1, x2, y2),
-                    'type': 'interaction_zone',
-                    'color': (255, 255, 0, 60),  # Yellow overlay for interaction zones
-                    'priority': 'high'
-                }
-                self.overlay_data['interaction_zones'].append(zone_data)
-            
-            # === ACTION POINTS vs CENTROIDS ===
-            # Check if flow analyses exist and have the expected structure
-            if hasattr(self, 'flow_analyses') and self.flow_analyses:
-                for flow_analysis in self.flow_analyses:
-                    try:
-                        # Check if flow_analysis has the expected attributes
-                        if hasattr(flow_analysis, 'flow_direction') and hasattr(flow_analysis, 'region_id'):
-                            # FlowAnalysis structure: region_id, flow_magnitude, flow_direction, oscillation_strength, confidence
-                            # flow_direction is np.ndarray with flow vector
-                            
-                            # We need to determine center position from the region_id or other means
-                            # For now, use a fallback approach since the exact structure isn't clear
-                            
-                            # Extract flow vector components
-                            if hasattr(flow_analysis.flow_direction, '__len__') and len(flow_analysis.flow_direction) >= 2:
-                                flow_x = flow_analysis.flow_direction[0] 
-                                flow_y = flow_analysis.flow_direction[1]
-                            else:
-                                flow_x, flow_y = 0, 0
-                            
-                            # For now, skip detailed centroid/action point visualization until we can
-                            # properly determine the region centers. Just add the flow magnitude info.
-                            
-                            # Add basic flow info for debugging
-                            flow_info = {
-                                'region_id': flow_analysis.region_id,
-                                'magnitude': flow_analysis.flow_magnitude,
-                                'direction': (flow_x, flow_y),
-                                'confidence': flow_analysis.confidence,
-                                'type': 'flow_analysis'
-                            }
-                            # Store in a separate category until we can properly visualize
-                            if 'flow_info' not in self.overlay_data:
-                                self.overlay_data['flow_info'] = []
-                            self.overlay_data['flow_info'].append(flow_info)
-                        
-                    except Exception as e:
-                        self.logger.debug(f"Skipping flow_analysis due to attribute issue: {e}")
-                        continue
-            
-            # === LOCKED PENIS STATE ===
-            penis_state = self._get_penis_state()
-            if penis_state['locked_penis_box']:
-                locked_penis_data = {
-                    'bbox': penis_state['locked_penis_box'].get('bbox') if isinstance(penis_state['locked_penis_box'], dict) else penis_state['locked_penis_box'],
-                    'confidence': penis_state.get('penis_tracker_confidence', 0.0),
-                    'active': self._is_penis_active(),
-                    'color': (0, 255, 0) if self._is_penis_active() else (255, 165, 0),  # Green if active, orange if inactive
-                    'thickness': 3
-                }
-                self.overlay_data['locked_penis_state'] = locked_penis_data
-            
-            # === OSCILLATION ANALYSIS GRID ===
-            if hasattr(self, 'oscillation_history') and self.oscillation_history:
-                for (grid_x, grid_y), history in list(self.oscillation_history.items())[:50]:  # Limit for performance
-                    if len(history) > 5:
-                        recent_activity = np.std(list(history)[-10:]) if len(history) >= 10 else np.std(list(history))
-                        grid_cell = {
-                            'position': (grid_x, grid_y),
-                            'size': getattr(self, 'oscillation_block_size', 32),
-                            'activity': recent_activity,
-                            'color': (255, int(255 * (1 - min(recent_activity, 1.0))), 0, 120),  # Heat map color
-                            'computed': recent_activity > 0.1  # Show if this cell was actively computed
-                        }
-                        self.overlay_data['oscillation_grid'].append(grid_cell)
-            
-            # === SIGNAL SOURCE INDICATORS ===
-            # Show what's contributing to the final funscript signal
-            signal_sources = []
-            
-            # Frame differentiation contribution
-            if hasattr(self, 'change_regions') and self.change_regions:
-                total_change = sum(region.intensity * region.area for region in self.change_regions) / 1000000.0
-                signal_sources.append({
-                    'type': 'frame_diff',
-                    'strength': min(total_change, 1.0),
-                    'color': (0, 255, 0),
-                    'label': f'Frame Diff: {total_change:.2f}'
-                })
-            
-            # Optical flow contribution 
-            if hasattr(self, 'flow_analyses') and self.flow_analyses:
-                try:
-                    # Safely extract flow magnitudes
-                    flow_magnitudes = []
-                    for f in self.flow_analyses:
-                        if hasattr(f, 'flow_magnitude'):
-                            flow_magnitudes.append(f.flow_magnitude)
-                    
-                    if flow_magnitudes:
-                        flow_strength = np.mean(flow_magnitudes)
-                        signal_sources.append({
-                            'type': 'optical_flow', 
-                            'strength': min(flow_strength * 10, 1.0),
-                            'color': (0, 255, 255),
-                            'label': f'Optical Flow: {flow_strength:.2f}'
-                        })
-                except Exception as e:
-                    self.logger.debug(f"Error processing flow strength: {e}")
-                    # Add placeholder
-                    signal_sources.append({
-                        'type': 'optical_flow', 
-                        'strength': 0.0,
-                        'color': (0, 255, 255),
-                        'label': 'Optical Flow: N/A'
-                    })
-            
-            # Oscillation contribution
-            oscillation_strength = getattr(self, 'current_oscillation_intensity', 0.0)
-            signal_sources.append({
-                'type': 'oscillation',
-                'strength': min(oscillation_strength * 20, 1.0),
-                'color': (255, 0, 255),
-                'label': f'Oscillation: {oscillation_strength:.3f}'
-            })
-            
-            self.overlay_data['signal_source_indicators'] = signal_sources
-            
-        except Exception as e:
-            self.logger.warning(f"Error preparing overlay data: {e}")
-            # Ensure overlay_data exists even on error
-            if not hasattr(self, 'overlay_data'):
-                self.overlay_data = {}
     
     def _create_debug_overlay(self, frame: np.ndarray) -> np.ndarray:
         """
@@ -3261,10 +3183,20 @@ class HybridIntelligenceTracker(BaseTracker):
             
             # === RENDER FLOW VECTORS ===
             for vector in self.overlay_data.get('flow_vectors', []):
-                cv2.arrowedLine(overlay_frame,
-                               (int(vector['start'][0]), int(vector['start'][1])),
-                               (int(vector['end'][0]), int(vector['end'][1])),
-                               vector['color'], vector['thickness'])
+                # Check for both 'start_point'/'end_point' and 'start'/'end' formats
+                start_key = 'start_point' if 'start_point' in vector else 'start'
+                end_key = 'end_point' if 'end_point' in vector else 'end'
+                
+                if start_key in vector and end_key in vector:
+                    start_point = vector[start_key]
+                    end_point = vector[end_key]
+                    color = vector.get('color', (0, 255, 255))
+                    thickness = vector.get('thickness', 2)
+                    
+                    cv2.arrowedLine(overlay_frame,
+                                   (int(start_point[0]), int(start_point[1])),
+                                   (int(end_point[0]), int(end_point[1])),
+                                   color, thickness)
             
             # === RENDER LOCKED PENIS STATE ===
             penis_state = self.overlay_data.get('locked_penis_state')
@@ -3284,12 +3216,18 @@ class HybridIntelligenceTracker(BaseTracker):
             
             # === RENDER POSE SKELETONS ===
             for pose in self.overlay_data.get('poses', []):
-                # Draw skeleton connections
+                # Draw skeleton connections with anatomical facial structure
                 pose_connections = [
                     (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),  # Arms
                     (11, 12), (5, 11), (6, 12),               # Torso
                     (11, 13), (13, 15), (12, 14), (14, 16),   # Legs
-                    (1, 2), (2, 3), (3, 4), (1, 5), (2, 6)    # Head/neck
+                    # Anatomically correct facial connections:
+                    (0, 1),  # Nose to left eye
+                    (0, 2),  # Nose to right eye
+                    (1, 3),  # Left eye to left ear
+                    (2, 4),  # Right eye to right ear
+                    (3, 5),  # Left ear to left shoulder
+                    (4, 6)   # Right ear to right shoulder
                 ]
                 
                 keypoints = pose.get('keypoints', [])
@@ -3317,7 +3255,10 @@ class HybridIntelligenceTracker(BaseTracker):
                     idx1, idx2 = connection
                     if idx1 < len(keypoints) and idx2 < len(keypoints):
                         kp1, kp2 = keypoints[idx1], keypoints[idx2]
-                        if kp1[2] > 0.3 and kp2[2] > 0.3:  # Confidence threshold
+                        # Check confidence AND that keypoints are not at (0,0)
+                        if (kp1[2] > 0.3 and kp2[2] > 0.3 and 
+                            (kp1[0] != 0 or kp1[1] != 0) and 
+                            (kp2[0] != 0 or kp2[1] != 0)):
                             cv2.line(overlay_frame, 
                                    (int(kp1[0]), int(kp1[1])),
                                    (int(kp2[0]), int(kp2[1])),
@@ -3325,54 +3266,17 @@ class HybridIntelligenceTracker(BaseTracker):
                 
                 # Draw keypoints
                 for i, (x, y, conf) in enumerate(keypoints):
-                    if conf > 0.3:  # Only draw confident keypoints
+                    # Only draw confident keypoints that are not at (0,0)
+                    if conf > 0.3 and (x != 0 or y != 0):
                         cv2.circle(overlay_frame, (int(x), int(y)), 4, joint_color, -1)
                         cv2.circle(overlay_frame, (int(x), int(y)), 4, (255, 255, 255), 1)
 
-            # === RENDER LEGEND ===
-            self._draw_visualization_legend(overlay_frame)
-            
             return overlay_frame
             
         except Exception as e:
             self.logger.warning(f"Error creating debug overlay: {e}")
             return frame
     
-    def _draw_visualization_legend(self, frame: np.ndarray):
-        """Draw a legend explaining the visualization elements."""
-        try:
-            # Legend background
-            legend_x, legend_y = 10, frame.shape[0] - 150
-            legend_w, legend_h = 200, 140
-            
-            # Semi-transparent background
-            cv2.rectangle(frame, (legend_x, legend_y), (legend_x + legend_w, legend_y + legend_h),
-                         (0, 0, 0), -1)
-            cv2.rectangle(frame, (legend_x, legend_y), (legend_x + legend_w, legend_y + legend_h),
-                         (255, 255, 255), 1)
-            
-            # Title
-            cv2.putText(frame, "VISUAL LEGEND", (legend_x + 5, legend_y + 15),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-            
-            # Legend items
-            legend_items = [
-                ("C = Centroid", (255, 0, 255)),
-                ("A = Action Point", (0, 255, 255)), 
-                ("→ = Flow Vector", (0, 255, 255)),
-                ("Green = Computed", (0, 255, 0)),
-                ("Gray = Disregarded", (128, 128, 128)),
-                ("Yellow = Interaction", (255, 255, 0)),
-            ]
-            
-            y_offset = legend_y + 35
-            for item, color in legend_items:
-                cv2.putText(frame, item, (legend_x + 5, y_offset),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
-                y_offset += 16
-                
-        except Exception as e:
-            self.logger.warning(f"Error drawing legend: {e}")
 
 
 # Registration function for the tracker system
