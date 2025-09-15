@@ -4,8 +4,6 @@ FunGen is a Python-based tool that uses AI to generate Funscript files from VR a
 
 Join the **Discord community** for discussions and support: [Discord Community](https://discord.gg/WYkjMbtCZA)
 
-Note: The necessary YOLO models will also be available via the Discord.
-
 ---
 
 ### DISCLAIMER
@@ -40,15 +38,15 @@ conda activate VRFunAIGen
 ### Clone the repository
 Open a command prompt and navigate to the folder where you'd like FunGen to be located. For example, if you want it in C:\FunGen, navigate to C:\ ('cd C:\'). Then run
 ```bash
-git clone --branch v0.5.0 https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGenBeta
-cd FunGenBeta
+git clone --branch main https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator.git FunGen
+cd FunGen
 ```
 
 ### Install the core python requirements
 ```bash
 pip install -r core.requirements.txt
 ```
-- If you have the original FunGen installed, skip to [Download the YOLO model](#download-the-yolo-model)
+- If you have the original FunGen installed, skip to [Download the YOLO models](#download-the-yolo-models)
 
 ### NVIDIA GPU Setup (CUDA Required)
 
@@ -76,8 +74,9 @@ pip install tensorrt
 **Verify Installation:**
 ```bash
 nvidia-smi                    # Check GPU and driver
-nvcc --version               # Check CUDA version
+nvcc --version               # Check CUDA version  
 python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
+python -c "import torch; print(torch.backends.cudnn.is_available())"  # Check cuDNN
 ```
 
 ### If your GPU doesn't support cuda
@@ -85,16 +84,15 @@ python -c "import torch; print(torch.cuda.is_available())"  # Check PyTorch CUDA
 pip install -r cpu.requirements.txt
 ```
 
-### If your GPU supports ROCm (AMD Linux Only)
+### AMD GPU acceleration (ROCm for Linux Only)
+ROCm is supported for AMD GPUs on Linux. To install the required packages, run:
 ```bash
 pip install -r rocm.requirements.txt
 ```
 
-## Download the YOLO model
-Go to our discord to download the latest YOLO model for free. When downloaded place the YOLO model file(s) in the `models/` sub-directory. If you aren't sure you can add all the models and let the app decide the best option for you.
+## Download the YOLO models
 
-## Download the pose model
-Download from https://docs.ultralytics.com/tasks/pose/ and place in the `models/` sub-directory.
+The necessary YOLO models will be automatically downloaded on the first startup. If you want to use a specific model, you can download it from our Discord and place it in the `models/` sub-directory. If you aren't sure, you can add all the models and let the app decide the best option for you.
 
 ### Start the app
 ```bash
@@ -116,9 +114,6 @@ We support multiple model formats across Windows, macOS, and Linux.
 
 In most cases, the app will automatically detect the best model from your models directory at launch, but if the right model wasn't present at this time or the right dependencies where not installed, you might need to override it under settings. The same applies when we release a new version of the model.
 
-
-### AMD GPU acceleration
-Coming soon
 
 ### Troubleshooting CUDA Installation
 
@@ -146,7 +141,7 @@ You can use Start windows.bat to launch the gui on windows.
 
 ## GitHub Token Setup (Optional)
 
-FunGen includes an update system that allows you to download and switch between different versions of the application. To use this feature, you'll need to set up a GitHub Personal Access Token.
+FunGen includes an update system that allows you to download and switch between different versions of the application. To use this feature, you'll need to set up a GitHub Personal Access Token. This is optional and only required for the update functionality.
 
 ### Why a GitHub Token?
 
@@ -198,7 +193,7 @@ This allows FunGen to fetch commit information, changelogs, and version data wit
 ### What the Token is Used For
 
 The GitHub token enables these features in FunGen:
-- **Version Selection**: Browse and download specific commits from the `v0.5.0` branch
+- **Version Selection**: Browse and download specific commits from the `main` branch
 - **Changelog Display**: View detailed changes between versions
 - **Update Notifications**: Check for new versions and updates
 - **Rate Limit Management**: Avoid hitting GitHub's API rate limits
@@ -226,16 +221,16 @@ python main.py
 
 ### CLI Examples
 
-**To generate a script for a single video with default settings (3-stage mode):**
+**To generate a script for a single video with default settings:**
 
 ```bash
 python main.py "/path/to/your/video.mp4"
 ```
 
-**To process an entire folder of videos recursively using 2-stage mode and overwrite existing funscripts:**
+**To process an entire folder of videos recursively using a specific mode and overwrite existing funscripts:**
 
 ```bash
-python main.py "/path/to/your/folder" --mode 2-stage --overwrite --recursive
+python main.py "/path/to/your/folder" --mode <your_mode> --overwrite --recursive
 ```
 
 ### Command-Line Arguments
@@ -243,12 +238,72 @@ python main.py "/path/to/your/folder" --mode 2-stage --overwrite --recursive
 | Argument | Short | Description |
 |---|---|---|
 | `input_path` | | **Required for CLI mode.** Path to a single video file or a folder containing videos. |
-| `--mode` | | Sets the processing mode. Choices: `2-stage`, `3-stage`, `oscillation-detector`. Default is `3-stage`. |
+| `--mode` | | Sets the processing mode. The available modes are discovered dynamically. |
+| `--od-mode` | | Sets the oscillation detector mode to use in Stage 3. Choices: `current`, `legacy`. Default is `current`. |
 | `--overwrite`| | Forces the app to re-process and overwrite any existing funscripts. By default, it skips videos that already have a funscript. |
 | `--no-autotune`| | Disables the automatic application of Ultimate Autotune after generation. |
 | `--no-copy` | | Prevents saving a copy of the final funscript next to the video file. It will only be saved in the application's output folder. |
 | `--recursive`| `-r` | If the input path is a folder, this flag enables scanning for videos in all its subdirectories. |
 
+---
+
+# Modular Systems
+
+FunGen features a modular architecture for both funscript filtering and motion tracking, allowing for easy extension and customization.
+
+## Filter Plugin System
+
+The funscript filter system allows you to apply a variety of transformations to your generated funscripts. These can be chained together to achieve complex effects.
+
+### Available Plugins:
+
+- **Amplify:** Amplifies or reduces position values around a center point.
+- **Autotune SG:** Automatically finds optimal Savitzky-Golay filter parameters.
+- **Clamp:** Clamps all positions to a specific value.
+- **Invert:** Inverts position values (0 becomes 100, etc.).
+- **Keyframes:** Simplifies the script to significant peaks and valleys.
+- **Resample:** Resamples the funscript at regular intervals while preserving peak timing.
+- **Simplify (RDP):** Simplifies the funscript by removing redundant points using the RDP algorithm.
+- **Smooth (SG):** Applies a Savitzky-Golay smoothing filter.
+- **Speed Limiter:** Limits speed and adds vibrations for hardware device compatibility.
+- **Threshold Clamp:** Clamps positions to 0/100 based on thresholds.
+- **Ultimate Autotune:** A comprehensive 7-stage enhancement pipeline.
+
+## Tracking System
+
+The tracker system is responsible for analyzing the video and generating the raw motion data. Trackers are organized into categories based on their functionality.
+
+### Live Trackers
+
+These trackers process the video in real-time.
+
+- **Hybrid Intelligence Tracker:** A multi-modal approach combining frame differentiation, optical flow, YOLO detection, and oscillation analysis.
+- **Oscillation Detector (Experimental 2):** A hybrid approach combining experimental timing precision with legacy amplification and signal conditioning.
+- **Oscillation Detector (Legacy):** The original oscillation tracker with cohesion analysis and superior amplification.
+- **Relative Distance Tracker:** An optimized high-performance tracker with vectorized operations and intelligent caching.
+- **User ROI Tracker:** A manual ROI definition with optical flow tracking and optional sub-tracking.
+- **YOLO ROI Tracker:** Automatic ROI detection using YOLO object detection with optical flow tracking.
+
+### Offline Trackers
+
+These trackers process the video in stages for higher accuracy.
+
+- **Contact Analysis (2-Stage):** Offline contact detection and analysis using YOLO detection results.
+- **Mixed Processing (3-Stage):** A hybrid approach using Stage 2 signals and selective live ROI tracking for BJ/HJ chapters.
+- **Optical Flow Analysis (3-Stage):** Offline optical flow tracking using live tracker algorithms on Stage 2 segments.
+
+### Experimental Trackers
+
+These trackers are in development and may not be as stable as the others.
+
+- **Enhanced Axis Projection Tracker:** A production-grade motion tracking system with multi-scale analysis, temporal coherence, and adaptive thresholding.
+- **Working Axis Projection Tracker:** A simplified but reliable motion tracking with axis projection.
+- **Beat Marker (Visual/Audio):** Generates actions from visual brightness changes, audio beats, or metronome.
+- **DOT Marker (Manual Point):** Tracks a manually selected colored dot/point on screen.
+
+### Community Trackers
+
+- **Community Example Tracker:** A template tracker showing basic motion detection and funscript generation.
 
 ---
 
@@ -355,3 +410,4 @@ Join the **Discord community** for discussions and support:
 [Discord Community](https://discord.gg/WYkjMbtCZA)
 
 ---
+
