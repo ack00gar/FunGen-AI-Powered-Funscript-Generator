@@ -46,7 +46,6 @@ cd FunGen
 ```bash
 pip install -r core.requirements.txt
 ```
-- If you have the original FunGen installed, skip to [Download the YOLO models](#download-the-yolo-models)
 
 ### NVIDIA GPU Setup (CUDA Required)
 
@@ -410,4 +409,3 @@ Join the **Discord community** for discussions and support:
 [Discord Community](https://discord.gg/WYkjMbtCZA)
 
 ---
-
