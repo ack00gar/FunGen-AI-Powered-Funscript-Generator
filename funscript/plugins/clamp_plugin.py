@@ -121,20 +121,42 @@ class ThresholdClampPlugin(FunscriptTransformationPlugin):
         lower_thresh = params['lower_threshold']
         upper_thresh = params['upper_threshold']
         
-        # Apply threshold clamping
-        count_changed = 0
-        for idx in indices_to_clamp:
-            original_pos = actions_list[idx]['pos']
-            new_pos = original_pos
+        # OPTIMIZED: Use bulk operations for large datasets
+        if len(indices_to_clamp) > 1000:
+            # Convert to numpy array for vectorized operations
+            indices_array = np.array(indices_to_clamp)
+            positions = np.array([actions_list[i]['pos'] for i in indices_to_clamp])
             
-            if original_pos < lower_thresh:
-                new_pos = 0
-            elif original_pos > upper_thresh:
-                new_pos = 100
+            # Vectorized clamping using boolean indexing
+            clamped_positions = positions.copy()
+            clamped_positions[positions < lower_thresh] = 0
+            clamped_positions[positions > upper_thresh] = 100
             
-            if new_pos != original_pos:
-                actions_list[idx]['pos'] = new_pos
-                count_changed += 1
+            # Find only changed positions for bulk update
+            changed_mask = clamped_positions != positions
+            count_changed = np.sum(changed_mask)
+            
+            # Bulk update using advanced indexing
+            if count_changed > 0:
+                changed_indices = indices_array[changed_mask]
+                changed_values = clamped_positions[changed_mask]
+                
+                for idx, new_pos in zip(changed_indices, changed_values):
+                    actions_list[idx]['pos'] = int(new_pos)
+        else:
+            # Original path for smaller datasets
+            positions = np.array([actions_list[i]['pos'] for i in indices_to_clamp])
+            
+            clamped_positions = positions.copy()
+            clamped_positions[positions < lower_thresh] = 0
+            clamped_positions[positions > upper_thresh] = 100
+            
+            changed_mask = clamped_positions != positions
+            count_changed = np.sum(changed_mask)
+            
+            for i, idx in enumerate(indices_to_clamp):
+                if changed_mask[i]:
+                    actions_list[idx]['pos'] = int(clamped_positions[i])
         
         # Invalidate cache
         funscript._invalidate_cache(axis)
@@ -160,11 +182,16 @@ class ThresholdClampPlugin(FunscriptTransformationPlugin):
             return indices_to_process
         
         elif start_time_ms is not None and end_time_ms is not None:
-            # Use time range
-            indices_to_process = []
-            for i, action in enumerate(actions_list):
-                if start_time_ms <= action['at'] <= end_time_ms:
-                    indices_to_process.append(i)
+            # OPTIMIZED: Use vectorized time range filtering for large datasets
+            if len(actions_list) > 10000:
+                timestamps = np.array([action['at'] for action in actions_list])
+                time_mask = (timestamps >= start_time_ms) & (timestamps <= end_time_ms)
+                indices_to_process = np.where(time_mask)[0].tolist()
+            else:
+                indices_to_process = []
+                for i, action in enumerate(actions_list):
+                    if start_time_ms <= action['at'] <= end_time_ms:
+                        indices_to_process.append(i)
             return indices_to_process
         
         else:
@@ -317,12 +344,18 @@ class ValueClampPlugin(FunscriptTransformationPlugin):
         
         clamp_value = params['clamp_value']
         
-        # Apply value clamping
-        count_changed = 0
-        for idx in indices_to_clamp:
-            if actions_list[idx]['pos'] != clamp_value:
+        # Vectorized value clamping
+        # Extract positions using vectorized indexing
+        positions = np.array([actions_list[i]['pos'] for i in indices_to_clamp])
+        
+        # Batch update only changed positions
+        changed_mask = positions != clamp_value
+        count_changed = np.sum(changed_mask)
+        
+        # Update only changed positions
+        for i, idx in enumerate(indices_to_clamp):
+            if changed_mask[i]:
                 actions_list[idx]['pos'] = clamp_value
-                count_changed += 1
         
         # Invalidate cache
         funscript._invalidate_cache(axis)
@@ -347,11 +380,16 @@ class ValueClampPlugin(FunscriptTransformationPlugin):
             return indices_to_process
         
         elif start_time_ms is not None and end_time_ms is not None:
-            # Use time range
-            indices_to_process = []
-            for i, action in enumerate(actions_list):
-                if start_time_ms <= action['at'] <= end_time_ms:
-                    indices_to_process.append(i)
+            # OPTIMIZED: Use vectorized time range filtering for large datasets
+            if len(actions_list) > 10000:
+                timestamps = np.array([action['at'] for action in actions_list])
+                time_mask = (timestamps >= start_time_ms) & (timestamps <= end_time_ms)
+                indices_to_process = np.where(time_mask)[0].tolist()
+            else:
+                indices_to_process = []
+                for i, action in enumerate(actions_list):
+                    if start_time_ms <= action['at'] <= end_time_ms:
+                        indices_to_process.append(i)
             return indices_to_process
         
         else:
