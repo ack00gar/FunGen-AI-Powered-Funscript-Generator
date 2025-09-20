@@ -856,6 +856,19 @@ class VideoProcessor:
         selected_hwaccel = getattr(self.app, 'hardware_acceleration_method', 'auto') if self.app else "none"
         available_on_app = getattr(self.app, 'available_ffmpeg_hwaccels', []) if self.app else []
 
+        # Force hardware acceleration to "none" for 10-bit or preprocessed videos
+        is_10bit_video = self.video_info.get('bit_depth', 8) > 8
+        is_preprocessed_video = self._is_using_preprocessed_video()
+        
+        if is_10bit_video or is_preprocessed_video:
+            if is_10bit_video and is_preprocessed_video:
+                self.logger.info("Hardware acceleration forced to 'none' for 10-bit preprocessed video (compatibility)")
+            elif is_10bit_video:
+                self.logger.info("Hardware acceleration forced to 'none' for 10-bit video (compatibility)")
+            elif is_preprocessed_video:
+                self.logger.info("Hardware acceleration forced to 'none' for preprocessed video (compatibility)")
+            return []  # Return empty args = no hardware acceleration
+
         system = platform.system().lower()
         self.logger.debug(
             f"Determining HWAccel. Selected: '{selected_hwaccel}', OS: {system}, App Available: {available_on_app}")

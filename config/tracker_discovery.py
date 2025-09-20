@@ -258,7 +258,7 @@ class DynamicTrackerDiscovery:
         # Filter out example trackers
         all_trackers = [t for t in all_trackers if "example" not in t.internal_name.lower() and "example" not in t.display_name.lower()]
         
-        # Sort all trackers alphabetically by display name (with folder prefix applied for sorting)
+        # Sort all trackers: Experimental trackers at the end, others alphabetically
         def get_sort_key(tracker_info):
             folder_prefix = tracker_info.folder_name.title() + " - " if tracker_info.folder_name else ""
             display_name = tracker_info.display_name
@@ -266,7 +266,12 @@ class DynamicTrackerDiscovery:
                 prefixed_display_name = folder_prefix + display_name
             else:
                 prefixed_display_name = display_name
-            return prefixed_display_name
+            
+            # Move experimental trackers to the end by adding a prefix that sorts last
+            if tracker_info.folder_name and tracker_info.folder_name.lower() == "experimental":
+                return "zzz_" + prefixed_display_name  # "zzz_" ensures it sorts last
+            else:
+                return prefixed_display_name
         
         all_trackers.sort(key=get_sort_key)
         
