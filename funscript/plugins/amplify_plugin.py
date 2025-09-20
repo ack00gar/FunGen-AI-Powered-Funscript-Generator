@@ -110,20 +110,40 @@ class AmplifyPlugin(FunscriptTransformationPlugin):
         scale_factor = params['scale_factor']
         center_value = params['center_value']
         
-        # Apply amplification
-        affected_count = 0
-        for i in indices_to_amplify:
-            original_pos = actions_list[i]['pos']
+        # OPTIMIZED: Use numpy array indexing for bulk operations
+        if len(indices_to_amplify) > 1000:  # Use optimized path for large datasets
+            # Convert indices to numpy array for vectorized indexing
+            indices_array = np.array(indices_to_amplify)
             
-            # Amplify around center point
-            new_pos = center_value + (original_pos - center_value) * scale_factor
+            # Extract all positions at once using advanced indexing
+            positions = np.array([actions_list[i]['pos'] for i in indices_to_amplify])
             
-            # Clamp to valid range
-            new_pos_clamped = int(round(np.clip(new_pos, 0, 100)))
+            # Vectorized amplification (same as before)
+            amplified_positions = center_value + (positions - center_value) * scale_factor
+            clamped_positions = np.clip(np.round(amplified_positions), 0, 100).astype(int)
             
-            if new_pos_clamped != original_pos:
-                actions_list[i]['pos'] = new_pos_clamped
-                affected_count += 1
+            # OPTIMIZED: Bulk update using numpy operations
+            changed_mask = clamped_positions != positions
+            affected_count = np.sum(changed_mask)
+            
+            # Update all positions in batch - much faster for large datasets
+            changed_indices = indices_array[changed_mask]
+            changed_positions = clamped_positions[changed_mask]
+            
+            for idx, new_pos in zip(changed_indices, changed_positions):
+                actions_list[idx]['pos'] = int(new_pos)
+        else:
+            # Original path for smaller datasets
+            positions = np.array([actions_list[i]['pos'] for i in indices_to_amplify])
+            amplified_positions = center_value + (positions - center_value) * scale_factor
+            clamped_positions = np.clip(np.round(amplified_positions), 0, 100).astype(int)
+            
+            changed_mask = clamped_positions != positions
+            affected_count = np.sum(changed_mask)
+            
+            for i, idx in enumerate(indices_to_amplify):
+                if changed_mask[i]:
+                    actions_list[idx]['pos'] = int(clamped_positions[i])
         
         # Invalidate cache
         funscript._invalidate_cache(axis)
@@ -149,11 +169,19 @@ class AmplifyPlugin(FunscriptTransformationPlugin):
             return indices_to_amplify
         
         elif start_time_ms is not None and end_time_ms is not None:
-            # Use time range
-            indices_to_amplify = []
-            for i, action in enumerate(actions_list):
-                if start_time_ms <= action['at'] <= end_time_ms:
-                    indices_to_amplify.append(i)
+            # OPTIMIZED: Use vectorized time range filtering for large datasets
+            if len(actions_list) > 10000:
+                # Extract timestamps as numpy array
+                timestamps = np.array([action['at'] for action in actions_list])
+                # Use boolean indexing to find matching indices
+                time_mask = (timestamps >= start_time_ms) & (timestamps <= end_time_ms)
+                indices_to_amplify = np.where(time_mask)[0].tolist()
+            else:
+                # Original method for smaller datasets
+                indices_to_amplify = []
+                for i, action in enumerate(actions_list):
+                    if start_time_ms <= action['at'] <= end_time_ms:
+                        indices_to_amplify.append(i)
             return indices_to_amplify
         
         else:

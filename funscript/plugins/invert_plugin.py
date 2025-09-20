@@ -98,11 +98,22 @@ class InvertPlugin(FunscriptTransformationPlugin):
             self.logger.debug(f"No points to invert for {axis} axis")
             return
         
-        # Apply inversion: pos = 100 - pos
-        for idx in indices_to_invert:
-            original_pos = actions_list[idx]['pos']
-            inverted_pos = 100 - original_pos
-            actions_list[idx]['pos'] = inverted_pos
+        # OPTIMIZED: Apply inversion using vectorized operations for large datasets
+        if len(indices_to_invert) > 1000:
+            # Vectorized inversion for large datasets
+            indices_array = np.array(indices_to_invert)
+            positions = np.array([actions_list[i]['pos'] for i in indices_to_invert])
+            inverted_positions = 100 - positions
+            
+            # Bulk update
+            for idx, new_pos in zip(indices_array, inverted_positions):
+                actions_list[idx]['pos'] = int(new_pos)
+        else:
+            # Original method for smaller datasets
+            for idx in indices_to_invert:
+                original_pos = actions_list[idx]['pos']
+                inverted_pos = 100 - original_pos
+                actions_list[idx]['pos'] = inverted_pos
         
         # Invalidate cache
         funscript._invalidate_cache(axis)
@@ -127,11 +138,16 @@ class InvertPlugin(FunscriptTransformationPlugin):
             return indices_to_invert
         
         elif start_time_ms is not None and end_time_ms is not None:
-            # Use time range
-            indices_to_invert = []
-            for i, action in enumerate(actions_list):
-                if start_time_ms <= action['at'] <= end_time_ms:
-                    indices_to_invert.append(i)
+            # OPTIMIZED: Use vectorized time range filtering for large datasets
+            if len(actions_list) > 10000:
+                timestamps = np.array([action['at'] for action in actions_list])
+                time_mask = (timestamps >= start_time_ms) & (timestamps <= end_time_ms)
+                indices_to_invert = np.where(time_mask)[0].tolist()
+            else:
+                indices_to_invert = []
+                for i, action in enumerate(actions_list):
+                    if start_time_ms <= action['at'] <= end_time_ms:
+                        indices_to_invert.append(i)
             return indices_to_invert
         
         else:
