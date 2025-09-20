@@ -173,8 +173,10 @@ class KeyframePlugin(FunscriptTransformationPlugin):
         if len(segment) < 3:
             return segment
 
-        # OPTIMIZATION: Use vectorized approach for large datasets
-        if len(segment) > 2000:
+        # BREAKTHROUGH OPTIMIZATION: Use different algorithms based on dataset size
+        if len(segment) > 50000:
+            return self._find_keyframes_ultra_fast(segment, params)
+        elif len(segment) > 2000:
             return self._find_keyframes_vectorized(segment, params)
         else:
             return self._find_keyframes_original(segment, params)
@@ -252,6 +254,68 @@ class KeyframePlugin(FunscriptTransformationPlugin):
                 break
                 
         return extrema
+    
+    def _find_keyframes_ultra_fast(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
+        """Ultra-fast approximate keyframe detection for massive datasets."""
+        position_tolerance = params['position_tolerance']
+        time_tolerance_ms = params['time_tolerance_ms']
+        
+        # STRATEGY: Use statistical sampling + local maxima detection
+        positions = np.array([action['pos'] for action in segment])
+        timestamps = np.array([action['at'] for action in segment])
+        
+        # Step 1: Reduce problem size with uniform sampling
+        sample_rate = max(1, len(segment) // 10000)  # Reduce to ~10k points max
+        sampled_indices = np.arange(0, len(positions), sample_rate)
+        if sampled_indices[-1] != len(positions) - 1:
+            sampled_indices = np.append(sampled_indices, len(positions) - 1)
+        
+        sampled_positions = positions[sampled_indices]
+        sampled_timestamps = timestamps[sampled_indices]
+        sampled_segment = [segment[i] for i in sampled_indices]
+        
+        # Step 2: Apply fast local maxima/minima detection
+        # Use scipy.signal.find_peaks equivalent with numpy
+        pos_diff1 = np.diff(sampled_positions)
+        pos_diff2 = np.diff(pos_diff1)
+        
+        # Find local extrema (where derivative changes sign)
+        sign_changes = np.diff(np.sign(pos_diff1))
+        extrema_indices = np.where(np.abs(sign_changes) > 0)[0] + 1  # +1 to adjust index
+        
+        # Always include first and last points
+        keyframe_indices = [0]
+        keyframe_indices.extend(extrema_indices.tolist())
+        keyframe_indices.append(len(sampled_segment) - 1)
+        
+        # Remove duplicates and sort
+        keyframe_indices = sorted(set(keyframe_indices))
+        
+        # Step 3: Filter by significance using vectorized operations
+        if len(keyframe_indices) > 3:
+            # Quick significance test - keep points that differ significantly from neighbors
+            significance_mask = np.ones(len(keyframe_indices), dtype=bool)
+            
+            for i in range(1, len(keyframe_indices) - 1):
+                idx = keyframe_indices[i]
+                prev_idx = keyframe_indices[i-1]
+                next_idx = keyframe_indices[i+1]
+                
+                curr_pos = sampled_positions[idx]
+                prev_pos = sampled_positions[prev_idx]
+                next_pos = sampled_positions[next_idx]
+                
+                # Simple significance: minimum distance to neighbors
+                significance = min(abs(curr_pos - prev_pos), abs(curr_pos - next_pos))
+                if significance < position_tolerance:
+                    significance_mask[i] = False
+            
+            keyframe_indices = [keyframe_indices[i] for i in range(len(keyframe_indices)) if significance_mask[i]]
+        
+        # Step 4: Map back to original segment
+        keyframes = [sampled_segment[i] for i in keyframe_indices]
+        
+        return keyframes
     
     def _find_keyframes_original(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
         """Original keyframe detection for smaller datasets."""
