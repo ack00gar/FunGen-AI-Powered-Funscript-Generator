@@ -169,31 +169,51 @@ class SavgolFilterPlugin(FunscriptTransformationPlugin):
             )
             return False
         
-        # Extract positions
-        positions = np.array([actions_list[i]['pos'] for i in indices_to_filter])
+        # OPTIMIZED: Use bulk operations for large datasets
+        if len(indices_to_filter) > 1000:
+            # Vectorized extraction and processing for large datasets
+            indices_array = np.array(indices_to_filter)
+            positions = np.array([actions_list[i]['pos'] for i in indices_to_filter])
+            
+            try:
+                # Apply Savitzky-Golay filter
+                smoothed_positions = savgol_filter(positions, window_length, polyorder)
+                
+                # Vectorized clipping and type conversion
+                smoothed_positions_clipped = np.clip(np.round(smoothed_positions), 0, 100).astype(int)
+                
+                # Bulk update using zip for better performance
+                for idx, new_pos in zip(indices_array, smoothed_positions_clipped):
+                    actions_list[idx]['pos'] = int(new_pos)
+            except Exception as e:
+                self.logger.error(f"Error applying Savitzky-Golay filter to {axis} axis: {e}")
+                raise
+        else:
+            # Original method for smaller datasets
+            positions = np.array([actions_list[i]['pos'] for i in indices_to_filter])
+            
+            try:
+                # Apply Savitzky-Golay filter
+                smoothed_positions = savgol_filter(positions, window_length, polyorder)
+                
+                # Update positions
+                smoothed_positions_clipped = np.clip(np.round(smoothed_positions), 0, 100).astype(int)
+                for i, list_idx in enumerate(indices_to_filter):
+                    actions_list[list_idx]['pos'] = int(smoothed_positions_clipped[i])
+            except Exception as e:
+                self.logger.error(f"Error applying Savitzky-Golay filter to {axis} axis: {e}")
+                raise
+            
+        # Invalidate cache
+        funscript._invalidate_cache(axis)
         
-        try:
-            # Apply Savitzky-Golay filter
-            smoothed_positions = savgol_filter(positions, window_length, polyorder)
-            
-            # Update the actions with smoothed positions (in-place already)
-            for i, list_idx in enumerate(indices_to_filter):
-                actions_list[list_idx]['pos'] = int(round(np.clip(smoothed_positions[i], 0, 100)))
-            
-            # Invalidate cache
-            funscript._invalidate_cache(axis)
-            
-            self.logger.info(
-                f"Applied Savitzky-Golay filter to {axis} axis, "
-                f"affecting {len(indices_to_filter)} points "
-                f"(window: {window_length}, poly: {polyorder})"
-            )
-            
-            return True  # Successfully processed
-            
-        except Exception as e:
-            self.logger.error(f"Error applying Savitzky-Golay filter to {axis} axis: {e}")
-            raise
+        self.logger.info(
+            f"Applied Savitzky-Golay filter to {axis} axis, "
+            f"affecting {len(indices_to_filter)} points "
+            f"(window: {window_length}, poly: {polyorder})"
+        )
+        
+        return True  # Successfully processed
     
     def _get_indices_to_filter(self, actions_list: List[Dict], params: Dict[str, Any]) -> List[int]:
         """Determine which action indices should be filtered."""
@@ -210,15 +230,21 @@ class SavgolFilterPlugin(FunscriptTransformationPlugin):
             return indices_to_filter
         
         elif start_time_ms is not None and end_time_ms is not None:
-            # Use time range
-            start_idx, end_idx = self._get_action_indices_in_time_range(
-                actions_list, start_time_ms, end_time_ms
-            )
-            
-            if start_idx is None or end_idx is None or start_idx > end_idx:
-                return []
-            
-            return list(range(start_idx, end_idx + 1))
+            # OPTIMIZED: Use vectorized time range filtering for large datasets
+            if len(actions_list) > 10000:
+                timestamps = np.array([action['at'] for action in actions_list])
+                time_mask = (timestamps >= start_time_ms) & (timestamps <= end_time_ms)
+                return np.where(time_mask)[0].tolist()
+            else:
+                # Use original method for smaller datasets
+                start_idx, end_idx = self._get_action_indices_in_time_range(
+                    actions_list, start_time_ms, end_time_ms
+                )
+                
+                if start_idx is None or end_idx is None or start_idx > end_idx:
+                    return []
+                
+                return list(range(start_idx, end_idx + 1))
         
         else:
             # Filter entire list

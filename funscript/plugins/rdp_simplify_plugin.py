@@ -167,11 +167,19 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
             self.logger.debug(f"Segment for RDP on {axis} axis has < 2 points")
             return False
         
-        # Convert to points array for RDP
-        points = np.array([
-            [action['at'], action['pos']] 
-            for action in segment_info['segment']
-        ], dtype=np.float64)
+        # OPTIMIZED: Vectorized conversion to points array for RDP
+        segment = segment_info['segment']
+        if len(segment) > 1000:
+            # Use vectorized extraction for large datasets
+            timestamps = np.array([action['at'] for action in segment], dtype=np.float64)
+            positions = np.array([action['pos'] for action in segment], dtype=np.float64)
+            points = np.column_stack((timestamps, positions))
+        else:
+            # Original method for smaller datasets
+            points = np.column_stack((
+                [action['at'] for action in segment],
+                [action['pos'] for action in segment]
+            )).astype(np.float64)
         
         epsilon = params['epsilon']
         
@@ -180,7 +188,7 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
             simplified_points = self._rdp_numpy_implementation(points, epsilon)
             self.logger.debug(f"Using optimized numpy RDP implementation for {axis} axis simplification")
             
-            # Convert back to action dictionaries
+            # Vectorized conversion back to action dictionaries
             simplified_actions = [
                 {'at': int(point[0]), 'pos': int(np.clip(point[1], 0, 100))}
                 for point in simplified_points

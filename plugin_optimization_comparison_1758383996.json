@@ -1,0 +1,344 @@
+{
+  "50k_points": {
+    "data_size": 50000,
+    "benchmark_results": {
+      "Amplify": {
+        "plugin_name": "Amplify",
+        "success": true,
+        "average_time_seconds": 0.01330011133783652,
+        "std_time_seconds": 4.635573779818506e-05,
+        "min_time_seconds": 0.013248084011138417,
+        "max_time_seconds": 0.01336066699877847,
+        "average_memory_mb": 0.6927083333333334,
+        "num_runs": 3,
+        "points_processed": 50000,
+        "points_per_second": 3759367.0255796,
+        "parameters": {
+          "scale_factor": 1.5,
+          "center_value": 50
+        }
+      },
+      "Threshold Clamp": {
+        "plugin_name": "Threshold Clamp",
+        "success": true,
+        "average_time_seconds": 0.0066696253343252465,
+        "std_time_seconds": 2.4840445289942173e-05,
+        "min_time_seconds": 0.006634499994106591,
+        "max_time_seconds": 0.006687667002552189,
+        "average_memory_mb": 1.265625,
+        "num_runs": 3,
+        "points_processed": 50000,
+        "points_per_second": 7496672.975418102,
+        "parameters": {
+          "lower_threshold": 20,
+          "upper_threshold": 80
+        }
+      },
+      "Clamp": {
+        "plugin_name": "Clamp",
+        "success": true,
+        "average_time_seconds": 0.007876221997624574,
+        "std_time_seconds": 1.2091696651238614e-05,
+        "min_time_seconds": 0.00786070799222216,
+        "max_time_seconds": 0.007890207998570986,
+        "average_memory_mb": 0.53125,
+        "num_runs": 3,
+        "points_processed": 50000,
+        "points_per_second": 6348221.268405046,
+        "parameters": {
+          "clamp_value": 50
+        }
+      },
+      "Invert": {
+        "plugin_name": "Invert",
+        "success": true,
+        "average_time_seconds": 0.013186444329524724,
+        "std_time_seconds": 0.00018732769671458898,
+        "min_time_seconds": 0.012922041991259903,
+        "max_time_seconds": 0.013332999995327555,
+        "average_memory_mb": 0.7916666666666666,
+        "num_runs": 3,
+        "points_processed": 50000,
+        "points_per_second": 3791772.7289113835,
+        "parameters": {}
+      },
+      "Simplify (RDP)": {
+        "plugin_name": "Simplify (RDP)",
+        "success": true,
+        "average_time_seconds": 0.7435563470013827,
+        "std_time_seconds": 0.000997339034298547,
+        "min_time_seconds": 0.7421562499948777,
+        "max_time_seconds": 0.7444041249982547,
+        "average_memory_mb": 13.0625,
+        "num_runs": 3,
+        "points_processed": 50000,
+        "points_per_second": 67244.39943474387,
+        "parameters": {
+          "epsilon": 5.0
+        }
+      },
+      "Smooth (SG)": {
+        "plugin_name": "Smooth (SG)",
+        "success": true,
+        "average_time_seconds": 0.013698166663137576,
+        "std_time_seconds": 8.032877609777714e-05,
+        "min_time_seconds": 0.013621874997625127,
+        "max_time_seconds": 0.013809208001475781,
+        "average_memory_mb": 0.5572916666666666,
+        "num_runs": 3,
+        "points_processed": 50000,
+        "points_per_second": 3650123.496785333,
+        "parameters": {
+          "window_length": 7,
+          "polyorder": 3
+        }
+      },
+      "Speed Limiter": {
+        "plugin_name": "Speed Limiter",
+        "success": true,
+        "average_time_seconds": 0.07761406899953727,
+        "std_time_seconds": 0.00027378944447762526,
+        "min_time_seconds": 0.07735079100530129,
+        "max_time_seconds": 0.07799158299167175,
+        "average_memory_mb": 11.291666666666666,
+        "num_runs": 3,
+        "points_processed": 50000,
+        "points_per_second": 644213.1000798077,
+        "parameters": {
+          "min_interval_ms": 50,
+          "speed_threshold": 300.0,
+          "vibe_amount": 0
+        }
+      }
+    },
+    "test_timestamp": "2025-09-20 17:59:33"
+  },
+  "100k_points": {
+    "data_size": 100000,
+    "benchmark_results": {
+      "Amplify": {
+        "plugin_name": "Amplify",
+        "success": true,
+        "average_time_seconds": 0.026721416996830765,
+        "std_time_seconds": 0.00022701907787213007,
+        "min_time_seconds": 0.02654545799305197,
+        "max_time_seconds": 0.027041958994232118,
+        "average_memory_mb": 0.3854166666666667,
+        "num_runs": 3,
+        "points_processed": 100000,
+        "points_per_second": 3742316.510081044,
+        "parameters": {
+          "scale_factor": 1.5,
+          "center_value": 50
+        }
+      },
+      "Threshold Clamp": {
+        "plugin_name": "Threshold Clamp",
+        "success": true,
+        "average_time_seconds": 0.01354198633634951,
+        "std_time_seconds": 0.00018799082780867458,
+        "min_time_seconds": 0.013276458994369023,
+        "max_time_seconds": 0.013686250007594936,
+        "average_memory_mb": 0.0625,
+        "num_runs": 3,
+        "points_processed": 100000,
+        "points_per_second": 7384441.064718784,
+        "parameters": {
+          "lower_threshold": 20,
+          "upper_threshold": 80
+        }
+      },
+      "Clamp": {
+        "plugin_name": "Clamp",
+        "success": true,
+        "average_time_seconds": 0.015971250337315723,
+        "std_time_seconds": 2.1101031385935636e-05,
+        "min_time_seconds": 0.015951666995533742,
+        "max_time_seconds": 0.016000542003894225,
+        "average_memory_mb": 0.0625,
+        "num_runs": 3,
+        "points_processed": 100000,
+        "points_per_second": 6261250.552585536,
+        "parameters": {
+          "clamp_value": 50
+        }
+      },
+      "Invert": {
+        "plugin_name": "Invert",
+        "success": true,
+        "average_time_seconds": 0.026837389004261542,
+        "std_time_seconds": 0.00027511238635797924,
+        "min_time_seconds": 0.026460292006959207,
+        "max_time_seconds": 0.027108875001431443,
+        "average_memory_mb": 0.06770833333333333,
+        "num_runs": 3,
+        "points_processed": 100000,
+        "points_per_second": 3726144.893757022,
+        "parameters": {}
+      },
+      "Simplify (RDP)": {
+        "plugin_name": "Simplify (RDP)",
+        "success": true,
+        "average_time_seconds": 1.5069027360004839,
+        "std_time_seconds": 0.022735485026645567,
+        "min_time_seconds": 1.4748247079987777,
+        "max_time_seconds": 1.5248400410055183,
+        "average_memory_mb": 16.692708333333332,
+        "num_runs": 3,
+        "points_processed": 100000,
+        "points_per_second": 66361.28371855839,
+        "parameters": {
+          "epsilon": 5.0
+        }
+      },
+      "Smooth (SG)": {
+        "plugin_name": "Smooth (SG)",
+        "success": true,
+        "average_time_seconds": 0.027843430332723074,
+        "std_time_seconds": 0.0010273282447256526,
+        "min_time_seconds": 0.026777457998832688,
+        "max_time_seconds": 0.029231332999188453,
+        "average_memory_mb": 1.0520833333333333,
+        "num_runs": 3,
+        "points_processed": 100000,
+        "points_per_second": 3591511.491401069,
+        "parameters": {
+          "window_length": 7,
+          "polyorder": 3
+        }
+      },
+      "Speed Limiter": {
+        "plugin_name": "Speed Limiter",
+        "success": true,
+        "average_time_seconds": 0.15481522233555248,
+        "std_time_seconds": 0.00010940771737793306,
+        "min_time_seconds": 0.15466070899856277,
+        "max_time_seconds": 0.15489950000483077,
+        "average_memory_mb": 13.21875,
+        "num_runs": 3,
+        "points_processed": 100000,
+        "points_per_second": 645931.3140619735,
+        "parameters": {
+          "min_interval_ms": 50,
+          "speed_threshold": 300.0,
+          "vibe_amount": 0
+        }
+      }
+    },
+    "test_timestamp": "2025-09-20 17:59:39"
+  },
+  "300k_points": {
+    "data_size": 300000,
+    "benchmark_results": {
+      "Amplify": {
+        "plugin_name": "Amplify",
+        "success": true,
+        "average_time_seconds": 0.08362523633695673,
+        "std_time_seconds": 0.0011145414195215483,
+        "min_time_seconds": 0.08215837499301415,
+        "max_time_seconds": 0.08485820901114494,
+        "average_memory_mb": 12.484375,
+        "num_runs": 3,
+        "points_processed": 300000,
+        "points_per_second": 3587433.8075552937,
+        "parameters": {
+          "scale_factor": 1.5,
+          "center_value": 50
+        }
+      },
+      "Threshold Clamp": {
+        "plugin_name": "Threshold Clamp",
+        "success": true,
+        "average_time_seconds": 0.043080916667046644,
+        "std_time_seconds": 0.0007787823685383114,
+        "min_time_seconds": 0.04206025000894442,
+        "max_time_seconds": 0.04394962500373367,
+        "average_memory_mb": 6.369791666666667,
+        "num_runs": 3,
+        "points_processed": 300000,
+        "points_per_second": 6963640.126754204,
+        "parameters": {
+          "lower_threshold": 20,
+          "upper_threshold": 80
+        }
+      },
+      "Clamp": {
+        "plugin_name": "Clamp",
+        "success": true,
+        "average_time_seconds": 0.050409111334981084,
+        "std_time_seconds": 0.0005499860432437078,
+        "min_time_seconds": 0.049991166990366764,
+        "max_time_seconds": 0.05118616700929124,
+        "average_memory_mb": 1.7916666666666667,
+        "num_runs": 3,
+        "points_processed": 300000,
+        "points_per_second": 5951305.072736263,
+        "parameters": {
+          "clamp_value": 50
+        }
+      },
+      "Invert": {
+        "plugin_name": "Invert",
+        "success": true,
+        "average_time_seconds": 0.08141284733331607,
+        "std_time_seconds": 0.001125024474705746,
+        "min_time_seconds": 0.07982233399525285,
+        "max_time_seconds": 0.0822430410044035,
+        "average_memory_mb": 4.140625,
+        "num_runs": 3,
+        "points_processed": 300000,
+        "points_per_second": 3684922.095547847,
+        "parameters": {}
+      },
+      "Simplify (RDP)": {
+        "plugin_name": "Simplify (RDP)",
+        "success": true,
+        "average_time_seconds": 4.601941041333096,
+        "std_time_seconds": 0.01739964752061005,
+        "min_time_seconds": 4.580899041000521,
+        "max_time_seconds": 4.623509541997919,
+        "average_memory_mb": 25.401041666666668,
+        "num_runs": 3,
+        "points_processed": 300000,
+        "points_per_second": 65189.88342212564,
+        "parameters": {
+          "epsilon": 5.0
+        }
+      },
+      "Smooth (SG)": {
+        "plugin_name": "Smooth (SG)",
+        "success": true,
+        "average_time_seconds": 0.08601887500359832,
+        "std_time_seconds": 0.0006773817568914567,
+        "min_time_seconds": 0.08509404200594872,
+        "max_time_seconds": 0.08669758299947716,
+        "average_memory_mb": 4.6875,
+        "num_runs": 3,
+        "points_processed": 300000,
+        "points_per_second": 3487606.6443260326,
+        "parameters": {
+          "window_length": 7,
+          "polyorder": 3
+        }
+      },
+      "Speed Limiter": {
+        "plugin_name": "Speed Limiter",
+        "success": true,
+        "average_time_seconds": 0.47257990266856115,
+        "std_time_seconds": 0.008087956482755633,
+        "min_time_seconds": 0.46584008299396373,
+        "max_time_seconds": 0.4839531670004362,
+        "average_memory_mb": -20.567708333333332,
+        "num_runs": 3,
+        "points_processed": 300000,
+        "points_per_second": 634813.2840731523,
+        "parameters": {
+          "min_interval_ms": 50,
+          "speed_threshold": 300.0,
+          "vibe_amount": 0
+        }
+      }
+    },
+    "test_timestamp": "2025-09-20 17:59:56"
+  }
+}
