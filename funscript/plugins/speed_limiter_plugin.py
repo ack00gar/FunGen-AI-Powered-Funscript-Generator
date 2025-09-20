@@ -306,10 +306,58 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
         return result_actions
     
     def _limit_speed(self, actions: List[Dict], speed_threshold: float, axis: str) -> List[Dict]:
-        """Limit the maximum speed of movements."""
+        """ULTRA-OPTIMIZED: Vectorized speed limiting with batch processing."""
         if len(actions) <= 1:
             return actions
         
+        # OPTIMIZATION: Use vectorized approach for large datasets
+        if len(actions) > 3000:
+            return self._limit_speed_vectorized(actions, speed_threshold, axis)
+        else:
+            return self._limit_speed_original(actions, speed_threshold, axis)
+    
+    def _limit_speed_vectorized(self, actions: List[Dict], speed_threshold: float, axis: str) -> List[Dict]:
+        """Vectorized speed limiting for maximum performance."""
+        # Extract arrays for vectorized operations
+        timestamps = np.array([action['at'] for action in actions])
+        positions = np.array([action['pos'] for action in actions])
+        
+        # Calculate time deltas and position deltas vectorized
+        time_deltas = np.diff(timestamps)
+        pos_deltas = np.diff(positions)
+        
+        # Calculate speeds (positions per millisecond)
+        speeds = np.abs(pos_deltas) / np.maximum(time_deltas, 1)  # Avoid division by zero
+        
+        # Find violations
+        speed_violations = speeds > speed_threshold
+        
+        if not np.any(speed_violations):
+            # No violations, return original
+            return actions
+        
+        # For violations, we need to create intermediate points
+        # This is the complex part that requires sequential processing
+        result_actions = [actions[0]]
+        
+        for i in range(1, len(actions)):
+            if speed_violations[i-1]:  # i-1 because speeds array is one shorter
+                # Create intermediate points
+                intermediate = self._create_intermediate_actions(
+                    result_actions[-1], actions[i], speed_threshold
+                )
+                result_actions.extend(intermediate)
+            else:
+                result_actions.append(actions[i])
+        
+        speed_corrections = len(result_actions) - len(actions)
+        if speed_corrections > 0:
+            self.logger.debug(f"{axis} axis: Added {speed_corrections} intermediate points (vectorized)")
+        
+        return result_actions
+    
+    def _limit_speed_original(self, actions: List[Dict], speed_threshold: float, axis: str) -> List[Dict]:
+        """Original speed limiting for smaller datasets."""
         speed_limited_actions = [actions[0]]  # Always keep first action
         
         for i in range(1, len(actions)):
