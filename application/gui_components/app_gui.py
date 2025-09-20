@@ -1367,14 +1367,24 @@ class GUI:
             offline_trackers = discovery.get_trackers_by_category(TrackerCategory.OFFLINE)
             for tracker in offline_trackers:
                 if tracker.supports_batch:
-                    batch_compatible_trackers.append(tracker.display_name)
+                    # Add prefix based on folder name
+                    if tracker.folder_name and tracker.folder_name.lower() == "experimental":
+                        display_name = f"Experimental: {tracker.display_name}"
+                    else:
+                        display_name = f"Offline: {tracker.display_name}"
+                    batch_compatible_trackers.append(display_name)
                     tracker_internal_names.append(tracker.internal_name)
             
             # Add live trackers (non-intervention only)
             live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
             for tracker in live_trackers:
                 if tracker.supports_batch and not tracker.requires_intervention:
-                    batch_compatible_trackers.append(tracker.display_name)
+                    # Add prefix based on folder name
+                    if tracker.folder_name and tracker.folder_name.lower() == "experimental":
+                        display_name = f"Experimental: {tracker.display_name}"
+                    else:
+                        display_name = f"Live: {tracker.display_name}"
+                    batch_compatible_trackers.append(display_name)
                     tracker_internal_names.append(tracker.internal_name)
             
             # Create dropdown
