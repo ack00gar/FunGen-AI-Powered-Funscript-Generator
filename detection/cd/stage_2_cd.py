@@ -434,47 +434,70 @@ def _calculate_fallback_absolute_distance(locked_penis_box_coords: Tuple[float, 
 def _normalize_funscript_sparse_per_segment(app, frame_objects: List[FrameObject], segments: List[Segment], logger: Optional[logging.Logger]):
     """ Normalizes funscript distances (funscript_distance on FrameObject) per Segment.
     """
+    # Vectorize operations using NumPy where possible
     for seg in segments:
-        if not seg.segment_frame_objects: continue
+        if not seg.segment_frame_objects: 
+            continue
 
-        values = [fo.funscript_distance for fo in seg.segment_frame_objects]
-        if not values: continue
+        # Convert to NumPy array for vectorized operations
+        values = np.array([fo.funscript_distance for fo in seg.segment_frame_objects])
+        if values.size == 0: 
+            continue
 
-        p01 = np.percentile(values, 5)
-        p99 = np.percentile(values, 95)
-
-        filtered_values = [v for v in values if p01 <= v <= p99]
-        min_val_in_segment = min(values)  # True min for scaling outliers
-        max_val_in_segment = max(values)  # True max for scaling outliers
-
-        filtered_min = min(filtered_values) if filtered_values else min_val_in_segment
-        filtered_max = max(filtered_values) if filtered_values else max_val_in_segment
-
+        # Calculate percentiles once
+        p01, p99 = np.percentile(values, [5, 95])
+        
+        # Vectorized filtering
+        mask = (values >= p01) & (values <= p99)
+        filtered_values = values[mask]
+        
+        # Calculate min/max once
+        min_val_in_segment, max_val_in_segment = values.min(), values.max()
+        
+        if filtered_values.size > 0:
+            filtered_min, filtered_max = filtered_values.min(), filtered_values.max()
+        else:
+            filtered_min, filtered_max = min_val_in_segment, max_val_in_segment
+            
         scale_range = filtered_max - filtered_min
-
-        for fo in seg.segment_frame_objects:
-            val = float(fo.funscript_distance)
-            original_val_for_debug = val
-
-            if seg.major_position in ['Not Relevant', 'Close up']:
-                val = 100.0
-            else:
-                if val <= p01:  # Outlier low
-                    # Map to 0-5 based on position relative to true min_val_in_segment
-                    # Avoid division by zero if p01 is the same as min_val_in_segment
-                    denominator = p01 - min_val_in_segment
-                    val = ((val - min_val_in_segment) / denominator) * 5.0 if denominator > 1e-6 else 0.0
-                elif val >= p99:  # Outlier high
-                    # Map to 95-100 based on position relative to true max_val_in_segment
-                    denominator = max_val_in_segment - p99
-                    val = 95.0 + ((val - p99) / denominator) * 5.0 if denominator > 1e-6 else 100.0
-                else:  # Non-outlier
-                    if scale_range < 1e-6:  # No variation in non-outliers
-                        val = 50.0
-                    else:  # Scale to 5-95
-                        val = 5.0 + ((val - filtered_min) / scale_range) * 90.0
-
-            fo.funscript_distance = int(np.clip(round(val), 0, 100))
+        
+        # Vectorized normalization
+        if seg.major_position in ['Not Relevant', 'Close up']:
+            normalized_values = np.full_like(values, 100.0)
+        else:
+            # Vectorized outlier handling
+            normalized_values = np.empty_like(values, dtype=float)
+            
+            # Low outliers
+            low_mask = values <= p01
+            if np.any(low_mask):
+                denominator = p01 - min_val_in_segment
+                if denominator > 1e-6:
+                    normalized_values[low_mask] = ((values[low_mask] - min_val_in_segment) / denominator) * 5.0
+                else:
+                    normalized_values[low_mask] = 0.0
+            
+            # High outliers
+            high_mask = values >= p99
+            if np.any(high_mask):
+                denominator = max_val_in_segment - p99
+                if denominator > 1e-6:
+                    normalized_values[high_mask] = 95.0 + ((values[high_mask] - p99) / denominator) * 5.0
+                else:
+                    normalized_values[high_mask] = 100.0
+            
+            # Normal values
+            normal_mask = ~low_mask & ~high_mask
+            if np.any(normal_mask):
+                if scale_range < 1e-6:
+                    normalized_values[normal_mask] = 50.0
+                else:
+                    normalized_values[normal_mask] = 5.0 + ((values[normal_mask] - filtered_min) / scale_range) * 90.0
+        
+        # Apply normalized values back to frame objects
+        clipped_values = np.clip(np.round(normalized_values), 0, 100).astype(int)
+        for i, fo in enumerate(seg.segment_frame_objects):
+            fo.funscript_distance = clipped_values[i]
 
 def _apply_signal_enhancement(app, frame_objects: List[FrameObject], logger: Optional[logging.Logger] = None):
     """
@@ -491,75 +514,54 @@ def _apply_signal_enhancement(app, frame_objects: List[FrameObject], logger: Opt
             logger.debug("Signal enhancement disabled, skipping")
         return
     
-    if not frame_objects or len(frame_objects) < 2:
+    n_frames = len(frame_objects)
+    if not frame_objects or n_frames < 2:
         if logger:
             logger.debug("Not enough frames for signal enhancement")
         return
     
-    # Initialize signal enhancer
-    enhancer = Stage2SignalEnhancer(
-        motion_threshold_low=12.0,
-        motion_threshold_high=30.0, 
-        signal_change_threshold=6,
-        enhancement_strength=0.25,
-        logger=logger
-    )
-    
     if logger:
-        logger.debug(f"Applying signal enhancement to {len(frame_objects)} frames")
+        logger.debug(f"Applying signal enhancement to {n_frames} frames")
     
-    # We need access to the original video frames for motion analysis
-    # For now, we'll enhance based on existing locked penis positions as ROI proxy
     enhanced_count = 0
     
-    for i, frame_obj in enumerate(frame_objects):
-        if i == 0:
-            continue  # Skip first frame
-        
-        # Get locked penis box as ROI for motion analysis
-        roi = None
-        if (frame_obj.locked_penis_state.active and 
-            frame_obj.locked_penis_state.box):
+    # Cache property access and precompute where possible
+    frame_data = []
+    for frame_obj in frame_objects:
+        if frame_obj.locked_penis_state.active and frame_obj.locked_penis_state.box:
             box = frame_obj.locked_penis_state.box
-            # Convert to (x1, y1, x2, y2) format
-            roi = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+            # Precompute center coordinates
+            cx = (box[0] + box[2]) / 2
+            cy = (box[1] + box[3]) / 2
+            frame_data.append((frame_obj.funscript_distance, cx, cy))
+        else:
+            frame_data.append((frame_obj.funscript_distance, None, None))
+    
+    # Process frames in pairs to reduce redundant calculations
+    for i in range(1, n_frames):
+        curr_distance, curr_cx, curr_cy = frame_data[i]
+        prev_distance, prev_cx, prev_cy = frame_data[i-1]
         
-        # For Stage 2, we don't have the original video frames readily available
-        # So we'll use a simplified enhancement based on signal patterns and locked penis movement
-        original_signal = frame_obj.funscript_distance
-        
-        # Simple motion proxy: check if locked penis position changed significantly
-        prev_frame = frame_objects[i-1]
+        # Check for motion
         motion_detected = False
+        if curr_cx is not None and prev_cx is not None:
+            # Use squared distance to avoid sqrt calculation
+            dx = curr_cx - prev_cx
+            dy = curr_cy - prev_cy
+            squared_movement = dx*dx + dy*dy
+            # Compare squared distances (25 = 5^2)
+            motion_detected = squared_movement > 25.0
         
-        if (roi and prev_frame.locked_penis_state.active and 
-            prev_frame.locked_penis_state.box):
-            
-            prev_box = prev_frame.locked_penis_state.box
-            
-            # Calculate center movement
-            curr_cx = (roi[0] + roi[2]) / 2
-            curr_cy = (roi[1] + roi[3]) / 2
-            prev_cx = (prev_box[0] + prev_box[2]) / 2
-            prev_cy = (prev_box[1] + prev_box[3]) / 2
-            
-            movement = np.sqrt((curr_cx - prev_cx)**2 + (curr_cy - prev_cy)**2)
-            
-            # Consider significant movement (>5 pixels) as motion
-            motion_detected = movement > 5.0
-        
-        # Apply simple enhancement logic
-        prev_signal = prev_frame.funscript_distance
-        signal_change = abs(original_signal - prev_signal)
-        
-        enhanced_signal = original_signal
+        # Apply enhancement logic
+        signal_change = abs(curr_distance - prev_distance)
+        enhanced_signal = curr_distance
         
         # False stroke suppression: large signal change but no motion
         if signal_change > 8 and not motion_detected:
             # Reduce signal change by 40%
-            change_direction = 1 if original_signal > prev_signal else -1
+            change_direction = 1 if curr_distance > prev_distance else -1
             reduced_change = int(signal_change * 0.6)
-            enhanced_signal = prev_signal + (change_direction * reduced_change)
+            enhanced_signal = prev_distance + (change_direction * reduced_change)
             enhanced_count += 1
         
         # Missing stroke detection: motion but small signal change
@@ -567,14 +569,14 @@ def _apply_signal_enhancement(app, frame_objects: List[FrameObject], logger: Opt
             # Add small boost based on motion
             boost = 8  # Small boost
             direction = 1 if i % 2 == 0 else -1  # Alternate direction for oscillation
-            enhanced_signal = original_signal + (direction * boost)
+            enhanced_signal = curr_distance + (direction * boost)
             enhanced_count += 1
         
         # Apply enhanced signal
-        frame_obj.funscript_distance = int(np.clip(enhanced_signal, 0, 100))
+        frame_objects[i].funscript_distance = int(np.clip(enhanced_signal, 0, 100))
     
     if logger:
-        logger.debug(f"Enhanced {enhanced_count} frame signals out of {len(frame_objects)}")
+        logger.debug(f"Enhanced {enhanced_count} frame signals out of {n_frames}")
 
 def _get_dominant_pose(frame_obj: FrameObject, is_vr: bool, frame_width: int) -> Optional[PoseRecord]:
     if not frame_obj.poses:
@@ -1797,14 +1799,21 @@ def pass_7_smooth_and_normalize_distances(app, frames: List, funscript_frames: L
     if logger:
         logger.debug("Starting Stage 2 Pass 7: Smooth and Normalize Distances")
 
-    all_raw_distances = [fo.funscript_distance for fo in frames]
-    if not all_raw_distances or len(all_raw_distances) < 11:  # Savgol needs enough points
+    # Vectorized implementation for better performance
+    all_raw_distances = np.array([fo.funscript_distance for fo in frames])
+    if not all_raw_distances.size or len(all_raw_distances) < 11:  # Savgol needs enough points
         if logger:
             logger.debug("Not enough data points for Savitzky-Golay filter.")
     else:
+        # Apply Savitzky-Golay filter with vectorized operations
         smoothed_distances = savgol_filter(all_raw_distances, window_length=11, polyorder=2)
+        # Vectorized clipping and rounding
+        clipped_distances = np.clip(np.round(smoothed_distances), 0, 100).astype(int)
+        
+        # Apply smoothed values back to frame objects
         for i, fo in enumerate(frames):
-            fo.funscript_distance = int(np.clip(round(smoothed_distances[i]), 0, 100))
+            fo.funscript_distance = clipped_distances[i]
+            
         if logger:
             logger.debug("Applied Savitzky-Golay filter to distances.")
     
@@ -1816,13 +1825,17 @@ def pass_7_smooth_and_normalize_distances(app, frames: List, funscript_frames: L
     if logger:
         logger.debug("Applied per-segment normalization to distances.")
 
-    full_script_data_np = np.array(
-        [[fo.frame_id, fo.funscript_distance] for fo in frames],
-        dtype=np.float64
-    )
-
-    funscript_frames[:] = full_script_data_np[:, 0].astype(int).tolist()
-    funscript_distances[:] = full_script_data_np[:, 1].astype(int).tolist()
+    # Vectorized extraction of frame data
+    if frames:
+        full_script_data_np = np.array(
+            [[fo.frame_id, fo.funscript_distance] for fo in frames],
+            dtype=np.float64
+        )
+        funscript_frames[:] = full_script_data_np[:, 0].astype(int).tolist()
+        funscript_distances[:] = full_script_data_np[:, 1].astype(int).tolist()
+    else:
+        funscript_frames.clear()
+        funscript_distances.clear()
 
 
 
