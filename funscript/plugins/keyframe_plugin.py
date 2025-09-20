@@ -166,12 +166,97 @@ class KeyframePlugin(FunscriptTransformationPlugin):
             }
     
     def _find_keyframes(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
-        """Find significant keyframes using the corrected projection-based algorithm."""
+        """OPTIMIZED: Find significant keyframes using vectorized operations for large datasets."""
         position_tolerance = params['position_tolerance']
         time_tolerance_ms = params['time_tolerance_ms']
 
         if len(segment) < 3:
             return segment
+
+        # OPTIMIZATION: Use vectorized approach for large datasets
+        if len(segment) > 2000:
+            return self._find_keyframes_vectorized(segment, params)
+        else:
+            return self._find_keyframes_original(segment, params)
+    
+    def _find_keyframes_vectorized(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
+        """Vectorized keyframe detection for large datasets."""
+        position_tolerance = params['position_tolerance']
+        time_tolerance_ms = params['time_tolerance_ms']
+        
+        # Extract positions and timestamps as numpy arrays
+        positions = np.array([action['pos'] for action in segment])
+        timestamps = np.array([action['at'] for action in segment])
+        
+        # VECTORIZED: Find local extrema using numpy operations
+        # Create shifted arrays for comparison
+        pos_prev = positions[:-2]  # positions[i-1]
+        pos_curr = positions[1:-1]  # positions[i]
+        pos_next = positions[2:]    # positions[i+1]
+        
+        # Detect peaks: curr > prev AND curr >= next
+        # Detect valleys: curr < prev AND curr <= next
+        is_peak = (pos_curr > pos_prev) & (pos_curr >= pos_next)
+        is_valley = (pos_curr < pos_prev) & (pos_curr <= pos_next)
+        is_extremum = is_peak | is_valley
+        
+        # Build extrema list (always include first and last)
+        extrema_indices = [0]
+        extrema_indices.extend(np.where(is_extremum)[0] + 1)  # +1 because we compared shifted arrays
+        extrema_indices.append(len(segment) - 1)
+        
+        # Remove duplicates and sort
+        extrema_indices = sorted(set(extrema_indices))
+        extrema = [segment[i] for i in extrema_indices]
+        
+        # VECTORIZED significance calculation and filtering
+        if len(extrema) <= 2:
+            return extrema
+            
+        # Convert to numpy arrays for vectorized processing
+        ext_positions = np.array([ext['pos'] for ext in extrema])
+        ext_timestamps = np.array([ext['at'] for ext in extrema])
+        
+        # Calculate significance for all internal points at once
+        while len(extrema) > 2:
+            if len(ext_positions) <= 2:
+                break
+                
+            # Vectorized significance calculation for internal points
+            prev_pos = ext_positions[:-2]
+            curr_pos = ext_positions[1:-1] 
+            next_pos = ext_positions[2:]
+            prev_time = ext_timestamps[:-2]
+            curr_time = ext_timestamps[1:-1]
+            next_time = ext_timestamps[2:]
+            
+            # Calculate projection-based significance
+            durations = next_time.astype(np.float64) - prev_time.astype(np.float64)
+            time_deltas = curr_time.astype(np.float64) - prev_time.astype(np.float64)
+            progress = np.divide(time_deltas, durations, 
+                               out=np.zeros_like(time_deltas), where=durations!=0)
+            projected_pos = prev_pos + progress * (next_pos - prev_pos)
+            significance_scores = np.abs(curr_pos - projected_pos)
+            
+            # Find weakest point
+            min_idx = np.argmin(significance_scores)
+            min_significance = significance_scores[min_idx]
+            
+            if min_significance < position_tolerance:
+                # Remove the weakest point (add 1 because we're looking at internal points)
+                remove_idx = min_idx + 1
+                extrema.pop(remove_idx)
+                ext_positions = np.delete(ext_positions, remove_idx)
+                ext_timestamps = np.delete(ext_timestamps, remove_idx)
+            else:
+                break
+                
+        return extrema
+    
+    def _find_keyframes_original(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
+        """Original keyframe detection for smaller datasets."""
+        position_tolerance = params['position_tolerance']
+        time_tolerance_ms = params['time_tolerance_ms']
 
         # Pass 1: Find all local extrema (peaks and valleys), including equal-to neighbor cases
         extrema: List[Dict] = [segment[0]]

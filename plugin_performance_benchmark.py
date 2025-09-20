@@ -89,7 +89,8 @@ class PluginBenchmark:
             'Invert',
             'Simplify (RDP)',
             'Smooth (SG)',
-            'Speed Limiter'
+            'Speed Limiter',
+            'Keyframes'
         ]
         
         print(f"Available plugins: {[p['name'] for p in plugin_registry.list_plugins()]}")
@@ -121,6 +122,10 @@ class PluginBenchmark:
                 'min_interval_ms': 50,
                 'speed_threshold': 300.0,
                 'vibe_amount': 0
+            },
+            'Keyframes': {
+                'position_tolerance': 10,
+                'time_tolerance_ms': 50
             }
         }
     
