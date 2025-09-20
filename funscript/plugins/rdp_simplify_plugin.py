@@ -91,45 +91,58 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
     
     def _rdp_numpy_implementation(self, points, epsilon):
         """
-        Fast numpy-based RDP implementation using vectorized operations.
-        Much faster than the rdp library for typical funscript data.
+        OPTIMIZED: Iterative RDP implementation with stack-based processing.
+        Eliminates recursion overhead and uses vectorized batch processing.
         """
         if len(points) < 3:
             return points
         
-        # Calculate perpendicular distances from all points to the line between first and last
-        line_vec = points[-1] - points[0]
-        line_length = np.linalg.norm(line_vec)
+        # OPTIMIZATION: Use iterative stack-based approach instead of recursion
+        # This eliminates function call overhead and enables better memory management
+        stack = [(0, len(points) - 1)]
+        keep = np.zeros(len(points), dtype=bool)
+        keep[0] = True  # Always keep first point
+        keep[-1] = True  # Always keep last point
         
-        if line_length == 0:
-            return np.vstack((points[0], points[-1]))
+        while stack:
+            start_idx, end_idx = stack.pop()
+            
+            if end_idx - start_idx <= 1:
+                continue
+                
+            # OPTIMIZED: Vectorized distance calculation for all points in segment
+            segment_points = points[start_idx:end_idx + 1]
+            if len(segment_points) < 3:
+                continue
+                
+            line_vec = segment_points[-1] - segment_points[0]
+            line_length = np.linalg.norm(line_vec)
+            
+            if line_length == 0:
+                continue
+            
+            # Vectorized perpendicular distance calculation
+            intermediate_points = segment_points[1:-1]
+            point_vecs = intermediate_points - segment_points[0]
+            cross_products = np.cross(line_vec, point_vecs)
+            distances = np.abs(cross_products) / line_length
+            
+            if len(distances) == 0:
+                continue
+                
+            # Find max distance point
+            max_local_idx = np.argmax(distances)
+            max_distance = distances[max_local_idx]
+            max_global_idx = start_idx + max_local_idx + 1
+            
+            if max_distance > epsilon:
+                # Keep this point and add sub-segments to stack
+                keep[max_global_idx] = True
+                stack.append((start_idx, max_global_idx))
+                stack.append((max_global_idx, end_idx))
         
-        # Vectorized distance calculation for better performance
-        if len(points) == 2:
-            return points
-        
-        # Get all intermediate points (exclude first and last)
-        intermediate_points = points[1:-1]
-        
-        # Calculate perpendicular distances vectorized
-        point_vecs = intermediate_points - points[0]
-        cross_products = np.cross(line_vec, point_vecs)
-        distances = np.abs(cross_products) / line_length
-        
-        if len(distances) == 0:
-            return np.vstack((points[0], points[-1]))
-        
-        max_index_in_distances = np.argmax(distances)
-        max_distance = distances[max_index_in_distances]
-        max_index = max_index_in_distances + 1  # +1 because we skipped first point
-        
-        if max_distance > epsilon:
-            # Recursively simplify left and right segments
-            left = self._rdp_numpy_implementation(points[:max_index + 1], epsilon)
-            right = self._rdp_numpy_implementation(points[max_index:], epsilon)
-            return np.vstack((left[:-1], right))
-        else:
-            return np.vstack((points[0], points[-1]))
+        # Return only the points we're keeping
+        return points[keep]
     
     def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
         """Apply RDP simplification to the specified axis."""
