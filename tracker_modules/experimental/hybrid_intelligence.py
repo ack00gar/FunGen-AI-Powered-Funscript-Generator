@@ -1367,7 +1367,8 @@ class HybridIntelligenceTracker(BaseTracker):
                            f"window={self.PENIS_DETECTION_WINDOW}f, conf={tracker['confidence']:.2f}")
             
             if penis_candidates:
-                self.logger.debug(f"Penis candidates: {[(c['class_name'], f'{c['confidence']:.2f}') for c in penis_candidates]}")
+                candidates_info = [(c['class_name'], f"{c['confidence']:.2f}") for c in penis_candidates]
+                self.logger.debug(f"Penis candidates: {candidates_info}")
             elif tracker['active']:
                 self.logger.debug("Locked penis active but no candidates this frame (intermittent YOLO)")
     
