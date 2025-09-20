@@ -600,7 +600,7 @@ class MixedStageProcessor:
                 if interacting_objs:
                     interacting_objs.sort(key=lambda x: self.roi_tracker.CLASS_PRIORITY.get(x["class_name"].lower(), 99))
                     current_best_interaction_name = interacting_objs[0]["class_name"].lower()
-                self.roi_tracker.update_main_interaction_class(current_best_interaction_name)
+                self.roi_tracker._update_main_interaction_class(current_best_interaction_name)
                 
                 # Calculate combined ROI using exact same logic as live tracker
                 combined_roi_candidate = self.roi_tracker._calculate_combined_roi(
@@ -634,7 +634,7 @@ class MixedStageProcessor:
                 # Handle missing penis detection (exact same logic as live tracker)
                 if penis_box is None and self.roi_tracker.penis_last_known_box:
                     self.roi_tracker.penis_last_known_box = None
-                    self.roi_tracker.update_main_interaction_class(None)
+                    self.roi_tracker._update_main_interaction_class(None)
             
             # Handle ROI persistence timeout (exact same logic as live tracker)
             if not self.roi_tracker.penis_last_known_box and self.roi_tracker.roi is not None:
@@ -646,7 +646,7 @@ class MixedStageProcessor:
             
             # Process the ROI content for optical flow tracking (exact same logic as live tracker)
             if self.roi_tracker.roi and self.roi_tracker.penis_last_known_box:
-                processed_frame = self.roi_tracker.preprocess_frame(video_frame)
+                processed_frame = self.roi_tracker._preprocess_frame(video_frame)
                 current_frame_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
                 
                 rx, ry, rw, rh = self.roi_tracker.roi

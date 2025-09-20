@@ -614,7 +614,13 @@ class DualAxisFunscript:
                 return np.vstack((points[0], points[-1]))
 
         try:
-            simplified_points = rdp_numpy(points, epsilon)
+            import sys
+            original_limit = sys.getrecursionlimit()
+            sys.setrecursionlimit(max(10000, len(points) * 2))
+            try:
+                simplified_points = rdp_numpy(points, epsilon)
+            finally:
+                sys.setrecursionlimit(original_limit)
 
             # --- Reconstruct Actions (Preserve Start/End Exactly) ---
             new_segment_actions = []
@@ -1136,7 +1142,13 @@ class DualAxisFunscript:
                 else:
                     return np.vstack((points[0], points[-1]))
 
-            simplified_points = rdp_numpy(points, epsilon)
+            import sys
+            original_limit = sys.getrecursionlimit()
+            sys.setrecursionlimit(max(10000, len(points) * 2))
+            try:
+                simplified_points = rdp_numpy(points, epsilon)
+            finally:
+                sys.setrecursionlimit(original_limit)
 
             for i, p in enumerate(simplified_points):
                 if i == 0:

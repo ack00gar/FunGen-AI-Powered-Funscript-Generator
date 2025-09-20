@@ -107,7 +107,7 @@ class AppEventHandlers:
             return
         if not self.app.tracker: self.logger.error("Tracker not initialized."); return
         
-        self.app.tracker.set_tracking_mode("YOLO_ROI")  # Ensure correct mode
+        self.app.tracker.set_tracking_mode("yolo_roi")  # Ensure correct mode
         self.app.stage_processor.start_full_analysis(processing_mode=self.app.app_state_ui.selected_tracker_name)
         self.app.energy_saver.reset_activity_timer()
 

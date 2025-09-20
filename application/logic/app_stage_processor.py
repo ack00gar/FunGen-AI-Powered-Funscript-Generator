@@ -783,6 +783,11 @@ class AppStageProcessor:
                 return
 
             # --- Stage 3 (or Finish) ---
+            self.logger.info(f"[DEBUG] Determining stage progression for mode: {selected_mode}")
+            self.logger.info(f"[DEBUG] is_stage2_tracker: {self._is_stage2_tracker(selected_mode)}")
+            self.logger.info(f"[DEBUG] is_stage3_tracker: {self._is_stage3_tracker(selected_mode)}")
+            self.logger.info(f"[DEBUG] is_mixed_stage3_tracker: {self._is_mixed_stage3_tracker(selected_mode)}")
+            
             if self._is_stage2_tracker(selected_mode):
                 if stage2_success:
                     packaged_data = {
@@ -800,6 +805,63 @@ class AppStageProcessor:
                     "video_path": fm.video_path
                 }
                 self.gui_event_queue.put(("analysis_message", completion_payload, None))
+            elif self._is_mixed_stage3_tracker(selected_mode):
+                self.logger.info(f"[DEBUG] Starting Mixed Stage 3 processing for mode: {selected_mode}")
+                self.current_analysis_stage = 3
+                segments_objects = s2_output_data.get("segments_objects", [])
+
+                # Send complete Stage 2 results to properly update UI chapters
+                if s2_output_data:
+                    packaged_data = {
+                        "results_dict": s2_output_data,
+                        "was_ranged": is_s1_data_source_ranged,
+                        "range_frames": frame_range_for_s1 or (range_start_frame, range_end_frame)
+                    }
+                    self.gui_event_queue.put(("stage2_results_success", packaged_data, s2_overlay_path))
+
+                effective_range_is_active = frame_range_for_s1 is not None
+                effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
+                effective_end_frame = frame_range_for_s1[1] if effective_range_is_active else range_end_frame
+
+                segments_for_s3 = self._filter_segments_for_range(segments_objects, effective_range_is_active,
+                                                                  effective_start_frame, effective_end_frame)
+
+                if not segments_for_s3:
+                    self.gui_event_queue.put(("analysis_message", "No relevant segments in range for Mixed Stage 3.", "Info"))
+                    return
+
+                frame_objects_list = s2_output_data.get("all_s2_frame_objects_list", [])
+                self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
+                self.logger.info(f"Mixed Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
+
+                # Store SQLite database path for Mixed Stage 3
+                self.app.s2_sqlite_db_path = s2_output_data.get("sqlite_db_path")
+
+                self.logger.info(f"Starting Mixed Stage 3 with {preprocessed_path_for_s3}.")
+
+                s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
+                stage3_success = s3_results_dict is not None
+
+                if stage3_success:
+                    self.gui_event_queue.put(("stage3_completed", self.stage3_time_elapsed_str, self.stage3_processing_fps_str))
+
+                    packaged_data = {
+                        "results_dict": s3_results_dict,
+                        "was_ranged": effective_range_is_active,
+                        "range_frames": (effective_start_frame, effective_end_frame)
+                    }
+                    self.last_analysis_result = packaged_data
+                    
+                    # Process Stage 3 mixed results immediately
+                    self.gui_event_queue.put(("stage3_results_success", packaged_data, None))
+
+                if stage3_success:
+                    completion_payload = {
+                        "message": "AI CV (3-Stage Mixed) analysis completed successfully.",
+                        "status": "Completed",
+                        "video_path": fm.video_path
+                    }
+                    self.gui_event_queue.put(("analysis_message", completion_payload, None))
             elif self._is_stage3_tracker(selected_mode):
                 self.current_analysis_stage = 3
                 segments_objects = s2_output_data.get("segments_objects", [])
@@ -851,56 +913,6 @@ class AppStageProcessor:
                     self.last_analysis_result = packaged_data
                     
                     # Process Stage 3 results immediately
-                    self.gui_event_queue.put(("stage3_results_success", packaged_data, None))
-
-            elif self._is_mixed_stage3_tracker(selected_mode):
-                self.current_analysis_stage = 3
-                segments_objects = s2_output_data.get("segments_objects", [])
-                video_segments_for_gui = s2_output_data.get("video_segments", [])
-
-                # Send complete Stage 2 results to properly update UI chapters
-                if s2_output_data:
-                    packaged_data = {
-                        "results_dict": s2_output_data,
-                        "was_ranged": is_s1_data_source_ranged,
-                        "range_frames": frame_range_for_s1 or (range_start_frame, range_end_frame)
-                    }
-                    self.gui_event_queue.put(("stage2_results_success", packaged_data, s2_overlay_path))
-
-                effective_range_is_active = frame_range_for_s1 is not None
-                effective_start_frame = frame_range_for_s1[0] if effective_range_is_active else range_start_frame
-                effective_end_frame = frame_range_for_s1[1] if effective_range_is_active else range_end_frame
-
-                segments_for_s3 = self._filter_segments_for_range(segments_objects, effective_range_is_active,
-                                                                  effective_start_frame, effective_end_frame)
-
-                if not segments_for_s3:
-                    self.gui_event_queue.put(("analysis_message", "No relevant segments in range for Mixed Stage 3.", "Info"))
-                    return
-
-                frame_objects_list = s2_output_data.get("all_s2_frame_objects_list", [])
-                self.app.s2_frame_objects_map_for_s3 = {fo.frame_id: fo for fo in frame_objects_list}
-                self.logger.info(f"Mixed Stage 3 data preparation: {len(frame_objects_list)} frame objects loaded from cached Stage 2 data")
-
-                # Store SQLite database path for Mixed Stage 3
-                self.app.s2_sqlite_db_path = s2_output_data.get("sqlite_db_path")
-
-                self.logger.info(f"Starting Mixed Stage 3 with {preprocessed_path_for_s3}.")
-
-                s3_results_dict = self._execute_stage3_mixed_module(segments_for_s3, preprocessed_path_for_s3, s2_output_data)
-                stage3_success = s3_results_dict is not None
-
-                if stage3_success:
-                    self.gui_event_queue.put(("stage3_completed", self.stage3_time_elapsed_str, self.stage3_processing_fps_str))
-
-                    packaged_data = {
-                        "results_dict": s3_results_dict,
-                        "was_ranged": effective_range_is_active,
-                        "range_frames": (effective_start_frame, effective_end_frame)
-                    }
-                    self.last_analysis_result = packaged_data
-                    
-                    # Process Stage 3 mixed results immediately
                     self.gui_event_queue.put(("stage3_results_success", packaged_data, None))
 
                 if self.stop_stage_event.is_set():
