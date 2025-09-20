@@ -517,7 +517,7 @@ class TrackerManager:
             
         try:
             if hasattr(self._current_tracker, 'initialize'):
-                init_result = self._current_tracker.initialize(self.app)
+                init_result = self._current_tracker.initialize(self.app, tracker_model_path=self.tracker_model_path)
                 if isinstance(init_result, bool) and not init_result:
                     self.logger.error(f"Tracker {self._current_mode} initialization failed")
                     return False
