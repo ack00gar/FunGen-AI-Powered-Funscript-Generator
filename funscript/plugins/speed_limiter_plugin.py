@@ -162,30 +162,56 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
         funscript._invalidate_cache(axis)
     
     def _remove_short_intervals(self, actions: List[Dict], min_interval: int, axis: str) -> List[Dict]:
-        """Remove actions that are too close together in time."""
+        """OPTIMIZED: Remove actions that are too close together in time using vectorized operations."""
         if len(actions) <= 1:
             return actions
         
-        # Start from the end and work backwards to preserve chronological order
-        filtered_actions = [actions[-1]]  # Always keep the last action
-        last_kept_time = actions[-1]['at']
-        
-        for i in range(len(actions) - 2, -1, -1):
-            current_action = actions[i]
-            interval = abs(current_action['at'] - last_kept_time)
+        # OPTIMIZATION: Use vectorized approach for large datasets
+        if len(actions) > 5000:
+            # Extract timestamps as numpy array
+            timestamps = np.array([action['at'] for action in actions])
             
-            if interval >= min_interval:
-                filtered_actions.append(current_action)
-                last_kept_time = current_action['at']
-        
-        # Restore chronological order
-        filtered_actions.reverse()
-        
-        removed_count = len(actions) - len(filtered_actions)
-        if removed_count > 0:
-            self.logger.debug(f"{axis} axis: Removed {removed_count} actions due to min interval")
-        
-        return filtered_actions
+            # Calculate intervals between consecutive actions
+            intervals = np.diff(timestamps)
+            
+            # Create boolean mask for actions to keep
+            keep_mask = np.ones(len(actions), dtype=bool)
+            
+            # Mark actions to remove (those with intervals < min_interval)
+            for i in range(len(intervals)):
+                if intervals[i] < min_interval:
+                    # Remove the later action (preserve chronological order)
+                    keep_mask[i + 1] = False
+            
+            # Filter actions using the mask
+            filtered_actions = [actions[i] for i in range(len(actions)) if keep_mask[i]]
+            
+            removed_count = len(actions) - len(filtered_actions)
+            if removed_count > 0:
+                self.logger.debug(f"{axis} axis: Removed {removed_count} actions due to min interval (vectorized)")
+            
+            return filtered_actions
+        else:
+            # Original method for smaller datasets
+            filtered_actions = [actions[-1]]  # Always keep the last action
+            last_kept_time = actions[-1]['at']
+            
+            for i in range(len(actions) - 2, -1, -1):
+                current_action = actions[i]
+                interval = abs(current_action['at'] - last_kept_time)
+                
+                if interval >= min_interval:
+                    filtered_actions.append(current_action)
+                    last_kept_time = current_action['at']
+            
+            # Restore chronological order
+            filtered_actions.reverse()
+            
+            removed_count = len(actions) - len(filtered_actions)
+            if removed_count > 0:
+                self.logger.debug(f"{axis} axis: Removed {removed_count} actions due to min interval")
+            
+            return filtered_actions
     
     def _add_vibrations(self, actions: List[Dict], vibe_amount: int, 
                        small_movement_threshold: int, axis: str) -> tuple[List[Dict], int]:
