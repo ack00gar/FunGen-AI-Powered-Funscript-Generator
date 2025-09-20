@@ -196,6 +196,9 @@ class HybridIntelligenceTracker(BaseTracker):
             self.show_flow_vectors = kwargs.get('show_flow_vectors', True)
             self.show_oscillation_grid = kwargs.get('show_oscillation_grid', True)
             
+            # Performance settings
+            self.processing_timeout = kwargs.get('processing_timeout', 0.5)  # 500ms default timeout
+            
             # === 1. ENHANCED FRAME DIFFERENTIATION PARAMETERS ===
             self.frame_diff_threshold = kwargs.get('frame_diff_threshold', 12)  # Much more sensitive
             self.min_change_area = kwargs.get('min_change_area', 100)  # Smaller minimum area
@@ -813,13 +816,20 @@ class HybridIntelligenceTracker(BaseTracker):
                     futures.append(self.executor.submit(self._detect_semantic_objects, frame))
                 futures.append(self.executor.submit(self._estimate_pose, frame))
 
-                # Collect results as they complete
+                # Collect results with progressive timeout handling
                 for future in futures:
-                    result = future.result(timeout=0.1)
-                    if isinstance(result, list) and result and isinstance(result[0], SemanticRegion):
-                        self.semantic_regions = result
-                    elif isinstance(result, dict):
-                        pose_data = result
+                    try:
+                        result = future.result(timeout=self.processing_timeout)
+                        if isinstance(result, list) and result and isinstance(result[0], SemanticRegion):
+                            self.semantic_regions = result
+                        elif isinstance(result, dict):
+                            pose_data = result
+                    except TimeoutError:
+                        self.logger.warning(f"Frame {self.frame_count}: Processing timeout, using previous results")
+                        # Cancel the future to free resources
+                        future.cancel()
+                        # Continue with previous frame's data
+                        continue
             else:
                 # First frame case
                 self.semantic_regions = self._detect_semantic_objects(frame)
