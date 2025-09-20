@@ -225,18 +225,29 @@ class Stage3MixedTracker(BaseOfflineTracker):
                     from tracker.tracker_manager import TrackerManager as TM
                     TrackerManager = TM
                 
-                self.tracker_manager = TrackerManager(app_instance)
-                if not self.tracker_manager.set_tracker(self.live_tracker_name, **self.mixed_live_tracker_settings):
+                # Get the tracker model path from app instance
+                tracker_model_path = getattr(app_instance, 'yolo_det_model_path', '')
+                if not tracker_model_path:
+                    self.logger.error("No tracker model path available from app instance")
+                    return False
+
+                self.tracker_manager = TrackerManager(app_instance, tracker_model_path)
+                if not self.tracker_manager.set_tracking_mode(self.live_tracker_name):
                     self.logger.warning(f"Failed to set live tracker {self.live_tracker_name}, trying fallbacks")
                     # Try fallback trackers suitable for mixed mode
                     fallback_trackers = ['oscillation_experimental_2', 'oscillation_experimental', 'user_roi']
                     tracker_set = False
                     for fallback in fallback_trackers:
-                        if self.tracker_manager.set_tracker(fallback, **self.mixed_live_tracker_settings):
+                        if self.tracker_manager.set_tracking_mode(fallback):
                             self.live_tracker_name = fallback
                             tracker_set = True
                             self.logger.info(f"Using fallback tracker: {fallback}")
                             break
+                    
+                    # Apply mixed mode settings after tracker is set
+                    if hasattr(self.tracker_manager, 'update_tracker_settings'):
+                        self.tracker_manager.update_tracker_settings(**self.mixed_live_tracker_settings)
+                    
                     if not tracker_set:
                         self.logger.error("No suitable live tracker available for Mixed processing")
                         return False

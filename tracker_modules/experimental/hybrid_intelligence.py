@@ -490,8 +490,8 @@ class HybridIntelligenceTracker(BaseTracker):
         self.PENIS_DEACTIVATION_MIN_DETECTIONS = 1  # Only deactivate if < 1 detection in window AND patience exceeded
         
         # Height adaptation using 95th percentile over large window (like Stage 2)
-        self.PENIS_SIZE_ANALYSIS_WINDOW_SECONDS = 30  # Window for height percentile calculation (larger for stability)
-        self.PENIS_SIZE_UPDATE_INTERVAL = 60  # Only update evolved size every N frames (2 sec at 30fps)
+        self.PENIS_SIZE_ANALYSIS_WINDOW_SECONDS = 20  # Window for height percentile calculation
+        self.PENIS_SIZE_UPDATE_INTERVAL = 30  # Only update evolved size every N frames (1 sec at 30fps)
         self.PENIS_SIZE_MIN_SAMPLES = 15  # Minimum samples needed for reliable 95th percentile
         
         # THREAD SAFETY: Add lock for penis tracking state
@@ -500,6 +500,7 @@ class HybridIntelligenceTracker(BaseTracker):
         # Tracker state (protected by _penis_state_lock)
         self.locked_penis_tracker = {
             'box': None,  # Current locked penis box (x1, y1, x2, y2)
+            'center': None, # Last known center point
             'confidence': 0.0,  # Confidence of locked penis
             'unseen_frames': 0,  # Frames since last detection
             'total_detections': 0,  # Total detections in current window
@@ -592,6 +593,39 @@ class HybridIntelligenceTracker(BaseTracker):
             'oscillation': 0.1
         }
         
+        # State for signal persistence and decay
+        self.signal_state = {
+            'frame_diff': 0.0,
+            'yolo_weighted': 0.0,
+            'optical_flow': 0.0,
+            'oscillation': 0.0,
+            'pose_activity': 0.0
+        }
+        self.signal_decay_rate = 0.85  # Decay to 85% of previous value per frame
+        
+        self.droi_state = 'DISCOVERY'
+        self.current_droi_box = None # (x1, y1, x2, y2)
+        self.target_droi_box = None
+        self.DROI_UPDATE_INTERVAL = 300 # frames (10 seconds @ 30fps)
+        self.droi_last_update_frame = 0
+
+        # Position Identification
+        self.current_sexual_position = 'discovery'
+        self.interaction_history = deque(maxlen=150) # 5 seconds @ 30fps
+        self.POSITION_UPDATE_INTERVAL = 150 # 5 seconds
+        self.position_last_update_frame = 0
+        self.DROI_EXPANSION_FACTORS = {
+            'hand': {'w': 0.15, 'h': 0.25},
+            'face': {'w': 0.15, 'h': 0.25},
+            'pussy': {'w': 1.0, 'h_up': 2.0, 'h_down': 0.5},
+            'butt': {'w': 1.0, 'h_up': 2.0, 'h_down': 0.5},
+            'discovery': {'w': 0.5, 'h': 0.5}
+        }
+
+        # Thrust Detection
+        self.thrust_detection_patch = None
+        self.is_male_thrusting = False
+
         # Final output state - VR POV semantics: 100=no action, 0=full insertion
         self.last_primary_position = 100.0  # Start at no action (VR POV default)
         self.last_secondary_position = 50.0   # Secondary centered
@@ -758,148 +792,95 @@ class HybridIntelligenceTracker(BaseTracker):
     def process_frame(self, frame: np.ndarray, frame_time_ms: int, 
                      frame_index: Optional[int] = None) -> TrackerResult:
         """
-        Process a frame using the hybrid intelligence approach.
-        
-        Processing Pipeline:
-        1. Frame Differentiation - Detect areas of change
-        2. YOLO Detection - Identify semantic objects  
-        3. Region Prioritization - Weight regions by importance
-        4. Selective Optical Flow - Compute flow in priority regions
-        5. Oscillation Analysis - Detect rhythmic patterns
-        6. Signal Fusion - Combine all signals intelligently
-        7. Temporal Smoothing - Apply smoothing and generate actions
+        Process a frame using the DROI-based hybrid intelligence approach.
         """
         start_time = time.time()
         
         try:
             self.frame_count += 1
-            
-            # Periodic memory cleanup every 30 frames for performance
             if self.frame_count % 30 == 0:
                 self._perform_memory_cleanup()
             
-            # Convert to grayscale for processing
             self.current_frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             
-            # === PARALLEL PROCESSING PIPELINE ===
+            # === STAGE 1: PARALLEL DETECTION & ANALYSIS ===
             futures = []
+            pose_data = {}
             
             if self.prev_frame_gray is not None:
-                # Frame diff + motion tracking
-                diff_future = self.executor.submit(self._detect_frame_changes_fast, self.prev_frame_gray, self.current_frame_gray)
-                futures.append(('diff', diff_future))
-                
-                # YOLO detection (if needed)
+                # Launch all expensive tasks in parallel
                 if self._should_run_yolo():
-                    yolo_future = self.executor.submit(self._detect_semantic_objects, frame)
-                    futures.append(('yolo', yolo_future))
-                    
-                # Pose estimation
-                pose_future = self.executor.submit(self._estimate_pose, frame)
-                futures.append(('pose', pose_future))
+                    futures.append(self.executor.submit(self._detect_semantic_objects, frame))
+                futures.append(self.executor.submit(self._estimate_pose, frame))
+
+                # Collect results as they complete
+                for future in futures:
+                    result = future.result(timeout=0.1)
+                    if isinstance(result, list) and result and isinstance(result[0], SemanticRegion):
+                        self.semantic_regions = result
+                    elif isinstance(result, dict):
+                        pose_data = result
             else:
-                self.change_regions = []
+                # First frame case
+                self.semantic_regions = self._detect_semantic_objects(frame)
                 pose_data = self._estimate_pose(frame)
-            
-            # Collect parallel results
-            for task, future in futures:
-                try:
-                    if task == 'diff':
-                        self.change_regions = future.result(timeout=0.05)
-                        total_motion = sum(r.intensity * r.area for r in self.change_regions) / 1000000.0
-                        self.yolo_motion_history.append(min(total_motion, 2.0))
-                    elif task == 'yolo':
-                        self.semantic_regions = future.result(timeout=0.05)
-                    elif task == 'pose':
-                        pose_data = future.result(timeout=0.05)
-                except Exception as e:
-                    self.logger.debug(f"Parallel task {task} failed: {e}")
-            
-            # === STEP 3: REGION PRIORITIZATION ===
-            priority_regions = self._prioritize_regions(pose_data)
-            
-            # === STEP 4: SELECTIVE OPTICAL FLOW ===
-            if self.prev_frame_gray is not None and priority_regions:
-                self.flow_analyses = self._compute_selective_flow(
-                    self.prev_frame_gray, self.current_frame_gray, priority_regions
-                )
+
+            # === STAGE 2: DROI DEFINITION & MASKED ANALYSIS ===
+            # Periodically update the DROI, otherwise keep it locked for stable analysis
+            if (self.frame_count - self.droi_last_update_frame) > self.DROI_UPDATE_INTERVAL:
+                self._update_dynamic_roi()
+                self.droi_last_update_frame = self.frame_count
+
+            if (self.frame_count - self.position_last_update_frame) > self.POSITION_UPDATE_INTERVAL:
+                self._update_sexual_position()
+                self.position_last_update_frame = self.frame_count
+
+            self._smoothly_update_droi()
+            droi_mask = self._create_droi_mask(self.current_frame_gray.shape)
+            oscillation_signal = 0.0 # Initialize here
+
+            if droi_mask is not None and self.prev_frame_gray is not None:
+                masked_prev_gray = cv2.bitwise_and(self.prev_frame_gray, self.prev_frame_gray, mask=droi_mask)
+                masked_current_gray = cv2.bitwise_and(self.current_frame_gray, self.current_frame_gray, mask=droi_mask)
+                
+                self.flow_analyses = self._compute_selective_flow(masked_prev_gray, masked_current_gray)
+                oscillation_signal = self._analyze_oscillation_patterns() # This now uses flow, not change regions
             else:
                 self.flow_analyses = []
+
+            self.current_oscillation_intensity = oscillation_signal
             
-            # === STEP 5: OSCILLATION ANALYSIS ===
-            oscillation_signal = self._analyze_oscillation_patterns()
-            self.current_oscillation_intensity = oscillation_signal  # Store for debug display
-            
-            # === STEP 6: SIGNAL FUSION ===
-            # Store pose data for debug visualization
+            # === STAGE 3: SIGNAL FUSION & ACTION GENERATION ===
             self.last_pose_data = pose_data
-            
             primary_pos, secondary_pos = self._fuse_signals(oscillation_signal, pose_data)
+            action_log = self._generate_funscript_actions(primary_pos, secondary_pos, frame_time_ms, frame_index)
             
-            # === STEP 7: GENERATE ACTIONS ===
-            action_log = self._generate_funscript_actions(
-                primary_pos, secondary_pos, frame_time_ms, frame_index
-            )
+            # === STAGE 4: VISUALIZATION ===
+            self._prepare_overlay_data(self.change_regions, pose_data)
             
-            # === STEP 8: PREPARE OVERLAY DATA ===
-            # Always prepare overlay data for external visualization
-            self._prepare_overlay_data(priority_regions, pose_data)
+            display_frame = self._create_debug_overlay(frame) if not getattr(self, 'use_external_visualization', False) else frame
             
-            # Decide whether to draw on frame or return clean frame
-            if getattr(self, 'use_external_visualization', False):
-                display_frame = frame  # Return clean frame for external overlay
-                boxes_count = len(self.overlay_data.get('yolo_boxes', []))
-                poses_count = len(self.overlay_data.get('poses', []))
-                change_regions_count = len(self.overlay_data.get('change_regions', []))
-                flow_vectors_count = len(self.overlay_data.get('flow_vectors', []))
-                
-                self.logger.debug(f"Overlay prepared: {boxes_count} boxes, {poses_count} poses, {change_regions_count} regions, {flow_vectors_count} flows")
-            else:
-                # Use internal visualization - ensure overlays are visible
-                display_frame = self._create_debug_overlay(frame)
-                
-                # Debug logging to understand overlay status
-                if hasattr(self, 'overlay_data') and self.overlay_data:
-                    computation_count = len(self.overlay_data.get('computation_areas', []))
-                    disregarded_count = len(self.overlay_data.get('disregarded_areas', []))
-                    zones_count = len(self.overlay_data.get('interaction_zones', []))
-                    
-                    if computation_count > 0 or disregarded_count > 0 or zones_count > 0:
-                        self.logger.debug(f"Overlays: {computation_count} computed, {disregarded_count} disregarded, {zones_count} zones")
-                else:
-                    self.logger.debug("No overlay data prepared")
-            
-            # Update state for next frame (avoid copy)
             self.prev_frame_gray = self.current_frame_gray
             
-            # Performance tracking
+            # Performance tracking & final result
             processing_time = time.time() - start_time
             self.processing_times.append(processing_time)
-            
-            # Create result
             debug_info = self._generate_debug_info(processing_time)
-            status_msg = f"Hybrid Intelligence: {len(priority_regions)} regions, {len(self.flow_analyses)} flows"
+            status_msg = f"DROI: {self.droi_state} ({len(self.change_regions)} motion)"
             
-            # Update debug window data if enabled
             if self.debug_window_enabled:
                 self._update_debug_window_data(processing_time)
             
             return TrackerResult(
-                processed_frame=display_frame,
-                action_log=action_log,
-                debug_info=debug_info,
-                status_message=status_msg
+                processed_frame=display_frame, action_log=action_log,
+                debug_info=debug_info, status_message=status_msg
             )
             
         except Exception as e:
-            self.logger.error(f"Frame processing error: {e}")
-            self.logger.error(f"Full traceback: {traceback.format_exc()}")
-            # Return safe fallback
+            self.logger.error(f"Frame processing error: {e}\n{traceback.format_exc()}")
             return TrackerResult(
-                processed_frame=frame,
-                action_log=[],
-                debug_info={"error": str(e)},
-                status_message=f"Error: {str(e)}"
+                processed_frame=frame, action_log=[],
+                debug_info={"error": str(e)}, status_message=f"Error: {str(e)}"
             )
     
     def _detect_frame_changes_fast(self, prev_gray: np.ndarray, curr_gray: np.ndarray) -> List[ChangeRegion]:
@@ -1215,21 +1196,31 @@ class HybridIntelligenceTracker(BaseTracker):
             self._update_penis_box_tracking_internal()
     
     def _update_penis_box_tracking_internal(self):
-        """Internal implementation of penis tracking (thread-safe)."""
-        # Find current penis candidates
+        """Enhanced penis tracking using Stage 2 insights with IoU continuity and conceptual box evolution."""
+        # Find current penis candidates with enhanced filtering
         penis_candidates = []
-        target_classes = ['penis', 'locked_penis']  # Focus on actual penis detections
+        target_classes = ['penis', 'locked_penis', 'glans']  # Include glans for better tracking
         
         for region in self.semantic_regions:
             if (region.class_name.lower() in target_classes and 
-                region.confidence > 0.3 and 
+                region.confidence > 0.2 and  # Lower threshold for better detection
                 hasattr(region, 'bbox')):
-                penis_candidates.append({
-                    'bbox': region.bbox,
-                    'confidence': region.confidence,
-                    'class_name': region.class_name,
-                    'area': (region.bbox[2] - region.bbox[0]) * (region.bbox[3] - region.bbox[1])
-                })
+                # Calculate area and aspect ratio for better filtering
+                width = region.bbox[2] - region.bbox[0]
+                height = region.bbox[3] - region.bbox[1]
+                area = width * height
+                aspect_ratio = width / height if height > 0 else 0
+                
+                # Filter out obviously invalid detections
+                if area > 100 and 0.3 < aspect_ratio < 5.0:  # Reasonable size and shape
+                    penis_candidates.append({
+                        'bbox': region.bbox,
+                        'confidence': region.confidence,
+                        'class_name': region.class_name,
+                        'area': area,
+                        'aspect_ratio': aspect_ratio,
+                        'center': ((region.bbox[0] + region.bbox[2]) / 2, (region.bbox[1] + region.bbox[3]) / 2)
+                    })
         
         tracker = self.locked_penis_tracker
         current_time = time.time()
@@ -1274,6 +1265,7 @@ class HybridIntelligenceTracker(BaseTracker):
                     # Update or establish lock
                     selected_penis = best_candidate
                     tracker['box'] = selected_penis['bbox']
+                    tracker['center'] = ((selected_penis['bbox'][0] + selected_penis['bbox'][2]) / 2, (selected_penis['bbox'][1] + selected_penis['bbox'][3]) / 2)
                     tracker['confidence'] = selected_penis['confidence']
                     tracker['unseen_frames'] = 0
                     tracker['last_seen_timestamp'] = current_time
@@ -1281,57 +1273,79 @@ class HybridIntelligenceTracker(BaseTracker):
                     
                     if not tracker['established_frame']:
                         tracker['established_frame'] = self.frame_count
-                        self.logger.info(f"Penis lock candidate found: {selected_penis['class_name']} conf={selected_penis['confidence']:.2f}")
-                    else:
-                        self.logger.debug(f"Penis lock updated: conf={selected_penis['confidence']:.2f}")
         
-        # 2. Determine if lock should be active based on detection history with hysteresis
+        # 2. Enhanced Stage 2-style state management with conceptual box evolution
         recent_detections = len([f for f in tracker['detection_frames'] 
                                if self.frame_count - f <= self.PENIS_DETECTION_WINDOW])
         
-        # Hysteresis logic: different thresholds for activation vs deactivation
-        if not tracker['active']:
-            # ACTIVATION: Require strong evidence (multiple detections)
-            if recent_detections >= self.PENIS_ACTIVATION_MIN_DETECTIONS and tracker['box']:
-                tracker['active'] = True
-                self.logger.info(f"Penis lock ACTIVATED: {recent_detections} detections in {self.PENIS_DETECTION_WINDOW} frame window")
-        else:
-            # DEACTIVATION: Only deactivate if BOTH conditions met:
-            # 1. Very few recent detections AND 2. Patience period exceeded
-            if (recent_detections < self.PENIS_DEACTIVATION_MIN_DETECTIONS and 
-                tracker['unseen_frames'] > self.PENIS_PATIENCE):
-                self.logger.info(f"Penis lock DEACTIVATED: only {recent_detections} detections in {self.PENIS_DETECTION_WINDOW} frames, unseen for {tracker['unseen_frames']} frames")
-                tracker['active'] = False
-                tracker['box'] = None
-                tracker['detection_frames'].clear()
-                tracker['established_frame'] = None
+        # Update conceptual box and size evolution tracking
+        if selected_penis and tracker['box']:
+            self._update_penis_conceptual_box(tracker, selected_penis)
         
-        # 4. Update legacy compatibility fields
-        if tracker['active'] and tracker['box']:
-            # Use evolved size box if available, otherwise fallback to raw detection
+        # Enhanced hysteresis logic with Stage 2 insights
+        if not tracker['active']:
+            # ACTIVATION: Require strong evidence with size consistency
+            if (recent_detections >= self.PENIS_ACTIVATION_MIN_DETECTIONS and 
+                tracker['box'] and 
+                self._validate_penis_size_consistency(tracker)):
+                tracker['active'] = True
+                tracker['locked_frame'] = self.frame_count
+                # Initialize conceptual box parameters
+                if 'max_height' not in tracker:
+                    tracker['max_height'] = tracker['box'][3] - tracker['box'][1]
+                self.logger.info(f"Penis lock ACTIVATED: {recent_detections} detections, size validated")
+        else:
+            # DEACTIVATION: Enhanced logic with size tracking
+            size_inconsistent = not self._validate_penis_size_consistency(tracker)
+            if ((recent_detections < self.PENIS_DEACTIVATION_MIN_DETECTIONS and 
+                 tracker['unseen_frames'] > self.PENIS_PATIENCE) or 
+                (size_inconsistent and tracker['unseen_frames'] > 5)):
+                self.logger.info(f"Penis lock DEACTIVATED: detections={recent_detections}, unseen={tracker['unseen_frames']}, size_issue={size_inconsistent}")
+                tracker['active'] = False
+                tracker['locked_frame'] = None
+                # Preserve box/center for continuity but reset size tracking
+                tracker.pop('max_height', None)
+                tracker.pop('max_penetration_height', None)
+        
+        # 4. Update legacy compatibility fields with enhanced conceptual box
+        if tracker['active']:
+            # Use evolved conceptual box if available, otherwise fallback to raw detection
             display_box = self._get_evolved_penis_box() or tracker['box']
             
-            self.locked_penis_box = {
-                'bbox': display_box,
-                'confidence': tracker['confidence'],
-                'timestamp': tracker['last_seen_timestamp']
-            }
-            self.penis_tracker_confidence = tracker['confidence']
-            self.locked_penis_last_seen = tracker['last_seen_timestamp']
+            # Update distance calculation reference points
+            if display_box:
+                tracker['penis_base_y'] = display_box[3]  # Bottom of conceptual box
+                tracker['penis_center'] = (
+                    (display_box[0] + display_box[2]) / 2,
+                    (display_box[1] + display_box[3]) / 2
+                )
             
-            # Add to history for continuity - use evolved box for consistent size
-            penis_box = {
-                'bbox': display_box,
-                'confidence': tracker['confidence'],
-                'timestamp': current_time,
-                'area': (display_box[2] - display_box[0]) * (display_box[3] - display_box[1])
-            }
-            if not self.penis_box_history or self._is_significantly_different_box(penis_box):
-                self.penis_box_history.append(penis_box)
+            if display_box:
+                self.locked_penis_box = {
+                    'bbox': display_box,
+                    'confidence': tracker['confidence'],
+                    'timestamp': tracker['last_seen_timestamp']
+                }
+                self.penis_tracker_confidence = tracker['confidence']
+                self.locked_penis_last_seen = tracker['last_seen_timestamp']
                 
+                # Add to history for continuity - use evolved box for consistent size
+                penis_box_for_history = {
+                    'bbox': display_box,
+                    'confidence': tracker['confidence'],
+                    'timestamp': current_time,
+                    'area': (display_box[2] - display_box[0]) * (display_box[3] - display_box[1])
+                }
+                if not self.penis_box_history or self._is_significantly_different_box(penis_box_for_history):
+                    self.penis_box_history.append(penis_box_for_history)
+                    
                 # Track size evolution for 95th percentile calculation - use RAW detection box
-                # Important: Use raw detection box here to avoid circular feedback with evolved size
-                self._update_penis_size_evolution(tracker['box'])
+                if tracker['box']:
+                    self._update_penis_size_evolution(tracker['box'])
+            else:
+                # Case where lock is active but box is gone, clear legacy fields
+                self.locked_penis_box = None
+                self.penis_tracker_confidence = 0.0
         else:
             # No active lock - clear legacy fields
             self.locked_penis_box = None
@@ -1460,20 +1474,20 @@ class HybridIntelligenceTracker(BaseTracker):
         return None
     
     def _get_evolved_penis_box(self) -> Optional[Tuple[float, float, float, float]]:
-        """Get penis box adjusted to 95th percentile size if available."""
+        """
+        Get penis box adjusted to 95th percentile size.
+        Crucially, maintains this size at the last known position even if detection is temporarily lost.
+        """
         tracker = self.locked_penis_tracker
         
-        if not tracker['box'] or not tracker['evolved_size']:
-            return tracker['box']  # Return current box if no evolution data
-        
-        current_box = tracker['box']
+        # We need a last known center and an evolved size to proceed
+        if not tracker['center'] or not tracker['evolved_size']:
+            return tracker['box']  # Fallback to raw box if we haven't learned anything yet
+
         evolved_width, evolved_height, _ = tracker['evolved_size']
+        center_x, center_y = tracker['center']
         
-        # Calculate center of current box
-        center_x = (current_box[0] + current_box[2]) / 2
-        center_y = (current_box[1] + current_box[3]) / 2
-        
-        # Create evolved box centered on current position
+        # Create the stable, evolved box centered on the last known position
         half_width = evolved_width / 2
         half_height = evolved_height / 2
         
@@ -1485,6 +1499,100 @@ class HybridIntelligenceTracker(BaseTracker):
         )
         
         return evolved_box
+    
+    def _update_penis_conceptual_box(self, tracker: Dict, selected_penis: Dict):
+        """Update conceptual box with Stage 2-style evolution tracking."""
+        if not tracker.get('box') or not selected_penis:
+            return
+        
+        current_height = selected_penis['bbox'][3] - selected_penis['bbox'][1]
+        
+        # Update max height tracking (similar to Stage 2's max_height)
+        if 'max_height' not in tracker:
+            tracker['max_height'] = current_height
+        else:
+            tracker['max_height'] = max(tracker['max_height'], current_height)
+        
+        # Track penetration depth variations (for distance calculation)
+        if 'max_penetration_height' not in tracker:
+            tracker['max_penetration_height'] = current_height
+        else:
+            # Update max penetration height with some decay to adapt to scene changes
+            tracker['max_penetration_height'] = max(
+                tracker['max_penetration_height'] * 0.99,  # Slight decay
+                current_height
+            )
+        
+        # Update conceptual full stroke box (like Stage 2)
+        x1, _, x2, y2_raw = selected_penis['bbox']
+        conceptual_full_box = (x1, y2_raw - tracker['max_height'], x2, y2_raw)
+        tracker['conceptual_box'] = conceptual_full_box
+    
+    def _validate_penis_size_consistency(self, tracker: Dict) -> bool:
+        """Validate penis detection size consistency using Stage 2 insights."""
+        if not tracker.get('box'):
+            return False
+        
+        current_box = tracker['box']
+        current_width = current_box[2] - current_box[0]
+        current_height = current_box[3] - current_box[1]
+        current_area = current_width * current_height
+        
+        # Check against historical max if available
+        if 'max_height' in tracker:
+            max_height = tracker['max_height']
+            # Current height shouldn't be more than 3x the historical max
+            if current_height > max_height * 3.0:
+                return False
+            # Current height shouldn't be less than 0.2x the historical max
+            if current_height < max_height * 0.2:
+                return False
+        
+        # Basic sanity checks
+        if current_area < 50:  # Too small
+            return False
+        if current_area > 50000:  # Unrealistically large
+            return False
+        
+        # Aspect ratio check
+        aspect_ratio = current_width / current_height if current_height > 0 else 0
+        if aspect_ratio < 0.2 or aspect_ratio > 10.0:  # Unrealistic shape
+            return False
+        
+        return True
+    
+    def _calculate_normalized_distance_to_penis(self, contact_box: Tuple[float, float, float, float], 
+                                               contact_class: str) -> float:
+        """Calculate normalized distance using Stage 2's optimal reference points."""
+        tracker = self.locked_penis_tracker
+        
+        if not tracker.get('active') or not tracker.get('conceptual_box'):
+            return 50.0  # Default middle position
+        
+        # Use conceptual box like Stage 2
+        penis_box = tracker['conceptual_box']
+        penis_base_y = penis_box[3]  # Bottom of conceptual box
+        max_height = tracker.get('max_height', 100.0)
+        
+        # Use Stage 2's optimal reference points for each interaction type
+        if contact_class == 'face':
+            contact_y_ref = contact_box[3]  # Bottom of face
+        elif contact_class == 'hand':
+            contact_y_ref = (contact_box[1] + contact_box[3]) / 2  # Center Y of hand
+        elif contact_class in ['pussy', 'vagina']:
+            contact_y_ref = (contact_box[1] + contact_box[3]) / 2  # Center Y of pussy
+        elif contact_class in ['butt', 'anus']:
+            contact_y_ref = (9 * contact_box[3] + contact_box[1]) / 10  # Mostly bottom
+        else:  # breast, foot, etc.
+            contact_y_ref = (contact_box[1] + contact_box[3]) / 2  # Center
+        
+        # Calculate distance from contact to penis base
+        distance_to_base = abs(penis_base_y - contact_y_ref)
+        
+        # Normalize using max height as reference
+        normalized_distance = min(100.0, (distance_to_base / max_height) * 100.0)
+        
+        return 100.0 - normalized_distance  # Invert for VR POV (100=close, 0=far)
     
     def _analyze_anatomical_regions(self, person: Dict, frame_w: int, frame_h: int) -> Dict[str, Dict]:
         """Analyze activity in different anatomical regions."""
@@ -1887,115 +1995,44 @@ class HybridIntelligenceTracker(BaseTracker):
         
         return intersection_area / union_area
     
-    def _compute_selective_flow(self, prev_gray: np.ndarray, curr_gray: np.ndarray,
-                               priority_regions: List[Tuple[ChangeRegion, List[SemanticRegion]]]) -> List[FlowAnalysis]:
-        """Compute optical flow selectively within priority regions."""
-        flow_analyses = []
-        
-        if not self.flow_dense:
-            return flow_analyses
-        
+    def _compute_selective_flow(self, prev_gray: np.ndarray, curr_gray: np.ndarray) -> List[FlowAnalysis]:
+        """Compute optical flow for the entire masked DROI."""
+        if not self.flow_dense or prev_gray.shape[0] < 12 or prev_gray.shape[1] < 12:
+            return []
+
         try:
-            # VR POV optimization: Focus on top 5 regions (genital regions prioritized)
-            for i, (change_region, semantics) in enumerate(priority_regions[:5]):  # Top 5 regions for VR POV focus
-                # Extract ROI
-                x, y, w, h = change_region.x, change_region.y, change_region.width, change_region.height
-                
-                # Ensure bounds are within frame
-                frame_h, frame_w = prev_gray.shape
-                x = max(0, min(x, frame_w - 1))
-                y = max(0, min(y, frame_h - 1))
-                w = min(w, frame_w - x)
-                h = min(h, frame_h - y)
-                
-                if w < 12 or h < 12:  # Skip tiny regions (DIS flow requires >= 12)
-                    continue
-                
-                # Memory pool for ROI operations
-                roi_key = (w, h)
-                if roi_key not in self.roi_pool:
-                    self.roi_pool[roi_key] = (np.empty((h, w), dtype=np.uint8), np.empty((h, w), dtype=np.uint8))
-                    
-                prev_roi, curr_roi = self.roi_pool[roi_key]
-                prev_roi[:] = prev_gray[y:y+h, x:x+w]
-                curr_roi[:] = curr_gray[y:y+h, x:x+w]
-                
-                # 🚀 OPTIMIZED: CPU DIS ULTRAFAST optical flow (10-50x faster than GPU Farneback)
-                flow = self.flow_dense.calc(prev_roi, curr_roi, None)
-                
-                # 🚀 VECTORIZED flow analysis - numpy operations are highly optimized
-                # Calculate magnitude using vectorized operations
-                magnitude = np.linalg.norm(flow, axis=2)  # Faster than manual sqrt
-                avg_magnitude = np.mean(magnitude)
-                avg_direction = np.mean(flow, axis=(0, 1))
-                
-                # Simple oscillation detection within region
-                flow_std = np.std(magnitude)
-                oscillation_strength = min(flow_std / (avg_magnitude + 1e-6), 2.0)
-                
-                # Calculate confidence based on semantic information
-                confidence = 0.5  # Base confidence
-                if semantics:
-                    # Boost confidence for high-priority semantic objects
-                    max_priority_sem = max(semantics, key=lambda x: x.priority)
-                    semantic_boost = (max_priority_sem.priority / 10.0) * max_priority_sem.confidence
-                    confidence = min(confidence + semantic_boost, 1.0)
-                
-                flow_analysis = FlowAnalysis(
-                    region_id=i,
-                    flow_magnitude=avg_magnitude,
-                    flow_direction=avg_direction,
-                    oscillation_strength=oscillation_strength,
-                    confidence=confidence
-                )
-                
-                flow_analyses.append(flow_analysis)
+            flow = self.flow_dense.calc(prev_gray, curr_gray, None)
+            
+            magnitude = np.linalg.norm(flow, axis=2)
+            avg_magnitude = np.mean(magnitude)
+            avg_direction = np.mean(flow, axis=(0, 1))
+            
+            flow_std = np.std(magnitude)
+            oscillation_strength = min(flow_std / (avg_magnitude + 1e-6), 2.0)
+
+            analysis = FlowAnalysis(
+                region_id=0,
+                flow_magnitude=avg_magnitude,
+                flow_direction=avg_direction,
+                oscillation_strength=oscillation_strength,
+                confidence=1.0 # Confidence is 1.0 as it's our only source
+            )
+            
+            return [analysis]
         
         except Exception as e:
-            self.logger.warning(f"Selective optical flow computation failed: {e}")
-        
-        return flow_analyses
-    
+            self.logger.warning(f"Optical flow computation failed: {e}")
+            return []
+
     def _analyze_oscillation_patterns(self) -> float:
-        """⚡ OPTIMIZED: Simple motion derivative oscillation analysis (FFT eliminated)."""
-        if self.prev_frame_gray is None or self.current_frame_gray is None or not self.change_regions:
+        """Analyzes oscillation based on the global flow analysis."""
+        if not self.flow_analyses:
             return 0.0
         
-        try:
-            # Use existing change regions instead of expensive grid analysis
-            motion_derivatives = []
-            
-            for region in self.change_regions[:3]:  # Process only top 3 regions for speed
-                # Use region intensity as motion signal
-                current_intensity = region.intensity / 255.0
-                
-                # Update motion history for this region
-                region_key = f"{region.x}_{region.y}"
-                if region_key not in self.oscillation_history:
-                    self.oscillation_history[region_key] = deque(maxlen=15)  # 0.5 seconds at 30fps
-                
-                self.oscillation_history[region_key].append(current_intensity)
-                history = list(self.oscillation_history[region_key])
-                
-                # Simple derivative-based oscillation detection (much faster than FFT)
-                if len(history) >= 5:
-                    derivatives = np.diff(history[-8:])  # Use last 8 frames only
-                    if len(derivatives) > 0:
-                        sign_changes = np.sum(np.diff(np.sign(derivatives)) != 0)
-                        oscillation_strength = sign_changes / len(derivatives)
-                        motion_derivatives.append(oscillation_strength * current_intensity)
-            
-            # Calculate final oscillation signal
-            if motion_derivatives:
-                final_oscillation = np.mean(motion_derivatives)
-                final_oscillation *= (self.oscillation_sensitivity / 10.0)  # Apply sensitivity
-                return min(final_oscillation, 1.0)
-            else:
-                return 0.0
-                
-        except Exception as e:
-            self.logger.warning(f"Oscillation analysis failed: {e}")
-            return 0.0
+        # Use the oscillation strength calculated in the main flow analysis
+        # This is simpler and more directly tied to the signal source
+        oscillation_strength = self.flow_analyses[0].oscillation_strength
+        return min(oscillation_strength * self.oscillation_sensitivity, 1.0)
     
     
     def _get_interaction_regions(self) -> List[Tuple[int, int, int, int]]:
@@ -2116,150 +2153,232 @@ class HybridIntelligenceTracker(BaseTracker):
             current_time = time.time()
             return (self.locked_penis_box is not None and 
                     (current_time - self.locked_penis_last_seen) < self.locked_penis_persistence_duration)
+
+    def _update_sexual_position(self):
+        """Analyzes interaction history to deduce the current sexual position."""
+        if not self.interaction_history:
+            self.current_sexual_position = 'discovery'
+            return
+
+        from collections import Counter
+        interaction_counts = Counter(self.interaction_history)
+        
+        # Find the most common interaction
+        most_common_interaction, count = interaction_counts.most_common(1)[0]
+
+        # Set position based on the dominant interaction type
+        if count > len(self.interaction_history) * 0.6: # Needs to be dominant
+            if most_common_interaction in ['pussy', 'butt']:
+                # Simple for now, can be refined with orientation later
+                self.current_sexual_position = 'missionary' # or doggy
+            elif most_common_interaction == 'hand':
+                self.current_sexual_position = 'handjob'
+            elif most_common_interaction == 'face':
+                self.current_sexual_position = 'blowjob'
+            else:
+                self.current_sexual_position = 'discovery'
+        else:
+            self.current_sexual_position = 'discovery'
+        
+        self.logger.info(f"Updated sexual position to: {self.current_sexual_position}")
+
+    def _analyze_thrust_patch(self) -> bool:
+        """Analyzes optical flow in the thrust patch to detect male thrusting."""
+        if self.thrust_detection_patch is None or self.prev_frame_gray is None:
+            return False
+
+        x1, y1, x2, y2 = map(int, self.thrust_detection_patch)
+        h, w = self.current_frame_gray.shape
+        x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+
+        if x2 <= x1 or y2 <= y1:
+            return False
+
+        prev_roi = self.prev_frame_gray[y1:y2, x1:x2]
+        curr_roi = self.current_frame_gray[y1:y2, x1:x2]
+
+        flow = self.flow_dense.calc(prev_roi, curr_roi, None)
+        magnitude = np.linalg.norm(flow, axis=2)
+        avg_magnitude = np.mean(magnitude)
+
+        # If average motion magnitude in this patch is high, assume male is thrusting
+        is_thrusting = avg_magnitude > 2.5 # Threshold needs tuning
+        self.is_male_thrusting = is_thrusting
+        return is_thrusting
+
+    def _smoothly_update_droi(self):
+        """Interpolates the current DROI towards the target DROI for smooth transitions."""
+        if self.target_droi_box is None:
+            return
+
+        if self.current_droi_box is None:
+            self.current_droi_box = self.target_droi_box
+            return
+
+        # Simple linear interpolation
+        alpha = 0.05 # 5% movement per frame
+        new_box = [
+            (1 - alpha) * self.current_droi_box[i] + alpha * self.target_droi_box[i]
+            for i in range(4)
+        ]
+        self.current_droi_box = tuple(new_box)
+
+    def _update_dynamic_roi(self):
+        """
+        STATE-DRIVEN DROI CALCULATION
+        Sets the target_droi_box and thrust_detection_patch based on the identified sexual position.
+        """
+        is_penis_locked = self._is_penis_active() and self.penis_tracker_confidence > 0.5
+        penis_box = self._get_evolved_penis_box()
+
+        if not is_penis_locked or not penis_box:
+            self.droi_state = 'DISCOVERY'
+            self.target_droi_box = None
+            self.thrust_detection_patch = None
+            return
+
+        px1, py1, px2, py2 = penis_box
+        pw, ph = px2 - px1, py2 - py1
+
+        # Define the thrust patch relative to the penis box base
+        thrust_patch_height = ph * 0.5
+        self.thrust_detection_patch = (px1, py2, px2, py2 + thrust_patch_height)
+
+        # Find best intersecting interactive region
+        interactive_regions = [r for r in self.semantic_regions if r.class_name.lower() in ['pussy', 'butt', 'hand', 'face']]
+        best_intersecting_region = None
+        max_iou = 0.0
+        if interactive_regions:
+            for region in interactive_regions:
+                iou = TrackerVisualizationHelper.calculate_iou(penis_box, region.bbox)
+                if iou > max_iou:
+                    max_iou = iou
+                    best_intersecting_region = region
+        
+        if max_iou > 0.01 and best_intersecting_region:
+            new_droi_state = 'LOCKED'
+            self.interaction_history.append(best_intersecting_region.class_name.lower())
+            
+            # Use the CURRENT interaction for sizing, not the historical position
+            current_interaction_type = best_intersecting_region.class_name.lower()
+            exp_factors = self.DROI_EXPANSION_FACTORS.get(current_interaction_type, self.DROI_EXPANSION_FACTORS['discovery'])
+
+            if current_interaction_type in ['pussy', 'butt']:
+                # Anchor DROI to penis base and expand upwards
+                droi_w = pw * (1 + exp_factors['w'])
+                droi_h = ph * (1 + exp_factors['h_up'] + exp_factors['h_down'])
+                center_x = (px1 + px2) / 2
+                new_x1 = center_x - droi_w / 2
+                new_x2 = center_x + droi_w / 2
+                # Anchor at base and extend up
+                new_y2 = py2 + ph * exp_factors['h_down']
+                new_y1 = new_y2 - droi_h
+                new_target_box = (new_x1, new_y1, new_x2, new_y2)
+            else: # handjob, blowjob
+                # DROI is just the penis box itself
+                new_target_box = penis_box
+
+        else:
+            new_droi_state = 'PROXIMITY'
+            new_target_box = penis_box # Default to penis box in proximity
+
+        if new_droi_state != self.droi_state:
+            self.logger.info(f"DROI state changed: {self.droi_state} -> {new_droi_state}")
+            self.droi_state = new_droi_state
+
+        if new_target_box != self.target_droi_box:
+            self.logger.info(f"DROI target updated. New Box: ({new_target_box[0]:.0f}, {new_target_box[1]:.0f}, {new_target_box[2]:.0f}, {new_target_box[3]:.0f}))")
+            self.target_droi_box = new_target_box
+
+    def _create_droi_mask(self, frame_shape: Tuple[int, int]) -> Optional[np.ndarray]:
+        """Creates a binary mask from the current DROI box."""
+        if self.current_droi_box is None:
+            return None
+        
+        mask = np.zeros(frame_shape, dtype=np.uint8)
+        x1, y1, x2, y2 = self.current_droi_box
+        
+        # Clip coordinates to be within frame dimensions
+        h, w = frame_shape
+        x1, y1 = max(0, int(x1)), max(0, int(y1))
+        x2, y2 = min(w, int(x2)), min(h, int(y2))
+        
+        if x1 < x2 and y1 < y2:
+            mask[y1:y2, x1:x2] = 255
+        
+        return mask
     
     def _fuse_signals(self, oscillation_signal: float, pose_data: Dict[str, Any] = None) -> Tuple[float, float]:
-        """Intelligently fuse all signal sources to generate primary/secondary positions."""
+        """STATE-DRIVEN SIGNAL SELECTION for a clean, context-aware signal."""
         
-        # Initialize signal components
-        frame_diff_signal = 0.0
-        yolo_weighted_signal = 0.0
-        optical_flow_signal = 0.0
-        pose_activity_signal = 0.0
-        
-        # === 1. FRAME DIFF SIGNAL ===
-        if self.change_regions:
-            # Weight by both intensity and area
-            weighted_changes = []
-            for region in self.change_regions:
-                area_weight = min(region.area / 10000.0, 1.0)  # Normalize area
-                intensity_weight = region.intensity / 255.0   # Normalize intensity
-                weighted_changes.append(area_weight * intensity_weight)
-            
-            frame_diff_signal = min(sum(weighted_changes), 1.0)
-        
-        # === 2. YOLO WEIGHTED SIGNAL ===
-        if self.semantic_regions:
-            weighted_detections = []
-            for sem_region in self.semantic_regions:
-                weight = sem_region.priority * sem_region.confidence
-                weighted_detections.append(weight)
-            
-            if weighted_detections:
-                yolo_weighted_signal = min(sum(weighted_detections) / 50.0, 1.0)  # Normalize
-        
-        # === 3. OPTICAL FLOW SIGNAL ===
-        if self.flow_analyses:
-            weighted_flows = []
-            for flow_analysis in self.flow_analyses:
-                flow_contribution = flow_analysis.flow_magnitude * flow_analysis.confidence
-                weighted_flows.append(flow_contribution)
-            
-            if weighted_flows:
-                optical_flow_signal = min(np.mean(weighted_flows) * 10.0, 1.0)  # Normalize
-        
-        # === 4. COMPREHENSIVE POSE SIGNALS ===
-        pose_signals = {}
-        penis_confidence = 0.0
-        
-        if pose_data and pose_data.get('primary_person'):
-            primary_person = pose_data['primary_person']
-            anatomical_activities = pose_data.get('anatomical_activities', {})
-            signal_components = pose_data.get('signal_components', {})
-            penis_confidence = pose_data.get('penis_association_confidence', 0.0)
-            
-            # Extract individual anatomical signals
-            pose_signals = {
-                'face_activity': signal_components.get('face_activity', 0.0),
-                'breast_activity': signal_components.get('breast_activity', 0.0),
-                'navel_activity': signal_components.get('navel_activity', 0.0),
-                'hand_activity': signal_components.get('hand_activity', 0.0),
-                'torso_stability': signal_components.get('torso_stability', 1.0),
-                'overall_body_activity': signal_components.get('overall_body_activity', 0.0)
-            }
-        
-        # === 5. SOPHISTICATED SIGNAL FUSION ===
-        # Calculate weighted signals with penis association confidence
-        penis_weight = max(0.3, penis_confidence)  # Minimum 30% weight even without penis detection
-        
-        # Traditional signals
-        base_signals = {
-            'frame_diff': frame_diff_signal * self.fusion_weights['frame_diff'],
-            'yolo_weighted': yolo_weighted_signal * self.fusion_weights['yolo_weighted'], 
-            'optical_flow': optical_flow_signal * self.fusion_weights['optical_flow'],
-            'oscillation': oscillation_signal * self.fusion_weights['oscillation']
-        }
-        
-        # Advanced pose-based signals (weighted by penis association)
-        pose_contribution = 0.0
-        if pose_signals:
-            # Weighted combination of anatomical activities
-            anatomical_weights = {
-                'face_activity': 0.10,
-                'breast_activity': 0.30,  # High weight for breast movement
-                'navel_activity': 0.25,   # High weight for core movement
-                'hand_activity': 0.25,    # Hand-penis proximity important
-                'overall_body_activity': 0.10
-            }
-            
-            for signal_name, weight in anatomical_weights.items():
-                signal_value = pose_signals.get(signal_name, 0.0)
-                pose_contribution += weight * signal_value
-            
-            # Apply penis association weighting
-            pose_contribution *= penis_weight
-        
-        # Check if we have meaningful activity
-        total_base_signal = sum(base_signals.values())
-        total_signal_strength = total_base_signal + pose_contribution
-        has_active_signals = total_signal_strength > 0.01
-        
-        if has_active_signals:
-            # Combine base signals and pose contributions
-            base_fused_signal = total_base_signal
-            
-            # Apply pose enhancement - stronger boost for high-confidence penis association
-            pose_boost_factor = 1.0 + (pose_contribution * penis_confidence * 0.8)  # Up to 80% boost
-            
-            # Final signal combines base + enhanced pose activity
-            fused_signal = (base_fused_signal * pose_boost_factor) + (pose_contribution * 0.3)
-            
-            # Map to VR POV funscript position (100=no action, 0=full insertion)
-            primary_pos = 100.0 - (fused_signal * 100.0)  # INVERTED for VR POV
-            
-            # For secondary axis, use optical flow direction if available
-            secondary_pos = self.last_secondary_position  # Start with current position
+        primary_pos = self.last_primary_position
+        secondary_pos = self.last_secondary_position
+        fused_signal = 0.0
+
+        # === STATE-BASED SIGNAL SELECTION ===
+        if self.droi_state == 'LOCKED':
+            # In LOCKED state, we trust ONLY the vertical optical flow within the DROI.
             if self.flow_analyses:
-                # Use horizontal flow component for secondary axis
-                horizontal_flows = [fa.flow_direction[0] for fa in self.flow_analyses if fa.confidence > 0.3]
-                if horizontal_flows:
-                    avg_horizontal = np.mean(horizontal_flows)
-                    secondary_pos = 50.0 + (avg_horizontal * 25.0)  # Scale to ±25 around center
-                    secondary_pos = max(0.0, min(100.0, secondary_pos))  # Clamp to valid range
-            
-            # Apply Butterworth low-pass filter for superior smoothing (no phase lag)
-            primary_pos, secondary_pos = self.butterworth_filter.filter(primary_pos, secondary_pos)
-            
+                # Extract vertical component of flow (y-axis)
+                vertical_flows = [fa.flow_direction[1] for fa in self.flow_analyses if fa.confidence > 0.4]
+                if vertical_flows:
+                    # Average the vertical flow and scale it to represent funscript motion
+                    # A positive flow (downward motion) should decrease the funscript position (move down)
+                    fused_signal = np.mean(vertical_flows) * 1.5 # Amplification factor
+
+        elif self.droi_state == 'PROXIMITY':
+            # In PROXIMITY, we use optical flow magnitude from the partner's body motion.
+            if self.flow_analyses:
+                flow_magnitudes = [fa.flow_magnitude for fa in self.flow_analyses if fa.confidence > 0.3]
+                if flow_magnitudes:
+                    fused_signal = np.mean(flow_magnitudes) * 0.5 # Use magnitude, with some scaling
+
+        elif self.droi_state == 'DISCOVERY':
+            # In DISCOVERY, we also rely on optical flow magnitude to find the action.
+            if self.flow_analyses:
+                flow_magnitudes = [fa.flow_magnitude for fa in self.flow_analyses if fa.confidence > 0.2]
+                if flow_magnitudes:
+                    fused_signal = np.mean(flow_magnitudes) * 0.5 # Use magnitude, with some scaling
+
+        # === POSITION CALCULATION ===
+        if fused_signal != 0.0:
+            # Invert signal if male is detected to be thrusting
+            if self.is_male_thrusting:
+                fused_signal *= -1
+
+            # Context-Aware Amplification
+            droi_h = self.current_droi_box[3] - self.current_droi_box[1] if self.current_droi_box else frame.shape[0]
+            # Smaller DROI implies smaller movements, so we need more amplification.
+            amplification_factor = max(1.0, 150.0 / droi_h) # Inverse relationship
+            fused_signal *= amplification_factor
+
+            # Map the fused signal to the funscript position range
+            position_offset = fused_signal * 50.0
+            primary_pos = 50.0 - position_offset
         else:
-            # No motion detected - gradual decay to VR POV "no action" position (100)
-            decay_rate = 0.02  # 2% decay per frame towards 100 (no action)
-            target_primary = 100.0  # VR POV: 100 = no action/withdrawal
-            target_secondary = 50.0  # Secondary stays centered
-            
-            # Gradual exponential decay towards target
-            primary_pos = self.last_primary_position + (target_primary - self.last_primary_position) * decay_rate
-            secondary_pos = self.last_secondary_position + (target_secondary - self.last_secondary_position) * decay_rate
+            # No signal, decay towards the neutral position
+            primary_pos = self.last_primary_position + (50.0 - self.last_primary_position) * 0.02
+
+        # For secondary axis, always use horizontal flow if available, regardless of state
+        if self.flow_analyses:
+            horizontal_flows = [fa.flow_direction[0] for fa in self.flow_analyses if fa.confidence > 0.3]
+            if horizontal_flows:
+                avg_horizontal = np.mean(horizontal_flows)
+                secondary_pos = 50.0 + (avg_horizontal * 25.0)
+        else:
+            secondary_pos = self.last_secondary_position + (50.0 - self.last_secondary_position) * 0.02
+
+        # Apply final smoothing and update history
+        primary_pos, secondary_pos = self.butterworth_filter.filter(primary_pos, secondary_pos)
         
-        # Update history
-        self.last_primary_position = primary_pos
-        self.last_secondary_position = secondary_pos
+        self.last_primary_position = np.clip(primary_pos, 0, 100)
+        self.last_secondary_position = np.clip(secondary_pos, 0, 100)
         
-        self.primary_signal_history.append(primary_pos)
-        self.secondary_signal_history.append(secondary_pos)
+        self.primary_signal_history.append(self.last_primary_position)
+        self.secondary_signal_history.append(self.last_secondary_position)
+        self.position_history.append(self.last_primary_position)
         
-        # Update graphical debug history
-        self.position_history.append(primary_pos)
-        
-        return primary_pos, secondary_pos
+        return self.last_primary_position, self.last_secondary_position
     
     def _generate_funscript_actions(self, primary_pos: float, secondary_pos: float, 
                                   frame_time_ms: int, frame_index: Optional[int] = None) -> List[Dict]:
@@ -2273,21 +2392,6 @@ class HybridIntelligenceTracker(BaseTracker):
         try:
             # Use provided timestamp directly
             timestamp = frame_time_ms
-            
-            # Apply signal amplification if available
-            if hasattr(self, 'signal_amplifier') and self.signal_amplifier:
-                # Use optical flow data for signal enhancement
-                dy_flow = 0.0
-                dx_flow = 0.0
-                if self.flow_analyses:
-                    # Average the flow directions from all analyses
-                    avg_flow = np.mean([fa.flow_direction for fa in self.flow_analyses], axis=0)
-                    dy_flow = float(avg_flow[1]) if len(avg_flow) > 1 else 0.0
-                    dx_flow = float(avg_flow[0]) if len(avg_flow) > 0 else 0.0
-                
-                primary_pos, secondary_pos = self.signal_amplifier.enhance_signal(
-                    int(primary_pos), int(secondary_pos), dy_flow, dx_flow
-                )
             
             # Primary axis action
             action_primary = {
@@ -2866,6 +2970,9 @@ class HybridIntelligenceTracker(BaseTracker):
             contact_info=contact_info,
             change_regions=change_regions_data,
             flow_vectors=flow_vectors_data,
+            # DROI Visualization
+            droi_box=self.current_droi_box,
+            droi_state=self.droi_state,
             # Additional hybrid tracker data
             oscillation_grid_active=self.show_oscillation_grid,
             oscillation_sensitivity=self.oscillation_sensitivity,
@@ -3054,6 +3161,25 @@ class HybridIntelligenceTracker(BaseTracker):
                 cv2.putText(overlay_frame, label,
                           (x1, y1 - 5),
                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, label_color, 1)
+
+            # === RENDER DROI STATE ===
+            droi_box = self.overlay_data.get('droi_box')
+            droi_state = self.overlay_data.get('droi_state', 'N/A')
+            if droi_box:
+                state_colors = {
+                    'LOCKED': (0, 255, 0), # Green
+                    'PROXIMITY': (0, 255, 255), # Yellow
+                    'DISCOVERY': (255, 0, 0) # Blue
+                }
+                color = state_colors.get(droi_state, (255, 255, 255))
+                x1, y1, x2, y2 = map(int, droi_box)
+                
+                # Draw DROI box
+                cv2.rectangle(overlay_frame, (x1, y1), (x2, y2), color, 2)
+                
+                # Draw DROI state label
+                label = f"DROI: {droi_state}"
+                cv2.putText(overlay_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             
             # === RENDER COMPUTATION vs DISREGARDED AREAS ===
             for area in self.overlay_data.get('computation_areas', []):
