@@ -146,6 +146,43 @@ class AppFileManager:
             secondary_path = self.get_output_path_for_file(video_path, "_t2_raw.funscript")
             self._save_funscript_file(secondary_path, secondary_actions, None)
 
+    def save_raw_funscripts_next_to_video(self, video_path: str):
+        """Save raw funscripts next to the video file with .raw.funscript extension."""
+        if not self.app.funscript_processor: return
+        if not video_path: return
+
+        primary_actions = self.app.funscript_processor.get_actions('primary')
+        secondary_actions = self.app.funscript_processor.get_actions('secondary')
+        chapters = self.app.funscript_processor.video_chapters
+        
+        # Check if copy to video location is enabled
+        save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
+        if self.app.is_batch_processing_active:
+            save_next_to_video = self.app.batch_copy_funscript_to_video_location
+        
+        if not save_next_to_video:
+            self.logger.info("Copy to video location is disabled. Raw funscripts saved only to output folder.")
+            return
+        
+        self.logger.info("Saving raw funscripts next to video file with .raw.funscript extension...")
+
+        if primary_actions:
+            base, _ = os.path.splitext(video_path)
+            primary_path = f"{base}.raw.funscript"
+            self._save_funscript_file(primary_path, primary_actions, chapters)
+            self.logger.info(f"Raw primary funscript saved: {os.path.basename(primary_path)}")
+        
+        # Determine roll generation setting
+        generate_roll = self.app.app_settings.get("generate_roll_file", True)
+        if self.app.is_batch_processing_active:
+            generate_roll = self.app.batch_generate_roll_file
+            
+        if secondary_actions and generate_roll:
+            base, _ = os.path.splitext(video_path)
+            secondary_path = f"{base}.raw.roll.funscript"
+            self._save_funscript_file(secondary_path, secondary_actions, None)
+            self.logger.info(f"Raw secondary funscript saved: {os.path.basename(secondary_path)}")
+
     def load_funscript_to_timeline(self, funscript_file_path: str, timeline_num: int = 1):
         actions, error_msg, chapters_as_dicts, chapters_fps_from_file = self._parse_funscript_file(funscript_file_path)
         funscript_processor = self.app.funscript_processor
