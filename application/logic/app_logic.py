@@ -1290,16 +1290,7 @@ class ApplicationLogic:
             self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
             chapters_for_save = self.funscript_processor.video_chapters
 
-        # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
-        self.logger.info("Saving final funscripts...")
-        self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
-
-        # 4. SAVE THE PROJECT
-        self.logger.info("Saving project file for completed video...")
-        project_filepath = self.file_manager.get_output_path_for_file(video_path, PROJECT_FILE_EXTENSION)
-        self.project_manager.save_project(project_filepath)
-
-        # 5. Handle simple mode
+        # 3. Handle simple mode BEFORE saving final funscripts
         is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
         # Check if current tracker is offline mode for simple mode auto-enhancements
         from config.tracker_discovery import TrackerCategory
@@ -1307,10 +1298,28 @@ class ApplicationLogic:
         tracker_info = discovery.get_tracker_info(self.app_state_ui.selected_tracker_name)
         is_offline_analysis = tracker_info and tracker_info.category == TrackerCategory.OFFLINE
 
-        if is_simple_mode and is_offline_analysis:
+        simple_mode_autotune_applied = False
+        if is_simple_mode and is_offline_analysis and not autotune_enabled_for_batch:
             self.logger.info("Simple Mode: Automatically applying Ultimate Autotune with defaults...")
             self.set_status_message("Analysis complete! Applying auto-enhancements...")
             self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+            chapters_for_save = self.funscript_processor.video_chapters
+            simple_mode_autotune_applied = True
+
+        # 4. SAVE THE FINAL FUNSCRIPT
+        any_processing_applied = post_processing_enabled or autotune_enabled_for_batch or simple_mode_autotune_applied
+        
+        if any_processing_applied:
+            self.logger.info("Saving final (post-processed) funscripts...")
+            self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
+        else:
+            self.logger.info("No post-processing was applied. Saving raw funscript with .raw.funscript extension to video location.")
+            self.file_manager.save_raw_funscripts_next_to_video(video_path)
+
+        # 5. SAVE THE PROJECT
+        self.logger.info("Saving project file for completed video...")
+        project_filepath = self.file_manager.get_output_path_for_file(video_path, PROJECT_FILE_EXTENSION)
+        self.project_manager.save_project(project_filepath)
 
         # 6. Signal batch loop to continue
         if self.is_batch_processing_active and hasattr(self, 'save_and_reset_complete_event'):
@@ -1385,11 +1394,7 @@ class ApplicationLogic:
                 else:
                     self.logger.info("Auto post-processing disabled or superseded by Ultimate Autotune, skipping.")
 
-                if autotune_enabled:
-                    self.logger.info("Triggering Ultimate Autotune for completed live session.")
-                    self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
-                
-                # Handle Simple Mode auto ultimate autotune for live sessions
+                # Handle Simple Mode auto ultimate autotune for live sessions BEFORE saving
                 is_simple_mode = getattr(self.app_state_ui, 'ui_view_mode', 'expert') == 'simple'
                 # Check if current tracker is live mode for simple mode auto-enhancements  
                 from config.tracker_discovery import TrackerCategory
@@ -1398,15 +1403,27 @@ class ApplicationLogic:
                 is_live_mode = tracker_info and tracker_info.category == TrackerCategory.LIVE
                 has_actions = bool(self.funscript_processor.get_actions('primary'))
                 
+                simple_mode_autotune_applied = False
                 if is_simple_mode and is_live_mode and has_actions and not autotune_enabled:
                     self.logger.info("Simple Mode: Automatically applying Ultimate Autotune to live session...")
                     self.set_status_message("Live tracking complete! Applying auto-enhancements...")
                     self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+                    simple_mode_autotune_applied = True
+                
+                if autotune_enabled:
+                    self.logger.info("Triggering Ultimate Autotune for completed live session.")
+                    self.trigger_ultimate_autotune_with_defaults(timeline_num=1)
 
-                # 3. SAVE THE FINAL (POST-PROCESSED) FUNSCRIPT
-                self.logger.info("Saving final (post-processed) funscript.")
-                chapters_for_save = self.funscript_processor.video_chapters
-                self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
+                # 3. SAVE THE FINAL FUNSCRIPT
+                any_processing_applied = post_processing_enabled or autotune_enabled or simple_mode_autotune_applied
+                
+                if any_processing_applied:
+                    self.logger.info("Saving final (post-processed) funscript.")
+                    chapters_for_save = self.funscript_processor.video_chapters
+                    self.file_manager.save_final_funscripts(video_path, chapters=chapters_for_save)
+                else:
+                    self.logger.info("No post-processing was applied to live session. Saving raw funscript with .raw.funscript extension to video location.")
+                    self.file_manager.save_raw_funscripts_next_to_video(video_path)
 
             else:
                 self.logger.warning("Live session ended, but no video path is available to save the raw funscript.")
@@ -1938,7 +1955,12 @@ class ApplicationLogic:
                     self.logger.info("Ultimate Autotune disabled - auto post-processing enabled from settings")
                 else:
                     self.logger.info("Both Ultimate Autotune and auto post-processing disabled")
-            self.batch_generate_roll_file = (args.mode in ['3-stage', '3-stage-mixed'])
+            # Determine roll file generation based on CLI argument or tracker capabilities
+            if hasattr(args, 'generate_roll') and args.generate_roll:
+                self.batch_generate_roll_file = True
+            else:
+                # Default behavior: enable for 3-stage modes or dual-axis trackers
+                self.batch_generate_roll_file = (args.mode in ['3-stage', '3-stage-mixed']) or (tracker_info and tracker_info.supports_dual_axis)
 
             self.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
 
