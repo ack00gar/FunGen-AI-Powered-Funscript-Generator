@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.7"
+INSTALLER_VERSION = "1.2.8"
 
 # Configuration
 CONFIG = {
@@ -585,7 +585,12 @@ class FunGenUniversalInstaller:
         print("  Setting up Python environment...")
         
         if self.conda_available:
-            return self._setup_conda_environment()
+            if self._setup_conda_environment():
+                return True
+            else:
+                print("  Conda environment setup failed, trying Python venv as fallback...")
+                self.conda_available = False  # Switch to venv mode
+                return self._setup_venv_environment()
         else:
             return self._setup_venv_environment()
     
@@ -600,13 +605,30 @@ class FunGenUniversalInstaller:
         
         if not env_exists:
             print(f"  Creating conda environment '{CONFIG['env_name']}'...")
-            ret, _, stderr = self.run_command([
+            print(f"  Using conda at: {conda_exe}")
+            print(f"  Command: conda create -n {CONFIG['env_name']} python={CONFIG['python_version']} -y")
+            
+            ret, stdout, stderr = self.run_command([
                 str(conda_exe), "create", "-n", CONFIG["env_name"],
                 f"python={CONFIG['python_version']}", "-y"
             ], check=False)
             
             if ret != 0:
-                self.print_error(f"Failed to create conda environment: {stderr}")
+                self.print_error(f"Failed to create conda environment")
+                self.print_error(f"Error details: {stderr}")
+                if stdout:
+                    self.print_error(f"Output: {stdout}")
+                
+                # Common solutions
+                print("\nPossible solutions:")
+                print("1. Try running manually:")
+                print(f"   conda create -n {CONFIG['env_name']} python={CONFIG['python_version']} -y")
+                print("2. Check if conda is properly initialized:")
+                print("   conda init")
+                print("3. Try using system Python instead (rerun installer)")
+                print("4. Check available conda channels:")
+                print("   conda info")
+                
                 return False
         else:
             self.print_success(f"Using existing conda environment '{CONFIG['env_name']}'")
@@ -622,12 +644,22 @@ class FunGenUniversalInstaller:
             return True
         
         print(f"  Creating virtual environment...")
+        print(f"  Using Python: {sys.executable}")
+        print(f"  Target path: {self.venv_path}")
+        
         ret, _, stderr = self.run_command([
             sys.executable, "-m", "venv", str(self.venv_path)
         ], check=False)
         
         if ret != 0:
-            self.print_error(f"Failed to create virtual environment: {stderr}")
+            self.print_error(f"Failed to create virtual environment")
+            self.print_error(f"Error: {stderr}")
+            print("\nPossible solutions:")
+            print("1. Check if Python venv module is available:")
+            print(f"   {sys.executable} -m venv --help")
+            print("2. Try installing python3-venv (Linux):")
+            print("   sudo apt install python3-venv")
+            print("3. Use system Python directly (not recommended)")
             return False
         
         self.print_success("Virtual environment created")
