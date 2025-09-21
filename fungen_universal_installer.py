@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.1"
+INSTALLER_VERSION = "1.2.2"
 
 # Configuration
 CONFIG = {
@@ -729,11 +729,28 @@ class FunGenUniversalInstaller:
     
     def _create_windows_launcher(self, activate_cmd: str):
         """Create Windows launcher"""
+        # Add tool paths to PATH
+        path_additions = []
+        
         # Add FFmpeg path if it exists
         ffmpeg_path = self.tools_dir / "ffmpeg"
-        path_setup = ""
         if ffmpeg_path.exists():
-            path_setup = f'set "PATH={ffmpeg_path};%PATH%"\n'
+            path_additions.append(str(ffmpeg_path))
+        
+        # Add common Git paths if they exist
+        git_paths = [
+            Path.home() / "AppData" / "Local" / "Programs" / "Git" / "bin",
+            Path("C:\\Program Files\\Git\\bin"),
+            Path("C:\\Program Files (x86)\\Git\\bin")
+        ]
+        for git_path in git_paths:
+            if git_path.exists():
+                path_additions.append(str(git_path))
+                break  # Only add the first one found
+        
+        path_setup = ""
+        if path_additions:
+            path_setup = f'set "PATH={";".join(path_additions)};%PATH%"\n'
         
         launcher_content = f'''@echo off
 cd /d "{self.project_path}"
