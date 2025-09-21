@@ -415,11 +415,20 @@ class FunGenUniversalInstaller:
         
         print("  Cloning repository...")
         ret, _, stderr = self.run_command([
-            "git", "clone", CONFIG["repo_url"], str(self.project_path)
+            "git", "clone", "--branch", "main", CONFIG["repo_url"], str(self.project_path)
         ], check=False)
         
         if ret == 0:
-            self.print_success("Repository cloned successfully")
+            # Verify git repository is properly set up
+            ret, stdout, _ = self.run_command([
+                "git", "rev-parse", "--short", "HEAD"
+            ], cwd=self.project_path, check=False)
+            
+            if ret == 0:
+                commit = stdout.strip()
+                self.print_success(f"Repository cloned successfully (main@{commit})")
+            else:
+                self.print_success("Repository cloned successfully")
             return True
         else:
             self.print_error(f"Failed to clone repository: {stderr}")
@@ -595,29 +604,43 @@ class FunGenUniversalInstaller:
             
             # Install core requirements
             core_req = CONFIG["requirements_files"]["core"]
-            if Path(core_req).exists():
-                print("  Installing core requirements...")
-                ret, _, stderr = self.run_command([
+            core_req_path = self.project_path / core_req
+            if core_req_path.exists():
+                print(f"  Installing core requirements from {core_req}...")
+                ret, stdout, stderr = self.run_command([
                     str(python_exe), "-m", "pip", "install", "-r", core_req
                 ], check=False)
                 
                 if ret != 0:
                     self.print_error(f"Failed to install core requirements: {stderr}")
                     return False
+                else:
+                    print(f"    Core requirements installed successfully")
+            else:
+                self.print_error(f"Core requirements file not found: {core_req_path}")
+                return False
             
             # Install GPU-specific requirements
             gpu_type = self._detect_gpu()
             req_file = CONFIG["requirements_files"].get(gpu_type)
             
-            if req_file and Path(req_file).exists():
-                print(f"  Installing {gpu_type.upper()} requirements...")
-                ret, _, stderr = self.run_command([
-                    str(python_exe), "-m", "pip", "install", "-r", req_file
-                ], check=False)
-                
-                if ret != 0:
-                    self.print_warning(f"Failed to install {gpu_type} requirements: {stderr}")
-                    # Don't fail installation for GPU requirements
+            if req_file:
+                gpu_req_path = self.project_path / req_file
+                if gpu_req_path.exists():
+                    print(f"  Installing {gpu_type.upper()} requirements from {req_file}...")
+                    ret, stdout, stderr = self.run_command([
+                        str(python_exe), "-m", "pip", "install", "-r", req_file
+                    ], check=False)
+                    
+                    if ret != 0:
+                        self.print_warning(f"Failed to install {gpu_type} requirements: {stderr}")
+                        # Don't fail installation for GPU requirements
+                    else:
+                        print(f"    {gpu_type.upper()} requirements installed successfully")
+                else:
+                    self.print_warning(f"GPU requirements file not found: {gpu_req_path}")
+            else:
+                print(f"  No specific requirements for {gpu_type} GPU type")
             
             self.print_success("Python dependencies installed")
             return True
@@ -796,6 +819,7 @@ read -p "Press Enter to close..."
         print("=" * 60 + Colors.ENDC)
         
         print(f"\n{Colors.CYAN}To run FunGen:{Colors.ENDC}")
+        print(f"{Colors.YELLOW}  ⚠ IMPORTANT: Use the launcher scripts below (not 'python main.py' directly){Colors.ENDC}")
         
         if self.platform == "Windows":
             print(f"  • Double-click: {self.project_path / 'launch.bat'}")
@@ -803,6 +827,15 @@ read -p "Press Enter to close..."
             if self.platform == "Darwin":
                 print(f"  • Double-click: {self.project_path / 'launch.command'}")
             print(f"  • Terminal: {self.project_path / 'launch.sh'}")
+        
+        print(f"\n{Colors.CYAN}Alternative terminal method:{Colors.ENDC}")
+        print(f"  cd \"{self.project_path}\"")
+        if self.conda_available:
+            print(f"  conda activate {CONFIG['env_name']}")
+        else:
+            print(f"  source venv/bin/activate  # Linux/macOS")
+            print(f"  venv\\Scripts\\activate     # Windows")
+        print(f"  python {CONFIG['main_script']}")
         
         print(f"\n{Colors.YELLOW}First-time setup:{Colors.ENDC}")
         print("  • FunGen will download required YOLO models on first run")
