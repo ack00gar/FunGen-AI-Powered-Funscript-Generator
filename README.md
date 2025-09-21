@@ -18,7 +18,7 @@ This project is still at the early stages of development. It is not intended for
 
 ### Windows
 1. Download: [fungen_install.bat](https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_install.bat)
-2. Right-click → "Run as administrator" (recommended)
+2. Double-click to run (or run from command prompt)
 3. Wait for automatic installation of Python, Git, FFmpeg, and FunGen
 
 ### Linux/macOS
@@ -51,7 +51,7 @@ Before using this project, ensure you have the following installed:
 - **Miniconda** (https://www.anaconda.com/docs/getting-started/miniconda/install)
 
 Easy install of Miniconda for Windows users:
-Click Start, type "cmd", right click on Command Prompt, and select "Run as administrator." Enter "winget install -e --id Anaconda.Miniconda3" and press enter. Miniconda should then download and install.
+Open Command Prompt and run: `winget install -e --id Anaconda.Miniconda3`
 
 ### Start a miniconda command prompt
 After installing Miniconda look for a program called "Anaconda prompt (miniconda3)" in the start menu (on Windows) and open it
