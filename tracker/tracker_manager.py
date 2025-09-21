@@ -6,7 +6,6 @@ import logging
 import numpy as np
 from typing import List, Dict, Tuple, Optional, Any, Union
 
-from config.tracker_discovery import get_tracker_discovery
 from tracker.tracker_modules import tracker_registry
 from funscript.dual_axis_funscript import DualAxisFunscript
 
@@ -31,6 +30,7 @@ class TrackerManager:
         self._current_tracker = None
         self._current_mode = None
         self._tracker_info = None
+        from config.tracker_discovery import get_tracker_discovery
         self._discovery = get_tracker_discovery()
         
         # Create funscript instance for accumulating tracking data
