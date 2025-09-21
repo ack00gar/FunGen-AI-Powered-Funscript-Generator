@@ -5,6 +5,32 @@
 
 set -e  # Exit on any error
 
+# Check for help or common invalid flags
+for arg in "$@"; do
+    case $arg in
+        -h|--help)
+            echo "FunGen Bootstrap Installer"
+            echo "Usage: $0 [options]"
+            echo ""
+            echo "This script downloads and installs FunGen automatically."
+            echo "All options are passed to the universal installer."
+            echo ""
+            echo "Common options:"
+            echo "  --force     Force reinstallation"
+            echo "  --uninstall Run uninstaller instead"
+            echo "  --help      Show this help"
+            echo ""
+            exit 0
+            ;;
+        -u)
+            echo "ERROR: '-u' is not a valid option."
+            echo "Did you mean '--uninstall' or '--force'?"
+            echo "Run '$0 --help' for available options."
+            exit 1
+            ;;
+    esac
+done
+
 echo "=========================================="
 echo "     FunGen Bootstrap Installer"
 echo "=========================================="
@@ -14,6 +40,9 @@ echo "  - Python 3.11 (Miniconda)"
 echo "  - Git"
 echo "  - FFmpeg/FFprobe"
 echo "  - FunGen AI and all dependencies"
+echo ""
+echo "Note: You may be prompted for your password to install system packages"
+echo "      (Git, FFmpeg) via your system's package manager."
 echo ""
 
 # Detect OS and architecture
@@ -87,23 +116,33 @@ urllib.request.urlretrieve('$url', '$output')
     return 1
 }
 
-echo "[1/4] Downloading Miniconda installer..."
-if ! download_file "$PYTHON_URL" "$PYTHON_INSTALLER" "Miniconda"; then
-    echo "ERROR: Failed to download Miniconda installer"
-    exit 1
+echo "[1/4] Checking Python installation..."
+if [ -d "$MINICONDA_PATH" ]; then
+    echo "    Miniconda already installed, skipping download..."
+else
+    echo "    Downloading Miniconda installer..."
+    if ! download_file "$PYTHON_URL" "$PYTHON_INSTALLER" "Miniconda"; then
+        echo "ERROR: Failed to download Miniconda installer"
+        exit 1
+    fi
+    echo "    Miniconda installer downloaded successfully"
 fi
-echo "    Miniconda installer downloaded successfully"
 
 echo ""
 echo "[2/4] Installing Miniconda..."
-echo "    This may take a few minutes..."
-chmod +x "$PYTHON_INSTALLER"
-"$PYTHON_INSTALLER" -b -p "$MINICONDA_PATH"
-if [ $? -ne 0 ]; then
-    echo "ERROR: Miniconda installation failed"
-    exit 1
+if [ -d "$MINICONDA_PATH" ]; then
+    echo "    Miniconda already installed at $MINICONDA_PATH"
+    echo "    Using existing installation..."
+else
+    echo "    This may take a few minutes..."
+    chmod +x "$PYTHON_INSTALLER"
+    "$PYTHON_INSTALLER" -b -p "$MINICONDA_PATH"
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Miniconda installation failed"
+        exit 1
+    fi
+    echo "    Miniconda installed successfully"
 fi
-echo "    Miniconda installed successfully"
 
 # Add conda to PATH for this session
 export PATH="$MINICONDA_PATH/bin:$PATH"
@@ -121,8 +160,13 @@ echo "[4/4] Running FunGen universal installer..."
 echo "    The universal installer will now handle the complete setup..."
 echo ""
 
-# Run the universal Python installer
-python "$UNIVERSAL_INSTALLER" --dir "$(pwd)"
+# Pass through any command line arguments to the universal installer
+if [ $# -gt 0 ]; then
+    echo "    Passing arguments: $@"
+    python "$UNIVERSAL_INSTALLER" --dir "$(pwd)" "$@"
+else
+    python "$UNIVERSAL_INSTALLER" --dir "$(pwd)"
+fi
 INSTALL_RESULT=$?
 
 if [ $INSTALL_RESULT -eq 0 ]; then
