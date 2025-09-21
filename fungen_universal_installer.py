@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.6"
+INSTALLER_VERSION = "1.2.7"
 
 # Configuration
 CONFIG = {
@@ -170,7 +170,18 @@ class FunGenUniversalInstaller:
         print("=" * 60 + Colors.ENDC)
         print(f"{Colors.CYAN}Platform: {self.platform} ({self.arch})")
         print(f"Install Directory: {self.install_dir}")
-        print(f"Project Path: {self.project_path}{Colors.ENDC}\n")
+        print(f"Project Path: {self.project_path}{Colors.ENDC}")
+        
+        # Add interactive warning for macOS/Linux
+        if self.platform in ["Darwin", "Linux"]:
+            print(f"\n{Colors.YELLOW}⚠️  INTERACTIVE INSTALLATION NOTICE:")
+            print("   Some system installations may require your interaction:")
+            print("   • Password prompts for system package installation")
+            print("   • License agreement acceptance (Xcode Command Line Tools)")
+            print("   • Package manager confirmations")
+            print(f"   Please stay near your computer during installation.{Colors.ENDC}")
+        
+        print()
     
     def print_step(self, step_name: str):
         """Print current installation step"""
@@ -354,19 +365,35 @@ class FunGenUniversalInstaller:
         """Install Git on macOS"""
         # Check if Homebrew is available
         if self.command_exists("brew"):
+            print("  Installing Git via Homebrew...")
+            print("  Note: This may prompt for your password or Xcode license acceptance")
             ret, _, stderr = self.run_command(["brew", "install", "git"], check=False)
             if ret == 0:
                 self.print_success("Git installed via Homebrew")
                 return True
+            else:
+                print(f"  Homebrew install failed: {stderr}")
         
         # Try to install Xcode Command Line Tools
         print("  Installing Xcode Command Line Tools (includes Git)...")
+        print("  This will open a dialog - please accept the license agreement")
         ret, _, _ = self.run_command(["xcode-select", "--install"], check=False)
         
         if ret == 0:
-            print("  Please complete the Xcode Command Line Tools installation in the dialog")
-            print("  Then re-run this installer")
-            return False
+            print("  ⚠️  INTERACTIVE STEP REQUIRED:")
+            print("     A dialog has opened for Xcode Command Line Tools installation")
+            print("     Please accept the license agreement and complete the installation")
+            print("     This may take several minutes to download and install")
+            print("  ")
+            input("  Press Enter when the installation is complete...")
+            
+            # Verify installation
+            if self.command_exists("git"):
+                self.print_success("Git installed via Xcode Command Line Tools")
+                return True
+            else:
+                self.print_error("Git installation verification failed")
+                return False
         else:
             self.print_error("Could not install Git automatically")
             self.print_error("Please install Git manually: https://git-scm.com/download/mac")
@@ -387,16 +414,24 @@ class FunGenUniversalInstaller:
         for update_cmd, install_cmd in package_managers:
             if self.command_exists(install_cmd[0]):
                 print(f"  Using {install_cmd[0]} package manager...")
+                print("  Note: You may be prompted for your password or to accept terms")
                 
                 if update_cmd:
+                    print("  Updating package lists...")
                     self.run_command(update_cmd, check=False)
                 
+                print(f"  Installing Git with {install_cmd[0]}...")
                 ret, _, stderr = self.run_command(install_cmd, check=False)
                 if ret == 0:
                     self.print_success(f"Git installed via {install_cmd[0]}")
                     return True
                 else:
                     self.print_warning(f"Failed to install with {install_cmd[0]}: {stderr}")
+                    # If interactive prompts were missed, suggest manual installation
+                    if "interactive" in stderr.lower() or "prompt" in stderr.lower():
+                        print("  ⚠️  This package manager may require interactive input")
+                        print(f"     Try running manually: sudo {' '.join(install_cmd)}")
+                        return False
         
         self.print_error("Could not install Git automatically")
         self.print_error("Please install Git manually using your system's package manager")
