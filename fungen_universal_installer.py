@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 FunGen Universal Installer - Stage 2
+Version: 1.2.0
 Complete installation system that assumes Python is available but nothing else
 
 This installer handles the complete FunGen setup after Python is installed:
@@ -29,6 +30,9 @@ import tarfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import argparse
+
+# Version information
+INSTALLER_VERSION = "1.2.0"
 
 # Configuration
 CONFIG = {
@@ -122,10 +126,11 @@ class ProgressBar:
 class FunGenUniversalInstaller:
     """Universal FunGen installer - assumes Python is available"""
     
-    def __init__(self, install_dir: Optional[str] = None, force: bool = False):
+    def __init__(self, install_dir: Optional[str] = None, force: bool = False, bootstrap_version: Optional[str] = None):
         self.platform = platform.system()
         self.arch = platform.machine().lower()
         self.force = force
+        self.bootstrap_version = bootstrap_version
         self.install_dir = Path(install_dir) if install_dir else Path.cwd()
         self.project_path = self.install_dir / CONFIG["project_name"]
         
@@ -159,6 +164,9 @@ class FunGenUniversalInstaller:
         """Print installer header"""
         print(f"\n{Colors.HEADER}{Colors.BOLD}=" * 60)
         print("    FunGen Universal Installer")
+        print(f"              v{INSTALLER_VERSION}")
+        if self.bootstrap_version:
+            print(f"         (Bootstrap v{self.bootstrap_version})")
         print("=" * 60 + Colors.ENDC)
         print(f"{Colors.CYAN}Platform: {self.platform} ({self.arch})")
         print(f"Install Directory: {self.install_dir}")
@@ -927,6 +935,12 @@ Examples:
     )
     
     parser.add_argument(
+        "--bootstrap-version",
+        help="Version of the bootstrap script (for troubleshooting)",
+        default=None
+    )
+    
+    parser.add_argument(
         "--force",
         action="store_true", 
         help="Force reinstallation of existing components"
@@ -941,7 +955,7 @@ Examples:
     parser.add_argument(
         "--version",
         action="version",
-        version="FunGen Universal Installer 2.0.0"
+        version=f"FunGen Universal Installer {INSTALLER_VERSION}"
     )
     
     args = parser.parse_args()
@@ -972,7 +986,8 @@ Examples:
     # Run installer
     installer = FunGenUniversalInstaller(
         install_dir=args.dir,
-        force=args.force
+        force=args.force,
+        bootstrap_version=args.bootstrap_version
     )
     
     success = installer.install()
