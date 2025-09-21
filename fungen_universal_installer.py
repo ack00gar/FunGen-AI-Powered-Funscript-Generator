@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.8"
+INSTALLER_VERSION = "1.2.9"
 
 # Configuration
 CONFIG = {
@@ -693,8 +693,32 @@ class FunGenUniversalInstaller:
                 ], check=False)
                 
                 if ret != 0:
-                    self.print_error(f"Failed to install core requirements: {stderr}")
-                    return False
+                    # Check if this is a compilation issue (common on Windows)
+                    if "Microsoft Visual C++" in stderr or "error: failed-wheel-build" in stderr:
+                        self.print_warning("Compilation error detected. Trying with precompiled wheels only...")
+                        print("  Installing core requirements with --only-binary=all flag...")
+                        ret2, stdout2, stderr2 = self.run_command([
+                            str(python_exe), "-m", "pip", "install", "-r", core_req, 
+                            "--only-binary=all", "--prefer-binary"
+                        ], check=False)
+                        
+                        if ret2 != 0:
+                            self.print_error("Failed to install even with precompiled wheels.")
+                            self.print_error("This usually means Microsoft Visual C++ Build Tools are missing.")
+                            self.print_error("")
+                            self.print_error("SOLUTION:")
+                            self.print_error("1. Install Microsoft C++ Build Tools from:")
+                            self.print_error("   https://visualstudio.microsoft.com/visual-cpp-build-tools/")
+                            self.print_error("2. Or install Visual Studio Community with C++ workload")
+                            self.print_error("3. Restart your computer and run this installer again")
+                            self.print_error("")
+                            self.print_error(f"Technical details: {stderr2}")
+                            return False
+                        else:
+                            print(f"    Core requirements installed successfully (precompiled)")
+                    else:
+                        self.print_error(f"Failed to install core requirements: {stderr}")
+                        return False
                 else:
                     print(f"    Core requirements installed successfully")
             else:
@@ -714,8 +738,22 @@ class FunGenUniversalInstaller:
                     ], check=False)
                     
                     if ret != 0:
-                        self.print_warning(f"Failed to install {gpu_type} requirements: {stderr}")
-                        # Don't fail installation for GPU requirements
+                        # Try with precompiled wheels for GPU requirements too
+                        if "Microsoft Visual C++" in stderr or "error: failed-wheel-build" in stderr:
+                            self.print_warning("Compilation error in GPU requirements. Trying precompiled wheels...")
+                            ret2, stdout2, stderr2 = self.run_command([
+                                str(python_exe), "-m", "pip", "install", "-r", req_file,
+                                "--only-binary=all", "--prefer-binary"
+                            ], check=False)
+                            
+                            if ret2 != 0:
+                                self.print_warning(f"Failed to install {gpu_type} requirements even with precompiled wheels")
+                                self.print_warning("GPU acceleration may not work properly. Consider installing Visual C++ Build Tools.")
+                            else:
+                                print(f"    {gpu_type.upper()} requirements installed successfully (precompiled)")
+                        else:
+                            self.print_warning(f"Failed to install {gpu_type} requirements: {stderr}")
+                            # Don't fail installation for GPU requirements
                     else:
                         print(f"    {gpu_type.upper()} requirements installed successfully")
                 else:

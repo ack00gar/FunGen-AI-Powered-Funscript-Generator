@@ -1,4 +1,5 @@
 import os
+import webbrowser
 import imgui
 from config.element_group_colors import MenuColors
 
@@ -161,6 +162,7 @@ class MainMenu:
             self._render_tools_menu(app_state, file_mgr)
             self._render_ai_menu()
             self._render_updates_menu()
+            self._render_support_menu()
             imgui.end_main_menu_bar()
 
         self._render_timeline_selection_popup()
@@ -622,6 +624,7 @@ class MainMenu:
                 else:
                     tw._reset_state()
                     tw.is_open = True
+
             imgui.end_menu()
 
     def _render_ai_menu(self):
@@ -674,5 +677,33 @@ class MainMenu:
             if imgui.is_item_hovered():
                 imgui.set_tooltip(
                     "Shows the update dialog if an update has been detected."
+                )
+            imgui.end_menu()
+
+    def _render_support_menu(self):
+        app = self.app
+        if imgui.begin_menu("Support", True):
+            if _menu_item_simple("Support Development"):
+                try:
+                    webbrowser.open("https://ko-fi.com/k00gar")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open Ko-fi link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Support FunGen development on Ko-fi\n"
+                    "Your donations help improve the AI models and features!"
+                )
+
+            if _menu_item_simple("Join Discord Community"):
+                try:
+                    webbrowser.open("https://discord.com/invite/WYkjMbtCZA")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open Discord link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Join the FunGen Discord community\n"
+                    "Get help, share results, and discuss features!"
                 )
             imgui.end_menu()
