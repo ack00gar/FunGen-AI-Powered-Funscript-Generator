@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.3"
+INSTALLER_VERSION = "1.2.4"
 
 # Configuration
 CONFIG = {
