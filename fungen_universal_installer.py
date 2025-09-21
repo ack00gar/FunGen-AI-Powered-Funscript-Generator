@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.9"
+INSTALLER_VERSION = "1.3.0"
 
 # Configuration
 CONFIG = {
@@ -694,7 +694,18 @@ class FunGenUniversalInstaller:
                 
                 if ret != 0:
                     # Check if this is a compilation issue (common on Windows)
-                    if "Microsoft Visual C++" in stderr or "error: failed-wheel-build" in stderr:
+                    error_text = stderr + stdout  # Check both stderr and stdout
+                    compilation_errors = [
+                        "Microsoft Visual C++",
+                        "failed-wheel-build",
+                        "error: Microsoft Visual C++",
+                        "Building wheel for imgui",
+                        "Failed building wheel",
+                        "build dependencies",
+                        "error: subprocess-exited-with-error"
+                    ]
+                    
+                    if any(error in error_text for error in compilation_errors):
                         self.print_warning("Compilation error detected. Trying with precompiled wheels only...")
                         print("  Installing core requirements with --only-binary=all flag...")
                         ret2, stdout2, stderr2 = self.run_command([
@@ -703,17 +714,41 @@ class FunGenUniversalInstaller:
                         ], check=False)
                         
                         if ret2 != 0:
-                            self.print_error("Failed to install even with precompiled wheels.")
-                            self.print_error("This usually means Microsoft Visual C++ Build Tools are missing.")
-                            self.print_error("")
-                            self.print_error("SOLUTION:")
-                            self.print_error("1. Install Microsoft C++ Build Tools from:")
-                            self.print_error("   https://visualstudio.microsoft.com/visual-cpp-build-tools/")
-                            self.print_error("2. Or install Visual Studio Community with C++ workload")
-                            self.print_error("3. Restart your computer and run this installer again")
-                            self.print_error("")
-                            self.print_error(f"Technical details: {stderr2}")
-                            return False
+                            # Special case for imgui - try installing individual packages
+                            if "imgui" in error_text:
+                                self.print_warning("imgui compilation failed. Trying alternative approach...")
+                                print("  Installing packages individually, skipping imgui for now...")
+                                
+                                # Install all other packages first
+                                ret3, stdout3, stderr3 = self.run_command([
+                                    str(python_exe), "-m", "pip", "install", 
+                                    "numpy", "ultralytics==8.3.78", "glfw~=2.8.0", "pyopengl~=3.1.7",
+                                    "imageio~=2.36.1", "tqdm~=4.67.1", "colorama~=0.4.6", 
+                                    "opencv-python~=4.10.0.84", "scipy~=1.15.1", "simplification~=0.7.13",
+                                    "msgpack~=1.1.0", "pillow~=11.1.0", "orjson~=3.10.15", 
+                                    "send2trash~=1.8.3", "aiosqlite"
+                                ], check=False)
+                                
+                                if ret3 == 0:
+                                    # Try installing a pre-built imgui wheel or alternative
+                                    self.print_warning("Core packages installed. imgui will be installed later if needed.")
+                                    self.print_warning("The application may work without imgui GUI components.")
+                                    print(f"    Core requirements installed successfully (except imgui)")
+                                else:
+                                    self.print_error("Failed to install core packages even individually.")
+                                    return False
+                            else:
+                                self.print_error("Failed to install even with precompiled wheels.")
+                                self.print_error("This usually means Microsoft Visual C++ Build Tools are missing.")
+                                self.print_error("")
+                                self.print_error("SOLUTION:")
+                                self.print_error("1. Install Microsoft C++ Build Tools from:")
+                                self.print_error("   https://visualstudio.microsoft.com/visual-cpp-build-tools/")
+                                self.print_error("2. Or install Visual Studio Community with C++ workload")
+                                self.print_error("3. Restart your computer and run this installer again")
+                                self.print_error("")
+                                self.print_error(f"Technical details: {stderr2}")
+                                return False
                         else:
                             print(f"    Core requirements installed successfully (precompiled)")
                     else:
@@ -739,7 +774,18 @@ class FunGenUniversalInstaller:
                     
                     if ret != 0:
                         # Try with precompiled wheels for GPU requirements too
-                        if "Microsoft Visual C++" in stderr or "error: failed-wheel-build" in stderr:
+                        error_text = stderr + stdout  # Check both stderr and stdout
+                        compilation_errors = [
+                            "Microsoft Visual C++",
+                            "failed-wheel-build", 
+                            "error: Microsoft Visual C++",
+                            "Building wheel",
+                            "Failed building wheel",
+                            "build dependencies",
+                            "error: subprocess-exited-with-error"
+                        ]
+                        
+                        if any(error in error_text for error in compilation_errors):
                             self.print_warning("Compilation error in GPU requirements. Trying precompiled wheels...")
                             ret2, stdout2, stderr2 = self.run_command([
                                 str(python_exe), "-m", "pip", "install", "-r", req_file,
