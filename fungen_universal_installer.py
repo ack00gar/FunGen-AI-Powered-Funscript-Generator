@@ -767,11 +767,14 @@ read -p "Press Enter to close..."
         python_exe = self._get_python_executable()
         if python_exe and python_exe.exists():
             try:
-                ret, stdout, stderr = self.run_command([
-                    str(python_exe), "-c", 
+                # Create a shorter, more reliable test command
+                test_command = (
                     "import sys; print(f'Python: {sys.version.split()[0]}'); "
-                    "try: import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); except: print('PyTorch: Not installed'); "
+                    "try: import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.cuda.is_available()}'); except: print('PyTorch: Not installed'); "
                     "try: import ultralytics; print('Ultralytics: OK'); except: print('Ultralytics: Not installed')"
+                )
+                ret, stdout, stderr = self.run_command([
+                    str(python_exe), "-c", test_command
                 ], capture=True, check=False)
                 
                 if ret == 0:
