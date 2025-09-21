@@ -6,7 +6,7 @@ REM Downloads and runs the full Python installer
 
 setlocal EnableDelayedExpansion
 
-set BOOTSTRAP_VERSION=1.0.1
+set BOOTSTRAP_VERSION=1.0.2
 
 REM Check for help or common invalid flags
 if "%1"=="-h" goto :show_help
