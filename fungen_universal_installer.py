@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.3.0"
+INSTALLER_VERSION = "1.3.1"
 
 # Configuration
 CONFIG = {
@@ -687,75 +687,55 @@ class FunGenUniversalInstaller:
             core_req = CONFIG["requirements_files"]["core"]
             core_req_path = self.project_path / core_req
             if core_req_path.exists():
-                print(f"  Installing core requirements from {core_req}...")
-                ret, stdout, stderr = self.run_command([
-                    str(python_exe), "-m", "pip", "install", "-r", core_req
-                ], check=False)
-                
-                if ret != 0:
-                    # Check if this is a compilation issue (common on Windows)
-                    error_text = stderr + stdout  # Check both stderr and stdout
-                    compilation_errors = [
-                        "Microsoft Visual C++",
-                        "failed-wheel-build",
-                        "error: Microsoft Visual C++",
-                        "Building wheel for imgui",
-                        "Failed building wheel",
-                        "build dependencies",
-                        "error: subprocess-exited-with-error"
+                # On Windows, try to avoid imgui compilation issues by installing packages individually first
+                if platform.system() == "Windows":
+                    print(f"  Installing core requirements (Windows optimized approach)...")
+                    print("  Installing packages individually to avoid compilation issues...")
+                    
+                    # Install all packages except imgui first
+                    non_imgui_packages = [
+                        "numpy", "ultralytics==8.3.78", "glfw~=2.8.0", "pyopengl~=3.1.7",
+                        "imageio~=2.36.1", "tqdm~=4.67.1", "colorama~=0.4.6", 
+                        "opencv-python~=4.10.0.84", "scipy~=1.15.1", "simplification~=0.7.13",
+                        "msgpack~=1.1.0", "pillow~=11.1.0", "orjson~=3.10.15", 
+                        "send2trash~=1.8.3", "aiosqlite"
                     ]
                     
-                    if any(error in error_text for error in compilation_errors):
-                        self.print_warning("Compilation error detected. Trying with precompiled wheels only...")
-                        print("  Installing core requirements with --only-binary=all flag...")
-                        ret2, stdout2, stderr2 = self.run_command([
-                            str(python_exe), "-m", "pip", "install", "-r", core_req, 
-                            "--only-binary=all", "--prefer-binary"
-                        ], check=False)
-                        
-                        if ret2 != 0:
-                            # Special case for imgui - try installing individual packages
-                            if "imgui" in error_text:
-                                self.print_warning("imgui compilation failed. Trying alternative approach...")
-                                print("  Installing packages individually, skipping imgui for now...")
-                                
-                                # Install all other packages first
-                                ret3, stdout3, stderr3 = self.run_command([
-                                    str(python_exe), "-m", "pip", "install", 
-                                    "numpy", "ultralytics==8.3.78", "glfw~=2.8.0", "pyopengl~=3.1.7",
-                                    "imageio~=2.36.1", "tqdm~=4.67.1", "colorama~=0.4.6", 
-                                    "opencv-python~=4.10.0.84", "scipy~=1.15.1", "simplification~=0.7.13",
-                                    "msgpack~=1.1.0", "pillow~=11.1.0", "orjson~=3.10.15", 
-                                    "send2trash~=1.8.3", "aiosqlite"
-                                ], check=False)
-                                
-                                if ret3 == 0:
-                                    # Try installing a pre-built imgui wheel or alternative
-                                    self.print_warning("Core packages installed. imgui will be installed later if needed.")
-                                    self.print_warning("The application may work without imgui GUI components.")
-                                    print(f"    Core requirements installed successfully (except imgui)")
-                                else:
-                                    self.print_error("Failed to install core packages even individually.")
-                                    return False
-                            else:
-                                self.print_error("Failed to install even with precompiled wheels.")
-                                self.print_error("This usually means Microsoft Visual C++ Build Tools are missing.")
-                                self.print_error("")
-                                self.print_error("SOLUTION:")
-                                self.print_error("1. Install Microsoft C++ Build Tools from:")
-                                self.print_error("   https://visualstudio.microsoft.com/visual-cpp-build-tools/")
-                                self.print_error("2. Or install Visual Studio Community with C++ workload")
-                                self.print_error("3. Restart your computer and run this installer again")
-                                self.print_error("")
-                                self.print_error(f"Technical details: {stderr2}")
-                                return False
-                        else:
-                            print(f"    Core requirements installed successfully (precompiled)")
+                    ret, stdout, stderr = self.run_command([
+                        str(python_exe), "-m", "pip", "install"
+                    ] + non_imgui_packages, check=False)
+                    
+                    if ret != 0:
+                        self.print_error(f"Failed to install core packages: {stderr}")
+                        return False
+                    
+                    # Now try to install imgui separately with fallback
+                    print("  Attempting to install imgui...")
+                    ret_imgui, stdout_imgui, stderr_imgui = self.run_command([
+                        str(python_exe), "-m", "pip", "install", "imgui"
+                    ], check=False)
+                    
+                    if ret_imgui != 0:
+                        self.print_warning("imgui compilation failed (expected on Windows without Visual Studio)")
+                        self.print_warning("FunGen will work but GUI components may be limited")
+                        self.print_warning("To fix this, install Microsoft Visual C++ Build Tools:")
+                        self.print_warning("https://visualstudio.microsoft.com/visual-cpp-build-tools/")
+                        print("  Core requirements installed successfully (except imgui)")
                     else:
+                        print("  Core requirements installed successfully (including imgui)")
+                        
+                else:
+                    # Non-Windows: use regular requirements file installation
+                    print(f"  Installing core requirements from {core_req}...")
+                    ret, stdout, stderr = self.run_command([
+                        str(python_exe), "-m", "pip", "install", "-r", core_req
+                    ], check=False)
+                    
+                    if platform.system() != "Windows" and ret != 0:
                         self.print_error(f"Failed to install core requirements: {stderr}")
                         return False
-                else:
-                    print(f"    Core requirements installed successfully")
+                    elif platform.system() != "Windows":
+                        print(f"    Core requirements installed successfully")
             else:
                 self.print_error(f"Core requirements file not found: {core_req_path}")
                 return False
