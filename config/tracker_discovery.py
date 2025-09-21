@@ -131,7 +131,7 @@ class DynamicTrackerDiscovery:
         """Determine the source folder name for display prefixing."""
         
         # Get the actual folder name from the tracker registry
-        from tracker_modules import tracker_registry
+        from tracker.tracker_modules import tracker_registry
         actual_folder = tracker_registry.get_tracker_folder(metadata.name)
         
         if actual_folder:
