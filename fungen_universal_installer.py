@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.4"
+INSTALLER_VERSION = "1.2.5"
 
 # Configuration
 CONFIG = {
@@ -427,6 +427,11 @@ class FunGenUniversalInstaller:
         ], check=False)
         
         if ret == 0:
+            # Configure git safe.directory to prevent permission issues
+            self.run_command([
+                "git", "config", "--add", "safe.directory", str(self.project_path)
+            ], cwd=self.project_path, check=False)
+            
             # Verify git repository is properly set up
             ret, stdout, _ = self.run_command([
                 "git", "rev-parse", "--short", "HEAD"

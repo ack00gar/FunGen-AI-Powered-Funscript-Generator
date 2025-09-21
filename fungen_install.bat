@@ -25,17 +25,18 @@ echo   - Git
 echo   - FFmpeg/FFprobe
 echo   - FunGen AI and all dependencies
 echo.
-echo Note: For best results, right-click and "Run as administrator"
-echo       Some installations may require administrator privileges.
+echo IMPORTANT: Run this installer as a NORMAL USER (not administrator)
+echo           Running as administrator can cause git permission issues!
 echo.
 
-REM Check if we're running as administrator (needed for some installations)
+REM Check if we're running as administrator and warn if we are
 net session >nul 2>&1
-if %errorLevel% neq 0 (
-    echo WARNING: Not running as administrator.
-    echo Some installations may require admin privileges.
-    echo Consider right-clicking and "Run as administrator"
+if %errorLevel% equ 0 (
+    echo WARNING: You are running as administrator!
+    echo This may cause git permission issues later.
+    echo Recommendation: Run this installer as a normal user instead.
     echo.
+    echo Press Ctrl+C to cancel, or any key to continue anyway...
     pause
 )
 
