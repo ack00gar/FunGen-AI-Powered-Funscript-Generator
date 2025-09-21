@@ -429,6 +429,50 @@ See the [LICENSE](LICENSE) file for full details.
 
 ---
 
+# Troubleshooting
+
+## Installation Issues
+
+### "unknown@unknown" or Git Permission Errors
+
+If you see `[unknown@unknown]` in the application logs or git errors like "returned non-zero exit status 128":
+
+**Cause:** The installer was run with administrator privileges, causing git permission/ownership issues.
+
+**Solution 1 - Fix git permissions:**
+```cmd
+cd "C:\path\to\your\FunGen\FunGen"
+git config --add safe.directory .
+```
+
+**Solution 2 - Reinstall as normal user:**
+1. Redownload `fungen_install.bat`
+2. Run it as a **normal user** (NOT as administrator)
+3. Use the launcher script (`launch.bat`) instead of `python main.py`
+
+### FFmpeg/FFprobe Not Found
+
+If you get "ffmpeg/ffprobe not found" errors:
+
+1. **Use the launcher script** (`launch.bat` or `launch.sh`) instead of running `python main.py` directly
+2. **Rerun the installer** to get updated launcher scripts with FFmpeg PATH fixes
+3. The launcher automatically adds FFmpeg to PATH
+
+### General Installation Problems
+
+1. **Always use launcher scripts** - Don't run `python main.py` directly
+2. **Run installer as normal user** - Avoid administrator mode
+3. **Rerun installer for updates** - Get latest fixes by rerunning the installer
+4. **Check working directory** - Make sure you're in the FunGen project folder
+
+For detailed diagnostics, run:
+```cmd
+cd "C:\path\to\your\FunGen\FunGen"
+python debug_git.py
+```
+
+---
+
 # Support
 
 If you encounter any issues or have questions, please open an issue on GitHub.
