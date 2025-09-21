@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.5"
+INSTALLER_VERSION = "1.2.6"
 
 # Configuration
 CONFIG = {
@@ -327,10 +327,11 @@ class FunGenUniversalInstaller:
             if not self.download_with_progress(git_url, installer_path, "Git installer"):
                 return False
             
-            # Install silently
+            # Install silently with user-only installation (no admin required)
             ret, _, stderr = self.run_command([
                 str(installer_path), "/VERYSILENT", "/NORESTART", "/NOCANCEL",
-                "/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"
+                "/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS", 
+                "/CURRENTUSER"  # Install for current user only
             ], check=False)
             
             if ret == 0:
