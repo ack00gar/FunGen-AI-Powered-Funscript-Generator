@@ -15,6 +15,9 @@ echo   - Git
 echo   - FFmpeg/FFprobe
 echo   - FunGen AI and all dependencies
 echo.
+echo Note: For best results, right-click and "Run as administrator"
+echo       Some installations may require administrator privileges.
+echo.
 
 REM Check if we're running as administrator (needed for some installations)
 net session >nul 2>&1
@@ -36,27 +39,39 @@ set PYTHON_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
 set PYTHON_INSTALLER=%TEMP_DIR%\python-installer.exe
 set UNIVERSAL_INSTALLER=%TEMP_DIR%\fungen_universal_installer.py
 
-echo [1/4] Downloading Python installer...
-REM Use PowerShell to download (available on all modern Windows)
-powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%PYTHON_INSTALLER%'}"
-if %errorLevel% neq 0 (
-    echo ERROR: Failed to download Python installer
-    goto :cleanup_and_exit
+echo [1/4] Checking Python installation...
+if exist "%MINICONDA_INSTALL_PATH%" (
+    echo    Python already installed, skipping download...
+    set PYTHON_ALREADY_INSTALLED=1
+) else (
+    echo    Downloading Python installer...
+    REM Use PowerShell to download (available on all modern Windows)
+    powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%PYTHON_INSTALLER%'}"
+    if %errorLevel% neq 0 (
+        echo ERROR: Failed to download Python installer
+        goto :cleanup_and_exit
+    )
+    echo    Python installer downloaded successfully
 )
-echo    Python installer downloaded successfully
 
 echo.
 echo [2/4] Installing Python 3.11...
-echo    This may take a few minutes...
-"%PYTHON_INSTALLER%" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_launcher=0
-if %errorLevel% neq 0 (
-    echo ERROR: Python installation failed
-    goto :cleanup_and_exit
+if defined PYTHON_ALREADY_INSTALLED (
+    echo    Python already installed, using existing installation...
+    REM Ensure PATH includes Python
+    call :refresh_path
+) else (
+    echo    This may take a few minutes...
+    "%PYTHON_INSTALLER%" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_launcher=0
+    if %errorLevel% neq 0 (
+        echo ERROR: Python installation failed
+        goto :cleanup_and_exit
+    )
+    
+    REM Refresh PATH to include Python
+    call :refresh_path
+    echo    Python 3.11 installed successfully
 )
-
-REM Refresh PATH to include Python
-call :refresh_path
-echo    Python 3.11 installed successfully
 
 echo.
 echo [3/4] Downloading FunGen universal installer...
@@ -72,8 +87,13 @@ echo [4/4] Running FunGen universal installer...
 echo    The universal installer will now handle the complete setup...
 echo.
 
-REM Run the universal Python installer
-python "%UNIVERSAL_INSTALLER%" --dir "%CD%"
+REM Pass through any command line arguments to the universal installer
+if "%*"=="" (
+    python "%UNIVERSAL_INSTALLER%" --dir "%CD%"
+) else (
+    echo    Passing arguments: %*
+    python "%UNIVERSAL_INSTALLER%" --dir "%CD%" %*
+)
 set INSTALL_RESULT=%errorLevel%
 
 :cleanup_and_exit
