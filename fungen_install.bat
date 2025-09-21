@@ -6,7 +6,7 @@ REM Downloads and runs the full Python installer
 
 setlocal EnableDelayedExpansion
 
-set BOOTSTRAP_VERSION=1.0.0
+set BOOTSTRAP_VERSION=1.0.1
 
 REM Check for help or common invalid flags
 if "%1"=="-h" goto :show_help
@@ -61,13 +61,28 @@ if %errorLevel% equ 0 (
     set PYTHON_ALREADY_INSTALLED=1
 ) else (
     echo    Downloading Python installer...
+    echo    URL: %PYTHON_URL%
     REM Use PowerShell to download (available on all modern Windows)
     powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%PYTHON_INSTALLER%'}"
     if %errorLevel% neq 0 (
-        echo ERROR: Failed to download Python installer
-        goto :cleanup_and_exit
+        echo WARNING: Failed to download Python installer
+        echo.
+        echo Possible causes:
+        echo 1. Network/firewall blocking the download
+        echo 2. Corporate proxy restrictions
+        echo 3. Antivirus software interference
+        echo.
+        echo CONTINUING: The universal installer will try alternative Python installation methods...
+        echo.
+        echo Alternative: You can also install Python manually from:
+        echo   - https://python.org/downloads/ (Python 3.11+)
+        echo   - winget install Python.Python.3.11 
+        echo   - Microsoft Store (Python 3.11)
+        echo.
+        set PYTHON_DOWNLOAD_FAILED=1
+    ) else (
+        echo    Python installer downloaded successfully
     )
-    echo    Python installer downloaded successfully
 )
 
 echo.
@@ -76,17 +91,20 @@ if defined PYTHON_ALREADY_INSTALLED (
     echo    Python already installed, using existing installation...
     REM Ensure PATH includes Python
     call :refresh_path
+) else if defined PYTHON_DOWNLOAD_FAILED (
+    echo    Skipping Python installation due to download failure...
+    echo    The universal installer will handle Python setup...
 ) else (
     echo    This may take a few minutes...
     "%PYTHON_INSTALLER%" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_launcher=0
     if %errorLevel% neq 0 (
-        echo ERROR: Python installation failed
-        goto :cleanup_and_exit
+        echo WARNING: Python installation failed
+        echo The universal installer will try alternative methods...
+    ) else (
+        REM Refresh PATH to include Python
+        call :refresh_path
+        echo    Python 3.11 installed successfully
     )
-    
-    REM Refresh PATH to include Python
-    call :refresh_path
-    echo    Python 3.11 installed successfully
 )
 
 echo.
