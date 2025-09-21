@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.2"
+INSTALLER_VERSION = "1.2.3"
 
 # Configuration
 CONFIG = {
@@ -766,11 +766,27 @@ pause
     
     def _create_unix_launcher(self, activate_cmd: str):
         """Create Unix launcher (Linux/macOS)"""
+        # Add tool paths to PATH  
+        path_additions = []
+        
         # Add FFmpeg path if it exists
         ffmpeg_path = self.tools_dir / "ffmpeg"
-        path_setup = ""
         if ffmpeg_path.exists():
-            path_setup = f'export PATH="{ffmpeg_path}:$PATH"\n'
+            path_additions.append(str(ffmpeg_path))
+        
+        # Add Git paths that might not be in standard PATH (mainly for Homebrew)
+        git_paths = [
+            Path("/usr/local/bin"),  # Homebrew on Intel macOS
+            Path("/opt/homebrew/bin"),  # Homebrew on Apple Silicon macOS
+        ]
+        for git_path in git_paths:
+            if git_path.exists() and (git_path / "git").exists():
+                path_additions.append(str(git_path))
+                break  # Only add the first one found
+        
+        path_setup = ""
+        if path_additions:
+            path_setup = f'export PATH="{":".join(path_additions)}:$PATH"\n'
         
         launcher_content = f'''#!/bin/bash
 cd "$(dirname "$0")"
