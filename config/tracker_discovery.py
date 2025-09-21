@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-from tracker_modules import tracker_registry, TrackerMetadata
+from tracker.tracker_modules import tracker_registry, TrackerMetadata
 
 
 class TrackerCategory(Enum):
