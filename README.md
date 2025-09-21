@@ -12,7 +12,37 @@ This project is still at the early stages of development. It is not intended for
 
 ---
 
-## Prerequisites
+## Quick Installation (Recommended)
+
+**Automatic installer that handles everything for you:**
+
+### Windows
+1. Download: [fungen_install.bat](https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_install.bat)
+2. Right-click → "Run as administrator" (recommended)
+3. Wait for automatic installation of Python, Git, FFmpeg, and FunGen
+
+### Linux/macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_install.sh | bash
+```
+
+The installer automatically:
+- Installs Python 3.11 (Miniconda)
+- Installs Git and FFmpeg/FFprobe  
+- Downloads and sets up FunGen AI
+- Installs all required dependencies
+- Creates launcher scripts for easy startup
+- Detects your GPU and optimizes PyTorch installation
+
+**That's it!** The installer creates launch scripts - just run them to start FunGen.
+
+---
+
+## Manual Installation
+
+If you prefer manual installation or need custom configuration:
+
+### Prerequisites
 
 Before using this project, ensure you have the following installed:
 
@@ -22,8 +52,6 @@ Before using this project, ensure you have the following installed:
 
 Easy install of Miniconda for Windows users:
 Click Start, type "cmd", right click on Command Prompt, and select "Run as administrator." Enter "winget install -e --id Anaconda.Miniconda3" and press enter. Miniconda should then download and install.
-
-# Installation
 
 ### Start a miniconda command prompt
 After installing Miniconda look for a program called "Anaconda prompt (miniconda3)" in the start menu (on Windows) and open it
@@ -95,7 +123,7 @@ The necessary YOLO models will be automatically downloaded on the first startup.
 
 ### Start the app
 ```bash
-python3 main.py
+python main.py
 ```
 
 We support multiple model formats across Windows, macOS, and Linux.
