@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.3.1"
+INSTALLER_VERSION = "1.3.5"
 
 # Configuration
 CONFIG = {
@@ -580,9 +580,77 @@ class FunGenUniversalInstaller:
         self.print_warning("Please install FFmpeg using your system's package manager")
         return True  # Don't fail installation
     
+    def _check_arm64_windows_compatibility(self):
+        """Check for ARM64 Windows and provide guidance."""
+        if platform.system() == "Windows" and platform.machine().lower() in ['arm64', 'aarch64']:
+            python_arch = platform.architecture()[0]
+            
+            self.print_warning("ARM64 Windows detected!")
+            self.print_warning("")
+            self.print_warning("ARM64 Windows has limited Python package support.")
+            self.print_warning("Many packages (including imgui) cannot compile on ARM64.")
+            self.print_warning("")
+            
+            if "arm" in platform.platform().lower() or "arm64" in python_arch.lower():
+                self.print_warning("RECOMMENDED SOLUTION:")
+                self.print_warning("1. Uninstall current Python (if ARM64)")
+                self.print_warning("2. Download Python 3.11 x64 from python.org")
+                self.print_warning("3. Install x64 Python (will run via emulation)")
+                self.print_warning("4. Rerun this installer")
+                self.print_warning("")
+                self.print_warning("ALTERNATIVE: Use Windows Subsystem for Linux (WSL)")
+                self.print_warning("- Run: wsl --install")
+                self.print_warning("- Install Ubuntu and run FunGen in Linux")
+                self.print_warning("")
+                
+                response = input("Continue anyway? (not recommended) [y/N]: ").lower()
+                if response != 'y':
+                    self.print_error("Installation cancelled. Please install x64 Python first.")
+                    return False
+                    
+        return True
+
+    def _handle_imgui_installation_failure(self):
+        """Handle imgui installation failure with appropriate guidance."""
+        self.print_error("All imgui installation strategies failed.")
+        self.print_error("This means no precompiled wheels are available and compilation failed.")
+        self.print_error("")
+        
+        # ARM64-specific guidance
+        if platform.machine().lower() in ['arm64', 'aarch64']:
+            self.print_error("ARM64 WINDOWS DETECTED:")
+            self.print_error("imgui does not compile on ARM64 Windows.")
+            self.print_error("")
+            self.print_error("RECOMMENDED SOLUTION:")
+            self.print_error("1. Uninstall current ARM64 Python")
+            self.print_error("2. Download Python 3.11 x64 from python.org")
+            self.print_error("3. Install x64 Python (runs via emulation)")
+            self.print_error("4. Rerun this installer")
+            self.print_error("")
+            self.print_error("ALTERNATIVE: Use WSL2 Ubuntu")
+        else:
+            self.print_error("SOLUTION OPTIONS:")
+            self.print_error("1. EASIEST: Install Microsoft Visual C++ Build Tools:")
+            self.print_error("   https://visualstudio.microsoft.com/visual-cpp-build-tools/")
+            self.print_error("   - Download 'Build Tools for Visual Studio 2022'")
+            self.print_error("   - Select 'C++ build tools' workload")
+            self.print_error("   - Restart computer after installation")
+            self.print_error("")
+            self.print_error("2. Install Visual Studio Community (includes build tools)")
+            self.print_error("3. Use Windows Subsystem for Linux (WSL2)")
+        
+        self.print_error("")
+        self.print_error("⚠️  WITHOUT IMGUI, FUNGEN CANNOT DISPLAY ITS GUI!")
+        self.print_error("The installation will continue, but FunGen won't work until this is fixed.")
+        print("  Core requirements installed (GUI unavailable)")
+
     def setup_python_environment(self) -> bool:
         """Setup Python virtual environment"""
         print("  Setting up Python environment...")
+        
+        # Check ARM64 compatibility before proceeding
+        if not self._check_arm64_windows_compatibility():
+            return False
         
         if self.conda_available:
             if self._setup_conda_environment():
@@ -709,18 +777,54 @@ class FunGenUniversalInstaller:
                         self.print_error(f"Failed to install core packages: {stderr}")
                         return False
                     
-                    # Now try to install imgui separately with fallback
+                    # Now try to install imgui separately with multiple fallback strategies
                     print("  Attempting to install imgui...")
+                    
+                    # Strategy 1: Force precompiled wheels first (avoid compilation)
+                    print("  Trying imgui with precompiled wheels only...")
                     ret_imgui, stdout_imgui, stderr_imgui = self.run_command([
-                        str(python_exe), "-m", "pip", "install", "imgui"
+                        str(python_exe), "-m", "pip", "install", "imgui", 
+                        "--only-binary=all", "--prefer-binary"
                     ], check=False)
                     
                     if ret_imgui != 0:
-                        self.print_warning("imgui compilation failed (expected on Windows without Visual Studio)")
-                        self.print_warning("FunGen will work but GUI components may be limited")
-                        self.print_warning("To fix this, install Microsoft Visual C++ Build Tools:")
-                        self.print_warning("https://visualstudio.microsoft.com/visual-cpp-build-tools/")
-                        print("  Core requirements installed successfully (except imgui)")
+                        self.print_warning("Precompiled wheels not available. Trying alternative strategies...")
+                        
+                        # Strategy 2: Try with fresh cache (sometimes wheels are corrupted)
+                        print("  Trying imgui with fresh cache...")
+                        ret_imgui2, stdout_imgui2, stderr_imgui2 = self.run_command([
+                            str(python_exe), "-m", "pip", "install", "imgui", 
+                            "--no-cache-dir", "--only-binary=all"
+                        ], check=False)
+                        
+                        if ret_imgui2 != 0:
+                            # Strategy 3: Try imgui 2.0.0 specifically (most likely to have wheels)
+                            print("  Trying imgui 2.0.0 (most likely to have precompiled wheels)...")
+                            ret_imgui3, stdout_imgui3, stderr_imgui3 = self.run_command([
+                                str(python_exe), "-m", "pip", "install", "imgui==2.0.0",
+                                "--only-binary=all", "--prefer-binary"
+                            ], check=False)
+                            
+                            if ret_imgui3 == 0:
+                                print("  Core requirements installed successfully (imgui 2.0.0)")
+                                imgui_installed = True
+                            else:
+                                imgui_installed = False
+                            
+                            if not imgui_installed:
+                                # Strategy 4: Last resort - allow compilation but with better error handling
+                                print("  Last resort: attempting compilation...")
+                                ret_imgui4, stdout_imgui4, stderr_imgui4 = self.run_command([
+                                    str(python_exe), "-m", "pip", "install", "imgui", "--no-cache-dir"
+                                ], check=False)
+                                
+                                if ret_imgui4 == 0:
+                                    print("  Core requirements installed successfully (imgui compiled)")
+                                else:
+                                    # All strategies failed - provide guidance
+                                    self._handle_imgui_installation_failure()
+                        else:
+                            print("  Core requirements installed successfully (imgui retry)")
                     else:
                         print("  Core requirements installed successfully (including imgui)")
                         
@@ -1050,6 +1154,13 @@ read -p "Press Enter to close..."
     def install(self) -> bool:
         """Run the complete installation"""
         self.print_header()
+        
+        # Early ARM64 Windows detection
+        if platform.system() == "Windows" and platform.machine().lower() in ['arm64', 'aarch64']:
+            self.print_warning("⚠️  ARM64 Windows system detected!")
+            self.print_warning("📦 Python packages may have limited compatibility on ARM64.")
+            self.print_warning("🔧 If installation fails, consider using x64 Python instead.")
+            print()
         
         try:
             steps = [
