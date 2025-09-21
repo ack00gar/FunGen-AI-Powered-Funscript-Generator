@@ -23,7 +23,16 @@ def _setup_bootstrap_logger():
                                          cwd=os.getcwd())
             if branch_result.returncode == 0 and branch_result.stdout.strip():
                 branch = branch_result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            else:
+                # Debug: Log why branch detection failed
+                if os.environ.get('FUNGEN_DEBUG_GIT'):
+                    print(f"DEBUG: Branch detection failed. Return code: {branch_result.returncode}")
+                    print(f"DEBUG: Stdout: '{branch_result.stdout}'")
+                    print(f"DEBUG: Stderr: '{branch_result.stderr}'")
+                    print(f"DEBUG: Working directory: {os.getcwd()}")
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            if os.environ.get('FUNGEN_DEBUG_GIT'):
+                print(f"DEBUG: Branch detection exception: {type(e).__name__}: {e}")
             pass
         
         try:
@@ -33,7 +42,15 @@ def _setup_bootstrap_logger():
                                          cwd=os.getcwd())
             if commit_result.returncode == 0 and commit_result.stdout.strip():
                 commit = commit_result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            else:
+                # Debug: Log why commit detection failed
+                if os.environ.get('FUNGEN_DEBUG_GIT'):
+                    print(f"DEBUG: Commit detection failed. Return code: {commit_result.returncode}")
+                    print(f"DEBUG: Stdout: '{commit_result.stdout}'")
+                    print(f"DEBUG: Stderr: '{commit_result.stderr}'")
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            if os.environ.get('FUNGEN_DEBUG_GIT'):
+                print(f"DEBUG: Commit detection exception: {type(e).__name__}: {e}")
             pass
         
         git_info = f"{branch}@{commit}"
