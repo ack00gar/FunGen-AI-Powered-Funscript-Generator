@@ -44,6 +44,7 @@ class AppSettings:
             "window_height": constants.DEFAULT_WINDOW_HEIGHT,
             "ui_layout_mode": constants.DEFAULT_UI_LAYOUT,
             "global_font_scale": 1.0,
+            "auto_system_scaling_enabled": True,  # Automatically detect and apply system scaling
             "timeline_pan_speed_multiplier": 20,
             "show_funscript_interactive_timeline": True,
             "show_funscript_interactive_timeline2": False,
