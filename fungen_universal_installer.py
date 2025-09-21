@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import argparse
 
 # Version information
-INSTALLER_VERSION = "1.2.0"
+INSTALLER_VERSION = "1.2.1"
 
 # Configuration
 CONFIG = {
@@ -729,9 +729,15 @@ class FunGenUniversalInstaller:
     
     def _create_windows_launcher(self, activate_cmd: str):
         """Create Windows launcher"""
+        # Add FFmpeg path if it exists
+        ffmpeg_path = self.tools_dir / "ffmpeg"
+        path_setup = ""
+        if ffmpeg_path.exists():
+            path_setup = f'set "PATH={ffmpeg_path};%PATH%"\n'
+        
         launcher_content = f'''@echo off
 cd /d "{self.project_path}"
-echo Activating FunGen environment...
+{path_setup}echo Activating FunGen environment...
 {activate_cmd}
 echo Starting FunGen...
 python {CONFIG["main_script"]} %*
@@ -743,9 +749,15 @@ pause
     
     def _create_unix_launcher(self, activate_cmd: str):
         """Create Unix launcher (Linux/macOS)"""
+        # Add FFmpeg path if it exists
+        ffmpeg_path = self.tools_dir / "ffmpeg"
+        path_setup = ""
+        if ffmpeg_path.exists():
+            path_setup = f'export PATH="{ffmpeg_path}:$PATH"\n'
+        
         launcher_content = f'''#!/bin/bash
 cd "$(dirname "$0")"
-echo "Activating FunGen environment..."
+{path_setup}echo "Activating FunGen environment..."
 {activate_cmd}
 echo "Starting FunGen..."
 python {CONFIG["main_script"]} "$@"
