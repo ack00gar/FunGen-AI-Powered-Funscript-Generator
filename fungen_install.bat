@@ -5,6 +5,12 @@ REM Downloads and runs the full Python installer
 
 setlocal EnableDelayedExpansion
 
+REM Check for help or common invalid flags
+if "%1"=="-h" goto :show_help
+if "%1"=="--help" goto :show_help
+if "%1"=="-u" goto :invalid_flag
+if "%1"=="/?" goto :show_help
+
 echo ==========================================
 echo      FunGen Bootstrap Installer
 echo ==========================================
@@ -38,10 +44,16 @@ set INSTALLER_URL=https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-F
 set PYTHON_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
 set PYTHON_INSTALLER=%TEMP_DIR%\python-installer.exe
 set UNIVERSAL_INSTALLER=%TEMP_DIR%\fungen_universal_installer.py
+set MINICONDA_INSTALL_PATH=%USERPROFILE%\miniconda3
 
 echo [1/4] Checking Python installation...
-if exist "%MINICONDA_INSTALL_PATH%" (
-    echo    Python already installed, skipping download...
+REM Check for Python in various locations
+python --version >nul 2>&1
+if %errorLevel% equ 0 (
+    echo    Python already available in PATH, skipping download...
+    set PYTHON_ALREADY_INSTALLED=1
+) else if exist "%MINICONDA_INSTALL_PATH%" (
+    echo    Miniconda already installed, skipping download...
     set PYTHON_ALREADY_INSTALLED=1
 ) else (
     echo    Downloading Python installer...
@@ -129,3 +141,27 @@ for /f "delims=" %%i in ('powershell -Command "[Environment]::GetEnvironmentVari
 for /f "delims=" %%i in ('powershell -Command "[Environment]::GetEnvironmentVariable('PATH', 'Machine')"') do set MACHINE_PATH=%%i
 set PATH=%MACHINE_PATH%;%USER_PATH%
 goto :eof
+
+:show_help
+echo FunGen Bootstrap Installer for Windows
+echo Usage: %0 [options]
+echo.
+echo This script downloads and installs FunGen automatically.
+echo All options are passed to the universal installer.
+echo.
+echo Common options:
+echo   --force     Force reinstallation
+echo   --uninstall Run uninstaller instead
+echo   --help      Show this help
+echo   /?, -h      Show this help
+echo.
+pause
+exit /b 0
+
+:invalid_flag
+echo ERROR: '-u' is not a valid option.
+echo Did you mean '--uninstall' or '--force'?
+echo Run '%0 --help' for available options.
+echo.
+pause
+exit /b 1
