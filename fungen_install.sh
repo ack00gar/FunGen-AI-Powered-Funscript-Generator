@@ -1,9 +1,12 @@
 #!/bin/bash
 # FunGen Universal Bootstrap Installer for Linux/macOS
+# Version: 1.0.0
 # This script requires ZERO dependencies - only uses POSIX shell built-ins
 # Downloads and runs the full Python installer
 
 set -e  # Exit on any error
+
+BOOTSTRAP_VERSION="1.0.0"
 
 # Check for help or common invalid flags
 for arg in "$@"; do
@@ -33,6 +36,7 @@ done
 
 echo "=========================================="
 echo "     FunGen Bootstrap Installer"
+echo "            v${BOOTSTRAP_VERSION}"
 echo "=========================================="
 echo ""
 echo "This installer will download and install everything needed:"
@@ -163,9 +167,9 @@ echo ""
 # Pass through any command line arguments to the universal installer
 if [ $# -gt 0 ]; then
     echo "    Passing arguments: $@"
-    python "$UNIVERSAL_INSTALLER" --dir "$(pwd)" "$@"
+    python "$UNIVERSAL_INSTALLER" --dir "$(pwd)" --bootstrap-version "$BOOTSTRAP_VERSION" "$@"
 else
-    python "$UNIVERSAL_INSTALLER" --dir "$(pwd)"
+    python "$UNIVERSAL_INSTALLER" --dir "$(pwd)" --bootstrap-version "$BOOTSTRAP_VERSION"
 fi
 INSTALL_RESULT=$?
 

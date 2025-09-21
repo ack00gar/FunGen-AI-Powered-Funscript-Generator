@@ -1,9 +1,12 @@
 @echo off
 REM FunGen Universal Bootstrap Installer for Windows
+REM Version: 1.0.0
 REM This script requires ZERO dependencies - only uses Windows built-ins
 REM Downloads and runs the full Python installer
 
 setlocal EnableDelayedExpansion
+
+set BOOTSTRAP_VERSION=1.0.0
 
 REM Check for help or common invalid flags
 if "%1"=="-h" goto :show_help
@@ -13,6 +16,7 @@ if "%1"=="/?" goto :show_help
 
 echo ==========================================
 echo      FunGen Bootstrap Installer
+echo              v%BOOTSTRAP_VERSION%
 echo ==========================================
 echo.
 echo This installer will download and install everything needed:
@@ -101,10 +105,10 @@ echo.
 
 REM Pass through any command line arguments to the universal installer
 if "%*"=="" (
-    python "%UNIVERSAL_INSTALLER%" --dir "%CD%"
+    python "%UNIVERSAL_INSTALLER%" --dir "%CD%" --bootstrap-version "%BOOTSTRAP_VERSION%"
 ) else (
     echo    Passing arguments: %*
-    python "%UNIVERSAL_INSTALLER%" --dir "%CD%" %*
+    python "%UNIVERSAL_INSTALLER%" --dir "%CD%" --bootstrap-version "%BOOTSTRAP_VERSION%" %*
 )
 set INSTALL_RESULT=%errorLevel%
 
