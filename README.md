@@ -12,6 +12,19 @@ This project is still at the early stages of development. It is not intended for
 
 ---
 
+## New Feature: Automatic System Scaling Support
+
+FunGen now automatically detects your system's display scaling settings (DPI) and adjusts the UI accordingly. This feature works on Windows, macOS, and Linux, ensuring the application looks crisp and properly sized on high-DPI displays.
+
+- Automatically applies the correct font scaling based on your system settings
+- Supports Windows display scaling (125%, 150%, etc.)
+- Supports macOS Retina displays
+- Supports Linux high-DPI configurations
+- Can be enabled/disabled in the Settings menu
+- Manual detection button available for when you change display settings
+
+---
+
 ## Quick Installation (Recommended)
 
 **Automatic installer that handles everything for you:**

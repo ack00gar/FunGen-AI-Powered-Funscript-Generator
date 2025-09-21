@@ -862,6 +862,49 @@ class ControlPanelUI:
                 energy.reset_activity_timer()
         imgui.pop_item_width()
         _tooltip_if_hovered("Adjust the global UI font size. Applied instantly.")
+        
+        # Automatic system scaling option
+        imgui.same_line()
+        auto_scaling_enabled = settings.get("auto_system_scaling_enabled", True)
+        ch, auto_scaling_enabled = imgui.checkbox("Auto System Scaling", auto_scaling_enabled)
+        if ch:
+            settings.set("auto_system_scaling_enabled", auto_scaling_enabled)
+            if auto_scaling_enabled:
+                # Apply system scaling immediately when enabled
+                try:
+                    from application.utils.system_scaling import apply_system_scaling_to_settings
+                    scaling_applied = apply_system_scaling_to_settings(settings)
+                    if scaling_applied:
+                        app.logger.info("System scaling applied to application settings")
+                        energy.reset_activity_timer()
+                except Exception as e:
+                    app.logger.warning(f"Failed to apply system scaling: {e}")
+            else:
+                app.logger.info("Automatic system scaling disabled")
+        _tooltip_if_hovered("Automatically detect and apply system DPI/scaling settings at startup. "
+                           "When enabled, the application will adjust the UI font size based on your "
+                           "system's display scaling settings (e.g., 125%, 150%, etc.).")
+        
+        # Manual system scaling detection button
+        if imgui.button("Detect System Scaling Now"):
+            try:
+                from application.utils.system_scaling import get_system_scaling_info, get_recommended_font_scale
+                scaling_factor, dpi, platform_name = get_system_scaling_info()
+                recommended_scale = get_recommended_font_scale(scaling_factor)
+                current_scale = settings.get("global_font_scale", config.constants.DEFAULT_FONT_SCALE)
+                
+                app.logger.info(f"System scaling detected: {scaling_factor:.2f}x ({dpi:.0f} DPI on {platform_name})")
+                app.logger.info(f"Recommended font scale: {recommended_scale} (current: {current_scale})")
+                
+                if abs(recommended_scale - current_scale) > 0.05:  # Only update if significantly different
+                    settings.set("global_font_scale", recommended_scale)
+                    energy.reset_activity_timer()
+                    app.logger.info(f"Font scale updated to {recommended_scale} based on system scaling")
+                else:
+                    app.logger.info("System scaling matches current font scale setting")
+            except Exception as e:
+                app.logger.warning(f"Failed to detect system scaling: {e}")
+        _tooltip_if_hovered("Manually detect and apply current system DPI/scaling settings.")
 
         imgui.text("Timeline Pan Speed")
         imgui.same_line()
