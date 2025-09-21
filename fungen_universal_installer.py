@@ -884,6 +884,7 @@ Examples:
   python fungen_universal_installer.py
   python fungen_universal_installer.py --dir ~/FunGen
   python fungen_universal_installer.py --force
+  python fungen_universal_installer.py --uninstall
         """
     )
     
@@ -900,12 +901,41 @@ Examples:
     )
     
     parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Download and run the uninstaller instead"
+    )
+    
+    parser.add_argument(
         "--version",
         action="version",
         version="FunGen Universal Installer 2.0.0"
     )
     
     args = parser.parse_args()
+    
+    # Handle uninstall option
+    if args.uninstall:
+        print("🗑️ Downloading and running FunGen uninstaller...")
+        
+        uninstaller_url = "https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_uninstall.py"
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            uninstaller_path = Path(temp_dir) / "fungen_uninstall.py"
+            
+            try:
+                urllib.request.urlretrieve(uninstaller_url, uninstaller_path)
+                print("✓ Downloaded uninstaller")
+                
+                # Run uninstaller with remaining args
+                remaining_args = [arg for arg in sys.argv[1:] if arg != "--uninstall"]
+                result = subprocess.run([sys.executable, str(uninstaller_path)] + remaining_args)
+                sys.exit(result.returncode)
+                
+            except Exception as e:
+                print(f"❌ Failed to download uninstaller: {e}")
+                print("Please download fungen_uninstall.py manually from GitHub")
+                sys.exit(1)
     
     # Run installer
     installer = FunGenUniversalInstaller(
