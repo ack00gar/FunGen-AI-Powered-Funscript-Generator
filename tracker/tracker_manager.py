@@ -7,7 +7,7 @@ import numpy as np
 from typing import List, Dict, Tuple, Optional, Any, Union
 
 from config.tracker_discovery import get_tracker_discovery
-from tracker_modules import tracker_registry
+from tracker.tracker_modules import tracker_registry
 from funscript.dual_axis_funscript import DualAxisFunscript
 
 
