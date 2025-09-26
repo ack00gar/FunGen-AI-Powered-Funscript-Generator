@@ -706,9 +706,9 @@ class MainMenu:
                     "Supporters get access to:\n"
                     "• Hardware device integration (Handy, OSR2, etc.)\n"
                     "• Live tracking with device control\n"
-                    "• Video + funscript synchronized playbook\n"
-                    "• Advanced device parameterization\n"
-                    "Your donations help improve the AI models and features!"
+                    "• Video + funscript synchronized playback\n"
+                    "• Advanced device parameterization\n\n"
+                    "After supporting, contact the bot in Discord to get your device_control folder!"
                 )
 
             if _menu_item_simple("Join Discord Community"):

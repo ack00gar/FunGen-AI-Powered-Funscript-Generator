@@ -848,11 +848,11 @@ class DeviceControlUI:
             imgui.separator()
             imgui.dummy(0, 5)
             
-            imgui.text_colored("How to activate:", 0.0, 1.0, 0.0)
+            imgui.text_colored("Want to unlock Supporter-only features?", 0.0, 1.0, 0.0)
             imgui.text_wrapped(
-                "Once you become a supporter, you'll receive a device_control "
-                "folder. Simply copy it to your FunGen directory and restart "
-                "the application to activate all device control features!"
+                "Support on ko-fi then get in touch with the bot in discord "
+                "to receive your device_control folder. Simply copy it to your "
+                "FunGen directory and restart to activate all features!"
             )
         
         imgui.end()
