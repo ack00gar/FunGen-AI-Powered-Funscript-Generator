@@ -346,7 +346,10 @@ def _check_device_control_dependencies(*, non_interactive: bool = True, auto_ins
         for line in lines:
             # Skip pip index URLs and comments
             if not line.startswith('-') and not line.startswith('#'):
-                device_control_packages.append(line)
+                # Strip inline comments from package specifications
+                package = line.split('#')[0].strip()
+                if package:  # Only add non-empty packages
+                    device_control_packages.append(package)
         
         if device_control_packages:
             logger.info("Installing device control dependencies (aiohttp, pyserial, etc.)...")
