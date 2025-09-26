@@ -2576,6 +2576,10 @@ class InteractiveFunscriptTimeline:
             if should_sync_timeline:
                 # No manual interaction right now
                 current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
+                
+                # Device control integration: send funscript position during video playback
+                self._send_device_control_position(current_video_time_ms, is_playing)
+                
                 # Using effective center of screen
                 target_pan_offset = current_video_time_ms - center_marker_offset_ms
                 
@@ -3537,3 +3541,89 @@ class InteractiveFunscriptTimeline:
 
         # --- Window End ---
         imgui.end()
+    
+    def _send_device_control_position(self, current_time_ms: float, is_playing: bool):
+        """Send funscript data to device control with device-specific handling."""
+        try:
+            # Only send during active playback to avoid excessive updates
+            if not is_playing:
+                return
+            
+            # Check if device control is available
+            device_manager = getattr(self.app, 'device_manager', None)
+            if not device_manager or not device_manager.is_connected():
+                return
+                
+            # Check if video playback device control is enabled
+            if not self.app.app_settings.get("device_control_video_playback", False):
+                return
+            
+            # Get funscript actions using the correct timeline method
+            actions_list = self._get_actions_list_ref()
+            if not actions_list:
+                return
+            
+            # Get secondary axis data if available
+            secondary_actions = None
+            try:
+                funscript_instance, _ = self._get_target_funscript_details()
+                if funscript_instance and hasattr(funscript_instance, 'secondary_actions'):
+                    secondary_actions = getattr(funscript_instance, 'secondary_actions', None)
+            except Exception:
+                pass
+            
+            # Get video playback speed (for proper timing calculations)
+            playback_speed = 1.0  # Default to normal speed
+            if hasattr(self.app, 'processor') and hasattr(self.app.processor, 'playback_speed'):
+                playback_speed = self.app.processor.playback_speed
+            
+            # Send raw funscript data with current time and lookahead
+            # DeviceManager will handle device-specific logic
+            device_manager.update_funscript_sync(
+                current_time_ms=current_time_ms,
+                primary_actions=actions_list,
+                secondary_actions=secondary_actions,
+                playback_speed=playback_speed,
+                is_playing=is_playing
+            )
+            
+        except Exception as e:
+            # Silently handle errors to avoid disrupting video playback
+            if hasattr(self.app, 'logger'):
+                self.app.logger.debug(f"Device control update error: {e}")
+    
+    def _get_funscript_position_at_time(self, actions_list: list, time_ms: float) -> Optional[float]:
+        """Get interpolated funscript position at specific time."""
+        if not actions_list:
+            return None
+        
+        # Find the two actions that bracket the current time
+        # Actions are assumed to be sorted by time
+        for i in range(len(actions_list)):
+            action = actions_list[i]
+            action_time = action.get('at', 0) if isinstance(action, dict) else action[0]
+            
+            if action_time >= time_ms:
+                if i == 0:
+                    # Before first action, use first position
+                    action_pos = action.get('pos', 50) if isinstance(action, dict) else action[1]
+                    return float(action_pos)
+                else:
+                    # Interpolate between prev and current action
+                    prev_action = actions_list[i - 1]
+                    prev_time = prev_action.get('at', 0) if isinstance(prev_action, dict) else prev_action[0]
+                    prev_pos = prev_action.get('pos', 50) if isinstance(prev_action, dict) else prev_action[1]
+                    current_pos = action.get('pos', 50) if isinstance(action, dict) else action[1]
+                    
+                    # Linear interpolation
+                    time_ratio = (time_ms - prev_time) / (action_time - prev_time)
+                    interpolated_pos = prev_pos + (current_pos - prev_pos) * time_ratio
+                    return float(interpolated_pos)
+        
+        # After last action, use last position
+        if actions_list:
+            last_action = actions_list[-1]
+            last_pos = last_action.get('pos', 50) if isinstance(last_action, dict) else last_action[1]
+            return float(last_pos)
+        
+        return None

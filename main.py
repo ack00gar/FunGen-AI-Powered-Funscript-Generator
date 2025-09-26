@@ -7,19 +7,54 @@ import logging
 
 def _setup_bootstrap_logger():
     """Set up early bootstrap logger for startup phase before full logger initialization."""
-    # Get git info for bootstrap logging
+    # Get git info for bootstrap logging with improved error handling
     try:
         import subprocess
-        branch_result = subprocess.run(['git', 'branch', '--show-current'], 
-                                     capture_output=True, text=True, timeout=2)
-        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else 'unknown'
+        import os
         
-        commit_result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
-                                     capture_output=True, text=True, timeout=2)
-        commit = commit_result.stdout.strip() if commit_result.returncode == 0 else 'unknown'
+        # Increase timeout and add better error handling
+        branch = 'unknown'
+        commit = 'unknown'
+        
+        try:
+            # Try to get branch name
+            branch_result = subprocess.run(['git', 'branch', '--show-current'], 
+                                         capture_output=True, text=True, timeout=5,
+                                         cwd=os.getcwd())
+            if branch_result.returncode == 0 and branch_result.stdout.strip():
+                branch = branch_result.stdout.strip()
+            else:
+                # Debug: Log why branch detection failed
+                if os.environ.get('FUNGEN_DEBUG_GIT'):
+                    print(f"DEBUG: Branch detection failed. Return code: {branch_result.returncode}")
+                    print(f"DEBUG: Stdout: '{branch_result.stdout}'")
+                    print(f"DEBUG: Stderr: '{branch_result.stderr}'")
+                    print(f"DEBUG: Working directory: {os.getcwd()}")
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            if os.environ.get('FUNGEN_DEBUG_GIT'):
+                print(f"DEBUG: Branch detection exception: {type(e).__name__}: {e}")
+            pass
+        
+        try:
+            # Try to get commit hash
+            commit_result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
+                                         capture_output=True, text=True, timeout=5,
+                                         cwd=os.getcwd())
+            if commit_result.returncode == 0 and commit_result.stdout.strip():
+                commit = commit_result.stdout.strip()
+            else:
+                # Debug: Log why commit detection failed
+                if os.environ.get('FUNGEN_DEBUG_GIT'):
+                    print(f"DEBUG: Commit detection failed. Return code: {commit_result.returncode}")
+                    print(f"DEBUG: Stdout: '{commit_result.stdout}'")
+                    print(f"DEBUG: Stderr: '{commit_result.stderr}'")
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            if os.environ.get('FUNGEN_DEBUG_GIT'):
+                print(f"DEBUG: Commit detection exception: {type(e).__name__}: {e}")
+            pass
         
         git_info = f"{branch}@{commit}"
-    except:
+    except Exception:
         git_info = "nogit@unknown"
     
     # Set up a minimal colored console handler for startup
@@ -144,3 +179,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

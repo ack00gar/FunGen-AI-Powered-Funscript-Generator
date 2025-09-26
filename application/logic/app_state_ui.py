@@ -43,6 +43,7 @@ class AppStateUI:
 
         # UI visibility states
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
+        self.show_simulator_3d = self.app_settings.get("show_simulator_3d", defaults.get("show_simulator_3d", False))
         self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", True))  # Legacy preview
         self.show_gauge = self.app_settings.get("show_gauge_window", defaults.get("show_gauge_window", True))
         self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", False))
@@ -149,9 +150,9 @@ class AppStateUI:
         # L/R Dial Window Attributes
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
         default_lr_dial_size_w = self.app_settings.get("lr_dial_window_size_w",
-                                                       defaults.get("lr_dial_window_size_w", 150))
+                                                       defaults.get("lr_dial_window_size_w", 180))
         default_lr_dial_size_h = self.app_settings.get("lr_dial_window_size_h",
-                                                       defaults.get("lr_dial_window_size_h", 180))
+                                                       defaults.get("lr_dial_window_size_h", 220))
         gauge_w_for_lr_default = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))
         default_lr_dial_x = self.window_width - gauge_w_for_lr_default - default_lr_dial_size_w - 30
         default_lr_dial_y = menu_bar_h_for_default + 10
@@ -420,8 +421,8 @@ class AppStateUI:
         )
 
         self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", self.show_lr_dial_graph))
-        default_lr_dial_w = self.app_settings.get("lr_dial_window_size_w", defaults.get("lr_dial_window_size_w", 150))
-        default_lr_dial_h = self.app_settings.get("lr_dial_window_size_h", defaults.get("lr_dial_window_size_h", 180))
+        default_lr_dial_w = self.app_settings.get("lr_dial_window_size_w", defaults.get("lr_dial_window_size_w", 180))
+        default_lr_dial_h = self.app_settings.get("lr_dial_window_size_h", defaults.get("lr_dial_window_size_h", 220))
         gauge_w_curr = self.gauge_window_size_t1[0]  # Use current gauge width for positioning
 
         calc_def_lr_dial_x = self.window_width - gauge_w_curr - default_lr_dial_w - 30
