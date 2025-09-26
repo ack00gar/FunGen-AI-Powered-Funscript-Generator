@@ -157,7 +157,8 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     This function is designed to be run before the main application starts.
     """
     # 1. Self-bootstrap: Ensure the checker has its own dependencies
-    bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging'], pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+    # Note: send2trash is included because it's imported by application.utils.__init__.py -> generated_file_manager.py
+    bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging', 'send2trash'], pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
 
     logger.info("=== Checking Application Dependencies ===")
 
