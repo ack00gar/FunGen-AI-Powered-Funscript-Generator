@@ -708,7 +708,7 @@ class MainMenu:
                     "• Live tracking with device control\n"
                     "• Video + funscript synchronized playback\n"
                     "• Advanced device parameterization\n\n"
-                    "After supporting, contact the bot in Discord to get your device_control folder!"
+                    "After supporting, use !device_control command in Discord to get your folder!"
                 )
 
             if _menu_item_simple("Join Discord Community"):
