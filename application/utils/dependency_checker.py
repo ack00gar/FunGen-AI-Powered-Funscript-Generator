@@ -230,7 +230,10 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
         logger.error("Installation guide: https://pytorch.org/get-started/locally/")
         sys.exit(1)
 
-    # 6. Check for ffmpeg and ffprobe
+    # 6. Check for device_control feature dependencies if folder is present
+    device_control_changed = _check_device_control_dependencies(non_interactive=non_interactive, auto_install=auto_install)
+    
+    # 7. Check for ffmpeg and ffprobe
     check_ffmpeg_ffprobe()
 
     logger.info("=== Dependency Check Finished ===\n")
@@ -304,6 +307,66 @@ def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = F
             sys.exit(1)
     else:
         logger.info("ffmpeg and ffprobe are available.")
+
+
+def _check_device_control_dependencies(*, non_interactive: bool = True, auto_install: bool = True):
+    """
+    Check and install device_control feature dependencies if the device_control folder is present.
+    This supports the supporter-tier device control features.
+    """
+    import os
+    from pathlib import Path
+    
+    # Check if device_control folder exists (supporter feature)
+    device_control_path = Path("device_control")
+    if not device_control_path.exists():
+        logger.debug("device_control folder not present, skipping device control dependencies")
+        return False
+    
+    # Check if device_control requirements file exists
+    requirements_file = device_control_path / "requirements.txt"
+    if not requirements_file.exists():
+        logger.warning(f"device_control folder exists but {requirements_file} not found")
+        return False
+    
+    logger.info("🎮 Device control folder detected - checking supporter feature dependencies...")
+    
+    try:
+        with open(requirements_file, 'r') as f:
+            lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        
+        if not lines:
+            logger.debug("No dependencies listed in device_control/requirements.txt")
+            return False
+        
+        logger.info(f"Found {len(lines)} device control dependencies to check...")
+        device_control_packages = []
+        
+        for line in lines:
+            # Skip pip index URLs and comments
+            if not line.startswith('-') and not line.startswith('#'):
+                device_control_packages.append(line)
+        
+        if device_control_packages:
+            logger.info("Installing device control dependencies (aiohttp, pyserial, etc.)...")
+            changed = _ensure_packages(device_control_packages, pip_args=None, 
+                                     non_interactive=non_interactive, auto_install=auto_install)
+            
+            if changed:
+                logger.info("✅ Device control dependencies installed successfully!")
+            else:
+                logger.info("✅ Device control dependencies already satisfied")
+            
+            return changed
+        else:
+            logger.debug("No valid packages found in device_control requirements")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error checking device_control dependencies: {e}")
+        logger.error("Device control features may not work properly")
+        return False
+
 
 if __name__ == '__main__':
     check_and_install_dependencies()
