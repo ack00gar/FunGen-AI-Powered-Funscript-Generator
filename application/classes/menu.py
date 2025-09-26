@@ -756,4 +756,3 @@ class MainMenu:
                         imgui.set_tooltip("Device control not initialized\nCheck Device Control tab in Control Panel")
                     else:
                         imgui.set_tooltip("Device control not available\nSupporter feature - requires device_control folder")
-
