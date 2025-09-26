@@ -48,6 +48,11 @@ class TrackerManager:
         
         # UI visualization state (for GUI compatibility)
         self.show_all_boxes = False
+        
+        # Device control integration (subscriber feature)
+        self.device_bridge = None
+        self.live_device_control_enabled = False  # User toggle
+        self._init_device_bridge()
         self.show_flow = False
         self.show_stats = False
         self.show_funscript_preview = False
@@ -557,23 +562,34 @@ class TrackerManager:
 
     def _extract_result_data(self, result, original_frame) -> Tuple[np.ndarray, Optional[List[Dict]]]:
         """Extract processed frame and action log from tracker result."""
+        processed_frame = None
+        action_log = None
+        
         # Handle TrackerResult object
         if hasattr(result, 'processed_frame') and hasattr(result, 'action_log'):
-            return result.processed_frame, result.action_log
+            processed_frame, action_log = result.processed_frame, result.action_log
         
         # Handle tuple format
         elif isinstance(result, tuple) and len(result) >= 2:
             processed_frame, action_log = result[0], result[1]
-            return processed_frame, action_log
         
         # Handle single frame return
         elif isinstance(result, np.ndarray):
-            return result, None
+            processed_frame, action_log = result, None
         
         # Fallback
         else:
             self.logger.warning(f"Unexpected tracker result format: {type(result)}")
-            return original_frame, None
+            processed_frame, action_log = original_frame, None
+        
+        # Send to device control if available and enabled
+        if action_log and len(action_log) > 0:
+            self.logger.debug(f"Attempting to send action to device control: {action_log[-1]}")
+            self._send_to_device_control(action_log[-1])  # Send latest action
+        else:
+            self.logger.debug(f"No action log to send to device control: action_log={action_log}")
+        
+        return processed_frame, action_log
 
     def _add_actions_to_funscript(self, action_log: Optional[List[Dict]]):
         """Add action log entries to the funscript."""
@@ -588,6 +604,135 @@ class TrackerManager:
                     self.funscript.add_action(timestamp_ms, position)
         except Exception as e:
             self.logger.error(f"Error adding actions to funscript: {e}")
+
+    def _init_device_bridge(self):
+        """Initialize device control bridge if available."""
+        try:
+            # Check if device_control folder exists (supporter feature)
+            if self._is_device_control_available():
+                from device_control.bridges.live_tracker_bridge import create_live_tracker_bridge
+                
+                # Get device manager from app if available
+                device_manager = getattr(self.app, 'device_manager', None)
+                if device_manager:
+                    self.device_bridge = create_live_tracker_bridge(device_manager)
+                    self.logger.info("Device control bridge initialized for live tracking")
+                else:
+                    self.logger.debug("Device manager not available in app")
+        except ImportError:
+            # Device control not available (non-subscriber)
+            self.device_bridge = None
+            self.logger.debug("Device control not available - live device control disabled")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize device control bridge: {e}")
+            self.device_bridge = None
+    
+    def _is_device_control_available(self) -> bool:
+        """Check if device control features are available."""
+        from pathlib import Path
+        return Path("device_control").exists()
+    
+    def set_live_device_control_enabled(self, enabled: bool):
+        """Enable/disable live device control (user toggle)."""
+        self.live_device_control_enabled = enabled
+        self.logger.info(f"Live device control {'enabled' if enabled else 'disabled'}")
+        
+        if enabled and self.device_bridge:
+            # Start device bridge (handle no event loop gracefully)
+            import asyncio
+            try:
+                # Check if there's an active event loop
+                loop = asyncio.get_running_loop()
+                asyncio.create_task(self.device_bridge.start())
+            except RuntimeError:
+                # No event loop available - manually activate bridge
+                self.device_bridge.is_active = True
+                self.logger.debug("No event loop - manually activated device bridge")
+        elif self.device_bridge:
+            # Stop device bridge (handle no event loop gracefully)
+            import asyncio
+            try:
+                # Check if there's an active event loop
+                loop = asyncio.get_running_loop()
+                asyncio.create_task(self.device_bridge.stop())
+            except RuntimeError:
+                # No event loop available - manually deactivate bridge
+                self.device_bridge.is_active = False
+                self.logger.debug("No event loop - manually deactivated device bridge")
+
+    def _send_to_device_control(self, latest_action: Dict):
+        """Send latest tracking position to device control."""
+        # Check if device bridge needs to be initialized
+        if not self.device_bridge and hasattr(self.app, 'device_manager'):
+            self.logger.info("Device manager available but no bridge - re-initializing bridge")
+            self._init_device_bridge()
+            
+            # Also check if live tracking should be enabled from settings
+            if not self.live_device_control_enabled:
+                live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
+                if live_tracking_enabled:
+                    self.set_live_device_control_enabled(True)
+                    self.logger.info("Auto-enabled live device control from settings")
+        
+        # Debug logging for device control flow
+        device_manager = getattr(self.app, 'device_manager', None)
+        device_connected = device_manager.is_connected() if device_manager else False
+        connected_devices = list(device_manager.connected_devices.keys()) if device_manager else []
+        
+        # Use debug level for routine checks to reduce verbosity during normal operation
+        self.logger.debug(f"Device control check: bridge={self.device_bridge is not None}, "
+                         f"enabled={self.live_device_control_enabled}, active={self.tracking_active}")
+        self.logger.debug(f"Device manager: exists={device_manager is not None}, "
+                         f"connected={device_connected}, devices={connected_devices}")
+        
+        if not (self.device_bridge and 
+                self.live_device_control_enabled and 
+                self.tracking_active):
+            # Log what's preventing device control (only warn once per session)
+            if not self.device_bridge and not hasattr(self, '_no_bridge_warned'):
+                self.logger.info("Live tracking device control: No device bridge available")
+                self._no_bridge_warned = True
+            if not self.live_device_control_enabled and not hasattr(self, '_not_enabled_warned'):
+                self.logger.info("Live tracking device control: Not enabled - check Control Panel → Global Device Settings → 'Enable Live Tracking Control'")
+                self._not_enabled_warned = True
+            return
+            
+        try:
+            if not isinstance(latest_action, dict):
+                return
+                
+            # Extract positions from action
+            primary_pos = latest_action.get('pos')
+            secondary_pos = latest_action.get('secondary_pos', 50.0)  # Default center
+            
+            if primary_pos is not None:
+                # Import TrackerResult here to avoid import issues for non-subscribers
+                try:
+                    from tracker.tracker_modules.core.base_tracker import TrackerResult
+                except ImportError:
+                    # Create a simple mock if TrackerResult not available
+                    class TrackerResult:
+                        def __init__(self, processed_frame, action_log, debug_info):
+                            self.processed_frame = processed_frame
+                            self.action_log = action_log
+                            self.debug_info = debug_info
+                
+                # Create a TrackerResult-like object for the bridge
+                mock_result = TrackerResult(
+                    processed_frame=None,  # Not needed for device control
+                    action_log=None,
+                    debug_info={
+                        'primary_position': primary_pos,
+                        'secondary_position': secondary_pos,
+                        'timestamp_ms': latest_action.get('at', 0)
+                    }
+                )
+                
+                # Send to device bridge
+                self.device_bridge.on_tracker_result(mock_result)
+                
+        except Exception as e:
+            self.logger.error(f"Error sending to device control: {e}")
 
     def _update_visualization_state(self):
         """Update visualization state from current tracker."""

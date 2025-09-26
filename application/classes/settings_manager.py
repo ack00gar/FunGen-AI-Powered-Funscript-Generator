@@ -43,7 +43,14 @@ class AppSettings:
             "window_width": constants.DEFAULT_WINDOW_WIDTH,
             "window_height": constants.DEFAULT_WINDOW_HEIGHT,
             "ui_layout_mode": constants.DEFAULT_UI_LAYOUT,
+            
+            # Movement Bar (L/R Dial) Window Settings
+            "lr_dial_window_size_w": 180,  # Width of movement bar window
+            "lr_dial_window_size_h": 220,  # Height of movement bar window
+            "lr_dial_window_pos_x": -1,    # X position (-1 = auto-calculate)
+            "lr_dial_window_pos_y": -1,    # Y position (-1 = auto-calculate)
             "global_font_scale": 1.0,
+            "auto_system_scaling_enabled": True,  # Automatically detect and apply system scaling
             "timeline_pan_speed_multiplier": 20,
             "show_funscript_interactive_timeline": True,
             "show_funscript_interactive_timeline2": False,
@@ -58,8 +65,9 @@ class AppSettings:
             "use_simplified_funscript_preview": False,
             "show_stage2_overlay": True,
             "show_gauge_window_timeline1": True,
-            "show_gauge_window_timeline2": False,
-            "show_lr_dial_graph": True,
+"show_gauge_window_timeline2": False,
+            "show_lr_dial_graph": True,  # Movement Bar (rotating bar with up/down fill and roll angle)
+            "show_simulator_3d": False, # 3D Simulator
             "show_chapter_list_window": False,
             "show_timeline_editor_buttons": False,
             "show_advanced_options": False,
@@ -148,6 +156,16 @@ class AppSettings:
             "updater_check_on_startup": True,
             "updater_check_periodically": True,
             "updater_suppress_popup": False,
+            
+            # Device Control Settings
+            "device_control_enabled": True,
+            "buttplug_server_address": "localhost",
+            "buttplug_server_port": 12345,
+            "buttplug_auto_connect": False,
+            "device_control_preferred_backend": "buttplug",  # "buttplug", "osr", or "auto"
+            "device_control_max_rate_hz": 20.0,
+            "device_control_selected_devices": [],  # List of selected device IDs
+            "device_control_log_commands": False,
         }
         return defaults
 

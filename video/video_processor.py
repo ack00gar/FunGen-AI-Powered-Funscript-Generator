@@ -1101,7 +1101,6 @@ class VideoProcessor:
         if self.processing_end_frame_limit != -1:
             num_frames_to_process = self.processing_end_frame_limit - self.processing_start_frame_limit + 1
 
-
         if not self._start_ffmpeg_process(start_frame_abs_idx=self.processing_start_frame_limit, num_frames_to_output_ffmpeg=num_frames_to_process):
             self.logger.error("Failed to start FFmpeg for processing start.")
             return

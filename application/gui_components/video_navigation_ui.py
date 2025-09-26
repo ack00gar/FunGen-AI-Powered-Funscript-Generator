@@ -1356,20 +1356,13 @@ class VideoNavigationUI:
                 
                 for tracker in trackers:
                     display_name = getattr(tracker, 'display_name', tracker.internal_name)
-                    description = getattr(tracker, 'description', '')
                     
-                    # Create descriptive menu item
+                    # Only show the tracker name, not the description
                     menu_text = display_name
-                    if description:
-                        menu_text += f" - {description[:50]}..." if len(description) > 50 else f" - {description}"
                     
                     if imgui.menu_item(menu_text)[0]:
                         self._apply_tracker_to_chapter(tracker, selected_chapter)
                         imgui.close_current_popup()
-                        
-                    # Add tooltip for full description
-                    if imgui.is_item_hovered() and description:
-                        imgui.set_tooltip(description)
                 
                 tracker_found = True
             

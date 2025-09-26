@@ -1,9 +1,12 @@
 @echo off
 REM FunGen Universal Bootstrap Installer for Windows
+REM Version: 1.0.0
 REM This script requires ZERO dependencies - only uses Windows built-ins
 REM Downloads and runs the full Python installer
 
 setlocal EnableDelayedExpansion
+
+set BOOTSTRAP_VERSION=1.0.8
 
 REM Check for help or common invalid flags
 if "%1"=="-h" goto :show_help
@@ -13,6 +16,7 @@ if "%1"=="/?" goto :show_help
 
 echo ==========================================
 echo      FunGen Bootstrap Installer
+echo              v%BOOTSTRAP_VERSION%
 echo ==========================================
 echo.
 echo This installer will download and install everything needed:
@@ -21,17 +25,17 @@ echo   - Git
 echo   - FFmpeg/FFprobe
 echo   - FunGen AI and all dependencies
 echo.
-echo Note: For best results, right-click and "Run as administrator"
-echo       Some installations may require administrator privileges.
+echo RECOMMENDED: Run this installer as a NORMAL USER
+echo             Most installations work fine without administrator privileges
 echo.
 
-REM Check if we're running as administrator (needed for some installations)
+REM Check if we're running as administrator and warn if we are
 net session >nul 2>&1
-if %errorLevel% neq 0 (
-    echo WARNING: Not running as administrator.
-    echo Some installations may require admin privileges.
-    echo Consider right-clicking and "Run as administrator"
+if %errorLevel% equ 0 (
+    echo WARNING: Running as administrator may cause git permission issues.
+    echo Most installations work fine as a normal user.
     echo.
+    echo Press Ctrl+C to cancel and rerun as normal user, or any key to continue...
     pause
 )
 
@@ -57,13 +61,28 @@ if %errorLevel% equ 0 (
     set PYTHON_ALREADY_INSTALLED=1
 ) else (
     echo    Downloading Python installer...
+    echo    URL: %PYTHON_URL%
     REM Use PowerShell to download (available on all modern Windows)
     powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%PYTHON_INSTALLER%'}"
     if %errorLevel% neq 0 (
-        echo ERROR: Failed to download Python installer
-        goto :cleanup_and_exit
+        echo WARNING: Failed to download Python installer
+        echo.
+        echo Possible causes:
+        echo 1. Network/firewall blocking the download
+        echo 2. Corporate proxy restrictions
+        echo 3. Antivirus software interference
+        echo.
+        echo CONTINUING: The universal installer will try alternative Python installation methods...
+        echo.
+        echo Alternative: You can also install Python manually from:
+        echo   - https://python.org/downloads/ (Python 3.11+)
+        echo   - winget install Python.Python.3.11 
+        echo   - Microsoft Store (Python 3.11)
+        echo.
+        set PYTHON_DOWNLOAD_FAILED=1
+    ) else (
+        echo    Python installer downloaded successfully
     )
-    echo    Python installer downloaded successfully
 )
 
 echo.
@@ -72,17 +91,20 @@ if defined PYTHON_ALREADY_INSTALLED (
     echo    Python already installed, using existing installation...
     REM Ensure PATH includes Python
     call :refresh_path
+) else if defined PYTHON_DOWNLOAD_FAILED (
+    echo    Skipping Python installation due to download failure...
+    echo    The universal installer will handle Python setup...
 ) else (
     echo    This may take a few minutes...
     "%PYTHON_INSTALLER%" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_launcher=0
     if %errorLevel% neq 0 (
-        echo ERROR: Python installation failed
-        goto :cleanup_and_exit
+        echo WARNING: Python installation failed
+        echo The universal installer will try alternative methods...
+    ) else (
+        REM Refresh PATH to include Python
+        call :refresh_path
+        echo    Python 3.11 installed successfully
     )
-    
-    REM Refresh PATH to include Python
-    call :refresh_path
-    echo    Python 3.11 installed successfully
 )
 
 echo.
@@ -101,10 +123,10 @@ echo.
 
 REM Pass through any command line arguments to the universal installer
 if "%*"=="" (
-    python "%UNIVERSAL_INSTALLER%" --dir "%CD%"
+    python "%UNIVERSAL_INSTALLER%" --dir "%CD%" --bootstrap-version "%BOOTSTRAP_VERSION%"
 ) else (
     echo    Passing arguments: %*
-    python "%UNIVERSAL_INSTALLER%" --dir "%CD%" %*
+    python "%UNIVERSAL_INSTALLER%" --dir "%CD%" --bootstrap-version "%BOOTSTRAP_VERSION%" %*
 )
 set INSTALL_RESULT=%errorLevel%
 

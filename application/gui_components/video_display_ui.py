@@ -35,6 +35,11 @@ class VideoDisplayUI:
         self.oscillation_area_draw_current_screen_pos: tuple = (0, 0)  # In ImGui screen space
         self.drawn_oscillation_area_video_coords: tuple | None = None  # (x,y,w,h) in original video frame pixel space
         self.waiting_for_oscillation_point_click: bool = False
+        
+        # Handy device control state
+        self.handy_streaming_active = False
+        self.handy_preparing = False
+        self.handy_last_funscript_path = None
 
     def _update_actual_video_image_rect(self, display_w, display_h, cursor_x_offset, cursor_y_offset):
         win_pos_x, win_pos_y = imgui.get_window_position()
@@ -179,6 +184,10 @@ class VideoDisplayUI:
         if imgui.button(ICON_NEXT_FRAME + "##VidOverNext", width=pb_icon_w): event_handlers.handle_playback_control("next_frame")
         imgui.same_line(spacing=pb_btn_spacing)
         if imgui.button(ICON_JUMP_END + "##VidOverEnd", width=pb_icon_w): event_handlers.handle_playback_control("jump_end")
+        
+        # Add Handy control button inline with playback controls
+        self._render_handy_control_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
+        
         imgui.end_group()
 
         if controls_disabled:
@@ -1013,3 +1022,547 @@ class VideoDisplayUI:
                     imgui.get_color_u32_rgba(*roi_color),
                     roi_label
                 )
+    
+    def _render_handy_control_button_inline(self, spacing: float, button_height: float, controls_disabled: bool):
+        """Render Handy device control button inline with playback controls."""
+        # Check if Handy devices are available
+        if not self._is_handy_available():
+            return
+            
+        style = imgui.get_style()
+        button_width = button_height * 2.8  # Smaller width for inline display
+        
+        # Add spacing and render inline with other controls
+        imgui.same_line(spacing=spacing)
+        
+        # Determine button state and text
+        if self.handy_preparing:
+            # Show preparing state
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.8, 0.2, 1.0)  # Yellow
+            button_text = "Preparing"  # Loading text
+            button_enabled = False
+        elif self.handy_streaming_active:
+            # Show stop streaming button
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
+            button_text = "Stop"  # Stop text
+            button_enabled = True
+        else:
+            # Show start streaming button
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2, 1.0)  # Green
+            button_text = "Handy"  # Handy button text
+            button_enabled = True
+            
+        # Disable button if no funscript actions available
+        has_funscript = self._has_funscript_actions()
+        if not has_funscript and not self.handy_streaming_active:
+            button_enabled = False
+            button_text = "No Funscript"  # No funscript available
+            
+        # Apply disabled styling if controls are disabled or button is disabled
+        if controls_disabled or not button_enabled:
+            if not controls_disabled:  # Only add if not already applied
+                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
+            
+        # Render the button
+        button_clicked = imgui.button(f"{button_text}##HandyControl", width=button_width)
+        
+        if button_clicked:
+            print(f"DEBUG: Handy button clicked - enabled: {button_enabled}, controls_disabled: {controls_disabled}")
+            if button_enabled and not controls_disabled:
+                print(f"DEBUG: Button action triggered - streaming_active: {self.handy_streaming_active}")
+                if self.handy_streaming_active:
+                    print("DEBUG: Stopping Handy streaming")
+                    self._stop_handy_streaming()
+                else:
+                    print("DEBUG: Starting Handy streaming")
+                    self._start_handy_streaming()
+            else:
+                print("DEBUG: Button click ignored - button disabled or controls disabled")
+                
+        # Clean up disabled styling if we added it
+        if not controls_disabled and not button_enabled:
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
+            
+        imgui.pop_style_color()
+        
+        # Show tooltip with additional info
+        if imgui.is_item_hovered():
+            imgui.begin_tooltip()
+            if self.handy_preparing:
+                imgui.text("Uploading funscript and setting up HSSP streaming...")
+            elif self.handy_streaming_active:
+                imgui.text("Handy streaming active. Click to stop.")
+            elif not has_funscript:
+                imgui.text("No funscript actions available. Create a timeline first.")
+            else:
+                imgui.text("Start Handy streaming with current funscript")
+                imgui.text("Will upload to Handy servers and sync with video position")
+            imgui.end_tooltip()
+    
+    def _is_handy_available(self):
+        """Check if Handy devices are connected and device control is enabled."""
+        try:
+            # Check if device control is enabled
+            if not hasattr(self.app, 'app_settings'):
+                return False
+                
+            device_control_enabled = self.app.app_settings.get("device_control_video_playback", False)
+            if not device_control_enabled:
+                return False
+                
+            # Check if device manager exists and has Handy devices
+            if not hasattr(self.app, 'device_manager') or not self.app.device_manager:
+                return False
+                
+            device_manager = self.app.device_manager
+            if not device_manager.is_connected():
+                return False
+                
+            # Check for connected Handy devices
+            for device_id, backend in device_manager.connected_devices.items():
+                device_info = backend.get_device_info()
+                if device_info and "handy" in device_info.name.lower():
+                    return True
+                    
+            return False
+            
+        except Exception:
+            return False
+    
+    def _has_funscript_actions(self):
+        """Check if funscript actions are available for streaming."""
+        try:
+            # Check if funscript processor exists
+            if not hasattr(self.app, 'funscript_processor') or not self.app.funscript_processor:
+                return False
+                
+            fs_proc = self.app.funscript_processor
+            
+            # Get the DualAxisFunscript object
+            funscript_obj = fs_proc.get_funscript_obj()
+            if not funscript_obj:
+                return False
+                
+            # Check primary axis actions only (Handy uses primary axis)
+            primary_actions = fs_proc.get_actions('primary')
+            return len(primary_actions) > 0 if primary_actions else False
+            
+        except Exception as e:
+            return False
+    
+    def _start_handy_streaming(self):
+        """Start Handy streaming with current funscript and video position."""
+        print("DEBUG: _start_handy_streaming() called")
+        import threading
+        import asyncio
+        
+        def start_streaming_async():
+            print("DEBUG: start_streaming_async() thread started")
+            loop = None
+            try:
+                # Set preparing state
+                self.handy_preparing = True
+                print("DEBUG: handy_preparing set to True")
+                
+                # Get current video position with multiple fallback methods
+                current_time_ms = 0.0
+                current_frame = 0
+                fps = 0.0
+                
+                if hasattr(self.app, 'processor') and self.app.processor:
+                    # Method 1: Direct frame index and FPS
+                    if hasattr(self.app.processor, 'current_frame_index'):
+                        current_frame = self.app.processor.current_frame_index
+                        
+                    if hasattr(self.app.processor, 'fps'):
+                        fps = self.app.processor.fps
+                        
+                    # Method 2: Try video_info if available
+                    if hasattr(self.app.processor, 'video_info') and self.app.processor.video_info:
+                        if fps <= 0 and 'fps' in self.app.processor.video_info:
+                            fps = self.app.processor.video_info['fps']
+                            
+                    # Method 3: Try get_current_frame_timestamp_ms if available
+                    if hasattr(self.app.processor, 'get_current_frame_timestamp_ms'):
+                        try:
+                            timestamp_ms = self.app.processor.get_current_frame_timestamp_ms()
+                            if timestamp_ms > 0:
+                                current_time_ms = timestamp_ms
+                        except:
+                            pass
+                    
+                    # Calculate from frame and FPS if timestamp method didn't work
+                    if current_time_ms == 0.0 and fps > 0:
+                        current_time_ms = (current_frame / fps) * 1000.0
+                
+                print(f"DEBUG: Current video position: {current_time_ms}ms (frame {current_frame}, fps {fps})")
+                
+                # Extract funscript from current position onwards (your suggested approach!)
+                # This creates a new funscript where the current video position becomes time 0
+                print(f"DEBUG: Creating time-extracted funscript starting from {current_time_ms}ms")
+                
+                # Get funscript actions using the same method as detection
+                print("DEBUG: Getting funscript actions")
+                if not hasattr(self.app, 'funscript_processor') or not self.app.funscript_processor:
+                    print("DEBUG: No funscript processor found")
+                    self.handy_preparing = False
+                    return
+                    
+                fs_proc = self.app.funscript_processor
+                funscript_obj = fs_proc.get_funscript_obj()
+                if not funscript_obj:
+                    print("DEBUG: No funscript object found")
+                    self.handy_preparing = False
+                    return
+                
+                primary_actions = fs_proc.get_actions('primary')
+                secondary_actions = fs_proc.get_actions('secondary')
+                
+                print(f"DEBUG: Retrieved {len(primary_actions)} primary actions, {len(secondary_actions)} secondary actions")
+                
+                if not primary_actions:
+                    print("DEBUG: No primary actions available")
+                    self.handy_preparing = False
+                    return
+                
+                # Create and save temporary funscript file
+                import tempfile
+                import json
+                import os
+                
+                print("DEBUG: Creating time-extracted funscript for Handy")
+                
+                # Extract actions from current video position onwards
+                extracted_primary_actions = []
+                for action in primary_actions:
+                    action_time = action.get('at', 0)
+                    if action_time >= current_time_ms:
+                        # Adjust timestamp to start from 0 (current video position becomes time 0)
+                        adjusted_action = {
+                            'at': int(action_time - current_time_ms),  # Integer timestamps for Handy compatibility
+                            'pos': int(action.get('pos', 0))  # Integer positions for Handy compatibility
+                        }
+                        extracted_primary_actions.append(adjusted_action)
+                
+                # Do the same for secondary actions if present
+                extracted_secondary_actions = []
+                if secondary_actions:
+                    for action in secondary_actions:
+                        action_time = action.get('at', 0)
+                        if action_time >= current_time_ms:
+                            adjusted_action = {
+                                'at': int(action_time - current_time_ms),  # Integer timestamps for Handy compatibility
+                                'pos': int(action.get('pos', 0))  # Integer positions for Handy compatibility
+                            }
+                            extracted_secondary_actions.append(adjusted_action)
+                
+                # Ensure funscript always starts at time=0 for HSSP compatibility
+                if extracted_primary_actions and extracted_primary_actions[0]['at'] > 0:
+                    # Interpolate the position at current_time_ms for time=0 baseline
+                    baseline_pos = 50  # Default if no data
+                    
+                    # Find the actions before and after current_time_ms for interpolation
+                    prev_action = None
+                    next_action = None
+                    
+                    for i, action in enumerate(primary_actions):
+                        action_time = action.get('at', 0)
+                        if action_time <= current_time_ms:
+                            prev_action = action
+                        elif action_time > current_time_ms and next_action is None:
+                            next_action = action
+                            break
+                    
+                    # Interpolate position at current_time_ms
+                    if prev_action and next_action:
+                        # Linear interpolation between two actions
+                        t1, p1 = prev_action['at'], prev_action['pos']
+                        t2, p2 = next_action['at'], next_action['pos']
+                        
+                        # Calculate interpolation factor (0 to 1)
+                        if t2 > t1:
+                            factor = (current_time_ms - t1) / (t2 - t1)
+                            baseline_pos = p1 + (p2 - p1) * factor
+                        else:
+                            baseline_pos = p1
+                    elif prev_action:
+                        # Use last known position if no next action
+                        baseline_pos = prev_action.get('pos', 50)
+                    elif next_action:
+                        # Use next position if no previous action
+                        baseline_pos = next_action.get('pos', 50)
+                    
+                    # Insert interpolated baseline action at time=0
+                    baseline_action = {'at': 0, 'pos': int(baseline_pos)}
+                    extracted_primary_actions.insert(0, baseline_action)
+                    print(f"DEBUG: Added interpolated baseline action at time=0: {baseline_action}")
+                
+                # Ensure minimum of 2 actions for HSSP compatibility
+                if len(extracted_primary_actions) < 2:
+                    # Add a hold action at 1000ms with same position
+                    if extracted_primary_actions:
+                        last_pos = extracted_primary_actions[-1]['pos']
+                    else:
+                        last_pos = 50  # Default middle position
+                        extracted_primary_actions.append({'at': 0, 'pos': last_pos})
+                    
+                    hold_action = {'at': 1000, 'pos': last_pos}
+                    extracted_primary_actions.append(hold_action)
+                    print(f"DEBUG: Added hold action for HSSP minimum requirement: {hold_action}")
+                
+                print(f"DEBUG: Extracted {len(extracted_primary_actions)} primary actions starting from time 0")
+                print(f"DEBUG: Original video time {current_time_ms}ms now maps to funscript time 0ms")
+                
+                if not extracted_primary_actions:
+                    print("DEBUG: No actions found after current video position - video may be at end")
+                    self.handy_preparing = False
+                    return
+                
+                # Show sample extracted actions for debugging
+                if extracted_primary_actions:
+                    print(f"DEBUG: First extracted action: {extracted_primary_actions[0]}")
+                    print(f"DEBUG: Last extracted action: {extracted_primary_actions[-1]}")
+                    
+                    # Get extracted funscript duration
+                    last_action_time = max(action.get('at', 0) for action in extracted_primary_actions)
+                    first_action_time = min(action.get('at', 0) for action in extracted_primary_actions)
+                    funscript_duration_ms = last_action_time - first_action_time
+                    
+                    print(f"DEBUG: First action: at={primary_actions[0].get('at')}ms, pos={primary_actions[0].get('pos')}")
+                    if len(primary_actions) > 1:
+                        print(f"DEBUG: Last action: at={last_action_time}ms")
+                    print(f"DEBUG: Funscript duration: {funscript_duration_ms}ms ({funscript_duration_ms/1000:.1f}s)")
+                    print(f"DEBUG: Start time: {current_time_ms}ms")
+                    
+                    # Check if start time is within funscript range
+                    if current_time_ms > last_action_time:
+                        print(f"WARNING: Start time ({current_time_ms}ms) is AFTER last action ({last_action_time}ms)")
+                        print("This might cause HSSP play to fail - no actions to play")
+                    elif current_time_ms < first_action_time:
+                        print(f"WARNING: Start time ({current_time_ms}ms) is BEFORE first action ({first_action_time}ms)")
+                    else:
+                        print(f"INFO: Start time is within funscript range ({first_action_time}ms - {last_action_time}ms)")
+                    
+                    # Find actions around the current video position
+                    nearby_actions = [a for a in primary_actions if abs(a.get('at', 0) - current_time_ms) < 5000]
+                    print(f"DEBUG: Actions within 5s of current position ({current_time_ms}ms): {len(nearby_actions)}")
+                    if nearby_actions:
+                        for i, action in enumerate(nearby_actions[:3]):
+                            print(f"DEBUG: Nearby action {i+1}: at={action.get('at')}ms, pos={action.get('pos')}")
+                
+                # Use extracted actions that start from time 0 (current video position)
+                funscript_data = {
+                    "actions": extracted_primary_actions,
+                    "inverted": False,
+                    "range": 90,
+                    "version": "1.0"
+                }
+                
+                # Save to temporary file
+                temp_dir = tempfile.gettempdir()
+                temp_filename = f"handy_stream_{int(current_time_ms)}.funscript"
+                temp_path = os.path.join(temp_dir, temp_filename)
+                
+                print(f"DEBUG: Saving funscript to: {temp_path}")
+                with open(temp_path, 'w') as f:
+                    json.dump(funscript_data, f, indent=2)
+                
+                self.handy_last_funscript_path = temp_path
+                print("DEBUG: Funscript file saved successfully")
+                
+                # Start async workflow
+                print("DEBUG: Creating new event loop")
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                device_manager = self.app.device_manager
+                print(f"DEBUG: Device manager available: {device_manager is not None}")
+                
+                # Prepare Handy devices with extracted (time-shifted) actions
+                print("DEBUG: Calling prepare_handy_for_video_playback with extracted actions")
+                prepare_success = loop.run_until_complete(
+                    device_manager.prepare_handy_for_video_playback(extracted_primary_actions, extracted_secondary_actions)
+                )
+                print(f"DEBUG: Prepare result: {prepare_success}")
+                
+                if not prepare_success:
+                    print("DEBUG: Prepare failed, returning")
+                    self.handy_preparing = False
+                    return
+                
+                # Wait a moment for upload to complete
+                print("DEBUG: Waiting 2 seconds for upload to complete")
+                loop.run_until_complete(asyncio.sleep(2))
+                
+                # Start synchronized playback from time 0 (since our funscript now starts at 0)
+                print(f"DEBUG: Starting video sync at 0ms (extracted funscript starts from current video position {current_time_ms}ms)")
+                start_success = loop.run_until_complete(
+                    device_manager.start_handy_video_sync(0.0)  # Always start from 0 with extracted funscript
+                )
+                print(f"DEBUG: Video sync start result: {start_success}")
+                
+                if start_success:
+                    self.handy_streaming_active = True
+                    print("DEBUG: Handy streaming activated successfully!")
+                    
+                    # Auto-start video playback for real-time sync
+                    print("DEBUG: Auto-starting video playback for Handy sync")
+                    try:
+                        # Check if video is not currently playing
+                        is_currently_playing = (self.app.processor and 
+                                              self.app.processor.is_processing and 
+                                              not self.app.processor.pause_event.is_set())
+                        
+                        if not is_currently_playing:
+                            print("DEBUG: Video not playing, starting playback")
+                            # Start video playback using the same method as the play button
+                            if hasattr(self.app, 'event_handlers'):
+                                self.app.event_handlers.handle_playback_control("play_pause")
+                                print("DEBUG: Video playback started via event handler")
+                            else:
+                                print("DEBUG: No event handlers available")
+                        else:
+                            print("DEBUG: Video already playing")
+                            
+                    except Exception as playback_error:
+                        print(f"DEBUG: Failed to auto-start video playback: {playback_error}")
+                    
+                    if hasattr(self.app, 'logger'):
+                        self.app.logger.info(f"Handy streaming started at {current_time_ms:.1f}ms")
+                else:
+                    print("DEBUG: Video sync start failed")
+                
+                self.handy_preparing = False
+                print("DEBUG: handy_preparing set to False, streaming setup complete")
+                
+            except Exception as e:
+                print(f"DEBUG: Exception in streaming setup: {e}")
+                import traceback
+                traceback.print_exc()
+                self.handy_preparing = False
+                if hasattr(self.app, 'logger'):
+                    self.app.logger.error(f"Failed to start Handy streaming: {e}")
+            finally:
+                if loop is not None:
+                    print("DEBUG: Closing event loop")
+                    loop.close()
+                else:
+                    print("DEBUG: No loop to close")
+        
+        # Start in background thread
+        print("DEBUG: Creating background thread for Handy streaming")
+        thread = threading.Thread(target=start_streaming_async, name="HandyStreamStart", daemon=True)
+        thread.start()
+        print("DEBUG: Background thread started")
+    
+    def _stop_handy_streaming(self):
+        """Stop Handy streaming and clean up."""
+        print("DEBUG: _stop_handy_streaming() called")
+        try:
+            # Stop Handy device streaming
+            if hasattr(self.app, 'device_manager') and self.app.device_manager:
+                print("DEBUG: Stopping Handy device streaming")
+                self.app.device_manager.stop_handy_streaming()
+            else:
+                print("DEBUG: No device manager available for stopping")
+            
+            # Stop video playback
+            print("DEBUG: Stopping video playback")
+            try:
+                if hasattr(self.app, 'processor') and self.app.processor:
+                    is_currently_playing = (self.app.processor.is_processing and 
+                                          not self.app.processor.pause_event.is_set())
+                    
+                    if is_currently_playing:
+                        print("DEBUG: Video is playing, pausing it")
+                        if hasattr(self.app, 'event_handlers'):
+                            self.app.event_handlers.handle_playback_control("play_pause")
+                            print("DEBUG: Video playback paused via event handler")
+                        else:
+                            print("DEBUG: No event handlers available for stopping video")
+                    else:
+                        print("DEBUG: Video was not playing")
+                else:
+                    print("DEBUG: No video processor available")
+                    
+            except Exception as video_stop_error:
+                print(f"DEBUG: Failed to stop video playback: {video_stop_error}")
+            
+            # Update streaming state
+            self.handy_streaming_active = False
+            print("DEBUG: handy_streaming_active set to False")
+            
+            # Clean up temporary funscript file
+            if self.handy_last_funscript_path:
+                try:
+                    import os
+                    if os.path.exists(self.handy_last_funscript_path):
+                        os.remove(self.handy_last_funscript_path)
+                        print(f"DEBUG: Removed temporary funscript file: {self.handy_last_funscript_path}")
+                    else:
+                        print(f"DEBUG: Temporary funscript file not found: {self.handy_last_funscript_path}")
+                except Exception as cleanup_error:
+                    print(f"DEBUG: Failed to clean up funscript file: {cleanup_error}")
+                self.handy_last_funscript_path = None
+            
+            if hasattr(self.app, 'logger'):
+                self.app.logger.info("Handy streaming stopped")
+                
+            print("DEBUG: Handy streaming stop complete")
+                
+        except Exception as e:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.error(f"Error stopping Handy streaming: {e}")
+    
+    def _resync_handy_after_seek(self):
+        """Resynchronize Handy device after video seek."""
+        print("DEBUG: _resync_handy_after_seek() called")
+        
+        if not self.handy_streaming_active:
+            print("DEBUG: Handy streaming not active, skipping resync")
+            return
+        
+        try:
+            # Stop current streaming first
+            print("DEBUG: Stopping current Handy streaming for resync")
+            if hasattr(self.app, 'device_manager') and self.app.device_manager:
+                # Just stop the playback, not the entire streaming session
+                import asyncio
+                
+                def stop_and_resync():
+                    loop = None
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        
+                        # Stop current HSSP playback
+                        print("DEBUG: Stopping HSSP playback for resync")
+                        loop.run_until_complete(self.app.device_manager.stop_handy_playback())
+                        
+                        # Wait a brief moment for stop to complete
+                        loop.run_until_complete(asyncio.sleep(0.5))
+                        
+                        # Restart with new position
+                        print("DEBUG: Restarting Handy streaming from new position")
+                        self._start_handy_streaming()
+                        
+                    except Exception as e:
+                        print(f"DEBUG: Error during resync: {e}")
+                        if hasattr(self.app, 'logger'):
+                            self.app.logger.error(f"Failed to resync Handy after seek: {e}")
+                    finally:
+                        if loop is not None:
+                            loop.close()
+                
+                # Run resync in background thread
+                import threading
+                thread = threading.Thread(target=stop_and_resync, name="HandyResync", daemon=True)
+                thread.start()
+                print("DEBUG: Resync thread started")
+                
+        except Exception as e:
+            print(f"DEBUG: Exception in Handy resync: {e}")
+            if hasattr(self.app, 'logger'):
+                self.app.logger.error(f"Failed to resync Handy after seek: {e}")
