@@ -694,6 +694,24 @@ class MainMenu:
     def _render_support_menu(self):
         app = self.app
         if imgui.begin_menu("Support", True):
+            if _menu_item_simple("💝 Become a Supporter"):
+                try:
+                    webbrowser.open("https://ko-fi.com/k00gar")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open Ko-fi link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Unlock device control features and support development!\n"
+                    "Supporters get access to:\n"
+                    "• Hardware device integration (Handy, OSR2, etc.)\n"
+                    "• Live tracking with device control\n"
+                    "• Video + funscript synchronized playback\n"
+                    "• Advanced device parameterization"
+                )
+
+            imgui.separator()
+
             if _menu_item_simple("Support Development"):
                 try:
                     webbrowser.open("https://ko-fi.com/k00gar")

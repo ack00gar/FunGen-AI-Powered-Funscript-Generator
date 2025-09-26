@@ -127,17 +127,16 @@ class DeviceControlUI:
     
     def render(self):
         """Render the device control UI."""
-        if not self.available:
-            self.app.logger.debug("Device Control UI not available - feature not detected")
-            return
-        
         # Check if window should be shown
         app_state = self.app.app_state_ui
         should_show = getattr(app_state, 'show_device_control_window', False)
         
-        self.app.logger.info(f"Device Control render: should_show={should_show}")
-        
         if not should_show:
+            return
+        
+        # Always render window, but show different content based on availability
+        if not self.available:
+            self._render_supporter_only_message()
             return
         
         # Set window properties to ensure it's visible
@@ -794,6 +793,81 @@ class DeviceControlUI:
         if self.live_tracking_active and self.live_tracker:
             asyncio.create_task(self.live_tracker.process_tracking_result(tracking_result))
     
+    def _render_supporter_only_message(self):
+        """Render supporter-only message when device control is not available."""
+        # Set window properties
+        imgui.set_next_window_position(150, 150, imgui.FIRST_USE_EVER)
+        imgui.set_next_window_size(500, 300, imgui.FIRST_USE_EVER)
+        
+        # Main window
+        window_flags = imgui.WINDOW_NO_COLLAPSE
+        expanded, opened = imgui.begin("🎮 Device Control", True, window_flags)
+        
+        if not opened:
+            self.app.app_state_ui.show_device_control_window = False
+        
+        if expanded:
+            # Center the content
+            imgui.dummy(0, 20)
+            
+            # Title
+            imgui.push_font(None)  # Use default font but we can make it bold
+            imgui.text_colored("🎮 Device Control", 0.2, 0.8, 1.0)
+            imgui.pop_font()
+            
+            imgui.separator()
+            imgui.dummy(0, 10)
+            
+            # Main message
+            imgui.text_colored("Supporter Feature Only", 1.0, 0.6, 0.0)
+            imgui.dummy(0, 10)
+            
+            imgui.text_wrapped(
+                "Device control features are available to supporters only. "
+                "These features include:"
+            )
+            
+            imgui.dummy(0, 5)
+            imgui.bullet_text("Hardware device integration (Handy, OSR2, etc.)")
+            imgui.bullet_text("Live tracking with device control")
+            imgui.bullet_text("Video + funscript synchronized playback")
+            imgui.bullet_text("Advanced device parameterization")
+            imgui.bullet_text("Multi-axis device support")
+            
+            imgui.dummy(0, 15)
+            
+            # Support button
+            if imgui.button("💝 Become a Supporter", width=200, height=30):
+                # This would open the support/patreon page
+                self._open_support_page()
+            
+            imgui.same_line()
+            imgui.text_colored("Support the project!", 0.7, 0.7, 0.7)
+            
+            imgui.dummy(0, 10)
+            imgui.separator()
+            imgui.dummy(0, 5)
+            
+            imgui.text_colored("How to activate:", 0.0, 1.0, 0.0)
+            imgui.text_wrapped(
+                "Once you become a supporter, you'll receive a device_control "
+                "folder. Simply copy it to your FunGen directory and restart "
+                "the application to activate all device control features!"
+            )
+        
+        imgui.end()
+    
+    def _open_support_page(self):
+        """Open the support/patreon page in browser."""
+        try:
+            import webbrowser
+            # This would be the actual support URL
+            support_url = "https://patreon.com/your_project"  # Replace with actual URL
+            webbrowser.open(support_url)
+            self.logger.info("Opened supporter page in browser")
+        except Exception as e:
+            self.logger.error(f"Failed to open support page: {e}")
+
     def cleanup(self):
         """Clean up device control resources."""
         if not self.available:
