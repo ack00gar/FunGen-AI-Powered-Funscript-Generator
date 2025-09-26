@@ -12,13 +12,26 @@ This project is still at the early stages of development. It is not intended for
 
 ---
 
+## New Feature: Automatic System Scaling Support
+
+FunGen now automatically detects your system's display scaling settings (DPI) and adjusts the UI accordingly. This feature works on Windows, macOS, and Linux, ensuring the application looks crisp and properly sized on high-DPI displays.
+
+- Automatically applies the correct font scaling based on your system settings
+- Supports Windows display scaling (125%, 150%, etc.)
+- Supports macOS Retina displays
+- Supports Linux high-DPI configurations
+- Can be enabled/disabled in the Settings menu
+- Manual detection button available for when you change display settings
+
+---
+
 ## Quick Installation (Recommended)
 
 **Automatic installer that handles everything for you:**
 
 ### Windows
 1. Download: [fungen_install.bat](https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_install.bat)
-2. Right-click → "Run as administrator" (recommended)
+2. Double-click to run (or run from command prompt)
 3. Wait for automatic installation of Python, Git, FFmpeg, and FunGen
 
 ### Linux/macOS
@@ -51,7 +64,7 @@ Before using this project, ensure you have the following installed:
 - **Miniconda** (https://www.anaconda.com/docs/getting-started/miniconda/install)
 
 Easy install of Miniconda for Windows users:
-Click Start, type "cmd", right click on Command Prompt, and select "Run as administrator." Enter "winget install -e --id Anaconda.Miniconda3" and press enter. Miniconda should then download and install.
+Open Command Prompt and run: `winget install -e --id Anaconda.Miniconda3`
 
 ### Start a miniconda command prompt
 After installing Miniconda look for a program called "Anaconda prompt (miniconda3)" in the start menu (on Windows) and open it
@@ -426,6 +439,50 @@ See the [LICENSE](LICENSE) file for full details.
 - **YOLO**: Thanks to the Ultralytics team for the YOLO implementation.
 - **FFmpeg**: For video processing capabilities.
 - **Eroscripts Community**: For the inspiration and use cases.
+
+---
+
+# Troubleshooting
+
+## Installation Issues
+
+### "unknown@unknown" or Git Permission Errors
+
+If you see `[unknown@unknown]` in the application logs or git errors like "returned non-zero exit status 128":
+
+**Cause:** The installer was run with administrator privileges, causing git permission/ownership issues.
+
+**Solution 1 - Fix git permissions:**
+```cmd
+cd "C:\path\to\your\FunGen\FunGen"
+git config --add safe.directory .
+```
+
+**Solution 2 - Reinstall as normal user:**
+1. Redownload `fungen_install.bat`
+2. Run it as a **normal user** (NOT as administrator)
+3. Use the launcher script (`launch.bat`) instead of `python main.py`
+
+### FFmpeg/FFprobe Not Found
+
+If you get "ffmpeg/ffprobe not found" errors:
+
+1. **Use the launcher script** (`launch.bat` or `launch.sh`) instead of running `python main.py` directly
+2. **Rerun the installer** to get updated launcher scripts with FFmpeg PATH fixes
+3. The launcher automatically adds FFmpeg to PATH
+
+### General Installation Problems
+
+1. **Always use launcher scripts** - Don't run `python main.py` directly
+2. **Run installer as normal user** - Avoid administrator mode
+3. **Rerun installer for updates** - Get latest fixes by rerunning the installer
+4. **Check working directory** - Make sure you're in the FunGen project folder
+
+For detailed diagnostics, run:
+```cmd
+cd "C:\path\to\your\FunGen\FunGen"
+python debug_git.py
+```
 
 ---
 

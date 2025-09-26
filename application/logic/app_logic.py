@@ -271,6 +271,23 @@ class ApplicationLogic:
         self.energy_saver = AppEnergySaver(self)
         self.utility = AppUtility(self)
 
+        # --- System Scaling Detection ---
+        if not self.is_cli_mode:
+            try:
+                from application.utils.system_scaling import apply_system_scaling_to_settings, get_system_scaling_info
+                scaling_applied = apply_system_scaling_to_settings(self.app_settings)
+                if scaling_applied:
+                    self.logger.info("System scaling applied to application settings")
+                else:
+                    # Log system scaling info for debugging even if not applied
+                    try:
+                        scaling_factor, dpi, platform = get_system_scaling_info()
+                        self.logger.debug(f"System scaling info: {scaling_factor:.2f}x ({dpi:.0f} DPI on {platform})")
+                    except Exception as e:
+                        self.logger.debug(f"Could not get system scaling info: {e}")
+            except Exception as e:
+                self.logger.warning(f"Failed to apply system scaling: {e}")
+
         # --- Other Managers ---
         self.project_manager = ProjectManager(self)
         self.shortcut_manager = ShortcutManager(self)

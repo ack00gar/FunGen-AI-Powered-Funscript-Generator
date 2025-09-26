@@ -12,7 +12,7 @@ from typing import List, Dict
 from collections import deque
 
 from config import constants, element_group_colors
-from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu
+from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
 
@@ -88,7 +88,8 @@ class GUI:
         self.main_menu = MainMenu(app)
         self.gauge_window_ui_t1 = GaugeWindow(app, timeline_num=1)
         self.gauge_window_ui_t2 = GaugeWindow(app, timeline_num=2)
-        self.lr_dial_window_ui = LRDialWindow(app)
+        self.movement_bar_ui = LRDialWindow(app)  # Movement Bar (backward compatible name)
+        self.simulator_3d_window_ui = Simulator3DWindow(app)
 
         self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=1)
         self.timeline_editor2 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=2)
@@ -1711,9 +1712,12 @@ class GUI:
         if getattr(app_state, 'show_gauge_window_timeline2', False):
             self.gauge_window_ui_t2.render()
             
-        # Only render LR dial window if shown
-        if getattr(app_state, 'show_lr_dial_window', False):
-            self.lr_dial_window_ui.render()
+        # Only render Movement Bar if shown
+        if getattr(app_state, 'show_lr_dial_graph', False):
+            self.movement_bar_ui.render()
+
+        if getattr(app_state, 'show_simulator_3d', False):
+            self.simulator_3d_window_ui.render()
         
         # Batch confirmation dialog (has internal visibility check)
         self._render_batch_confirmation_dialog()

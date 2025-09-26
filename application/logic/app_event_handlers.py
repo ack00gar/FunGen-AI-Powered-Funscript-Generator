@@ -326,6 +326,14 @@ class AppEventHandlers:
             if mark_dirty and self.app.project_manager:
                 self.app.project_manager.project_dirty = True  # Seeking can be considered a change
             self.app.energy_saver.reset_activity_timer()
+            
+            # Resync Handy device if streaming is active
+            if hasattr(self.app, 'video_display_ui') and self.app.video_display_ui:
+                video_ui = self.app.video_display_ui
+                if hasattr(video_ui, 'handy_streaming_active') and video_ui.handy_streaming_active:
+                    # Trigger Handy resync after seek
+                    self.logger.info("Resyncing Handy after video seek...")
+                    video_ui._resync_handy_after_seek()
 
     def handle_seek_bar_drag(self, frame_index: int):
         """Handle seeking from UI elements like the timeline preview bar."""

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 FunGen Universal Installer - Stage 2
+Version: 1.2.0
 Complete installation system that assumes Python is available but nothing else
 
 This installer handles the complete FunGen setup after Python is installed:
@@ -29,6 +30,9 @@ import tarfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import argparse
+
+# Version information
+INSTALLER_VERSION = "1.3.5"
 
 # Configuration
 CONFIG = {
@@ -122,10 +126,11 @@ class ProgressBar:
 class FunGenUniversalInstaller:
     """Universal FunGen installer - assumes Python is available"""
     
-    def __init__(self, install_dir: Optional[str] = None, force: bool = False):
+    def __init__(self, install_dir: Optional[str] = None, force: bool = False, bootstrap_version: Optional[str] = None):
         self.platform = platform.system()
         self.arch = platform.machine().lower()
         self.force = force
+        self.bootstrap_version = bootstrap_version
         self.install_dir = Path(install_dir) if install_dir else Path.cwd()
         self.project_path = self.install_dir / CONFIG["project_name"]
         
@@ -159,10 +164,24 @@ class FunGenUniversalInstaller:
         """Print installer header"""
         print(f"\n{Colors.HEADER}{Colors.BOLD}=" * 60)
         print("    FunGen Universal Installer")
+        print(f"              v{INSTALLER_VERSION}")
+        if self.bootstrap_version:
+            print(f"         (Bootstrap v{self.bootstrap_version})")
         print("=" * 60 + Colors.ENDC)
         print(f"{Colors.CYAN}Platform: {self.platform} ({self.arch})")
         print(f"Install Directory: {self.install_dir}")
-        print(f"Project Path: {self.project_path}{Colors.ENDC}\n")
+        print(f"Project Path: {self.project_path}{Colors.ENDC}")
+        
+        # Add interactive warning for macOS/Linux
+        if self.platform in ["Darwin", "Linux"]:
+            print(f"\n{Colors.YELLOW}⚠️  INTERACTIVE INSTALLATION NOTICE:")
+            print("   Some system installations may require your interaction:")
+            print("   • Password prompts for system package installation")
+            print("   • License agreement acceptance (Xcode Command Line Tools)")
+            print("   • Package manager confirmations")
+            print(f"   Please stay near your computer during installation.{Colors.ENDC}")
+        
+        print()
     
     def print_step(self, step_name: str):
         """Print current installation step"""
@@ -319,10 +338,11 @@ class FunGenUniversalInstaller:
             if not self.download_with_progress(git_url, installer_path, "Git installer"):
                 return False
             
-            # Install silently
+            # Install silently with user-only installation (no admin required)
             ret, _, stderr = self.run_command([
                 str(installer_path), "/VERYSILENT", "/NORESTART", "/NOCANCEL",
-                "/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"
+                "/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS", 
+                "/CURRENTUSER"  # Install for current user only
             ], check=False)
             
             if ret == 0:
@@ -345,19 +365,35 @@ class FunGenUniversalInstaller:
         """Install Git on macOS"""
         # Check if Homebrew is available
         if self.command_exists("brew"):
+            print("  Installing Git via Homebrew...")
+            print("  Note: This may prompt for your password or Xcode license acceptance")
             ret, _, stderr = self.run_command(["brew", "install", "git"], check=False)
             if ret == 0:
                 self.print_success("Git installed via Homebrew")
                 return True
+            else:
+                print(f"  Homebrew install failed: {stderr}")
         
         # Try to install Xcode Command Line Tools
         print("  Installing Xcode Command Line Tools (includes Git)...")
+        print("  This will open a dialog - please accept the license agreement")
         ret, _, _ = self.run_command(["xcode-select", "--install"], check=False)
         
         if ret == 0:
-            print("  Please complete the Xcode Command Line Tools installation in the dialog")
-            print("  Then re-run this installer")
-            return False
+            print("  ⚠️  INTERACTIVE STEP REQUIRED:")
+            print("     A dialog has opened for Xcode Command Line Tools installation")
+            print("     Please accept the license agreement and complete the installation")
+            print("     This may take several minutes to download and install")
+            print("  ")
+            input("  Press Enter when the installation is complete...")
+            
+            # Verify installation
+            if self.command_exists("git"):
+                self.print_success("Git installed via Xcode Command Line Tools")
+                return True
+            else:
+                self.print_error("Git installation verification failed")
+                return False
         else:
             self.print_error("Could not install Git automatically")
             self.print_error("Please install Git manually: https://git-scm.com/download/mac")
@@ -378,16 +414,24 @@ class FunGenUniversalInstaller:
         for update_cmd, install_cmd in package_managers:
             if self.command_exists(install_cmd[0]):
                 print(f"  Using {install_cmd[0]} package manager...")
+                print("  Note: You may be prompted for your password or to accept terms")
                 
                 if update_cmd:
+                    print("  Updating package lists...")
                     self.run_command(update_cmd, check=False)
                 
+                print(f"  Installing Git with {install_cmd[0]}...")
                 ret, _, stderr = self.run_command(install_cmd, check=False)
                 if ret == 0:
                     self.print_success(f"Git installed via {install_cmd[0]}")
                     return True
                 else:
                     self.print_warning(f"Failed to install with {install_cmd[0]}: {stderr}")
+                    # If interactive prompts were missed, suggest manual installation
+                    if "interactive" in stderr.lower() or "prompt" in stderr.lower():
+                        print("  ⚠️  This package manager may require interactive input")
+                        print(f"     Try running manually: sudo {' '.join(install_cmd)}")
+                        return False
         
         self.print_error("Could not install Git automatically")
         self.print_error("Please install Git manually using your system's package manager")
@@ -415,11 +459,25 @@ class FunGenUniversalInstaller:
         
         print("  Cloning repository...")
         ret, _, stderr = self.run_command([
-            "git", "clone", CONFIG["repo_url"], str(self.project_path)
+            "git", "clone", "--branch", "main", CONFIG["repo_url"], str(self.project_path)
         ], check=False)
         
         if ret == 0:
-            self.print_success("Repository cloned successfully")
+            # Configure git safe.directory to prevent permission issues
+            self.run_command([
+                "git", "config", "--add", "safe.directory", str(self.project_path)
+            ], cwd=self.project_path, check=False)
+            
+            # Verify git repository is properly set up
+            ret, stdout, _ = self.run_command([
+                "git", "rev-parse", "--short", "HEAD"
+            ], cwd=self.project_path, check=False)
+            
+            if ret == 0:
+                commit = stdout.strip()
+                self.print_success(f"Repository cloned successfully (main@{commit})")
+            else:
+                self.print_success("Repository cloned successfully")
             return True
         else:
             self.print_error(f"Failed to clone repository: {stderr}")
@@ -522,12 +580,85 @@ class FunGenUniversalInstaller:
         self.print_warning("Please install FFmpeg using your system's package manager")
         return True  # Don't fail installation
     
+    def _check_arm64_windows_compatibility(self):
+        """Check for ARM64 Windows and provide guidance."""
+        if platform.system() == "Windows" and platform.machine().lower() in ['arm64', 'aarch64']:
+            python_arch = platform.architecture()[0]
+            
+            self.print_warning("ARM64 Windows detected!")
+            self.print_warning("")
+            self.print_warning("ARM64 Windows has limited Python package support.")
+            self.print_warning("Many packages (including imgui) cannot compile on ARM64.")
+            self.print_warning("")
+            
+            if "arm" in platform.platform().lower() or "arm64" in python_arch.lower():
+                self.print_warning("RECOMMENDED SOLUTION:")
+                self.print_warning("1. Uninstall current Python (if ARM64)")
+                self.print_warning("2. Download Python 3.11 x64 from python.org")
+                self.print_warning("3. Install x64 Python (will run via emulation)")
+                self.print_warning("4. Rerun this installer")
+                self.print_warning("")
+                self.print_warning("ALTERNATIVE: Use Windows Subsystem for Linux (WSL)")
+                self.print_warning("- Run: wsl --install")
+                self.print_warning("- Install Ubuntu and run FunGen in Linux")
+                self.print_warning("")
+                
+                response = input("Continue anyway? (not recommended) [y/N]: ").lower()
+                if response != 'y':
+                    self.print_error("Installation cancelled. Please install x64 Python first.")
+                    return False
+                    
+        return True
+
+    def _handle_imgui_installation_failure(self):
+        """Handle imgui installation failure with appropriate guidance."""
+        self.print_error("All imgui installation strategies failed.")
+        self.print_error("This means no precompiled wheels are available and compilation failed.")
+        self.print_error("")
+        
+        # ARM64-specific guidance
+        if platform.machine().lower() in ['arm64', 'aarch64']:
+            self.print_error("ARM64 WINDOWS DETECTED:")
+            self.print_error("imgui does not compile on ARM64 Windows.")
+            self.print_error("")
+            self.print_error("RECOMMENDED SOLUTION:")
+            self.print_error("1. Uninstall current ARM64 Python")
+            self.print_error("2. Download Python 3.11 x64 from python.org")
+            self.print_error("3. Install x64 Python (runs via emulation)")
+            self.print_error("4. Rerun this installer")
+            self.print_error("")
+            self.print_error("ALTERNATIVE: Use WSL2 Ubuntu")
+        else:
+            self.print_error("SOLUTION OPTIONS:")
+            self.print_error("1. EASIEST: Install Microsoft Visual C++ Build Tools:")
+            self.print_error("   https://visualstudio.microsoft.com/visual-cpp-build-tools/")
+            self.print_error("   - Download 'Build Tools for Visual Studio 2022'")
+            self.print_error("   - Select 'C++ build tools' workload")
+            self.print_error("   - Restart computer after installation")
+            self.print_error("")
+            self.print_error("2. Install Visual Studio Community (includes build tools)")
+            self.print_error("3. Use Windows Subsystem for Linux (WSL2)")
+        
+        self.print_error("")
+        self.print_error("⚠️  WITHOUT IMGUI, FUNGEN CANNOT DISPLAY ITS GUI!")
+        self.print_error("The installation will continue, but FunGen won't work until this is fixed.")
+        print("  Core requirements installed (GUI unavailable)")
+
     def setup_python_environment(self) -> bool:
         """Setup Python virtual environment"""
         print("  Setting up Python environment...")
         
+        # Check ARM64 compatibility before proceeding
+        if not self._check_arm64_windows_compatibility():
+            return False
+        
         if self.conda_available:
-            return self._setup_conda_environment()
+            if self._setup_conda_environment():
+                return True
+            else:
+                print("  Conda environment setup failed, trying Python venv as fallback...")
+                self.conda_available = False  # Switch to venv mode
+                return self._setup_venv_environment()
         else:
             return self._setup_venv_environment()
     
@@ -542,13 +673,30 @@ class FunGenUniversalInstaller:
         
         if not env_exists:
             print(f"  Creating conda environment '{CONFIG['env_name']}'...")
-            ret, _, stderr = self.run_command([
+            print(f"  Using conda at: {conda_exe}")
+            print(f"  Command: conda create -n {CONFIG['env_name']} python={CONFIG['python_version']} -y")
+            
+            ret, stdout, stderr = self.run_command([
                 str(conda_exe), "create", "-n", CONFIG["env_name"],
                 f"python={CONFIG['python_version']}", "-y"
             ], check=False)
             
             if ret != 0:
-                self.print_error(f"Failed to create conda environment: {stderr}")
+                self.print_error(f"Failed to create conda environment")
+                self.print_error(f"Error details: {stderr}")
+                if stdout:
+                    self.print_error(f"Output: {stdout}")
+                
+                # Common solutions
+                print("\nPossible solutions:")
+                print("1. Try running manually:")
+                print(f"   conda create -n {CONFIG['env_name']} python={CONFIG['python_version']} -y")
+                print("2. Check if conda is properly initialized:")
+                print("   conda init")
+                print("3. Try using system Python instead (rerun installer)")
+                print("4. Check available conda channels:")
+                print("   conda info")
+                
                 return False
         else:
             self.print_success(f"Using existing conda environment '{CONFIG['env_name']}'")
@@ -564,12 +712,22 @@ class FunGenUniversalInstaller:
             return True
         
         print(f"  Creating virtual environment...")
+        print(f"  Using Python: {sys.executable}")
+        print(f"  Target path: {self.venv_path}")
+        
         ret, _, stderr = self.run_command([
             sys.executable, "-m", "venv", str(self.venv_path)
         ], check=False)
         
         if ret != 0:
-            self.print_error(f"Failed to create virtual environment: {stderr}")
+            self.print_error(f"Failed to create virtual environment")
+            self.print_error(f"Error: {stderr}")
+            print("\nPossible solutions:")
+            print("1. Check if Python venv module is available:")
+            print(f"   {sys.executable} -m venv --help")
+            print("2. Try installing python3-venv (Linux):")
+            print("   sudo apt install python3-venv")
+            print("3. Use system Python directly (not recommended)")
             return False
         
         self.print_success("Virtual environment created")
@@ -595,29 +753,184 @@ class FunGenUniversalInstaller:
             
             # Install core requirements
             core_req = CONFIG["requirements_files"]["core"]
-            if Path(core_req).exists():
-                print("  Installing core requirements...")
-                ret, _, stderr = self.run_command([
-                    str(python_exe), "-m", "pip", "install", "-r", core_req
-                ], check=False)
-                
-                if ret != 0:
-                    self.print_error(f"Failed to install core requirements: {stderr}")
-                    return False
+            core_req_path = self.project_path / core_req
+            if core_req_path.exists():
+                # On Windows, try to avoid imgui compilation issues by installing packages individually first
+                if platform.system() == "Windows":
+                    print(f"  Installing core requirements (Windows optimized approach)...")
+                    print("  Installing packages individually to avoid compilation issues...")
+                    
+                    # Install all packages except imgui first
+                    non_imgui_packages = [
+                        "numpy", "ultralytics==8.3.78", "glfw~=2.8.0", "pyopengl~=3.1.7",
+                        "imageio~=2.36.1", "tqdm~=4.67.1", "colorama~=0.4.6", 
+                        "opencv-python~=4.10.0.84", "scipy~=1.15.1", "simplification~=0.7.13",
+                        "msgpack~=1.1.0", "pillow~=11.1.0", "orjson~=3.10.15", 
+                        "send2trash~=1.8.3", "aiosqlite"
+                    ]
+                    
+                    ret, stdout, stderr = self.run_command([
+                        str(python_exe), "-m", "pip", "install"
+                    ] + non_imgui_packages, check=False)
+                    
+                    if ret != 0:
+                        self.print_error(f"Failed to install core packages: {stderr}")
+                        return False
+                    
+                    # Now try to install imgui separately with multiple fallback strategies
+                    print("  Attempting to install imgui...")
+                    
+                    # Strategy 1: Force precompiled wheels first (avoid compilation)
+                    print("  Trying imgui with precompiled wheels only...")
+                    ret_imgui, stdout_imgui, stderr_imgui = self.run_command([
+                        str(python_exe), "-m", "pip", "install", "imgui", 
+                        "--only-binary=all", "--prefer-binary"
+                    ], check=False)
+                    
+                    if ret_imgui != 0:
+                        self.print_warning("Precompiled wheels not available. Trying alternative strategies...")
+                        
+                        # Strategy 2: Try with fresh cache (sometimes wheels are corrupted)
+                        print("  Trying imgui with fresh cache...")
+                        ret_imgui2, stdout_imgui2, stderr_imgui2 = self.run_command([
+                            str(python_exe), "-m", "pip", "install", "imgui", 
+                            "--no-cache-dir", "--only-binary=all"
+                        ], check=False)
+                        
+                        if ret_imgui2 != 0:
+                            # Strategy 3: Try imgui 2.0.0 specifically (most likely to have wheels)
+                            print("  Trying imgui 2.0.0 (most likely to have precompiled wheels)...")
+                            ret_imgui3, stdout_imgui3, stderr_imgui3 = self.run_command([
+                                str(python_exe), "-m", "pip", "install", "imgui==2.0.0",
+                                "--only-binary=all", "--prefer-binary"
+                            ], check=False)
+                            
+                            if ret_imgui3 == 0:
+                                print("  Core requirements installed successfully (imgui 2.0.0)")
+                                imgui_installed = True
+                            else:
+                                imgui_installed = False
+                            
+                            if not imgui_installed:
+                                # Strategy 4: Last resort - allow compilation but with better error handling
+                                print("  Last resort: attempting compilation...")
+                                ret_imgui4, stdout_imgui4, stderr_imgui4 = self.run_command([
+                                    str(python_exe), "-m", "pip", "install", "imgui", "--no-cache-dir"
+                                ], check=False)
+                                
+                                if ret_imgui4 == 0:
+                                    print("  Core requirements installed successfully (imgui compiled)")
+                                else:
+                                    # All strategies failed - provide guidance
+                                    self._handle_imgui_installation_failure()
+                        else:
+                            print("  Core requirements installed successfully (imgui retry)")
+                    else:
+                        print("  Core requirements installed successfully (including imgui)")
+                        
+                else:
+                    # Non-Windows: use regular requirements file installation
+                    print(f"  Installing core requirements from {core_req}...")
+                    ret, stdout, stderr = self.run_command([
+                        str(python_exe), "-m", "pip", "install", "-r", core_req
+                    ], check=False)
+                    
+                    if platform.system() != "Windows" and ret != 0:
+                        self.print_error(f"Failed to install core requirements: {stderr}")
+                        return False
+                    elif platform.system() != "Windows":
+                        print(f"    Core requirements installed successfully")
+            else:
+                self.print_error(f"Core requirements file not found: {core_req_path}")
+                return False
             
             # Install GPU-specific requirements
             gpu_type = self._detect_gpu()
             req_file = CONFIG["requirements_files"].get(gpu_type)
             
-            if req_file and Path(req_file).exists():
-                print(f"  Installing {gpu_type.upper()} requirements...")
-                ret, _, stderr = self.run_command([
-                    str(python_exe), "-m", "pip", "install", "-r", req_file
+            if req_file:
+                gpu_req_path = self.project_path / req_file
+                if gpu_req_path.exists():
+                    print(f"  Installing {gpu_type.upper()} requirements from {req_file}...")
+                    ret, stdout, stderr = self.run_command([
+                        str(python_exe), "-m", "pip", "install", "-r", req_file
+                    ], check=False)
+                    
+                    if ret != 0:
+                        # Try with precompiled wheels for GPU requirements too
+                        error_text = stderr + stdout  # Check both stderr and stdout
+                        compilation_errors = [
+                            "Microsoft Visual C++",
+                            "failed-wheel-build", 
+                            "error: Microsoft Visual C++",
+                            "Building wheel",
+                            "Failed building wheel",
+                            "build dependencies",
+                            "error: subprocess-exited-with-error"
+                        ]
+                        
+                        if any(error in error_text for error in compilation_errors):
+                            self.print_warning("Compilation error in GPU requirements. Trying precompiled wheels...")
+                            ret2, stdout2, stderr2 = self.run_command([
+                                str(python_exe), "-m", "pip", "install", "-r", req_file,
+                                "--only-binary=all", "--prefer-binary"
+                            ], check=False)
+                            
+                            if ret2 != 0:
+                                self.print_warning(f"Failed to install {gpu_type} requirements even with precompiled wheels")
+                                self.print_warning("GPU acceleration may not work properly. Consider installing Visual C++ Build Tools.")
+                            else:
+                                print(f"    {gpu_type.upper()} requirements installed successfully (precompiled)")
+                        else:
+                            self.print_warning(f"Failed to install {gpu_type} requirements: {stderr}")
+                            # Don't fail installation for GPU requirements
+                    else:
+                        print(f"    {gpu_type.upper()} requirements installed successfully")
+                else:
+                    self.print_warning(f"GPU requirements file not found: {gpu_req_path}")
+            else:
+                print(f"  No specific requirements for {gpu_type} GPU type")
+            
+            # Install device_control requirements if available (supporter feature)
+            device_control_req_path = self.project_path / "device_control" / "requirements.txt"
+            if device_control_req_path.exists():
+                print("  Installing device control requirements (supporter feature)...")
+                ret, stdout, stderr = self.run_command([
+                    str(python_exe), "-m", "pip", "install", "-r", str(device_control_req_path)
                 ], check=False)
                 
                 if ret != 0:
-                    self.print_warning(f"Failed to install {gpu_type} requirements: {stderr}")
-                    # Don't fail installation for GPU requirements
+                    # Try with precompiled wheels for device control too
+                    error_text = stderr + stdout
+                    compilation_errors = [
+                        "Microsoft Visual C++",
+                        "failed-wheel-build", 
+                        "error: Microsoft Visual C++",
+                        "Building wheel",
+                        "Failed building wheel",
+                        "build dependencies",
+                        "error: subprocess-exited-with-error"
+                    ]
+                    
+                    if any(error in error_text for error in compilation_errors):
+                        self.print_warning("Compilation error in device control requirements. Trying precompiled wheels...")
+                        ret2, stdout2, stderr2 = self.run_command([
+                            str(python_exe), "-m", "pip", "install", "-r", str(device_control_req_path),
+                            "--only-binary=all", "--prefer-binary"
+                        ], check=False)
+                        
+                        if ret2 != 0:
+                            self.print_warning("Failed to install device control requirements even with precompiled wheels")
+                            self.print_warning("Device control features may not work properly.")
+                        else:
+                            print("    Device control requirements installed successfully (precompiled)")
+                    else:
+                        self.print_warning(f"Failed to install device control requirements: {stderr}")
+                        self.print_warning("Device control features may not work properly.")
+                else:
+                    print("    Device control requirements installed successfully")
+            else:
+                print("  Device control not found - core features only")
             
             self.print_success("Python dependencies installed")
             return True
@@ -698,9 +1011,32 @@ class FunGenUniversalInstaller:
     
     def _create_windows_launcher(self, activate_cmd: str):
         """Create Windows launcher"""
+        # Add tool paths to PATH
+        path_additions = []
+        
+        # Add FFmpeg path if it exists
+        ffmpeg_path = self.tools_dir / "ffmpeg"
+        if ffmpeg_path.exists():
+            path_additions.append(str(ffmpeg_path))
+        
+        # Add common Git paths if they exist
+        git_paths = [
+            Path.home() / "AppData" / "Local" / "Programs" / "Git" / "bin",
+            Path("C:\\Program Files\\Git\\bin"),
+            Path("C:\\Program Files (x86)\\Git\\bin")
+        ]
+        for git_path in git_paths:
+            if git_path.exists():
+                path_additions.append(str(git_path))
+                break  # Only add the first one found
+        
+        path_setup = ""
+        if path_additions:
+            path_setup = f'set "PATH={";".join(path_additions)};%PATH%"\n'
+        
         launcher_content = f'''@echo off
 cd /d "{self.project_path}"
-echo Activating FunGen environment...
+{path_setup}echo Activating FunGen environment...
 {activate_cmd}
 echo Starting FunGen...
 python {CONFIG["main_script"]} %*
@@ -712,9 +1048,31 @@ pause
     
     def _create_unix_launcher(self, activate_cmd: str):
         """Create Unix launcher (Linux/macOS)"""
+        # Add tool paths to PATH  
+        path_additions = []
+        
+        # Add FFmpeg path if it exists
+        ffmpeg_path = self.tools_dir / "ffmpeg"
+        if ffmpeg_path.exists():
+            path_additions.append(str(ffmpeg_path))
+        
+        # Add Git paths that might not be in standard PATH (mainly for Homebrew)
+        git_paths = [
+            Path("/usr/local/bin"),  # Homebrew on Intel macOS
+            Path("/opt/homebrew/bin"),  # Homebrew on Apple Silicon macOS
+        ]
+        for git_path in git_paths:
+            if git_path.exists() and (git_path / "git").exists():
+                path_additions.append(str(git_path))
+                break  # Only add the first one found
+        
+        path_setup = ""
+        if path_additions:
+            path_setup = f'export PATH="{":".join(path_additions)}:$PATH"\n'
+        
         launcher_content = f'''#!/bin/bash
 cd "$(dirname "$0")"
-echo "Activating FunGen environment..."
+{path_setup}echo "Activating FunGen environment..."
 {activate_cmd}
 echo "Starting FunGen..."
 python {CONFIG["main_script"]} "$@"
@@ -767,23 +1125,18 @@ read -p "Press Enter to close..."
         python_exe = self._get_python_executable()
         if python_exe and python_exe.exists():
             try:
-                # Create a shorter, more reliable test command
-                test_command = (
-                    "import sys; print(f'Python: {sys.version.split()[0]}'); "
-                    "try: import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.cuda.is_available()}'); except: print('PyTorch: Not installed'); "
-                    "try: import ultralytics; print('Ultralytics: OK'); except: print('Ultralytics: Not installed')"
-                )
+                # Create a much shorter test command to avoid Windows command line length limits
+                test_command = "import torch, ultralytics; print('Environment: OK')"
                 ret, stdout, stderr = self.run_command([
                     str(python_exe), "-c", test_command
                 ], capture=True, check=False)
                 
                 if ret == 0:
                     self.print_success("Python environment: OK")
-                    for line in stdout.strip().split('\n'):
-                        if line.strip():
-                            print(f"    {line}")
+                    print(f"    PyTorch and Ultralytics successfully imported")
                 else:
-                    self.print_warning(f"Python environment test failed: {stderr}")
+                    self.print_warning(f"Python environment test failed - but installation may still work")
+                    self.print_warning(f"Error details: {stderr}")
             except Exception as e:
                 self.print_warning(f"Could not test Python environment: {e}")
         
@@ -796,6 +1149,7 @@ read -p "Press Enter to close..."
         print("=" * 60 + Colors.ENDC)
         
         print(f"\n{Colors.CYAN}To run FunGen:{Colors.ENDC}")
+        print(f"{Colors.YELLOW}  ⚠ IMPORTANT: Use the launcher scripts below (not 'python main.py' directly){Colors.ENDC}")
         
         if self.platform == "Windows":
             print(f"  • Double-click: {self.project_path / 'launch.bat'}")
@@ -804,10 +1158,20 @@ read -p "Press Enter to close..."
                 print(f"  • Double-click: {self.project_path / 'launch.command'}")
             print(f"  • Terminal: {self.project_path / 'launch.sh'}")
         
+        print(f"\n{Colors.CYAN}Alternative terminal method:{Colors.ENDC}")
+        print(f"  cd \"{self.project_path}\"")
+        if self.conda_available:
+            print(f"  conda activate {CONFIG['env_name']}")
+        else:
+            print(f"  source venv/bin/activate  # Linux/macOS")
+            print(f"  venv\\Scripts\\activate     # Windows")
+        print(f"  python {CONFIG['main_script']}")
+        
         print(f"\n{Colors.YELLOW}First-time setup:{Colors.ENDC}")
         print("  • FunGen will download required YOLO models on first run")
         print("  • Initial download may take 5-10 minutes")
         print("  • Ensure stable internet connection for model downloads")
+        print("  • If validation warnings appear above, they can usually be ignored")
         
         print(f"\n{Colors.CYAN}GPU Acceleration:{Colors.ENDC}")
         gpu_type = self._detect_gpu()
@@ -831,6 +1195,13 @@ read -p "Press Enter to close..."
     def install(self) -> bool:
         """Run the complete installation"""
         self.print_header()
+        
+        # Early ARM64 Windows detection
+        if platform.system() == "Windows" and platform.machine().lower() in ['arm64', 'aarch64']:
+            self.print_warning("⚠️  ARM64 Windows system detected!")
+            self.print_warning("📦 Python packages may have limited compatibility on ARM64.")
+            self.print_warning("🔧 If installation fails, consider using x64 Python instead.")
+            print()
         
         try:
             steps = [
@@ -898,6 +1269,12 @@ Examples:
     )
     
     parser.add_argument(
+        "--bootstrap-version",
+        help="Version of the bootstrap script (for troubleshooting)",
+        default=None
+    )
+    
+    parser.add_argument(
         "--force",
         action="store_true", 
         help="Force reinstallation of existing components"
@@ -912,7 +1289,7 @@ Examples:
     parser.add_argument(
         "--version",
         action="version",
-        version="FunGen Universal Installer 2.0.0"
+        version=f"FunGen Universal Installer {INSTALLER_VERSION}"
     )
     
     args = parser.parse_args()
@@ -943,7 +1320,8 @@ Examples:
     # Run installer
     installer = FunGenUniversalInstaller(
         install_dir=args.dir,
-        force=args.force
+        force=args.force,
+        bootstrap_version=args.bootstrap_version
     )
     
     success = installer.install()

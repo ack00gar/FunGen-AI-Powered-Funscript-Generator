@@ -1,4 +1,5 @@
 import os
+import webbrowser
 import imgui
 from config.element_group_colors import MenuColors
 
@@ -161,6 +162,11 @@ class MainMenu:
             self._render_tools_menu(app_state, file_mgr)
             self._render_ai_menu()
             self._render_updates_menu()
+            self._render_support_menu()
+            
+            # Render device control indicator after Support menu
+            self._render_device_control_indicator()
+            
             imgui.end_main_menu_bar()
 
         self._render_timeline_selection_popup()
@@ -483,11 +489,18 @@ class MainMenu:
                 setattr(app_state, attr, val)
                 pm.project_dirty = True
 
-        label = "L/R Dial Graph"
+        label = "Movement Bar"
         cur = getattr(app_state, "show_lr_dial_graph")
         clicked, val = imgui.menu_item(label, selected=cur)
         if clicked:
             setattr(app_state, "show_lr_dial_graph", val)
+            pm.project_dirty = True
+
+        label = "3D Simulator"
+        cur = getattr(app_state, "show_simulator_3d")
+        clicked, val = imgui.menu_item(label, selected=cur)
+        if clicked:
+            setattr(app_state, "show_simulator_3d", val)
             pm.project_dirty = True
 
         if not hasattr(app_state, "show_chapter_list_window"):
@@ -622,6 +635,7 @@ class MainMenu:
                 else:
                     tw._reset_state()
                     tw.is_open = True
+
             imgui.end_menu()
 
     def _render_ai_menu(self):
@@ -676,3 +690,70 @@ class MainMenu:
                     "Shows the update dialog if an update has been detected."
                 )
             imgui.end_menu()
+
+    def _render_support_menu(self):
+        app = self.app
+        if imgui.begin_menu("Support", True):
+            if _menu_item_simple("Support Development"):
+                try:
+                    webbrowser.open("https://ko-fi.com/k00gar")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open Ko-fi link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Support FunGen development on Ko-fi\n"
+                    "Your donations help improve the AI models and features!"
+                )
+
+            if _menu_item_simple("Join Discord Community"):
+                try:
+                    webbrowser.open("https://discord.com/invite/WYkjMbtCZA")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open Discord link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Join the FunGen Discord community\n"
+                    "Get help, share results, and discuss features!"
+                )
+            imgui.end_menu()
+
+    def _render_device_control_indicator(self):
+        """Render simple device control status indicator button."""
+        app = self.app
+        
+        # Check if device manager exists and is connected
+        device_manager = getattr(app, 'device_manager', None)
+        
+        if device_manager and device_manager.is_connected():
+            # Green button for active/connected
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)  # Green
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.6, 0.1, 1.0)
+            button_clicked = imgui.small_button("Device: ON")
+            imgui.pop_style_color(3)
+            
+            if imgui.is_item_hovered():
+                connected_devices = list(device_manager.connected_devices.keys())
+                device_name = connected_devices[0] if connected_devices else "Unknown"
+                imgui.set_tooltip(f"Device Connected: {device_name}\nActive for live tracking and video playback")
+        else:
+            # Red button for inactive/disconnected
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.3, 0.3, 1.0)  # Red
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.8, 0.4, 0.4, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.2, 0.2, 1.0)
+            button_clicked = imgui.small_button("Device: OFF")
+            imgui.pop_style_color(3)
+            
+            if imgui.is_item_hovered():
+                if device_manager:
+                    imgui.set_tooltip("No device connected\nDevice control available but not active")
+                else:
+                    # Check if device_control feature is available (folder exists)
+                    from application.utils.feature_detection import is_feature_available
+                    if is_feature_available("device_control"):
+                        imgui.set_tooltip("Device control not initialized\nCheck Device Control tab in Control Panel")
+                    else:
+                        imgui.set_tooltip("Device control not available\nSupporter feature - requires device_control folder")
+
