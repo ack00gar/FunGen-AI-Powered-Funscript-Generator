@@ -694,7 +694,7 @@ class MainMenu:
     def _render_support_menu(self):
         app = self.app
         if imgui.begin_menu("Support", True):
-            if _menu_item_simple("💝 Become a Supporter"):
+            if _menu_item_simple("Become a Supporter"):
                 try:
                     webbrowser.open("https://ko-fi.com/k00gar")
                 except Exception as e:
@@ -706,21 +706,8 @@ class MainMenu:
                     "Supporters get access to:\n"
                     "• Hardware device integration (Handy, OSR2, etc.)\n"
                     "• Live tracking with device control\n"
-                    "• Video + funscript synchronized playback\n"
-                    "• Advanced device parameterization"
-                )
-
-            imgui.separator()
-
-            if _menu_item_simple("Support Development"):
-                try:
-                    webbrowser.open("https://ko-fi.com/k00gar")
-                except Exception as e:
-                    if hasattr(app, 'logger') and app.logger:
-                        app.logger.warning(f"Could not open Ko-fi link: {e}")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Support FunGen development on Ko-fi\n"
+                    "• Video + funscript synchronized playbook\n"
+                    "• Advanced device parameterization\n"
                     "Your donations help improve the AI models and features!"
                 )
 

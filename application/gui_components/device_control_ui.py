@@ -837,7 +837,7 @@ class DeviceControlUI:
             imgui.dummy(0, 15)
             
             # Support button
-            if imgui.button("💝 Become a Supporter", width=200, height=30):
+            if imgui.button("Become a Supporter", width=200, height=30):
                 # This would open the support/patreon page
                 self._open_support_page()
             
