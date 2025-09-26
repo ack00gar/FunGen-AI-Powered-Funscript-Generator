@@ -598,8 +598,8 @@ class VideoDisplayUI:
                                     imgui.pop_style_var()
 
                             # Position at top right of video frame
-                            btn_labels = ["3D Simulator"]
-                            btn_attrs = ["show_simulator_3d"]
+                            btn_labels = ["Gauge T1", "Gauge T2", "3D Simulator"]
+                            btn_attrs = ["show_gauge_window_timeline1", "show_gauge_window_timeline2", "show_simulator_3d"]
                             btn_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in btn_labels]
                             total_btn_width = sum(btn_widths)
                             # btn_height = imgui.get_frame_height()
