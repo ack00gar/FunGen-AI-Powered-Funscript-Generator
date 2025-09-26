@@ -845,12 +845,19 @@ class DeviceControlUI:
             imgui.text_colored("Support the project!", 0.7, 0.7, 0.7)
             
             imgui.dummy(0, 10)
+            imgui.text_colored("Bot Command Available!", 0.0, 0.8, 1.0)
+            imgui.text_wrapped(
+                "Discord bot now supports: !device_control\n"
+                "Available to Supporters, Moderators, and Admins"
+            )
+            
+            imgui.dummy(0, 10)
             imgui.separator()
             imgui.dummy(0, 5)
             
             imgui.text_colored("Want to unlock Supporter-only features?", 0.0, 1.0, 0.0)
             imgui.text_wrapped(
-                "Support on ko-fi then get in touch with the bot in discord "
+                "Support on ko-fi then use the !device_control command in Discord "
                 "to receive your device_control folder. Simply copy it to your "
                 "FunGen directory and restart to activate all features!"
             )
