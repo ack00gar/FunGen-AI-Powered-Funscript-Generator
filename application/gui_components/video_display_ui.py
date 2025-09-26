@@ -40,6 +40,7 @@ class VideoDisplayUI:
         self.handy_streaming_active = False
         self.handy_preparing = False
         self.handy_last_funscript_path = None
+        self.saved_processing_speed_mode = None  # Store original speed mode when Handy starts
 
     def _update_actual_video_image_rect(self, display_w, display_h, cursor_x_offset, cursor_y_offset):
         win_pos_x, win_pos_y = imgui.get_window_position()
@@ -1155,6 +1156,15 @@ class VideoDisplayUI:
     def _start_handy_streaming(self):
         """Start Handy streaming with current funscript and video position."""
         print("DEBUG: _start_handy_streaming() called")
+        
+        # Force video to real-time speed for proper Handy synchronization
+        if hasattr(self.app, 'app_state_ui') and hasattr(self.app.app_state_ui, 'selected_processing_speed_mode'):
+            # Save current speed mode to restore later
+            self.saved_processing_speed_mode = self.app.app_state_ui.selected_processing_speed_mode
+            # Force to real-time speed
+            self.app.app_state_ui.selected_processing_speed_mode = constants.ProcessingSpeedMode.REALTIME
+            print(f"DEBUG: Forced video speed to REALTIME (was {self.saved_processing_speed_mode.value})")
+        
         import threading
         import asyncio
         
@@ -1460,6 +1470,15 @@ class VideoDisplayUI:
     def _stop_handy_streaming(self):
         """Stop Handy streaming and clean up."""
         print("DEBUG: _stop_handy_streaming() called")
+        
+        # Restore original video speed mode
+        if (self.saved_processing_speed_mode is not None and 
+            hasattr(self.app, 'app_state_ui') and 
+            hasattr(self.app.app_state_ui, 'selected_processing_speed_mode')):
+            self.app.app_state_ui.selected_processing_speed_mode = self.saved_processing_speed_mode
+            print(f"DEBUG: Restored video speed to {self.saved_processing_speed_mode.value}")
+            self.saved_processing_speed_mode = None
+        
         try:
             # Stop Handy device streaming
             if hasattr(self.app, 'device_manager') and self.app.device_manager:
