@@ -145,8 +145,13 @@ def main():
         # This helps maintain consistent behavior across different Python versions
 
     # Step 4: Parse command-line arguments
-    parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation")
-    parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file or a folder of videos. If omitted, GUI will start.')
+    parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation and Processing")
+    parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file, folder of videos, or funscript file. If omitted, GUI will start.')
+    
+    # Funscript filtering mode
+    parser.add_argument('--funscript-mode', action='store_true', help='Process funscript files instead of videos. Apply filters to existing funscripts.')
+    parser.add_argument('--filter', choices=['ultimate-autotune', 'rdp-simplify', 'savgol-filter', 'speed-limiter', 'anti-jerk', 'amplify', 'clamp', 'invert', 'keyframe'], 
+                        help='Filter to apply to funscript(s). Only works with --funscript-mode.')
     
     # Dynamic mode selection - get available modes from discovery system
     try:
@@ -157,7 +162,7 @@ def main():
         default_mode = batch_modes[0] if batch_modes else '3-stage'
         
         parser.add_argument('--mode', choices=available_modes, default=default_mode, 
-                        help='The processing mode to use for analysis. Available modes are dynamically discovered.')
+                        help='The processing mode to use for analysis. Only works with video processing.')
     except Exception as e:
         # Fallback if discovery system fails
         parser.add_argument('--mode', default='3-stage', help='Processing mode (discovery system unavailable)')
@@ -171,8 +176,16 @@ def main():
 
     args = parser.parse_args()
 
-    # Step 5: Start the appropriate interface
+    # Step 5: Validate arguments and start the appropriate interface
     if args.input_path:
+        # Validate funscript mode arguments
+        if args.funscript_mode and not args.filter:
+            logger.error("--funscript-mode requires --filter to be specified")
+            sys.exit(1)
+        if args.filter and not args.funscript_mode:
+            logger.error("--filter can only be used with --funscript-mode")
+            sys.exit(1)
+        
         run_cli(args)
     else:
         run_gui()
