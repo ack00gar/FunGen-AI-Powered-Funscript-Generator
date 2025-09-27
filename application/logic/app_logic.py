@@ -1896,6 +1896,11 @@ class ApplicationLogic:
         try:
             self.logger.info("Running in Command-Line Interface (CLI) mode.")
 
+            # Check if we're in funscript processing mode
+            if hasattr(args, 'funscript_mode') and args.funscript_mode:
+                self._run_funscript_cli_mode(args)
+                return
+
             # 1. Resolve input path and find video files
             input_path = os.path.abspath(args.input_path)
             if not os.path.exists(input_path):
@@ -2148,3 +2153,159 @@ class ApplicationLogic:
             error_msg = f"Error downloading models: {e}"
             self.set_status_message(error_msg, duration=5.0)
             self.logger.error(error_msg, exc_info=True)
+
+    def _run_funscript_cli_mode(self, args):
+        """
+        Handles CLI funscript processing mode - applies filters to existing funscripts.
+        """
+        self.logger.info("Running in funscript processing mode")
+        
+        # 1. Find funscript files
+        input_path = os.path.abspath(args.input_path)
+        if not os.path.exists(input_path):
+            self.logger.error(f"Input path does not exist: {input_path}")
+            return
+        
+        funscript_paths = []
+        if os.path.isfile(input_path):
+            if input_path.lower().endswith('.funscript'):
+                funscript_paths.append(input_path)
+            else:
+                self.logger.error(f"File is not a funscript: {input_path}")
+                return
+        elif os.path.isdir(input_path):
+            self.logger.info(f"Scanning folder for funscripts: {input_path} (Recursive: {args.recursive})")
+            if args.recursive:
+                for root, _, files in os.walk(input_path):
+                    for file in files:
+                        if file.lower().endswith('.funscript'):
+                            funscript_paths.append(os.path.join(root, file))
+            else:
+                for file in os.listdir(input_path):
+                    if file.lower().endswith('.funscript'):
+                        funscript_paths.append(os.path.join(input_path, file))
+        
+        if not funscript_paths:
+            self.logger.error("No funscript files found at the specified path.")
+            return
+        
+        self.logger.info(f"Found {len(funscript_paths)} funscript(s) to process with filter: {args.filter}")
+        
+        # 2. Load plugin system
+        try:
+            from funscript.plugins.base_plugin import plugin_registry
+            # Import all plugins to ensure they're registered
+            from funscript.plugins import (
+                ultimate_autotune_plugin, rdp_simplify_plugin, savgol_filter_plugin,
+                speed_limiter_plugin, anti_jerk_plugin, amplify_plugin, clamp_plugin,
+                invert_plugin, keyframe_plugin
+            )
+            
+            # Manually register plugins that don't auto-register
+            from funscript.plugins.rdp_simplify_plugin import RdpSimplifyPlugin
+            from funscript.plugins.amplify_plugin import AmplifyPlugin
+            from funscript.plugins.clamp_plugin import ValueClampPlugin
+            from funscript.plugins.invert_plugin import InvertPlugin
+            from funscript.plugins.savgol_filter_plugin import SavgolFilterPlugin
+            from funscript.plugins.speed_limiter_plugin import SpeedLimiterPlugin
+            from funscript.plugins.anti_jerk_plugin import AntiJerkPlugin
+            from funscript.plugins.keyframe_plugin import KeyframePlugin
+            
+            # Register plugins that aren't auto-registering
+            plugins_to_register = [
+                RdpSimplifyPlugin(), AmplifyPlugin(), ValueClampPlugin(), InvertPlugin(),
+                SavgolFilterPlugin(), SpeedLimiterPlugin(), AntiJerkPlugin(), KeyframePlugin()
+            ]
+            
+            for plugin in plugins_to_register:
+                try:
+                    plugin_registry.register(plugin)
+                except Exception:
+                    pass  # May already be registered
+                    
+        except ImportError as e:
+            self.logger.error(f"Failed to import plugin system: {e}")
+            return
+        
+        # 3. Get the specified plugin
+        plugin_map = {
+            'ultimate-autotune': 'Ultimate Autotune',
+            'rdp-simplify': 'Simplify (RDP)',
+            'savgol-filter': 'SavGol Filter',
+            'speed-limiter': 'Speed Limiter',
+            'anti-jerk': 'Anti-Jerk',
+            'amplify': 'Amplify',
+            'clamp': 'Clamp',
+            'invert': 'Invert',
+            'keyframe': 'Keyframe'
+        }
+        
+        plugin_name = plugin_map.get(args.filter)
+        if not plugin_name:
+            self.logger.error(f"Unknown filter: {args.filter}")
+            return
+        
+        plugin = plugin_registry.get_plugin(plugin_name)
+        if not plugin:
+            self.logger.error(f"Plugin not found: {plugin_name}")
+            return
+        
+        self.logger.info(f"Using plugin: {plugin_name}")
+        
+        # 4. Process each funscript
+        success_count = 0
+        for i, funscript_path in enumerate(funscript_paths):
+            try:
+                self.logger.info(f"Processing {i+1}/{len(funscript_paths)}: {os.path.basename(funscript_path)}")
+                
+                # Load the funscript using existing parsing logic
+                from funscript import DualAxisFunscript
+                actions, error_msg, _, _ = self.file_manager._parse_funscript_file(funscript_path)
+                
+                if error_msg:
+                    self.logger.error(f"Failed to parse funscript {funscript_path}: {error_msg}")
+                    continue
+                
+                if not actions:
+                    self.logger.warning(f"Skipping empty funscript: {funscript_path}")
+                    continue
+                
+                # Create funscript object and set actions
+                funscript = DualAxisFunscript()
+                funscript.primary_actions = actions
+                
+                # Get default parameters for the plugin
+                if hasattr(plugin, 'get_default_params'):
+                    params = plugin.get_default_params()
+                else:
+                    params = {}
+                
+                # Apply the filter
+                self.logger.info(f"Applying {plugin_name} filter...")
+                result = plugin.transform(funscript, 'primary', **params)
+                
+                # Some plugins return the funscript object, others modify in-place and return None
+                # We'll treat any non-exception result as success and use the original funscript
+                # which should now be modified by the plugin
+                output_path = self._generate_filtered_funscript_path(funscript_path, args.filter, args.overwrite)
+                
+                # Save the filtered funscript using existing file manager
+                # Use the modified funscript (plugins modify in-place)
+                self.file_manager._save_funscript_file(output_path, funscript.primary_actions)
+                self.logger.info(f"Saved filtered funscript: {output_path}")
+                success_count += 1
+                    
+            except Exception as e:
+                self.logger.error(f"Error processing {funscript_path}: {e}")
+                continue
+        
+        self.logger.info(f"Funscript processing complete. Successfully processed {success_count}/{len(funscript_paths)} files.")
+    
+    def _generate_filtered_funscript_path(self, original_path, filter_name, overwrite):
+        """Generate output path for filtered funscript."""
+        if overwrite:
+            return original_path
+        
+        # Insert filter name before .funscript extension
+        base, ext = os.path.splitext(original_path)
+        return f"{base}.{filter_name}{ext}"
