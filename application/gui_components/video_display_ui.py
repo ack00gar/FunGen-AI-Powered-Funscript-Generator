@@ -189,6 +189,9 @@ class VideoDisplayUI:
         # Add Handy control button inline with playback controls
         self._render_handy_control_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
         
+        # Add Fullscreen button inline with playback controls
+        self._render_fullscreen_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
+        
         imgui.end_group()
 
         if controls_disabled:
@@ -1101,6 +1104,244 @@ class VideoDisplayUI:
                 imgui.text("Start Handy streaming with current funscript")
                 imgui.text("Will upload to Handy servers and sync with video position")
             imgui.end_tooltip()
+    
+    def _render_fullscreen_button_inline(self, spacing: float, button_height: float, controls_disabled: bool):
+        """Render fullscreen button inline with playback controls."""
+        style = imgui.get_style()
+        button_width = button_height * 1.5  # Compact width for inline display
+        
+        # Add spacing and render inline with other controls
+        imgui.same_line(spacing=spacing)
+        
+        # Check if live tracking is active (when FS button should be enabled)
+        is_live_tracking = (self.app.processor and
+                           self.app.processor.is_processing and
+                           self.app.processor.enable_tracker_processing)
+        
+        # If parent controls are disabled due to live tracking, temporarily enable just for FS button
+        parent_disabled_override = False
+        if controls_disabled and is_live_tracking:
+            # Pop the parent disabled state temporarily
+            imgui.internal.pop_item_flag()
+            imgui.pop_style_var()
+            parent_disabled_override = True
+        
+        # Determine if video is loaded and ready for fullscreen
+        video_loaded = (hasattr(self.app, 'processor') and 
+                       self.app.processor and 
+                       hasattr(self.app.processor, 'video_path') and 
+                       self.app.processor.video_path)
+        
+        # Check if fullscreen is currently active
+        has_fullscreen_process = (hasattr(self, '_fullscreen_process') and 
+                                 self._fullscreen_process and 
+                                 self._fullscreen_process.poll() is None)
+        
+        # live tracking status already checked above
+        
+        # Fullscreen button should be enabled during live tracking!
+        # That's exactly when users want to see fullscreen with audio
+        # Override the parent controls_disabled for fullscreen specifically
+        fullscreen_button_disabled = not video_loaded
+        
+        # Important: Ignore parent controls_disabled during live tracking
+        # The fullscreen feature is most useful during live tracking!
+        if is_live_tracking and video_loaded:
+            fullscreen_button_disabled = False
+        
+        # Determine button state and styling
+        if has_fullscreen_process:
+            # Exit fullscreen mode
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
+            button_text = "Exit FS"
+            button_enabled = True
+        else:
+            # Enter fullscreen mode - highlight during live tracking
+            if is_live_tracking:
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2, 1.0)  # Green (live tracking)
+                button_text = "FS Live"
+            else:
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.8, 1.0)  # Blue (normal)
+                button_text = "FS"
+            button_enabled = video_loaded
+        
+        # Apply disabled styling if needed (but NOT during live tracking)
+        if fullscreen_button_disabled:
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
+        
+        # Render the button
+        button_clicked = imgui.button(f"{button_text}##FullscreenControl", width=button_width)
+        
+        # Use our fullscreen-specific logic, not parent controls_disabled
+        if button_clicked and not fullscreen_button_disabled:
+            self._handle_fullscreen_button_click()
+        
+        # Clean up disabled styling if we added it
+        if fullscreen_button_disabled:
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
+        
+        imgui.pop_style_color()
+        
+        # Show tooltip
+        if imgui.is_item_hovered():
+            imgui.begin_tooltip()
+            if not video_loaded:
+                imgui.text("No video loaded")
+            elif has_fullscreen_process:
+                imgui.text("Exit fullscreen mode")
+                imgui.text("Press Q in fullscreen window to quit")
+            elif is_live_tracking:
+                imgui.text("Fullscreen during live tracking")
+                imgui.text("Perfect sync + audio + controls")
+            else:
+                imgui.text("Enter fullscreen mode")
+                imgui.text("High-quality display with audio")
+            imgui.end_tooltip()
+        
+        # Restore parent disabled state if we overrode it
+        if parent_disabled_override:
+            # Re-apply parent disabled styling for subsequent buttons
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
+    
+    def _handle_fullscreen_button_click(self):
+        """Handle fullscreen button click - use simple synchronized ffplay approach."""
+        try:
+            # Check if we already have a fullscreen process running
+            if hasattr(self, '_fullscreen_process') and self._fullscreen_process:
+                if self._fullscreen_process.poll() is None:  # Still running
+                    # Stop existing fullscreen
+                    self._fullscreen_process.terminate()
+                    self._fullscreen_process = None
+                    if hasattr(self.app, 'logger'):
+                        self.app.logger.info("Fullscreen mode disabled")
+                    return
+            
+            # Start new fullscreen with synchronized ffplay
+            if not hasattr(self.app.processor, 'video_path') or not self.app.processor.video_path:
+                if hasattr(self.app, 'logger'):
+                    self.app.logger.warning("No video loaded for fullscreen")
+                return
+            
+            # Get current timestamp for perfect sync
+            current_time = self._get_current_playback_time()
+            
+            # Build ffplay command with high quality and audio
+            ffplay_cmd = [
+                'ffplay',
+                '-fs',                              # Fullscreen
+                '-autoexit',                        # Auto-exit when done
+                '-ss', str(current_time),           # Start at current time for sync
+                '-vf', self._get_fullscreen_video_filter(),  # High quality filter
+                self.app.processor.video_path       # Video file
+            ]
+            
+            # Start synchronized ffplay process
+            import subprocess
+            import sys
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            
+            self._fullscreen_process = subprocess.Popen(
+                ffplay_cmd,
+                stderr=subprocess.DEVNULL,  # Hide ffplay output
+                creationflags=creation_flags
+            )
+            
+            if hasattr(self.app, 'logger'):
+                self.app.logger.info(f"✅ Fullscreen started with ffplay (sync time: {current_time:.2f}s)")
+                self.app.logger.info("🎮 Controls: Space=pause, ←→=seek±10s, ↑↓=seek±1min, Q=quit")
+                self.app.logger.info("🔊 Audio: Full quality audio included")
+                    
+        except Exception as e:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.error(f"Error starting fullscreen: {e}")
+            import traceback
+            if hasattr(self.app, 'logger'):
+                self.app.logger.error(traceback.format_exc())
+    
+    def _initialize_dual_frame_processing(self):
+        """Initialize dual-frame processing for fullscreen display."""
+        try:
+            # Initialize dual-frame processor if needed
+            if not hasattr(self.app.processor, 'dual_frame_processor'):
+                from video.dual_frame_processor import DualFrameProcessor
+                self.app.processor.dual_frame_processor = DualFrameProcessor(self.app.processor)
+            
+            # Enable dual-frame mode
+            if not self.app.processor.dual_frame_processor.dual_frame_enabled:
+                self.app.processor.dual_frame_processor.enable_dual_frame_mode()
+                
+        except Exception as e:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.error(f"Error initializing dual-frame processing: {e}")
+    
+    def _get_current_fullscreen_frame(self) -> Optional[object]:
+        """Get current frame for fullscreen display."""
+        # This would get the latest fullscreen frame from dual-frame processor
+        if (hasattr(self.app.processor, 'dual_frame_processor') and
+            self.app.processor.dual_frame_processor.dual_frame_enabled):
+            return self.app.processor.dual_frame_processor.get_latest_fullscreen_frame()
+        return None
+    
+    def _handle_fullscreen_play_pause(self):
+        """Handle play/pause from fullscreen controls."""
+        if hasattr(self.app.processor, 'is_processing'):
+            if self.app.processor.is_processing:
+                self.app.processor.pause_processing()
+            else:
+                self.app.processor.resume_processing()
+    
+    def _handle_fullscreen_stop(self):
+        """Handle stop from fullscreen controls."""
+        if hasattr(self.app.processor, 'stop_processing'):
+            self.app.processor.stop_processing()
+    
+    def _handle_fullscreen_exit(self):
+        """Handle fullscreen exit."""
+        if hasattr(self.app, 'fullscreen_manager'):
+            self.app.fullscreen_manager.stop_fullscreen_display()
+    
+    def _get_current_playback_time(self) -> float:
+        """Get current playback time in seconds for synchronization."""
+        try:
+            # Try to get current time from processor
+            if hasattr(self.app.processor, 'get_current_time'):
+                return self.app.processor.get_current_time()
+            
+            # Fallback: calculate from current frame index
+            if (hasattr(self.app.processor, 'current_frame_index') and 
+                hasattr(self.app.processor, 'video_info') and
+                self.app.processor.video_info):
+                
+                fps = self.app.processor.video_info.get('fps', 30.0)
+                current_frame = self.app.processor.current_frame_index or 0
+                return current_frame / fps
+            
+            # Default to start of video
+            return 0.0
+            
+        except Exception as e:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.warning(f"Could not get current playback time: {e}")
+            return 0.0
+    
+    def _get_fullscreen_video_filter(self) -> str:
+        """Get appropriate video filter for fullscreen display."""
+        try:
+            # For VR videos, use simple crop for left eye view (full resolution)
+            if (hasattr(self.app.processor, 'is_vr_active_or_potential') and 
+                self.app.processor.is_vr_active_or_potential()):
+                return "crop=iw/2:ih:0:0"  # Left eye crop only, preserve full resolution
+            
+            # For regular videos, no scaling - preserve original resolution
+            return "null"  # No filtering, full original resolution
+            
+        except Exception as e:
+            if hasattr(self.app, 'logger'):
+                self.app.logger.warning(f"Could not determine video filter: {e}")
+            return "null"  # Safe default - no filtering
     
     def _is_handy_available(self):
         """Check if Handy devices are connected and device control is enabled."""
