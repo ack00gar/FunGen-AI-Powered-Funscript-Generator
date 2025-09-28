@@ -91,24 +91,32 @@ if not exist "main.py" (
     exit /b 1
 )
 
+REM Find actual Python executable (avoid Microsoft Store redirect)
+set "PYTHON_CMD=python"
+
+REM If in venv, use venv python directly
+if exist "venv\Scripts\python.exe" (
+    set "PYTHON_CMD=%~dp0venv\Scripts\python.exe"
+)
+
 REM Check Python availability
-python --version >nul 2>&1
+"!PYTHON_CMD!" --version >nul 2>&1
 if !errorlevel! neq 0 (
     echo ✗ Python not available in current environment
-    echo   Please check your environment activation.
+    echo   Microsoft Store redirect detected - use FunGen_Windows_Fix.bat
     pause
     exit /b 1
 )
 
 REM Display Python info
 echo Python environment info:
-python --version
+"!PYTHON_CMD!" --version
 echo Python path: 
-python -c "import sys; print(sys.executable)"
+"!PYTHON_CMD!" -c "import sys; print(sys.executable)"
 echo.
 
 REM Launch FunGen
-python main.py %*
+"!PYTHON_CMD!" main.py %*
 
 REM Keep window open if there was an error
 if !errorlevel! neq 0 (
