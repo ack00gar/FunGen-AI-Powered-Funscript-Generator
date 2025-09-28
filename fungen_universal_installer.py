@@ -6,7 +6,7 @@ Complete installation system that assumes Python is available but nothing else
 
 This installer handles the complete FunGen setup after Python is installed:
 - Git installation and repository cloning
-- FFmpeg/FFprobe installation
+- FFmpeg suite installation (ffmpeg, ffprobe, ffplay)
 - GPU detection and appropriate PyTorch installation
 - Virtual environment setup
 - All Python dependencies
@@ -484,9 +484,9 @@ class FunGenUniversalInstaller:
             return False
     
     def install_ffmpeg(self) -> bool:
-        """Install FFmpeg and FFprobe"""
-        if self.command_exists("ffmpeg") and self.command_exists("ffprobe"):
-            self.print_success("FFmpeg already available")
+        """Install FFmpeg, FFprobe, and FFplay"""
+        if self.command_exists("ffmpeg") and self.command_exists("ffprobe") and self.command_exists("ffplay"):
+            self.print_success("FFmpeg suite already available")
             return True
         
         print("  Installing FFmpeg...")
@@ -537,20 +537,31 @@ class FunGenUniversalInstaller:
             if ffmpeg_bin not in os.environ["PATH"]:
                 os.environ["PATH"] = ffmpeg_bin + ";" + os.environ["PATH"]
             
-            self.print_success("FFmpeg installed successfully")
-            return True
+            # Verify all FFmpeg tools are available
+            if self.command_exists("ffmpeg") and self.command_exists("ffprobe") and self.command_exists("ffplay"):
+                self.print_success("FFmpeg suite installed successfully")
+                return True
+            else:
+                self.print_error("FFmpeg installation incomplete - some tools missing")
+                return False
     
     def _install_ffmpeg_macos(self) -> bool:
         """Install FFmpeg on macOS"""
         if self.command_exists("brew"):
             ret, _, stderr = self.run_command(["brew", "install", "ffmpeg"], check=False)
             if ret == 0:
-                self.print_success("FFmpeg installed via Homebrew")
-                return True
+                # Verify all FFmpeg tools are available
+                if self.command_exists("ffmpeg") and self.command_exists("ffprobe") and self.command_exists("ffplay"):
+                    self.print_success("FFmpeg suite installed via Homebrew")
+                    return True
+                else:
+                    self.print_error("FFmpeg installation incomplete - some tools missing")
+                    return False
         
         self.print_warning("Could not install FFmpeg automatically")
         self.print_warning("Please install Homebrew and run: brew install ffmpeg")
-        return True  # Don't fail installation
+        self.print_warning("FFmpeg suite (including ffplay) is required for fullscreen functionality")
+        return False  # Fail installation if FFmpeg not available
     
     def _install_ffmpeg_linux(self) -> bool:
         """Install FFmpeg on Linux"""
@@ -573,12 +584,18 @@ class FunGenUniversalInstaller:
                 
                 ret, _, stderr = self.run_command(install_cmd, check=False)
                 if ret == 0:
-                    self.print_success(f"FFmpeg installed via {install_cmd[0]}")
-                    return True
+                    # Verify all FFmpeg tools are available
+                    if self.command_exists("ffmpeg") and self.command_exists("ffprobe") and self.command_exists("ffplay"):
+                        self.print_success(f"FFmpeg suite installed via {install_cmd[0]}")
+                        return True
+                    else:
+                        self.print_error("FFmpeg installation incomplete - some tools missing")
+                        continue  # Try next package manager
         
         self.print_warning("Could not install FFmpeg automatically")
         self.print_warning("Please install FFmpeg using your system's package manager")
-        return True  # Don't fail installation
+        self.print_warning("FFmpeg suite (including ffplay) is required for fullscreen functionality")
+        return False  # Fail installation if FFmpeg not available
     
     def _check_arm64_windows_compatibility(self):
         """Check for ARM64 Windows and provide guidance."""
@@ -1100,6 +1117,7 @@ read -p "Press Enter to close..."
             ("Git", lambda: self.command_exists("git")),
             ("FFmpeg", lambda: self.command_exists("ffmpeg") or True),  # Optional
             ("FFprobe", lambda: self.command_exists("ffprobe") or True),  # Optional
+            ("FFplay", lambda: self.command_exists("ffplay") or True),  # Optional
             ("Project files", lambda: (self.project_path / CONFIG["main_script"]).exists()),
             ("Models directory", lambda: (self.project_path / "models").exists()),
             ("Requirements files", lambda: any(

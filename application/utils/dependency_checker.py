@@ -234,25 +234,30 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     # 6. Check for device_control feature dependencies if folder is present
     device_control_changed = _check_device_control_dependencies(non_interactive=non_interactive, auto_install=auto_install)
     
-    # 7. Check for ffmpeg and ffprobe
-    check_ffmpeg_ffprobe()
+    # 7. Check for ffmpeg, ffprobe, and ffplay (auto-install if needed)
+    check_ffmpeg_ffprobe(non_interactive=non_interactive, auto_install=auto_install)
 
     logger.info("=== Dependency Check Finished ===\n")
 
 
 def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = False):
-    """Checks for ffmpeg and ffprobe and offers to install them if missing."""
+    """Checks for ffmpeg, ffprobe, and ffplay and offers to install them if missing."""
     ffmpeg_missing = not is_tool('ffmpeg')
     ffprobe_missing = not is_tool('ffprobe')
+    ffplay_missing = not is_tool('ffplay')
 
-    if ffmpeg_missing or ffprobe_missing:
+    if ffmpeg_missing or ffprobe_missing or ffplay_missing:
         missing_tools = []
         if ffmpeg_missing:
             missing_tools.append('ffmpeg')
         if ffprobe_missing:
             missing_tools.append('ffprobe')
+        if ffplay_missing:
+            missing_tools.append('ffplay')
         
         logger.warning(f"The following required tools are not found in your system's PATH: {', '.join(missing_tools)}.")
+        if 'ffplay' in missing_tools:
+            logger.warning("ffplay is required for fullscreen video functionality with audio support.")
         
         system = platform.system()
         install_cmd = ""
@@ -273,11 +278,11 @@ def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = F
                     if auto_install:
                         logger.info(f"Attempting non-interactive install: {install_cmd}")
                         subprocess.check_call(install_cmd, shell=True)
-                        if not is_tool('ffmpeg') or not is_tool('ffprobe'):
-                            logger.error("Installation may have failed. Please install ffmpeg manually.")
+                        if not is_tool('ffmpeg') or not is_tool('ffprobe') or not is_tool('ffplay'):
+                            logger.error("Installation may have failed. Please install ffmpeg suite manually.")
                             sys.exit(1)
                         else:
-                            logger.info("ffmpeg installed successfully.")
+                            logger.info("ffmpeg suite installed successfully.")
                     else:
                         logger.warning("Non-interactive mode: skipping ffmpeg auto-install. Please install manually.")
                         sys.exit(1)
@@ -287,11 +292,11 @@ def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = F
                         logger.info(f"Running installation command: {install_cmd}")
                         subprocess.check_call(install_cmd, shell=True)
                         # Re-check after installation
-                        if not is_tool('ffmpeg') or not is_tool('ffprobe'):
-                            logger.error("Installation may have failed. Please install ffmpeg manually.")
+                        if not is_tool('ffmpeg') or not is_tool('ffprobe') or not is_tool('ffplay'):
+                            logger.error("Installation may have failed. Please install ffmpeg suite manually.")
                             sys.exit(1)
                         else:
-                            logger.info("ffmpeg installed successfully.")
+                            logger.info("ffmpeg suite installed successfully.")
                     else:
                         logger.warning("Installation skipped. Please install ffmpeg manually to proceed.")
                         sys.exit(1)
