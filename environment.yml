@@ -5,7 +5,7 @@ channels:
 dependencies:
   - python=3.12
   - pip
-  - ffmpeg # This will install ffmpeg and ffprobe from conda-forge
+  - ffmpeg # This will install ffmpeg, ffprobe, and ffplay from conda-forge
   # - other_conda_package
   - pip:
     # - Add your pip dependencies here, if any, from requirements.txt
