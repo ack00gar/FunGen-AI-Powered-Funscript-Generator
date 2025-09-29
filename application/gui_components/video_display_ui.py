@@ -41,6 +41,9 @@ class VideoDisplayUI:
         self.handy_preparing = False
         self.handy_last_funscript_path = None
         self.saved_processing_speed_mode = None  # Store original speed mode when Handy starts
+        
+        # Fullscreen process state
+        self._fullscreen_process = None
 
     def _update_actual_video_image_rect(self, display_w, display_h, cursor_x_offset, cursor_y_offset):
         win_pos_x, win_pos_y = imgui.get_window_position()

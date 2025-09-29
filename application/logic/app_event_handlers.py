@@ -38,10 +38,12 @@ class AppEventHandlers:
             is_currently_playing = processor.is_processing and not processor.pause_event.is_set()
             if is_currently_playing:
                 processor.pause_processing()
+                # Native fullscreen auto-pauses via single FFmpeg dual-output
             else:
                 # Only start regular video playback, never restart tracking sessions
                 # Tracking sessions should only be started via the control panel
                 processor.start_processing()
+                # Native fullscreen auto-resumes via single FFmpeg dual-output
             return
         if action_name == "stop":
             processor.stop_processing()
@@ -334,6 +336,16 @@ class AppEventHandlers:
                     # Trigger Handy resync after seek
                     self.logger.info("Resyncing Handy after video seek...")
                     video_ui._resync_handy_after_seek()
+                
+                # Native fullscreen auto-syncs via single FFmpeg dual-output
+                if hasattr(video_ui, 'native_fullscreen') and video_ui.native_fullscreen.is_active():
+                    self.logger.info("🎯 Native fullscreen auto-synced via single FFmpeg dual-output")
+
+    def _sync_fullscreen_pause_state(self, paused: bool):
+        """Legacy method - no longer needed with single FFmpeg dual-output architecture."""
+        # Native fullscreen automatically syncs with main video processing
+        # because both use frames from the same single FFmpeg process
+        pass
 
     def handle_seek_bar_drag(self, frame_index: int):
         """Handle seeking from UI elements like the timeline preview bar."""

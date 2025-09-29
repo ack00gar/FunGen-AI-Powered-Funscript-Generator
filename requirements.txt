@@ -6,7 +6,6 @@ glfw
 PyOpenGL
 imgui
 scipy
-rdp
 simplification
 orjson
 torch>=2.0.0
