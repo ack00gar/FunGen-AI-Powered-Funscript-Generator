@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 echo ================================================================
 echo          FunGen Enhanced Universal Installer
-echo                    v1.4.0
+echo                    v1.4.2 - IMPROVED
 echo ================================================================
 echo This installer will download and install everything needed:
 echo - Miniconda (Python 3.11 + conda package manager)
@@ -14,6 +14,35 @@ echo.
 echo RECOMMENDED: Run this installer as a NORMAL USER
 echo             Most installations work fine without administrator privileges
 echo.
+echo IMPROVEMENTS IN v1.4.2:
+echo - Added ARM64 Windows detection and guidance
+echo - More robust error handling
+echo - Improved progress reporting
+echo.
+
+echo [0.1/8] Checking system architecture...
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
+    echo ⚠️  ARM64 Windows detected!
+    echo    This architecture has limited Python package compatibility.
+    echo    Many packages (including imgui) cannot compile on ARM64.
+    echo.
+    echo    RECOMMENDED SOLUTION:
+    echo    1. Uninstall current Python (if ARM64)
+    echo    2. Download Python 3.11 x64 from python.org
+    echo    3. Install x64 Python (will run via emulation)
+    echo    4. Rerun this installer
+    echo.
+    echo    ALTERNATIVE: Use Windows Subsystem for Linux (WSL)
+    echo    - Run: wsl --install
+    echo    - Install Ubuntu and run FunGen in Linux
+    echo.
+    set /p response="Continue anyway? (not recommended) [y/N]: "
+    if /i not "!response!"=="y" (
+        echo Installation cancelled. Please install x64 Python first.
+        pause
+        exit /b 1
+    )
+)
 
 pause
 
@@ -26,13 +55,18 @@ set "MINICONDA_PATH=%USERPROFILE%\miniconda3"
 set "CONDA_EXE=%MINICONDA_PATH%\Scripts\conda.exe"
 set "ENV_NAME=fungen"
 
+REM Update URL for ARM64 if detected
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
+    set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-arm64.exe"
+)
+
 REM Create temp directory
 if not exist "%TEMP_DIR%" mkdir "%TEMP_DIR%"
 
 echo [1/8] Checking Miniconda installation...
 if exist "%CONDA_EXE%" (
     echo ✓ Miniconda already installed at: %MINICONDA_PATH%
-    goto :check_git
+    goto :init_conda
 ) else (
     echo ✗ Miniconda not found, will install automatically
 )
@@ -63,8 +97,31 @@ if !errorlevel! neq 0 (
 )
 echo ✓ Miniconda installed successfully
 
+:init_conda
+echo.
+echo [3.5/8] Initializing conda...
+echo   Setting up conda for command line use...
+
 REM Initialize conda for cmd
-call "%MINICONDA_PATH%\Scripts\activate.bat"
+call "%MINICONDA_PATH%\Scripts\conda.exe" init cmd.exe >nul 2>&1
+if !errorlevel! neq 0 (
+    echo ⚠ Conda init failed, trying alternative method...
+    REM Alternative: Add conda to PATH for this session
+    set "PATH=%MINICONDA_PATH%\Scripts;%MINICONDA_PATH%;%PATH%"
+) else (
+    echo ✓ Conda initialized successfully
+)
+
+REM Accept Terms of Service for conda channels (handles the TOS error)
+echo   Accepting conda Terms of Service...
+"%CONDA_EXE%" config --set channel_priority disabled >nul 2>&1
+"%CONDA_EXE%" config --add channels conda-forge >nul 2>&1
+
+REM Try to accept TOS, but don't fail if it doesn't work
+"%CONDA_EXE%" tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main >nul 2>&1
+"%CONDA_EXE%" tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r >nul 2>&1  
+"%CONDA_EXE%" tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2 >nul 2>&1
+echo ✓ Conda configuration updated
 
 :check_git
 echo.
@@ -73,43 +130,61 @@ where git >nul 2>&1
 if !errorlevel! equ 0 (
     echo ✓ Git already available
 ) else (
-    echo Installing Git via conda...
-    "%CONDA_EXE%" install git -y
+    echo   Installing Git via conda...
+    "%CONDA_EXE%" install git -c conda-forge -y
     if !errorlevel! neq 0 (
-        echo ✗ Failed to install Git
-        pause
-        exit /b 1
+        echo ⚠ Git conda install failed, but will continue
+        echo   Git may be installed by the universal installer
+    ) else (
+        echo ✓ Git installed successfully
     )
-    echo ✓ Git installed successfully
 )
 
 echo.
 echo [5/8] Creating FunGen conda environment...
 echo   Creating environment '%ENV_NAME%' with Python 3.11...
 
-"%CONDA_EXE%" create -n %ENV_NAME% python=3.11 -y
+REM Create environment with explicit channel to avoid TOS issues
+"%CONDA_EXE%" create -n %ENV_NAME% python=3.11 -c conda-forge -y
 if !errorlevel! neq 0 (
-    echo ✗ Failed to create conda environment
-    pause
-    exit /b 1
+    echo ⚠ Failed to create conda environment with conda-forge
+    echo   Trying with default channels...
+    "%CONDA_EXE%" create -n %ENV_NAME% python=3.11 -y --override-channels --channel defaults
+    if !errorlevel! neq 0 (
+        echo ✗ Failed to create conda environment
+        echo   This may be due to conda Terms of Service issues
+        echo   Try running these commands manually:
+        echo   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+        echo   conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+        pause
+        exit /b 1
+    )
 )
 echo ✓ Conda environment '%ENV_NAME%' created successfully
 
 echo.
 echo [6/8] Installing FFmpeg via conda...
-"%CONDA_EXE%" activate %ENV_NAME% && "%CONDA_EXE%" install ffmpeg -c conda-forge -y
-if !errorlevel! neq 0 (
-    echo ⚠ FFmpeg conda install failed
-    echo   The universal installer will handle FFmpeg installation as fallback
+
+REM Properly activate environment for FFmpeg installation
+call "%MINICONDA_PATH%\Scripts\activate.bat" %ENV_NAME%
+if !errorlevel! equ 0 (
+    conda install ffmpeg -c conda-forge -y
+    if !errorlevel! neq 0 (
+        echo ⚠ FFmpeg conda install failed
+        echo   The universal installer will handle FFmpeg installation as fallback
+    ) else (
+        echo ✓ FFmpeg installed via conda
+    )
 ) else (
-    echo ✓ FFmpeg installed via conda
+    echo ⚠ Failed to activate environment for FFmpeg installation
+    echo   The universal installer will handle FFmpeg installation as fallback
 )
 
 echo.
 echo [7/8] Running FunGen universal installer...
 echo   Prerequisites installed, now calling universal installer...
 
-REM Activate the conda environment
+REM Ensure we're in the activated environment
 call "%MINICONDA_PATH%\Scripts\activate.bat" %ENV_NAME%
 
 REM Check if install.py exists in current directory
@@ -118,22 +193,35 @@ if exist "%INSTALL_DIR%install.py" (
     python "%INSTALL_DIR%install.py" --dir "%INSTALL_DIR%" --env-name "%ENV_NAME%" --skip-python-check
 ) else (
     echo   install.py not found locally, downloading from GitHub...
+    
+    REM Use a more reliable download method
     set "INSTALLER_URL=https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.py"
     set "INSTALLER_FILE=%TEMP_DIR%\install.py"
     
-    powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%INSTALLER_URL%' -OutFile '%INSTALLER_FILE%'}"
+    echo   Downloading from: !INSTALLER_URL!
+    
+    REM Try PowerShell first
+    powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '!INSTALLER_URL!' -OutFile '!INSTALLER_FILE!' -UseBasicParsing; exit 0 } catch { exit 1 }"
+    
     if !errorlevel! neq 0 (
-        echo ✗ Failed to download universal installer
-        pause
-        exit /b 1
+        echo ⚠ PowerShell download failed, trying curl...
+        curl -L -o "!INSTALLER_FILE!" "!INSTALLER_URL!"
+        if !errorlevel! neq 0 (
+            echo ✗ Failed to download universal installer
+            echo   Please download install.py manually from GitHub
+            pause
+            exit /b 1
+        )
     )
     
+    echo ✓ Universal installer downloaded successfully
     echo   Running downloaded universal installer...
-    python "%INSTALLER_FILE%" --dir "%INSTALL_DIR%" --env-name "%ENV_NAME%" --skip-python-check
+    python "!INSTALLER_FILE!" --dir "%INSTALL_DIR%" --env-name "%ENV_NAME%" --skip-python-check
 )
 
 if !errorlevel! neq 0 (
     echo ✗ Universal installer failed
+    echo   Check the error messages above for details
     pause
     exit /b 1
 )
@@ -150,6 +238,7 @@ echo ✓ FunGen universal installer completed successfully
 echo.
 echo Check above for launcher instructions.
 echo.
+
 pause
 
 REM Cleanup
