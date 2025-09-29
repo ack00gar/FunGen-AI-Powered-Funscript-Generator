@@ -1,6 +1,8 @@
 import json
 import os
 import logging
+import subprocess
+import platform
 from typing import Optional
 from config import constants
 
@@ -24,6 +26,10 @@ class AppSettings:
 
         self.is_first_run = False
         self.load_settings()
+        
+        # Auto-detect and set hardware acceleration on first run
+        if self.is_first_run:
+            self.auto_detect_hardware_acceleration()
 
     def get_default_settings(self):
         constants = self.constants
@@ -82,7 +88,7 @@ class AppSettings:
             "num_producers_stage1": constants.DEFAULT_S1_NUM_PRODUCERS,
             "num_consumers_stage1": constants.DEFAULT_S1_NUM_CONSUMERS,
             "num_workers_stage2_of": constants.DEFAULT_S2_OF_WORKERS,
-            "hardware_acceleration_method": "auto",
+            "hardware_acceleration_method": "none",  # Default to CPU to avoid CUDA errors on non-NVIDIA systems
             "ffmpeg_path": "ffmpeg",
 
             # Autosave & Energy Saver
@@ -239,3 +245,53 @@ class AppSettings:
         self.data = self.get_default_settings()
         self.save_settings()
         self.logger.info("All application settings have been reset to their default values.")
+    
+    def auto_detect_hardware_acceleration(self):
+        """
+        Auto-detect available GPU and set appropriate hardware acceleration.
+        Only runs on first launch or when settings are reset.
+        """
+        system = platform.system()
+        detected_method = "none"  # Default to CPU
+        
+        try:
+            # Check for NVIDIA GPU on Windows/Linux
+            if system in ["Windows", "Linux"]:
+                try:
+                    result = subprocess.run(
+                        ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        detected_method = "auto"  # NVIDIA GPU detected, allow auto selection
+                        self.logger.info(f"NVIDIA GPU detected: {result.stdout.strip()}")
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    pass
+                
+                # Check for Intel QSV (Quick Sync)
+                if detected_method == "none":
+                    try:
+                        # Check if ffmpeg supports qsv
+                        result = subprocess.run(
+                            ['ffmpeg', '-hide_banner', '-hwaccels'],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if 'qsv' in result.stdout.lower():
+                            detected_method = "qsv"
+                            self.logger.info("Intel Quick Sync Video detected")
+                    except (subprocess.TimeoutExpired, FileNotFoundError):
+                        pass
+            
+            # macOS uses VideoToolbox
+            elif system == "Darwin":
+                detected_method = "videotoolbox"
+                self.logger.info("macOS detected, using VideoToolbox acceleration")
+            
+        except Exception as e:
+            self.logger.warning(f"Error during GPU detection: {e}")
+        
+        # Update the setting
+        if detected_method != self.data.get("hardware_acceleration_method"):
+            self.logger.info(f"Setting hardware acceleration to: {detected_method}")
+            self.data["hardware_acceleration_method"] = detected_method
+            self.save_settings()
