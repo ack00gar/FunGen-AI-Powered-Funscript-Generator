@@ -60,7 +60,7 @@ if defined CONDA_EXE (
     echo.
     echo   Please create a conda environment using:
     echo   conda create -n fungen python=3.11 -y
-    echo   Or run: fungen_enhanced_install.bat
+    echo   Or run: install.bat
     goto :no_environment
 )
 
@@ -68,9 +68,8 @@ if defined CONDA_EXE (
 echo ✗ No Python environment found!
 echo.
 echo SOLUTIONS:
-echo 1. Run original installer: fungen_install.bat
-echo 2. Run enhanced installer: fungen_enhanced_install.bat  
-echo 3. Fix Python version: fix_python_version.bat
+echo 1. Run Windows installer: install.bat
+echo 2. Run Python installer: python install.py
 echo.
 pause
 exit /b 1

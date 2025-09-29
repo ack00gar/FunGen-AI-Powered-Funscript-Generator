@@ -112,76 +112,50 @@ echo [6b/8] Installing FFmpeg manually...
 REM Add manual FFmpeg installation logic here if needed
 echo ✓ FFmpeg installation completed
 
-:install_python_deps
 echo.
-echo [7/8] Installing Python dependencies in conda environment...
-echo   Activating environment and installing requirements...
+echo [7/8] Running FunGen universal installer...
+echo   Prerequisites installed, now calling universal installer...
 
+REM Activate the conda environment
 call "%MINICONDA_PATH%\Scripts\activate.bat" %ENV_NAME%
 
-REM Install core requirements first
-if exist "%INSTALL_DIR%core.requirements.txt" (
-    echo Installing core dependencies from core.requirements.txt...
-    pip install -r "%INSTALL_DIR%core.requirements.txt"
-) else if exist "%INSTALL_DIR%requirements.txt" (
-    echo Installing dependencies from requirements.txt...
-    pip install -r "%INSTALL_DIR%requirements.txt"
+REM Check if install.py exists in current directory
+if exist "%INSTALL_DIR%install.py" (
+    echo   Running local install.py...
+    python "%INSTALL_DIR%install.py" --dir "%INSTALL_DIR%" --env-name "%ENV_NAME%" --skip-python-check
 ) else (
-    echo Installing essential dependencies manually...
-    pip install numpy imgui[glfw] glfw pyopengl opencv-python scipy simplification msgpack pillow orjson send2trash aiosqlite
-    pip install ultralytics==8.3.78 
-)
-
-REM Detect and install appropriate PyTorch version
-echo.
-echo Detecting GPU for PyTorch installation...
-nvidia-smi >nul 2>&1
-if !errorlevel! equ 0 (
-    echo NVIDIA GPU detected, installing CUDA version of PyTorch...
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-) else (
-    echo No NVIDIA GPU detected, installing CPU version of PyTorch...
-    pip install torch torchvision torchaudio
+    echo   install.py not found locally, downloading from GitHub...
+    set "INSTALLER_URL=https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.py"
+    set "INSTALLER_FILE=%TEMP_DIR%\install.py"
+    
+    powershell -Command "& {[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%INSTALLER_URL%' -OutFile '%INSTALLER_FILE%'}"
+    if !errorlevel! neq 0 (
+        echo ✗ Failed to download universal installer
+        pause
+        exit /b 1
+    )
+    
+    echo   Running downloaded universal installer...
+    python "%INSTALLER_FILE%" --dir "%INSTALL_DIR%" --env-name "%ENV_NAME%" --skip-python-check
 )
 
 if !errorlevel! neq 0 (
-    echo ✗ Failed to install Python dependencies
+    echo ✗ Universal installer failed
     pause
     exit /b 1
 )
-echo ✓ Python dependencies installed successfully
 
-echo.
-echo [8/8] Creating launcher scripts...
-echo   Creating conda-aware launcher...
-
-REM Create conda launcher script
-echo @echo off > "%INSTALL_DIR%FunGen_Conda.bat"
-echo call "%MINICONDA_PATH%\Scripts\activate.bat" %ENV_NAME% >> "%INSTALL_DIR%FunGen_Conda.bat"
-echo cd /d "%INSTALL_DIR%" >> "%INSTALL_DIR%FunGen_Conda.bat"
-echo python main.py %%* >> "%INSTALL_DIR%FunGen_Conda.bat"
-echo pause >> "%INSTALL_DIR%FunGen_Conda.bat"
-
-echo ✓ Launcher scripts created
+echo ✓ FunGen installation completed by universal installer
 
 echo.
 echo ================================================================
 echo                  Installation Complete!
 echo ================================================================
 echo.
-echo ✓ Miniconda installed: %MINICONDA_PATH%
-echo ✓ Conda environment '%ENV_NAME%' created with Python 3.11
-echo ✓ All dependencies installed
-echo ✓ FFmpeg/FFprobe available
+echo ✓ Prerequisites installed (Miniconda, Git, FFmpeg)
+echo ✓ FunGen universal installer completed successfully
 echo.
-echo To run FunGen:
-echo   Option 1: Double-click "FunGen_Conda.bat"
-echo   Option 2: Open Anaconda Prompt and run:
-echo             conda activate %ENV_NAME%
-echo             cd "%INSTALL_DIR%"
-echo             python main.py
-echo.
-echo The conda environment ensures no conflicts with other Python installations!
+echo Check above for launcher instructions.
 echo.
 pause
 

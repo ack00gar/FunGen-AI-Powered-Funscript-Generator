@@ -1273,10 +1273,10 @@ This installer assumes Python is available but installs everything else:
 - Platform-specific launcher scripts
 
 Examples:
-  python fungen_universal_installer.py
-  python fungen_universal_installer.py --dir ~/FunGen
-  python fungen_universal_installer.py --force
-  python fungen_universal_installer.py --uninstall
+  python install.py
+  python install.py --dir ~/FunGen
+  python install.py --force
+  python install.py --uninstall
         """
     )
     
@@ -1316,10 +1316,10 @@ Examples:
     if args.uninstall:
         print("🗑️ Downloading and running FunGen uninstaller...")
         
-        uninstaller_url = "https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_uninstall.py"
+        uninstaller_url = "https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/uninstall.py"
         
         with tempfile.TemporaryDirectory() as temp_dir:
-            uninstaller_path = Path(temp_dir) / "fungen_uninstall.py"
+            uninstaller_path = Path(temp_dir) / "uninstall.py"
             
             try:
                 urllib.request.urlretrieve(uninstaller_url, uninstaller_path)

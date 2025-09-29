@@ -82,9 +82,9 @@ TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
 # Configuration
-INSTALLER_URL="https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_universal_installer.py"
+INSTALLER_URL="https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.py"
 PYTHON_INSTALLER="$TEMP_DIR/miniconda-installer.sh"
-UNIVERSAL_INSTALLER="$TEMP_DIR/fungen_universal_installer.py"
+UNIVERSAL_INSTALLER="$TEMP_DIR/install.py"
 MINICONDA_PATH="$HOME/miniconda3"
 
 # Function to download files (tries multiple methods)
