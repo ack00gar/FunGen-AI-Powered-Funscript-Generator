@@ -118,13 +118,30 @@ echo [7/8] Installing Python dependencies in conda environment...
 echo   Activating environment and installing requirements...
 
 call "%MINICONDA_PATH%\Scripts\activate.bat" %ENV_NAME%
-if exist "%INSTALL_DIR%requirements.txt" (
+
+REM Install core requirements first
+if exist "%INSTALL_DIR%core.requirements.txt" (
+    echo Installing core dependencies from core.requirements.txt...
+    pip install -r "%INSTALL_DIR%core.requirements.txt"
+) else if exist "%INSTALL_DIR%requirements.txt" (
+    echo Installing dependencies from requirements.txt...
     pip install -r "%INSTALL_DIR%requirements.txt"
 ) else (
-    echo Installing core dependencies...
+    echo Installing essential dependencies manually...
+    pip install numpy imgui[glfw] glfw pyopengl opencv-python scipy simplification msgpack pillow orjson send2trash aiosqlite
+    pip install ultralytics==8.3.78 
+)
+
+REM Detect and install appropriate PyTorch version
+echo.
+echo Detecting GPU for PyTorch installation...
+nvidia-smi >nul 2>&1
+if !errorlevel! equ 0 (
+    echo NVIDIA GPU detected, installing CUDA version of PyTorch...
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-    pip install ultralytics opencv-python numpy pillow tqdm colorama
-    pip install imgui[glfw] glfw pyopengl
+) else (
+    echo No NVIDIA GPU detected, installing CPU version of PyTorch...
+    pip install torch torchvision torchaudio
 )
 
 if !errorlevel! neq 0 (
