@@ -30,13 +30,13 @@ FunGen now automatically detects your system's display scaling settings (DPI) an
 **Automatic installer that handles everything for you:**
 
 ### Windows
-1. Download: [fungen_install.bat](https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_install.bat)
+1. Download: [install.bat](https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.bat)
 2. Double-click to run (or run from command prompt)
 3. Wait for automatic installation of Python, Git, FFmpeg, and FunGen
 
 ### Linux/macOS
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/fungen_install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.sh | bash
 ```
 
 The installer automatically:
@@ -459,9 +459,9 @@ git config --add safe.directory .
 ```
 
 **Solution 2 - Reinstall as normal user:**
-1. Redownload `fungen_install.bat`
+1. Redownload `install.bat`
 2. Run it as a **normal user** (NOT as administrator)
-3. Use the launcher script (`launch.bat`) instead of `python main.py`
+3. Use the launcher script created by the installer instead of `python main.py`
 
 ### FFmpeg/FFprobe Not Found
 
