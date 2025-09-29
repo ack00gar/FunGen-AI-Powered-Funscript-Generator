@@ -8,6 +8,9 @@ test_timeline_fixes.py
 test_complete_ua_fix.py
 audit_launch_logging.py
 
+# Experimental VR streaming feature (work in progress)
+vr_streaming/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
