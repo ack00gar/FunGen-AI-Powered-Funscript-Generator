@@ -99,18 +99,11 @@ echo.
 echo [6/8] Installing FFmpeg via conda...
 "%CONDA_EXE%" activate %ENV_NAME% && "%CONDA_EXE%" install ffmpeg -c conda-forge -y
 if !errorlevel! neq 0 (
-    echo ⚠ FFmpeg conda install failed, will try manual installation
-    goto :manual_ffmpeg
+    echo ⚠ FFmpeg conda install failed
+    echo   The universal installer will handle FFmpeg installation as fallback
 ) else (
     echo ✓ FFmpeg installed via conda
-    goto :install_python_deps
 )
-
-:manual_ffmpeg
-echo.
-echo [6b/8] Installing FFmpeg manually...
-REM Add manual FFmpeg installation logic here if needed
-echo ✓ FFmpeg installation completed
 
 echo.
 echo [7/8] Running FunGen universal installer...
