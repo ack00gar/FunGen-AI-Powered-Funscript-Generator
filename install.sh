@@ -1,12 +1,12 @@
 #!/bin/bash
 # FunGen Universal Bootstrap Installer for Linux/macOS
-# Version: 1.0.0
+# Version: 1.0.1
 # This script requires ZERO dependencies - only uses POSIX shell built-ins
 # Downloads and runs the full Python installer
 
 set -e  # Exit on any error
 
-BOOTSTRAP_VERSION="1.0.0"
+BOOTSTRAP_VERSION="1.0.1"
 
 # Check for help or common invalid flags
 for arg in "$@"; do
@@ -67,6 +67,14 @@ case $OS in
         if [ "$ARCH" = "arm64" ]; then
             PYTHON_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh"
         fi
+        # Recommend Rosetta 2 for Apple Silicon if running x86_64 Python
+        if [ "$ARCH" = "arm64" ]; then
+            echo "ℹ️  Apple Silicon (M1/M2/M3) detected!"
+            echo "   If you encounter issues with x86_64 packages,"
+            echo "   consider installing Rosetta 2:"
+            echo "   softwareupdate --install-rosetta"
+            echo ""
+        fi
         ;;
     *)
         echo "ERROR: Unsupported operating system: $OS"
@@ -118,6 +126,19 @@ urllib.request.urlretrieve('$url', '$output')
     
     echo "ERROR: No download tool available (curl, wget, or python3)"
     return 1
+}
+
+# Function to handle interactive package installations
+handle_interactive_install() {
+    local cmd=("$@")
+    echo "  Note: This installation may require your interaction (password, agreement acceptance)"
+    echo "  Running: ${cmd[*]}"
+    if ! "${cmd[@]}"; then
+        echo "  Installation failed. You may need to run this command manually:"
+        echo "    sudo ${cmd[*]}"
+        return 1
+    fi
+    return 0
 }
 
 echo "[1/4] Checking Python installation..."
@@ -191,6 +212,9 @@ else
     if [ "$PLATFORM" = "macOS" ]; then
         echo "You may need to install Xcode Command Line Tools:"
         echo "  xcode-select --install"
+        echo ""
+        echo "For Apple Silicon systems, you may need Rosetta 2:"
+        echo "  softwareupdate --install-rosetta"
     fi
 fi
 
