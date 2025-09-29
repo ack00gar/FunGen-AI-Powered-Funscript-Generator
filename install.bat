@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 echo ================================================================
 echo          FunGen Enhanced Universal Installer
-echo                    v1.4.2 - IMPROVED
+echo                    v1.4.3 - CRITICAL FIXES
 echo ================================================================
 echo This installer will download and install everything needed:
 echo - Miniconda (Python 3.11 + conda package manager)
@@ -14,10 +14,11 @@ echo.
 echo RECOMMENDED: Run this installer as a NORMAL USER
 echo             Most installations work fine without administrator privileges
 echo.
-echo IMPROVEMENTS IN v1.4.2:
-echo - Added ARM64 Windows detection and guidance
-echo - More robust error handling
-echo - Improved progress reporting
+echo CRITICAL FIXES IN v1.4.3:
+echo - Fixed "Run conda init" errors with proper initialization
+echo - Fixed PowerShell URL parsing with correct variable expansion  
+echo - Added robust conda environment activation with fallbacks
+echo - Improved ARM64 Windows detection and guidance
 echo.
 
 echo [0.1/8] Checking system architecture...
@@ -102,15 +103,29 @@ echo.
 echo [3.5/8] Initializing conda...
 echo   Setting up conda for command line use...
 
-REM Initialize conda for cmd
-call "%MINICONDA_PATH%\Scripts\conda.exe" init cmd.exe >nul 2>&1
+REM Initialize conda for cmd - CRITICAL FIX
+echo   Initializing conda for command line use...
+call "%MINICONDA_PATH%\Scripts\conda.exe" init cmd.exe
 if !errorlevel! neq 0 (
     echo ⚠ Conda init failed, trying alternative method...
     REM Alternative: Add conda to PATH for this session
     set "PATH=%MINICONDA_PATH%\Scripts;%MINICONDA_PATH%;%PATH%"
+    
+    REM Try to initialize conda again after PATH fix
+    "%MINICONDA_PATH%\Scripts\conda.exe" init cmd.exe >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo ⚠ Alternative conda init also failed, but continuing...
+        echo   Will use PATH-based conda access
+    ) else (
+        echo ✓ Conda initialized successfully via alternative method
+    )
 ) else (
     echo ✓ Conda initialized successfully
 )
+
+REM Restart the command prompt environment to pick up conda init changes
+echo   Refreshing environment variables...
+call "%MINICONDA_PATH%\Scripts\activate.bat"
 
 REM Accept Terms of Service for conda channels (handles the TOS error)
 echo   Accepting conda Terms of Service...
@@ -184,8 +199,14 @@ echo.
 echo [7/8] Running FunGen universal installer...
 echo   Prerequisites installed, now calling universal installer...
 
-REM Ensure we're in the activated environment
+REM Initialize conda environment variables properly
 call "%MINICONDA_PATH%\Scripts\activate.bat" %ENV_NAME%
+if !errorlevel! neq 0 (
+    echo ⚠ Environment activation failed, trying alternative method...
+    REM Alternative activation method
+    set "PATH=%MINICONDA_PATH%\envs\%ENV_NAME%\Scripts;%MINICONDA_PATH%\envs\%ENV_NAME%;%PATH%"
+    set "CONDA_DEFAULT_ENV=%ENV_NAME%"
+)
 
 REM Check if install.py exists in current directory
 if exist "%INSTALL_DIR%install.py" (
@@ -194,18 +215,18 @@ if exist "%INSTALL_DIR%install.py" (
 ) else (
     echo   install.py not found locally, downloading from GitHub...
     
-    REM Use a more reliable download method
-    set "INSTALLER_URL=https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.py"
-    set "INSTALLER_FILE=%TEMP_DIR%\install.py"
+    REM Use a more reliable download method with proper variable expansion
+    set INSTALLER_URL=https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.py
+    set INSTALLER_FILE=%TEMP_DIR%\install.py
     
     echo   Downloading from: !INSTALLER_URL!
     
-    REM Try PowerShell first
-    powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '!INSTALLER_URL!' -OutFile '!INSTALLER_FILE!' -UseBasicParsing; exit 0 } catch { exit 1 }"
+    REM Try PowerShell first with corrected variable expansion
+    powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%INSTALLER_URL%' -OutFile '%INSTALLER_FILE%' -UseBasicParsing; exit 0 } catch { exit 1 }"
     
     if !errorlevel! neq 0 (
         echo ⚠ PowerShell download failed, trying curl...
-        curl -L -o "!INSTALLER_FILE!" "!INSTALLER_URL!"
+        curl -L -o "%INSTALLER_FILE%" "%INSTALLER_URL%"
         if !errorlevel! neq 0 (
             echo ✗ Failed to download universal installer
             echo   Please download install.py manually from GitHub
@@ -216,7 +237,7 @@ if exist "%INSTALL_DIR%install.py" (
     
     echo ✓ Universal installer downloaded successfully
     echo   Running downloaded universal installer...
-    python "!INSTALLER_FILE!" --dir "%INSTALL_DIR%" --env-name "%ENV_NAME%" --skip-python-check
+    python "%INSTALLER_FILE%" --dir "%INSTALL_DIR%" --env-name "%ENV_NAME%" --skip-python-check
 )
 
 if !errorlevel! neq 0 (
