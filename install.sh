@@ -69,10 +69,10 @@ case $OS in
         fi
         # Recommend Rosetta 2 for Apple Silicon if running x86_64 Python
         if [ "$ARCH" = "arm64" ]; then
-            echo "ℹ️  Apple Silicon (M1/M2/M3) detected!"
-            echo "   If you encounter issues with x86_64 packages,"
-            echo "   consider installing Rosetta 2:"
-            echo "   softwareupdate --install-rosetta"
+            echo "NOTE: Apple Silicon (M1/M2/M3) detected!"
+            echo "      If you encounter issues with x86_64 packages,"
+            echo "      consider installing Rosetta 2:"
+            echo "      softwareupdate --install-rosetta"
             echo ""
         fi
         ;;
