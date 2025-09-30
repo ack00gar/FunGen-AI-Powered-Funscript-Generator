@@ -38,7 +38,7 @@ if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
     echo    - Install Ubuntu and run FunGen in Linux
     echo.
     set /p response="Continue anyway? (not recommended) [y/N]: "
-    if /i not "!response!"=="y" (
+    if /i "!response!" neq "y" (
         echo Installation cancelled. Please install x64 Python first.
         pause
         exit /b 1
