@@ -229,7 +229,7 @@ if exist "%INSTALL_DIR%install.py" (
     echo   Downloading from: !INSTALLER_URL!
     
     REM Try PowerShell first with properly quoted and expanded variables
-    powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '!INSTALLER_URL!' -OutFile '!INSTALLER_FILE!' -UseBasicParsing; exit 0 } catch { Write-Host $_.Exception.Message; exit 1 }"
+    powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%INSTALLER_URL%' -OutFile '%INSTALLER_FILE%' -UseBasicParsing; exit 0 } catch { Write-Host $_.Exception.Message; exit 1 }"
     
     if !errorlevel! neq 0 (
         echo ⚠ PowerShell download failed, trying curl...
