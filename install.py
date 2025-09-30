@@ -1030,12 +1030,12 @@ class FunGenUniversalInstaller:
         """Create Windows launcher"""
         # Add tool paths to PATH
         path_additions = []
-        
+
         # Add FFmpeg path if it exists
         ffmpeg_path = self.tools_dir / "ffmpeg"
         if ffmpeg_path.exists():
             path_additions.append(str(ffmpeg_path))
-        
+
         # Add common Git paths if they exist
         git_paths = [
             Path.home() / "AppData" / "Local" / "Programs" / "Git" / "bin",
@@ -1046,20 +1046,33 @@ class FunGenUniversalInstaller:
             if git_path.exists():
                 path_additions.append(str(git_path))
                 break  # Only add the first one found
-        
+
         path_setup = ""
         if path_additions:
             path_setup = f'set "PATH={";".join(path_additions)};%PATH%"\n'
-        
+
+        # Check if path is UNC (network share)
+        project_path_str = str(self.project_path)
+        is_unc = project_path_str.startswith('\\\\') or project_path_str.startswith('//')
+
+        if is_unc:
+            # For UNC paths, use pushd which maps to a temporary drive letter
+            cd_command = f'pushd "{self.project_path}"'
+            end_command = 'popd\n'
+        else:
+            # For regular paths, use cd /d
+            cd_command = f'cd /d "{self.project_path}"'
+            end_command = ''
+
         launcher_content = f'''@echo off
-cd /d "{self.project_path}"
+{cd_command}
 {path_setup}echo Activating FunGen environment...
 {activate_cmd}
 echo Starting FunGen...
 python {CONFIG["main_script"]} %*
-pause
+{end_command}pause
 '''
-        
+
         launcher_path = self.project_path / "launch.bat"
         launcher_path.write_text(launcher_content, encoding='utf-8')
     
