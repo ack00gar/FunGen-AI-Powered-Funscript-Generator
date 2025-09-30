@@ -1125,7 +1125,7 @@ read -p "Press Enter to close..."
     def validate_installation(self) -> bool:
         """Validate the installation"""
         self.print_step("Validating installation")
-        
+
         checks = [
             ("Git", lambda: self.command_exists("git")),
             ("FFmpeg", lambda: self.command_exists("ffmpeg") or True),  # Optional
@@ -1134,23 +1134,27 @@ read -p "Press Enter to close..."
             ("Project files", lambda: (self.project_path / CONFIG["main_script"]).exists()),
             ("Models directory", lambda: (self.project_path / "models").exists()),
             ("Requirements files", lambda: any(
-                (self.project_path / req).exists() 
+                (self.project_path / req).exists()
                 for req in CONFIG["requirements_files"].values()
             )),
         ]
-        
+
         all_passed = True
         for check_name, check_func in checks:
             try:
                 if check_func():
                     self.print_success(f"{check_name}: OK")
                 else:
-                    self.print_error(f"{check_name}: FAILED")
-                    if check_name not in ["FFmpeg", "FFprobe"]:  # Optional
+                    # Git, FFmpeg, FFprobe, FFplay are optional - may be in conda env only
+                    if check_name in ["Git", "FFmpeg", "FFprobe", "FFplay"]:
+                        self.print_warning(f"{check_name}: Not in PATH (may be in conda environment)")
+                    else:
+                        self.print_error(f"{check_name}: FAILED")
                         all_passed = False
             except Exception as e:
                 self.print_error(f"{check_name}: ERROR - {e}")
-                all_passed = False
+                if check_name not in ["Git", "FFmpeg", "FFprobe", "FFplay"]:
+                    all_passed = False
         
         # Test Python environment
         python_exe = self._get_python_executable()
