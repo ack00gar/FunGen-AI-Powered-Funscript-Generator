@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 echo ================================================================
 echo          FunGen Enhanced Universal Installer
-echo                    v1.4.3 - CRITICAL FIXES
+echo                    v1.4.4 - ACTIVATION FIXES
 echo ================================================================
 echo This installer will download and install everything needed:
 echo - Miniconda (Python 3.11 + conda package manager)
@@ -14,11 +14,11 @@ echo.
 echo RECOMMENDED: Run this installer as a NORMAL USER
 echo             Most installations work fine without administrator privileges
 echo.
-echo CRITICAL FIXES IN v1.4.3:
-echo - Fixed "Run conda init" errors with proper initialization
-echo - Fixed PowerShell URL parsing with correct variable expansion  
-echo - Added robust conda environment activation with fallbacks
-echo - Improved ARM64 Windows detection and guidance
+echo CRITICAL FIXES IN v1.4.4:
+echo - Fixed "Run conda init before conda activate" error
+echo - Fixed PowerShell URL variable expansion issue  
+echo - Use direct conda -n flag to avoid activation errors
+echo - Improved fallback for FFmpeg installation
 echo.
 
 echo [0.1/8] Checking system architecture...
@@ -183,7 +183,8 @@ echo [6/8] Installing FFmpeg via conda...
 REM Properly activate environment for FFmpeg installation
 call "%MINICONDA_PATH%\Scripts\activate.bat" %ENV_NAME%
 if !errorlevel! equ 0 (
-    conda install ffmpeg -c conda-forge -y
+    REM Use full path to conda executable to avoid activation issues
+    "%CONDA_EXE%" install -n %ENV_NAME% ffmpeg -c conda-forge -y
     if !errorlevel! neq 0 (
         echo ⚠ FFmpeg conda install failed
         echo   The universal installer will handle FFmpeg installation as fallback
@@ -192,7 +193,13 @@ if !errorlevel! equ 0 (
     )
 ) else (
     echo ⚠ Failed to activate environment for FFmpeg installation
-    echo   The universal installer will handle FFmpeg installation as fallback
+    echo   Trying direct conda install without activation...
+    "%CONDA_EXE%" install -n %ENV_NAME% ffmpeg -c conda-forge -y
+    if !errorlevel! neq 0 (
+        echo   The universal installer will handle FFmpeg installation as fallback
+    ) else (
+        echo ✓ FFmpeg installed via conda
+    )
 )
 
 echo.
@@ -216,17 +223,17 @@ if exist "%INSTALL_DIR%install.py" (
     echo   install.py not found locally, downloading from GitHub...
     
     REM Use a more reliable download method with proper variable expansion
-    set INSTALLER_URL=https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.py
-    set INSTALLER_FILE=%TEMP_DIR%\install.py
+    set "INSTALLER_URL=https://raw.githubusercontent.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/main/install.py"
+    set "INSTALLER_FILE=%TEMP_DIR%\install.py"
     
     echo   Downloading from: !INSTALLER_URL!
     
-    REM Try PowerShell first with corrected variable expansion
-    powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%INSTALLER_URL%' -OutFile '%INSTALLER_FILE%' -UseBasicParsing; exit 0 } catch { exit 1 }"
+    REM Try PowerShell first with properly quoted and expanded variables
+    powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '!INSTALLER_URL!' -OutFile '!INSTALLER_FILE!' -UseBasicParsing; exit 0 } catch { Write-Host $_.Exception.Message; exit 1 }"
     
     if !errorlevel! neq 0 (
         echo ⚠ PowerShell download failed, trying curl...
-        curl -L -o "%INSTALLER_FILE%" "%INSTALLER_URL%"
+        curl -L -o "!INSTALLER_FILE!" "!INSTALLER_URL!"
         if !errorlevel! neq 0 (
             echo ✗ Failed to download universal installer
             echo   Please download install.py manually from GitHub

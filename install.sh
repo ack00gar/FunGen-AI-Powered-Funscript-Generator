@@ -1,12 +1,12 @@
 #!/bin/bash
 # FunGen Universal Bootstrap Installer for Linux/macOS
-# Version: 1.0.1
+# Version: 1.0.2
 # This script requires ZERO dependencies - only uses POSIX shell built-ins
 # Downloads and runs the full Python installer
 
 set -e  # Exit on any error
 
-BOOTSTRAP_VERSION="1.0.1"
+BOOTSTRAP_VERSION="1.0.2"
 
 # Check for help or common invalid flags
 for arg in "$@"; do
@@ -186,11 +186,19 @@ echo "    The universal installer will now handle the complete setup..."
 echo ""
 
 # Pass through any command line arguments to the universal installer
+# Use the conda python explicitly to avoid system python issues
+CONDA_PYTHON="$MINICONDA_PATH/bin/python"
+if [ ! -f "$CONDA_PYTHON" ]; then
+    echo "WARNING: Conda python not found at $CONDA_PYTHON"
+    echo "         Falling back to PATH python"
+    CONDA_PYTHON="python"
+fi
+
 if [ $# -gt 0 ]; then
     echo "    Passing arguments: $@"
-    python "$UNIVERSAL_INSTALLER" --dir "$(pwd)" --bootstrap-version "$BOOTSTRAP_VERSION" "$@"
+    "$CONDA_PYTHON" "$UNIVERSAL_INSTALLER" --dir "$(pwd)" --bootstrap-version "$BOOTSTRAP_VERSION" "$@"
 else
-    python "$UNIVERSAL_INSTALLER" --dir "$(pwd)" --bootstrap-version "$BOOTSTRAP_VERSION"
+    "$CONDA_PYTHON" "$UNIVERSAL_INSTALLER" --dir "$(pwd)" --bootstrap-version "$BOOTSTRAP_VERSION"
 fi
 INSTALL_RESULT=$?
 
