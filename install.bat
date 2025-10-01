@@ -188,7 +188,18 @@ if !errorlevel! neq 0 (
 )
 
 REM Remove trailing backslash from INSTALL_DIR to avoid quote escaping issues
-set "INSTALL_DIR_CLEAN=%INSTALL_DIR:~0,-1%"
+REM BUT: Keep it if we're at drive root (C:\, D:\, etc.)
+set "INSTALL_DIR_CLEAN=%INSTALL_DIR%"
+if "%INSTALL_DIR:~-1%"=="\" (
+    REM Has trailing backslash - check if it's a drive root
+    if "%INSTALL_DIR:~-2,1%"==":" (
+        REM It's a drive root like C:\ - keep the backslash
+        set "INSTALL_DIR_CLEAN=%INSTALL_DIR%"
+    ) else (
+        REM It's a regular path like C:\foo\ - remove trailing backslash
+        set "INSTALL_DIR_CLEAN=%INSTALL_DIR:~0,-1%"
+    )
+)
 
 REM Fix git safe.directory issue for network shares
 echo   Configuring git for network share access...
