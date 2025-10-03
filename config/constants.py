@@ -205,7 +205,7 @@ POSITION_INFO_MAPPING = {
     "NR": {"long_name": "Not Relevant", "short_name": "NR"},
     "C-Up": {"long_name": "Close Up", "short_name": "C-Up"},
     "CG/Miss.": {"long_name": "Cowgirl / Missionary", "short_name": "CG/Miss."},
-    "R.CG/Dog.": {"long_name": "Rev. Cowgirl / Doggy", "short_name": "R.CG/Dog"},
+    "R.CG/Dog.": {"long_name": "Rev. Cowgirl / Doggy", "short_name": "R.CG/Dog."},
     "BJ": {"long_name": "Blowjob", "short_name": "BJ"},
     "HJ": {"long_name": "Handjob", "short_name": "HJ"},
     "FootJ": {"long_name": "Footjob", "short_name": "FootJ"},
