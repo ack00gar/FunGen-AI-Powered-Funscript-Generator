@@ -14,6 +14,8 @@ from collections import OrderedDict
 
 from config import constants
 
+# ML-based VR format detector
+from video.vr_format_detector_ml_real import RealMLVRFormatDetector
 
 try:
     from scipy.io import wavfile
@@ -115,6 +117,10 @@ class VideoProcessor:
         from video.dual_frame_processor import SingleFFmpegDualOutputProcessor
         self.dual_output_processor = SingleFFmpegDualOutputProcessor(self)
         self.dual_output_enabled = False
+
+        # ML format detector (lazy loaded)
+        self.ml_detector = None
+        self.ml_model_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'vr_detector_model_rf.pkl')
 
     def _clear_cache(self):
         with self.frame_cache_lock:
@@ -302,6 +308,44 @@ class VideoProcessor:
         is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
         is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
 
+        # Try ML detection first if in auto mode and model available
+        ml_detection_succeeded = False
+        if self.video_type_setting == 'auto' and os.path.exists(self.ml_model_path):
+            try:
+                # Lazy load detector
+                if self.ml_detector is None:
+                    self.logger.info("Loading ML format detector...")
+                    self.ml_detector = RealMLVRFormatDetector(logger=self.logger)
+                    self.ml_detector.load_model(self.ml_model_path)
+                    self.logger.info("ML format detector loaded successfully")
+
+                # Detect format
+                ml_result = self.ml_detector.detect(self.video_path, self.video_info, num_frames=3)
+
+                if ml_result and ml_result.get('confidence', 0) > 0.5:
+                    self.logger.info(f"ML detected format: {ml_result.get('format_string')} "
+                                   f"(confidence: {ml_result.get('confidence'):.2f})")
+
+                    # Apply ML results
+                    self.determined_video_type = ml_result['video_type']
+
+                    if ml_result['video_type'] == 'VR':
+                        self.vr_input_format = ml_result['format_string']
+                        if ml_result.get('fov'):
+                            self.vr_fov = ml_result['fov']
+
+                    ml_detection_succeeded = True
+                    self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+                    self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+                    self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
+                    return  # Skip filename heuristics
+                else:
+                    self.logger.info("ML detection confidence low, falling back to filename heuristics")
+
+            except Exception as e:
+                self.logger.warning(f"ML detection failed: {e}, falling back to filename heuristics")
+
+        # Fallback to filename heuristics
         if self.video_type_setting == 'auto':
             upper_video_path = self.video_path.upper()
             vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
@@ -563,29 +607,57 @@ class VideoProcessor:
             return None
 
     @staticmethod
-    def get_video_type_heuristic(video_path: str) -> str:
+    def get_video_type_heuristic(video_path: str, use_ml: bool = False) -> str:
         """
         A lightweight heuristic to guess the video type (2D/VR) and format (SBS/TB)
         without fully opening the video. Uses ffprobe for metadata.
+
+        Args:
+            video_path: Path to video file
+            use_ml: If True, attempt ML detection first (requires model in /models)
+
+        Returns:
+            String like "2D", "VR (he_sbs)", "VR (fisheye_tb)", or "Unknown"
         """
         if not os.path.exists(video_path):
             return "Unknown"
 
         try:
             cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                   '-show_entries', 'stream=width,height', '-of', 'json', video_path]
+                   '-show_entries', 'stream=width,height,pix_fmt', '-of', 'json', video_path]
             creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True, timeout=5, creationflags=creation_flags)
             data = json.loads(result.stdout)
             stream_info = data.get('streams', [{}])[0]
             width = int(stream_info.get('width', 0))
             height = int(stream_info.get('height', 0))
+            pix_fmt = stream_info.get('pix_fmt', '')
         except Exception:
             return "Unknown"
 
         if width == 0 or height == 0:
             return "Unknown"
 
+        # Try ML detection if requested
+        if use_ml:
+            try:
+                model_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'vr_detector_model_rf.pkl')
+                if os.path.exists(model_path):
+                    detector = RealMLVRFormatDetector(logger=None)
+                    detector.load_model(model_path)
+
+                    video_info = {'width': width, 'height': height, 'pix_fmt': pix_fmt}
+                    ml_result = detector.detect(video_path, video_info, num_frames=3)
+
+                    if ml_result and ml_result.get('confidence', 0) > 0.5:
+                        if ml_result['video_type'] == '2D':
+                            return "2D"
+                        else:
+                            return f"VR ({ml_result['format_string']})"
+            except Exception:
+                pass  # Fall back to filename heuristics
+
+        # Fallback to filename heuristics
         is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
         is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
         upper_video_path = video_path.upper()
@@ -1393,16 +1465,26 @@ class VideoProcessor:
 
                 # Apply timing control only if not in MAX_SPEED mode
                 if target_delay > 0:
-                    current_time = time.perf_counter()
-                    sleep_duration = next_frame_target_time - current_time
+                    # Check if we should skip frame delay (when behind by 3+ frames)
+                    should_skip = False
+                    if hasattr(self, 'sync_server') and self.sync_server:
+                        should_skip = self.sync_server.should_skip_frame()
 
-                    if sleep_duration > 0:
-                        time.sleep(sleep_duration)
+                    if not should_skip:
+                        current_time = time.perf_counter()
+                        sleep_duration = next_frame_target_time - current_time
 
-                    if next_frame_target_time < current_time - target_delay:
-                        next_frame_target_time = current_time + target_delay
+                        if sleep_duration > 0:
+                            time.sleep(sleep_duration)
+
+                        if next_frame_target_time < current_time - target_delay:
+                            next_frame_target_time = current_time + target_delay
+                        else:
+                            next_frame_target_time += target_delay
                     else:
-                        next_frame_target_time += target_delay
+                        # Skipping frame delay to catch up
+                        current_time = time.perf_counter()
+                        next_frame_target_time = current_time + target_delay
         finally:
             self.logger.info(f"_processing_loop ending. is_processing: {self.is_processing}, stop_event: {self.stop_event.is_set()}")
             self._terminate_ffmpeg_processes()
