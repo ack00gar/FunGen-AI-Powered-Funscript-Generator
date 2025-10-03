@@ -1,4 +1,5 @@
 import os
+import pickle
 import threading
 import math
 import time
@@ -16,6 +17,7 @@ from application.utils.checkpoint_manager import (
 )
 from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
 
+from detection.cd.data_structures.segments import Segment
 import detection.cd.stage_1_cd as stage1_module
 import detection.cd.stage_2_cd as stage2_module
 import detection.cd.stage_3_of_processor as stage3_module
@@ -703,7 +705,7 @@ class AppStageProcessor:
                             from detection.cd.stage_1_cd import _validate_preprocessed_video_completeness
                             expected_frames = len(fm.stage1_output_msgpack_path) if hasattr(fm, 'stage1_output_msgpack_path') else 0
                             if self.app.processor and self.app.processor.video_info:
-                                expected_frames = self.app.processor.video_info.get('frame_count', 0)
+                                expected_frames = self.app.processor.video_info.get('total_frames', 0)
                                 fps = self.app.processor.video_info.get('fps', 30.0)
                                 
                                 if _validate_preprocessed_video_completeness(preprocessed_path_for_s3, expected_frames, fps, self.logger):
@@ -1169,31 +1171,32 @@ class AppStageProcessor:
                 try:
                     import sqlite3
                     with sqlite3.connect(db_path) as conn:
+                        conn.row_factory = sqlite3.Row
                         cursor = conn.cursor()
                         
                         # Load segments data
                         segment_tables = ['atr_segments', 'segments']
                         for table_name in segment_tables:
                             try:
+                                from application.utils.video_segment import VideoSegment
+
                                 cursor.execute(f"SELECT * FROM {table_name}")
-                                segments_data = cursor.fetchall()
-                                if segments_data:
-                                    # Convert to expected format
-                                    from application.utils.video_segment import VideoSegment
-                                    for segment_row in segments_data:
-                                        # Basic segment reconstruction - adjust based on actual DB schema
-                                        segment = VideoSegment(
-                                            start_frame_id=segment_row[1] if len(segment_row) > 1 else 0,
-                                            end_frame_id=segment_row[2] if len(segment_row) > 2 else 0,
-                                            class_id=segment_row[3] if len(segment_row) > 3 else 1,
-                                            class_name=segment_row[4] if len(segment_row) > 4 else "unknown",
-                                            segment_type="SexAct",
-                                            position_short_name=segment_row[4] if len(segment_row) > 4 else "HJ",
-                                            position_long_name=segment_row[4] if len(segment_row) > 4 else "Hand Job"
-                                        )
-                                        loaded_data["video_segments"].append(segment)
-                                        loaded_data["segments_objects"].append(segment)
-                                    break  # Use first successful table
+                                for segment_row in cursor:
+                                    _seg = pickle.loads(segment_row['segment_data'])
+
+                                    # Basic segment reconstruction - adjust based on actual DB schema
+                                    segment = VideoSegment(
+                                        start_frame_id=_seg.start_frame_id,
+                                        end_frame_id=_seg.end_frame_id,
+                                        class_id=getattr(_seg, 'class_id', None),
+                                        class_name=getattr(_seg, 'class_name', 'unknown'),
+                                        segment_type="SexAct",
+                                        position_short_name=_seg.position_short_name,
+                                        position_long_name=_seg.position_long_name,
+                                    )
+                                    loaded_data["video_segments"].append(segment)
+                                    loaded_data["segments_objects"].append(segment)
+                                break  # Use first successful table
                             except sqlite3.Error:
                                 continue
                                 
