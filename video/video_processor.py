@@ -226,7 +226,7 @@ class VideoProcessor:
         preprocessed_path = None
         # Proactively search for the preprocessed file for the *current* video
         if self.app and hasattr(self.app, 'file_manager'):
-            potential_preprocessed_path = self.app.file_manager.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
+            potential_preprocessed_path = self.app.file_manager.get_output_path_for_file(self.video_path, "_preprocessed.mp4")
             if os.path.exists(potential_preprocessed_path):
                 preprocessed_path = potential_preprocessed_path
                 # Also update the file_manager's state to be consistent
@@ -874,7 +874,7 @@ class VideoProcessor:
     def _is_using_preprocessed_video(self) -> bool:
         """Checks if the active video source is a preprocessed file."""
         is_using_preprocessed_by_path_diff = self._active_video_source_path != self.video_path
-        is_preprocessed_by_name = self._active_video_source_path.endswith("_preprocessed.mkv")
+        is_preprocessed_by_name = self._active_video_source_path.endswith("_preprocessed.mp4")
         return is_using_preprocessed_by_path_diff or is_preprocessed_by_name
 
     def _needs_hw_download(self) -> bool:
@@ -1920,7 +1920,7 @@ class VideoProcessor:
 
         try:
             if self.app and hasattr(self.app, 'file_manager'):
-                preprocessed_path = self.app.file_manager.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
+                preprocessed_path = self.app.file_manager.get_output_path_for_file(self.video_path, "_preprocessed.mp4")
 
                 if os.path.exists(preprocessed_path):
                     status["exists"] = True

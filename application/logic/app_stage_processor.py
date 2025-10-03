@@ -561,7 +561,7 @@ class AppStageProcessor:
 
         # --- MODIFIED LOGIC TO CHECK FOR BOTH FILES ---
         full_msgpack_path = fm.get_output_path_for_file(fm.video_path, ".msgpack")
-        preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+        preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mp4")
 
         # Stage 1 can be skipped only if BOTH the msgpack and preprocessed video exist and are valid
         msgpack_valid = os.path.exists(full_msgpack_path) and self._validate_preprocessed_artifacts(full_msgpack_path, preprocessed_video_path)
@@ -638,7 +638,7 @@ class AppStageProcessor:
                 ((range_start_frame, range_end_frame) if range_is_active else None)
 
             target_s1_path = fm.stage1_output_msgpack_path
-            preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+            preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mp4")
 
 
             # Determine if this is an autotuner run
@@ -1082,10 +1082,10 @@ class AppStageProcessor:
 
             #preprocessed_video_path = None
             #if self.save_preprocessed_video:
-            #    preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+            #    preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mp4")
 
             # Preprocessed video is now optional.
-            preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+            preprocessed_video_path = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mp4")
 
             num_producers = num_producers_override if num_producers_override is not None else self.num_producers_stage1
             num_consumers = num_consumers_override if num_consumers_override is not None else self.num_consumers_stage1
@@ -1572,7 +1572,7 @@ class AppStageProcessor:
                 preprocessed_video_path_for_s2 = self.app.file_manager.preprocessed_video_path
             else:
                 # Fallback: try to guess the path if the direct reference is missing.
-                preprocessed_video_path_for_s2 = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mkv")
+                preprocessed_video_path_for_s2 = fm.get_output_path_for_file(fm.video_path, "_preprocessed.mp4")
                 if not os.path.exists(preprocessed_video_path_for_s2):
                     self.logger.warning("Optical flow recovery may fail: Preprocessed video from Stage 1 not found.")
                     preprocessed_video_path_for_s2 = None
