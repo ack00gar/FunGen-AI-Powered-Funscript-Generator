@@ -54,7 +54,7 @@ def stage3_worker_proc(
             It returns the pre-determined preprocessed path or an empty string,
             preventing a TypeError with os.path.exists(None).
             """
-            if extension == "_preprocessed.mkv":
+            if extension == "_preprocessed.mp4":
                 return self.preprocessed_video_path if self.preprocessed_video_path is not None else ""
             # Return an empty string for any other unexpected request.
             return ""
