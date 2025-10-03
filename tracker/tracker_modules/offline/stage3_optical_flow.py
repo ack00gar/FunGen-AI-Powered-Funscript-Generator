@@ -283,7 +283,6 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
                 success=False,
                 error_message="Stage 3 module not available"
             )
-        
         try:
             start_time = time.time()
             self.current_stage = OfflineProcessingStage.STAGE_3
@@ -524,7 +523,7 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
             storage = Stage2SQLiteStorage(sqlite_path, self.logger)
             
             # Load segments
-            segments_data = storage.get_all_segments()
+            segments_data = storage.get_segments()
             segments = []
             
             # Convert to Segment objects if needed
