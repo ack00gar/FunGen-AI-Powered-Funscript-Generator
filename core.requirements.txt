@@ -8,6 +8,7 @@ tqdm~=4.67.1
 colorama~=0.4.6
 opencv-python~=4.10.0.84
 scipy~=1.15.1
+scikit-learn>=1.0.0
 simplification~=0.7.13
 msgpack~=1.1.0
 pillow~=11.1.0
