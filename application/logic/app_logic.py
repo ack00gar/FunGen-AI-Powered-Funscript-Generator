@@ -1027,12 +1027,9 @@ class ApplicationLogic:
                         self.logger.info("CLI Mode: Loading analysis results into funscript processor.")
                         results_package = self.stage_processor.last_analysis_result
                         if results_package and "results_dict" in results_package:
-                            results_dict = results_package.get("results_dict", {})
-                            primary_actions = results_dict.get("primary_actions", [])
-                            secondary_actions = results_dict.get("secondary_actions", [])
-
-                            self.funscript_processor.clear_timeline_history_and_set_new_baseline(1, primary_actions, "Stage 2 (CLI)")
-                            self.funscript_processor.clear_timeline_history_and_set_new_baseline(2, secondary_actions, "Stage 2 (CLI)")
+                            if result_script := results_package["results_dict"].get("funscript"):
+                                self.funscript_processor.clear_timeline_history_and_set_new_baseline(1, result_script.primary_actions, "Stage 2 (CLI)")
+                                self.funscript_processor.clear_timeline_history_and_set_new_baseline(2, result_script.secondary_actions, "Stage 2 (CLI)")
                         else:
                             self.logger.error("CLI Mode: Analysis finished but no results were found to load.")
                     # --- END OF ADDED BLOCK ---
