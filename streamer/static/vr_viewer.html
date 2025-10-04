@@ -1450,8 +1450,10 @@
                                     // Azimuth in YZ plane
                                     float phi = atan(dir.z, dir.y);
 
-                                    // Fisheye: r proportional to theta
-                                    float r = theta / (fisheyeFOV / 2.0);
+                                    // Stereographic fisheye projection (more natural than linear)
+                                    // r = 2*tan(theta/2) normalized by max angle
+                                    float maxAngle = fisheyeFOV / 2.0;
+                                    float r = (2.0 * tan(theta / 2.0)) / (2.0 * tan(maxAngle / 2.0));
 
                                     if (r > 1.0) {
                                         gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -1462,10 +1464,8 @@
                                     float texX = r * cos(phi);
                                     float texY = r * sin(phi);
 
-                                    // Map to left eye circle at (0.25, 0.5)
-                                    // Horizontal radius: 0.25 (half of 0.5 width per eye)
-                                    // Vertical radius: reduced to fix stretched height
-                                    vec2 uv = vec2(0.25 - texY * 0.25, 0.5 + texX * 0.20);
+                                    // Map to left eye circle at (0.25, 0.5), radius 0.25 both axes
+                                    vec2 uv = vec2(0.25 - texY * 0.25, 0.5 + texX * 0.25);
 
                                     gl_FragColor = texture2D(map, uv);
                                 }
