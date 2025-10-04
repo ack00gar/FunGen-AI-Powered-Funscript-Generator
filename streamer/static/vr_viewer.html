@@ -1370,11 +1370,17 @@
                 this.texture.colorSpace = THREE.SRGBColorSpace; // Fix gamma/color issues
 
                 // Handle SBS eye selection (left/right eye cropping for SBS videos)
-                // For fisheye and equirect modes, always force left eye only
-                if (projectionType === 'fisheye190' || projectionType === 'fisheye200' || projectionType === 'equirect180') {
+                // Fisheye needs both eyes in the texture - don't crop
+                if (projectionType === 'fisheye190' || projectionType === 'fisheye200') {
+                    // Use full texture for fisheye (both eyes needed for projection)
+                    this.texture.repeat.set(1, 1);
+                    this.texture.offset.set(0, 0);
+                    console.log('🐟 Fisheye: Using full SBS texture (both eyes)');
+                } else if (projectionType === 'equirect180') {
+                    // Equirect: Default to left eye only
                     this.updateTextureForEyeMode('left-eye');
                     currentVRMode = 'left-eye';
-                    console.log('👁️ Fisheye/Equirect mode: Forced left eye only');
+                    console.log('🌐 Equirect: Defaulting to left eye');
                 } else {
                     // For other modes, use current selection
                     this.updateTextureForEyeMode(currentVRMode);
@@ -2894,17 +2900,12 @@
         }
 
         function applyVideoTransform() {
-            // Preserve VR view mode classes when applying transform
-            let baseTransform = `scale(${videoZoom}) translate(${videoPanX / videoZoom}px, ${videoPanY / videoZoom}px)`;
-
-            // If in VR mode, append the VR transform
-            if (currentVRMode === 'left-eye') {
-                baseTransform = `${baseTransform} scale(2) translateX(25%)`;
-            } else if (currentVRMode === 'right-eye') {
-                baseTransform = `${baseTransform} scale(2) translateX(-25%)`;
+            // Only apply zoom/pan transform if using CSS mode (flat)
+            // THREE.js renderer handles its own transforms
+            if (!projectionRenderer.active) {
+                let baseTransform = `scale(${videoZoom}) translate(${videoPanX / videoZoom}px, ${videoPanY / videoZoom}px)`;
+                video.style.transform = baseTransform;
             }
-
-            video.style.transform = baseTransform;
 
             // Update UI
             zoomValue.textContent = `${Math.round(videoZoom * 100)}%`;
