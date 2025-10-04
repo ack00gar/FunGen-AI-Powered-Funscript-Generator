@@ -43,6 +43,8 @@
             width: 100% !important;
             height: 100% !important;
             background-color: #000;
+            position: relative;
+            z-index: 1;
         }
 
         /* Hide Video.js default controls (we use custom) */
@@ -58,6 +60,15 @@
         .video-js canvas {
             width: 100% !important;
             height: 100% !important;
+        }
+
+        /* Ensure video element doesn't block mouse events to overlay */
+        .video-js video {
+            pointer-events: none;
+        }
+
+        .video-js .vjs-tech {
+            pointer-events: none;
         }
 
         /* Overlay UI */
@@ -689,15 +700,18 @@
         }
 
         /* Fade out controls on idle */
-        body.idle #topBar,
-        body.idle #bottomControls {
+        body.idle #topBar {
             opacity: 0;
             transition: opacity 0.3s;
         }
 
-        body.idle #topBar:hover,
-        body.idle #bottomControls:hover {
+        body.idle #topBar:hover {
             opacity: 1;
+        }
+
+        /* Bottom controls always visible for better accessibility */
+        #bottomControls {
+            opacity: 1 !important;
         }
 
         /* Mobile/Touch optimizations */
@@ -1916,7 +1930,7 @@
             clearTimeout(idleTimer);
             idleTimer = setTimeout(() => {
                 document.body.classList.add('idle');
-            }, 3000);
+            }, 10000); // Increased from 3s to 10s for better accessibility
         }
 
         // Draw funscript graph overlay (bottom left)
