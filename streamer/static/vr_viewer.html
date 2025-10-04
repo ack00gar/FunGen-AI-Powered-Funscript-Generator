@@ -1185,7 +1185,21 @@
 
                 <!-- Keyboard Shortcuts Help -->
                 <div class="panel-section">
-                    <div class="panel-label">Zoom & Pan Controls</div>
+                    <div class="panel-label">🎮 Quick VR Mode Shortcuts</div>
+                    <div style="font-size: 13px; color: rgba(255, 255, 255, 0.7); line-height: 1.8;">
+                        <div><kbd>0</kbd> : Auto-Detect</div>
+                        <div><kbd>1</kbd> : 2D Flat</div>
+                        <div><kbd>2</kbd> : VR 180° SBS</div>
+                        <div><kbd>3</kbd> : VR 360° SBS</div>
+                        <div><kbd>4</kbd> : VR 180° Top-Bottom</div>
+                        <div><kbd>5</kbd> : VR 360° Top-Bottom</div>
+                        <div><kbd>6</kbd> : VR 180° Mono</div>
+                        <div><kbd>7</kbd> : VR 360° Mono</div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <div class="panel-label">⌨️ Zoom & Pan Controls</div>
                     <div style="font-size: 13px; color: rgba(255, 255, 255, 0.7); line-height: 1.6;">
                         <div><kbd>+</kbd> / <kbd>-</kbd> : Zoom in/out</div>
                         <div><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> : Pan video</div>
@@ -2393,6 +2407,48 @@
                             adjustVolume(-10);
                         }
                         break;
+
+                    // VR Mode shortcuts (number keys)
+                    case 'Digit1':
+                    case 'Numpad1':
+                        e.preventDefault();
+                        setVRMode('NONE', '2D Flat');
+                        break;
+                    case 'Digit2':
+                    case 'Numpad2':
+                        e.preventDefault();
+                        setVRMode('180_LR', 'VR 180° SBS');
+                        break;
+                    case 'Digit3':
+                    case 'Numpad3':
+                        e.preventDefault();
+                        setVRMode('360_LR', 'VR 360° SBS');
+                        break;
+                    case 'Digit4':
+                    case 'Numpad4':
+                        e.preventDefault();
+                        setVRMode('180_TB', 'VR 180° TB');
+                        break;
+                    case 'Digit5':
+                    case 'Numpad5':
+                        e.preventDefault();
+                        setVRMode('360_TB', 'VR 360° TB');
+                        break;
+                    case 'Digit6':
+                    case 'Numpad6':
+                        e.preventDefault();
+                        setVRMode('180_MONO', 'VR 180° Mono');
+                        break;
+                    case 'Digit7':
+                    case 'Numpad7':
+                        e.preventDefault();
+                        setVRMode('360', 'VR 360° Mono');
+                        break;
+                    case 'Digit0':
+                    case 'Numpad0':
+                        e.preventDefault();
+                        setVRMode('AUTO', 'Auto-Detect');
+                        break;
                 }
             });
 
@@ -2587,6 +2643,99 @@
                 volumeBtn.textContent = '🔉';
             } else {
                 volumeBtn.textContent = '🔊';
+            }
+        }
+
+        // Quick VR mode switcher (called by keyboard shortcuts)
+        function setVRMode(mode, displayName) {
+            console.log(`🎬 Quick VR mode switch: ${displayName} (${mode})`);
+
+            // Apply to Video.js VR plugin
+            player.vr({
+                projection: mode,
+                debug: false
+            });
+
+            // Update VR Settings panel selectors to match
+            const projectionSelect = document.getElementById('vrProjectionSelect');
+            const stereoSelect = document.getElementById('vrStereoSelect');
+
+            // Parse mode to update UI selectors
+            if (mode === 'AUTO') {
+                projectionSelect.value = 'AUTO';
+            } else if (mode === 'NONE') {
+                projectionSelect.value = 'NONE';
+            } else if (mode.startsWith('180')) {
+                projectionSelect.value = '180';
+                if (mode.includes('_TB')) stereoSelect.value = 'TB';
+                else if (mode.includes('_MONO')) stereoSelect.value = 'MONO';
+                else stereoSelect.value = 'LR';
+            } else if (mode.startsWith('360')) {
+                projectionSelect.value = '360';
+                if (mode.includes('_TB')) stereoSelect.value = 'TB';
+                else if (mode.includes('_MONO')) stereoSelect.value = 'MONO';
+                else stereoSelect.value = 'LR';
+            }
+
+            // Show on-screen notification with shortcuts hint
+            showVRModeNotification(displayName);
+
+            console.log(`✅ VR mode set to: ${mode}`);
+        }
+
+        // Show VR mode change notification
+        function showVRModeNotification(modeName) {
+            // Remove existing notification if any
+            const existing = document.getElementById('vrModeNotification');
+            if (existing) existing.remove();
+
+            // Create notification
+            const notification = document.createElement('div');
+            notification.id = 'vrModeNotification';
+            notification.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.9);
+                color: white;
+                padding: 20px 30px;
+                border-radius: 12px;
+                font-size: 24px;
+                font-weight: 600;
+                z-index: 10001;
+                backdrop-filter: blur(10px);
+                border: 2px solid rgba(0, 212, 255, 0.5);
+                animation: fadeInOut 2s ease-in-out;
+                pointer-events: none;
+            `;
+            notification.innerHTML = `
+                🎬 ${modeName}
+                <div style="font-size: 14px; margin-top: 10px; opacity: 0.7; font-weight: 400;">
+                    Press 0-7 to change VR mode
+                </div>
+            `;
+
+            document.body.appendChild(notification);
+
+            // Auto-remove after 2 seconds
+            setTimeout(() => {
+                notification.remove();
+            }, 2000);
+
+            // Add CSS animation if not exists
+            if (!document.getElementById('vrModeNotificationStyle')) {
+                const style = document.createElement('style');
+                style.id = 'vrModeNotificationStyle';
+                style.textContent = `
+                    @keyframes fadeInOut {
+                        0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+                        20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                        80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+                    }
+                `;
+                document.head.appendChild(style);
             }
         }
 
