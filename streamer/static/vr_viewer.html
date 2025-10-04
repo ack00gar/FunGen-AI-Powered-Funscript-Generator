@@ -1345,6 +1345,9 @@
                 this.active = false;
                 this.projectionType = null;
                 this.animationId = null;
+                // Spherical rotation state
+                this.lon = 0; // Horizontal rotation (longitude)
+                this.lat = 0; // Vertical rotation (latitude)
             }
 
             init(projectionType) {
@@ -1389,6 +1392,11 @@
 
                 // Create geometry based on projection type
                 this.createGeometry(projectionType);
+
+                // Set initial camera orientation (pointing at center of hemisphere)
+                this.lon = 0; // Center horizontally
+                this.lat = 0; // Center vertically
+                this.updateCameraOrientation();
 
                 // Add simple mouse/touch look-around controls for desktop
                 this.addDesktopControls();
@@ -1455,10 +1463,10 @@
             }
 
             addDesktopControls() {
-                // Simple mouse drag to look around
+                // Simple mouse drag to look around using spherical coordinates
                 let isDragging = false;
                 let previousMousePosition = { x: 0, y: 0 };
-                const rotationSpeed = 0.005;
+                const rotationSpeed = 0.2; // Degrees per pixel
 
                 this.canvas.addEventListener('mousedown', (e) => {
                     isDragging = true;
@@ -1472,18 +1480,20 @@
                     const deltaX = e.clientX - previousMousePosition.x;
                     const deltaY = e.clientY - previousMousePosition.y;
 
-                    // Rotate camera (intuitive: drag left/right rotates horizontally, up/down vertically)
-                    this.camera.rotation.y += deltaX * rotationSpeed;
-                    this.camera.rotation.x += deltaY * rotationSpeed;
+                    // Update spherical coordinates
+                    this.lon -= deltaX * rotationSpeed; // Horizontal: drag right = look right (negative lon)
+                    this.lat += deltaY * rotationSpeed; // Vertical: drag down = look down (positive lat)
 
                     // Limit vertical rotation (prevent flipping upside down)
-                    this.camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.camera.rotation.x));
+                    this.lat = Math.max(-85, Math.min(85, this.lat));
 
-                    // Limit horizontal rotation (prevent spinning beyond video bounds)
-                    // For hemisphere projections: limit to ±90° (180° total)
+                    // Limit horizontal rotation for hemisphere projections
                     if (this.projectionType === 'fisheye190' || this.projectionType === 'fisheye200' || this.projectionType === 'equirect180') {
-                        this.camera.rotation.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.camera.rotation.y));
+                        this.lon = Math.max(-90, Math.min(90, this.lon));
                     }
+
+                    // Update camera orientation using spherical coordinates
+                    this.updateCameraOrientation();
 
                     previousMousePosition = { x: e.clientX, y: e.clientY };
                 });
@@ -1502,6 +1512,18 @@
                 }, { passive: false });
 
                 this.canvas.style.cursor = 'grab';
+            }
+
+            updateCameraOrientation() {
+                // Convert spherical coordinates (lon, lat) to camera lookAt target
+                const phi = THREE.MathUtils.degToRad(90 - this.lat); // Latitude to phi
+                const theta = THREE.MathUtils.degToRad(this.lon); // Longitude to theta
+
+                const x = 500 * Math.sin(phi) * Math.cos(theta);
+                const y = 500 * Math.cos(phi);
+                const z = 500 * Math.sin(phi) * Math.sin(theta);
+
+                this.camera.lookAt(x, y, z);
             }
 
             render() {
