@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VR Video Viewer - Native Sync</title>
 
+    <!-- THREE.js for VR projection rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -996,6 +999,9 @@
             Your browser doesn't support HTML5 video.
         </video>
 
+        <!-- THREE.js Canvas for 3D VR Projection -->
+        <canvas id="vrCanvas" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>
+
         <!-- Loading Overlay (shown while XBVR is loading video) -->
         <div id="loadingOverlay" style="display: none;">
             <div class="splash-content">
@@ -1130,6 +1136,19 @@
                 <div class="panel-header">👁️ VR View Controls</div>
 
                 <div class="panel-section">
+                    <div class="panel-label">📽️ Projection Type</div>
+                    <select id="projectionSelect" style="width: 100%; padding: 8px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; font-size: 14px;">
+                        <option value="auto">Auto-Detect</option>
+                        <option value="flat">Flat (2D/SBS)</option>
+                        <option value="fisheye180">Fisheye 180°</option>
+                        <option value="fisheye190">Fisheye 190°</option>
+                        <option value="fisheye200">Fisheye 200°</option>
+                        <option value="equirect180">Equirectangular 180°</option>
+                        <option value="equirect360">Equirectangular 360°</option>
+                    </select>
+                </div>
+
+                <div class="panel-section">
                     <div class="panel-label">🎮 View Mode</div>
                     <div style="font-size: 14px; color: rgba(255, 255, 255, 0.8); line-height: 2;">
                         <div><kbd>1</kbd> Full View • <kbd>2</kbd> Left Eye • <kbd>3</kbd> Right Eye</div>
@@ -1154,12 +1173,12 @@
                 </div>
 
                 <div class="panel-section">
-                    <div class="panel-label">ℹ️ How It Works</div>
+                    <div class="panel-label">ℹ️ Supported Formats</div>
                     <div style="font-size: 13px; color: rgba(255, 255, 255, 0.6); line-height: 1.6;">
-                        <p style="margin: 0 0 8px 0;">For SBS (Side-by-Side) VR videos:</p>
-                        <p style="margin: 0 0 8px 0;">• <strong>Full View</strong> shows both eyes</p>
-                        <p style="margin: 0 0 8px 0;">• <strong>Left Eye</strong> crops to left half (desktop VR viewing)</p>
-                        <p style="margin: 0;">• <strong>Right Eye</strong> crops to right half</p>
+                        <p style="margin: 0 0 8px 0;">• <strong>Flat SBS/TB</strong>: Quest passthrough recordings</p>
+                        <p style="margin: 0 0 8px 0;">• <strong>Fisheye</strong>: 180-200° dome projection</p>
+                        <p style="margin: 0 0 8px 0;">• <strong>Equirectangular</strong>: 180/360° sphere</p>
+                        <p style="margin: 0;">Desktop: Mouse to look around • VR: Full immersion</p>
                     </div>
                 </div>
 
@@ -1236,6 +1255,8 @@
         // VR view mode state
         let currentVRMode = 'full'; // 'full', 'left-eye', 'right-eye'
         let detectedVRFormat = '2D'; // Will be set on video load
+        let currentProjection = 'auto'; // Current projection mode
+        let videoMetadata = {}; // Metadata from server (projection, fov, layout)
 
         // FPS tracking
         let lastFrameTime = 0;
@@ -1297,6 +1318,260 @@
         // Loading overlay elements
         const loadingOverlay = document.getElementById('loadingOverlay');
         const loadingVideoName = document.getElementById('loadingVideoName');
+
+        // Projection renderer elements
+        const vrCanvas = document.getElementById('vrCanvas');
+        const projectionSelect = document.getElementById('projectionSelect');
+
+        // ===================================================================
+        // UNIFIED PROJECTION RENDERER
+        // Handles all VR projection types: flat, fisheye, equirectangular
+        // Works in both desktop browser and VR headset
+        // ===================================================================
+        class ProjectionRenderer {
+            constructor(videoElement, canvasElement) {
+                this.video = videoElement;
+                this.canvas = canvasElement;
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.mesh = null;
+                this.texture = null;
+                this.controls = null;
+                this.active = false;
+                this.projectionType = null;
+                this.animationId = null;
+            }
+
+            init(projectionType) {
+                this.projectionType = projectionType;
+
+                // Hide video, show canvas
+                this.video.style.display = 'none';
+                this.canvas.style.display = 'block';
+
+                // Create THREE.js scene
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.camera.position.set(0, 0, 0.1);
+
+                // Create renderer
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+
+                // Create video texture
+                this.texture = new THREE.VideoTexture(this.video);
+                this.texture.minFilter = THREE.LinearFilter;
+                this.texture.magFilter = THREE.LinearFilter;
+
+                // Create geometry based on projection type
+                this.createGeometry(projectionType);
+
+                // Add simple mouse/touch look-around controls for desktop
+                this.addDesktopControls();
+
+                // Start render loop
+                this.active = true;
+                this.render();
+
+                console.log(`✅ Projection renderer initialized: ${projectionType}`);
+            }
+
+            createGeometry(type) {
+                let geometry, material;
+
+                switch(type) {
+                    case 'fisheye180':
+                    case 'fisheye190':
+                    case 'fisheye200':
+                        // Fisheye: Dome (hemisphere) with appropriate FOV
+                        const fov = parseInt(type.replace('fisheye', ''));
+                        const thetaLength = (fov / 180) * Math.PI; // Convert degrees to radians
+                        geometry = new THREE.SphereGeometry(
+                            500, // radius
+                            60,  // widthSegments
+                            40,  // heightSegments
+                            0,   // phiStart
+                            Math.PI * 2, // phiLength (full circle)
+                            0,   // thetaStart
+                            thetaLength  // thetaLength (how much of sphere vertically)
+                        );
+                        geometry.scale(-1, 1, 1); // Invert for inside view
+                        break;
+
+                    case 'equirect180':
+                        // Equirectangular hemisphere
+                        geometry = new THREE.SphereGeometry(500, 60, 40, 0, Math.PI); // Half sphere
+                        geometry.scale(-1, 1, 1);
+                        break;
+
+                    case 'equirect360':
+                        // Equirectangular full sphere
+                        geometry = new THREE.SphereGeometry(500, 60, 40);
+                        geometry.scale(-1, 1, 1);
+                        break;
+
+                    case 'flat':
+                    default:
+                        // Flat screen in front of camera
+                        const aspectRatio = this.video.videoWidth / this.video.videoHeight || 16/9;
+                        geometry = new THREE.PlaneGeometry(16 * aspectRatio, 16);
+                        geometry.translate(0, 0, -10);
+                        break;
+                }
+
+                material = new THREE.MeshBasicMaterial({
+                    map: this.texture,
+                    side: THREE.DoubleSide
+                });
+
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.scene.add(this.mesh);
+            }
+
+            addDesktopControls() {
+                // Simple mouse drag to look around
+                let isDragging = false;
+                let previousMousePosition = { x: 0, y: 0 };
+                const rotationSpeed = 0.005;
+
+                this.canvas.addEventListener('mousedown', (e) => {
+                    isDragging = true;
+                    previousMousePosition = { x: e.clientX, y: e.clientY };
+                    this.canvas.style.cursor = 'grabbing';
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!isDragging) return;
+
+                    const deltaX = e.clientX - previousMousePosition.x;
+                    const deltaY = e.clientY - previousMousePosition.y;
+
+                    // Rotate camera
+                    this.camera.rotation.y -= deltaX * rotationSpeed;
+                    this.camera.rotation.x -= deltaY * rotationSpeed;
+
+                    // Limit vertical rotation
+                    this.camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.camera.rotation.x));
+
+                    previousMousePosition = { x: e.clientX, y: e.clientY };
+                });
+
+                document.addEventListener('mouseup', () => {
+                    isDragging = false;
+                    this.canvas.style.cursor = 'grab';
+                });
+
+                // Mouse wheel zoom (adjust FOV)
+                this.canvas.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    this.camera.fov += e.deltaY * 0.05;
+                    this.camera.fov = Math.max(30, Math.min(120, this.camera.fov)); // Limit FOV
+                    this.camera.updateProjectionMatrix();
+                }, { passive: false });
+
+                this.canvas.style.cursor = 'grab';
+            }
+
+            render() {
+                if (!this.active) return;
+
+                this.animationId = requestAnimationFrame(() => this.render());
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            destroy() {
+                this.active = false;
+                if (this.animationId) {
+                    cancelAnimationFrame(this.animationId);
+                }
+                if (this.renderer) {
+                    this.renderer.dispose();
+                }
+                if (this.texture) {
+                    this.texture.dispose();
+                }
+
+                // Show video, hide canvas
+                this.video.style.display = 'block';
+                this.canvas.style.display = 'none';
+
+                console.log('🔴 Projection renderer destroyed');
+            }
+
+            onWindowResize() {
+                if (!this.active) return;
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }
+
+        // Create projection renderer instance
+        const projectionRenderer = new ProjectionRenderer(video, vrCanvas);
+
+        // ===================================================================
+        // PROJECTION MANAGEMENT FUNCTIONS
+        // ===================================================================
+
+        function detectProjectionType(metadata) {
+            // Auto-detect based on server metadata
+            const projection = metadata.projection || 'he';
+            const fov = metadata.fov || 180;
+            const aspectRatio = video.videoWidth / video.videoHeight;
+
+            if (projection === 'fisheye') {
+                return `fisheye${fov}`;
+            } else if (projection === 'he' || projection === 'equirect') {
+                if (aspectRatio > 3.5) {
+                    return 'equirect180'; // SBS 180°
+                } else if (aspectRatio > 1.8) {
+                    return 'equirect360'; // 360° full sphere
+                } else {
+                    return 'equirect180'; // Default hemisphere
+                }
+            } else {
+                // Flat video
+                return 'flat';
+            }
+        }
+
+        function applyProjection(type) {
+            if (type === 'auto') {
+                type = detectProjectionType(videoMetadata);
+            }
+
+            console.log(`🎬 Applying projection: ${type}`);
+
+            // Destroy existing renderer if active
+            if (projectionRenderer.active) {
+                projectionRenderer.destroy();
+            }
+
+            // Use flat CSS mode for flat videos
+            if (type === 'flat') {
+                video.style.display = 'block';
+                vrCanvas.style.display = 'none';
+                console.log('📺 Using flat CSS mode');
+                return;
+            }
+
+            // Use THREE.js projection renderer for fisheye/equirect
+            projectionRenderer.init(type);
+        }
+
+        // Handle projection selector change
+        projectionSelect.addEventListener('change', () => {
+            const selectedProjection = projectionSelect.value;
+            currentProjection = selectedProjection;
+            applyProjection(selectedProjection);
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            projectionRenderer.onWindowResize();
+        });
 
         // Show loading overlay if loading from XBVR
         if (xbvrVideoPath) {
@@ -2002,6 +2277,11 @@
                 } else {
                     detectedVRFormat = '2D';
                     console.log('📺 Standard 2D video detected');
+                }
+
+                // Apply projection if auto-detect is enabled
+                if (currentProjection === 'auto' && Object.keys(videoMetadata).length > 0) {
+                    applyProjection('auto');
                 }
 
                 // Update splash screen
