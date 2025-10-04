@@ -514,6 +514,37 @@
             display: block;
         }
 
+        /* VR Settings Panel */
+        #vrSettingsPanel {
+            position: absolute;
+            bottom: 150px;
+            right: 20px;
+            background: rgba(20, 20, 25, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            min-width: 400px;
+            max-width: 500px;
+            max-height: calc(100vh - 200px);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: none;
+            pointer-events: all;
+            overflow-y: auto;
+        }
+
+        #vrSettingsPanel.visible {
+            display: block;
+        }
+
+        kbd {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
         .panel-header {
             font-size: 16px;
             font-weight: 600;
@@ -1041,6 +1072,7 @@
                 <!-- Playback Controls -->
                 <div id="playbackControls">
                     <button class="control-btn" id="vrBtn" title="Enter VR" style="background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%); border: none; font-size: 18px;">🥽</button>
+                    <button class="control-btn" id="vrSettingsBtn" title="VR Settings" style="background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%); border: none; font-size: 18px;">⚙️</button>
                     <button class="control-btn" id="xbvrBrowserBtn" title="Open XBVR Browser" style="background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%); border: none; font-size: 18px;">📚</button>
                     <button class="control-btn" id="interactiveBtn" title="Interactive Control" style="background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%); border: none; font-size: 18px; margin-right: 20px;">🎮</button>
 
@@ -1097,6 +1129,63 @@
                 <div class="panel-toggle">
                     <span class="panel-toggle-label">Interactive Sync</span>
                     <div class="toggle-switch" id="interactiveSyncToggle"></div>
+                </div>
+
+            </div>
+
+            <!-- VR Settings Panel -->
+            <div id="vrSettingsPanel">
+                <div class="panel-header">🥽 VR Settings</div>
+
+                <!-- Projection Type -->
+                <div class="panel-section">
+                    <div class="panel-label">Projection Type</div>
+                    <select class="panel-select" id="vrProjectionSelect">
+                        <option value="AUTO">Auto-Detect</option>
+                        <option value="NONE">2D / Flat</option>
+                        <option value="180">180° Hemisphere</option>
+                        <option value="360">360° Sphere</option>
+                        <option value="EAC">Equi-Angular Cubemap</option>
+                    </select>
+                </div>
+
+                <!-- Stereo Format -->
+                <div class="panel-section">
+                    <div class="panel-label">Stereo Format</div>
+                    <select class="panel-select" id="vrStereoSelect">
+                        <option value="LR">Side-by-Side (Left/Right)</option>
+                        <option value="TB">Top-Bottom</option>
+                        <option value="MONO">Monoscopic (No 3D)</option>
+                    </select>
+                </div>
+
+                <!-- Current Settings Info -->
+                <div class="panel-section">
+                    <div class="panel-label">Detected Format</div>
+                    <div style="font-size: 14px; color: rgba(255, 255, 255, 0.8); padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 6px;">
+                        <div style="margin-bottom: 5px;">📐 Resolution: <span id="vrDetectedResolution">-</span></div>
+                        <div style="margin-bottom: 5px;">📊 Aspect Ratio: <span id="vrDetectedAspect">-</span></div>
+                        <div>🎬 Format: <span id="vrDetectedFormat">-</span></div>
+                    </div>
+                </div>
+
+                <!-- Keyboard Shortcuts Help -->
+                <div class="panel-section">
+                    <div class="panel-label">Zoom & Pan Controls</div>
+                    <div style="font-size: 13px; color: rgba(255, 255, 255, 0.7); line-height: 1.6;">
+                        <div><kbd>+</kbd> / <kbd>-</kbd> : Zoom in/out</div>
+                        <div><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> : Pan video</div>
+                        <div><kbd>R</kbd> : Reset zoom & pan</div>
+                        <div><kbd>Mouse Wheel</kbd> : Zoom (Video.js VR)</div>
+                        <div><kbd>Mouse Drag</kbd> : Pan (Video.js VR)</div>
+                    </div>
+                </div>
+
+                <!-- Apply Button -->
+                <div class="panel-section">
+                    <button class="setting-btn" id="vrApplyBtn" style="width: 100%; background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%); border: none; padding: 12px; font-size: 14px;">
+                        Apply VR Settings
+                    </button>
                 </div>
 
             </div>
@@ -1948,6 +2037,11 @@
                     console.log('📺 Standard 2D video detected');
                 }
 
+                // Update VR Settings panel with detected info
+                document.getElementById('vrDetectedResolution').textContent = `${video.videoWidth} × ${video.videoHeight}`;
+                document.getElementById('vrDetectedAspect').textContent = aspectRatio.toFixed(2);
+                document.getElementById('vrDetectedFormat').textContent = vrFormat;
+
                 // Apply VR projection to Video.js VR plugin
                 if (vrProjection !== 'NONE') {
                     player.vr({ projection: vrProjection });
@@ -2072,6 +2166,27 @@
             // VR button
             vrBtn.addEventListener('click', enterVR);
 
+            // VR Settings button
+            document.getElementById('vrSettingsBtn').addEventListener('click', () => {
+                const vrSettingsPanel = document.getElementById('vrSettingsPanel');
+                const vrSettingsBtn = document.getElementById('vrSettingsBtn');
+                const isVisible = vrSettingsPanel.classList.toggle('visible');
+                vrSettingsBtn.classList.toggle('active', isVisible);
+
+                // Close interactive panel if open
+                if (isVisible) {
+                    document.getElementById('interactivePanel').classList.remove('visible');
+                    document.getElementById('interactiveBtn').classList.remove('active');
+                }
+
+                resetIdleTimer();
+            });
+
+            // VR Apply Settings button
+            document.getElementById('vrApplyBtn').addEventListener('click', () => {
+                applyVRSettings();
+            });
+
             // XBVR Browser button - redirect to XBVR browser (same tab)
             document.getElementById('xbvrBrowserBtn').addEventListener('click', () => {
                 window.location.href = '/xbvr';
@@ -2104,6 +2219,13 @@
             interactiveBtn.addEventListener('click', () => {
                 const isVisible = interactivePanel.classList.toggle('visible');
                 interactiveBtn.classList.toggle('active', isVisible);
+
+                // Close VR settings panel if open
+                if (isVisible) {
+                    document.getElementById('vrSettingsPanel').classList.remove('visible');
+                    document.getElementById('vrSettingsBtn').classList.remove('active');
+                }
+
                 resetIdleTimer();
             });
 
@@ -2452,6 +2574,42 @@
             } else {
                 volumeBtn.textContent = '🔊';
             }
+        }
+
+        // VR Settings Control
+        function applyVRSettings() {
+            const projectionSelect = document.getElementById('vrProjectionSelect');
+            const stereoSelect = document.getElementById('vrStereoSelect');
+
+            const projection = projectionSelect.value;
+            const stereo = stereoSelect.value;
+
+            console.log(`🥽 Applying VR settings: ${projection} ${stereo !== 'LR' ? stereo : ''}`);
+
+            // Combine projection and stereo format for Video.js VR
+            let vrMode = projection;
+
+            // Append stereo format suffix if not default LR (Side-by-Side)
+            if (projection !== 'NONE' && projection !== 'AUTO') {
+                if (stereo === 'TB') {
+                    vrMode = `${projection}_TB`;  // e.g., '180_TB', '360_TB'
+                } else if (stereo === 'MONO') {
+                    vrMode = `${projection}_MONO`;  // e.g., '180_MONO'
+                } else {
+                    vrMode = `${projection}_LR`;  // e.g., '180_LR', '360_LR' (explicit SBS)
+                }
+            }
+
+            // Apply to Video.js VR plugin
+            player.vr({
+                projection: vrMode,
+                debug: false
+            });
+
+            console.log(`✅ VR mode set to: ${vrMode}`);
+
+            // Show confirmation
+            showNotification(`VR settings applied: ${vrMode}`, 'success');
         }
 
         // WebXR VR Mode with THREE.js
