@@ -1463,8 +1463,8 @@
                                     float texU = r * cos(phi);
                                     float texV = r * sin(phi);
 
-                                    // Fix mirroring: flip texV sign
-                                    vec2 uv = vec2(0.25 + texV * 0.25, 0.5 + texU * 0.25);
+                                    // Scale down to zoom out (0.20 instead of 0.25) and reduce height more
+                                    vec2 uv = vec2(0.25 + texV * 0.20, 0.5 + texU * 0.16);
 
                                     gl_FragColor = texture2D(map, uv);
                                 }
