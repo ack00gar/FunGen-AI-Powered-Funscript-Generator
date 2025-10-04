@@ -1414,46 +1414,20 @@
                 switch(type) {
                     case 'fisheye190':
                     case 'fisheye200':
-                        // Fisheye: Use custom shader for proper fisheye-to-equirectangular conversion
+                        // Fisheye: Use equirect hemisphere mapping (same as equirect180)
+                        // Proper fisheye requires custom shader, but equirect works reasonably well
                         const fov = parseInt(type.replace('fisheye', ''));
-                        geometry = new THREE.SphereGeometry(500, 60, 40);
+                        geometry = new THREE.SphereGeometry(
+                            500,              // radius
+                            60,               // widthSegments
+                            40,               // heightSegments
+                            -Math.PI / 2,     // phiStart (start 90° left, so center is at front)
+                            Math.PI           // phiLength (180° = half sphere horizontally)
+                        );
                         geometry.scale(-1, 1, 1); // Invert for inside view
-
-                        // Custom fisheye shader material
-                        material = new THREE.ShaderMaterial({
-                            uniforms: {
-                                map: { value: this.texture }
-                            },
-                            vertexShader: `
-                                varying vec3 vWorldDirection;
-                                void main() {
-                                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                                    vWorldDirection = normalize(worldPosition.xyz);
-                                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                                }
-                            `,
-                            fragmentShader: `
-                                #define PI 3.14159265359
-                                uniform sampler2D map;
-                                varying vec3 vWorldDirection;
-
-                                void main() {
-                                    vec3 n = normalize(vWorldDirection);
-
-                                    // Fisheye projection: convert 3D direction to fisheye UV
-                                    float r = 2.0 * atan(length(n.xz), n.y) / PI;
-                                    float theta = atan(n.z, n.x);
-                                    vec2 uv = vec2(cos(theta), sin(theta)) * r * 0.5 + vec2(0.5);
-
-                                    gl_FragColor = texture2D(map, uv);
-                                }
-                            `,
-                            side: THREE.DoubleSide
-                        });
-
                         this.camera.fov = fov === 190 ? 95 : 100;
                         this.camera.updateProjectionMatrix();
-                        console.log(`🐟 Fisheye ${fov}° with custom shader, camera FOV: ${this.camera.fov}°`);
+                        console.log(`🐟 Fisheye ${fov}° using equirect mapping, camera FOV: ${this.camera.fov}°`);
                         break;
 
                     case 'equirect180':
@@ -1469,11 +1443,6 @@
                         this.camera.fov = 90;
                         this.camera.updateProjectionMatrix();
                         console.log(`🌐 Equirectangular 180° hemisphere created (centered at front)`);
-
-                        material = new THREE.MeshBasicMaterial({
-                            map: this.texture,
-                            side: THREE.DoubleSide
-                        });
                         break;
 
                     default:
@@ -1481,21 +1450,13 @@
                         const aspectRatio = this.video.videoWidth / this.video.videoHeight || 16/9;
                         geometry = new THREE.PlaneGeometry(16 * aspectRatio, 16);
                         geometry.translate(0, 0, -10);
-
-                        material = new THREE.MeshBasicMaterial({
-                            map: this.texture,
-                            side: THREE.DoubleSide
-                        });
                         break;
                 }
 
-                // Only create default material if not already created in switch
-                if (!material) {
-                    material = new THREE.MeshBasicMaterial({
-                        map: this.texture,
-                        side: THREE.DoubleSide
-                    });
-                }
+                material = new THREE.MeshBasicMaterial({
+                    map: this.texture,
+                    side: THREE.DoubleSide
+                });
 
                 this.mesh = new THREE.Mesh(geometry, material);
                 this.scene.add(this.mesh);
