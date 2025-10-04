@@ -308,6 +308,21 @@ class VideoProcessor:
         is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
         is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
 
+        # Resolution-based pre-filter: rule out VR if resolution is too low
+        # VR videos are typically 3840x1920 minimum (SBS) or 1920x3840 (TB)
+        # Standard 2D videos like 1920x1080, 1280x720, etc. cannot be VR
+        is_definitely_2d = (
+            (width <= 2560 and height <= 1440) or  # Standard 2D resolutions (1080p, 720p, 1440p)
+            (width < 3000 and not is_sbs_resolution and not is_tb_resolution)  # Not wide/tall enough
+        )
+
+        if is_definitely_2d and self.video_type_setting == 'auto':
+            self.logger.info(f"Resolution {width}x{height} is too low for VR - classified as 2D (skipping ML)")
+            self.determined_video_type = '2D'
+            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            return
+
         # Try ML detection first if in auto mode and model available
         ml_detection_succeeded = False
         if self.video_type_setting == 'auto' and os.path.exists(self.ml_model_path):
