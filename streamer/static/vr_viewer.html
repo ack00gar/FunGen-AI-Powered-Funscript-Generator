@@ -1140,9 +1140,9 @@
                     <select id="projectionSelect" style="width: 100%; padding: 8px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; font-size: 14px;">
                         <option value="auto">Auto-Detect</option>
                         <option value="flat">Flat (2D/SBS)</option>
-                        <option value="vr180">VR 180° FOV</option>
-                        <option value="vr190">VR 190° FOV</option>
-                        <option value="vr200">VR 200° FOV</option>
+                        <option value="equirect180">Equirectangular 180°</option>
+                        <option value="fisheye190">Fisheye 190°</option>
+                        <option value="fisheye200">Fisheye 200°</option>
                     </select>
                     <div id="autoDetectedLabel" style="font-size: 12px; color: rgba(0, 212, 255, 0.8); margin-top: 4px; display: none;">
                         Detected: <span id="autoDetectedValue">—</span>
@@ -1370,12 +1370,13 @@
                 this.texture.colorSpace = THREE.SRGBColorSpace; // Fix gamma/color issues
 
                 // Handle SBS eye selection (left/right eye cropping for SBS videos)
-                // For VR mode, default to left eye if currently in full mode
-                if (projectionType.startsWith('vr') && currentVRMode === 'full') {
+                // For fisheye and equirect modes, always force left eye only
+                if (projectionType === 'fisheye190' || projectionType === 'fisheye200' || projectionType === 'equirect180') {
                     this.updateTextureForEyeMode('left-eye');
                     currentVRMode = 'left-eye';
-                    console.log('🎬 VR mode: Defaulting to left eye view');
+                    console.log('👁️ Fisheye/Equirect mode: Forced left eye only');
                 } else {
+                    // For other modes, use current selection
                     this.updateTextureForEyeMode(currentVRMode);
                 }
 
@@ -1395,21 +1396,47 @@
             createGeometry(type) {
                 let geometry, material;
 
-                if (type.startsWith('vr')) {
-                    // VR mode: Full sphere for all FOVs
-                    geometry = new THREE.SphereGeometry(500, 60, 40);
-                    geometry.scale(-1, 1, 1); // Invert for inside view
+                switch(type) {
+                    case 'fisheye190':
+                    case 'fisheye200':
+                        // Fisheye: Dome (hemisphere)
+                        const fov = parseInt(type.replace('fisheye', ''));
+                        geometry = new THREE.SphereGeometry(
+                            500,         // radius
+                            60,          // widthSegments
+                            40,          // heightSegments
+                            0,           // phiStart
+                            Math.PI * 2, // phiLength (full circle)
+                            0,           // thetaStart
+                            Math.PI / 2  // thetaLength (hemisphere = 90 degrees from pole)
+                        );
+                        geometry.scale(-1, 1, 1); // Invert for inside view
+                        this.camera.fov = fov === 190 ? 95 : 100;
+                        this.camera.updateProjectionMatrix();
+                        console.log(`🐟 Fisheye ${fov}° dome created, camera FOV: ${this.camera.fov}°`);
+                        break;
 
-                    // Adjust camera FOV based on video FOV
-                    const fov = parseInt(type.replace('vr', '')) || 180;
-                    this.camera.fov = fov === 180 ? 90 : fov === 190 ? 95 : 100;
-                    this.camera.updateProjectionMatrix();
-                    console.log(`📐 Camera FOV adjusted to ${this.camera.fov}° for ${fov}° video`);
-                } else {
-                    // Flat mode: shouldn't reach here, but fallback to plane
-                    const aspectRatio = this.video.videoWidth / this.video.videoHeight || 16/9;
-                    geometry = new THREE.PlaneGeometry(16 * aspectRatio, 16);
-                    geometry.translate(0, 0, -10);
+                    case 'equirect180':
+                        // Equirectangular hemisphere (180° horizontal)
+                        geometry = new THREE.SphereGeometry(
+                            500,      // radius
+                            60,       // widthSegments
+                            40,       // heightSegments
+                            0,        // phiStart
+                            Math.PI   // phiLength (180° = half circle horizontally)
+                        );
+                        geometry.scale(-1, 1, 1); // Invert for inside view
+                        this.camera.fov = 90;
+                        this.camera.updateProjectionMatrix();
+                        console.log(`🌐 Equirectangular 180° hemisphere created`);
+                        break;
+
+                    default:
+                        // Flat mode: shouldn't reach here, but fallback to plane
+                        const aspectRatio = this.video.videoWidth / this.video.videoHeight || 16/9;
+                        geometry = new THREE.PlaneGeometry(16 * aspectRatio, 16);
+                        geometry.translate(0, 0, -10);
+                        break;
                 }
 
                 material = new THREE.MeshBasicMaterial({
@@ -1529,18 +1556,24 @@
         function detectProjectionType(metadata) {
             const aspectRatio = video.videoWidth / video.videoHeight;
 
-            // Check if we have FOV metadata from video processor
+            // Check metadata from video processor
+            const projection = metadata.projection || null;
             const fov = metadata.fov || null;
 
             if (aspectRatio > 1.8) {
                 // Wide video = VR
-                // Use FOV from metadata if available, otherwise default to 180
-                if (fov === 190) {
-                    return 'vr190';
-                } else if (fov === 200) {
-                    return 'vr200';
+                if (projection === 'fisheye') {
+                    // Fisheye projection
+                    if (fov === 190) {
+                        return 'fisheye190';
+                    } else if (fov === 200) {
+                        return 'fisheye200';
+                    } else {
+                        return 'fisheye190'; // Default fisheye
+                    }
                 } else {
-                    return 'vr180'; // Default to 180° FOV
+                    // Equirectangular (hemisphere)
+                    return 'equirect180';
                 }
             } else {
                 // Normal aspect ratio = flat 2D
@@ -1551,9 +1584,9 @@
         function applyProjection(type) {
             const displayNames = {
                 'flat': 'Flat (2D/SBS)',
-                'vr180': 'VR 180° FOV',
-                'vr190': 'VR 190° FOV',
-                'vr200': 'VR 200° FOV'
+                'equirect180': 'Equirectangular 180°',
+                'fisheye190': 'Fisheye 190°',
+                'fisheye200': 'Fisheye 200°'
             };
 
             let detectedType = null;
