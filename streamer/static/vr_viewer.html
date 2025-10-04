@@ -1463,7 +1463,7 @@
                                     float texY = r * sin(phi);
 
                                     // Map to left eye circle at (0.25, 0.5), radius ~0.24
-                                    vec2 uv = vec2(0.25 - texY * 0.24, 0.5 - texX * 0.24);
+                                    vec2 uv = vec2(0.25 - texY * 0.24, 0.5 + texX * 0.24);
 
                                     gl_FragColor = texture2D(map, uv);
                                 }
