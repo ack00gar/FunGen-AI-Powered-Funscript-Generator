@@ -1393,9 +1393,10 @@
                 // Create geometry based on projection type
                 this.createGeometry(projectionType);
 
-                // Set initial camera orientation (pointing at center of hemisphere)
-                this.lon = 0; // Center horizontally
-                this.lat = 0; // Center vertically
+                // Set initial camera orientation
+                // For fisheye: shader measures from +Y axis, so rotate camera to look at +Y
+                this.lon = projectionType.startsWith('fisheye') ? -270 : 0;
+                this.lat = 0;
                 this.updateCameraOrientation();
 
                 // Add simple mouse/touch look-around controls for desktop
