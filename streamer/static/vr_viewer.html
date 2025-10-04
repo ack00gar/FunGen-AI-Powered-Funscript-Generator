@@ -1443,30 +1443,27 @@
                                 void main() {
                                     vec3 dir = normalize(vWorldDirection);
 
-                                    // Calculate angle from forward direction (negative Z in THREE.js)
-                                    // theta is angle from -Z axis (forward)
-                                    float theta = acos(-dir.z);
+                                    // Camera at lon=0,lat=0 looks at +X (500,0,0)
+                                    // Fisheye center should align with camera forward (+X)
+                                    float theta = acos(dir.x);
 
-                                    // Calculate azimuth (phi) around the -Z axis
-                                    float phi = atan(dir.y, dir.x);
+                                    // Azimuth in YZ plane
+                                    float phi = atan(dir.z, dir.y);
 
-                                    // Fisheye circular projection: r is proportional to theta
+                                    // Fisheye: r proportional to theta
                                     float r = theta / (fisheyeFOV / 2.0);
 
-                                    // If outside fisheye circle, show black
                                     if (r > 1.0) {
                                         gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
                                         return;
                                     }
 
-                                    // Convert polar to cartesian for texture lookup
-                                    float x = r * cos(phi);
-                                    float y = r * sin(phi);
+                                    // Polar to cartesian
+                                    float texX = r * cos(phi);
+                                    float texY = r * sin(phi);
 
-                                    // Map to texture coordinates
-                                    // Left eye circle center is at (0.25, 0.5)
-                                    // Circle radius is ~0.24 (2900/2 / 5800 ≈ 0.25)
-                                    vec2 uv = vec2(0.25 + x * 0.24, 0.5 - y * 0.24);
+                                    // Map to left eye circle at (0.25, 0.5), radius ~0.24
+                                    vec2 uv = vec2(0.25 - texY * 0.24, 0.5 - texX * 0.24);
 
                                     gl_FragColor = texture2D(map, uv);
                                 }
