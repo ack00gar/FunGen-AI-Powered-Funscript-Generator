@@ -1414,20 +1414,66 @@
                 switch(type) {
                     case 'fisheye190':
                     case 'fisheye200':
-                        // Fisheye: Use equirect hemisphere mapping (same as equirect180)
-                        // Proper fisheye requires custom shader, but equirect works reasonably well
+                        // Fisheye: Circular fisheye projection (200° FOV fisheye circles in SBS format)
+                        // Each eye is a circular fisheye image, need proper circular unwarp
                         const fov = parseInt(type.replace('fisheye', ''));
-                        geometry = new THREE.SphereGeometry(
-                            500,              // radius
-                            60,               // widthSegments
-                            40,               // heightSegments
-                            -Math.PI / 2,     // phiStart (start 90° left, so center is at front)
-                            Math.PI           // phiLength (180° = half sphere horizontally)
-                        );
+                        geometry = new THREE.SphereGeometry(500, 60, 40);
                         geometry.scale(-1, 1, 1); // Invert for inside view
-                        this.camera.fov = fov === 190 ? 95 : 100;
+
+                        // Custom fisheye shader for circular fisheye projection
+                        material = new THREE.ShaderMaterial({
+                            uniforms: {
+                                map: { value: this.texture },
+                                fisheyeFOV: { value: fov * Math.PI / 180.0 } // Convert to radians
+                            },
+                            vertexShader: `
+                                varying vec3 vWorldDirection;
+                                void main() {
+                                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                                    vWorldDirection = normalize(worldPosition.xyz);
+                                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                                }
+                            `,
+                            fragmentShader: `
+                                #define PI 3.14159265359
+                                uniform sampler2D map;
+                                uniform float fisheyeFOV;
+                                varying vec3 vWorldDirection;
+
+                                void main() {
+                                    vec3 dir = normalize(vWorldDirection);
+
+                                    // Calculate angle from center (theta)
+                                    float theta = acos(dir.y);
+
+                                    // Calculate azimuth (phi)
+                                    float phi = atan(dir.z, dir.x);
+
+                                    // Fisheye circular projection: r is proportional to theta
+                                    float r = theta / (fisheyeFOV / 2.0);
+
+                                    // If outside fisheye circle, discard
+                                    if (r > 1.0) {
+                                        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                                        return;
+                                    }
+
+                                    // Convert polar to cartesian for texture lookup
+                                    float x = r * cos(phi);
+                                    float z = r * sin(phi);
+
+                                    // Map to texture coordinates (0.25, 0.5) is center of left eye circle
+                                    vec2 uv = vec2(0.25 + x * 0.22, 0.5 - z * 0.44);
+
+                                    gl_FragColor = texture2D(map, uv);
+                                }
+                            `,
+                            side: THREE.DoubleSide
+                        });
+
+                        this.camera.fov = 90;
                         this.camera.updateProjectionMatrix();
-                        console.log(`🐟 Fisheye ${fov}° using equirect mapping, camera FOV: ${this.camera.fov}°`);
+                        console.log(`🐟 Fisheye ${fov}° circular projection with shader`);
                         break;
 
                     case 'equirect180':
@@ -1443,6 +1489,11 @@
                         this.camera.fov = 90;
                         this.camera.updateProjectionMatrix();
                         console.log(`🌐 Equirectangular 180° hemisphere created (centered at front)`);
+
+                        material = new THREE.MeshBasicMaterial({
+                            map: this.texture,
+                            side: THREE.DoubleSide
+                        });
                         break;
 
                     default:
@@ -1450,13 +1501,21 @@
                         const aspectRatio = this.video.videoWidth / this.video.videoHeight || 16/9;
                         geometry = new THREE.PlaneGeometry(16 * aspectRatio, 16);
                         geometry.translate(0, 0, -10);
+
+                        material = new THREE.MeshBasicMaterial({
+                            map: this.texture,
+                            side: THREE.DoubleSide
+                        });
                         break;
                 }
 
-                material = new THREE.MeshBasicMaterial({
-                    map: this.texture,
-                    side: THREE.DoubleSide
-                });
+                // Only create default material if not already created
+                if (!material) {
+                    material = new THREE.MeshBasicMaterial({
+                        map: this.texture,
+                        side: THREE.DoubleSide
+                    });
+                }
 
                 this.mesh = new THREE.Mesh(geometry, material);
                 this.scene.add(this.mesh);
