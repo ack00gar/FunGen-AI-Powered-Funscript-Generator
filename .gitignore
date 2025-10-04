@@ -11,6 +11,10 @@ audit_launch_logging.py
 # Experimental VR streaming feature (work in progress)
 vr_streaming/
 
+# Supporter-only features (not included in public release)
+device_control/
+streamer/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
