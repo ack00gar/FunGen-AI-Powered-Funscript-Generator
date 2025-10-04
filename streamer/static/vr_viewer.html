@@ -1471,9 +1471,10 @@
                             side: THREE.DoubleSide
                         });
 
-                        this.camera.fov = 90;
+                        // Camera FOV should match fisheye FOV for proper viewing
+                        this.camera.fov = fov === 190 ? 110 : 120;
                         this.camera.updateProjectionMatrix();
-                        console.log(`🐟 Fisheye ${fov}° circular projection with shader`);
+                        console.log(`🐟 Fisheye ${fov}° circular projection with shader, camera FOV: ${this.camera.fov}°`);
                         break;
 
                     case 'equirect180':
