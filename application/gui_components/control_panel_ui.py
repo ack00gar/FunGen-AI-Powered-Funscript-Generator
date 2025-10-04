@@ -71,6 +71,11 @@ class ControlPanelUI:
         # Bridge attributes for live control
         "video_playback_bridge",
         "live_tracker_bridge",
+        # Native Sync attributes (supporter feature)
+        "_native_sync_manager",
+        "_prev_client_count",
+        "_native_sync_status_cache",
+        "_native_sync_status_time",
     )
 
     def __init__(self, app):
@@ -108,6 +113,12 @@ class ControlPanelUI:
         # Buttplug device discovery UI state
         self._discovered_buttplug_devices = []
         self._buttplug_discovery_performed = False
+
+        # Native Sync attributes (supporter feature)
+        self._native_sync_manager = None
+        self._prev_client_count = 0
+        self._native_sync_status_cache = None
+        self._native_sync_status_time = 0
 
     # ------- Helpers -------
     
@@ -346,7 +357,17 @@ class ControlPanelUI:
                         imgui.end_tab_item()
             except ImportError:
                 pass
-            
+
+            # Streamer tab (supporter feature)
+            try:
+                from application.utils.feature_detection import is_feature_available
+                if is_feature_available("streamer"):
+                    if imgui.begin_tab_item("Streamer")[0]:
+                        tab_selected = "native_sync"
+                        imgui.end_tab_item()
+            except ImportError:
+                pass
+
             imgui.end_tab_bar()
 
         avail = imgui.get_content_region_available()
@@ -361,6 +382,8 @@ class ControlPanelUI:
             self._render_settings_tab()
         elif tab_selected == "device_control":
             self._render_device_control_tab()
+        elif tab_selected == "native_sync":
+            self._render_native_sync_tab()
         imgui.end_child()
         imgui.end()
 
@@ -4186,3 +4209,471 @@ class ControlPanelUI:
             
         except Exception as e:
             self.app.logger.error(f"Failed to start Handy test: {e}")
+
+    def _render_native_sync_tab(self):
+        """Render native sync tab content."""
+        try:
+            # Initialize native sync manager lazily
+            if self._native_sync_manager is None:
+                from streamer.integration_manager import NativeSyncManager
+                self._native_sync_manager = NativeSyncManager(
+                    self.app.processor,
+                    logger=self.app.logger
+                )
+
+            # Cache status to avoid expensive lookups every frame (throttle to 500ms)
+            import time
+            current_time = time.time()
+
+            # Update cache if stale (> 500ms)
+            if self._native_sync_status_cache is None or (current_time - self._native_sync_status_time) > 0.5:
+                self._native_sync_status_cache = self._native_sync_manager.get_status()
+                self._native_sync_status_time = current_time
+
+            # Use cached status
+            status = self._native_sync_status_cache
+            is_running = status.get('is_running', False)
+            client_count = status.get('connected_clients', 0)
+
+            # Auto-hide/show video feed based on client connections
+            if is_running:
+                # Initialize setting if not exists
+                if not hasattr(self.app.app_settings, '_streamer_auto_hide_video'):
+                    self.app.app_settings._streamer_auto_hide_video = True
+
+                auto_hide_enabled = getattr(self.app.app_settings, '_streamer_auto_hide_video', True)
+
+                # Track previous client count
+                if not hasattr(self, '_prev_client_count'):
+                    self._prev_client_count = 0
+
+                # Client connected (0 -> >0)
+                if auto_hide_enabled and client_count > 0 and self._prev_client_count == 0:
+                    self.app.app_state_ui.show_video_feed = False
+                    self.app.app_settings.set("show_video_feed", False)
+                    self.app.logger.info("🎥 Auto-hiding video feed (streamer active)")
+
+                # All clients disconnected (>0 -> 0)
+                elif client_count == 0 and self._prev_client_count > 0:
+                    self.app.app_state_ui.show_video_feed = True
+                    self.app.app_settings.set("show_video_feed", True)
+                    self.app.logger.info("🎥 Restoring video feed (no clients)")
+
+                self._prev_client_count = client_count
+
+            # Control Section
+            open_, _ = imgui.collapsing_header(
+                "Server Control##NativeSyncControl",
+                flags=imgui.TREE_NODE_DEFAULT_OPEN,
+            )
+            if open_:
+                # Description
+                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                imgui.text_colored(
+                    "Stream video to browsers/VR headsets with frame-perfect synchronization. "
+                    "Supports zoom/pan controls, speed modes, and interactive device control.",
+                    0.7, 0.7, 0.7
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.spacing()
+
+                # Start/Stop button
+                if is_running:
+                    # Running - show stop button
+                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.9, 0.3, 0.3)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.7, 0.1, 0.1)
+                    if imgui.button("Stop Streaming Server", width=-1):
+                        self._stop_native_sync()
+                    imgui.pop_style_color(3)
+                else:
+                    # Not running - show start button
+                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.9, 0.3)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.7, 0.1)
+                    if imgui.button("Start Streaming Server", width=-1):
+                        self._start_native_sync()
+                    imgui.pop_style_color(3)
+
+            # Connection Info Section (only when running)
+            if is_running:
+                open_, _ = imgui.collapsing_header(
+                    "Connection Info##NativeSyncConnection",
+                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
+                )
+                if open_:
+                    # FunGen Viewer URL
+                    viewer_url = f"http://{self._get_local_ip()}:{status.get('http_port', 8080)}/fungen"
+                    imgui.text("FunGen Viewer URL:")
+                    imgui.same_line()
+                    imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 1.0, 0.5)
+                    imgui.text(viewer_url)
+                    imgui.pop_style_color()
+
+                    # Buttons row
+                    button_width = imgui.get_content_region_available_width() / 2 - 5
+                    if imgui.button("Open in Browser", width=button_width):
+                        self._open_in_browser(viewer_url)
+                    imgui.same_line()
+                    if imgui.button("Copy URL", width=button_width):
+                        self._copy_to_clipboard(viewer_url)
+
+                    imgui.spacing()
+
+                    # WebSocket URL
+                    ws_url = f"ws://{self._get_local_ip()}:{status.get('sync_port', 8765)}"
+                    imgui.text("WebSocket Sync:")
+                    imgui.same_line()
+                    imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 1.0, 0.5)
+                    imgui.text(ws_url)
+                    imgui.pop_style_color()
+
+                # Status Section
+                open_, _ = imgui.collapsing_header(
+                    "Status##NativeSyncStatus",
+                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
+                )
+                if open_:
+                    # Server status
+                    sync_active = status.get('sync_server_active', False)
+                    video_active = status.get('video_server_active', False)
+
+                    imgui.text("Sync Server:")
+                    imgui.same_line()
+                    if sync_active:
+                        imgui.text_colored("Active", 0.0, 1.0, 0.0)
+                    else:
+                        imgui.text_colored("Inactive", 1.0, 0.0, 0.0)
+
+                    imgui.text("Video Server:")
+                    imgui.same_line()
+                    if video_active:
+                        imgui.text_colored("Active", 0.0, 1.0, 0.0)
+                    else:
+                        imgui.text_colored("Inactive", 1.0, 0.0, 0.0)
+
+                    # Connected clients
+                    client_count = status.get('connected_clients', 0)
+                    imgui.text(f"Connected Clients:")
+                    imgui.same_line()
+                    if client_count > 0:
+                        imgui.text_colored(str(client_count), 0.0, 1.0, 0.5)
+                    else:
+                        imgui.text_colored("0", 0.7, 0.7, 0.7)
+
+                    imgui.spacing()
+
+                    # Browser Playback Progress (when clients connected)
+                    if client_count > 0:
+                        imgui.separator()
+                        imgui.text("Browser Playback Position:")
+
+                        # Get sync server for browser position
+                        if self._native_sync_manager and self._native_sync_manager.sync_server:
+                            sync_server = self._native_sync_manager.sync_server
+                            browser_frame = sync_server.target_frame_index
+                            processor_frame = self.app.processor.current_frame_index
+                            total_frames = self.app.processor.total_frames
+
+                            if browser_frame is not None and total_frames > 0:
+                                # Calculate progress percentages
+                                browser_progress = (browser_frame / total_frames) * 100.0
+                                processor_progress = (processor_frame / total_frames) * 100.0
+
+                                # Browser progress bar
+                                imgui.text("  Browser:")
+                                imgui.same_line(120)
+                                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 0.0, 0.7, 1.0)
+                                imgui.progress_bar(browser_progress / 100.0, (200, 0), f"{browser_frame} / {total_frames}")
+                                imgui.pop_style_color()
+
+                                # Processor progress bar
+                                imgui.text("  Processing:")
+                                imgui.same_line(120)
+                                if processor_frame > browser_frame:
+                                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 0.0, 1.0, 0.5)
+                                else:
+                                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 1.0, 0.5, 0.0)
+                                imgui.progress_bar(processor_progress / 100.0, (200, 0), f"{processor_frame} / {total_frames}")
+                                imgui.pop_style_color()
+
+                                # Show drift if exists
+                                drift = processor_frame - browser_frame
+                                if abs(drift) > 10:
+                                    imgui.spacing()
+                                    if drift > 0:
+                                        imgui.text_colored(f"  Processing is {drift} frames ahead", 0.0, 1.0, 0.5)
+                                    else:
+                                        imgui.text_colored(f"  Processing is {abs(drift)} frames behind!", 1.0, 0.5, 0.0)
+                            else:
+                                imgui.text_colored("  Waiting for browser position updates...", 0.7, 0.7, 0.7)
+                        else:
+                            imgui.text_colored("  No sync data available", 0.7, 0.7, 0.7)
+
+                # Video Display Options (when streaming)
+                open_, _ = imgui.collapsing_header(
+                    "Display Options##NativeSyncDisplay",
+                    flags=0,  # Collapsed by default
+                )
+                if open_:
+                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                    imgui.text_colored(
+                        "When streaming to browsers, you can hide the local video feed to save GPU resources.",
+                        0.7, 0.7, 0.7
+                    )
+                    imgui.pop_text_wrap_pos()
+                    imgui.spacing()
+
+                    # Auto-hide video feed checkbox
+                    if not hasattr(self.app.app_settings, '_streamer_auto_hide_video'):
+                        self.app.app_settings._streamer_auto_hide_video = True
+
+                    auto_hide = getattr(self.app.app_settings, '_streamer_auto_hide_video', True)
+                    clicked, new_val = imgui.checkbox("Auto-hide Video Feed while streaming", auto_hide)
+                    if clicked:
+                        self.app.app_settings._streamer_auto_hide_video = new_val
+                        # Apply immediately
+                        if new_val and client_count > 0:
+                            # Hide video
+                            self.app.app_state_ui.show_video_feed = False
+                            self.app.app_settings.set("show_video_feed", False)
+                        elif not new_val:
+                            # Show video
+                            self.app.app_state_ui.show_video_feed = True
+                            self.app.app_settings.set("show_video_feed", True)
+
+                    imgui.same_line()
+                    imgui.text_colored("(?)", 0.7, 0.7, 0.7)
+                    if imgui.is_item_hovered():
+                        imgui.begin_tooltip()
+                        imgui.text("When enabled, the video feed will be hidden\nwhen clients are connected, and restored when\nall clients disconnect.")
+                        imgui.end_tooltip()
+
+            # XBVR Configuration Section
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            open_, _ = imgui.collapsing_header(
+                "XBVR Integration##XBVRSettings",
+                flags=imgui.TREE_NODE_DEFAULT_OPEN if not is_running else 0,
+            )
+            if open_:
+                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                imgui.text_colored(
+                    "Browse and load videos from your XBVR library directly in the VR viewer. "
+                    "Displays scene thumbnails, funscript availability, and enables remote playback control.",
+                    0.7, 0.7, 0.7
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.spacing()
+
+                # Get current settings
+                xbvr_enabled = self.app.app_settings.get('xbvr_enabled', True)
+                xbvr_host = self.app.app_settings.get('xbvr_host', '192.168.1.94')
+                xbvr_port = self.app.app_settings.get('xbvr_port', 9999)
+
+                # Enable/disable XBVR
+                clicked, new_enabled = imgui.checkbox("Enable XBVR Browser", xbvr_enabled)
+                if clicked:
+                    self.app.app_settings.set('xbvr_enabled', new_enabled)
+                    self.app.app_settings.save_settings()
+
+                imgui.same_line()
+                imgui.text_colored("(?)", 0.7, 0.7, 0.7)
+                if imgui.is_item_hovered():
+                    imgui.begin_tooltip()
+                    imgui.text("When enabled, the Interactive panel in the VR viewer\nwill show an XBVR Browser tab for browsing your\nXBVR library and loading videos remotely.")
+                    imgui.end_tooltip()
+
+                if new_enabled if clicked else xbvr_enabled:
+                    imgui.spacing()
+
+                    # XBVR Host
+                    imgui.text("XBVR Host/IP:")
+                    imgui.push_item_width(200)
+                    changed, new_host = imgui.input_text(
+                        "##xbvr_host",
+                        str(xbvr_host),
+                        256
+                    )
+                    imgui.pop_item_width()
+                    if changed or imgui.is_item_deactivated_after_edit():
+                        self.app.app_settings.set('xbvr_host', new_host)
+                        self.app.app_settings.save_settings()
+
+                    # XBVR Port
+                    imgui.text("XBVR Port:")
+                    imgui.push_item_width(100)
+                    changed, new_port_str = imgui.input_text(
+                        "##xbvr_port",
+                        str(xbvr_port),
+                        256
+                    )
+                    imgui.pop_item_width()
+                    if changed or imgui.is_item_deactivated_after_edit():
+                        try:
+                            new_port = int(new_port_str)
+                            self.app.app_settings.set('xbvr_port', new_port)
+                            self.app.app_settings.save_settings()
+                        except ValueError:
+                            pass  # Ignore invalid port input
+
+                    imgui.spacing()
+                    imgui.text_colored(
+                        f"XBVR URL: http://{xbvr_host}:{xbvr_port}",
+                        0.5, 0.8, 1.0
+                    )
+
+                    imgui.spacing()
+                    # Discover XBVR button
+                    if imgui.button("Discover XBVR Address", width=-1):
+                        self._discover_xbvr_address()
+
+            # Info Section (only when not running)
+            if not is_running:
+                open_, _ = imgui.collapsing_header(
+                    "Requirements##NativeSyncRequirements",
+                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
+                )
+                if open_:
+                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                    imgui.text_colored(
+                        "This will start HTTP and WebSocket servers for native video playback "
+                        "in browsers and VR headsets. Your video will be served at full quality "
+                        "with frame-perfect synchronization.",
+                        0.7, 0.7, 0.7
+                    )
+                    imgui.pop_text_wrap_pos()
+                    imgui.spacing()
+
+                    imgui.bullet_text("Video must be loaded")
+                    imgui.bullet_text("Ports 8080 (HTTP) and 8765 (WebSocket) available")
+                    imgui.bullet_text("Browser with HTML5 video support")
+
+                # Features Section
+                open_, _ = imgui.collapsing_header(
+                    "Features##NativeSyncFeatures",
+                    flags=0,  # Collapsed by default
+                )
+                if open_:
+                    imgui.bullet_text("Native hardware H.265/AV1 decode")
+                    imgui.bullet_text("Zoom/Pan controls (+/- and WASD keys)")
+                    imgui.bullet_text("Speed modes (Real Time / Slo Mo)")
+                    imgui.bullet_text("Real-time FPS and resolution stats")
+                    imgui.bullet_text("Interactive device control")
+                    imgui.bullet_text("Funscript visualization graph")
+
+        except Exception as e:
+            imgui.text(f"Error in Streamer: {e}")
+            imgui.text_colored("See logs for details.", 1.0, 0.0, 0.0)
+            import traceback
+            self.app.logger.error(f"Native Sync tab error: {e}")
+            self.app.logger.error(traceback.format_exc())
+
+    def _start_native_sync(self):
+        """Start native sync servers."""
+        try:
+            # Check if video is loaded
+            if not self.app.processor.video_path:
+                self.app.logger.error("No video loaded. Please load a video first.")
+                return
+
+            self.app.logger.info("Starting native video sync...")
+            self._native_sync_manager.start()
+
+        except Exception as e:
+            self.app.logger.error(f"Failed to start native sync: {e}")
+            import traceback
+            self.app.logger.error(traceback.format_exc())
+
+    def _stop_native_sync(self):
+        """Stop native sync servers."""
+        try:
+            self.app.logger.info("Stopping native video sync...")
+            self._native_sync_manager.stop()
+
+        except Exception as e:
+            self.app.logger.error(f"Failed to stop native sync: {e}")
+
+    def _open_in_browser(self, url: str):
+        """Open URL in system default browser."""
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            self.app.logger.info(f"Opening in browser: {url}")
+        except Exception as e:
+            self.app.logger.error(f"Failed to open browser: {e}")
+
+    def _copy_to_clipboard(self, text: str):
+        """Copy text to clipboard."""
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+            self.app.logger.info(f"Copied to clipboard: {text}")
+        except:
+            # Fallback - just log
+            self.app.logger.info(f"URL to copy: {text}")
+
+    def _discover_xbvr_address(self):
+        """Attempt to discover XBVR on the local network."""
+        import socket
+        import requests
+        from threading import Thread
+
+        def scan_network():
+            # Get local IP to determine subnet
+            local_ip = self._get_local_ip()
+            if not local_ip or not local_ip.startswith('192.168.'):
+                self.app.logger.info("Could not determine local network subnet", extra={'status_message': True})
+                return
+
+            # Extract subnet (e.g., 192.168.1.x)
+            subnet = '.'.join(local_ip.split('.')[:-1])
+            self.app.logger.info(f"Scanning {subnet}.0/24 for XBVR on port 9999...", extra={'status_message': True})
+
+            found = False
+            for i in range(1, 255):
+                if found:
+                    break
+                test_ip = f"{subnet}.{i}"
+                try:
+                    # Quick connection test on port 9999
+                    response = requests.get(f"http://{test_ip}:9999", timeout=0.5)
+                    if response.status_code == 200 or 'xbvr' in response.text.lower():
+                        self.app.logger.info(f"✅ Found XBVR at {test_ip}:9999", extra={'status_message': True})
+                        self.app.app_settings.set('xbvr_host', test_ip)
+                        self.app.app_settings.save_settings()
+                        found = True
+                except:
+                    pass  # Connection failed, continue
+
+            if not found:
+                self.app.logger.info("No XBVR server found on local network", extra={'status_message': True})
+
+        # Run scan in background thread
+        Thread(target=scan_network, daemon=True).start()
+
+    def _get_local_ip(self) -> str:
+        """Get local network IP address (prefer 192.168.x.x over VPN)."""
+        import socket
+        try:
+            # Get all network interfaces
+            hostname = socket.gethostname()
+            addresses = socket.getaddrinfo(hostname, None, socket.AF_INET)
+
+            # Prefer 192.168.x.x addresses
+            for addr in addresses:
+                ip = addr[4][0]
+                if ip.startswith('192.168.'):
+                    return ip
+
+            # Fallback to any non-loopback address
+            for addr in addresses:
+                ip = addr[4][0]
+                if not ip.startswith('127.'):
+                    return ip
+
+            return "localhost"
+        except:
+            return "localhost"

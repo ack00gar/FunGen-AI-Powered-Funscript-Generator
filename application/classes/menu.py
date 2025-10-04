@@ -33,11 +33,13 @@ def _radio_line(label, is_selected):
     return False
 
 class MainMenu:
-    __slots__ = ("app", "FRAME_OFFSET")
+    __slots__ = ("app", "gui", "FRAME_OFFSET", "_last_menu_log_time")
 
-    def __init__(self, app_instance):
+    def __init__(self, app_instance, gui_instance=None):
         self.app = app_instance
+        self.gui = gui_instance
         self.FRAME_OFFSET = MenuColors.FRAME_OFFSET
+        self._last_menu_log_time = 0
 
     # ------------------------- POPUPS -------------------------
 
@@ -163,10 +165,13 @@ class MainMenu:
             self._render_ai_menu()
             self._render_updates_menu()
             self._render_support_menu()
-            
+
             # Render device control indicator after Support menu
             self._render_device_control_indicator()
-            
+
+            # Render Native Sync / VR Stream indicator
+            self._render_native_sync_indicator()
+
             imgui.end_main_menu_bar()
 
         self._render_timeline_selection_popup()
@@ -727,22 +732,33 @@ class MainMenu:
     def _render_device_control_indicator(self):
         """Render simple device control status indicator button."""
         app = self.app
-        
+
         # Check if device manager exists and is connected
         device_manager = getattr(app, 'device_manager', None)
-        
+        device_count = 0
+
         if device_manager and device_manager.is_connected():
-            # Green button for active/connected
+            # Count connected devices
+            device_count = len(device_manager.connected_devices)
+
+            # Green button showing device count
             imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)  # Green
             imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
             imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.6, 0.1, 1.0)
-            button_clicked = imgui.small_button("Device: ON")
+            button_label = f"Device: {device_count}"
+            button_clicked = imgui.small_button(button_label)
             imgui.pop_style_color(3)
-            
+
             if imgui.is_item_hovered():
                 connected_devices = list(device_manager.connected_devices.keys())
-                device_name = connected_devices[0] if connected_devices else "Unknown"
-                imgui.set_tooltip(f"Device Connected: {device_name}\nActive for live tracking and video playback")
+                if device_count == 1:
+                    device_name = connected_devices[0] if connected_devices else "Unknown"
+                    imgui.set_tooltip(f"Device: {device_name}\nActive for live tracking and video playback")
+                else:
+                    device_list = ", ".join(connected_devices[:3])  # Show up to 3
+                    if device_count > 3:
+                        device_list += f" (+{device_count - 3} more)"
+                    imgui.set_tooltip(f"{device_count} devices connected\n{device_list}")
         else:
             # Red button for inactive/disconnected
             imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.3, 0.3, 1.0)  # Red
@@ -750,14 +766,82 @@ class MainMenu:
             imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.2, 0.2, 1.0)
             button_clicked = imgui.small_button("Device: OFF")
             imgui.pop_style_color(3)
-            
+
             if imgui.is_item_hovered():
                 if device_manager:
-                    imgui.set_tooltip("No device connected\nDevice control available but not active")
+                    imgui.set_tooltip("No device connected\nGo to Device Control tab to connect")
                 else:
                     # Check if device_control feature is available (folder exists)
                     from application.utils.feature_detection import is_feature_available
                     if is_feature_available("device_control"):
                         imgui.set_tooltip("Device control not initialized\nCheck Device Control tab in Control Panel")
                     else:
-                        imgui.set_tooltip("Device control not available\nSupporter feature - requires device_control folder")
+                        imgui.set_tooltip("Supporter only feature\nCheck the Support menu for details")
+
+    def _render_native_sync_indicator(self):
+        """Render Native Video Sync / VR Stream status indicator button."""
+        app = self.app
+
+        # Check if Native Sync manager exists and is running
+        sync_manager = None
+        is_running = False
+        client_count = 0
+
+        # Check if we have access to GUI and control panel
+        has_gui = self.gui is not None
+        has_control_panel = has_gui and hasattr(self.gui, 'control_panel_ui')
+
+        if has_control_panel:
+            control_panel = self.gui.control_panel_ui
+            sync_manager = getattr(control_panel, '_native_sync_manager', None)
+
+            if sync_manager:
+                # Get status to check is_running
+                try:
+                    status = sync_manager.get_status()
+                    is_running = status.get('is_running', False)
+                    client_count = status.get('connected_clients', 0)
+                except Exception as e:
+                    # Fallback if get_status fails
+                    is_running = False
+                    client_count = 0
+
+        if is_running and client_count > 0:
+            # Green button showing client count
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)  # Green
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.6, 0.1, 1.0)
+            button_label = f"Streamer: {client_count}"
+            button_clicked = imgui.small_button(button_label)
+            imgui.pop_style_color(3)
+
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"Streaming to {client_count} client{'s' if client_count != 1 else ''}\nServing video to browsers/VR headsets")
+        elif is_running:
+            # Yellow button for running but no clients
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.7, 0.2, 1.0)  # Yellow
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.9, 0.8, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.7, 0.6, 0.1, 1.0)
+            button_clicked = imgui.small_button("Streamer: 0")
+            imgui.pop_style_color(3)
+
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Streamer running\nWaiting for clients to connect")
+        else:
+            # Red button for inactive
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.3, 0.3, 1.0)  # Red
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.8, 0.4, 0.4, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.2, 0.2, 1.0)
+            button_clicked = imgui.small_button("Streamer: OFF")
+            imgui.pop_style_color(3)
+
+            if imgui.is_item_hovered():
+                if sync_manager:
+                    imgui.set_tooltip("Streamer not running\nGo to Streamer tab to start")
+                else:
+                    # Check if sync_server feature is available (folder exists)
+                    from application.utils.feature_detection import is_feature_available
+                    if is_feature_available("streamer"):
+                        imgui.set_tooltip("Streamer not initialized\nCheck Streamer tab in Control Panel")
+                    else:
+                        imgui.set_tooltip("Supporter only feature\nCheck the Support menu for details")
