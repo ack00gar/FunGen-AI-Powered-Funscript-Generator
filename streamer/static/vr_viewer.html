@@ -30,25 +30,23 @@
             object-fit: contain;
             background: #000;
             transform-origin: center center;
-            transition: transform 0.2s ease-out;
             position: relative;
             z-index: 1;
+            cursor: grab;
+            will-change: transform;
         }
 
         /* VR View Modes - CSS-based SBS cropping */
         /* For SBS videos, show only left or right half without stretching */
+        /* Note: clip-path applied via CSS, transform applied via JavaScript for zoom/pan */
         #video.vr-left-eye {
             object-fit: contain; /* Maintain aspect ratio */
             clip-path: inset(0 50% 0 0); /* Crop right 50%, keep left 50% */
-            transform: scale(2); /* Scale 2x both axes to maintain aspect ratio */
-            transform-origin: left center;
         }
 
         #video.vr-right-eye {
             object-fit: contain;
             clip-path: inset(0 0 0 50%); /* Crop left 50%, keep right 50% */
-            transform: scale(2); /* Scale 2x both axes to maintain aspect ratio */
-            transform-origin: right center;
         }
 
         /* Overlay UI */
@@ -1132,21 +1130,26 @@
                 <div class="panel-header">👁️ VR View Controls</div>
 
                 <div class="panel-section">
-                    <div class="panel-label">🎮 View Mode Shortcuts</div>
+                    <div class="panel-label">🎮 View Mode</div>
                     <div style="font-size: 14px; color: rgba(255, 255, 255, 0.8); line-height: 2;">
-                        <div><kbd>1</kbd> : Full View (SBS both eyes)</div>
-                        <div><kbd>2</kbd> : Left Eye Only (Desktop VR)</div>
-                        <div><kbd>3</kbd> : Right Eye Only</div>
-                        <div><kbd>V</kbd> : Toggle VR View (cycles through modes)</div>
+                        <div><kbd>1</kbd> Full View • <kbd>2</kbd> Left Eye • <kbd>3</kbd> Right Eye</div>
+                        <div><kbd>V</kbd> Toggle VR view</div>
                     </div>
                 </div>
 
                 <div class="panel-section">
-                    <div class="panel-label">⌨️ Zoom & Pan</div>
+                    <div class="panel-label">🔍 Zoom & Pan</div>
                     <div style="font-size: 14px; color: rgba(255, 255, 255, 0.8); line-height: 1.8;">
-                        <div><kbd>+</kbd> / <kbd>-</kbd> : Zoom in/out</div>
-                        <div><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> : Pan video</div>
-                        <div><kbd>R</kbd> : Reset zoom & pan</div>
+                        <div><strong>Mouse:</strong> Scroll to zoom • Drag to pan • Double-click to reset</div>
+                        <div><strong>Keyboard:</strong> <kbd>+</kbd> <kbd>-</kbd> zoom • <kbd>WASD</kbd> pan • <kbd>R</kbd> reset</div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <div class="panel-label">⚡ Quick Actions</div>
+                    <div style="font-size: 14px; color: rgba(255, 255, 255, 0.8); line-height: 1.8;">
+                        <div><kbd>F</kbd> Fullscreen • <kbd>ESC</kbd> Exit/Reset</div>
+                        <div><kbd>Space</kbd> Play/Pause • <kbd>←</kbd> <kbd>→</kbd> Seek</div>
                     </div>
                 </div>
 
@@ -2135,6 +2138,68 @@
                 resetIdleTimer();
             });
 
+            // Mouse wheel zoom
+            video.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                adjustZoom(delta);
+            }, { passive: false });
+
+            // Mouse drag panning
+            let isDragging = false;
+            let dragStartX = 0;
+            let dragStartY = 0;
+            let panStartX = 0;
+            let panStartY = 0;
+
+            video.addEventListener('mousedown', (e) => {
+                if (e.button === 0) { // Left click only
+                    // Don't start dragging if clicking on video controls
+                    if (e.target !== video) return;
+
+                    isDragging = true;
+                    dragStartX = e.clientX;
+                    dragStartY = e.clientY;
+                    panStartX = videoPanX;
+                    panStartY = videoPanY;
+                    video.style.cursor = 'grabbing';
+                    e.preventDefault();
+                }
+            });
+
+            // Double-click to reset zoom/pan
+            video.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+                resetTransform();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    e.preventDefault();
+                    const deltaX = e.clientX - dragStartX;
+                    const deltaY = e.clientY - dragStartY;
+                    videoPanX = panStartX + deltaX;
+                    videoPanY = panStartY + deltaY;
+
+                    // Use requestAnimationFrame for smooth rendering
+                    if (!window.dragRafId) {
+                        window.dragRafId = requestAnimationFrame(() => {
+                            applyVideoTransform();
+                            showZoomPanDisplay();
+                            window.dragRafId = null;
+                        });
+                    }
+                }
+            });
+
+            document.addEventListener('mouseup', (e) => {
+                if (isDragging && e.button === 0) {
+                    isDragging = false;
+                    video.style.cursor = 'grab';
+                    sendTransformCommand();
+                }
+            });
+
             // XBVR Browser button - redirect to XBVR browser (same tab)
             document.getElementById('xbvrBrowserBtn').addEventListener('click', () => {
                 window.location.href = '/xbvr';
@@ -2350,6 +2415,26 @@
                         e.preventDefault();
                         toggleVRView();
                         break;
+
+                    // F key for fullscreen toggle
+                    case 'KeyF':
+                        e.preventDefault();
+                        if (!document.fullscreenElement) {
+                            document.documentElement.requestFullscreen();
+                        } else {
+                            document.exitFullscreen();
+                        }
+                        break;
+
+                    // Double-click space to reset zoom/pan
+                    case 'Escape':
+                        e.preventDefault();
+                        if (videoZoom !== 1.0 || videoPanX !== 0 || videoPanY !== 0) {
+                            resetTransform();
+                        } else if (document.fullscreenElement) {
+                            document.exitFullscreen();
+                        }
+                        break;
                 }
             });
 
@@ -2448,8 +2533,17 @@
         }
 
         function applyVideoTransform() {
-            const transform = `scale(${videoZoom}) translate(${videoPanX / videoZoom}px, ${videoPanY / videoZoom}px)`;
-            video.style.transform = transform;
+            // Preserve VR view mode classes when applying transform
+            let baseTransform = `scale(${videoZoom}) translate(${videoPanX / videoZoom}px, ${videoPanY / videoZoom}px)`;
+
+            // If in VR mode, append the VR transform
+            if (currentVRMode === 'left-eye') {
+                baseTransform = `${baseTransform} scale(2) translateX(25%)`;
+            } else if (currentVRMode === 'right-eye') {
+                baseTransform = `${baseTransform} scale(2) translateX(-25%)`;
+            }
+
+            video.style.transform = baseTransform;
 
             // Update UI
             zoomValue.textContent = `${Math.round(videoZoom * 100)}%`;
@@ -2576,6 +2670,9 @@
                     displayName = 'Right Eye';
                     break;
             }
+
+            // Re-apply transform to include VR centering
+            applyVideoTransform();
 
             console.log(`👁️ View mode: ${displayName}`);
             showVRModeNotification(displayName);
