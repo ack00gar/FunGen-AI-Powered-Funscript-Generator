@@ -36,18 +36,18 @@
         }
 
         /* VR View Modes - CSS-based SBS cropping */
-        /* For SBS videos, show only left or right half at full screen */
+        /* For SBS videos, show only left or right half without stretching */
         #video.vr-left-eye {
-            object-fit: fill;
+            object-fit: contain; /* Maintain aspect ratio */
             clip-path: inset(0 50% 0 0); /* Crop right 50%, keep left 50% */
-            transform: scaleX(2); /* Scale 2x horizontally to fill screen */
+            transform: scale(2); /* Scale 2x both axes to maintain aspect ratio */
             transform-origin: left center;
         }
 
         #video.vr-right-eye {
-            object-fit: fill;
+            object-fit: contain;
             clip-path: inset(0 0 0 50%); /* Crop left 50%, keep right 50% */
-            transform: scaleX(2); /* Scale 2x horizontally to fill screen */
+            transform: scale(2); /* Scale 2x both axes to maintain aspect ratio */
             transform-origin: right center;
         }
 
