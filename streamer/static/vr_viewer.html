@@ -1357,7 +1357,7 @@
                 // Create THREE.js scene
                 this.scene = new THREE.Scene();
                 this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-                this.camera.position.set(0, 0, 0); // Camera at center of sphere/dome
+                this.camera.position.set(0, 0, 0.1); // Camera slightly offset from center
 
                 // Create renderer
                 this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
@@ -1406,22 +1406,20 @@
                 switch(type) {
                     case 'fisheye190':
                     case 'fisheye200':
-                        // Fisheye: Dome per eye (front hemisphere only, 180° FOV max)
-                        // SBS video has left/right eyes, each eye gets projected on front dome
+                        // Fisheye: Use equirect hemisphere mapping (same as equirect180)
+                        // Proper fisheye requires custom shader, but equirect works reasonably well
                         const fov = parseInt(type.replace('fisheye', ''));
                         geometry = new THREE.SphereGeometry(
-                            500,           // radius
-                            60,            // widthSegments
-                            40,            // heightSegments
-                            0,             // phiStart
-                            Math.PI,       // phiLength (180° horizontal dome)
-                            0,             // thetaStart
-                            Math.PI / 2    // thetaLength (90° vertical = front hemisphere dome)
+                            500,      // radius
+                            60,       // widthSegments
+                            40,       // heightSegments
+                            0,        // phiStart
+                            Math.PI   // phiLength (180° = half sphere horizontally)
                         );
                         geometry.scale(-1, 1, 1); // Invert for inside view
                         this.camera.fov = fov === 190 ? 95 : 100;
                         this.camera.updateProjectionMatrix();
-                        console.log(`🐟 Fisheye ${fov}° dome created (hemisphere), camera FOV: ${this.camera.fov}°`);
+                        console.log(`🐟 Fisheye ${fov}° using equirect mapping, camera FOV: ${this.camera.fov}°`);
                         break;
 
                     case 'equirect180':
