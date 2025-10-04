@@ -1906,35 +1906,49 @@
             // Update status badges
             updateStatusBadges(msg);
 
-            // Playback stats
-            if (msg.frame_index !== undefined && msg.total_frames !== undefined) {
-                document.getElementById('statFrameIndex').textContent = `${msg.frame_index} / ${msg.total_frames}`;
+            // Playback stats (null-safe - these elements may not exist)
+            const statFrameIndex = document.getElementById('statFrameIndex');
+            if (statFrameIndex && msg.frame_index !== undefined && msg.total_frames !== undefined) {
+                statFrameIndex.textContent = `${msg.frame_index} / ${msg.total_frames}`;
             }
 
             // Time
-            if (video.currentTime !== undefined && video.duration) {
-                document.getElementById('statTime').textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`;
+            const statTime = document.getElementById('statTime');
+            if (statTime && video.currentTime !== undefined && video.duration) {
+                statTime.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`;
             }
 
             // Video stats
-            if (video.videoWidth && video.videoHeight) {
-                document.getElementById('statResolution').textContent = `${video.videoWidth}×${video.videoHeight}`;
+            const statResolution = document.getElementById('statResolution');
+            if (statResolution && video.videoWidth && video.videoHeight) {
+                statResolution.textContent = `${video.videoWidth}×${video.videoHeight}`;
             }
 
             // Zoom and pan
-            document.getElementById('statZoom').textContent = `${Math.round(videoZoom * 100)}%`;
-            document.getElementById('statPan').textContent = `${Math.round(videoPanX)}, ${Math.round(videoPanY)}`;
+            const statZoom = document.getElementById('statZoom');
+            if (statZoom) {
+                statZoom.textContent = `${Math.round(videoZoom * 100)}%`;
+            }
+
+            const statPan = document.getElementById('statPan');
+            if (statPan) {
+                statPan.textContent = `${Math.round(videoPanX)}, ${Math.round(videoPanY)}`;
+            }
 
             // Connection status
-            const connected = ws && ws.readyState === WebSocket.OPEN;
-            document.getElementById('statConnection').textContent = connected ? 'Connected' : 'Disconnected';
+            const statConnection = document.getElementById('statConnection');
+            if (statConnection) {
+                const connected = ws && ws.readyState === WebSocket.OPEN;
+                statConnection.textContent = connected ? 'Connected' : 'Disconnected';
+            }
 
             // Drift (calculated in handleSyncMessage)
-            if (msg.frame_index !== undefined && msg.fps !== undefined && video.currentTime) {
+            const statDrift = document.getElementById('statDrift');
+            if (statDrift && msg.frame_index !== undefined && msg.fps !== undefined && video.currentTime) {
                 const serverTime = msg.frame_index / msg.fps;
                 const browserTime = video.currentTime;
                 const driftMs = Math.abs((serverTime - browserTime) * 1000);
-                document.getElementById('statDrift').textContent = `${Math.round(driftMs)}ms`;
+                statDrift.textContent = `${Math.round(driftMs)}ms`;
             }
         }
 
@@ -2032,10 +2046,12 @@
             video.addEventListener('loadedmetadata', () => {
                 const resolution = `${video.videoWidth}×${video.videoHeight}`;
                 const durationText = formatTime(video.duration);
-                duration.textContent = durationText;
-                videoRes.textContent = resolution;
+                if (duration) duration.textContent = durationText;
+                if (videoRes) videoRes.textContent = resolution;
 
-                // Update stats panel
+                // Update stats panel (null-safe)
+                const statResolution = document.getElementById('statResolution');
+                const statTime = document.getElementById('statTime');
                 if (statResolution) statResolution.textContent = resolution;
                 if (statTime) statTime.textContent = `0:00 / ${durationText}`;
 
@@ -2506,7 +2522,8 @@
             showZoomPanDisplay();
             sendTransformCommand();
 
-            // Update stats panel
+            // Update stats panel (null-safe)
+            const statZoom = document.getElementById('statZoom');
             if (statZoom) statZoom.textContent = `${Math.round(videoZoom * 100)}%`;
         }
 
@@ -2523,7 +2540,8 @@
             showZoomPanDisplay();
             sendTransformCommand();
 
-            // Update stats panel
+            // Update stats panel (null-safe)
+            const statPan = document.getElementById('statPan');
             if (statPan) statPan.textContent = `${videoPanX}, ${videoPanY}`;
         }
 
@@ -2535,7 +2553,9 @@
             showZoomPanDisplay();
             sendTransformCommand();
 
-            // Update stats panel
+            // Update stats panel (null-safe)
+            const statZoom = document.getElementById('statZoom');
+            const statPan = document.getElementById('statPan');
             if (statZoom) statZoom.textContent = '100%';
             if (statPan) statPan.textContent = '0, 0';
 
@@ -2591,7 +2611,8 @@
                 if (elapsed >= 1.0) {
                     const fps = framesSinceLastUpdate / elapsed;
                     const fpsRounded = Math.round(fps);
-                    playbackFPS.textContent = fpsRounded;
+                    if (playbackFPS) playbackFPS.textContent = fpsRounded;
+                    const statPlaybackFPS = document.getElementById('statPlaybackFPS');
                     if (statPlaybackFPS) statPlaybackFPS.textContent = fpsRounded;
                     framesSinceLastUpdate = 0;
                     lastUpdate = now;
@@ -2605,7 +2626,8 @@
             if (fpsUpdateInterval) {
                 clearInterval(fpsUpdateInterval);
                 fpsUpdateInterval = null;
-                playbackFPS.textContent = '0';
+                if (playbackFPS) playbackFPS.textContent = '0';
+                const statPlaybackFPS = document.getElementById('statPlaybackFPS');
                 if (statPlaybackFPS) statPlaybackFPS.textContent = '0';
                 console.log('📊 FPS tracking stopped');
             }
