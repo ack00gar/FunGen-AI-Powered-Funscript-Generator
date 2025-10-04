@@ -1393,10 +1393,9 @@
                 // Create geometry based on projection type
                 this.createGeometry(projectionType);
 
-                // Set initial camera orientation
-                // For fisheye: shader measures from +Y axis, so rotate camera to look at +Y
-                this.lon = projectionType.startsWith('fisheye') ? -270 : 0;
-                this.lat = 0;
+                // Set initial camera orientation (pointing at center of hemisphere)
+                this.lon = 0; // Center horizontally
+                this.lat = 0; // Center vertically
                 this.updateCameraOrientation();
 
                 // Add simple mouse/touch look-around controls for desktop
@@ -1444,11 +1443,11 @@
                                 void main() {
                                     vec3 dir = normalize(vWorldDirection);
 
-                                    // Calculate angle from center (theta)
-                                    float theta = acos(dir.y);
+                                    // Calculate angle from center (theta) - measure from +X axis (camera forward)
+                                    float theta = acos(dir.x);
 
-                                    // Calculate azimuth (phi)
-                                    float phi = atan(dir.z, dir.x);
+                                    // Calculate azimuth (phi) in YZ plane, rotated 90° counter-clockwise to correct orientation
+                                    float phi = atan(dir.z, dir.y) - PI / 2.0;
 
                                     // Fisheye circular projection: r is proportional to theta
                                     float r = theta / (fisheyeFOV / 2.0);
@@ -1472,10 +1471,9 @@
                             side: THREE.DoubleSide
                         });
 
-                        // Use 90° camera FOV for comfortable viewing
                         this.camera.fov = 90;
                         this.camera.updateProjectionMatrix();
-                        console.log(`🐟 Fisheye ${fov}° circular projection with shader, camera FOV: ${this.camera.fov}°`);
+                        console.log(`🐟 Fisheye ${fov}° circular projection with shader`);
                         break;
 
                     case 'equirect180':
