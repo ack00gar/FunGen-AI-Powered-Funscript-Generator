@@ -41,15 +41,16 @@
 
         /* VR View Modes - CSS-based SBS cropping */
         /* For SBS videos, show only left or right half without stretching */
-        /* Note: clip-path applied via CSS, transform applied via JavaScript for zoom/pan */
         #video.vr-left-eye {
             object-fit: contain; /* Maintain aspect ratio */
             clip-path: inset(0 50% 0 0); /* Crop right 50%, keep left 50% */
+            transform: scale(2) translateX(25%); /* Scale 2x and center */
         }
 
         #video.vr-right-eye {
             object-fit: contain;
             clip-path: inset(0 0 0 50%); /* Crop left 50%, keep right 50% */
+            transform: scale(2) translateX(-25%); /* Scale 2x and center */
         }
 
         /* Overlay UI */
@@ -1405,21 +1406,13 @@
                 switch(type) {
                     case 'fisheye190':
                     case 'fisheye200':
-                        // Fisheye: Dome (hemisphere)
+                        // Fisheye: Full sphere (fisheye projects onto full sphere)
                         const fov = parseInt(type.replace('fisheye', ''));
-                        geometry = new THREE.SphereGeometry(
-                            500,         // radius
-                            60,          // widthSegments
-                            40,          // heightSegments
-                            0,           // phiStart
-                            Math.PI * 2, // phiLength (full circle)
-                            0,           // thetaStart
-                            Math.PI / 2  // thetaLength (hemisphere = 90 degrees from pole)
-                        );
+                        geometry = new THREE.SphereGeometry(500, 60, 40);
                         geometry.scale(-1, 1, 1); // Invert for inside view
                         this.camera.fov = fov === 190 ? 95 : 100;
                         this.camera.updateProjectionMatrix();
-                        console.log(`🐟 Fisheye ${fov}° dome created, camera FOV: ${this.camera.fov}°`);
+                        console.log(`🐟 Fisheye ${fov}° sphere created, camera FOV: ${this.camera.fov}°`);
                         break;
 
                     case 'equirect180':
@@ -1565,6 +1558,8 @@
             // Check metadata from video processor
             const projection = metadata.projection || null;
             const fov = metadata.fov || null;
+
+            console.log('🔍 Detection metadata:', { aspectRatio, projection, fov, metadata });
 
             if (aspectRatio > 1.8) {
                 // Wide video = VR
