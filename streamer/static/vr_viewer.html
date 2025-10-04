@@ -1443,16 +1443,17 @@
                                 void main() {
                                     vec3 dir = normalize(vWorldDirection);
 
-                                    // Calculate angle from center (theta)
-                                    float theta = acos(dir.y);
+                                    // Calculate angle from forward direction (negative Z in THREE.js)
+                                    // theta is angle from -Z axis (forward)
+                                    float theta = acos(-dir.z);
 
-                                    // Calculate azimuth (phi)
-                                    float phi = atan(dir.z, dir.x);
+                                    // Calculate azimuth (phi) around the -Z axis
+                                    float phi = atan(dir.y, dir.x);
 
                                     // Fisheye circular projection: r is proportional to theta
                                     float r = theta / (fisheyeFOV / 2.0);
 
-                                    // If outside fisheye circle, discard
+                                    // If outside fisheye circle, show black
                                     if (r > 1.0) {
                                         gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
                                         return;
@@ -1460,10 +1461,12 @@
 
                                     // Convert polar to cartesian for texture lookup
                                     float x = r * cos(phi);
-                                    float z = r * sin(phi);
+                                    float y = r * sin(phi);
 
-                                    // Map to texture coordinates (0.25, 0.5) is center of left eye circle
-                                    vec2 uv = vec2(0.25 + x * 0.22, 0.5 - z * 0.44);
+                                    // Map to texture coordinates
+                                    // Left eye circle center is at (0.25, 0.5)
+                                    // Circle radius is ~0.24 (2900/2 / 5800 ≈ 0.25)
+                                    vec2 uv = vec2(0.25 + x * 0.24, 0.5 - y * 0.24);
 
                                     gl_FragColor = texture2D(map, uv);
                                 }
