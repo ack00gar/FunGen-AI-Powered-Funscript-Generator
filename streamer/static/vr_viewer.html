@@ -1146,6 +1146,9 @@
                         <option value="equirect180">Equirectangular 180°</option>
                         <option value="equirect360">Equirectangular 360°</option>
                     </select>
+                    <div id="autoDetectedLabel" style="font-size: 12px; color: rgba(0, 212, 255, 0.8); margin-top: 4px; display: none;">
+                        Detected: <span id="autoDetectedValue">—</span>
+                    </div>
                 </div>
 
                 <div class="panel-section">
@@ -1322,6 +1325,8 @@
         // Projection renderer elements
         const vrCanvas = document.getElementById('vrCanvas');
         const projectionSelect = document.getElementById('projectionSelect');
+        const autoDetectedLabel = document.getElementById('autoDetectedLabel');
+        const autoDetectedValue = document.getElementById('autoDetectedValue');
 
         // ===================================================================
         // UNIFIED PROJECTION RENDERER
@@ -1567,25 +1572,37 @@
         }
 
         function applyProjection(type) {
+            const displayNames = {
+                'flat': 'Flat (2D/SBS)',
+                'fisheye180': 'Fisheye 180°',
+                'fisheye190': 'Fisheye 190°',
+                'fisheye200': 'Fisheye 200°',
+                'equirect180': 'Equirectangular 180°',
+                'equirect360': 'Equirectangular 360°'
+            };
+
             let detectedType = null;
             if (type === 'auto') {
                 detectedType = detectProjectionType(videoMetadata);
                 type = detectedType;
-                // Update selector to show what was detected
-                const displayNames = {
-                    'flat': 'Flat (2D/SBS)',
-                    'fisheye180': 'Fisheye 180°',
-                    'fisheye190': 'Fisheye 190°',
-                    'fisheye200': 'Fisheye 200°',
-                    'equirect180': 'Equirectangular 180°',
-                    'equirect360': 'Equirectangular 360°'
-                };
+
                 console.log(`🎬 Auto-detected projection: ${displayNames[type] || type}`);
+
+                // Update the auto-detected label in VR settings panel
+                if (autoDetectedLabel && autoDetectedValue) {
+                    autoDetectedLabel.style.display = 'block';
+                    autoDetectedValue.textContent = displayNames[type] || type;
+                }
 
                 // Show notification of what was detected
                 showVRModeNotification(`Auto: ${displayNames[type] || type}`);
             } else {
                 console.log(`🎬 Applying projection: ${type}`);
+
+                // Hide auto-detected label when manually selected
+                if (autoDetectedLabel) {
+                    autoDetectedLabel.style.display = 'none';
+                }
             }
 
             // Destroy existing renderer if active
