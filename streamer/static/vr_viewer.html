@@ -1410,11 +1410,11 @@
                         // Proper fisheye requires custom shader, but equirect works reasonably well
                         const fov = parseInt(type.replace('fisheye', ''));
                         geometry = new THREE.SphereGeometry(
-                            500,      // radius
-                            60,       // widthSegments
-                            40,       // heightSegments
-                            0,        // phiStart
-                            Math.PI   // phiLength (180° = half sphere horizontally)
+                            500,              // radius
+                            60,               // widthSegments
+                            40,               // heightSegments
+                            -Math.PI / 2,     // phiStart (start 90° left, so center is at front)
+                            Math.PI           // phiLength (180° = half sphere horizontally)
                         );
                         geometry.scale(-1, 1, 1); // Invert for inside view
                         this.camera.fov = fov === 190 ? 95 : 100;
@@ -1423,18 +1423,18 @@
                         break;
 
                     case 'equirect180':
-                        // Equirectangular hemisphere (180° horizontal)
+                        // Equirectangular hemisphere (180° horizontal, centered at front)
                         geometry = new THREE.SphereGeometry(
-                            500,      // radius
-                            60,       // widthSegments
-                            40,       // heightSegments
-                            0,        // phiStart
-                            Math.PI   // phiLength (180° = half circle horizontally)
+                            500,              // radius
+                            60,               // widthSegments
+                            40,               // heightSegments
+                            -Math.PI / 2,     // phiStart (start 90° left, so center is at front)
+                            Math.PI           // phiLength (180° = half sphere horizontally)
                         );
                         geometry.scale(-1, 1, 1); // Invert for inside view
                         this.camera.fov = 90;
                         this.camera.updateProjectionMatrix();
-                        console.log(`🌐 Equirectangular 180° hemisphere created`);
+                        console.log(`🌐 Equirectangular 180° hemisphere created (centered at front)`);
                         break;
 
                     default:
