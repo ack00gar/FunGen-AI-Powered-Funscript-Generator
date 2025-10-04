@@ -1613,9 +1613,9 @@
             if (type === 'flat') {
                 video.style.display = 'block';
                 vrCanvas.style.display = 'none';
-                // Remove any VR eye cropping classes
-                video.classList.remove('vr-left-eye', 'vr-right-eye');
-                console.log('📺 Using flat CSS mode (full frame)');
+                // Re-apply current view mode (full/left/right eye) for CSS mode
+                setViewMode(currentVRMode);
+                console.log('📺 Using flat CSS mode');
                 return;
             }
 
@@ -2352,7 +2352,7 @@
                 }
 
                 // Apply projection if auto-detect is enabled
-                if (currentProjection === 'auto' && Object.keys(videoMetadata).length > 0) {
+                if (currentProjection === 'auto') {
                     applyProjection('auto');
                 }
 
