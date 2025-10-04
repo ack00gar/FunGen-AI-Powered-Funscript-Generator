@@ -1,0 +1,2622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VR Video Viewer - Native Sync</title>
+
+    <!-- Video.js + VR Plugin -->
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/videojs-vr@2.0.0/dist/videojs-vr.min.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #videoContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+            transform-origin: center center;
+            transition: transform 0.2s ease-out;
+        }
+
+        /* Video.js custom styling */
+        .video-js {
+            width: 100% !important;
+            height: 100% !important;
+            background-color: #000;
+        }
+
+        /* Hide Video.js default controls (we use custom) */
+        .video-js .vjs-control-bar {
+            display: none !important;
+        }
+
+        .video-js .vjs-big-play-button {
+            display: none !important;
+        }
+
+        /* Ensure VR canvas fills container */
+        .video-js canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        /* Overlay UI */
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        /* Top bar */
+        #topBar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 20px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            pointer-events: all;
+        }
+
+        #branding {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+        }
+
+        #fungenLogoRow {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        #fungenLogo {
+            height: 70px;
+            width: auto;
+            filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.6));
+        }
+
+        #fungenText {
+            font-size: 48px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 2px 10px rgba(0, 212, 255, 0.3);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        #fungenCredit {
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 400;
+            letter-spacing: 0.5px;
+            margin-left: 4px;
+        }
+
+        #statusInfo {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .status-badge {
+            padding: 8px 14px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            backdrop-filter: blur(10px);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+
+        .status-dot.connected { background: #00ff88; }
+
+        #devicePanel {
+            background: rgba(20, 20, 25, 0.95);
+            border-radius: 12px;
+            padding: 15px;
+            min-width: 250px;
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel-section {
+            margin-bottom: 15px;
+        }
+
+        .panel-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .panel-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .device-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .device-item:last-child {
+            border-bottom: none;
+        }
+
+        .device-name {
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .device-icon {
+            font-size: 16px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 42px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: #00ff88;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            background: white;
+            border-radius: 50%;
+            top: 3px;
+            left: 3px;
+            transition: left 0.3s;
+        }
+
+        .toggle-switch.active::after {
+            left: 21px;
+        }
+
+        .tracker-select {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .tracker-select option {
+            background: #1a1a1f;
+        }
+
+        .control-btn {
+            width: 48px;
+            height: 48px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.15s ease-out;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(10px);
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+
+        .control-btn:active {
+            transform: scale(0.9);
+            transition: all 0.05s ease-out;
+        }
+
+        .control-btn.primary {
+            width: 56px;
+            height: 56px;
+            background: #00aaff;
+            font-size: 24px;
+        }
+
+        .control-btn.primary:hover {
+            background: #0099ee;
+            transform: scale(1.15);
+        }
+
+        .control-btn.primary:active {
+            transform: scale(0.95);
+        }
+
+
+        #zoomPanDisplay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.9);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-variant-numeric: tabular-nums;
+            pointer-events: none;
+            backdrop-filter: blur(10px);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        #zoomPanDisplay.visible {
+            opacity: 1;
+        }
+
+
+        /* Funscript Graph Overlay */
+        #funscriptGraphOverlay {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            width: 300px;
+            height: 78px;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 4px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 8;
+        }
+
+        #funscriptGraphOverlay.visible {
+            opacity: 1;
+        }
+
+        #funscriptGraphOverlayCanvas {
+            width: 100%;
+            height: 70px;
+            border-radius: 4px;
+            background: transparent;
+        }
+
+        /* Bottom controls container */
+        #bottomControls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 30px;
+            background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0) 100%);
+            pointer-events: all;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Time display */
+        #timeDisplay {
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.95);
+            font-variant-numeric: tabular-nums;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        /* Progress bar */
+        #progressBar {
+            width: 100%;
+            max-width: 800px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        #progressFilled {
+            height: 100%;
+            background: #00aaff;
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+
+        #progressHandle {
+            position: absolute;
+            top: 50%;
+            left: 0%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        #progressBar:hover #progressHandle {
+            opacity: 1;
+        }
+
+        /* Playback controls row */
+        #playbackControls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .setting-btn {
+            padding: 9px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            color: white;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            backdrop-filter: blur(10px);
+        }
+
+        .setting-btn:hover {
+            background: rgba(255, 255, 255, 0.18);
+        }
+
+        .setting-btn.active {
+            background: #00aaff;
+            border-color: #00aaff;
+        }
+
+        .setting-btn.active:hover {
+            background: #0099ee;
+        }
+
+        /* Volume control */
+        .volume-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 12px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }
+
+        .volume-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px;
+            line-height: 1;
+        }
+
+        .volume-btn:hover {
+            color: #00aaff;
+        }
+
+        .volume-slider {
+            width: 80px;
+            height: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .volume-slider::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+
+        /* Panels - Right side */
+        #interactivePanel {
+            position: absolute;
+            bottom: 150px;
+            right: 20px;
+            background: rgba(20, 20, 25, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            min-width: 500px;
+            max-width: 600px;
+            max-height: calc(100vh - 200px);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: none;
+            pointer-events: all;
+            overflow-y: auto;
+        }
+
+        #interactivePanel.visible {
+            display: block;
+        }
+
+        .panel-header {
+            font-size: 16px;
+            font-weight: 600;
+            color: #00aaff;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel-section {
+            margin-bottom: 15px;
+        }
+
+        .panel-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .panel-label {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .panel-select {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: white;
+            font-size: 15px;
+            padding: 10px;
+            cursor: pointer;
+        }
+
+        .panel-select option {
+            background: #1a1a1f;
+        }
+
+        .panel-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        .panel-toggle-label {
+            font-size: 15px;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .toggle-switch {
+            width: 44px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: #00aaff;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: white;
+            top: 3px;
+            left: 3px;
+            transition: left 0.3s;
+        }
+
+        .toggle-switch.active::after {
+            left: 23px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 13px;
+        }
+
+        .stat-label {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .stat-value {
+            color: rgba(255, 255, 255, 0.9);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Panel Tabs */
+        .panel-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .panel-tab {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
+            padding: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .panel-tab:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .panel-tab.active {
+            background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%);
+            color: white;
+            border-color: transparent;
+        }
+
+        .panel-tab-content {
+            display: none;
+        }
+
+        .panel-tab-content.active {
+            display: block;
+        }
+
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Fade out controls on idle */
+        body.idle #topBar,
+        body.idle #bottomControls {
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        body.idle #topBar:hover,
+        body.idle #bottomControls:hover {
+            opacity: 1;
+        }
+
+        /* Mobile/Touch optimizations */
+        @media (max-width: 768px) {
+            #topBar {
+                padding: 15px;
+            }
+
+            #fungenLogo {
+                height: 32px;
+            }
+
+            #fungenText {
+                font-size: 20px;
+                letter-spacing: 2px;
+            }
+
+            .status-badge {
+                font-size: 11px;
+                padding: 6px 10px;
+            }
+
+            .setting-btn {
+                padding: 7px 12px;
+                font-size: 12px;
+            }
+
+            #bottomControls {
+                padding: 20px;
+                gap: 8px;
+            }
+
+            #timeDisplay {
+                font-size: 13px;
+            }
+
+            #playbackControls {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .control-btn {
+                width: 44px;
+                height: 44px;
+                font-size: 18px;
+            }
+
+            .control-btn.primary {
+                width: 50px;
+                height: 50px;
+                font-size: 22px;
+            }
+
+            .volume-control {
+                flex: 1 1 100%;
+                justify-content: center;
+            }
+
+            #interactivePanel {
+                bottom: 160px;
+                right: 15px;
+                min-width: 250px;
+                max-width: calc(100vw - 30px);
+            }
+        }
+
+        /* Extra small devices */
+        @media (max-width: 480px) {
+            #statusInfo {
+                flex-direction: column;
+                gap: 8px;
+                align-items: flex-end;
+            }
+
+            .control-btn {
+                width: 40px;
+                height: 40px;
+                font-size: 16px;
+            }
+
+            .control-btn.primary {
+                width: 46px;
+                height: 46px;
+                font-size: 20px;
+            }
+        }
+
+        /* Touch-friendly tap targets */
+        @media (hover: none) and (pointer: coarse) {
+            .control-btn, .setting-btn {
+                touch-action: manipulation;
+                -webkit-tap-highlight-color: rgba(0, 170, 255, 0.3);
+            }
+        }
+
+        /* Notification animations */
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+
+        /* Splash Screen Styles */
+        #splashScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            transition: opacity 0.5s ease-out, visibility 0.5s ease-out;
+        }
+
+        #splashScreen.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .splash-content {
+            text-align: center;
+            animation: splashFadeIn 1s ease-out;
+        }
+
+        .splash-logo {
+            width: 150px;
+            height: 150px;
+            margin-bottom: 30px;
+            animation: logoFloat 3s ease-in-out infinite;
+            filter: drop-shadow(0 0 30px rgba(0, 212, 255, 0.5));
+        }
+
+        .splash-title {
+            font-size: 64px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 0 0 10px 0;
+            letter-spacing: 8px;
+            animation: titleGlow 2s ease-in-out infinite alternate;
+        }
+
+        .splash-subtitle {
+            font-size: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            margin: 0 0 40px 0;
+            letter-spacing: 3px;
+        }
+
+        .splash-loader {
+            width: 300px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            margin: 0 auto 20px;
+            overflow: hidden;
+        }
+
+        .loader-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff 0%, #7b2ff7 50%, #00d4ff 100%);
+            background-size: 200% 100%;
+            border-radius: 2px;
+            animation: loaderProgress 2s ease-out forwards, loaderShine 1.5s linear infinite;
+        }
+
+        .splash-status {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.5);
+            margin: 10px 0;
+            animation: statusPulse 1.5s ease-in-out infinite;
+        }
+
+        .splash-credit {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.3);
+            margin-top: 30px;
+        }
+
+        /* Splash Screen Animations */
+        @keyframes splashFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes logoFloat {
+            0%, 100% {
+                transform: translateY(0px);
+            }
+            50% {
+                transform: translateY(-20px);
+            }
+        }
+
+        @keyframes titleGlow {
+            from {
+                filter: drop-shadow(0 0 10px rgba(0, 212, 255, 0.3));
+            }
+            to {
+                filter: drop-shadow(0 0 30px rgba(123, 47, 247, 0.5));
+            }
+        }
+
+        @keyframes loaderProgress {
+            from {
+                width: 0%;
+            }
+            to {
+                width: 100%;
+            }
+        }
+
+        @keyframes loaderShine {
+            from {
+                background-position: 0% 0%;
+            }
+            to {
+                background-position: 200% 0%;
+            }
+        }
+
+        @keyframes statusPulse {
+            0%, 100% {
+                opacity: 0.5;
+            }
+            50% {
+                opacity: 1;
+            }
+        }
+
+        /* Loading Overlay */
+        #loadingOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        #loadingOverlay .splash-content {
+            text-align: center;
+            animation: splashFadeIn 0.6s ease-out;
+        }
+
+        #loadingVideoName {
+            font-size: 18px;
+            color: #00d4ff;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Splash Screen -->
+    <div id="splashScreen">
+        <div class="splash-content">
+            <img src="/static/logo.png" alt="FunGen Logo" class="splash-logo">
+            <h1 class="splash-title">FUNGEN</h1>
+            <p class="splash-subtitle">VR Funscript Generator</p>
+            <div class="splash-loader">
+                <div class="loader-bar"></div>
+            </div>
+            <p class="splash-status">Connecting to server...</p>
+            <p class="splash-credit">by k00gar</p>
+        </div>
+    </div>
+
+    <div id="videoContainer">
+        <video id="video" class="video-js vjs-fluid" playsinline crossorigin="anonymous" preload="none">
+            <source src="">
+            Your browser doesn't support HTML5 video.
+        </video>
+
+        <!-- Loading Overlay (shown while XBVR is loading video) -->
+        <div id="loadingOverlay" style="display: none;">
+            <div class="splash-content">
+                <h1 class="splash-title">Loading Video</h1>
+                <p class="splash-subtitle" id="loadingVideoName">Please wait...</p>
+                <div class="splash-loader">
+                    <div class="loader-bar"></div>
+                </div>
+                <p class="splash-status">Preparing video stream...</p>
+            </div>
+        </div>
+
+        <!-- Overlay UI -->
+        <div id="overlay">
+            <!-- Top Bar -->
+            <div id="topBar">
+                <div id="branding">
+                    <div id="fungenLogoRow">
+                        <img src="/static/logo.png" alt="FunGen" id="fungenLogo">
+                        <span id="fungenText">FUNGEN</span>
+                    </div>
+                    <div id="fungenCredit">by k00gar</div>
+                </div>
+                <div id="statusInfo">
+                    <div class="status-badge">
+                        <div class="status-dot" id="wsDot"></div>
+                        <span id="wsStatus">FunGen: Connecting...</span>
+                    </div>
+                    <div class="status-badge" id="deviceBadge" style="display: none;">
+                        <div class="status-dot" id="deviceDot"></div>
+                        <span id="deviceStatus">Device: None</span>
+                    </div>
+                    <div class="status-badge" id="trackingBadge" style="display: none;">
+                        <span id="trackingStatus">Mode: Off</span>
+                    </div>
+                    <div class="status-badge" id="videoNameBadge" style="display: none;">
+                        <span>📹 <span id="videoName">-</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="zoomPanDisplay">
+                Zoom: <span id="zoomValue">100%</span> | Pan: <span id="panValue">0, 0</span>
+            </div>
+
+
+            <!-- Funscript Graph Overlay -->
+            <div id="funscriptGraphOverlay">
+                <canvas id="funscriptGraphOverlayCanvas" width="300" height="70"></canvas>
+            </div>
+
+            <!-- Bottom Controls -->
+            <div id="bottomControls">
+                <!-- Time Display -->
+                <div id="timeDisplay">
+                    <span id="currentTime">0:00</span> / <span id="duration">0:00</span>
+                    <span style="margin-left: 15px; opacity: 0.7;">Frame: <span id="frameIndex">0</span> / <span id="totalFrames">-</span></span>
+                </div>
+
+                <!-- Progress Bar -->
+                <div id="progressBar">
+                    <div id="progressFilled"></div>
+                    <div id="progressHandle"></div>
+                </div>
+
+                <!-- Playback Controls -->
+                <div id="playbackControls">
+                    <button class="control-btn" id="vrBtn" title="Enter VR" style="background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%); border: none; font-size: 18px;">🥽</button>
+                    <button class="control-btn" id="xbvrBrowserBtn" title="Open XBVR Browser" style="background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%); border: none; font-size: 18px;">📚</button>
+                    <button class="control-btn" id="interactiveBtn" title="Interactive Control" style="background: linear-gradient(135deg, #00d4ff 0%, #7b2ff7 100%); border: none; font-size: 18px; margin-right: 20px;">🎮</button>
+
+                    <button class="control-btn" id="skipBackBtn" title="Skip -10s">⏪</button>
+                    <button class="control-btn primary" id="playPauseBtn" title="Play/Pause">▶</button>
+                    <button class="control-btn" id="skipFwdBtn" title="Skip +10s">⏩</button>
+                    <button class="control-btn" id="stopBtn" title="Stop" style="margin-right: 20px;">⏹</button>
+
+                    <div class="volume-control">
+                        <button class="volume-btn" id="volumeBtn" title="Mute/Unmute">🔊</button>
+                        <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="100" title="Volume">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interactive Panel -->
+            <div id="interactivePanel">
+                <div class="panel-header">🎮 Interactive Control</div>
+
+                <!-- Mode Selection -->
+                <div class="panel-section">
+                    <div class="panel-label">Mode</div>
+                    <select class="panel-select" id="interactiveMode">
+                        <option value="livetracking">Live Tracking</option>
+                        <option value="funscript">Funscript</option>
+                    </select>
+                </div>
+
+                <!-- Live Tracker Selection (visible when livetracking mode) -->
+                <div class="panel-section" id="trackerSection">
+                    <div class="panel-label">Live Tracker</div>
+                    <select class="panel-select" id="liveTrackerSelect">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+
+                <!-- Funscript Selection (visible when funscript mode) -->
+                <div class="panel-section hidden" id="funscriptSection">
+                    <div class="panel-label">Funscript</div>
+                    <select class="panel-select" id="funscriptSelect">
+                        <option value="">No funscript loaded</option>
+                    </select>
+                </div>
+
+                <!-- Device Selection -->
+                <div class="panel-section">
+                    <div class="panel-label">Device</div>
+                    <select class="panel-select" id="deviceSelect">
+                        <option value="">No devices detected</option>
+                    </select>
+                </div>
+
+                <!-- Interactive Sync Toggle -->
+                <div class="panel-toggle">
+                    <span class="panel-toggle-label">Interactive Sync</span>
+                    <div class="toggle-switch" id="interactiveSyncToggle"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const WS_PORT = 8765;
+        const wsUrl = `ws://${window.location.hostname}:${WS_PORT}`;
+
+        // Splash screen state
+        let splashReady = {
+            wsConnected: false,
+            videoLoaded: false
+        };
+
+        function checkSplashReady() {
+            console.log('🔍 Checking splash ready:', splashReady);
+            if (splashReady.wsConnected && splashReady.videoLoaded) {
+                console.log('✅ Both ready - hiding splash');
+                setTimeout(() => {
+                    const splashScreen = document.getElementById('splashScreen');
+                    if (splashScreen) {
+                        splashScreen.classList.add('hidden');
+                        // Remove from DOM after animation completes
+                        setTimeout(() => {
+                            splashScreen.remove();
+                        }, 500);
+                    }
+                }, 500); // Small delay for better UX
+            }
+        }
+
+        // Timeout fallback: hide splash after 5 seconds even if video doesn't load
+        setTimeout(() => {
+            if (!splashReady.videoLoaded && splashReady.wsConnected) {
+                console.log('⚠️ Video load timeout - hiding splash anyway');
+                splashReady.videoLoaded = true;
+                updateSplashStatus('Starting...');
+                checkSplashReady();
+            }
+        }, 5000);
+
+        function updateSplashStatus(message) {
+            const statusEl = document.querySelector('.splash-status');
+            if (statusEl) {
+                statusEl.textContent = message;
+            }
+        }
+
+        // State
+        let ws = null;
+        let isSyncing = false;
+        let videoFPS = 30;
+        let userSeeking = false;
+        let lastUserInteraction = 0;
+        let liveTrackEnabled = false;
+        let idleTimer = null;
+        let lastDriftCheck = 0;
+        let lastFramePositionSent = 0;
+        let deviceStates = {
+            handy: false,
+            osr: false,
+            intiface: false
+        };
+
+        // Video transform state (for zoom/pan)
+        let videoZoom = 1.0;
+        let videoPanX = 0;
+        let videoPanY = 0;
+
+        // FPS tracking
+        let lastFrameTime = 0;
+        let frameCount = 0;
+        let fpsUpdateInterval = null;
+
+        // Funscript data
+        let funscriptData = [];
+
+        // Frame position broadcast interval
+        let framePositionInterval = null;
+
+        // DOM elements
+        const videoElement = document.getElementById('video');
+
+        // Initialize Video.js with VR support
+        const player = videojs('video', {
+            controls: false,  // We use custom controls
+            fluid: true,
+            playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
+            controlBar: {
+                children: []  // Hide default controls, use custom
+            }
+        });
+
+        // Enable VR plugin (will auto-detect format)
+        player.vr({
+            projection: 'AUTO',
+            debug: false,
+            forceCardboard: false
+        });
+
+        // Access underlying video element for compatibility with existing code
+        const video = player.el().querySelector('video');
+
+        const wsStatus = document.getElementById('wsStatus');
+        const wsDot = document.getElementById('wsDot');
+        const videoName = document.getElementById('videoName');
+        const videoNameBadge = document.getElementById('videoNameBadge');
+        const frameIndex = document.getElementById('frameIndex');
+        const totalFrames = document.getElementById('totalFrames');
+        const currentTime = document.getElementById('currentTime');
+        const duration = document.getElementById('duration');
+        const progressBar = document.getElementById('progressBar');
+        const progressFilled = document.getElementById('progressFilled');
+        const progressHandle = document.getElementById('progressHandle');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const skipBackBtn = document.getElementById('skipBackBtn');
+        const skipFwdBtn = document.getElementById('skipFwdBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const vrBtn = document.getElementById('vrBtn');
+        const zoomPanDisplay = document.getElementById('zoomPanDisplay');
+        const zoomValue = document.getElementById('zoomValue');
+        const panValue = document.getElementById('panValue');
+        const playbackFPS = document.getElementById('playbackFPS');
+        const videoRes = document.getElementById('videoRes');
+
+        // New UI elements
+        const interactiveBtn = document.getElementById('interactiveBtn');
+        const interactivePanel = document.getElementById('interactivePanel');
+        const interactiveMode = document.getElementById('interactiveMode');
+        const trackerSection = document.getElementById('trackerSection');
+        const funscriptSection = document.getElementById('funscriptSection');
+        const liveTrackerSelect = document.getElementById('liveTrackerSelect');
+        const funscriptSelect = document.getElementById('funscriptSelect');
+        const deviceSelect = document.getElementById('deviceSelect');
+        const interactiveSyncToggle = document.getElementById('interactiveSyncToggle');
+        const volumeBtn = document.getElementById('volumeBtn');
+        const volumeSlider = document.getElementById('volumeSlider');
+
+        // Parse URL parameters from XBVR redirect
+        const urlParams = new URLSearchParams(window.location.search);
+        const xbvrVideoPath = urlParams.get('video_path');
+        const xbvrFunscriptPath = urlParams.get('funscript_path');
+        const xbvrTracker = urlParams.get('tracker');
+        const xbvrDevice = urlParams.get('device');
+        const xbvrMode = urlParams.get('mode'); // 'tracking' or 'funscript'
+
+        // Loading overlay elements
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingVideoName = document.getElementById('loadingVideoName');
+
+        // Show loading overlay if loading from XBVR
+        if (xbvrVideoPath) {
+            console.log('📹 XBVR load detected:', {
+                video_path: xbvrVideoPath,
+                tracker: xbvrTracker,
+                device: xbvrDevice,
+                mode: xbvrMode
+            });
+
+            // Extract filename from path
+            const filename = xbvrVideoPath.split('/').pop();
+            loadingVideoName.textContent = filename;
+            loadingOverlay.style.display = 'flex';
+
+            // Prevent video from loading until we get confirmation
+            video.style.display = 'none';
+        }
+
+        // Initialize
+        connectWebSocket();
+        setupEventListeners();
+        resetIdleTimer();
+
+        // WebSocket connection
+        function connectWebSocket() {
+            console.log('Connecting to sync server:', wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('✅ Connected to sync server');
+                wsStatus.textContent = 'FunGen: Connected';
+                wsDot.classList.add('connected');
+
+                // Update splash screen
+                splashReady.wsConnected = true;
+                updateSplashStatus('Loading video...');
+                checkSplashReady();
+
+                // Send metadata
+                ws.send(JSON.stringify({
+                    type: 'metadata',
+                    data: {
+                        client_type: 'browser',
+                        user_agent: navigator.userAgent,
+                        supports_vr: 'xr' in navigator
+                    }
+                }));
+
+                // Request available trackers and devices
+                ws.send(JSON.stringify({
+                    type: 'request_capabilities'
+                }));
+
+                // If we have XBVR load parameters, trigger the load
+                if (xbvrVideoPath) {
+                    console.log('🎬 Triggering XBVR load from URL parameters');
+                    setTimeout(() => {
+                        triggerXBVRLoad();
+                    }, 500); // Wait for capabilities to load
+                } else {
+                    // Normal load (not from XBVR) - set video source to /video
+                    console.log('📹 Normal load - setting video source to /video');
+                    const videoSource = video.querySelector('source');
+                    videoSource.src = '/video';
+                    video.load();
+                    video.style.display = 'block';
+
+                    // Mark video as loaded immediately for splash screen
+                    // (video may already be cached, so loadedmetadata might not fire)
+                    splashReady.videoLoaded = true;
+                    updateSplashStatus('Ready!');
+                    checkSplashReady();
+                }
+
+                // Start independent frame position broadcast
+                // This ensures FunGen tracking always knows browser's position,
+                // even when video is paused or user seeks
+                startFramePositionBroadcast();
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleSyncMessage(msg);
+                } catch (e) {
+                    console.error('Failed to parse message:', e);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                wsStatus.textContent = 'FunGen: Error';
+                wsDot.classList.remove('connected');
+                updateSplashStatus('Connection error - retrying...');
+            };
+
+            ws.onclose = () => {
+                console.log('❌ Disconnected from sync server');
+                wsStatus.textContent = 'FunGen: Disconnected';
+                wsDot.classList.remove('connected');
+                updateSplashStatus('Reconnecting to server...');
+
+                // Stop frame position broadcast
+                stopFramePositionBroadcast();
+
+                setTimeout(connectWebSocket, 2000);
+            };
+        }
+
+        // Handle sync messages from server
+        function handleSyncMessage(msg) {
+            // Handle capabilities response
+            if (msg.type === 'capabilities') {
+                console.log('📋 Received capabilities:', msg);
+                console.log('  Trackers:', msg.trackers);
+                console.log('  Devices:', msg.devices);
+                updateTrackerList(msg.trackers || []);
+                updateDeviceList(msg.devices || []);
+
+                // Sync interactive menu with XBVR URL parameters
+                if (xbvrMode || xbvrTracker || xbvrDevice) {
+                    console.log('🔄 Syncing interactive menu with XBVR parameters');
+
+                    // Set mode (tracking vs funscript)
+                    if (xbvrMode === 'tracking') {
+                        interactiveMode.value = 'livetracking';
+                        trackerSection.classList.remove('hidden');
+                        funscriptSection.classList.add('hidden');
+
+                        // Select tracker if specified
+                        if (xbvrTracker) {
+                            liveTrackerSelect.value = xbvrTracker;
+                            console.log(`  ✓ Tracker: ${xbvrTracker}`);
+                        }
+                    } else {
+                        interactiveMode.value = 'funscript';
+                        trackerSection.classList.add('hidden');
+                        funscriptSection.classList.remove('hidden');
+                    }
+
+                    // Select device if specified
+                    if (xbvrDevice) {
+                        deviceSelect.value = xbvrDevice;
+                        console.log(`  ✓ Device: ${xbvrDevice}`);
+                    }
+                }
+
+                return;
+            }
+
+            // Handle funscript data
+            if (msg.type === 'funscript_data') {
+                // Store funscript data (using primary timeline for now)
+                funscriptData = msg.primary || [];
+                const hasData = msg.has_primary || msg.has_secondary;
+
+                console.log(`📊 Received funscript data: ${funscriptData.length} primary, ${(msg.secondary || []).length} secondary actions`);
+
+                // Update funscript selector
+                if (hasData) {
+                    funscriptSelect.innerHTML = '<option value="primary">Primary Timeline</option>';
+                    if (msg.has_secondary) {
+                        funscriptSelect.innerHTML += '<option value="secondary">Secondary Timeline</option>';
+                    }
+                } else {
+                    funscriptSelect.innerHTML = '<option value="">No funscript loaded</option>';
+                }
+
+                return;
+            }
+
+            // Handle XBVR load result - reload video to show the newly loaded file
+            if (msg.type === 'xbvr_load_result') {
+                if (msg.success) {
+                    console.log('✅ XBVR load successful:', msg.message);
+                    console.log('📹 Video path:', msg.video_path);
+
+                    // Update video name display
+                    if (msg.video_path) {
+                        const filename = msg.video_path.split('/').pop();
+                        videoName.textContent = filename;
+                        videoNameBadge.style.display = 'flex';
+                    }
+
+                    // Reload the video element to display the newly loaded video
+                    // The /video endpoint now serves the new file that GUI just loaded
+                    // Add cache-busting timestamp to force browser to reload
+                    console.log('🔄 Reloading video element with cache-busting...');
+                    const videoSource = video.querySelector('source');
+                    const timestamp = Date.now();
+                    const newSrc = `/video?t=${timestamp}`;
+
+                    console.log('  Old src:', videoSource.src);
+                    console.log('  New src:', newSrc);
+
+                    videoSource.src = newSrc;
+                    video.load(); // Reload from /video endpoint with new timestamp
+
+                    // Hide loading overlay and show video
+                    loadingOverlay.style.display = 'none';
+                    video.style.display = 'block';
+
+                    // Auto-play if tracking was started
+                    if (msg.tracker) {
+                        video.addEventListener('loadeddata', () => {
+                            console.log('▶️ Auto-playing video (tracking active)');
+                            video.play().catch(e => console.error('Auto-play failed:', e));
+                        }, { once: true });
+                    }
+                } else {
+                    console.error('❌ XBVR load failed:', msg.error);
+                    // Hide loading overlay on error too
+                    loadingOverlay.style.display = 'none';
+                    video.style.display = 'block';
+                }
+                return;
+            }
+
+
+            // DISABLED: Frame index sync from GUI (shows GUI processing frames, not browser video frames)
+            // In independent mode, we show browser's actual video position
+            // if (msg.frame_index !== undefined) {
+            //     frameIndex.textContent = msg.frame_index;
+            //     updateProgressBar();
+            // }
+
+            // Keep total_frames and fps for reference, but frame_index comes from video element
+            if (msg.total_frames !== undefined) {
+                totalFrames.textContent = msg.total_frames;
+            }
+
+            if (msg.fps !== undefined) {
+                videoFPS = msg.fps;
+            }
+
+            if (msg.is_playing !== undefined) {
+                // DISABLED: GUI sync mode (causes browser to sync to GUI processing state)
+                // In independent streamer mode, browser plays independently and only devices sync to browser.
+                // The GUI can process at max speed for live tracking without affecting browser playback.
+                //
+                // Old behavior: Browser would auto-play/pause when GUI started/stopped processing
+                // New behavior: Browser is independent, user controls playback manually
+                //
+                // Sync video playback state - only sync if there's a mismatch
+                // const videoShouldBePlaying = msg.is_playing;
+                // const videoIsPlaying = !video.paused;
+                //
+                // if (videoShouldBePlaying && !videoIsPlaying) {
+                //     console.log('▶️ Syncing: Starting playback');
+                //     video.play().catch(e => console.error('Failed to play:', e));
+                // } else if (!videoShouldBePlaying && videoIsPlaying) {
+                //     console.log('⏸️ Syncing: Pausing playback');
+                //     video.pause();
+                // }
+
+                // Update play/pause button text to match actual video state (not GUI state)
+                playPauseBtn.textContent = video.paused ? '▶' : '⏸';
+            }
+
+            // Update stats panel with latest data
+            updateStatsPanel(msg);
+
+            // REMOVED: Frame position updates are now sent independently via setInterval
+            // This ensures tracking continues even when sync messages stop (e.g., when paused)
+            // See startFramePositionBroadcast() function
+
+            // DISABLED: Old drift detection code (incompatible with query-based architecture)
+            // In the new architecture, VideoProcessor runs independently and only devices sync to browser.
+            // This code was causing VideoProcessor to constantly seek backward to match browser position.
+            //
+            // if (msg.frame_index !== undefined && msg.fps !== undefined) {
+            //     const now = Date.now();
+            //     const timeSinceDriftCheck = now - lastDriftCheck;
+            //
+            //     if (timeSinceDriftCheck >= 5000) { // Check every 5 seconds
+            //         lastDriftCheck = now;
+            //
+            //         const serverTime = msg.frame_index / msg.fps;
+            //         const browserTime = video.currentTime;
+            //         const timeDiff = Math.abs(serverTime - browserTime);
+            //
+            //         const timeSinceInteraction = Date.now() - lastUserInteraction;
+            //         const allowSync = !userSeeking && !video.seeking && timeSinceInteraction > 2000;
+            //
+            //         // If drift is significant, tell VideoProcessor to catch up to browser
+            //         // Only seek for large drifts (>5 seconds) - adaptive frame skip handles small drifts
+            //         if (timeDiff > 5.0 && allowSync && video.duration) {
+            //             const frameDiff = Math.floor(timeDiff * msg.fps);
+            //             console.log(`⚠️ Large drift detected: server=${serverTime.toFixed(2)}s, browser=${browserTime.toFixed(2)}s, diff=${timeDiff.toFixed(3)}s (${frameDiff} frames)`);
+            //             console.log(`📡 Seeking VideoProcessor to frame ${Math.floor(browserTime * msg.fps)}`);
+            //
+            //             // Tell VideoProcessor to seek to where WE are (only for large drifts)
+            //             const browserFrame = Math.floor(browserTime * msg.fps);
+            //             sendCommand('seek', browserFrame);
+            //         } else if (timeDiff > 1.0 && timeDiff <= 5.0) {
+            //             // For small to medium drifts, log but let adaptive frame skip handle it
+            //             const frameDiff = Math.floor(timeDiff * msg.fps);
+            //             console.log(`ℹ️ Small drift detected: ${timeDiff.toFixed(3)}s (${frameDiff} frames) - adaptive frame skip will catch up`);
+            //         }
+            //     }
+            // }
+        }
+
+        // Send control command to server
+        function sendCommand(action, frame = null) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('WebSocket not connected');
+                return;
+            }
+
+            const cmd = {
+                type: 'control',
+                action: action
+            };
+
+            if (frame !== null) {
+                cmd.frame = frame;
+            }
+
+            // Include current speed mode with play commands
+            if (action === 'play') {
+                cmd.speed_mode = isRealTime ? 'realtime' : 'slomo';
+            }
+
+            console.log('Sending command:', cmd);
+            ws.send(JSON.stringify(cmd));
+        }
+
+        // Send device/tracker control command
+        function sendDeviceCommand(type, data) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            ws.send(JSON.stringify({
+                type: type,
+                data: data
+            }));
+        }
+
+        // Trigger XBVR load from URL parameters
+        function triggerXBVRLoad() {
+            console.log('🎬 triggerXBVRLoad called');
+            console.log('  xbvrVideoPath:', xbvrVideoPath);
+            console.log('  xbvrFunscriptPath:', xbvrFunscriptPath);
+            console.log('  ws:', ws);
+            console.log('  ws.readyState:', ws ? ws.readyState : 'N/A');
+
+            if (!xbvrVideoPath) {
+                console.error('❌ Cannot trigger XBVR load - missing video_path');
+                return;
+            }
+
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('❌ Cannot trigger XBVR load - WebSocket not connected, retrying in 1s...');
+                setTimeout(triggerXBVRLoad, 1000);
+                return;
+            }
+
+            console.log('✅ Sending XBVR load command to sync server');
+            console.log('📹 Video path:', xbvrVideoPath);
+            console.log('📜 Funscript path:', xbvrFunscriptPath || '(none)');
+            console.log('  Mode:', xbvrMode);
+            console.log('  Tracker:', xbvrTracker || '(none - funscript only)');
+            console.log('  Device:', xbvrDevice || '(none)');
+
+            // Send load command to sync server
+            // The sync server will load the video in FunGen and start tracking if requested
+            const message = {
+                type: 'xbvr_load_video',
+                scene_id: 'from_url',  // Dummy ID since we already have the path
+                video_path: xbvrVideoPath,
+                funscript_path: xbvrFunscriptPath || null,
+                tracker: xbvrTracker || null,
+                device: xbvrDevice || null
+            };
+            console.log('📤 Sending:', JSON.stringify(message, null, 2));
+            ws.send(JSON.stringify(message));
+
+            // Clear URL parameters to avoid re-triggering on refresh
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+                console.log('✅ URL parameters cleared');
+            }
+        }
+
+        // Format time as MM:SS
+        function formatTime(seconds) {
+            if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Update tracker list with available trackers
+        function updateTrackerList(trackers) {
+            console.log(`📊 updateTrackerList called with ${trackers.length} trackers:`, trackers);
+
+            // Update Interactive panel tracker select
+            liveTrackerSelect.innerHTML = '<option value="">Select tracker...</option>';
+            trackers.forEach(tracker => {
+                const option = document.createElement('option');
+                option.value = tracker.internal_name || tracker.name;
+                option.textContent = tracker.display_name || tracker.name;
+                liveTrackerSelect.appendChild(option);
+            });
+            console.log(`✅ Updated liveTrackerSelect, now has ${liveTrackerSelect.options.length} options`);
+        }
+
+        // Update device list with detected devices
+        function updateDeviceList(devices) {
+            console.log(`🎮 updateDeviceList called with ${devices.length} devices:`, devices);
+
+            if (devices.length === 0) {
+                console.log('⚠️ No devices to display');
+                // Update Interactive panel device select
+                deviceSelect.innerHTML = '<option value="">No devices detected</option>';
+                return;
+            }
+
+            // Update Interactive panel device select
+            deviceSelect.innerHTML = '<option value="">Select device...</option>';
+            devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.id || device.name.toLowerCase();
+                option.textContent = `${device.icon || '🎮'} ${device.name}`;
+                deviceSelect.appendChild(option);
+            });
+            console.log(`✅ Updated deviceSelect, now has ${deviceSelect.options.length} options`);
+        }
+
+        // Show notification message
+        function showNotification(message, type = 'info') {
+            // Remove any existing notification
+            const existing = document.querySelector('.notification');
+            if (existing) {
+                existing.remove();
+            }
+
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                border-radius: 8px;
+                font-size: 14px;
+                z-index: 10000;
+                max-width: 400px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                animation: slideIn 0.3s ease-out;
+            `;
+
+            // Set colors based on type
+            if (type === 'success') {
+                notification.style.background = 'rgba(0, 255, 136, 0.9)';
+                notification.style.color = '#000';
+            } else if (type === 'error') {
+                notification.style.background = 'rgba(255, 68, 68, 0.9)';
+                notification.style.color = '#fff';
+            } else {
+                notification.style.background = 'rgba(0, 170, 255, 0.9)';
+                notification.style.color = '#fff';
+            }
+
+            document.body.appendChild(notification);
+
+            // Auto-remove after 4 seconds
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => notification.remove(), 300);
+            }, 4000);
+        }
+
+        // Update progress bar
+        function updateProgressBar() {
+            if (video.duration) {
+                const percent = (video.currentTime / video.duration) * 100;
+                progressFilled.style.width = `${percent}%`;
+                progressHandle.style.left = `${percent}%`;
+            }
+            currentTime.textContent = formatTime(video.currentTime);
+
+        }
+
+        // Update status badges (top bar)
+        function updateStatusBadges(msg) {
+            // Device status
+            const deviceBadge = document.getElementById('deviceBadge');
+            const deviceDot = document.getElementById('deviceDot');
+            const deviceStatus = document.getElementById('deviceStatus');
+
+            if (msg.device_name || msg.device_connected) {
+                deviceBadge.style.display = 'flex';
+                if (msg.device_connected) {
+                    deviceDot.className = 'status-dot connected';
+                    const protocol = msg.device_protocol || 'Unknown';
+                    deviceStatus.textContent = `Device: ${msg.device_name || 'Connected'} (${protocol})`;
+                } else {
+                    deviceDot.className = 'status-dot disconnected';
+                    deviceStatus.textContent = 'Device: None';
+                }
+            }
+
+            // Tracking mode status
+            const trackingBadge = document.getElementById('trackingBadge');
+            const trackingStatus = document.getElementById('trackingStatus');
+
+            if (msg.tracking_mode !== undefined) {
+                trackingBadge.style.display = 'flex';
+                if (msg.tracking_mode === 'off') {
+                    trackingStatus.textContent = 'Mode: Off';
+                } else if (msg.tracking_mode === 'funscript') {
+                    trackingStatus.textContent = 'Mode: Funscript';
+                } else {
+                    // Live tracking with tracker name
+                    trackingStatus.textContent = `Mode: ${msg.tracker_name || 'Tracking'}`;
+                }
+            } else if (msg.is_tracking !== undefined) {
+                // Fallback to boolean tracking state
+                trackingBadge.style.display = 'flex';
+                trackingStatus.textContent = msg.is_tracking ? 'Mode: Tracking' : 'Mode: Off';
+            }
+        }
+
+        // Update stats panel
+        function updateStatsPanel(msg) {
+            // Update video name if provided
+            if (msg.video_filename) {
+                videoName.textContent = msg.video_filename;
+                videoNameBadge.style.display = 'flex';
+            }
+
+            // Update status badges
+            updateStatusBadges(msg);
+
+            // Playback stats
+            if (msg.frame_index !== undefined && msg.total_frames !== undefined) {
+                document.getElementById('statFrameIndex').textContent = `${msg.frame_index} / ${msg.total_frames}`;
+            }
+
+            // Time
+            if (video.currentTime !== undefined && video.duration) {
+                document.getElementById('statTime').textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`;
+            }
+
+            // Video stats
+            if (video.videoWidth && video.videoHeight) {
+                document.getElementById('statResolution').textContent = `${video.videoWidth}×${video.videoHeight}`;
+            }
+
+            // Zoom and pan
+            document.getElementById('statZoom').textContent = `${Math.round(videoZoom * 100)}%`;
+            document.getElementById('statPan').textContent = `${Math.round(videoPanX)}, ${Math.round(videoPanY)}`;
+
+            // Connection status
+            const connected = ws && ws.readyState === WebSocket.OPEN;
+            document.getElementById('statConnection').textContent = connected ? 'Connected' : 'Disconnected';
+
+            // Drift (calculated in handleSyncMessage)
+            if (msg.frame_index !== undefined && msg.fps !== undefined && video.currentTime) {
+                const serverTime = msg.frame_index / msg.fps;
+                const browserTime = video.currentTime;
+                const driftMs = Math.abs((serverTime - browserTime) * 1000);
+                document.getElementById('statDrift').textContent = `${Math.round(driftMs)}ms`;
+            }
+        }
+
+        // Reset idle timer
+        function resetIdleTimer() {
+            document.body.classList.remove('idle');
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                document.body.classList.add('idle');
+            }, 3000);
+        }
+
+        // Draw funscript graph overlay (bottom left)
+        function drawFunscriptGraphOverlay() {
+            const canvas = document.getElementById('funscriptGraphOverlayCanvas');
+            const overlay = document.getElementById('funscriptGraphOverlay');
+            if (!canvas || !overlay) return;
+
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Show/hide based on idle state and funscript data
+            const isIdle = document.body.classList.contains('idle');
+            if (!funscriptData || funscriptData.length === 0 || isIdle) {
+                overlay.classList.remove('visible');
+                return;
+            }
+
+            // Show overlay when not idle and data available
+            overlay.classList.add('visible');
+
+            // Window: 5 seconds before, 5 seconds after current time
+            const currentTime = video.currentTime || 0;
+            const startTime = Math.max(0, currentTime - 5); // 5s before
+            const endTime = currentTime + 5; // 5s after
+            const timeWindow = endTime - startTime;
+
+            // Filter actions within the time window
+            const visibleActions = funscriptData.filter(action => {
+                const actionTime = action.at / 1000; // Convert ms to seconds
+                return actionTime >= startTime && actionTime <= endTime;
+            });
+
+            if (visibleActions.length === 0) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('No actions in view', width / 2, height / 2);
+                return;
+            }
+
+            // Draw funscript path - clean and simple
+            ctx.strokeStyle = 'rgba(0, 212, 255, 0.9)';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+
+            visibleActions.forEach((point, index) => {
+                const actionTime = point.at / 1000; // Convert ms to seconds
+                const x = ((actionTime - startTime) / timeWindow) * width;
+                const y = height - (point.pos / 100) * height; // pos is 0-100
+
+                if (index === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+
+            ctx.stroke();
+
+            // Draw current position indicator (center - 5s mark out of 10s window)
+            const currentPosX = width / 2; // Center of 5s before/after window
+
+            // Indicator line - clean
+            ctx.strokeStyle = 'rgba(0, 255, 136, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(currentPosX, 0);
+            ctx.lineTo(currentPosX, height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // Video events
+            video.addEventListener('loadedmetadata', () => {
+                const resolution = `${video.videoWidth}×${video.videoHeight}`;
+                const durationText = formatTime(video.duration);
+                duration.textContent = durationText;
+                videoRes.textContent = resolution;
+
+                // Update stats panel
+                if (statResolution) statResolution.textContent = resolution;
+                if (statTime) statTime.textContent = `0:00 / ${durationText}`;
+
+                console.log('✅ Video metadata loaded:', {
+                    duration: video.duration,
+                    width: video.videoWidth,
+                    height: video.videoHeight
+                });
+
+                // Auto-detect VR format based on aspect ratio
+                const aspectRatio = video.videoWidth / video.videoHeight;
+                let vrProjection = 'NONE';  // Default: 2D/flat video
+                let vrFormat = '2D';
+
+                if (aspectRatio > 3.5) {
+                    // Very wide aspect ratio = VR180 SBS
+                    vrProjection = '180';
+                    vrFormat = 'VR 180° SBS';
+                    console.log('🥽 VR Format detected: 180° Side-by-Side');
+                } else if (aspectRatio > 1.9) {
+                    // Wide aspect ratio = VR360 SBS
+                    vrProjection = '360';
+                    vrFormat = 'VR 360° SBS';
+                    console.log('🥽 VR Format detected: 360° Side-by-Side');
+                } else {
+                    // Normal aspect ratio = 2D video
+                    console.log('📺 Standard 2D video detected');
+                }
+
+                // Apply VR projection to Video.js VR plugin
+                if (vrProjection !== 'NONE') {
+                    player.vr({ projection: vrProjection });
+                    console.log(`✅ VR projection set to: ${vrProjection}`);
+                }
+
+                // Update splash screen
+                if (!splashReady.videoLoaded) {
+                    splashReady.videoLoaded = true;
+                    updateSplashStatus('Ready!');
+                    checkSplashReady();
+                    console.log('🎬 Splash screen marked as ready (loadedmetadata)');
+                }
+
+                // Start FPS tracking
+                startFPSTracking();
+            });
+
+            // Fallback: also try canplay event in case loadedmetadata doesn't fire
+            video.addEventListener('canplay', () => {
+                console.log('✅ Video can play');
+                if (!splashReady.videoLoaded) {
+                    splashReady.videoLoaded = true;
+                    updateSplashStatus('Ready!');
+                    checkSplashReady();
+                    console.log('🎬 Splash screen marked as ready (canplay)');
+                }
+            }, { once: true });
+
+            // Use requestAnimationFrame for smoother progress bar and funscript overlay updates
+            function animateProgressBar() {
+                updateProgressBar();
+                drawFunscriptGraphOverlay();
+                requestAnimationFrame(animateProgressBar);
+            }
+            animateProgressBar();
+
+            video.addEventListener('timeupdate', () => {
+                // Update frame index from actual video playback position (not GUI)
+                if (videoFPS > 0 && video.currentTime !== undefined) {
+                    const browserFrame = Math.floor(video.currentTime * videoFPS);
+                    frameIndex.textContent = browserFrame;
+                }
+            });
+
+            video.addEventListener('play', () => {
+                startFPSTracking();
+            });
+
+            video.addEventListener('pause', () => {
+                stopFPSTracking();
+            });
+
+            video.addEventListener('seeking', () => {
+                if (!isSyncing) {
+                    userSeeking = true;
+                    lastUserInteraction = Date.now();
+                }
+            });
+
+            video.addEventListener('seeked', () => {
+                if (isSyncing) {
+                    isSyncing = false;
+                } else if (userSeeking) {
+                    // Send seek command - backend will auto-restart tracking if it was active
+                    if (videoFPS > 0) {
+                        const frame = Math.floor(video.currentTime * videoFPS);
+                        console.log(`🔍 User seeked to frame ${frame}, backend will restart tracking if active`);
+                        sendCommand('seek', frame);
+                    }
+                    userSeeking = false;
+                }
+            });
+
+            // Play/Pause button
+            playPauseBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                // Independent mode: Control browser video directly, don't send commands to GUI
+                // GUI tracks independently at max speed, browser plays at user's pace
+                if (video.paused) {
+                    video.play().catch(err => console.error('Failed to play:', err));
+                    playPauseBtn.textContent = '⏸';
+                } else {
+                    video.pause();
+                    playPauseBtn.textContent = '▶';
+                }
+
+                // Old behavior: Send commands to GUI (disabled for independent mode)
+                // if (video.paused) {
+                //     sendCommand('play');
+                // } else {
+                //     sendCommand('pause');
+                // }
+            }, { passive: false });
+
+            // Skip buttons
+            skipBackBtn.addEventListener('click', () => {
+                // Independent mode: Seek browser video directly
+                const newTime = Math.max(0, video.currentTime - 10);
+                video.currentTime = newTime;
+                // Old: sendCommand('seek', frame);
+            });
+
+            skipFwdBtn.addEventListener('click', () => {
+                // Independent mode: Seek browser video directly
+                const newTime = Math.min(video.duration, video.currentTime + 10);
+                video.currentTime = newTime;
+                // Old: sendCommand('seek', frame);
+            });
+
+            // Stop button
+            stopBtn.addEventListener('click', () => {
+                // Independent mode: Stop browser video directly
+                video.pause();
+                video.currentTime = 0;
+                playPauseBtn.textContent = '▶';
+                // Old: sendCommand('stop');
+            });
+
+            // VR button
+            vrBtn.addEventListener('click', enterVR);
+
+            // XBVR Browser button - redirect to XBVR browser (same tab)
+            document.getElementById('xbvrBrowserBtn').addEventListener('click', () => {
+                window.location.href = '/xbvr';
+            });
+
+            // Progress bar seeking
+            progressBar.addEventListener('click', (e) => {
+                if (!video.duration || isNaN(video.duration)) {
+                    console.warn('Video duration not available yet');
+                    return;
+                }
+
+                const rect = progressBar.getBoundingClientRect();
+                const percent = (e.clientX - rect.left) / rect.width;
+                const newTime = percent * video.duration;
+                const frame = Math.floor(newTime * videoFPS);
+
+                console.log(`Seeking to ${newTime.toFixed(2)}s (frame ${frame})`);
+
+                // Seek locally first for immediate feedback
+                video.currentTime = newTime;
+                userSeeking = true;
+                lastUserInteraction = Date.now();
+
+                // Then tell server
+                sendCommand('seek', frame);
+            });
+
+            // Interactive panel toggle
+            interactiveBtn.addEventListener('click', () => {
+                const isVisible = interactivePanel.classList.toggle('visible');
+                interactiveBtn.classList.toggle('active', isVisible);
+                resetIdleTimer();
+            });
+
+            // Interactive mode change
+            interactiveMode.addEventListener('change', () => {
+                const mode = interactiveMode.value;
+
+                if (mode === 'livetracking') {
+                    trackerSection.classList.remove('hidden');
+                    funscriptSection.classList.add('hidden');
+                } else {
+                    trackerSection.classList.add('hidden');
+                    funscriptSection.classList.remove('hidden');
+                }
+            });
+
+            // Live tracker selection
+            liveTrackerSelect.addEventListener('change', () => {
+                const tracker = liveTrackerSelect.value;
+                console.log(`🎯 Live tracker changed to: ${tracker}`);
+
+                // Send to server
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'set_tracker',
+                        tracker: tracker
+                    }));
+                }
+            });
+
+            // Device selection
+            deviceSelect.addEventListener('change', () => {
+                const device = deviceSelect.value;
+                console.log(`🎮 Device changed to: ${device}`);
+            });
+
+            // Interactive sync toggle
+            interactiveSyncToggle.addEventListener('click', () => {
+                const isActive = interactiveSyncToggle.classList.toggle('active');
+
+                const mode = interactiveMode.value;
+                const tracker = liveTrackerSelect.value;
+                const device = deviceSelect.value;
+
+                console.log(`🔄 Interactive sync: ${isActive ? 'ON' : 'OFF'}, mode: ${mode}`);
+
+                // Mode-specific behavior
+                if (mode === 'livetracking') {
+                    // Live Tracking mode: Start/Stop live tracking
+                    console.log(isActive ? '▶️ Starting live tracking...' : '⏹️ Stopping live tracking...');
+
+                    if (!tracker) {
+                        console.warn('⚠️ No tracker selected');
+                        interactiveSyncToggle.classList.remove('active');
+                        return;
+                    }
+
+                    // Send to server to start/stop live tracking
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: isActive ? 'start_live_tracking' : 'stop_live_tracking',
+                            tracker: tracker,
+                            device: device
+                        }));
+                    }
+                } else if (mode === 'funscript') {
+                    // Funscript mode: Toggle live playback control setting
+                    console.log(isActive ? '🎮 Enabling live playback control...' : '🎮 Disabling live playback control...');
+
+                    // Send to server to toggle video playback control setting
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'toggle_video_playback_control',
+                            enabled: isActive
+                        }));
+                    }
+                }
+
+                // Update stats
+                document.getElementById('statSync').textContent = isActive ? 'Enabled' : 'Disabled';
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'SELECT') return; // Don't interfere with select
+
+                switch(e.code) {
+                    case 'Space':
+                        e.preventDefault();
+                        playPauseBtn.click();
+                        break;
+                    case 'ArrowLeft':
+                        e.preventDefault();
+                        skipBackBtn.click();
+                        break;
+                    case 'ArrowRight':
+                        e.preventDefault();
+                        skipFwdBtn.click();
+                        break;
+
+                    // Zoom controls
+                    case 'Equal':  // + key (with or without shift)
+                    case 'NumpadAdd':
+                        e.preventDefault();
+                        adjustZoom(0.1);
+                        break;
+                    case 'Minus':  // - key
+                    case 'NumpadSubtract':
+                        e.preventDefault();
+                        adjustZoom(-0.1);
+                        break;
+
+                    // Pan controls (WASD only)
+                    case 'KeyW':
+                        e.preventDefault();
+                        adjustPan(0, -20);
+                        break;
+                    case 'KeyS':
+                        e.preventDefault();
+                        adjustPan(0, 20);
+                        break;
+                    case 'KeyA':
+                        e.preventDefault();
+                        adjustPan(-20, 0);
+                        break;
+                    case 'KeyD':
+                        e.preventDefault();
+                        adjustPan(20, 0);
+                        break;
+
+                    // Reset zoom and pan
+                    case 'KeyR':
+                        e.preventDefault();
+                        resetTransform();
+                        break;
+
+                    // Volume controls
+                    case 'KeyM':
+                        e.preventDefault();
+                        toggleMute();
+                        break;
+                    case 'ArrowUp':
+                        if (e.ctrlKey || e.metaKey) {
+                            e.preventDefault();
+                            adjustVolume(10);
+                        }
+                        break;
+                    case 'ArrowDown':
+                        if (e.ctrlKey || e.metaKey) {
+                            e.preventDefault();
+                            adjustVolume(-10);
+                        }
+                        break;
+                }
+            });
+
+            // Volume controls
+            volumeBtn.addEventListener('click', toggleMute);
+
+            volumeSlider.addEventListener('input', (e) => {
+                const volume = parseInt(e.target.value);
+                video.volume = volume / 100;
+                updateVolumeIcon(volume);
+            });
+
+            // Mouse movement to reset idle timer
+            document.addEventListener('mousemove', resetIdleTimer);
+            document.addEventListener('click', resetIdleTimer);
+            document.addEventListener('keydown', resetIdleTimer);
+        }
+
+        // Frame position broadcast (independent of sync messages)
+        function startFramePositionBroadcast() {
+            // Clear any existing interval
+            if (framePositionInterval) {
+                clearInterval(framePositionInterval);
+            }
+
+            // Send frame position every 500ms
+            framePositionInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN && videoFPS > 0 && video.currentTime !== undefined) {
+                    const browserFrame = Math.floor(video.currentTime * videoFPS);
+                    ws.send(JSON.stringify({
+                        type: 'frame_position',
+                        frame_index: browserFrame,
+                        is_playing: !video.paused
+                    }));
+                }
+            }, 500);
+
+            console.log('▶️ Frame position broadcast started');
+        }
+
+        function stopFramePositionBroadcast() {
+            if (framePositionInterval) {
+                clearInterval(framePositionInterval);
+                framePositionInterval = null;
+                console.log('⏸ Frame position broadcast stopped');
+            }
+        }
+
+        // Zoom/Pan controls
+        let zoomPanTimeout = null;
+
+        function adjustZoom(delta) {
+            videoZoom = Math.max(0.5, Math.min(5.0, videoZoom + delta));
+            applyVideoTransform();
+            showZoomPanDisplay();
+            sendTransformCommand();
+
+            // Update stats panel
+            if (statZoom) statZoom.textContent = `${Math.round(videoZoom * 100)}%`;
+        }
+
+        function adjustPan(deltaX, deltaY) {
+            videoPanX += deltaX;
+            videoPanY += deltaY;
+
+            // Clamp pan to reasonable limits
+            const maxPan = 500;
+            videoPanX = Math.max(-maxPan, Math.min(maxPan, videoPanX));
+            videoPanY = Math.max(-maxPan, Math.min(maxPan, videoPanY));
+
+            applyVideoTransform();
+            showZoomPanDisplay();
+            sendTransformCommand();
+
+            // Update stats panel
+            if (statPan) statPan.textContent = `${videoPanX}, ${videoPanY}`;
+        }
+
+        function resetTransform() {
+            videoZoom = 1.0;
+            videoPanX = 0;
+            videoPanY = 0;
+            applyVideoTransform();
+            showZoomPanDisplay();
+            sendTransformCommand();
+
+            // Update stats panel
+            if (statZoom) statZoom.textContent = '100%';
+            if (statPan) statPan.textContent = '0, 0';
+
+            console.log('Reset zoom and pan to default');
+        }
+
+        function applyVideoTransform() {
+            const transform = `scale(${videoZoom}) translate(${videoPanX / videoZoom}px, ${videoPanY / videoZoom}px)`;
+            video.style.transform = transform;
+
+            // Update UI
+            zoomValue.textContent = `${Math.round(videoZoom * 100)}%`;
+            panValue.textContent = `${Math.round(videoPanX)}, ${Math.round(videoPanY)}`;
+        }
+
+        function showZoomPanDisplay() {
+            zoomPanDisplay.classList.add('visible');
+
+            // Auto-hide after 2 seconds
+            if (zoomPanTimeout) clearTimeout(zoomPanTimeout);
+            zoomPanTimeout = setTimeout(() => {
+                zoomPanDisplay.classList.remove('visible');
+            }, 2000);
+        }
+
+        function sendTransformCommand() {
+            // Send to server for VR controller sync in the future
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'transform',
+                    zoom: videoZoom,
+                    pan_x: videoPanX,
+                    pan_y: videoPanY
+                }));
+            }
+        }
+
+        // FPS tracking
+        function startFPSTracking() {
+            if (fpsUpdateInterval) return; // Already running
+
+            let framesSinceLastUpdate = 0;
+            let lastUpdate = performance.now();
+
+            fpsUpdateInterval = setInterval(() => {
+                const now = performance.now();
+                const elapsed = (now - lastUpdate) / 1000; // seconds
+
+                // Use requestAnimationFrame callback count as frame count
+                requestAnimationFrame(() => framesSinceLastUpdate++);
+
+                // Update display every second
+                if (elapsed >= 1.0) {
+                    const fps = framesSinceLastUpdate / elapsed;
+                    const fpsRounded = Math.round(fps);
+                    playbackFPS.textContent = fpsRounded;
+                    if (statPlaybackFPS) statPlaybackFPS.textContent = fpsRounded;
+                    framesSinceLastUpdate = 0;
+                    lastUpdate = now;
+                }
+            }, 100); // Check 10 times per second
+
+            console.log('📊 FPS tracking started');
+        }
+
+        function stopFPSTracking() {
+            if (fpsUpdateInterval) {
+                clearInterval(fpsUpdateInterval);
+                fpsUpdateInterval = null;
+                playbackFPS.textContent = '0';
+                if (statPlaybackFPS) statPlaybackFPS.textContent = '0';
+                console.log('📊 FPS tracking stopped');
+            }
+        }
+
+        // Volume control functions
+        let previousVolume = 100;
+
+        function toggleMute() {
+            if (video.volume > 0) {
+                previousVolume = video.volume * 100;
+                video.volume = 0;
+                volumeSlider.value = 0;
+                updateVolumeIcon(0);
+            } else {
+                video.volume = previousVolume / 100;
+                volumeSlider.value = previousVolume;
+                updateVolumeIcon(previousVolume);
+            }
+        }
+
+        function adjustVolume(delta) {
+            const newVolume = Math.max(0, Math.min(100, parseInt(volumeSlider.value) + delta));
+            volumeSlider.value = newVolume;
+            video.volume = newVolume / 100;
+            updateVolumeIcon(newVolume);
+        }
+
+        function updateVolumeIcon(volume) {
+            if (volume === 0) {
+                volumeBtn.textContent = '🔇';
+            } else if (volume < 33) {
+                volumeBtn.textContent = '🔈';
+            } else if (volume < 66) {
+                volumeBtn.textContent = '🔉';
+            } else {
+                volumeBtn.textContent = '🔊';
+            }
+        }
+
+        // WebXR VR Mode with THREE.js
+        let vrScene, vrCamera, vrRenderer, vrSphere, vrVideoTexture;
+        let vrActive = false;
+
+        async function enterVR() {
+            // Check if WebXR is available
+            if (!navigator.xr) {
+                console.log('⚠️ WebXR not available - falling back to fullscreen');
+                try {
+                    await document.documentElement.requestFullscreen();
+                    console.log('✅ Entered fullscreen mode (2D fallback)');
+                } catch (error) {
+                    console.error('Failed to enter fullscreen:', error);
+                    alert('VR not supported. Try accessing via HTTPS or use a VR browser.');
+                }
+                return;
+            }
+
+            // Check if VR is supported
+            const isVRSupported = await navigator.xr.isSessionSupported('immersive-vr');
+            if (!isVRSupported) {
+                console.log('⚠️ VR not supported - falling back to fullscreen');
+                await document.documentElement.requestFullscreen();
+                return;
+            }
+
+            // Initialize WebXR VR session
+            try {
+                if (vrActive) {
+                    // Exit VR
+                    if (vrRenderer && vrRenderer.xr && vrRenderer.xr.getSession()) {
+                        await vrRenderer.xr.getSession().end();
+                    }
+                    vrActive = false;
+                } else {
+                    // Enter VR
+                    console.log('🥽 Initializing WebXR VR session...');
+                    await initVRScene();
+                    vrActive = true;
+                }
+            } catch (error) {
+                console.error('Failed to toggle VR:', error);
+                alert('Failed to enter VR mode: ' + error.message);
+            }
+        }
+
+        async function initVRScene() {
+            // Create THREE.js scene for VR
+            vrScene = new THREE.Scene();
+
+            // Create camera
+            vrCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            vrCamera.position.set(0, 0, 0);
+
+            // Create renderer
+            if (!vrRenderer) {
+                vrRenderer = new THREE.WebGLRenderer({ antialias: true });
+                vrRenderer.setSize(window.innerWidth, window.innerHeight);
+                vrRenderer.xr.enabled = true;
+                document.body.appendChild(vrRenderer.domElement);
+                vrRenderer.domElement.style.position = 'absolute';
+                vrRenderer.domElement.style.top = '0';
+                vrRenderer.domElement.style.left = '0';
+                vrRenderer.domElement.style.zIndex = '10000';
+            }
+
+            // Create video texture from current video element
+            vrVideoTexture = new THREE.VideoTexture(video);
+            vrVideoTexture.minFilter = THREE.LinearFilter;
+            vrVideoTexture.magFilter = THREE.LinearFilter;
+            vrVideoTexture.format = THREE.RGBFormat;
+
+            // Detect video format and create appropriate geometry
+            const aspectRatio = video.videoWidth / video.videoHeight;
+
+            if (aspectRatio > 3.5) {
+                // 180° SBS
+                console.log('📐 Creating 180° SBS VR sphere');
+                createVR180SBSSphere();
+            } else if (aspectRatio > 1.8) {
+                // 360° SBS
+                console.log('📐 Creating 360° SBS VR sphere');
+                createVR360SBSSphere();
+            } else {
+                // Flat screen in VR
+                console.log('📐 Creating flat screen in VR');
+                createVRFlatScreen();
+            }
+
+            // Start XR session
+            const session = await navigator.xr.requestSession('immersive-vr');
+            vrRenderer.xr.setSession(session);
+
+            // Start render loop
+            vrRenderer.setAnimationLoop(() => {
+                vrRenderer.render(vrScene, vrCamera);
+            });
+
+            console.log('✅ VR mode active');
+        }
+
+        function createVR180SBSSphere() {
+            // Create hemisphere for 180° video
+            const geometry = new THREE.SphereGeometry(500, 60, 40, 0, Math.PI); // Only front hemisphere
+
+            // For SBS, we need to show only left half to left eye, right half to right eye
+            // THREE.js WebXR handles eye separation, we just need to map UVs correctly
+
+            // Adjust UVs to show only left half (0 to 0.5 of texture)
+            const uvs = geometry.attributes.uv.array;
+            for (let i = 0; i < uvs.length; i += 2) {
+                uvs[i] = uvs[i] * 0.5; // Scale U coordinate to first half
+            }
+            geometry.attributes.uv.needsUpdate = true;
+
+            // Flip inside-out for video projection
+            geometry.scale(-1, 1, 1);
+
+            const material = new THREE.MeshBasicMaterial({
+                map: vrVideoTexture,
+                side: THREE.DoubleSide
+            });
+
+            vrSphere = new THREE.Mesh(geometry, material);
+            vrScene.add(vrSphere);
+        }
+
+        function createVR360SBSSphere() {
+            // Create full sphere for 360° video
+            const geometry = new THREE.SphereGeometry(500, 60, 40);
+
+            // Adjust UVs for SBS (left half only)
+            const uvs = geometry.attributes.uv.array;
+            for (let i = 0; i < uvs.length; i += 2) {
+                uvs[i] = uvs[i] * 0.5;
+            }
+            geometry.attributes.uv.needsUpdate = true;
+
+            geometry.scale(-1, 1, 1);
+
+            const material = new THREE.MeshBasicMaterial({
+                map: vrVideoTexture,
+                side: THREE.DoubleSide
+            });
+
+            vrSphere = new THREE.Mesh(geometry, material);
+            vrScene.add(vrSphere);
+        }
+
+        function createVRFlatScreen() {
+            // Create flat screen in VR space
+            const geometry = new THREE.PlaneGeometry(16, 9);
+            const material = new THREE.MeshBasicMaterial({
+                map: vrVideoTexture,
+                side: THREE.DoubleSide
+            });
+
+            vrSphere = new THREE.Mesh(geometry, material);
+            vrSphere.position.set(0, 0, -10);
+            vrScene.add(vrSphere);
+        }
+
+
+    </script>
+</body>
+</html>
