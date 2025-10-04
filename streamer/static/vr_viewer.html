@@ -1406,13 +1406,22 @@
                 switch(type) {
                     case 'fisheye190':
                     case 'fisheye200':
-                        // Fisheye: Full sphere (fisheye projects onto full sphere)
+                        // Fisheye: Dome per eye (front hemisphere only, 180° FOV max)
+                        // SBS video has left/right eyes, each eye gets projected on front dome
                         const fov = parseInt(type.replace('fisheye', ''));
-                        geometry = new THREE.SphereGeometry(500, 60, 40);
+                        geometry = new THREE.SphereGeometry(
+                            500,           // radius
+                            60,            // widthSegments
+                            40,            // heightSegments
+                            0,             // phiStart
+                            Math.PI,       // phiLength (180° horizontal dome)
+                            0,             // thetaStart
+                            Math.PI / 2    // thetaLength (90° vertical = front hemisphere dome)
+                        );
                         geometry.scale(-1, 1, 1); // Invert for inside view
                         this.camera.fov = fov === 190 ? 95 : 100;
                         this.camera.updateProjectionMatrix();
-                        console.log(`🐟 Fisheye ${fov}° sphere created, camera FOV: ${this.camera.fov}°`);
+                        console.log(`🐟 Fisheye ${fov}° dome created (hemisphere), camera FOV: ${this.camera.fov}°`);
                         break;
 
                     case 'equirect180':
@@ -1888,6 +1897,13 @@
 
             if (msg.fps !== undefined) {
                 videoFPS = msg.fps;
+            }
+
+            // Update VR metadata from video processor
+            if (msg.vr_projection !== undefined || msg.vr_fov !== undefined) {
+                videoMetadata.projection = msg.vr_projection;
+                videoMetadata.fov = msg.vr_fov;
+                console.log('📹 VR metadata updated:', videoMetadata);
             }
 
             if (msg.is_playing !== undefined) {
@@ -2895,9 +2911,12 @@
         }
 
         function applyVideoTransform() {
-            // Only apply zoom/pan transform if using CSS mode (flat)
+            // Only apply zoom/pan transform if using CSS mode (flat) WITHOUT eye selection
             // THREE.js renderer handles its own transforms
-            if (!projectionRenderer.active) {
+            // vr-left-eye/vr-right-eye CSS classes handle their own centering transforms
+            const hasEyeClass = video.classList.contains('vr-left-eye') || video.classList.contains('vr-right-eye');
+
+            if (!projectionRenderer.active && !hasEyeClass) {
                 let baseTransform = `scale(${videoZoom}) translate(${videoPanX / videoZoom}px, ${videoPanY / videoZoom}px)`;
                 video.style.transform = baseTransform;
             }
