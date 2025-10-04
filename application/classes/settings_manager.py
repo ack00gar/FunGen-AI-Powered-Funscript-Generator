@@ -147,6 +147,11 @@ class AppSettings:
             # Database Management
             "retain_stage2_database": True,  # Keep SQLite database after processing (default: True for GUI, False for CLI)
             "auto_processing_use_chapter_profiles": True,
+
+            # VR Streaming / Native Sync
+            "xbvr_host": "192.168.1.94",  # XBVR server host/IP
+            "xbvr_port": 9999,  # XBVR server port
+            "xbvr_enabled": True,  # Enable XBVR integration
             "auto_post_proc_final_rdp_enabled": False,
             "auto_post_proc_final_rdp_epsilon": 10.0,
             "auto_post_processing_amplification_config": constants.DEFAULT_AUTO_POST_AMP_CONFIG,
