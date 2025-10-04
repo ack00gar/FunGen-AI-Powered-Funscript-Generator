@@ -1443,12 +1443,12 @@
                                 void main() {
                                     vec3 dir = normalize(vWorldDirection);
 
-                                    // Camera initial direction is +X (lon=0, lat=0)
-                                    // theta is angle from +X axis (camera forward)
-                                    float theta = acos(dir.x);
+                                    // Calculate angle from forward direction (negative Z in THREE.js)
+                                    // theta is angle from -Z axis (forward)
+                                    float theta = acos(-dir.z);
 
-                                    // Calculate azimuth (phi) around the X axis
-                                    float phi = atan(dir.z, dir.y);
+                                    // Calculate azimuth (phi) around the -Z axis
+                                    float phi = atan(dir.y, dir.x);
 
                                     // Fisheye circular projection: r is proportional to theta
                                     float r = theta / (fisheyeFOV / 2.0);
@@ -1465,8 +1465,8 @@
 
                                     // Map to texture coordinates
                                     // Left eye circle center is at (0.25, 0.5)
-                                    // Circle radius is ~0.24 (half circle fits in 0.5 width)
-                                    vec2 uv = vec2(0.25 + x * 0.24, 0.5 + y * 0.24);
+                                    // Circle radius is ~0.24 (2900/2 / 5800 ≈ 0.25)
+                                    vec2 uv = vec2(0.25 + x * 0.24, 0.5 - y * 0.24);
 
                                     gl_FragColor = texture2D(map, uv);
                                 }
