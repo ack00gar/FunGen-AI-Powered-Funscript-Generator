@@ -1339,17 +1339,9 @@ class UniversalSyncServer:
                                 funscript_path = f"{path}/{filename}"
                             break
 
-                # If no file found, fallback to XBVR's is_scripted field (less reliable)
-                # Only use this if we couldn't find the actual file
-                if not has_funscript:
-                    has_funscript = scene.get('is_scripted', False)
-                    # Also check for script_published, ai_script, or human_script fields
-                    if not has_funscript:
-                        has_funscript = (
-                            scene.get('script_published', False) or
-                            scene.get('ai_script', False) or
-                            scene.get('human_script', False)
-                        )
+                # Do NOT use XBVR's is_scripted/script_published fields as fallback
+                # Those indicate scripts exist online (SLR, etc.) but not necessarily locally
+                # Only trust the file array - if no funscript file found, scene has no script
 
                 # Debug logging for specific scene
                 if scene.get('title') == 'Queen of the Sculpture':
