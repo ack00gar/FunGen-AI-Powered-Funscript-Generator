@@ -305,88 +305,55 @@ class VideoProcessor:
 
         width = self.video_info.get('width', 0)
         height = self.video_info.get('height', 0)
-        aspect_ratio = width / height if height > 0 else 0
-
-        # Check if resolution clearly indicates VR (SBS/TB) or standard 2D
         is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
         is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
 
-        # Common 2D resolutions (16:9, 4:3, etc.)
-        common_2d_resolutions = [
-            (1920, 1080), (3840, 2160),  # 1080p, 4K UHD
-            (1280, 720), (2560, 1440),    # 720p, 1440p
-            (1280, 960), (1600, 1200),    # 4:3 formats
-            (2048, 1080),                 # DCI 2K
-            (720, 480), (720, 576),       # SD formats
-        ]
-        # Note: 4096x2160 excluded - could be VR (4K SBS) or DCI 4K
-        is_standard_2d = (width, height) in common_2d_resolutions or (1.3 <= aspect_ratio <= 1.85)
+        # Try ML detection first if in auto mode and model available
+        ml_detection_succeeded = False
+        if self.video_type_setting == 'auto' and os.path.exists(self.ml_model_path):
+            try:
+                # Lazy load detector
+                if self.ml_detector is None:
+                    self.logger.info("Loading ML format detector...")
+                    self.ml_detector = RealMLVRFormatDetector(logger=self.logger)
+                    self.ml_detector.load_model(self.ml_model_path)
+                    self.logger.info("ML format detector loaded successfully")
 
-        # Auto detection logic
+                # Detect format
+                ml_result = self.ml_detector.detect(self.video_path, self.video_info, num_frames=3)
+
+                if ml_result and ml_result.get('confidence', 0) > 0.5:
+                    self.logger.info(f"ML detected format: {ml_result.get('format_string')} "
+                                   f"(confidence: {ml_result.get('confidence'):.2f})")
+
+                    # Apply ML results
+                    self.determined_video_type = ml_result['video_type']
+
+                    if ml_result['video_type'] == 'VR':
+                        self.vr_input_format = ml_result['format_string']
+                        if ml_result.get('fov'):
+                            self.vr_fov = ml_result['fov']
+
+                    ml_detection_succeeded = True
+                    self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+                    self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+                    self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
+                    return  # Skip filename heuristics
+                else:
+                    self.logger.info("ML detection confidence low, falling back to filename heuristics")
+
+            except Exception as e:
+                self.logger.warning(f"ML detection failed: {e}, falling back to filename heuristics")
+
+        # Fallback to filename heuristics
         if self.video_type_setting == 'auto':
             upper_video_path = self.video_path.upper()
             vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
             has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
 
-            # If filename has VR keywords or obvious VR resolution, classify as VR
-            if has_vr_keyword or is_sbs_resolution or is_tb_resolution:
-                self.determined_video_type = 'VR'
-                self.logger.debug(
-                    f"VR detected by heuristics (SBS: {is_sbs_resolution}, TB: {is_tb_resolution}, Keyword: {has_vr_keyword})")
-
-            # If standard 2D aspect ratio (16:9, 4:3, etc.) and no VR keywords, classify as 2D
-            elif is_standard_2d:
-                self.determined_video_type = '2D'
-                self.logger.debug(f"Standard 2D aspect ratio detected ({aspect_ratio:.2f}), classified as 2D")
-
-            # Ambiguous case - use ML to decide
-            else:
-                ml_detection_succeeded = False
-                if os.path.exists(self.ml_model_path):
-                    try:
-                        # Lazy load detector
-                        if self.ml_detector is None:
-                            self.logger.info("Loading ML format detector...")
-                            self.ml_detector = RealMLVRFormatDetector(logger=self.logger)
-                            self.ml_detector.load_model(self.ml_model_path)
-                            self.logger.info("ML format detector loaded successfully")
-
-                        # Detect format
-                        self.logger.info(f"Ambiguous format (aspect: {aspect_ratio:.2f}), using ML detection...")
-                        ml_result = self.ml_detector.detect(self.video_path, self.video_info, num_frames=3)
-
-                        if ml_result and ml_result.get('confidence', 0) > 0.7:
-                            self.logger.info(f"ML detected: {ml_result.get('format_string')} "
-                                           f"(confidence: {ml_result.get('confidence'):.2f})")
-
-                            # Apply ML results
-                            self.determined_video_type = ml_result['video_type']
-
-                            if ml_result['video_type'] == 'VR':
-                                self.vr_input_format = ml_result['format_string']
-                                if ml_result.get('fov'):
-                                    self.vr_fov = ml_result['fov']
-
-                            ml_detection_succeeded = True
-                            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-                            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-                            self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
-                            return
-                        else:
-                            self.logger.info(f"ML detection confidence low ({ml_result.get('confidence', 0):.2f}), falling back to heuristics")
-
-                    except Exception as e:
-                        self.logger.warning(f"ML detection failed: {e}, falling back to heuristics")
-
-                # Fall back to aspect ratio heuristics if ML failed or low confidence
-                if not ml_detection_succeeded:
-                    # Aspect ratio-based guess: if very wide/tall, likely VR, otherwise 2D
-                    if aspect_ratio > 1.85 or aspect_ratio < 1.3:
-                        self.determined_video_type = 'VR'
-                        self.logger.debug(f"Unusual aspect ratio ({aspect_ratio:.2f}), ML unavailable, guessing VR")
-                    else:
-                        self.determined_video_type = '2D'
-                        self.logger.debug(f"Normal-ish aspect ratio ({aspect_ratio:.2f}), ML unavailable, guessing 2D")
+            self.determined_video_type = 'VR' if is_sbs_resolution or is_tb_resolution or has_vr_keyword else '2D'
+            self.logger.debug(
+                f"Auto-detected video type: {self.determined_video_type} (SBS Res: {is_sbs_resolution}, TB Res: {is_tb_resolution}, Keyword: {has_vr_keyword})")
         else:
             self.determined_video_type = self.video_type_setting
             self.logger.info(f"Using configured video type: {self.determined_video_type}")

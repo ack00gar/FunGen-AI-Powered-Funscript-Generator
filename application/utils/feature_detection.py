@@ -69,6 +69,22 @@ class FeatureDetector:
             dependencies=[],
             tier="supporter"
         )
+
+        # Video Streamer / VR Stream Mode (Supporter)
+        features["streamer"] = FeatureInfo(
+            name="streamer",
+            display_name="Video Streamer",
+            description="Stream video to browsers/VR headsets with frame-perfect sync, zoom/pan controls, and interactive device control",
+            folder_path="streamer",
+            required_files=[
+                "streamer/__init__.py",
+                "streamer/sync_server.py",
+                "streamer/video_http_server.py",
+                "streamer/integration_manager.py"
+            ],
+            dependencies=[],
+            tier="supporter"
+        )
         
         # Advanced AI Processing (Supporter)
         features["advanced_ai"] = FeatureInfo(

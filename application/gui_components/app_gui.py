@@ -85,7 +85,7 @@ class GUI:
 
         # Standard Components (owned by GUI)
         self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
-        self.main_menu = MainMenu(app)
+        self.main_menu = MainMenu(app, gui_instance=self)
         self.gauge_window_ui_t1 = GaugeWindow(app, timeline_num=1)
         self.gauge_window_ui_t2 = GaugeWindow(app, timeline_num=2)
         self.movement_bar_ui = LRDialWindow(app)  # Movement Bar (backward compatible name)
@@ -1718,7 +1718,7 @@ class GUI:
 
         if getattr(app_state, 'show_simulator_3d', False):
             self.simulator_3d_window_ui.render()
-        
+
         # Batch confirmation dialog (has internal visibility check)
         self._render_batch_confirmation_dialog()
         
@@ -2069,9 +2069,16 @@ class GUI:
 
     def cleanup(self):
         try:
+            # Stop native sync servers if running (managed by control panel now)
+            if hasattr(self.control_panel_ui, '_native_sync_manager'):
+                try:
+                    self.control_panel_ui._native_sync_manager.stop()
+                except Exception as e:
+                    self.app.logger.error(f"Error stopping native sync: {e}")
+
             self.app.logger.info("Shutting down ProcessingThreadManager...")
             self.processing_thread_manager.shutdown(timeout=3.0)
-            
+
             # Shutdown legacy preview worker thread
             for _ in self.preview_worker_threads:
                 try:
