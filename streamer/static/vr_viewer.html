@@ -1450,9 +1450,9 @@
                                     // Azimuth in YZ plane
                                     float phi = atan(dir.z, dir.y);
 
-                                    // Equidistant fisheye: r proportional to theta (simplest, most common)
+                                    // Equisolid angle fisheye: r = 2*sin(theta/2) (common for fisheye lenses)
                                     float maxAngle = fisheyeFOV / 2.0;
-                                    float r = theta / maxAngle;
+                                    float r = (2.0 * sin(theta / 2.0)) / (2.0 * sin(maxAngle / 2.0));
 
                                     if (r > 1.0) {
                                         gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -1463,8 +1463,8 @@
                                     float texU = r * cos(phi);
                                     float texV = r * sin(phi);
 
-                                    // Map to left eye circle: center (0.25, 0.5), radius 0.25
-                                    vec2 uv = vec2(0.25 - texV * 0.25, 0.5 + texU * 0.25);
+                                    // Fix mirroring: flip texV sign
+                                    vec2 uv = vec2(0.25 + texV * 0.25, 0.5 + texU * 0.25);
 
                                     gl_FragColor = texture2D(map, uv);
                                 }
