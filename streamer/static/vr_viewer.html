@@ -1364,6 +1364,10 @@
                 this.texture = new THREE.VideoTexture(this.video);
                 this.texture.minFilter = THREE.LinearFilter;
                 this.texture.magFilter = THREE.LinearFilter;
+                this.texture.colorSpace = THREE.SRGBColorSpace; // Fix gamma/color issues
+
+                // Handle SBS eye selection (left/right eye cropping for SBS videos)
+                this.updateTextureForEyeMode(currentVRMode);
 
                 // Create geometry based on projection type
                 this.createGeometry(projectionType);
@@ -1387,17 +1391,22 @@
                     case 'fisheye200':
                         // Fisheye: Dome (hemisphere) with appropriate FOV
                         const fov = parseInt(type.replace('fisheye', ''));
-                        const thetaLength = (fov / 180) * Math.PI; // Convert degrees to radians
+                        // For fisheye, we want a dome - hemisphere is PI/2 (90 degrees from pole)
+                        // 180° = hemisphere, 190/200° = slightly more than hemisphere
+                        const thetaLength = Math.PI / 2; // Always hemisphere for fisheye
                         geometry = new THREE.SphereGeometry(
                             500, // radius
                             60,  // widthSegments
                             40,  // heightSegments
                             0,   // phiStart
-                            Math.PI * 2, // phiLength (full circle)
-                            0,   // thetaStart
-                            thetaLength  // thetaLength (how much of sphere vertically)
+                            Math.PI * 2, // phiLength (full circle horizontally)
+                            0,   // thetaStart (start from top)
+                            thetaLength  // thetaLength (hemisphere = PI/2)
                         );
                         geometry.scale(-1, 1, 1); // Invert for inside view
+                        // Adjust camera FOV based on fisheye FOV
+                        this.camera.fov = fov === 180 ? 90 : fov === 190 ? 95 : 100;
+                        this.camera.updateProjectionMatrix();
                         break;
 
                     case 'equirect180':
@@ -1500,6 +1509,26 @@
                 console.log('🔴 Projection renderer destroyed');
             }
 
+            updateTextureForEyeMode(eyeMode) {
+                if (!this.texture) return;
+
+                // For SBS videos, crop texture to show only one eye
+                // THREE.js texture repeat/offset: (0.5, 1) = half width, (0, 0) = left half, (0.5, 0) = right half
+                if (eyeMode === 'left-eye') {
+                    this.texture.repeat.set(0.5, 1); // Show left half
+                    this.texture.offset.set(0, 0);
+                    console.log('👁️ Showing left eye only');
+                } else if (eyeMode === 'right-eye') {
+                    this.texture.repeat.set(0.5, 1); // Show right half
+                    this.texture.offset.set(0.5, 0);
+                    console.log('👁️ Showing right eye only');
+                } else {
+                    this.texture.repeat.set(1, 1); // Show full frame
+                    this.texture.offset.set(0, 0);
+                    console.log('👁️ Showing full frame (both eyes)');
+                }
+            }
+
             onWindowResize() {
                 if (!this.active) return;
                 this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -1538,11 +1567,26 @@
         }
 
         function applyProjection(type) {
+            let detectedType = null;
             if (type === 'auto') {
-                type = detectProjectionType(videoMetadata);
-            }
+                detectedType = detectProjectionType(videoMetadata);
+                type = detectedType;
+                // Update selector to show what was detected
+                const displayNames = {
+                    'flat': 'Flat (2D/SBS)',
+                    'fisheye180': 'Fisheye 180°',
+                    'fisheye190': 'Fisheye 190°',
+                    'fisheye200': 'Fisheye 200°',
+                    'equirect180': 'Equirectangular 180°',
+                    'equirect360': 'Equirectangular 360°'
+                };
+                console.log(`🎬 Auto-detected projection: ${displayNames[type] || type}`);
 
-            console.log(`🎬 Applying projection: ${type}`);
+                // Show notification of what was detected
+                showVRModeNotification(`Auto: ${displayNames[type] || type}`);
+            } else {
+                console.log(`🎬 Applying projection: ${type}`);
+            }
 
             // Destroy existing renderer if active
             if (projectionRenderer.active) {
@@ -1553,7 +1597,9 @@
             if (type === 'flat') {
                 video.style.display = 'block';
                 vrCanvas.style.display = 'none';
-                console.log('📺 Using flat CSS mode');
+                // Remove any VR eye cropping classes
+                video.classList.remove('vr-left-eye', 'vr-right-eye');
+                console.log('📺 Using flat CSS mode (full frame)');
                 return;
             }
 
@@ -1568,9 +1614,19 @@
             applyProjection(selectedProjection);
         });
 
-        // Handle window resize
+        // Handle window resize and fullscreen changes
         window.addEventListener('resize', () => {
             projectionRenderer.onWindowResize();
+        });
+
+        // Handle fullscreen changes
+        document.addEventListener('fullscreenchange', () => {
+            if (projectionRenderer.active) {
+                // Force canvas update when entering/exiting fullscreen
+                setTimeout(() => {
+                    projectionRenderer.onWindowResize();
+                }, 100);
+            }
         });
 
         // Show loading overlay if loading from XBVR
@@ -2953,6 +3009,11 @@
 
             // Re-apply transform to include VR centering
             applyVideoTransform();
+
+            // Update THREE.js renderer if active
+            if (projectionRenderer.active) {
+                projectionRenderer.updateTextureForEyeMode(mode);
+            }
 
             console.log(`👁️ View mode: ${displayName}`);
             showVRModeNotification(displayName);
