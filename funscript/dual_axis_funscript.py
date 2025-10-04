@@ -332,6 +332,29 @@ class DualAxisFunscript:
             stats["max_interval_ms"] = float(max(intervals)) if intervals else -1
         return stats
 
+    def get_actions_in_range(self, start_time_ms: int, end_time_ms: int, axis: str = 'primary') -> List[Dict]:
+        """
+        Get all actions within a time range for streaming/query purposes.
+
+        Args:
+            start_time_ms: Start of time range (inclusive)
+            end_time_ms: End of time range (inclusive)
+            axis: 'primary' or 'secondary'
+
+        Returns:
+            List of action dictionaries [{'at': timestamp_ms, 'pos': position}, ...]
+        """
+        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if not actions_list:
+            return []
+
+        indices = self._get_action_indices_in_time_range(actions_list, start_time_ms, end_time_ms)
+        if indices[0] is None or indices[1] is None:
+            return []
+
+        start_idx, end_idx = indices
+        return actions_list[start_idx:end_idx + 1]
+
     def _get_action_indices_in_time_range(self, actions_list: List[dict],
                                           start_time_ms: int, end_time_ms: int) -> Tuple[Optional[int], Optional[int]]:
         if not actions_list: return None, None
