@@ -1443,28 +1443,27 @@
                                 void main() {
                                     vec3 dir = normalize(vWorldDirection);
 
-                                    // Camera at lon=0,lat=0 looks at +X (500,0,0)
-                                    // Fisheye center should align with camera forward (+X)
-                                    float theta = acos(dir.x);
+                                    // Calculate angle from center (theta)
+                                    float theta = acos(dir.y);
 
-                                    // Azimuth in YZ plane
-                                    float phi = atan(dir.z, dir.y);
+                                    // Calculate azimuth (phi)
+                                    float phi = atan(dir.z, dir.x);
 
-                                    // Equisolid angle fisheye: r = 2*sin(theta/2) (common for fisheye lenses)
-                                    float maxAngle = fisheyeFOV / 2.0;
-                                    float r = (2.0 * sin(theta / 2.0)) / (2.0 * sin(maxAngle / 2.0));
+                                    // Fisheye circular projection: r is proportional to theta
+                                    float r = theta / (fisheyeFOV / 2.0);
 
+                                    // If outside fisheye circle, discard
                                     if (r > 1.0) {
                                         gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
                                         return;
                                     }
 
-                                    // Convert to cartesian texture coordinates
-                                    float texU = r * cos(phi);
-                                    float texV = r * sin(phi);
+                                    // Convert polar to cartesian for texture lookup
+                                    float x = r * cos(phi);
+                                    float z = r * sin(phi);
 
-                                    // Scale down to zoom out (0.20 instead of 0.25) and reduce height more
-                                    vec2 uv = vec2(0.25 + texV * 0.20, 0.5 + texU * 0.16);
+                                    // Map to texture coordinates (0.25, 0.5) is center of left eye circle
+                                    vec2 uv = vec2(0.25 + x * 0.22, 0.5 - z * 0.44);
 
                                     gl_FragColor = texture2D(map, uv);
                                 }
