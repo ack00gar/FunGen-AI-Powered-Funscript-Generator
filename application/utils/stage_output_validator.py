@@ -380,7 +380,7 @@ class StageOutputValidator:
                 # Check available tables
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
                 tables = [row[0] for row in cursor.fetchall()]
-                
+
                 # Check for frame_objects table (required for Stage 3)
                 if 'frame_objects' in tables:
                     cursor.execute("SELECT COUNT(*) FROM frame_objects")
@@ -391,7 +391,7 @@ class StageOutputValidator:
                         
                         # Check if frame objects have required Stage 3 data
                         # Check for funscript position data (different column names in different schemas)
-                        position_columns = ['pos_0_100', 'funscript_distance', 'funscript_position']
+                        position_columns = ['pos_0_100', 'atr_funscript_distance', 'atr_funscript_position']
                         for col in position_columns:
                             try:
                                 cursor.execute(f"SELECT COUNT(*) FROM frame_objects WHERE {col} IS NOT NULL LIMIT 1")
@@ -414,8 +414,8 @@ class StageOutputValidator:
                                 continue
                 
                 # Check for segments table
-                if 'segments' in tables or 's2_segments' in tables:
-                    segment_table = 's2_segments' if 's2_segments' in tables else 'segments'
+                if 'atr_segments' in tables or 's2_segments' in tables:
+                    segment_table = 's2_segments' if 's2_segments' in tables else 'atr_segments'
                     cursor.execute(f"SELECT COUNT(*) FROM {segment_table}")
                     segment_count = cursor.fetchone()[0]
                     if segment_count > 0:

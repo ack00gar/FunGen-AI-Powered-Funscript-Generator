@@ -54,7 +54,7 @@ def stage3_worker_proc(
             It returns the pre-determined preprocessed path or an empty string,
             preventing a TypeError with os.path.exists(None).
             """
-            if extension == "_preprocessed.mkv":
+            if extension == "_preprocessed.mp4":
                 return self.preprocessed_video_path if self.preprocessed_video_path is not None else ""
             # Return an empty string for any other unexpected request.
             return ""
@@ -86,13 +86,18 @@ def stage3_worker_proc(
                 import subprocess
                 import json
                 cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                       '-show_entries', 'stream=nb_frames', '-of', 'json', video_path]
+                       '-show_entries', 'stream=nb_frames,duration',
+                       '-show_entries', 'format=duration',
+                       '-of', 'json', video_path]
                 result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
                 if result.returncode == 0:
                     data = json.loads(result.stdout)
                     stream_info = data.get('streams', [{}])[0]
+                    format_info = data.get('format', {})
                     nb_frames_str = stream_info.get('nb_frames')
-                    expected_frames = int(nb_frames_str) if nb_frames_str and nb_frames_str != 'N/A' else 10000
+                    dur_str = stream_info.get('duration', format_info.get('duration', '0'))
+                    duration = float(dur_str) if dur_str and dur_str != 'N/A' else 0.0
+                    expected_frames = int(nb_frames_str) if nb_frames_str and nb_frames_str != 'N/A' else round(duration * fps)
                 else:
                     expected_frames = 10000  # Fallback
             except Exception:

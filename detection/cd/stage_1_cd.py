@@ -85,7 +85,7 @@ def _is_already_preprocessed_video(video_path: str, logger: logging.Logger) -> b
         True if the video is already preprocessed, False otherwise
     """
     # Check by filename pattern
-    if video_path.endswith("_preprocessed.mkv"):
+    if video_path.endswith("_preprocessed.mp4"):
         logger.warning(f"Video appears to be already preprocessed (by filename): {os.path.basename(video_path)}")
         return True
     

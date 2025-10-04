@@ -35,6 +35,7 @@ class TrackerDisplayInfo:
     requires_intervention: bool = False  # User ROI, oscillation area setup
     supports_batch: bool = True
     supports_realtime: bool = False
+    supports_dual_axis: bool = True
     stages: List = field(default_factory=list)  # List of StageDefinition objects
     properties: Dict[str, Any] = field(default_factory=dict)  # Tracker properties/capabilities
     folder_name: str = ""  # Source folder name for prefixing (live, offline, experimental, community)
@@ -122,6 +123,7 @@ class DynamicTrackerDiscovery:
             requires_intervention=requires_intervention,
             supports_batch=supports_batch,
             supports_realtime=supports_realtime,
+            supports_dual_axis=metadata.supports_dual_axis,
             stages=stages,
             properties=properties,
             folder_name=folder_name

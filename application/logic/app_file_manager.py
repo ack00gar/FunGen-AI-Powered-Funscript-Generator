@@ -423,7 +423,7 @@ class AppFileManager:
         stage_processor = self.app.stage_processor
 
         # This check now runs for ALL video loads, ensuring the app is always aware of the preprocessed file.
-        potential_preprocessed_path = self.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
+        potential_preprocessed_path = self.get_output_path_for_file(self.video_path, "_preprocessed.mp4")
         if os.path.exists(potential_preprocessed_path):
             # Validate the preprocessed file before using it
             preprocessed_status = self._get_preprocessed_file_status(potential_preprocessed_path)
@@ -868,7 +868,7 @@ class AppFileManager:
         if not self.video_path:
             return "No video loaded"
 
-        preprocessed_path = self.get_output_path_for_file(self.video_path, "_preprocessed.mkv")
+        preprocessed_path = self.get_output_path_for_file(self.video_path, "_preprocessed.mp4")
         status = self._get_preprocessed_file_status(preprocessed_path)
 
         if not status["exists"]:
