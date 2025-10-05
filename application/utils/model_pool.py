@@ -262,16 +262,18 @@ class SmartModelPool:
         model_ext = model_path.lower().split('.')[-1]
         
         if model_ext == 'mlpackage':
-            # CoreML models - try PyTorch fallback first
-            pt_path = model_path.replace('.mlpackage', '.pt')
-            if os.path.exists(pt_path):
-                self.logger.info(f"Using PyTorch equivalent for CoreML: {pt_path}")
-                model = YOLO(pt_path, task=task)
-            else:
-                try:
-                    model = YOLO(model_path, task=task)
-                except Exception as e:
-                    self.logger.warning(f"CoreML loading failed, no fallback: {e}")
+            # CoreML models - use native CoreML for Apple Neural Engine acceleration
+            try:
+                self.logger.info(f"Loading CoreML model natively: {model_path}")
+                model = YOLO(model_path, task=task)
+            except Exception as e:
+                # Fallback to PyTorch if CoreML fails
+                pt_path = model_path.replace('.mlpackage', '.pt')
+                if os.path.exists(pt_path):
+                    self.logger.warning(f"CoreML loading failed ({e}), using PyTorch fallback: {pt_path}")
+                    model = YOLO(pt_path, task=task)
+                else:
+                    self.logger.error(f"CoreML loading failed and no PyTorch fallback available: {e}")
                     raise
         else:
             # Standard models (.pt, .onnx, .engine)
