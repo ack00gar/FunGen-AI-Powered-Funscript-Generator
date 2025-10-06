@@ -231,9 +231,9 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
         logger.error("Installation guide: https://pytorch.org/get-started/locally/")
         sys.exit(1)
 
-    # 6. Check for device_control feature dependencies if folder is present
-    device_control_changed = _check_device_control_dependencies(non_interactive=non_interactive, auto_install=auto_install)
-    
+    # 6. Auto-discover and check feature module dependencies
+    feature_changed = _check_feature_dependencies(non_interactive=non_interactive, auto_install=auto_install)
+
     # 7. Check for ffmpeg, ffprobe, and ffplay (auto-install if needed)
     check_ffmpeg_ffprobe(non_interactive=non_interactive, auto_install=auto_install)
 
@@ -315,66 +315,80 @@ def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = F
         logger.info("ffmpeg and ffprobe are available.")
 
 
-def _check_device_control_dependencies(*, non_interactive: bool = True, auto_install: bool = True):
+def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: bool = True):
     """
-    Check and install device_control feature dependencies if the device_control folder is present.
-    This supports the supporter-tier device control features.
+    Auto-discover and check dependencies for all feature modules.
+    Scans for directories with requirements.txt files and installs their dependencies.
+    This supports modular features like device_control, streamer, etc.
     """
-    import os
     from pathlib import Path
-    
-    # Check if device_control folder exists (supporter feature)
-    device_control_path = Path("device_control")
-    if not device_control_path.exists():
-        logger.debug("device_control folder not present, skipping device control dependencies")
-        return False
-    
-    # Check if device_control requirements file exists
-    requirements_file = device_control_path / "requirements.txt"
-    if not requirements_file.exists():
-        logger.warning(f"device_control folder exists but {requirements_file} not found")
-        return False
-    
-    logger.info("🎮 Device control folder detected - checking supporter feature dependencies...")
-    
-    try:
-        with open(requirements_file, 'r') as f:
-            lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        
-        if not lines:
-            logger.debug("No dependencies listed in device_control/requirements.txt")
-            return False
-        
-        logger.info(f"Found {len(lines)} device control dependencies to check...")
-        device_control_packages = []
-        
-        for line in lines:
-            # Skip pip index URLs and comments
-            if not line.startswith('-') and not line.startswith('#'):
-                # Strip inline comments from package specifications
-                package = line.split('#')[0].strip()
-                if package:  # Only add non-empty packages
-                    device_control_packages.append(package)
-        
-        if device_control_packages:
-            logger.info("Installing device control dependencies (aiohttp, pyserial, etc.)...")
-            changed = _ensure_packages(device_control_packages, pip_args=None, 
-                                     non_interactive=non_interactive, auto_install=auto_install)
-            
-            if changed:
-                logger.info("✅ Device control dependencies installed successfully!")
+
+    # Define feature modules with their metadata
+    # Icons are optional but make logs nicer
+    feature_metadata = {
+        'device_control': {'icon': '🎮', 'description': 'device control'},
+        'streamer': {'icon': '📡', 'description': 'video streaming'},
+    }
+
+    any_changed = False
+
+    # Auto-discover all feature folders with requirements.txt
+    project_root = Path(".")
+    for feature_path in project_root.iterdir():
+        if not feature_path.is_dir():
+            continue
+
+        # Skip common non-feature directories
+        if feature_path.name.startswith('.') or feature_path.name in ['bin', '__pycache__', 'logs']:
+            continue
+
+        # Check if this folder has a requirements.txt
+        requirements_file = feature_path / "requirements.txt"
+        if not requirements_file.exists():
+            continue
+
+        feature_name = feature_path.name
+        metadata = feature_metadata.get(feature_name, {'icon': '📦', 'description': feature_name})
+
+        logger.info(f"{metadata['icon']} {feature_name} feature detected - checking dependencies...")
+
+        try:
+            with open(requirements_file, 'r') as f:
+                lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
+            if not lines:
+                logger.debug(f"No dependencies listed in {requirements_file}")
+                continue
+
+            logger.info(f"Found {len(lines)} {metadata['description']} dependencies to check...")
+            packages = []
+
+            for line in lines:
+                # Skip pip index URLs and comments
+                if not line.startswith('-') and not line.startswith('#'):
+                    # Strip inline comments from package specifications
+                    package = line.split('#')[0].strip()
+                    if package:  # Only add non-empty packages
+                        packages.append(package)
+
+            if packages:
+                logger.info(f"Checking {metadata['description']} dependencies...")
+                changed = _ensure_packages(packages, pip_args=None,
+                                         non_interactive=non_interactive, auto_install=auto_install)
+
+                if changed:
+                    logger.info(f"✅ {feature_name} dependencies installed successfully!")
+                    any_changed = True
+                else:
+                    logger.info(f"✅ {feature_name} dependencies already satisfied")
             else:
-                logger.info("✅ Device control dependencies already satisfied")
-            
-            return changed
-        else:
-            logger.debug("No valid packages found in device_control requirements")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error checking device_control dependencies: {e}")
-        logger.error("Device control features may not work properly")
-        return False
+                logger.debug(f"No valid packages found in {requirements_file}")
+
+        except Exception as e:
+            logger.error(f"Error checking {feature_name} dependencies: {e}")
+            logger.error(f"{feature_name} features may not work properly")
+
+    return any_changed
 
 
 if __name__ == '__main__':
