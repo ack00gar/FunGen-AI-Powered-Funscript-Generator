@@ -4547,9 +4547,9 @@ class ControlPanelUI:
                     imgui.pop_text_wrap_pos()
                     imgui.spacing()
 
-                    imgui.bullet_text("Video must be loaded")
                     imgui.bullet_text("Ports 8080 (HTTP) and 8765 (WebSocket) available")
                     imgui.bullet_text("Browser with HTML5 video support")
+                    imgui.bullet_text("Video can be loaded before or after starting the server")
 
                 # Features Section
                 open_, _ = imgui.collapsing_header(
@@ -4574,11 +4574,7 @@ class ControlPanelUI:
     def _start_native_sync(self):
         """Start native sync servers."""
         try:
-            # Check if video is loaded
-            if not self.app.processor.video_path:
-                self.app.logger.error("No video loaded. Please load a video first.")
-                return
-
+            # Streamer can start without a video loaded (video can be loaded later)
             self.app.logger.info("Starting native video sync...")
             self._native_sync_manager.start()
 
