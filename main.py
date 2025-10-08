@@ -124,11 +124,47 @@ def main():
     logger = logging.getLogger(__name__)
     
     # Step 2: Perform dependency check before importing anything else
+    # First, try to install the most basic bootstrap dependencies if they're missing
+    import subprocess
+    import sys
+    import importlib
+    
+    # Check if we have the required bootstrap packages
+    bootstrap_packages = ['packaging', 'requests', 'tqdm', 'send2trash']
+    missing_bootstrap = []
+    
+    for package in bootstrap_packages:
+        try:
+            importlib.import_module(package)
+        except ImportError:
+            missing_bootstrap.append(package)
+    
+    if missing_bootstrap:
+        logger.warning(f"Bootstrap dependencies missing: {', '.join(missing_bootstrap)}")
+        logger.info("Installing bootstrap dependencies...")
+        try:
+            result = subprocess.run([sys.executable, "-m", "pip", "install"] + missing_bootstrap, 
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.warning(f"Failed to install some bootstrap dependencies: {result.stderr}")
+                logger.info("Attempting to install from core.requirements.txt...")
+                result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", "core.requirements.txt"], 
+                                      capture_output=True, text=True)
+                if result.returncode != 0:
+                    logger.error(f"Failed to install core requirements: {result.stderr}")
+                    logger.error("Please manually install the requirements using: pip install -r core.requirements.txt")
+                    sys.exit(1)
+        except Exception as install_error:
+            logger.error(f"Failed to install bootstrap dependencies: {install_error}")
+            logger.error("Please manually install the requirements using: pip install -r core.requirements.txt")
+            sys.exit(1)
+    
+    # Now try to import and run the dependency checker
     try:
         from application.utils.dependency_checker import check_and_install_dependencies
         check_and_install_dependencies()
     except ImportError as e:
-        logger.error(f"Failed to import dependency checker: {e}")
+        logger.error(f"Failed to import dependency checker after bootstrap: {e}")
         logger.error("Please ensure the file 'application/utils/dependency_checker.py' exists.")
         sys.exit(1)
     except Exception as e:
