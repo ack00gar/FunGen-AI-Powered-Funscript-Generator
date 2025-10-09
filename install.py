@@ -901,11 +901,12 @@ class FunGenUniversalInstaller:
                             str(python_exe), "-m", "pip", "uninstall", "-y", "torch", "torchvision"
                         ], check=False)
 
-                        # Install via conda (gets us 2.5.1+ with NumPy 2.x support)
-                        print("  Installing PyTorch via conda...")
+                        # Install via conda from pkgs/main channel (gets us 2.5.1+ with NumPy 2.x support)
+                        # The pytorch channel only has 2.2.2 for macOS x86_64
+                        print("  Installing PyTorch via conda (pkgs/main)...")
                         ret, stdout, stderr = self.run_command([
                             str(conda_exe), "install", "-n", CONFIG["env_name"],
-                            "-c", "pytorch", "pytorch", "torchvision", "-y"
+                            "pytorch", "torchvision", "-y"
                         ], check=False)
 
                         if ret == 0:
