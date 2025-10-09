@@ -919,7 +919,28 @@ class FunGenUniversalInstaller:
                             if ret2 == 0:
                                 new_version = stdout2.strip()
                                 print(f"  PyTorch upgraded to {new_version} via conda")
-                                self.print_success(f"PyTorch {new_version} installed via conda (NumPy 2.x compatible)")
+
+                                # Check torchvision compatibility
+                                ret3, stdout3, _ = self.run_command([
+                                    str(python_exe), "-c", "import torchvision; print(torchvision.__version__)"
+                                ], capture=True, check=False)
+
+                                if ret3 == 0:
+                                    tv_version = stdout3.strip()
+                                    # PyTorch 2.6 requires torchvision >= 0.21
+                                    if new_version.startswith("2.6") and not tv_version.startswith("0.21"):
+                                        print(f"  Upgrading torchvision {tv_version} to be compatible with PyTorch {new_version}...")
+                                        self.run_command([
+                                            str(python_exe), "-m", "pip", "install", "--upgrade", "torchvision"
+                                        ], check=False)
+
+                                # Ensure scipy is compatible (1.15.x has NumPy compatibility issues)
+                                print("  Ensuring scipy compatibility...")
+                                self.run_command([
+                                    str(python_exe), "-m", "pip", "install", "--upgrade", "scipy"
+                                ], check=False)
+
+                                self.print_success(f"PyTorch {new_version} installed via conda")
                                 pytorch_via_conda = True  # Mark that we installed via conda
                             else:
                                 self.print_success("PyTorch installed via conda")
