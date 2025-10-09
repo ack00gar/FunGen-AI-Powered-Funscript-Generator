@@ -896,18 +896,20 @@ class FunGenUniversalInstaller:
                         # Get conda executable
                         conda_exe = self.miniconda_path / ("Scripts/conda.exe" if self.platform == "Windows" else "bin/conda")
 
-                        # Uninstall pip-installed torch and torchvision
-                        print("  Uninstalling pip PyTorch packages...")
+                        # Uninstall pip-installed torch, torchvision, numpy, and scipy
+                        # These will be reinstalled via conda for binary compatibility
+                        print("  Uninstalling pip PyTorch, numpy, and scipy packages...")
                         self.run_command([
-                            str(python_exe), "-m", "pip", "uninstall", "-y", "torch", "torchvision"
+                            str(python_exe), "-m", "pip", "uninstall", "-y", "torch", "torchvision", "numpy", "scipy"
                         ], check=False)
 
-                        # Install via conda from pkgs/main channel (gets us 2.5.1+ with NumPy 2.x support)
-                        # The pytorch channel only has 2.2.2 for macOS x86_64
-                        print("  Installing PyTorch via conda (pkgs/main)...")
+                        # Install via conda from pkgs/main channel with numpy 2.1 for compatibility
+                        # Installing pytorch, torchvision, and numpy together ensures compatible versions
+                        # pkgs/main has PyTorch 2.5.1 + torchvision 0.20.1 which are compatible
+                        print("  Installing PyTorch, torchvision, and numpy 2.1 via conda...")
                         ret, stdout, stderr = self.run_command([
                             str(conda_exe), "install", "-n", CONFIG["env_name"],
-                            "pytorch", "torchvision", "-y"
+                            "pytorch", "torchvision", "numpy=2.1", "-y"
                         ], check=False)
 
                         if ret == 0:
@@ -920,27 +922,23 @@ class FunGenUniversalInstaller:
                                 new_version = stdout2.strip()
                                 print(f"  PyTorch upgraded to {new_version} via conda")
 
-                                # Check torchvision compatibility
+                                # Verify torchvision version
                                 ret3, stdout3, _ = self.run_command([
                                     str(python_exe), "-c", "import torchvision; print(torchvision.__version__)"
                                 ], capture=True, check=False)
 
                                 if ret3 == 0:
                                     tv_version = stdout3.strip()
-                                    # PyTorch 2.6 requires torchvision >= 0.21
-                                    if new_version.startswith("2.6") and not tv_version.startswith("0.21"):
-                                        print(f"  Upgrading torchvision {tv_version} to be compatible with PyTorch {new_version}...")
-                                        self.run_command([
-                                            str(python_exe), "-m", "pip", "install", "--upgrade", "torchvision"
-                                        ], check=False)
+                                    print(f"  torchvision {tv_version} installed via conda")
 
-                                # Ensure scipy is compatible (1.15.x has NumPy compatibility issues)
-                                print("  Ensuring scipy compatibility...")
+                                # Install scipy via conda for binary compatibility with conda numpy
+                                print("  Installing scipy via conda for NumPy compatibility...")
                                 self.run_command([
-                                    str(python_exe), "-m", "pip", "install", "--upgrade", "scipy"
+                                    str(conda_exe), "install", "-n", CONFIG["env_name"],
+                                    "scipy", "-y"
                                 ], check=False)
 
-                                self.print_success(f"PyTorch {new_version} installed via conda")
+                                self.print_success(f"PyTorch {new_version} + torchvision {tv_version} installed via conda")
                                 pytorch_via_conda = True  # Mark that we installed via conda
                             else:
                                 self.print_success("PyTorch installed via conda")
