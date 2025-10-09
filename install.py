@@ -872,7 +872,60 @@ class FunGenUniversalInstaller:
             else:
                 self.print_error(f"Core requirements file not found: {core_req_path}")
                 return False
-            
+
+            # macOS-specific: Use conda for PyTorch to get newer versions (2.5+) with NumPy 2.x support
+            # pip only has PyTorch 2.2.2 for macOS x86_64, which requires NumPy 1.x
+            if self.platform == "Darwin" and self.conda_available:
+                print("  Checking PyTorch version for macOS compatibility...")
+
+                # Check installed PyTorch version
+                ret, stdout, stderr = self.run_command([
+                    str(python_exe), "-c", "import torch; print(torch.__version__)"
+                ], capture=True, check=False)
+
+                if ret == 0:
+                    torch_version = stdout.strip().split('+')[0]  # Remove +cpu suffix if present
+                    major, minor = map(int, torch_version.split('.')[:2])
+
+                    # If PyTorch < 2.4, it was compiled with NumPy 1.x and won't work with NumPy 2.x
+                    if major == 2 and minor < 4:
+                        print(f"  Detected PyTorch {torch_version} (requires NumPy 1.x)")
+                        print("  Upgrading to conda PyTorch for NumPy 2.x support...")
+
+                        # Get conda executable
+                        conda_exe = self.miniconda_path / ("Scripts/conda.exe" if self.platform == "Windows" else "bin/conda")
+
+                        # Uninstall pip-installed torch and torchvision
+                        print("  Uninstalling pip PyTorch packages...")
+                        self.run_command([
+                            str(python_exe), "-m", "pip", "uninstall", "-y", "torch", "torchvision"
+                        ], check=False)
+
+                        # Install via conda (gets us 2.5.1+ with NumPy 2.x support)
+                        print("  Installing PyTorch via conda...")
+                        ret, stdout, stderr = self.run_command([
+                            str(conda_exe), "install", "-n", CONFIG["env_name"],
+                            "-c", "pytorch", "pytorch", "torchvision", "-y"
+                        ], check=False)
+
+                        if ret == 0:
+                            # Verify new version
+                            ret2, stdout2, _ = self.run_command([
+                                str(python_exe), "-c", "import torch; print(torch.__version__)"
+                            ], capture=True, check=False)
+
+                            if ret2 == 0:
+                                new_version = stdout2.strip()
+                                print(f"  PyTorch upgraded to {new_version} via conda")
+                                self.print_success(f"PyTorch {new_version} installed via conda (NumPy 2.x compatible)")
+                            else:
+                                self.print_success("PyTorch installed via conda")
+                        else:
+                            self.print_warning(f"Failed to install PyTorch via conda: {stderr}")
+                            self.print_warning("Continuing with pip PyTorch (may have NumPy compatibility issues)")
+                    else:
+                        print(f"  PyTorch {torch_version} is compatible with NumPy 2.x")
+
             # Install GPU-specific requirements
             gpu_type = self._detect_gpu()
             req_file = CONFIG["requirements_files"].get(gpu_type)
