@@ -62,7 +62,7 @@ INTERNET_TEST_HOSTS = [
 # This is detected once and used by both Stage 1 and the live tracker.
 DEVICE = 'cpu'
 if torch:
-    if platform.processor() == 'arm' and platform.system() == 'Darwin':
+    if platform.machine() == 'arm64' and platform.system() == 'Darwin':
         DEVICE = 'mps'
     elif torch.cuda.is_available():
         DEVICE = 'cuda'
@@ -71,6 +71,12 @@ if torch:
 YOLO_INPUT_SIZE = 640
 # Default target height for oscillation processing/downscaling to match model input characteristics
 DEFAULT_OSCILLATION_PROCESSING_TARGET_HEIGHT = YOLO_INPUT_SIZE
+
+# GPU Unwarp Configuration (VR video processing optimization)
+ENABLE_GPU_UNWARP = True  # Use GPU shader unwrapping instead of CPU v360 filter
+GPU_UNWARP_BACKEND = 'auto'  # 'metal', 'opengl', 'auto'
+FALLBACK_TO_FFMPEG_V360 = True  # Use v360 if GPU unwarp unavailable
+
 # Fallback for determining producer/consumer counts if os.cpu_count() fails.
 DEFAULT_FALLBACK_CPU_CORES = 4
 
@@ -223,7 +229,7 @@ DEFAULT_LIVE_TRACKER_Y_OFFSET = 0.0
 DEFAULT_LIVE_TRACKER_X_OFFSET = 0.0
 DEFAULT_LIVE_TRACKER_BASE_AMPLIFICATION = 1.4
 DEFAULT_CLASS_AMP_MULTIPLIERS = {"face": 1.25, "hand": 1.5}
-DEFAULT_ROI_PERSISTENCE_FRAMES = 180
+DEFAULT_ROI_PERSISTENCE_FRAMES = 450  # 15 seconds @ 30fps (was 180 = 6s, increased for better occlusion handling)
 DEFAULT_ROI_SMOOTHING_FACTOR = 0.6
 DEFAULT_ROI_UPDATE_INTERVAL = 100
 DEFAULT_ROI_NARROW_FACTOR_HJBJ = 0.5
