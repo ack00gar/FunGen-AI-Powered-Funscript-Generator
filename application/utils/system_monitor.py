@@ -425,7 +425,13 @@ class SystemMonitor:
             # RAM
             try:
                 mem = psutil.virtual_memory()
-                self.ram_usage_percent.append(float(mem.percent))
+                # On macOS, mem.percent includes cached/inactive memory which is misleading
+                # Calculate actual used/total percentage for more accurate representation
+                if self.os_type == "Darwin":
+                    ram_percent = (float(mem.used) / float(mem.total)) * 100.0 if mem.total > 0 else 0.0
+                else:
+                    ram_percent = float(mem.percent)
+                self.ram_usage_percent.append(ram_percent)
                 self.ram_usage_gb.append(_bytes_to_gb(float(mem.used)))
                 self.ram_total_gb = _bytes_to_gb(float(mem.total))
             except Exception:

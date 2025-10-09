@@ -421,7 +421,7 @@ class ApplicationLogic:
                                  os.path.exists(self.yolo_pose_model_path_setting))
 
             # 3. Determine which models to download based on OS
-            is_mac_arm = platform.system() == "Darwin" and platform.processor() == 'arm'
+            is_mac_arm = platform.system() == "Darwin" and platform.machine() == 'arm64'
 
             # --- Download and Process Detection Model (only if user hasn't selected one) ---
             if not user_has_detection_model:
@@ -2033,7 +2033,8 @@ class ApplicationLogic:
             self.logger.info(f"Checking for default models in: {models_dir}")
 
             # Determine OS for model format
-            is_mac_arm = platform.system() == "Darwin" and platform.processor() == 'arm'
+            is_mac_arm = platform.system() == "Darwin" and platform.machine() == 'arm64'
+            self.logger.info(f"Platform detection: system={platform.system()}, machine={platform.machine()}, is_mac_arm={is_mac_arm}")
             downloaded_models = []
 
             # Check and download detection model
@@ -2051,8 +2052,10 @@ class ApplicationLogic:
                     
                     # Convert to CoreML if on macOS ARM
                     if is_mac_arm:
+                        self.logger.info(f"Attempting to convert detection model to CoreML (is_mac_arm={is_mac_arm})...")
                         try:
                             model = YOLO(det_model_path_pt)
+                            self.logger.info(f"YOLO model loaded, starting export to CoreML format...")
                             model.export(format="coreml")
                             self.logger.info(f"Converted detection model to CoreML: {det_model_path_mlpackage}")
                             # Set the CoreML model path in settings
@@ -2104,8 +2107,10 @@ class ApplicationLogic:
                     
                     # Convert to CoreML if on macOS ARM
                     if is_mac_arm:
+                        self.logger.info(f"Attempting to convert pose model to CoreML (is_mac_arm={is_mac_arm})...")
                         try:
                             model = YOLO(pose_model_path_pt)
+                            self.logger.info(f"YOLO pose model loaded, starting export to CoreML format...")
                             model.export(format="coreml")
                             self.logger.info(f"Converted pose model to CoreML: {pose_model_path_mlpackage}")
                             # Set the CoreML model path in settings

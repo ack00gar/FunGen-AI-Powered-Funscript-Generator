@@ -53,6 +53,22 @@ echo ""
 OS=$(uname -s)
 ARCH=$(uname -m)
 
+# On macOS, detect ACTUAL hardware (not just the running process architecture)
+# This is important because the script might be running under Rosetta on Apple Silicon
+if [ "$OS" = "Darwin" ]; then
+    if sysctl -n hw.optional.arm64 2>/dev/null | grep -q 1; then
+        HARDWARE_ARCH="arm64"
+        if [ "$ARCH" = "x86_64" ]; then
+            echo "NOTE: Detected Apple Silicon hardware, but running under Rosetta (x86_64)"
+            echo "      Will install ARM64 native Miniconda for best performance"
+            echo ""
+        fi
+        ARCH="arm64"  # Override to install native ARM64 version
+    else
+        HARDWARE_ARCH="x86_64"
+    fi
+fi
+
 case $OS in
     Linux*)
         PLATFORM="Linux"
@@ -66,13 +82,7 @@ case $OS in
         PYTHON_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh"
         if [ "$ARCH" = "arm64" ]; then
             PYTHON_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh"
-        fi
-        # Recommend Rosetta 2 for Apple Silicon if running x86_64 Python
-        if [ "$ARCH" = "arm64" ]; then
-            echo "NOTE: Apple Silicon (M1/M2/M3) detected!"
-            echo "      If you encounter issues with x86_64 packages,"
-            echo "      consider installing Rosetta 2:"
-            echo "      softwareupdate --install-rosetta"
+            echo "NOTE: Installing ARM64 native Miniconda for Apple Silicon"
             echo ""
         fi
         ;;
@@ -142,7 +152,28 @@ handle_interactive_install() {
 }
 
 echo "[1/4] Checking Python installation..."
-if [ -d "$MINICONDA_PATH" ]; then
+
+# Check if existing miniconda is the wrong architecture
+WRONG_ARCH=0
+if [ -d "$MINICONDA_PATH" ] && [ -f "$MINICONDA_PATH/bin/python" ]; then
+    INSTALLED_ARCH=$(file "$MINICONDA_PATH/bin/python" | grep -o "x86_64\|arm64" | head -1)
+    if [ "$ARCH" = "arm64" ] && [ "$INSTALLED_ARCH" = "x86_64" ]; then
+        echo "    WARNING: Found x86_64 (Intel) Miniconda on Apple Silicon Mac!"
+        echo "    This will cause performance issues and prevent CoreML model conversion."
+        echo "    Would you like to reinstall with ARM64 (native) Miniconda? [y/N]"
+        read -r response
+        if [ "$response" = "y" ] || [ "$response" = "Y" ]; then
+            echo "    Backing up old Miniconda to $HOME/miniconda3.x86_64.backup..."
+            mv "$MINICONDA_PATH" "$HOME/miniconda3.x86_64.backup"
+            WRONG_ARCH=1
+        else
+            echo "    Continuing with x86_64 Miniconda (running under Rosetta 2)..."
+            echo "    Note: CoreML model conversion will not work."
+        fi
+    fi
+fi
+
+if [ -d "$MINICONDA_PATH" ] && [ "$WRONG_ARCH" -eq 0 ]; then
     echo "    Miniconda already installed, skipping download..."
 else
     echo "    Downloading Miniconda installer..."
@@ -155,7 +186,7 @@ fi
 
 echo ""
 echo "[2/4] Installing Miniconda..."
-if [ -d "$MINICONDA_PATH" ]; then
+if [ -d "$MINICONDA_PATH" ] && [ "$WRONG_ARCH" -eq 0 ]; then
     echo "    Miniconda already installed at $MINICONDA_PATH"
     echo "    Using existing installation..."
 else
