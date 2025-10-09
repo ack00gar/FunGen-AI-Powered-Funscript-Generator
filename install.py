@@ -875,6 +875,7 @@ class FunGenUniversalInstaller:
 
             # macOS-specific: Use conda for PyTorch to get newer versions (2.5+) with NumPy 2.x support
             # pip only has PyTorch 2.2.2 for macOS x86_64, which requires NumPy 1.x
+            pytorch_via_conda = False  # Track if we installed PyTorch via conda
             if self.platform == "Darwin" and self.conda_available:
                 print("  Checking PyTorch version for macOS compatibility...")
 
@@ -919,8 +920,10 @@ class FunGenUniversalInstaller:
                                 new_version = stdout2.strip()
                                 print(f"  PyTorch upgraded to {new_version} via conda")
                                 self.print_success(f"PyTorch {new_version} installed via conda (NumPy 2.x compatible)")
+                                pytorch_via_conda = True  # Mark that we installed via conda
                             else:
                                 self.print_success("PyTorch installed via conda")
+                                pytorch_via_conda = True  # Mark that we installed via conda
                         else:
                             self.print_warning(f"Failed to install PyTorch via conda: {stderr}")
                             self.print_warning("Continuing with pip PyTorch (may have NumPy compatibility issues)")
@@ -928,10 +931,11 @@ class FunGenUniversalInstaller:
                         print(f"  PyTorch {torch_version} is compatible with NumPy 2.x")
 
             # Install GPU-specific requirements
+            # Skip on macOS if we already installed PyTorch via conda
             gpu_type = self._detect_gpu()
             req_file = CONFIG["requirements_files"].get(gpu_type)
-            
-            if req_file:
+
+            if req_file and not pytorch_via_conda:
                 gpu_req_path = self.project_path / req_file
                 if gpu_req_path.exists():
                     print(f"  Installing {gpu_type.upper()} requirements from {req_file}...")
@@ -971,6 +975,8 @@ class FunGenUniversalInstaller:
                         print(f"    {gpu_type.upper()} requirements installed successfully")
                 else:
                     self.print_warning(f"GPU requirements file not found: {gpu_req_path}")
+            elif pytorch_via_conda:
+                print(f"  Skipping {gpu_type.upper()} requirements (PyTorch already installed via conda)")
             else:
                 print(f"  No specific requirements for {gpu_type} GPU type")
             
