@@ -308,9 +308,38 @@ class FunGenUniversalInstaller:
         self.conda_available = (self.miniconda_path / "bin" / "conda").exists() or (self.miniconda_path / "Scripts" / "conda.exe").exists()
         if self.conda_available:
             self.print_success("Conda environment manager available")
+
+            # Check if conda Python is wrong architecture on macOS
+            if self.platform == "Darwin" and self.arch == "arm64":
+                conda_python = self.miniconda_path / "bin" / "python"
+                if conda_python.exists():
+                    try:
+                        result = subprocess.run(['file', str(conda_python)],
+                                              capture_output=True, text=True, timeout=5)
+                        if 'x86_64' in result.stdout:
+                            self.print_warning("╔" + "="*70 + "╗")
+                            self.print_warning("║  WARNING: x86_64 (Intel) Miniconda detected on Apple Silicon!      ║")
+                            self.print_warning("║  This will cause:                                                   ║")
+                            self.print_warning("║    • Slower performance (running under Rosetta 2)                   ║")
+                            self.print_warning("║    • CoreML model conversion will NOT work                          ║")
+                            self.print_warning("║    • No GPU acceleration via Metal Performance Shaders (MPS)        ║")
+                            self.print_warning("║                                                                     ║")
+                            self.print_warning("║  Recommended: Delete ~/miniconda3 and rerun installer               ║")
+                            self.print_warning("║    rm -rf ~/miniconda3                                              ║")
+                            self.print_warning("║    curl -fsSL https://raw.githubusercontent.com/.../install.sh | bash ║")
+                            self.print_warning("╚" + "="*70 + "╝")
+
+                            # Give user option to abort
+                            if not self.force:
+                                response = input("\n  Continue anyway? [y/N]: ").strip().lower()
+                                if response != 'y':
+                                    print("\n  Installation aborted. Please reinstall with ARM64 Miniconda.")
+                                    return False
+                    except Exception:
+                        pass
         else:
             self.print_success("Will use Python venv for environment management")
-        
+
         return True
     
     def install_git(self) -> bool:
