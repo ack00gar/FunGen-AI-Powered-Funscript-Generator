@@ -682,28 +682,40 @@ class FunGenUniversalInstaller:
     def _setup_conda_environment(self) -> bool:
         """Setup conda environment"""
         conda_exe = self.miniconda_path / ("Scripts/conda.exe" if self.platform == "Windows" else "bin/conda")
-        
+
+        # Accept conda Terms of Service if not already accepted
+        print("  Accepting conda Terms of Service...")
+        channels = [
+            "https://repo.anaconda.com/pkgs/main",
+            "https://repo.anaconda.com/pkgs/r"
+        ]
+        for channel in channels:
+            ret, stdout, stderr = self.run_command([
+                str(conda_exe), "tos", "accept", "--override-channels", "--channel", channel
+            ], capture=True, check=False)
+            # Continue even if this fails - may already be accepted
+
         # Check if environment exists
         ret, stdout, _ = self.run_command([str(conda_exe), "env", "list"], capture=True, check=False)
-        
+
         env_exists = CONFIG["env_name"] in stdout if ret == 0 else False
-        
+
         if not env_exists:
             print(f"  Creating conda environment '{CONFIG['env_name']}'...")
             print(f"  Using conda at: {conda_exe}")
             print(f"  Command: conda create -n {CONFIG['env_name']} python={CONFIG['python_version']} -y")
-            
+
             ret, stdout, stderr = self.run_command([
                 str(conda_exe), "create", "-n", CONFIG["env_name"],
                 f"python={CONFIG['python_version']}", "-y"
             ], check=False)
-            
+
             if ret != 0:
                 self.print_error(f"Failed to create conda environment")
                 self.print_error(f"Error details: {stderr}")
                 if stdout:
                     self.print_error(f"Output: {stdout}")
-                
+
                 # Common solutions
                 print("\nPossible solutions:")
                 print("1. Try running manually:")
@@ -713,11 +725,11 @@ class FunGenUniversalInstaller:
                 print("3. Try using system Python instead (rerun installer)")
                 print("4. Check available conda channels:")
                 print("   conda info")
-                
+
                 return False
         else:
             self.print_success(f"Using existing conda environment '{CONFIG['env_name']}'")
-        
+
         return True
     
     def _setup_venv_environment(self) -> bool:
