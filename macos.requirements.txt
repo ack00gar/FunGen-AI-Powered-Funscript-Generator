@@ -1,0 +1,10 @@
+# macOS-specific requirements for GPU Metal backend support
+# Install with: pip install -r macos.requirements.txt
+
+# Metal backend support (Apple Silicon GPU acceleration)
+pyobjc-framework-Metal>=10.0
+pyobjc-framework-MetalKit>=10.0
+
+# Note: These are only needed on macOS for Metal backend support.
+# The GPU unwarp worker will automatically fall back to OpenGL or v360
+# if Metal is not available.

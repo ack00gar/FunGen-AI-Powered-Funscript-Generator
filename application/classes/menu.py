@@ -2,6 +2,7 @@ import os
 import webbrowser
 import imgui
 from config.element_group_colors import MenuColors
+from application.utils import get_logo_texture_manager
 
 def _center_popup(width, height):
     mv = imgui.get_main_viewport()
@@ -33,15 +34,72 @@ def _radio_line(label, is_selected):
     return False
 
 class MainMenu:
-    __slots__ = ("app", "gui", "FRAME_OFFSET", "_last_menu_log_time")
+    __slots__ = ("app", "gui", "FRAME_OFFSET", "_last_menu_log_time", "_show_about_dialog",
+                 "_kofi_texture_id", "_kofi_width", "_kofi_height")
 
     def __init__(self, app_instance, gui_instance=None):
         self.app = app_instance
         self.gui = gui_instance
         self.FRAME_OFFSET = MenuColors.FRAME_OFFSET
         self._last_menu_log_time = 0
+        self._show_about_dialog = False
+        self._kofi_texture_id = None
+        self._kofi_width = 0
+        self._kofi_height = 0
 
     # ------------------------- POPUPS -------------------------
+
+    def _load_kofi_texture(self):
+        """Load Ko-fi support image as OpenGL texture (once)."""
+        if self._kofi_texture_id is not None:
+            return self._kofi_texture_id
+
+        try:
+            import cv2
+            import numpy as np
+            import OpenGL.GL as gl
+
+            kofi_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'kofi_support.png')
+
+            if not os.path.exists(kofi_path):
+                return None
+
+            # Load image
+            kofi_img = cv2.imread(kofi_path, cv2.IMREAD_UNCHANGED)
+            if kofi_img is None:
+                return None
+
+            # Convert BGR(A) to RGB(A)
+            if kofi_img.shape[2] == 4:
+                kofi_rgb = cv2.cvtColor(kofi_img, cv2.COLOR_BGRA2RGBA)
+            else:
+                kofi_rgb = cv2.cvtColor(kofi_img, cv2.COLOR_BGR2RGB)
+                alpha = np.full((kofi_rgb.shape[0], kofi_rgb.shape[1], 1), 255, dtype=np.uint8)
+                kofi_rgb = np.concatenate([kofi_rgb, alpha], axis=2)
+
+            self._kofi_height, self._kofi_width = kofi_rgb.shape[:2]
+
+            # Create OpenGL texture
+            self._kofi_texture_id = gl.glGenTextures(1)
+            gl.glBindTexture(gl.GL_TEXTURE_2D, self._kofi_texture_id)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+
+            gl.glTexImage2D(
+                gl.GL_TEXTURE_2D, 0, gl.GL_RGBA,
+                self._kofi_width, self._kofi_height, 0,
+                gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, kofi_rgb
+            )
+
+            gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+            return self._kofi_texture_id
+
+        except Exception as e:
+            if hasattr(self.app, 'logger') and self.app.logger:
+                self.app.logger.debug(f"Failed to load Ko-fi texture: {e}")
+            return None
 
     def _render_timeline_selection_popup(self):
         app = self.app
@@ -149,6 +207,151 @@ class MainMenu:
                 imgui.close_current_popup()
             imgui.end_popup()
 
+    def _render_about_dialog(self):
+        """Render About FunGen dialog with logo and Ko-fi support."""
+        if not self._show_about_dialog:
+            return
+
+        # Import constants here to get version info
+        from config import constants
+
+        # Center and open popup
+        imgui.open_popup("About FunGen##AboutDialog")
+
+        # Center on main viewport
+        mv = imgui.get_main_viewport()
+        main_viewport_pos_x, main_viewport_pos_y = mv.pos[0], mv.pos[1]
+        main_viewport_w, main_viewport_h = mv.size[0], mv.size[1]
+        dialog_width = 450
+        pos_x = main_viewport_pos_x + (main_viewport_w - dialog_width) * 0.5
+        pos_y = main_viewport_pos_y + main_viewport_h * 0.3  # Center vertically (slightly higher)
+        imgui.set_next_window_position(pos_x, pos_y, condition=imgui.ONCE)
+        imgui.set_next_window_size(dialog_width, 0, condition=imgui.ONCE)
+
+        opened, _ = imgui.begin_popup_modal(
+            "About FunGen##AboutDialog",
+            True,
+            flags=imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_MOVE
+        )
+
+        if opened:
+            # Load logo
+            logo_manager = get_logo_texture_manager()
+            logo_texture = logo_manager.get_texture_id()
+            logo_width, logo_height = logo_manager.get_dimensions()
+
+            # Center and display logo
+            if logo_texture and logo_width > 0 and logo_height > 0:
+                # Scale logo to reasonable size (max 150px)
+                max_size = 150
+                if logo_width > logo_height:
+                    display_w = min(logo_width, max_size)
+                    display_h = int(logo_height * (display_w / logo_width))
+                else:
+                    display_h = min(logo_height, max_size)
+                    display_w = int(logo_width * (display_h / logo_height))
+
+                # Center horizontally
+                avail_width = imgui.get_content_region_available_width()
+                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_width - display_w) * 0.5)
+                imgui.image(logo_texture, display_w, display_h)
+                imgui.spacing()
+
+            # App name and version
+            app_name = constants.APP_NAME
+            app_version = constants.APP_VERSION
+            title_text = f"{app_name} v{app_version}"
+
+            # Center text
+            text_width = imgui.calc_text_size(title_text)[0]
+            avail_width = imgui.get_content_region_available_width()
+            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_width - text_width) * 0.5)
+
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)  # Nice blue
+            imgui.text(title_text)
+            imgui.pop_style_color()
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            # Description
+            imgui.text_wrapped("AI-powered funscript generation using computer vision")
+            imgui.spacing()
+
+            # GitHub link button
+            if imgui.button("GitHub Repository", width=-1):
+                try:
+                    webbrowser.open("https://github.com/k00gar/FunGen")
+                except Exception as e:
+                    if hasattr(self.app, 'logger') and self.app.logger:
+                        self.app.logger.warning(f"Could not open GitHub link: {e}")
+
+            imgui.spacing()
+
+            # Ko-fi support section with image button
+            kofi_texture = self._load_kofi_texture()
+            if kofi_texture and self._kofi_width > 0 and self._kofi_height > 0:
+                # Scale to dialog width
+                avail_width = imgui.get_content_region_available_width()
+                scale = avail_width / self._kofi_width
+                display_w = avail_width
+                display_h = int(self._kofi_height * scale)
+
+                # Image button with no background/border for clean appearance
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.0, 0.0, 0.0)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.0, 0.0, 0.1)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.0, 0.0, 0.2)
+
+                if imgui.image_button(kofi_texture, display_w, display_h):
+                    try:
+                        webbrowser.open("https://ko-fi.com/k00gar")
+                    except Exception as e:
+                        if hasattr(self.app, 'logger') and self.app.logger:
+                            self.app.logger.warning(f"Could not open Ko-fi link: {e}")
+
+                imgui.pop_style_color(3)
+
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Support development and unlock device control!\n"
+                        "• Hardware device integration (Handy, OSR2, etc.)\n"
+                        "• Live tracking with device control\n"
+                        "• Synchronized playback"
+                    )
+            else:
+                # Fallback to text button if image fails to load
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.6, 0.15, 1.0)
+
+                if imgui.button("Support on Ko-fi", width=-1):
+                    try:
+                        webbrowser.open("https://ko-fi.com/k00gar")
+                    except Exception as e:
+                        if hasattr(self.app, 'logger') and self.app.logger:
+                            self.app.logger.warning(f"Could not open Ko-fi link: {e}")
+
+                imgui.pop_style_color(3)
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            # Credits
+            imgui.text("Created by k00gar")
+            imgui.spacing()
+
+            # Close button
+            if imgui.button("Close", width=-1):
+                self._show_about_dialog = False
+                imgui.close_current_popup()
+
+            imgui.end_popup()
+        else:
+            # Popup was closed (X button)
+            self._show_about_dialog = False
+
     # ------------------------- MAIN RENDER -------------------------
 
     def render(self):
@@ -158,6 +361,9 @@ class MainMenu:
         stage_proc = app.stage_processor
 
         if imgui.begin_main_menu_bar():
+            # Render logo at the start of menu bar
+            self._render_menu_bar_logo()
+
             self._render_file_menu(app_state, file_mgr)
             self._render_edit_menu(app_state)
             self._render_view_menu(app_state, stage_proc)
@@ -169,13 +375,14 @@ class MainMenu:
             # Render device control indicator after Support menu
             self._render_device_control_indicator()
 
-            # Render Native Sync / VR Stream indicator
+            # Render Streamer indicator
             self._render_native_sync_indicator()
 
             imgui.end_main_menu_bar()
 
         self._render_timeline_selection_popup()
         self._render_timeline_comparison_results_popup()
+        self._render_about_dialog()
 
     # ------------------------- MENUS -------------------------
 
@@ -699,6 +906,11 @@ class MainMenu:
     def _render_support_menu(self):
         app = self.app
         if imgui.begin_menu("Support", True):
+            if _menu_item_simple("About FunGen..."):
+                self._show_about_dialog = True
+
+            imgui.separator()
+
             if _menu_item_simple("Become a Supporter"):
                 try:
                     webbrowser.open("https://ko-fi.com/k00gar")
@@ -728,6 +940,28 @@ class MainMenu:
                     "Get help, share results, and discuss features!"
                 )
             imgui.end_menu()
+
+    def _render_menu_bar_logo(self):
+        """Render FunGen logo at the start of menu bar."""
+        # Load logo texture
+        logo_manager = get_logo_texture_manager()
+        logo_texture = logo_manager.get_texture_id()
+        logo_width, logo_height = logo_manager.get_dimensions()
+
+        if logo_texture and logo_width > 0 and logo_height > 0:
+            # Scale logo to menu bar height (typically ~20px)
+            menu_bar_height = imgui.get_frame_height()
+            logo_display_h = menu_bar_height - 4  # Small padding
+            logo_display_w = int(logo_width * (logo_display_h / logo_height))
+
+            # Add small padding on left
+            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + 8)
+
+            # Draw logo
+            imgui.image(logo_texture, logo_display_w, logo_display_h)
+
+            # Add spacing after logo before menus
+            imgui.same_line(spacing=8)
 
     def _render_device_control_indicator(self):
         """Render simple device control status indicator button."""
@@ -779,10 +1013,10 @@ class MainMenu:
                         imgui.set_tooltip("Supporter only feature\nCheck the Support menu for details")
 
     def _render_native_sync_indicator(self):
-        """Render Native Video Sync / VR Stream status indicator button."""
+        """Render Streamer status indicator button."""
         app = self.app
 
-        # Check if Native Sync manager exists and is running
+        # Check if Streamer manager exists and is running
         sync_manager = None
         is_running = False
         client_count = 0

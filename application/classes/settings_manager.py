@@ -90,6 +90,10 @@ class AppSettings:
             "num_workers_stage2_of": constants.DEFAULT_S2_OF_WORKERS,
             "hardware_acceleration_method": "none",  # Default to CPU to avoid CUDA errors on non-NVIDIA systems
             "ffmpeg_path": "ffmpeg",
+            # VR Unwarp method: 'auto', 'metal', 'opengl', 'v360'
+            # macOS: v360 is 26% faster than GPU unwarp due to optimized FFmpeg filter
+            # Other platforms: auto selects best GPU backend
+            "vr_unwarp_method": "v360" if platform.system() == "Darwin" else "auto",
 
             # Autosave & Energy Saver
             "autosave_enabled": True,
@@ -148,8 +152,8 @@ class AppSettings:
             "retain_stage2_database": True,  # Keep SQLite database after processing (default: True for GUI, False for CLI)
             "auto_processing_use_chapter_profiles": True,
 
-            # VR Streaming / Native Sync
-            "xbvr_host": "192.168.1.94",  # XBVR server host/IP
+            # VR Streaming / Streamer
+            "xbvr_host": "localhost",  # XBVR server host/IP
             "xbvr_port": 9999,  # XBVR server port
             "xbvr_enabled": True,  # Enable XBVR integration
             "auto_post_proc_final_rdp_enabled": False,
@@ -287,10 +291,12 @@ class AppSettings:
                     except (subprocess.TimeoutExpired, FileNotFoundError):
                         pass
             
-            # macOS uses VideoToolbox
+            # macOS: VideoToolbox is SLOWER for sequential frame processing with filters
+            # Benchmark shows CPU-only is 6x faster due to GPU→CPU transfer overhead
+            # Keep "none" (CPU-only) as default for best performance
             elif system == "Darwin":
-                detected_method = "videotoolbox"
-                self.logger.info("macOS detected, using VideoToolbox acceleration")
+                detected_method = "none"  # CPU-only is faster for this workload
+                self.logger.info("macOS detected, using CPU-only decoding (6x faster than VideoToolbox for filter chains)")
             
         except Exception as e:
             self.logger.warning(f"Error during GPU detection: {e}")
