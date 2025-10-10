@@ -180,6 +180,15 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
         logger.info("Checking core packages...")
         core_changed = _ensure_packages(core_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
 
+    # 3.5. macOS-specific: Check PyObjC for Metal GPU backend support
+    macos_changed = False
+    if platform.system() == "Darwin":
+        logger.info("Checking macOS Metal backend dependencies...")
+        macos_packages = ['pyobjc-framework-Metal>=10.0', 'pyobjc-framework-MetalKit>=10.0']
+        macos_changed = _ensure_packages(macos_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+        if macos_changed:
+            logger.info("✅ Metal backend support installed for GPU unwarp acceleration")
+
     # 4. Load and install GPU-specific requirements if needed
     gpu_changed = False
     if requirements_file != "core.requirements.txt":
@@ -209,7 +218,7 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
             logger.warning(f"{requirements_file} not found. Continuing with core packages only.")
 
     # Check if we need to restart due to major package changes
-    major_changes = bootstrap_changed or core_changed or gpu_changed
+    major_changes = bootstrap_changed or core_changed or macos_changed or gpu_changed
     
     if major_changes:
         logger.warning("\n=== Package Installation Complete ===")

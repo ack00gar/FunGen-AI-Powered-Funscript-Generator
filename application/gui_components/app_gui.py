@@ -546,6 +546,40 @@ class GUI:
             glfw.terminate()
             self.app.logger.error("Could not create GLFW window")
             return False
+
+        # Set window icon (macOS doesn't support window icons in GLFW, skip on macOS)
+        try:
+            import platform
+            if platform.system() != "Darwin":  # Skip on macOS
+                icon_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'logo.png')
+                if os.path.exists(icon_path):
+                    # Load icon with cv2 (already imported)
+                    icon_img = cv2.imread(icon_path, cv2.IMREAD_UNCHANGED)
+                    if icon_img is not None:
+                        # Convert BGR(A) to RGB(A) for GLFW
+                        if len(icon_img.shape) == 3 and icon_img.shape[2] == 4:  # Has alpha channel
+                            icon_rgb = cv2.cvtColor(icon_img, cv2.COLOR_BGRA2RGBA)
+                        else:
+                            icon_rgb = cv2.cvtColor(icon_img, cv2.COLOR_BGR2RGB)
+                            # Add alpha channel (fully opaque)
+                            alpha = np.full((icon_rgb.shape[0], icon_rgb.shape[1], 1), 255, dtype=np.uint8)
+                            icon_rgb = np.concatenate([icon_rgb, alpha], axis=2)
+
+                        height, width = icon_rgb.shape[:2]
+                        pixels = icon_rgb.tobytes()
+
+                        # pyGLFW expects list of GLFWimage objects
+                        # Create image tuple: (width, height, pixels)
+                        from glfw import _GLFWimage as GLFWimage
+                        icon_image = GLFWimage(width, height, pixels)
+
+                        glfw.set_window_icon(self.window, 1, [icon_image])
+                        self.app.logger.debug(f"Window icon set from {icon_path}")
+                    else:
+                        self.app.logger.warning(f"Failed to load icon image: {icon_path}")
+        except Exception as e:
+            self.app.logger.debug(f"Window icon not set: {e}")  # Debug level since it's non-critical
+
         glfw.make_context_current(self.window)
         glfw.set_drop_callback(self.window, self.handle_drop)
         glfw.set_window_close_callback(self.window, self.handle_window_close)
@@ -1858,18 +1892,9 @@ class GUI:
         import numpy as np
         
         try:
-            # Use the video processor's existing frame fetching with small batch
-            # This leverages its FFmpeg-based accurate frame extraction
-            original_batch_size = self.app.processor.batch_fetch_size
-            
-            # Temporarily set batch size to 1 for single frame fetch
-            self.app.processor.batch_fetch_size = 1
-            
-            # Get the specific frame using video processor's method (without updating current frame index for preview)
-            frame = self.app.processor._get_specific_frame(frame_index, update_current_index=False)
-            
-            # Restore original batch size
-            self.app.processor.batch_fetch_size = original_batch_size
+            # Use OpenCV-based thumbnail extractor for fast seeking (no FFmpeg process spawning!)
+            # This is much faster than spawning FFmpeg for each tooltip hover
+            frame = self.app.processor.get_thumbnail_frame(frame_index, use_gpu_unwarp=False)
             
             if frame is None:
                 return None, None

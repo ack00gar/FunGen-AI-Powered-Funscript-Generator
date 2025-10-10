@@ -71,7 +71,7 @@ class ControlPanelUI:
         # Bridge attributes for live control
         "video_playback_bridge",
         "live_tracker_bridge",
-        # Native Sync attributes (supporter feature)
+        # Streamer attributes (supporter feature)
         "_native_sync_manager",
         "_prev_client_count",
         "_native_sync_status_cache",
@@ -114,7 +114,7 @@ class ControlPanelUI:
         self._discovered_buttplug_devices = []
         self._buttplug_discovery_performed = False
 
-        # Native Sync attributes (supporter feature)
+        # Streamer attributes (supporter feature)
         self._native_sync_manager = None
         self._prev_client_count = 0
         self._native_sync_status_cache = None
@@ -4211,14 +4211,15 @@ class ControlPanelUI:
             self.app.logger.error(f"Failed to start Handy test: {e}")
 
     def _render_native_sync_tab(self):
-        """Render native sync tab content."""
+        """Render streamer tab content."""
         try:
-            # Initialize native sync manager lazily
+            # Initialize streamer manager lazily
             if self._native_sync_manager is None:
                 from streamer.integration_manager import NativeSyncManager
                 self._native_sync_manager = NativeSyncManager(
                     self.app.processor,
-                    logger=self.app.logger
+                    logger=self.app.logger,
+                    app_logic=self.app  # For HereSphere auto-load functionality
                 )
 
             # Cache status to avoid expensive lookups every frame (throttle to 500ms)
@@ -4328,6 +4329,52 @@ class ControlPanelUI:
                     imgui.text(ws_url)
                     imgui.pop_style_color()
 
+                    # HereSphere URLs (if enabled)
+                    if status.get('heresphere_enabled', False):
+                        imgui.spacing()
+                        imgui.separator()
+                        imgui.text_colored("HereSphere Integration:", 0.5, 0.8, 1.0)
+                        imgui.spacing()
+
+                        # HereSphere API URL
+                        local_ip = self._get_local_ip()
+                        heresphere_api_port = status.get('heresphere_api_port', 8091)
+                        heresphere_event_port = status.get('heresphere_event_port', 8090)
+
+                        api_url = f"http://{local_ip}:{heresphere_api_port}/heresphere"
+                        imgui.text("API Server (POST):")
+                        imgui.same_line()
+                        imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 1.0, 0.8)
+                        imgui.text(api_url)
+                        imgui.pop_style_color()
+
+                        # Copy button for API URL
+                        if imgui.button("Copy API URL", width=-1):
+                            self._copy_to_clipboard(api_url)
+
+                        imgui.spacing()
+
+                        # HereSphere Event URL
+                        event_url = f"http://{local_ip}:{heresphere_event_port}/heresphere/event"
+                        imgui.text("Event Server (POST):")
+                        imgui.same_line()
+                        imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 1.0, 0.8)
+                        imgui.text(event_url)
+                        imgui.pop_style_color()
+
+                        # Copy button for Event URL
+                        if imgui.button("Copy Event URL", width=-1):
+                            self._copy_to_clipboard(event_url)
+
+                        imgui.spacing()
+                        imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                        imgui.text_colored(
+                            "Configure HereSphere to use the API URL above as a library source. "
+                            "The Event URL is automatically provided to HereSphere via video metadata.",
+                            0.6, 0.6, 0.6
+                        )
+                        imgui.pop_text_wrap_pos()
+
                 # Status Section
                 open_, _ = imgui.collapsing_header(
                     "Status##NativeSyncStatus",
@@ -4338,7 +4385,7 @@ class ControlPanelUI:
                     sync_active = status.get('sync_server_active', False)
                     video_active = status.get('video_server_active', False)
 
-                    imgui.text("Sync Server:")
+                    imgui.text("Streamer:")
                     imgui.same_line()
                     if sync_active:
                         imgui.text_colored("Active", 0.0, 1.0, 0.0)
@@ -4468,25 +4515,11 @@ class ControlPanelUI:
                 imgui.pop_text_wrap_pos()
                 imgui.spacing()
 
-                # Get current settings
-                xbvr_enabled = self.app.app_settings.get('xbvr_enabled', True)
-                xbvr_host = self.app.app_settings.get('xbvr_host', '192.168.1.94')
+                # Get current settings (XBVR always enabled by default)
+                xbvr_host = self.app.app_settings.get('xbvr_host', 'localhost')
                 xbvr_port = self.app.app_settings.get('xbvr_port', 9999)
 
-                # Enable/disable XBVR
-                clicked, new_enabled = imgui.checkbox("Enable XBVR Browser", xbvr_enabled)
-                if clicked:
-                    self.app.app_settings.set('xbvr_enabled', new_enabled)
-                    self.app.app_settings.save_settings()
-
-                imgui.same_line()
-                imgui.text_colored("(?)", 0.7, 0.7, 0.7)
-                if imgui.is_item_hovered():
-                    imgui.begin_tooltip()
-                    imgui.text("When enabled, the Interactive panel in the VR viewer\nwill show an XBVR Browser tab for browsing your\nXBVR library and loading videos remotely.")
-                    imgui.end_tooltip()
-
-                if new_enabled if clicked else xbvr_enabled:
+                if True:
                     imgui.spacing()
 
                     # XBVR Host
@@ -4568,29 +4601,35 @@ class ControlPanelUI:
             imgui.text(f"Error in Streamer: {e}")
             imgui.text_colored("See logs for details.", 1.0, 0.0, 0.0)
             import traceback
-            self.app.logger.error(f"Native Sync tab error: {e}")
+            self.app.logger.error(f"Streamer tab error: {e}")
             self.app.logger.error(traceback.format_exc())
 
     def _start_native_sync(self):
-        """Start native sync servers."""
+        """Start streamer servers."""
         try:
             # Streamer can start without a video loaded (video can be loaded later)
-            self.app.logger.info("Starting native video sync...")
+            self.app.logger.info("Starting streamer...")
+
+            # Enable HereSphere and XBVR browser by default
+            if self._native_sync_manager:
+                self._native_sync_manager.enable_heresphere = True
+                self._native_sync_manager.enable_xbvr_browser = True
+
             self._native_sync_manager.start()
 
         except Exception as e:
-            self.app.logger.error(f"Failed to start native sync: {e}")
+            self.app.logger.error(f"Failed to start streamer: {e}")
             import traceback
             self.app.logger.error(traceback.format_exc())
 
     def _stop_native_sync(self):
-        """Stop native sync servers."""
+        """Stop streamer servers."""
         try:
-            self.app.logger.info("Stopping native video sync...")
+            self.app.logger.info("Stopping streamer...")
             self._native_sync_manager.stop()
 
         except Exception as e:
-            self.app.logger.error(f"Failed to stop native sync: {e}")
+            self.app.logger.error(f"Failed to stop streamer: {e}")
 
     def _open_in_browser(self, url: str):
         """Open URL in system default browser."""

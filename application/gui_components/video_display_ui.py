@@ -1,9 +1,9 @@
 import imgui
 from typing import Optional, Tuple
 
-
 import config.constants as constants
 from config.element_group_colors import VideoDisplayColors
+from application.utils import get_logo_texture_manager
 
 
 class VideoDisplayUI:
@@ -322,7 +322,10 @@ class VideoDisplayUI:
                 if self.app.processor and self.app.processor.current_frame is not None:
                     with self.app.processor.frame_lock:
                         if self.app.processor.current_frame is not None:
-                            current_frame_for_texture = self.app.processor.current_frame.copy()
+                            # Check if current_frame is actually a frame (numpy array) and not just a frame number (int)
+                            if hasattr(self.app.processor.current_frame, 'copy'):
+                                current_frame_for_texture = self.app.processor.current_frame.copy()
+                            # else: current_frame is just an int (frame number), no image to display
 
                 video_frame_available = current_frame_for_texture is not None
 
@@ -898,13 +901,53 @@ class VideoDisplayUI:
         imgui.end_group()
 
     def _render_drop_video_prompt(self):
+        """Render logo and drop prompt when no video is loaded."""
         cursor_start_pos = imgui.get_cursor_pos()
         win_size = imgui.get_window_size()
+
+        # Load logo texture
+        logo_manager = get_logo_texture_manager()
+        logo_texture = logo_manager.get_texture_id()
+        logo_width, logo_height = logo_manager.get_dimensions()
+
+        # Calculate sizes and positions for centered layout
         text_to_display = "Drag and drop one or more video files here."
         text_size = imgui.calc_text_size(text_to_display)
-        if win_size[0] > text_size[0] and win_size[1] > text_size[1]:  # Check if window is large enough for text
-            imgui.set_cursor_pos(((win_size[0] - text_size[0]) * 0.5 + cursor_start_pos[0], (win_size[1] - text_size[1]) * 0.5 + cursor_start_pos[1]))
-        imgui.text(text_to_display)
+
+        if logo_texture and logo_width > 0 and logo_height > 0:
+            # Scale logo to reasonable size (max 200px while maintaining aspect ratio)
+            max_logo_size = 200
+            if logo_width > logo_height:
+                display_logo_w = min(logo_width, max_logo_size)
+                display_logo_h = int(logo_height * (display_logo_w / logo_width))
+            else:
+                display_logo_h = min(logo_height, max_logo_size)
+                display_logo_w = int(logo_width * (display_logo_h / logo_height))
+
+            # Calculate total height (logo + spacing + text)
+            spacing = 20
+            total_height = display_logo_h + spacing + text_size[1]
+
+            # Center vertically
+            start_y = (win_size[1] - total_height) * 0.5 + cursor_start_pos[1]
+
+            # Draw logo centered horizontally
+            logo_x = (win_size[0] - display_logo_w) * 0.5 + cursor_start_pos[0]
+            imgui.set_cursor_pos((logo_x, start_y))
+
+            # Draw logo with slight transparency
+            imgui.image(logo_texture, display_logo_w, display_logo_h, tint_color=(1.0, 1.0, 1.0, 0.6))
+
+            # Draw text below logo
+            text_y = start_y + display_logo_h + spacing
+            text_x = (win_size[0] - text_size[0]) * 0.5 + cursor_start_pos[0]
+            imgui.set_cursor_pos((text_x, text_y))
+            imgui.text_colored(text_to_display, 0.7, 0.7, 0.7, 1.0)  # Slightly dimmed text
+        else:
+            # Fallback to text-only if logo fails to load
+            if win_size[0] > text_size[0] and win_size[1] > text_size[1]:
+                imgui.set_cursor_pos(((win_size[0] - text_size[0]) * 0.5 + cursor_start_pos[0], (win_size[1] - text_size[1]) * 0.5 + cursor_start_pos[1]))
+            imgui.text(text_to_display)
 
     def _render_mixed_mode_debug_overlay(self, draw_list):
         """

@@ -378,32 +378,43 @@ class AppFileManager:
         """
         Automatically saves funscripts next to the video file using the centralized saver.
         This now correctly includes all metadata.
+        For remote videos (HTTP URLs), funscripts are always saved to the output directory.
         """
         if not self.app.funscript_processor:
             self.app.logger.error("Funscript processor not available for saving.")
             return
 
-        base, _ = os.path.splitext(video_path)
         primary_actions = self.app.funscript_processor.get_actions('primary')
         secondary_actions = self.app.funscript_processor.get_actions('secondary')
         chapters = self.app.funscript_processor.video_chapters
         save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
 
+        # Check if video is remote (HTTP/HTTPS URL)
+        is_remote = video_path and video_path.startswith(('http://', 'https://'))
+
         if primary_actions:
-            if save_next_to_video:
+            if save_next_to_video and not is_remote:
+                # Save next to video file (only for local files)
                 base, _ = os.path.splitext(video_path)
                 primary_path = f"{base}_t1.funscript"
             else:
+                # Save to output directory (for remote videos or when configured)
                 primary_path = self.get_output_path_for_file(video_path, "_t1.funscript")
+
             self._save_funscript_file(primary_path, primary_actions, chapters)
+            self.logger.info(f"💾 Saved primary funscript to: {primary_path}")
 
         if secondary_actions:
-            if save_next_to_video:
+            if save_next_to_video and not is_remote:
+                # Save next to video file (only for local files)
                 base, _ = os.path.splitext(video_path)
                 secondary_path = f"{base}_t2.funscript"
             else:
+                # Save to output directory (for remote videos or when configured)
                 secondary_path = self.get_output_path_for_file(video_path, "_t2.funscript")
+
             self._save_funscript_file(secondary_path, secondary_actions, None)
+            self.logger.info(f"💾 Saved secondary funscript to: {secondary_path}")
 
     def handle_video_file_load(self, file_path: str, is_project_load=False):
         # If this is a direct video load, first check if an associated project exists.
@@ -630,7 +641,9 @@ class AppFileManager:
         Opens a video file, updates the application state, and returns success.
         This is the central method for loading a video.
         """
-        if not file_path or not os.path.exists(file_path):
+        # Check if file exists (skip check for HTTP URLs - FFmpeg will handle those)
+        is_remote = file_path and file_path.startswith(('http://', 'https://'))
+        if not file_path or (not is_remote and not os.path.exists(file_path)):
             self.app.logger.error(f"Video file not found: {file_path}")
             return False
 

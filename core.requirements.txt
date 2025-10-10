@@ -3,6 +3,7 @@ imgui
 ultralytics==8.3.78
 glfw~=2.8.0
 pyopengl~=3.1.7
+moderngl~=5.11.1
 imageio~=2.36.1
 tqdm~=4.67.1
 colorama~=0.4.6
