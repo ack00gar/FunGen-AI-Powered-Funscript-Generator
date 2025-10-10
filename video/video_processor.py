@@ -17,6 +17,9 @@ from config import constants
 # ML-based VR format detector
 from video.vr_format_detector_ml_real import RealMLVRFormatDetector
 
+# Thumbnail extractor for fast random frame access
+from video.thumbnail_extractor import ThumbnailExtractor
+
 try:
     from scipy.io import wavfile
     SCIPY_AVAILABLE_FOR_AUDIO = True
@@ -92,6 +95,19 @@ class VideoProcessor:
         self.determined_video_type = None
         self.ffmpeg_filter_string = ""
         self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+
+        # GPU Unwarp Worker for VR optimization
+        self.gpu_unwarp_worker = None
+        self.gpu_unwarp_enabled = False
+
+        # VR Unwarp method override (from UI dropdown)
+        # Options: 'auto', 'metal', 'opengl', 'v360'
+        self.vr_unwarp_method_override = 'auto'
+        if self.app and hasattr(self.app, 'app_settings'):
+            self.vr_unwarp_method_override = self.app.app_settings.get('vr_unwarp_method', 'auto')
+
+        # Thumbnail Extractor for fast random frame access (OpenCV-based)
+        self.thumbnail_extractor = None
 
         self.stop_event = threading.Event()
         self.processing_start_frame_limit = 0
@@ -214,6 +230,9 @@ class VideoProcessor:
         self.stop_processing()
         self.video_path = video_path # This will always be the ORIGINAL video path
         self._clear_cache()
+        # Clear ML detection cache when opening new video
+        if hasattr(self, '_ml_detection_cached'):
+            delattr(self, '_ml_detection_cached')
         self.video_info = self._get_video_info(video_path)
         if not self.video_info or self.video_info.get("total_frames", 0) == 0:
             self.logger.warning(f"Failed to get valid video info for {video_path}")
@@ -262,6 +281,12 @@ class VideoProcessor:
             self.logger.info(f"VideoProcessor will use original video as its active source.")
 
         self._update_video_parameters()
+
+        # Initialize GPU unwarp worker for VR videos (needed for seek-to-frame before playback starts)
+        self._init_gpu_unwarp_worker()
+
+        # Initialize thumbnail extractor for fast random frame access (OpenCV-based)
+        self._init_thumbnail_extractor()
 
         self.fps = self.video_info['fps']
         self.total_frames = self.video_info['total_frames']
@@ -324,8 +349,9 @@ class VideoProcessor:
             return
 
         # Try ML detection first if in auto mode and model available
+        # Cache ML detection to avoid re-running expensive inference on every settings change
         ml_detection_succeeded = False
-        if self.video_type_setting == 'auto' and os.path.exists(self.ml_model_path):
+        if self.video_type_setting == 'auto' and os.path.exists(self.ml_model_path) and not hasattr(self, '_ml_detection_cached'):
             try:
                 # Lazy load detector
                 if self.ml_detector is None:
@@ -350,6 +376,7 @@ class VideoProcessor:
                             self.vr_fov = ml_result['fov']
 
                     ml_detection_succeeded = True
+                    self._ml_detection_cached = True  # Cache result to avoid re-running on settings changes
                     self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
                     self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
                     self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
@@ -487,6 +514,7 @@ class VideoProcessor:
                 if not effective_vf_pipe2: effective_vf_pipe2 = f"scale={self.yolo_input_size}:{self.yolo_input_size}"
                 cmd2.extend(['-vf', effective_vf_pipe2])
                 cmd2.extend(['-frames:v', str(num_frames_to_fetch)])
+                # Always use BGR24 - GPU unwarp worker handles BGR->RGBA conversion internally
                 cmd2.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
 
                 if self.logger.isEnabledFor(logging.DEBUG):
@@ -498,7 +526,9 @@ class VideoProcessor:
                 local_p1_proc = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags)
                 if local_p1_proc.stdout is None: raise IOError("get_frames_batch: Pipe 1 stdout is None.")
 
-                local_p2_proc = subprocess.Popen(cmd2, stdin=local_p1_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20), creationflags=creation_flags)
+                # Always use BGR24 (3 bytes per pixel)
+                buffer_frame_size = self.yolo_input_size * self.yolo_input_size * 3
+                local_p2_proc = subprocess.Popen(cmd2, stdin=local_p1_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=buffer_frame_size * min(num_frames_to_fetch, 20), creationflags=creation_flags)
                 local_p1_proc.stdout.close()
 
             else:  # Standard single FFmpeg process
@@ -512,30 +542,51 @@ class VideoProcessor:
                 if not effective_vf: effective_vf = f"scale={self.yolo_input_size}:{self.yolo_input_size}"
                 cmd_single.extend(['-vf', effective_vf])
                 cmd_single.extend(['-frames:v', str(num_frames_to_fetch)])
+                # Always use BGR24 - GPU unwarp worker handles BGR->RGBA conversion internally
                 cmd_single.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
                 if self.logger.isEnabledFor(logging.DEBUG):
                     self.logger.debug(
                         f"get_frames_batch CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in cmd_single)}")
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                local_p2_proc = subprocess.Popen(cmd_single, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self.frame_size_bytes * min(num_frames_to_fetch, 20), creationflags=creation_flags)
+                # Always use BGR24 (3 bytes per pixel)
+                buffer_frame_size = self.yolo_input_size * self.yolo_input_size * 3
+                local_p2_proc = subprocess.Popen(cmd_single, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=buffer_frame_size * min(num_frames_to_fetch, 20), creationflags=creation_flags)
 
             if not local_p2_proc or local_p2_proc.stdout is None:
                 self.logger.error("get_frames_batch: Output FFmpeg process or its stdout is None.")
                 return frames_batch
 
+            # Always use BGR24 (3 bytes per pixel)
+            frame_size = self.yolo_input_size * self.yolo_input_size * 3
+
             for i in range(num_frames_to_fetch):
-                raw_frame_data = local_p2_proc.stdout.read(self.frame_size_bytes)
-                if len(raw_frame_data) < self.frame_size_bytes:
+                raw_frame_data = local_p2_proc.stdout.read(frame_size)
+                if len(raw_frame_data) < frame_size:
                     p2_stderr_content = local_p2_proc.stderr.read().decode(
                         errors='ignore') if local_p2_proc.stderr else ""
                     self.logger.warning(
-                        f"get_frames_batch: Incomplete data for frame {start_frame_num + i} (read {len(raw_frame_data)}/{self.frame_size_bytes}). P2 Stderr: {p2_stderr_content.strip()}")
+                        f"get_frames_batch: Incomplete data for frame {start_frame_num + i} (read {len(raw_frame_data)}/{frame_size}). P2 Stderr: {p2_stderr_content.strip()}")
                     if local_p1_proc and local_p1_proc.stderr:
                         p1_stderr_content = local_p1_proc.stderr.read().decode(errors='ignore')
                         self.logger.warning(f"get_frames_batch: P1 Stderr: {p1_stderr_content.strip()}")
                     break
-                frames_batch[start_frame_num + i] = np.frombuffer(raw_frame_data, dtype=np.uint8).reshape(
-                    self.yolo_input_size, self.yolo_input_size, 3)
+
+                frame = np.frombuffer(raw_frame_data, dtype=np.uint8).reshape(
+                    self.yolo_input_size, self.yolo_input_size, 3)  # BGR24
+
+                # Apply GPU unwarp for VR frames if enabled
+                if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
+                    frame_idx = start_frame_num + i
+                    self.gpu_unwarp_worker.submit_frame(frame_idx, frame,
+                                                       timestamp_ms=frame_idx * (1000.0 / self.fps) if self.fps > 0 else 0.0,
+                                                       timeout=0.1)
+                    unwarp_result = self.gpu_unwarp_worker.get_unwrapped_frame(timeout=0.5)
+                    if unwarp_result is not None:
+                        _, frame, _ = unwarp_result
+                    else:
+                        self.logger.warning(f"GPU unwarp timeout for batch frame {frame_idx}")
+
+                frames_batch[start_frame_num + i] = frame
 
         except Exception as e:
             self.logger.error(f"get_frames_batch: Error fetching batch @{start_frame_num}: {e}", exc_info=True)
@@ -570,6 +621,30 @@ class VideoProcessor:
                 if update_current_index:
                     self.current_frame_index = frame_index_abs
                 return frame
+
+        # For thumbnail generation (batch_size=1), use fast OpenCV extractor if available
+        # This is MUCH faster than spawning FFmpeg (3s vs 20ms)
+        # Note: Actual video seeks use FFmpeg for accuracy, this is only for UI tooltips
+        if self.batch_fetch_size == 1 and self.thumbnail_extractor is not None:
+            self.logger.debug(f"Using fast thumbnail extractor for single frame {frame_index_abs}")
+            frame = self.thumbnail_extractor.get_frame(frame_index_abs, use_gpu_unwarp=False)
+
+            if frame is not None:
+                # Cache the frame
+                with self.frame_cache_lock:
+                    if len(self.frame_cache) >= self.frame_cache_max_size:
+                        try:
+                            self.frame_cache.popitem(last=False)
+                        except KeyError:
+                            pass
+                    self.frame_cache[frame_index_abs] = frame
+                    self.frame_cache.move_to_end(frame_index_abs)
+
+                if update_current_index:
+                    self.current_frame_index = frame_index_abs
+                return frame
+            else:
+                self.logger.warning(f"Thumbnail extractor failed for frame {frame_index_abs}, falling back to FFmpeg")
 
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(
@@ -696,7 +771,7 @@ class VideoProcessor:
         # TODO: Add ffprobe detection and metadata extraction for YUV videos. Pass metadata to cv2 so it can use the correct decoder. Use metadata + cv2.cvtColor to convert to RGB.
         cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                '-show_entries',
-               'stream=width,height,r_frame_rate,nb_frames,avg_frame_rate,duration,codec_type,pix_fmt,bits_per_raw_sample',
+               'stream=width,height,r_frame_rate,nb_frames,avg_frame_rate,duration,codec_name,codec_long_name,codec_type,pix_fmt,bits_per_raw_sample',
                '-show_entries', 'format=duration,size,bit_rate', '-of', 'json', filename]
         try:
             creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
@@ -771,7 +846,9 @@ class VideoProcessor:
                     "width": int(stream_info.get('width', 0)), "height": int(stream_info.get('height', 0)),
                     "has_audio": has_audio_ffprobe, "bit_depth": bit_depth,
                     "file_size": file_size_bytes, "bitrate": bitrate_bps,
-                    "is_vfr": is_vfr, "filename": file_name
+                    "is_vfr": is_vfr, "filename": file_name,
+                    "codec_name": stream_info.get('codec_name', 'N/A'),
+                    "codec_long_name": stream_info.get('codec_long_name', 'N/A')
                     }
         except Exception as e:
             self.logger.error(f"Error in _get_video_info for {filename}: {e}")
@@ -880,8 +957,121 @@ class VideoProcessor:
             f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
         ]
 
+    def _init_gpu_unwarp_worker(self):
+        """Initialize GPU unwarp worker for VR video processing."""
+        from config.constants import ENABLE_GPU_UNWARP, GPU_UNWARP_BACKEND
+
+        # Check if user wants CPU v360 instead of GPU unwarp
+        if self.vr_unwarp_method_override == 'v360':
+            self.logger.info("User selected CPU v360 unwarp method - GPU unwarp disabled")
+            self.gpu_unwarp_enabled = False
+            return
+
+        # Only initialize for VR videos when GPU unwarp is enabled
+        if self.determined_video_type != 'VR' or not ENABLE_GPU_UNWARP:
+            self.gpu_unwarp_enabled = False
+            return
+
+        # If already initialized, skip (prevents duplicate workers)
+        if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
+            self.logger.debug("GPU unwarp worker already initialized, skipping")
+            return
+
+        try:
+            from video.gpu_unwarp_worker import GPUUnwarpWorker
+
+            # Get projection type from VR input format
+            projection_type = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
+            if 'fisheye' in projection_type or 'he' in projection_type:
+                # Map VR format to projection type
+                if projection_type == 'fisheye':
+                    projection_type = f'fisheye{int(self.vr_fov)}'
+                elif projection_type == 'he':
+                    projection_type = 'equirect180'
+
+            # Determine backend based on user override or default
+            if self.vr_unwarp_method_override in ['metal', 'opengl']:
+                backend = self.vr_unwarp_method_override
+            else:
+                backend = GPU_UNWARP_BACKEND  # Use default (auto)
+
+            self.gpu_unwarp_worker = GPUUnwarpWorker(
+                projection_type=projection_type,
+                output_size=self.yolo_input_size,
+                queue_size=16,  # Increased for batch processing
+                backend=backend,
+                pitch=self.vr_pitch,  # Pass directly (matches benchmark behavior)
+                yaw=0.0,
+                roll=0.0,
+                batch_size=4,  # Enable batch processing (12% faster)
+                input_format='bgr24'  # Input is BGR24 from FFmpeg, worker converts to RGBA internally
+            )
+            self.gpu_unwarp_worker.start()
+            self.gpu_unwarp_enabled = True
+            self.logger.info(f"GPU unwarp worker started (backend={backend}, projection={projection_type}, pitch={self.vr_pitch})")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize GPU unwarp worker: {e}. Falling back to CPU v360.")
+            self.gpu_unwarp_worker = None
+            self.gpu_unwarp_enabled = False
+
+    def _init_thumbnail_extractor(self):
+        """Initialize OpenCV-based thumbnail extractor for fast random frame access."""
+        # Close existing extractor if present
+        if self.thumbnail_extractor:
+            self.thumbnail_extractor.close()
+            self.thumbnail_extractor = None
+
+        # Only initialize if we have a valid video
+        if not self._active_video_source_path or not self.video_info:
+            return
+
+        try:
+            self.thumbnail_extractor = ThumbnailExtractor(
+                video_path=self._active_video_source_path,
+                logger=self.logger,
+                gpu_unwarp_worker=self.gpu_unwarp_worker,  # Optional: use GPU unwarp for VR thumbnails
+                output_size=self.yolo_input_size,
+                vr_input_format=self.vr_input_format if self.determined_video_type == 'VR' else None
+            )
+            self.logger.info("Thumbnail extractor initialized (OpenCV-based)")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize thumbnail extractor: {e}")
+            self.thumbnail_extractor = None
+
+    def get_thumbnail_frame(self, frame_index: int, use_gpu_unwarp: bool = False) -> Optional[np.ndarray]:
+        """
+        Get a thumbnail frame using OpenCV-based extractor (much faster than FFmpeg spawning).
+
+        This method is optimized for random frame access (e.g., timeline tooltips) and uses
+        OpenCV VideoCapture which maintains a persistent video connection.
+
+        Args:
+            frame_index: Frame index to extract
+            use_gpu_unwarp: Whether to apply GPU unwarp for VR content (slower but accurate)
+
+        Returns:
+            Frame as BGR24 numpy array (yolo_input_size x yolo_input_size) or None
+        """
+        if self.thumbnail_extractor is None:
+            # Fallback to FFmpeg-based extraction if thumbnail extractor not available
+            self.logger.debug("Thumbnail extractor not available, falling back to FFmpeg")
+            return self._get_specific_frame(frame_index, update_current_index=False)
+
+        try:
+            frame = self.thumbnail_extractor.get_frame(frame_index, use_gpu_unwarp=use_gpu_unwarp)
+            return frame
+
+        except Exception as e:
+            self.logger.warning(f"Thumbnail extraction failed: {e}, falling back to FFmpeg")
+            # Fallback to FFmpeg if OpenCV fails
+            return self._get_specific_frame(frame_index, update_current_index=False)
+
     def _get_vr_video_filters(self) -> List[str]:
         """Builds the list of FFmpeg filter segments for VR video, including cropping and v360."""
+        from config.constants import ENABLE_GPU_UNWARP
+
         if not self.video_info:
             return []
 
@@ -904,16 +1094,39 @@ class VideoProcessor:
             vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
             self.logger.info(f"Applying TB pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
 
-        base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
-        v360_filter_core = (
-            f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
-            f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
-            f"d_fov={self.vr_fov}:"
-            f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
-            f"pitch={self.vr_pitch}:yaw=0:roll=0:"
-            f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=lanczos"
-        )
-        vr_filters.append(v360_filter_core)
+        # Check unwarp method override to decide between GPU unwarp and CPU v360
+        if self.vr_unwarp_method_override == 'v360':
+            # User selected CPU v360 - use FFmpeg v360 filter for unwrapping
+            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
+            v360_filter_core = (
+                f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
+                f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
+                f"d_fov={self.vr_fov}:"
+                f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
+                f"pitch={self.vr_pitch}:yaw=0:roll=0:"
+                f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=linear"
+            )
+            vr_filters.append(v360_filter_core)
+            self.logger.info(f"Using CPU v360 filter (user override): {v360_filter_core}")
+        elif ENABLE_GPU_UNWARP:
+            # GPU unwarp enabled (auto/metal/opengl) - skip v360, just scale
+            # Unwrapping will be done by GPU worker in tracker
+            vr_filters.append(f"scale={self.yolo_input_size}:{self.yolo_input_size}")
+            self.logger.info(f"GPU unwarp enabled (method={self.vr_unwarp_method_override}) - using crop+scale (v360 skipped)")
+        else:
+            # Fallback: GPU unwarp disabled globally
+            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
+            v360_filter_core = (
+                f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
+                f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
+                f"d_fov={self.vr_fov}:"
+                f"v_fov={v_h_FOV}:h_fov={v_h_FOV}:"
+                f"pitch={self.vr_pitch}:yaw=0:roll=0:"
+                f"w={self.yolo_input_size}:h={self.yolo_input_size}:interp=linear"
+            )
+            vr_filters.append(v360_filter_core)
+            self.logger.info(f"Using CPU v360 filter (GPU unwarp disabled): {v360_filter_core}")
+
         return vr_filters
 
     def _build_ffmpeg_filter_string(self) -> str:
@@ -966,9 +1179,11 @@ class VideoProcessor:
             f"Determining HWAccel. Selected: '{selected_hwaccel}', OS: {system}, App Available: {available_on_app}")
 
         if selected_hwaccel == "auto":
-            if system == 'darwin' and 'videotoolbox' in available_on_app:
-                hwaccel_args = ['-hwaccel', 'videotoolbox']
-                self.logger.debug("Auto-selected 'videotoolbox' for macOS.")
+            # macOS: CPU-only is 6x faster than VideoToolbox for filter chains
+            # Benchmark: CPU 293 FPS vs VideoToolbox 47 FPS
+            if system == 'darwin':
+                hwaccel_args = []  # Use CPU-only decoding
+                self.logger.debug("Auto-selected CPU-only for macOS (6x faster than VideoToolbox for sequential processing with filters).")
             # [REDUNDANCY REMOVED] - Combined Linux/Windows logic
             elif system in ['linux', 'windows']:
                 if 'nvdec' in available_on_app or 'cuda' in available_on_app:
@@ -1103,6 +1318,7 @@ class VideoProcessor:
             cmd2.extend(['-vf', effective_vf_pipe2])
             if num_frames_to_output_ffmpeg and num_frames_to_output_ffmpeg > 0:
                 cmd2.extend(['-frames:v', str(num_frames_to_output_ffmpeg)])
+            # Always use BGR24 - GPU unwarp worker handles BGR->RGBA conversion internally
             cmd2.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
 
             self.logger.info(f"Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
@@ -1138,6 +1354,7 @@ class VideoProcessor:
             cmd.extend(['-vf', effective_vf])
             if num_frames_to_output_ffmpeg and num_frames_to_output_ffmpeg > 0:
                 cmd.extend(['-frames:v', str(num_frames_to_output_ffmpeg)])
+            # Always use BGR24 - GPU unwarp worker handles BGR->RGBA conversion internally
             cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
 
             self.logger.info(f"Single Pipe CMD: {' '.join(shlex.quote(str(x)) for x in cmd)}")
@@ -1201,6 +1418,9 @@ class VideoProcessor:
             self.logger.error("Failed to start FFmpeg for processing start.")
             return
 
+        # Initialize GPU unwarp worker for VR if enabled
+        self._init_gpu_unwarp_worker()
+
         self.is_processing = True
         self.pause_event.clear()
         self.stop_event.clear()
@@ -1250,6 +1470,19 @@ class VideoProcessor:
                     if thread_to_join.is_alive():
                         self.logger.warning("Processing thread did not join cleanly after stop signal.")
         self.processing_thread = None
+
+        # Stop GPU unwarp worker if active
+        if self.gpu_unwarp_worker:
+            self.logger.info("Stopping GPU unwarp worker...")
+            self.gpu_unwarp_worker.stop()
+            self.gpu_unwarp_worker = None
+            self.gpu_unwarp_enabled = False
+
+        # Close thumbnail extractor if active
+        if self.thumbnail_extractor:
+            self.logger.info("Closing thumbnail extractor...")
+            self.thumbnail_extractor.close()
+            self.thumbnail_extractor = None
 
         if self.tracker:
             self.logger.info("Signaling tracker to stop.")
@@ -1456,7 +1689,35 @@ class VideoProcessor:
                         self.app.on_processing_stopped(was_scripting_session=was_scripting_at_eos, scripted_frame_range=end_range_eos)
                     break
 
+                # Always use BGR24 format (3 bytes per pixel)
+                expected_size = self.yolo_input_size * self.yolo_input_size * 3
+                actual_bytes = len(raw_frame_bytes)
+
+                # Validate frame size
+                if actual_bytes != expected_size:
+                    self.logger.error(f"Invalid frame size: {actual_bytes} bytes (expected {expected_size}). Skipping frame.")
+                    continue
+
                 frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
+
+                # Apply GPU unwarp for VR frames if enabled
+                if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
+                    # Submit current frame to GPU worker (non-blocking)
+                    submit_success = self.gpu_unwarp_worker.submit_frame(self.current_frame_index, frame_np,
+                                                       timestamp_ms=self.current_frame_index * (1000.0 / self.fps) if self.fps > 0 else 0.0,
+                                                       timeout=0.05)
+
+                    # For MAX_SPEED: wait synchronously for current frame
+                    # For realtime: use async pattern (get previous frame from queue)
+                    is_max_speed = target_delay == 0.0
+                    timeout = 0.2 if is_max_speed else 0.01
+
+                    if submit_success:
+                        unwarp_result = self.gpu_unwarp_worker.get_unwrapped_frame(timeout=timeout)
+                        if unwarp_result is not None:
+                            _, frame_np, _ = unwarp_result
+                    # else: Use fisheye frame_np as-is (queue full or timeout)
+
                 processed_frame_for_gui = frame_np
                 if self.tracker and self.tracker.tracking_active:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
@@ -1558,6 +1819,7 @@ class VideoProcessor:
             cmd2.extend(['-vf', effective_vf_pipe2])
             if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
                 cmd2.extend(['-frames:v', str(num_frames_to_stream_hint)])
+            # Always use BGR24 - GPU unwarp worker handles BGR->RGBA conversion internally
             cmd2.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
 
             self.logger.info(f"Segment Pipe 1 CMD: {' '.join(shlex.quote(str(x)) for x in cmd1)}")
@@ -1586,7 +1848,9 @@ class VideoProcessor:
             if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
                 ffmpeg_cmd.extend(['-frames:v', str(num_frames_to_stream_hint)])
 
-            ffmpeg_cmd.extend(['-pix_fmt', 'bgr24', '-f', 'rawvideo', 'pipe:1'])
+            # Use RGBA for GPU unwarp to skip BGR->RGBA conversion
+            pix_fmt = 'rgba' if self.gpu_unwarp_enabled else 'bgr24'
+            ffmpeg_cmd.extend(['-pix_fmt', pix_fmt, '-f', 'rawvideo', 'pipe:1'])
             self.logger.info(f"Segment CMD (single pipe): {' '.join(shlex.quote(str(x)) for x in ffmpeg_cmd)}")
             try:
                 creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
@@ -1632,7 +1896,29 @@ class VideoProcessor:
                         f"after {frames_yielded} frames for segment (start {start_frame_abs_idx}). Stderr: '{stderr_on_short_read.strip()}'")
                     break
 
+                # Always use BGR24 format (3 bytes per pixel)
+                expected_size = self.yolo_input_size * self.yolo_input_size * 3
+                actual_bytes = len(raw_frame_bytes)
+
+                # Validate frame size
+                if actual_bytes != expected_size:
+                    self.logger.error(f"Invalid frame size: {actual_bytes} bytes (expected {expected_size}). Skipping frame.")
+                    continue
+
                 frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
+
+                # Apply GPU unwarp for VR frames if enabled
+                if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
+                    current_frame_id = start_frame_abs_idx + frames_yielded
+                    self.gpu_unwarp_worker.submit_frame(current_frame_id, frame_np,
+                                                       timestamp_ms=current_frame_id * (1000.0 / self.fps) if self.fps > 0 else 0.0,
+                                                       timeout=0.1)
+                    unwarp_result = self.gpu_unwarp_worker.get_unwrapped_frame(timeout=0.5)
+                    if unwarp_result is not None:
+                        _, frame_np, _ = unwarp_result
+                    else:
+                        self.logger.warning(f"GPU unwarp timeout for segment frame {current_frame_id}")
+
                 current_frame_id = start_frame_abs_idx + frames_yielded
                 yield current_frame_id, frame_np
                 frames_yielded += 1

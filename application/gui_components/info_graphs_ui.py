@@ -301,6 +301,13 @@ class InfoGraphsUI:
                 # Performance Panel Performance at the top
                 self.perf_monitor.render_info(show_detailed=True)
             imgui.separator()
+            # --- Pipeline Timing Section (Video Processing Performance) ---
+            if imgui.collapsing_header(
+                "Video Pipeline Performance##PipelineTimingSection",
+                flags=imgui.TREE_NODE_DEFAULT_OPEN,
+            )[0]:
+                self._render_content_pipeline_timing()
+            imgui.separator()
             if imgui.collapsing_header(
                 "System Monitor##PerformanceSection",
                 flags=imgui.TREE_NODE_DEFAULT_OPEN,
@@ -429,6 +436,17 @@ class InfoGraphsUI:
             imgui.next_column()
             imgui.text(f"{info.get('bit_depth', 'N/A')} bit")
             imgui.next_column()
+
+            imgui.text("Codec:")
+            imgui.next_column()
+            codec_name = info.get('codec_name', 'N/A')
+            imgui.text(codec_name.upper() if codec_name != 'N/A' else codec_name)
+            if imgui.is_item_hovered():
+                codec_long = info.get('codec_long_name', 'N/A')
+                if codec_long != 'N/A':
+                    imgui.set_tooltip(codec_long)
+            imgui.next_column()
+
             imgui.text("Detected Type:")
             imgui.next_column()
             imgui.text(f"{self.app.processor.determined_video_type or 'N/A'}")
@@ -539,6 +557,36 @@ class InfoGraphsUI:
             if changed:
                 processor.set_active_vr_parameters(input_format=vr_fmt_val[new_idx])
                 processor.reapply_video_settings()
+
+            # VR Unwarp Method dropdown
+            imgui.spacing()
+            unwarp_method_disp = ["Auto (Metal/OpenGL)", "GPU Metal", "GPU OpenGL", "CPU (v360)"]
+            unwarp_method_val = ["auto", "metal", "opengl", "v360"]
+
+            # Get current unwarp method
+            current_unwarp_method = getattr(processor, 'vr_unwarp_method_override', 'auto')
+            try:
+                current_unwarp_idx = unwarp_method_val.index(current_unwarp_method)
+            except ValueError:
+                current_unwarp_idx = 0
+
+            changed_unwarp, new_unwarp_idx = imgui.combo(
+                "Unwarp Method##vrUnwarp", current_unwarp_idx, unwarp_method_disp
+            )
+            if changed_unwarp:
+                processor.vr_unwarp_method_override = unwarp_method_val[new_unwarp_idx]
+                # Save to settings
+                self.app.app_settings.set("vr_unwarp_method", unwarp_method_val[new_unwarp_idx])
+                processor.reapply_video_settings()
+
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Unwarp Method:\n"
+                    "Auto: Automatically choose Metal or OpenGL\n"
+                    "GPU Metal: Use Metal shader (macOS)\n"
+                    "GPU OpenGL: Use OpenGL shader (cross-platform)\n"
+                    "CPU (v360): Use FFmpeg v360 filter (slower)"
+                )
 
             # Track slider dragging state
             is_slider_hovered = imgui.is_item_hovered()
@@ -667,6 +715,144 @@ class InfoGraphsUI:
             imgui.columns(1)
 
         imgui.end_child()
+
+    def _render_content_pipeline_timing(self):
+        """Render video processing pipeline performance metrics."""
+        processor = self.app.processor
+        if not processor or not processor.is_video_open():
+            imgui.text_disabled("No video loaded")
+            return
+
+        imgui.text_colored("Video Processing Pipeline", 0.8, 0.9, 1.0, 1.0)
+        imgui.separator()
+        imgui.spacing()
+
+        # Active unwarp method
+        imgui.columns(2, "pipeline_info", border=False)
+        imgui.set_column_width(0, 180 * imgui.get_io().font_global_scale)
+
+        imgui.text("Unwarp Method:")
+        imgui.next_column()
+
+        # Determine active method
+        if hasattr(processor, 'gpu_unwarp_enabled') and processor.gpu_unwarp_enabled:
+            if hasattr(processor, 'gpu_unwarp_worker') and processor.gpu_unwarp_worker:
+                backend = getattr(processor.gpu_unwarp_worker, 'backend', 'unknown')
+                method_text = f"GPU {backend.upper()}"
+                method_color = (0.2, 0.8, 0.2, 1.0)  # Green for GPU
+            else:
+                method_text = "GPU (initializing...)"
+                method_color = (1.0, 0.8, 0.2, 1.0)  # Yellow
+        elif processor.is_vr_active_or_potential():
+            method_text = "CPU (v360)"
+            method_color = (1.0, 0.6, 0.2, 1.0)  # Orange for CPU
+        else:
+            method_text = "N/A (2D video)"
+            method_color = (0.7, 0.7, 0.7, 1.0)  # Gray
+
+        imgui.text_colored(method_text, *method_color)
+        imgui.next_column()
+
+        # YOLO Model
+        imgui.text("YOLO Model:")
+        imgui.next_column()
+        if hasattr(processor, 'yolo_processor') and processor.yolo_processor:
+            model_name = getattr(processor.yolo_processor, 'model_name', 'FunGen-12s')
+            imgui.text(model_name)
+        else:
+            imgui.text_disabled("Not loaded")
+        imgui.next_column()
+
+        imgui.columns(1)
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Pipeline timing metrics
+        imgui.text_colored("Component Timings:", 0.8, 0.9, 1.0, 1.0)
+        imgui.spacing()
+
+        # Get timing data from processor (if available)
+        decode_time = getattr(processor, '_last_decode_time_ms', 0.0)
+        unwarp_time = getattr(processor, '_last_unwarp_time_ms', 0.0)
+        yolo_time = getattr(processor, '_last_yolo_time_ms', 0.0)
+        total_time = decode_time + unwarp_time + yolo_time
+
+        def render_timing_bar(label, time_ms, color):
+            """Render a timing bar with label and value."""
+            imgui.text(f"{label}:")
+            imgui.same_line(position=180 * imgui.get_io().font_global_scale)
+
+            if time_ms > 0:
+                imgui.text_colored(f"{time_ms:.2f}ms", *color)
+                imgui.same_line()
+                # Progress bar showing relative contribution
+                if total_time > 0:
+                    percentage = (time_ms / total_time)
+                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *color)
+                    imgui.progress_bar(percentage, size=(150, 0), overlay=f"{percentage*100:.1f}%")
+                    imgui.pop_style_color()
+            else:
+                imgui.text_disabled("N/A")
+
+        # FFmpeg decode
+        render_timing_bar("FFmpeg Decode", decode_time, (0.4, 0.7, 1.0, 1.0))
+
+        # GPU Unwarp / v360
+        if processor.gpu_unwarp_enabled:
+            render_timing_bar("GPU Unwarp", unwarp_time, (0.2, 0.8, 0.2, 1.0))
+        elif processor.is_vr_active_or_potential():
+            render_timing_bar("CPU v360 Unwarp", unwarp_time, (1.0, 0.6, 0.2, 1.0))
+
+        # YOLO Inference
+        render_timing_bar("YOLO Inference", yolo_time, (0.8, 0.4, 0.8, 1.0))
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Total and FPS
+        imgui.text_colored("Pipeline Summary:", 0.8, 0.9, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.columns(2, "pipeline_summary", border=False)
+        imgui.set_column_width(0, 180 * imgui.get_io().font_global_scale)
+
+        imgui.text("Total Time:")
+        imgui.next_column()
+        if total_time > 0:
+            if total_time < 16.67:
+                total_color = (0.2, 0.8, 0.2, 1.0)  # Green (>60 FPS)
+            elif total_time < 33.33:
+                total_color = (1.0, 0.8, 0.2, 1.0)  # Yellow (30-60 FPS)
+            else:
+                total_color = (1.0, 0.2, 0.2, 1.0)  # Red (<30 FPS)
+            imgui.text_colored(f"{total_time:.2f}ms", *total_color)
+        else:
+            imgui.text_disabled("N/A")
+        imgui.next_column()
+
+        imgui.text("Est. Pipeline FPS:")
+        imgui.next_column()
+        if total_time > 0:
+            fps = 1000.0 / total_time
+            if fps >= 60:
+                fps_color = (0.2, 0.8, 0.2, 1.0)  # Green
+            elif fps >= 30:
+                fps_color = (1.0, 0.8, 0.2, 1.0)  # Yellow
+            else:
+                fps_color = (1.0, 0.2, 0.2, 1.0)  # Red
+            imgui.text_colored(f"{fps:.1f} FPS", *fps_color)
+        else:
+            imgui.text_disabled("N/A")
+        imgui.next_column()
+
+        imgui.columns(1)
+        imgui.spacing()
+
+        # Performance recommendations
+        if total_time > 0:
+            imgui.text_disabled("Tip: Check individual component times to identify bottlenecks")
 
     def _render_content_performance(self):
         self.perf_monitor.start_timing()
