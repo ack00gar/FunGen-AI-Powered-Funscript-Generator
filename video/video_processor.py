@@ -109,6 +109,18 @@ class VideoProcessor:
         # Thumbnail Extractor for fast random frame access (OpenCV-based)
         self.thumbnail_extractor = None
 
+        # Performance timing metrics (for UI display)
+        # Update once per second with mean values
+        self._last_decode_time_ms = 0.0
+        self._last_unwarp_time_ms = 0.0
+        self._last_yolo_time_ms = 0.0
+
+        # Sample accumulators for 1-second averaging
+        self._decode_samples = []
+        self._unwarp_samples = []
+        self._yolo_samples = []
+        self._last_timing_update = time.time()
+
         self.stop_event = threading.Event()
         self.processing_start_frame_limit = 0
         self.processing_end_frame_limit = -1
@@ -137,6 +149,29 @@ class VideoProcessor:
         # ML format detector (lazy loaded)
         self.ml_detector = None
         self.ml_model_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'vr_detector_model_rf.pkl')
+
+    def _update_timing_metrics(self):
+        """Update display timing metrics from accumulated samples (once per second)."""
+        current_time = time.time()
+        if current_time - self._last_timing_update >= 1.0:
+            # Calculate means
+            if self._decode_samples:
+                self._last_decode_time_ms = sum(self._decode_samples) / len(self._decode_samples)
+                self._decode_samples = []
+
+            if self._unwarp_samples:
+                self._last_unwarp_time_ms = sum(self._unwarp_samples) / len(self._unwarp_samples)
+                self._unwarp_samples = []
+            else:
+                self._last_unwarp_time_ms = 0.0
+
+            if self._yolo_samples:
+                self._last_yolo_time_ms = sum(self._yolo_samples) / len(self._yolo_samples)
+                self._yolo_samples = []
+            else:
+                self._last_yolo_time_ms = 0.0
+
+            self._last_timing_update = current_time
 
     def _clear_cache(self):
         with self.frame_cache_lock:
@@ -1631,6 +1666,7 @@ class VideoProcessor:
 
                 # Get frame from dual output processor or standard FFmpeg
                 raw_frame_bytes = None
+                decode_start = time.perf_counter()
                 if self.dual_output_enabled:
                     # Use dual output processor
                     processing_frame = self.dual_output_processor.get_processing_frame()
@@ -1639,11 +1675,17 @@ class VideoProcessor:
                         raw_frame_bytes = processing_frame.tobytes()
                     else:
                         raw_frame_bytes = None
+                    decode_time = (time.perf_counter() - decode_start) * 1000.0
+                    self._decode_samples.append(decode_time)
                 else:
                     # Standard FFmpeg reading
                     if loop_ffmpeg_process.stdout is not None:
                         raw_frame_bytes = loop_ffmpeg_process.stdout.read(self.frame_size_bytes)
-                
+                        decode_time = (time.perf_counter() - decode_start) * 1000.0
+                        self._decode_samples.append(decode_time)
+                    else:
+                        raw_frame_bytes = None
+
                 raw_frame_len = len(raw_frame_bytes) if raw_frame_bytes is not None else 0
                 if not raw_frame_bytes or raw_frame_len < self.frame_size_bytes:
                     if self.dual_output_enabled:
@@ -1702,6 +1744,8 @@ class VideoProcessor:
 
                 # Apply GPU unwarp for VR frames if enabled
                 if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
+                    unwarp_start = time.perf_counter()
+
                     # Submit current frame to GPU worker (non-blocking)
                     submit_success = self.gpu_unwarp_worker.submit_frame(self.current_frame_index, frame_np,
                                                        timestamp_ms=self.current_frame_index * (1000.0 / self.fps) if self.fps > 0 else 0.0,
@@ -1718,15 +1762,24 @@ class VideoProcessor:
                             _, frame_np, _ = unwarp_result
                     # else: Use fisheye frame_np as-is (queue full or timeout)
 
+                    unwarp_time = (time.perf_counter() - unwarp_start) * 1000.0
+                    self._unwarp_samples.append(unwarp_time)
+
                 processed_frame_for_gui = frame_np
                 if self.tracker and self.tracker.tracking_active:
                     timestamp_ms = int(self.current_frame_index * (1000.0 / self.fps)) if self.fps > 0 else int(
                         time.time() * 1000)
-                    
+
                     try:
+                        yolo_start = time.perf_counter()
                         processed_frame_for_gui = self.tracker.process_frame(frame_np.copy(), timestamp_ms)[0]
+                        yolo_time = (time.perf_counter() - yolo_start) * 1000.0
+                        self._yolo_samples.append(yolo_time)
                     except Exception as e:
                         self.logger.error(f"Error in tracker.process_frame during loop: {e}", exc_info=True)
+
+                # Update timing metrics display (once per second)
+                self._update_timing_metrics()
 
                 with self.frame_lock:
                     self.current_frame = processed_frame_for_gui
