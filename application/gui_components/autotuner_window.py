@@ -1,5 +1,6 @@
 import imgui
 from config.constants import DEFAULT_S1_NUM_PRODUCERS, DEFAULT_S1_NUM_CONSUMERS
+from application.utils import primary_button_style
 
 class AutotunerWindow:
     def __init__(self, app_logic):
@@ -49,14 +50,16 @@ class AutotunerWindow:
                     imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                     imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-                if imgui.button("Start Autotune", width=-1):
-                    if is_ready:
-                        force_hwaccel = None
-                        if self.selected_hwaccel_idx > 0:
-                            selected_option = hwaccel_options[self.selected_hwaccel_idx]
-                            if selected_option != "Default (Test CPU + Best GPU)":
-                                force_hwaccel = selected_option
-                        self.app.start_autotuner(force_hwaccel=force_hwaccel)
+                # Start Autotune button (PRIMARY - positive action)
+                with primary_button_style():
+                    if imgui.button("Start Autotune", width=-1):
+                        if is_ready:
+                            force_hwaccel = None
+                            if self.selected_hwaccel_idx > 0:
+                                selected_option = hwaccel_options[self.selected_hwaccel_idx]
+                                if selected_option != "Default (Test CPU + Best GPU)":
+                                    force_hwaccel = selected_option
+                            self.app.start_autotuner(force_hwaccel=force_hwaccel)
 
                 if is_running:
                     imgui.pop_style_var()
@@ -124,13 +127,15 @@ class AutotunerWindow:
                     fps_best = self.app.autotuner_results.get((p_best, c_best, accel_best), (0.0, ""))[0]
                     imgui.text(f"Recommendation: {p_best}P/{c_best}C with HW Accel '{accel_best}' ({fps_best:.2f} FPS)")
 
-                    if imgui.button("Apply Recommended Settings"):
-                        self.app.stage_processor.num_producers_stage1 = p_best
-                        self.app.stage_processor.num_consumers_stage1 = c_best
-                        self.app.hardware_acceleration_method = accel_best
-                        self.app.app_settings.set("num_producers_stage1", p_best)
-                        self.app.app_settings.set("num_consumers_stage1", c_best)
-                        self.app.app_settings.set("hardware_acceleration_method", accel_best)
-                        self.app.logger.info(f"Autotuner settings applied: P={p_best}, C={c_best}, HW Accel={accel_best}", extra={'status_message': True})
+                    # Apply Recommended Settings button (PRIMARY - positive action)
+                    with primary_button_style():
+                        if imgui.button("Apply Recommended Settings"):
+                            self.app.stage_processor.num_producers_stage1 = p_best
+                            self.app.stage_processor.num_consumers_stage1 = c_best
+                            self.app.hardware_acceleration_method = accel_best
+                            self.app.app_settings.set("num_producers_stage1", p_best)
+                            self.app.app_settings.set("num_consumers_stage1", c_best)
+                            self.app.app_settings.set("hardware_acceleration_method", accel_best)
+                            self.app.logger.info(f"Autotuner settings applied: P={p_best}, C={c_best}, HW Accel={accel_best}", extra={'status_message': True})
         finally:
             imgui.end()
