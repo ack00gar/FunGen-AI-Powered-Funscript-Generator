@@ -184,6 +184,20 @@ class DarkTheme:
     UPDATE_DIALOG_TEXT = WHITE
     UPDATE_DIALOG_GRAY_TEXT = GRAY
 
+    # Button Palette Colors (for visual hierarchy)
+    # PRIMARY buttons (positive/affirmative actions: Start, Create, Save, etc.)
+    BUTTON_PRIMARY = (0.2, 0.5, 0.9, 1.0)  # Blue
+    BUTTON_PRIMARY_HOVERED = (0.3, 0.6, 1.0, 1.0)  # Lighter blue
+    BUTTON_PRIMARY_ACTIVE = (0.15, 0.4, 0.75, 1.0)  # Darker blue
+
+    # DESTRUCTIVE buttons (dangerous/irreversible actions: Delete, Clear, Abort, etc.)
+    BUTTON_DESTRUCTIVE = (0.8, 0.2, 0.2, 1.0)  # Red
+    BUTTON_DESTRUCTIVE_HOVERED = (0.9, 0.3, 0.3, 1.0)  # Lighter red
+    BUTTON_DESTRUCTIVE_ACTIVE = (0.7, 0.1, 0.1, 1.0)  # Darker red
+
+    # SECONDARY buttons (default/neutral actions: Browse, Edit, Cancel, etc.)
+    # These use ImGui's default button colors (no custom styling needed)
+
 
 # Current theme (default to dark)
 CurrentTheme = DarkTheme

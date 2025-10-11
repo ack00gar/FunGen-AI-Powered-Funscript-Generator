@@ -399,7 +399,23 @@ UI_CONTROL_ICON_URLS = {
 
     # File operations
     'ui/icons/folder.png': 'https://em-content.zobj.net/source/apple/391/file-folder_1f4c1.png',
+    'ui/icons/folder-open.png': 'https://em-content.zobj.net/source/apple/391/open-file-folder_1f4c2.png',
     'ui/icons/save.png': 'https://em-content.zobj.net/source/apple/391/floppy-disk_1f4be.png',
+    'ui/icons/save-as.png': 'https://em-content.zobj.net/source/apple/391/floppy-disk_1f4be.png',  # Using same as save
+    'ui/icons/document-new.png': 'https://em-content.zobj.net/source/apple/391/page-facing-up_1f4c4.png',
+    'ui/icons/import.png': 'https://em-content.zobj.net/source/apple/391/inbox-tray_1f4e5.png',
+    'ui/icons/export.png': 'https://em-content.zobj.net/source/apple/391/outbox-tray_1f4e4.png',
+
+    # Edit operations
+    'ui/icons/undo.png': 'https://em-content.zobj.net/source/apple/391/right-arrow-curving-left_21a9-fe0f.png',
+    'ui/icons/redo.png': 'https://em-content.zobj.net/source/apple/391/left-arrow-curving-right_21aa-fe0f.png',
+    'ui/icons/edit.png': 'https://em-content.zobj.net/source/apple/391/pencil_270f-fe0f.png',
+    'ui/icons/trash.png': 'https://em-content.zobj.net/source/apple/391/wastebasket_1f5d1-fe0f.png',
+
+    # Chapter management
+    'ui/icons/plus-circle.png': 'https://em-content.zobj.net/source/apple/391/heavy-plus-sign_2795.png',
+    'ui/icons/merge.png': 'https://em-content.zobj.net/source/apple/391/link_1f517.png',
+    'ui/icons/scissors.png': 'https://em-content.zobj.net/source/apple/391/scissors_2702-fe0f.png',
 
     # Status indicators
     'ui/icons/check.png': 'https://em-content.zobj.net/source/apple/391/check-mark-button_2705.png',

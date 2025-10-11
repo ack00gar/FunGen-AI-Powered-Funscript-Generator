@@ -235,3 +235,18 @@ class UpdateSettingsColors:
     TOKEN_NOT_SET = CurrentTheme.UPDATE_TOKEN_NOT_SET
     DIALOG_TEXT = CurrentTheme.UPDATE_DIALOG_TEXT
     DIALOG_GRAY_TEXT = CurrentTheme.UPDATE_DIALOG_GRAY_TEXT
+
+
+class ButtonColors:
+    """Color constants for button styling palette (visual hierarchy)."""
+    # PRIMARY buttons (positive/affirmative actions: Start, Create, Save, etc.)
+    PRIMARY = CurrentTheme.BUTTON_PRIMARY
+    PRIMARY_HOVERED = CurrentTheme.BUTTON_PRIMARY_HOVERED
+    PRIMARY_ACTIVE = CurrentTheme.BUTTON_PRIMARY_ACTIVE
+
+    # DESTRUCTIVE buttons (dangerous/irreversible actions: Delete, Clear, Abort, etc.)
+    DESTRUCTIVE = CurrentTheme.BUTTON_DESTRUCTIVE
+    DESTRUCTIVE_HOVERED = CurrentTheme.BUTTON_DESTRUCTIVE_HOVERED
+    DESTRUCTIVE_ACTIVE = CurrentTheme.BUTTON_DESTRUCTIVE_ACTIVE
+
+    # SECONDARY buttons use ImGui's default styling (no constants needed)
