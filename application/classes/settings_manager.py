@@ -70,10 +70,16 @@ class AppSettings:
             "show_heatmap": True,
             "use_simplified_funscript_preview": False,
             "show_stage2_overlay": True,
-            "show_gauge_window_timeline1": True,
-"show_gauge_window_timeline2": False,
-            "show_lr_dial_graph": True,  # Movement Bar (rotating bar with up/down fill and roll angle)
-            "show_simulator_3d": False, # 3D Simulator
+            "show_gauge_window_timeline1": False,
+            "show_gauge_window_timeline2": False,
+            "show_lr_dial_graph": False,  # Movement Bar (rotating bar with up/down fill and roll angle)
+            "show_simulator_3d": True, # 3D Simulator
+            "show_3d_simulator_logo": True,  # Display logo texture on 3D simulator cylinder
+
+            # Overlay mode settings (render as overlay on video display)
+            "gauge_overlay_mode": False,  # Render gauges as video overlay
+            "movement_bar_overlay_mode": False,  # Render movement bar as video overlay
+            "simulator_3d_overlay_mode": True,  # Render 3D simulator as video overlay
             "show_chapter_list_window": False,
             "show_timeline_editor_buttons": False,
             "show_advanced_options": False,

@@ -1739,18 +1739,18 @@ class GUI:
         """Optimized popup rendering - only renders visible/active popups."""
         app_state = self.app.app_state_ui
         
-        # Only render gauge windows if they're shown
-        if getattr(app_state, 'show_gauge_window_timeline1', False):
+        # Only render gauge windows if they're shown AND not in overlay mode
+        if getattr(app_state, 'show_gauge_window_timeline1', False) and not self.app.app_settings.get('gauge_overlay_mode', False):
             self.gauge_window_ui_t1.render()
-            
-        if getattr(app_state, 'show_gauge_window_timeline2', False):
+
+        if getattr(app_state, 'show_gauge_window_timeline2', False) and not self.app.app_settings.get('gauge_overlay_mode', False):
             self.gauge_window_ui_t2.render()
-            
-        # Only render Movement Bar if shown
-        if getattr(app_state, 'show_lr_dial_graph', False):
+
+        # Only render Movement Bar if shown AND not in overlay mode
+        if getattr(app_state, 'show_lr_dial_graph', False) and not self.app.app_settings.get('movement_bar_overlay_mode', False):
             self.movement_bar_ui.render()
 
-        if getattr(app_state, 'show_simulator_3d', False):
+        if getattr(app_state, 'show_simulator_3d', False) and not self.app.app_settings.get('simulator_3d_overlay_mode', False):
             self.simulator_3d_window_ui.render()
 
         # Batch confirmation dialog (has internal visibility check)
