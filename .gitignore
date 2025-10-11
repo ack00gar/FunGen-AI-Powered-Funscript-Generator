@@ -6,6 +6,9 @@ config.json
 # Auto-downloaded splash screen emojis (downloaded from config/constants.py URLs)
 assets/splash/*.png
 
+# Auto-downloaded UI control icons (downloaded from config/constants.py URLs)
+assets/ui/icons/*.png
+
 # Test and audit files that shouldn't be in the repo
 test_timeline_fixes.py
 test_complete_ua_fix.py
