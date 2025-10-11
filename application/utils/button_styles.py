@@ -20,9 +20,9 @@ def primary_button_style():
             if imgui.button("Start Processing"):
                 # Handle click
     """
-    imgui.push_style_color(imgui.Col.button, *ButtonColors.PRIMARY)
-    imgui.push_style_color(imgui.Col.button_hovered, *ButtonColors.PRIMARY_HOVERED)
-    imgui.push_style_color(imgui.Col.button_active, *ButtonColors.PRIMARY_ACTIVE)
+    imgui.push_style_color(imgui.COLOR_BUTTON, *ButtonColors.PRIMARY)
+    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *ButtonColors.PRIMARY_HOVERED)
+    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *ButtonColors.PRIMARY_ACTIVE)
     try:
         yield
     finally:
@@ -41,9 +41,9 @@ def destructive_button_style():
             if imgui.button("Delete Chapter"):
                 # Handle click
     """
-    imgui.push_style_color(imgui.Col.button, *ButtonColors.DESTRUCTIVE)
-    imgui.push_style_color(imgui.Col.button_hovered, *ButtonColors.DESTRUCTIVE_HOVERED)
-    imgui.push_style_color(imgui.Col.button_active, *ButtonColors.DESTRUCTIVE_ACTIVE)
+    imgui.push_style_color(imgui.COLOR_BUTTON, *ButtonColors.DESTRUCTIVE)
+    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *ButtonColors.DESTRUCTIVE_HOVERED)
+    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *ButtonColors.DESTRUCTIVE_ACTIVE)
     try:
         yield
     finally:

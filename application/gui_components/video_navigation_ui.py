@@ -2,7 +2,7 @@ import imgui
 import logging
 from typing import Optional
 
-from application.utils import _format_time, VideoSegment, get_icon_texture_manager
+from application.utils import _format_time, VideoSegment, get_icon_texture_manager, primary_button_style, destructive_button_style
 from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS
 from config.element_group_colors import VideoNavigationColors
 from config.constants_colors import CurrentTheme
@@ -1009,8 +1009,26 @@ class VideoNavigationUI:
 
             imgui.pop_item_width()
             imgui.separator()
-            if imgui.button("Create##ChapterCreateWinBtn"):
-                if self.app.funscript_processor:
+
+            # Get icon texture manager
+            icon_mgr = get_icon_texture_manager()
+            plus_circle_tex, _, _ = icon_mgr.get_icon_texture('plus-circle.png')
+            btn_size = imgui.get_frame_height()
+
+            # Create button with icon and PRIMARY styling (positive action)
+            with primary_button_style():
+                clicked = False
+                if plus_circle_tex:
+                    if imgui.image_button(plus_circle_tex, btn_size, btn_size):
+                        clicked = True
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Create new chapter")
+                    imgui.same_line()
+                    imgui.text("Create")
+                else:
+                    clicked = imgui.button("Create##ChapterCreateWinBtn")
+
+                if clicked and self.app.funscript_processor:
                     self.app.funscript_processor.create_new_chapter_from_data(self.chapter_edit_data.copy())
                     self.show_create_chapter_dialog = False
             imgui.same_line()
@@ -1086,8 +1104,26 @@ class VideoNavigationUI:
 
             imgui.pop_item_width()
             imgui.separator()
-            if imgui.button("Save##ChapterEditWinBtn"):
-                if self.app.funscript_processor and self.chapter_to_edit_id:
+
+            # Get icon texture manager
+            icon_mgr = get_icon_texture_manager()
+            save_tex, _, _ = icon_mgr.get_icon_texture('save-as.png')
+            btn_size = imgui.get_frame_height()
+
+            # Save button with icon and PRIMARY styling (positive action)
+            with primary_button_style():
+                clicked = False
+                if save_tex:
+                    if imgui.image_button(save_tex, btn_size, btn_size):
+                        clicked = True
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Save chapter changes")
+                    imgui.same_line()
+                    imgui.text("Save")
+                else:
+                    clicked = imgui.button("Save##ChapterEditWinBtn")
+
+                if clicked and self.app.funscript_processor and self.chapter_to_edit_id:
                     self.app.funscript_processor.update_chapter_from_data(self.chapter_to_edit_id, self.chapter_edit_data.copy())
                     self.show_edit_chapter_dialog = False
                     self.chapter_to_edit_id = None
@@ -1562,13 +1598,40 @@ class ChapterListWindow:
                     # Actions
                     imgui.table_next_column()
                     imgui.push_id(f"actions_{chapter.unique_id}")
-                    if imgui.button("Edit"):
-                        self._open_edit_dialog(chapter)
+
+                    # Get icon textures
+                    icon_mgr = get_icon_texture_manager()
+                    edit_tex, _, _ = icon_mgr.get_icon_texture('edit.png')
+                    trash_tex, _, _ = icon_mgr.get_icon_texture('trash.png')
+                    btn_size = imgui.get_frame_height()
+
+                    # Edit button with icon (SECONDARY - default styling)
+                    if edit_tex:
+                        if imgui.image_button(edit_tex, btn_size, btn_size):
+                            self._open_edit_dialog(chapter)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Edit chapter")
+                    else:
+                        if imgui.button("Edit"):
+                            self._open_edit_dialog(chapter)
+
                     imgui.same_line()
-                    if imgui.button("Delete"):
-                        fs_proc.delete_video_chapters_by_ids([chapter.unique_id])
-                        if chapter in self.list_context_selected_chapters:
-                            chapters_to_remove_from_selection.append(chapter)
+
+                    # Delete button with icon (DESTRUCTIVE - dangerous action)
+                    with destructive_button_style():
+                        if trash_tex:
+                            if imgui.image_button(trash_tex, btn_size, btn_size):
+                                fs_proc.delete_video_chapters_by_ids([chapter.unique_id])
+                                if chapter in self.list_context_selected_chapters:
+                                    chapters_to_remove_from_selection.append(chapter)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip("Delete chapter")
+                        else:
+                            if imgui.button("Delete"):
+                                fs_proc.delete_video_chapters_by_ids([chapter.unique_id])
+                                if chapter in self.list_context_selected_chapters:
+                                    chapters_to_remove_from_selection.append(chapter)
+
                     imgui.pop_id()
 
                 if chapters_to_remove_from_selection:
