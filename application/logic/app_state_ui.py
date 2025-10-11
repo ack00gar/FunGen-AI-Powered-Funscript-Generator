@@ -42,8 +42,8 @@ class AppStateUI:
             self.selected_processing_speed_mode: ProcessingSpeedMode = ProcessingSpeedMode.REALTIME
 
         # UI visibility states
-        self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", True))
-        self.show_simulator_3d = self.app_settings.get("show_simulator_3d", defaults.get("show_simulator_3d", False))
+        self.show_lr_dial_graph = self.app_settings.get("show_lr_dial_graph", defaults.get("show_lr_dial_graph", False))
+        self.show_simulator_3d = self.app_settings.get("show_simulator_3d", defaults.get("show_simulator_3d", True))
         self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", True))  # Legacy preview
         self.show_gauge = self.app_settings.get("show_gauge_window", defaults.get("show_gauge_window", True))
         self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", False))
@@ -111,7 +111,7 @@ class AppStateUI:
         self.last_funscript_preview_action_count = -1
 
         # Gauge Window Attributes
-        self.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1", defaults.get("show_gauge_window_timeline1", True))
+        self.show_gauge_window_timeline1 = self.app_settings.get("show_gauge_window_timeline1", defaults.get("show_gauge_window_timeline1", False))
         self.show_gauge_window_timeline2 = self.app_settings.get("show_gauge_window_timeline2", defaults.get("show_gauge_window_timeline2", False))
 
         default_gauge_w = self.app_settings.get("gauge_window_size_w", defaults.get("gauge_window_size_w", 100))

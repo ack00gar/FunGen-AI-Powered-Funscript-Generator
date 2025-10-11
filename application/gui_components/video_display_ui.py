@@ -626,6 +626,9 @@ class VideoDisplayUI:
                             if use_small_font:
                                 imgui.pop_font()
 
+                            # --- Render Component Overlays (if enabled) ---
+                            self._render_component_overlays(app_state)
+
                 # --- Interactive Refinement Overlay and Click Handling ---
                 if self.app.app_state_ui.interactive_refinement_mode_enabled:
                     # 1. Render the bounding boxes so the user can see what to click.
@@ -1872,3 +1875,327 @@ class VideoDisplayUI:
             print(f"DEBUG: Exception in Handy resync: {e}")
             if hasattr(self.app, 'logger'):
                 self.app.logger.error(f"Failed to resync Handy after seek: {e}")
+
+    def _render_component_overlays(self, app_state):
+        """Render component overlays (gauges, movement bar, 3D simulator) on video display."""
+        # Check if any overlay modes are enabled
+        gauge_overlay = self.app.app_settings.get('gauge_overlay_mode', False)
+        movement_bar_overlay = self.app.app_settings.get('movement_bar_overlay_mode', False)
+        simulator_3d_overlay = self.app.app_settings.get('simulator_3d_overlay_mode', False)
+
+        if not (gauge_overlay or movement_bar_overlay or simulator_3d_overlay):
+            return
+
+        # Get video display rect for positioning
+        img_rect = self._actual_video_image_rect_on_screen
+        if not img_rect:
+            return
+
+        video_min_x = img_rect['min_x']
+        video_min_y = img_rect['min_y']
+        video_max_x = img_rect['max_x']
+        video_max_y = img_rect['max_y']
+        video_width = video_max_x - video_min_x
+        video_height = video_max_y - video_min_y
+
+        # Render gauges overlay (bottom-left and bottom-center)
+        if gauge_overlay:
+            if app_state.show_gauge_window_timeline1:
+                self._render_gauge_overlay(app_state, "timeline1", video_min_x, video_min_y, video_max_x, video_max_y)
+            if app_state.show_gauge_window_timeline2:
+                self._render_gauge_overlay(app_state, "timeline2", video_min_x, video_min_y, video_max_x, video_max_y)
+
+        # Render movement bar overlay (bottom-right)
+        if movement_bar_overlay and app_state.show_lr_dial_graph:
+            self._render_movement_bar_overlay(app_state, video_min_x, video_min_y, video_max_x, video_max_y)
+
+        # Render 3D simulator overlay (top-left)
+        if simulator_3d_overlay and app_state.show_simulator_3d:
+            self._render_simulator_3d_overlay(app_state, video_min_x, video_min_y, video_max_x, video_max_y)
+
+    def _render_movement_bar_overlay(self, app_state, video_min_x, video_min_y, video_max_x, video_max_y):
+        """Render movement bar as overlay on video display (bottom-right)."""
+        overlay_width = 180
+        overlay_height = 220
+        padding = 10
+
+        # Position at bottom-right of video (default position)
+        overlay_x = video_max_x - overlay_width - padding
+        overlay_y = video_max_y - overlay_height - padding
+
+        imgui.set_next_window_position(overlay_x, overlay_y, condition=imgui.ONCE)
+        imgui.set_next_window_size(overlay_width, overlay_height, condition=imgui.ONCE)
+
+        # Fully transparent background, no border
+        imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_color(imgui.COLOR_BORDER, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_var(imgui.STYLE_WINDOW_ROUNDING, 0.0)
+
+        window_flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_SCROLLBAR |
+                       imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_SAVED_SETTINGS)
+
+        imgui.begin("Movement Bar (Overlay)##MovementBarOverlay", flags=window_flags)
+
+        # Draw movement bar content
+        self._draw_movement_bar_content(app_state)
+
+        # Clamp window position to video display area
+        current_pos = imgui.get_window_position()
+        current_size = imgui.get_window_size()
+
+        # Calculate clamped position
+        min_x = max(video_min_x, min(current_pos[0], video_max_x - current_size[0]))
+        min_y = max(video_min_y, min(current_pos[1], video_max_y - current_size[1]))
+
+        # Apply clamped position if different
+        if (min_x, min_y) != (current_pos[0], current_pos[1]):
+            imgui.set_window_position(min_x, min_y)
+
+        imgui.end()
+        imgui.pop_style_var(1)
+        imgui.pop_style_color(2)
+
+    def _draw_movement_bar_content(self, app_state):
+        """Draw the actual movement bar visualization."""
+        import numpy as np
+
+        draw_list = imgui.get_window_draw_list()
+        content_start_pos = imgui.get_cursor_screen_pos()
+        content_avail_w, content_avail_h = imgui.get_content_region_available()
+
+        padding = 15
+        canvas_origin_x = content_start_pos[0] + padding
+        canvas_origin_y = content_start_pos[1] + padding
+        drawable_width = content_avail_w - 2 * padding
+        drawable_height = content_avail_h - 2 * padding
+
+        if drawable_width < 80 or drawable_height < 120:
+            imgui.text("Too small")
+            return
+
+        # Get current funscript values
+        up_down_position = getattr(app_state, 'gauge_value_t1', 50)
+        roll_angle = getattr(app_state, 'lr_dial_value', 50)
+
+        # Calculate center point for rotation
+        center_x = canvas_origin_x + drawable_width / 2
+        center_y = canvas_origin_y + drawable_height / 2
+
+        # Convert roll_angle to rotation (-30° to +30°)
+        roll_degrees = -((roll_angle / 100.0) - 0.5) * 60.0
+        roll_radians = np.radians(roll_degrees)
+        cos_r, sin_r = np.cos(roll_radians), np.sin(roll_radians)
+
+        # Bar dimensions
+        bar_width = min(50, drawable_width * 0.25)
+        bar_height = drawable_height * 0.75
+
+        # Bar corners (unrotated, centered)
+        half_w = bar_width / 2
+        half_h = bar_height / 2
+        corners = [
+            (-half_w, -half_h),  # Top-left
+            (half_w, -half_h),   # Top-right
+            (half_w, half_h),    # Bottom-right
+            (-half_w, half_h)    # Bottom-left
+        ]
+
+        # Rotate corners
+        rotated = [(x * cos_r - y * sin_r + center_x, x * sin_r + y * cos_r + center_y) for x, y in corners]
+
+        # Draw bar background
+        p1, p2, p3, p4 = rotated
+        bar_bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.9)
+        draw_list.add_triangle_filled(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], bar_bg_color)
+        draw_list.add_triangle_filled(p1[0], p1[1], p3[0], p3[1], p4[0], p4[1], bar_bg_color)
+
+        # Calculate fill height based on up_down_position
+        fill_ratio = up_down_position / 100.0
+        fill_height = bar_height * fill_ratio
+
+        # Fill region corners (from bottom up to fill_height, with 2px padding)
+        fill_y_start = half_h - fill_height
+        fill_corners_local = [
+            (-half_w + 2, fill_y_start),  # Top-left of fill
+            (half_w - 2, fill_y_start),   # Top-right of fill
+            (half_w - 2, half_h - 2),     # Bottom-right
+            (-half_w + 2, half_h - 2)     # Bottom-left
+        ]
+
+        # Only draw fill if there's something to fill
+        if fill_height > 0:
+            rotated_fill = [(x * cos_r - y * sin_r + center_x, x * sin_r + y * cos_r + center_y) for x, y in fill_corners_local]
+
+            # Color based on position: red (down) to green (up)
+            if fill_ratio < 0.5:
+                # Bottom half: red to yellow
+                t = fill_ratio * 2  # 0 to 1
+                r, g, b = 0.8, 0.2 + t * 0.6, 0.0
+            else:
+                # Top half: yellow to green
+                t = (fill_ratio - 0.5) * 2  # 0 to 1
+                r, g, b = 0.8 - t * 0.6, 0.8, t * 0.2
+
+            fill_color = imgui.get_color_u32_rgba(r, g, b, 0.8)
+
+            # Draw filled portion
+            f1, f2, f3, f4 = rotated_fill
+            draw_list.add_triangle_filled(f1[0], f1[1], f2[0], f2[1], f3[0], f3[1], fill_color)
+            draw_list.add_triangle_filled(f1[0], f1[1], f3[0], f3[1], f4[0], f4[1], fill_color)
+
+        # Draw bar border
+        bar_border_color = imgui.get_color_u32_rgba(0.5, 0.5, 0.5, 1.0)
+        for i in range(len(rotated)):
+            p_cur = rotated[i]
+            p_next = rotated[(i + 1) % len(rotated)]
+            draw_list.add_line(p_cur[0], p_cur[1], p_next[0], p_next[1], bar_border_color, thickness=2)
+
+    def _render_gauge_overlay(self, app_state, timeline_name, video_min_x, video_min_y, video_max_x, video_max_y):
+        """Render gauge as overlay on video display."""
+        # Gauge dimensions
+        overlay_width = 120
+        overlay_height = 250
+        padding = 10
+
+        # Position based on timeline (T1 = bottom-left, T2 = bottom-center)
+        if timeline_name == "timeline1":
+            overlay_x = video_min_x + padding
+            overlay_y = video_max_y - overlay_height - padding
+            window_id = "Gauge T1 (Overlay)##GaugeT1Overlay"
+            gauge_value = getattr(app_state, 'gauge_value_t1', 50)
+        else:
+            # Center-left (offset from timeline1)
+            overlay_x = video_min_x + padding + overlay_width + 20
+            overlay_y = video_max_y - overlay_height - padding
+            window_id = "Gauge T2 (Overlay)##GaugeT2Overlay"
+            gauge_value = getattr(app_state, 'gauge_value_t2', 50)
+
+        imgui.set_next_window_position(overlay_x, overlay_y, condition=imgui.ONCE)
+        imgui.set_next_window_size(overlay_width, overlay_height, condition=imgui.ONCE)
+
+        # Fully transparent background, no border
+        imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_color(imgui.COLOR_BORDER, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_var(imgui.STYLE_WINDOW_ROUNDING, 0.0)
+
+        window_flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_SCROLLBAR |
+                       imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_SAVED_SETTINGS)
+
+        imgui.begin(window_id, flags=window_flags)
+
+        # Draw gauge content
+        self._draw_gauge_content(gauge_value)
+
+        # Clamp window position to video display area
+        current_pos = imgui.get_window_position()
+        current_size = imgui.get_window_size()
+
+        # Calculate clamped position
+        min_x = max(video_min_x, min(current_pos[0], video_max_x - current_size[0]))
+        min_y = max(video_min_y, min(current_pos[1], video_max_y - current_size[1]))
+
+        # Apply clamped position if different
+        if (min_x, min_y) != (current_pos[0], current_pos[1]):
+            imgui.set_window_position(min_x, min_y)
+
+        imgui.end()
+        imgui.pop_style_var(1)
+        imgui.pop_style_color(2)
+
+    def _draw_gauge_content(self, gauge_value):
+        """Draw the actual gauge visualization."""
+        from config.element_group_colors import GaugeColors
+
+        draw_list = imgui.get_window_draw_list()
+        content_start_pos = imgui.get_cursor_screen_pos()
+        content_avail_w, content_avail_h = imgui.get_content_region_available()
+
+        padding = 10
+        canvas_origin_x = content_start_pos[0] + padding
+        canvas_origin_y = content_start_pos[1] + padding
+        drawable_width = content_avail_w - 2 * padding
+        drawable_height = content_avail_h - 2 * padding
+
+        if drawable_width < 30 or drawable_height < 100:
+            imgui.text("Too small")
+            return
+
+        # Vertical gauge bar
+        bar_x = canvas_origin_x + drawable_width / 2 - 15
+        bar_y = canvas_origin_y
+        bar_width = 30
+        bar_height = drawable_height
+
+        # Background
+        bg_color = imgui.get_color_u32_rgba(*GaugeColors.BACKGROUND)
+        draw_list.add_rect_filled(bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, bg_color, rounding=5)
+
+        # Fill based on gauge value (bottom to top) - use BAR_GREEN
+        fill_height = bar_height * (gauge_value / 100.0)
+        fill_y = bar_y + bar_height - fill_height
+
+        fill_color = imgui.get_color_u32_rgba(*GaugeColors.BAR_GREEN)
+        if fill_height > 0:
+            draw_list.add_rect_filled(bar_x, fill_y, bar_x + bar_width, bar_y + bar_height, fill_color, rounding=5)
+
+        # Outline
+        outline_color = imgui.get_color_u32_rgba(*GaugeColors.BORDER)
+        draw_list.add_rect(bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, outline_color, rounding=5, thickness=2)
+
+        # Center line (50% mark) - use TEXT color
+        center_y = bar_y + bar_height / 2
+        center_line_color = imgui.get_color_u32_rgba(*GaugeColors.TEXT)
+        draw_list.add_line(bar_x, center_y, bar_x + bar_width, center_y, center_line_color, thickness=2)
+
+        # Value text
+        text = f"{int(gauge_value)}"
+        text_size = imgui.calc_text_size(text)
+        text_x = bar_x + bar_width / 2 - text_size[0] / 2
+        text_y = bar_y + bar_height + 5
+        text_color = imgui.get_color_u32_rgba(*GaugeColors.VALUE_TEXT)
+        draw_list.add_text(text_x, text_y, text_color, text)
+
+    def _render_simulator_3d_overlay(self, app_state, video_min_x, video_min_y, video_max_x, video_max_y):
+        """Render 3D simulator as overlay on video display (bottom-right, half size)."""
+        video_width = video_max_x - video_min_x
+        video_height = video_max_y - video_min_y
+
+        # Size: exactly half of video width and height
+        overlay_width = int(video_width / 2)
+        overlay_height = int(video_height / 2)
+
+        # Position at bottom-right of video (aligned to corner)
+        overlay_x = video_max_x - overlay_width
+        overlay_y = video_max_y - overlay_height
+
+        imgui.set_next_window_position(overlay_x, overlay_y, condition=imgui.ALWAYS)
+        imgui.set_next_window_size(overlay_width, overlay_height, condition=imgui.ALWAYS)
+
+        # Fully transparent background, no border
+        imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_color(imgui.COLOR_BORDER, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_var(imgui.STYLE_WINDOW_ROUNDING, 0.0)
+
+        window_flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_SCROLLBAR |
+                       imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_SAVED_SETTINGS |
+                       imgui.WINDOW_NO_RESIZE)
+
+        imgui.begin("3D Simulator (Overlay)##Simulator3DOverlay", flags=window_flags)
+
+        # Get current window content size for rendering
+        content_w, content_h = imgui.get_content_region_available()
+
+        # Get simulator instance and render 3D content
+        if hasattr(self.gui_instance, 'simulator_3d_window_ui'):
+            simulator = self.gui_instance.simulator_3d_window_ui
+            # Render the 3D content with overlay window size
+            if content_w > 50 and content_h > 50:  # Minimum size check
+                simulator.render_3d_content(width=int(content_w), height=int(content_h))
+            else:
+                imgui.text("Window too small")
+        else:
+            imgui.text("3D Simulator Unavailable")
+
+        imgui.end()
+        imgui.pop_style_var(1)
+        imgui.pop_style_color(2)

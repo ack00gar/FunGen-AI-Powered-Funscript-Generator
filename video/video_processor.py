@@ -81,6 +81,8 @@ class VideoProcessor:
         self.frames_for_fps_calc = 0
         self.frame_lock = threading.Lock()
         self.seek_request_frame_index = None
+        self.seek_in_progress = False  # Flag to track if seek operation is running
+        self.seek_thread = None  # Thread for async seek operations
         self.total_frames = 0
         self.current_frame_index = 0
         self.current_stream_start_frame_abs = 0
@@ -1531,30 +1533,72 @@ class VideoProcessor:
         self.logger.info("GUI processing stopped.")
 
     def seek_video(self, frame_index: int):
-        if not self.video_info or self.video_info.get('fps', 0) <= 0 or self.total_frames <= 0: return
+        """
+        Seek to a specific frame. This runs asynchronously to avoid blocking the UI.
+        If a seek is already in progress, it will be cancelled and replaced with the new seek.
+        """
+        if not self.video_info or self.video_info.get('fps', 0) <= 0 or self.total_frames <= 0:
+            return
+
         target_frame = max(0, min(frame_index, self.total_frames - 1))
 
-        was_processing = self.is_processing
-        was_paused = self.is_processing and self.pause_event.is_set()
-        stored_end_limit = self.processing_end_frame_limit
+        # If a seek is already in progress, wait for it to finish (or cancel it)
+        if self.seek_in_progress and self.seek_thread and self.seek_thread.is_alive():
+            self.logger.debug(f"Seek already in progress, new seek to frame {target_frame} will wait")
+            # Don't block - just set the new target and let the existing thread handle it
+            self.seek_request_frame_index = target_frame
+            return
 
-        if was_processing:
-            self.stop_processing(join_thread=True)
+        # Mark seek as in progress
+        self.seek_in_progress = True
+        self.seek_request_frame_index = target_frame
 
-        self.logger.info(f"Seek requested to frame {target_frame}")
-        new_frame = self._get_specific_frame(target_frame)
+        # Run seek operation in background thread to avoid blocking UI
+        self.seek_thread = threading.Thread(
+            target=self._seek_video_worker,
+            args=(target_frame,),
+            daemon=True,
+            name=f"SeekThread-{target_frame}"
+        )
+        self.seek_thread.start()
 
-        with self.frame_lock:
-            self.current_frame = new_frame
-        
+    def _seek_video_worker(self, target_frame: int):
+        """Worker thread for async seek operations. Runs blocking operations without freezing UI."""
+        try:
+            was_processing = self.is_processing
+            was_paused = self.is_processing and self.pause_event.is_set()
+            stored_end_limit = self.processing_end_frame_limit
 
-        if new_frame is None:
-            self.logger.warning(f"Seek to frame {target_frame} failed to retrieve frame.")
-            self.current_frame_index = target_frame
+            if was_processing:
+                # Stop processing without joining thread to avoid blocking
+                self.stop_processing(join_thread=False)
+                # Give it a moment to stop gracefully
+                time.sleep(0.05)
 
-        if was_processing and not was_paused:
-            self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
-        # If was_paused, do not restart processing (remain paused after seek)
+            self.logger.info(f"Seeking to frame {target_frame}")
+
+            # Use batch_fetch_size=1 for fast seeking via thumbnail extractor
+            original_batch_size = self.batch_fetch_size
+            self.batch_fetch_size = 1
+            new_frame = self._get_specific_frame(target_frame)
+            self.batch_fetch_size = original_batch_size
+
+            with self.frame_lock:
+                self.current_frame = new_frame
+
+            if new_frame is None:
+                self.logger.warning(f"Seek to frame {target_frame} failed to retrieve frame.")
+                self.current_frame_index = target_frame
+
+            if was_processing and not was_paused:
+                self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
+            # If was_paused, do not restart processing (remain paused after seek)
+
+        except Exception as e:
+            self.logger.error(f"Error during seek operation: {e}", exc_info=True)
+        finally:
+            self.seek_in_progress = False
+            self.seek_request_frame_index = None
 
     def is_vr_active_or_potential(self) -> bool:
         if self.video_type_setting == 'VR':

@@ -249,7 +249,7 @@ class GPUUnwarpWorker:
             self.avg_unwarp_time = self.total_unwarp_time / self.frames_processed
 
             # Log slow frames
-            if unwarp_time > 0.010:  # >10ms is slow for GPU
+            if unwarp_time > 0.020:  # >20ms is slow for GPU unwarp
                 self.logger.warning(f"Slow GPU unwarp: {unwarp_time*1000:.1f}ms for frame {job.frame_index}")
 
             # Submit to output queue (non-blocking drop if full)
