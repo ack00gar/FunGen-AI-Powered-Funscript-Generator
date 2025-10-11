@@ -12,20 +12,26 @@ hardcoded in the DualAxisFunscript class.
 from typing import Dict, Any, List, Optional
 import copy
 from funscript.plugins.base_plugin import FunscriptTransformationPlugin
+from funscript.plugins.resample_plugin import PeakPreservingResamplePlugin
+from funscript.plugins.savgol_filter_plugin import SavgolFilterPlugin
+from funscript.plugins.amplify_plugin import AmplifyPlugin
+from funscript.plugins.keyframe_plugin import KeyframePlugin
+from funscript.plugins.anti_jerk_plugin import AntiJerkPlugin
 
 
 class UltimateAutotunePlugin(FunscriptTransformationPlugin):
     """
     Ultimate Autotune Plugin - Multi-stage funscript enhancement pipeline.
-    
-    This plugin applies a sophisticated 7-stage processing pipeline:
-    1. High-speed point removal (custom speed limiter)
-    2. Peak-preserving resample (50ms)
-    3. Savitzky-Golay smoothing (window=11, order=7)
-    4. Peak-preserving resample (50ms)
-    5. Amplification (scale=1.25, center=50)
-    6. Peak-preserving resample (50ms)
-    7. Keyframe simplification (tolerance=10, time=50ms)
+
+    This plugin applies a sophisticated 8-stage processing pipeline using the plugin system:
+    1. High-speed point removal (custom speed limiter - no plugin available)
+    2. Peak-preserving resample (50ms) via PeakPreservingResamplePlugin
+    3. Savitzky-Golay smoothing (window=11, order=7) via SavgolFilterPlugin
+    4. Peak-preserving resample (50ms) via PeakPreservingResamplePlugin
+    5. Amplification (scale=1.25, center=50) via AmplifyPlugin
+    6. Peak-preserving resample (50ms) via PeakPreservingResamplePlugin
+    7. Keyframe simplification (tolerance=10, time=50ms) via KeyframePlugin
+    8. Anti-jerk filter (removes intermediate jerky points) via AntiJerkPlugin
     """
     
     @property
@@ -34,7 +40,7 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
     
     @property
     def description(self) -> str:
-        return "Comprehensive 7-stage enhancement pipeline for optimal funscript quality"
+        return "Comprehensive 8-stage enhancement pipeline for optimal funscript quality"
     
     @property
     def version(self) -> str:
@@ -99,6 +105,24 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
                 "default": 50,
                 "constraints": {"min": 10, "max": 500},
                 "description": "Time tolerance for keyframe simplification (ms)"
+            },
+            "anti_jerk_threshold": {
+                "type": float,
+                "default": 20.0,
+                "constraints": {"min": 5.0, "max": 40.0},
+                "description": "Maximum oscillation size to consider as jerk"
+            },
+            "anti_jerk_min_main_movement": {
+                "type": float,
+                "default": 50.0,
+                "constraints": {"min": 20.0, "max": 100.0},
+                "description": "Minimum main movement for anti-jerk processing"
+            },
+            "anti_jerk_deviation_threshold": {
+                "type": float,
+                "default": 15.0,
+                "constraints": {"min": 5.0, "max": 30.0},
+                "description": "Maximum deviation from direct path to allow"
             },
             "selected_indices": {
                 "type": list,
@@ -181,34 +205,48 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
                 
                 # === STEP 2: Resample ===
                 self.logger.debug(f"Ultimate Autotune ({current_axis}): (2) First resampling")
-                temp_fs.apply_peak_preserving_resample(current_axis, resample_rate_ms=params["resample_rate_ms"])
+                resample_plugin = PeakPreservingResamplePlugin()
+                resample_plugin.transform(temp_fs, axis=current_axis, resample_rate_ms=params["resample_rate_ms"])
                 
                 # === STEP 3: Smooth SG ===
                 self.logger.debug(f"Ultimate Autotune ({current_axis}): (3) Applying Savitzky-Golay filter")
-                temp_fs.apply_savitzky_golay(current_axis, 
-                                           window_length=params["sg_window_length"], 
-                                           polyorder=params["sg_polyorder"])
+                savgol_plugin = SavgolFilterPlugin()
+                savgol_plugin.transform(temp_fs, axis=current_axis,
+                                      window_length=params["sg_window_length"],
+                                      polyorder=params["sg_polyorder"])
                 
                 # === STEP 4: Resample ===
                 self.logger.debug(f"Ultimate Autotune ({current_axis}): (4) Second resampling")
-                temp_fs.apply_peak_preserving_resample(current_axis, resample_rate_ms=params["resample_rate_ms"])
+                resample_plugin = PeakPreservingResamplePlugin()
+                resample_plugin.transform(temp_fs, axis=current_axis, resample_rate_ms=params["resample_rate_ms"])
                 
                 # === STEP 5: Amplify ===
                 self.logger.debug(f"Ultimate Autotune ({current_axis}): (5) Amplifying values")
-                temp_fs.amplify_points_values(current_axis, 
-                                            scale_factor=params["amplify_scale"], 
-                                            center_value=params["amplify_center"])
+                amplify_plugin = AmplifyPlugin()
+                amplify_plugin.transform(temp_fs, axis=current_axis,
+                                       scale_factor=params["amplify_scale"],
+                                       center_value=params["amplify_center"])
                 
                 # === STEP 6: Resample ===
                 self.logger.debug(f"Ultimate Autotune ({current_axis}): (6) Third resampling")
-                temp_fs.apply_peak_preserving_resample(current_axis, resample_rate_ms=params["resample_rate_ms"])
+                resample_plugin = PeakPreservingResamplePlugin()
+                resample_plugin.transform(temp_fs, axis=current_axis, resample_rate_ms=params["resample_rate_ms"])
                 
                 # === STEP 7: Keyframes ===
                 self.logger.debug(f"Ultimate Autotune ({current_axis}): (7) Simplifying to keyframes")
-                temp_fs.simplify_to_keyframes(current_axis, 
-                                            position_tolerance=params["keyframe_position_tolerance"], 
-                                            time_tolerance_ms=params["keyframe_time_tolerance_ms"])
-                
+                keyframe_plugin = KeyframePlugin()
+                keyframe_plugin.transform(temp_fs, axis=current_axis,
+                                        position_tolerance=params["keyframe_position_tolerance"],
+                                        time_tolerance_ms=params["keyframe_time_tolerance_ms"])
+
+                # === STEP 8: Anti-Jerk Filter ===
+                self.logger.debug(f"Ultimate Autotune ({current_axis}): (8) Applying anti-jerk filter")
+                anti_jerk_plugin = AntiJerkPlugin()
+                anti_jerk_plugin.transform(temp_fs, axis=current_axis,
+                                          jerk_threshold=params["anti_jerk_threshold"],
+                                          min_main_movement=params["anti_jerk_min_main_movement"],
+                                          deviation_threshold=params["anti_jerk_deviation_threshold"])
+
                 # Get the final processed actions
                 final_actions = (temp_fs.primary_actions if current_axis == 'primary' 
                                else temp_fs.secondary_actions)
