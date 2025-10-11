@@ -35,8 +35,8 @@ class LogoTextureManager:
             return self.logo_texture_id
 
         try:
-            # Find logo.png in assets folder
-            logo_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'logo.png')
+            # Find logo.png in assets/branding folder
+            logo_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'branding', 'logo.png')
 
             if not os.path.exists(logo_path):
                 print(f"Logo file not found: {logo_path}")
