@@ -3,6 +3,9 @@
 /logs/*
 config.json
 
+# Auto-downloaded splash screen emojis (downloaded from config/constants.py URLs)
+assets/splash/*.png
+
 # Test and audit files that shouldn't be in the repo
 test_timeline_fixes.py
 test_complete_ua_fix.py

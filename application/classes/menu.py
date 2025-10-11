@@ -59,7 +59,7 @@ class MainMenu:
             import numpy as np
             import OpenGL.GL as gl
 
-            kofi_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'kofi_support.png')
+            kofi_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'branding', 'kofi_support.png')
 
             if not os.path.exists(kofi_path):
                 return None

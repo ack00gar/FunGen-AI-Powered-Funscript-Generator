@@ -51,7 +51,7 @@ class SplashScreen:
         try:
             # Get logo path (same as used by 3D simulator)
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            logo_path = os.path.join(script_dir, '..', '..', 'assets', 'logo.png')
+            logo_path = os.path.join(script_dir, '..', '..', 'assets', 'branding', 'logo.png')
 
             if not os.path.exists(logo_path):
                 self.app.logger.warning(f"Splash screen logo not found: {logo_path}")
@@ -411,7 +411,7 @@ class StandaloneSplashWindow:
             import os
             # Get logo path
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            logo_path = os.path.join(script_dir, '..', '..', 'assets', 'logo.png')
+            logo_path = os.path.join(script_dir, '..', '..', 'assets', 'branding', 'logo.png')
 
             if not os.path.exists(logo_path):
                 return
