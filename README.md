@@ -478,12 +478,6 @@ If you get "ffmpeg/ffprobe not found" errors:
 3. **Rerun installer for updates** - Get latest fixes by rerunning the installer
 4. **Check working directory** - Make sure you're in the FunGen project folder
 
-For detailed diagnostics, run:
-```cmd
-cd "C:\path\to\your\FunGen\FunGen"
-python debug_git.py
-```
-
 ---
 
 # Support
