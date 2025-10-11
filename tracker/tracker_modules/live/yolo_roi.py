@@ -69,16 +69,17 @@ class YoloRoiTracker(BaseTracker):
         self.primary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
         self.secondary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
         
-        # Additional smoothing layers for jerk reduction
-        self.position_history_smooth = deque(maxlen=3)  # Final position smoothing
-        self.last_primary_position = 50
-        self.last_secondary_position = 50
-        
+        # Reduced smoothing for lower latency (<100ms total delay)
+        self.position_history_smooth = deque(maxlen=2)  # Minimal final smoothing (reduced from 3)
+        self.last_primary_position = None  # Initialize as None to detect first frame
+        self.last_secondary_position = None
+        self.first_valid_position_captured = False  # Flag for startup calibration
+
         # Enhanced signal mastering using helper module
         self.signal_amplifier = SignalAmplifier(
             history_size=120,  # 4 seconds @ 30fps
             enable_live_amp=True,  # Enable dynamic amplification by default
-            smoothing_alpha=0.3,  # EMA smoothing factor
+            smoothing_alpha=0.7,  # Reduced EMA smoothing for lower latency (was 0.3)
             logger=self.logger
         )
         
@@ -468,20 +469,26 @@ class YoloRoiTracker(BaseTracker):
         if not self._initialized:
             self.logger.error("Tracker not initialized")
             return False
-        
+
         self.tracking_active = True
         self.frames_since_target_lost = 0
         self.penis_max_size_history.clear()
         self.prev_gray_main_roi, self.prev_features_main_roi = None, None
         self.penis_last_known_box, self.main_interaction_class = None, None
-        
+
+        # Reset smoothing state to prevent position 50 fallback
+        self.last_primary_position = None
+        self.last_secondary_position = None
+        self.first_valid_position_captured = False
+        self.position_history_smooth.clear()
+
         # Reset signal amplifier for new tracking session
         self.signal_amplifier.reset()
-        
+
         # Initialize motion mode tracking
         self.motion_mode = 'undetermined'
         self.motion_mode_history.clear()
-        
+
         self.logger.info("YOLO ROI tracking started")
         return True
     
@@ -762,8 +769,9 @@ class YoloRoiTracker(BaseTracker):
         rx, ry, rw, rh = roi_candidate
         
         # Determine new width based on interaction type
+        # Increased width for face/hand to accommodate horizontal motion (blowjob/handjob)
         if self.main_interaction_class in ["face", "hand"]:
-            new_rw = penis_w
+            new_rw = penis_w * 2.5  # Wider ROI to keep moving objects in frame
         else:
             new_rw = min(rw, penis_w * 2)
         
@@ -967,32 +975,39 @@ class YoloRoiTracker(BaseTracker):
         return primary_pos, secondary_pos, dy_smooth, dx_smooth, updated_sparse_features_out
     
     def _apply_final_smoothing(self, primary_pos: int, secondary_pos: int) -> Tuple[int, int]:
-        """Apply final layer of smoothing to reduce signal jerkiness."""
-        # Exponential moving average for smooth transitions
-        alpha = 0.3  # Smoothing factor (0 = max smoothing, 1 = no smoothing)
-        
+        """Apply minimal smoothing for low latency (~50ms total delay)."""
+        # First frame: initialize with actual position instead of defaulting to 50
+        if self.last_primary_position is None or self.last_secondary_position is None:
+            self.last_primary_position = primary_pos
+            self.last_secondary_position = secondary_pos
+            self.first_valid_position_captured = True
+            return primary_pos, secondary_pos
+
+        # Exponential moving average with reduced lag
+        alpha = 0.7  # Higher alpha = less lag (was 0.3, now 0.7 for <100ms delay)
+
         # Apply EMA smoothing
         smoothed_primary = int(alpha * primary_pos + (1 - alpha) * self.last_primary_position)
         smoothed_secondary = int(alpha * secondary_pos + (1 - alpha) * self.last_secondary_position)
-        
-        # Store position history for additional median smoothing
+
+        # Store position history for minimal additional smoothing
         self.position_history_smooth.append((smoothed_primary, smoothed_secondary))
-        
-        # Apply median smoothing over position history for even smoother results
-        if len(self.position_history_smooth) >= 3:
+
+        # Apply median smoothing only if we have 2+ samples (reduced from 3)
+        if len(self.position_history_smooth) >= 2:
             primary_values = [pos[0] for pos in list(self.position_history_smooth)]
             secondary_values = [pos[1] for pos in list(self.position_history_smooth)]
-            
+
             final_primary = int(np.median(primary_values))
             final_secondary = int(np.median(secondary_values))
         else:
             final_primary = smoothed_primary
             final_secondary = smoothed_secondary
-        
+
         # Update last positions
         self.last_primary_position = final_primary
         self.last_secondary_position = final_secondary
-        
+
         return final_primary, final_secondary
     
     def _calculate_flow_in_patch(self, current_patch_gray: np.ndarray, prev_patch_gray: Optional[np.ndarray], 
@@ -1071,54 +1086,54 @@ class YoloRoiTracker(BaseTracker):
         overall_dx, overall_dy = 0.0, 0.0
 
         if is_vr_video:
-            # VR-SPECIFIC: 2D Weighted Histogram of Flow on the DOMINANT region
-            block_size = 8
-            weighted_flows = []
+            # VR-SPECIFIC: Magnitude-weighted flow with Gaussian spatial weighting
+            # This combines magnitude weighting (to capture small moving objects like hands)
+            # with Gaussian spatial weighting (to focus on center of ROI)
 
-            # Create 2D Gaussian weights
+            # Calculate magnitude weights (prioritize moving pixels)
+            magnitudes = np.sqrt(dominant_flow_region[..., 0]**2 + dominant_flow_region[..., 1]**2)
+
+            # Create 2D Gaussian spatial weights (prioritize center of ROI)
             center_x, sigma_x = region_w / 2, region_w / 4.0
-            weights_x = np.exp(-((np.arange(region_w) - center_x) ** 2) / (2 * sigma_x ** 2))
-
             center_y, sigma_y = region_h / 2, region_h / 4.0
-            weights_y = np.exp(-((np.arange(region_h) - center_y) ** 2) / (2 * sigma_y ** 2))
 
-            for y in range(0, region_h, block_size):
-                for x in range(0, region_w, block_size):
-                    block_flow = dominant_flow_region[y:y + block_size, x:x + block_size]
-                    if block_flow.size < 2:
-                        continue
+            x_coords = np.arange(region_w)
+            y_coords = np.arange(region_h)
+            weights_x = np.exp(-((x_coords - center_x) ** 2) / (2 * sigma_x ** 2))
+            weights_y = np.exp(-((y_coords - center_y) ** 2) / (2 * sigma_y ** 2))
 
-                    # Histogram calculation to find the mode (most common motion)
-                    dx_vals, dy_vals = block_flow[..., 0].flatten(), block_flow[..., 1].flatten()
+            # Create 2D spatial weight matrix
+            spatial_weights = np.outer(weights_y, weights_x)
 
-                    flow_range = [[-20, 20], [-20, 20]]  # Range of expected pixel movements
-                    bins = 40  # Discretization level
+            # Combine magnitude and spatial weights
+            # This ensures: (1) moving pixels dominate, (2) center pixels are prioritized
+            combined_weights = magnitudes * spatial_weights
 
-                    hist, x_edges, y_edges = np.histogram2d(dx_vals, dy_vals, bins=bins, range=flow_range)
-
-                    # Find the bin with the highest count
-                    max_idx = np.unravel_index(np.argmax(hist), hist.shape)
-
-                    # Get the center of that bin as the representative motion vector
-                    mode_dx = (x_edges[max_idx[0]] + x_edges[max_idx[0] + 1]) / 2
-                    mode_dy = (y_edges[max_idx[1]] + y_edges[max_idx[1] + 1]) / 2
-
-                    # Get the combined 2D weight for this block
-                    mean_x_weight = np.mean(weights_x[x:x + block_size])
-                    mean_y_weight = np.mean(weights_y[y:y + block_size])
-                    block_weight = mean_x_weight * mean_y_weight
-
-                    weighted_flows.append({'dx': mode_dx, 'dy': mode_dy, 'weight': block_weight})
-
-            if weighted_flows:
-                total_weight = sum(f['weight'] for f in weighted_flows)
-                if total_weight > 0:
-                    overall_dx = sum(f['dx'] * f['weight'] for f in weighted_flows) / total_weight
-                    overall_dy = sum(f['dy'] * f['weight'] for f in weighted_flows) / total_weight
+            total_weight = np.sum(combined_weights)
+            if total_weight > 0:
+                # Weighted average of flow vectors
+                overall_dy = np.sum(dominant_flow_region[..., 1] * combined_weights) / total_weight
+                overall_dx = np.sum(dominant_flow_region[..., 0] * combined_weights) / total_weight
+            else:
+                # Fallback if no motion detected
+                overall_dy = np.median(dominant_flow_region[..., 1])
+                overall_dx = np.median(dominant_flow_region[..., 0])
         else:
-            # 2D VIDEO: Use simple median on the full ROI for performance
-            overall_dy = np.median(dominant_flow_region[..., 1])
-            overall_dx = np.median(dominant_flow_region[..., 0])
+            # 2D VIDEO: Magnitude-weighted average to capture small moving objects
+            # This prevents motion dilution when small moving objects (hand, face) are
+            # surrounded by large static regions (penis, background)
+            magnitudes = np.sqrt(dominant_flow_region[..., 0]**2 + dominant_flow_region[..., 1]**2)
+            total_magnitude = np.sum(magnitudes)
+
+            if total_magnitude > 0:
+                # Weight each flow vector by its magnitude - large motions dominate
+                # This ensures hand/face motion isn't diluted by static background
+                overall_dy = np.sum(dominant_flow_region[..., 1] * magnitudes) / total_magnitude
+                overall_dx = np.sum(dominant_flow_region[..., 0] * magnitudes) / total_magnitude
+            else:
+                # Fallback if no motion detected at all
+                overall_dy = np.median(dominant_flow_region[..., 1])
+                overall_dx = np.median(dominant_flow_region[..., 0])
 
         return overall_dy, overall_dx, lower_magnitude, upper_magnitude, flow
 
