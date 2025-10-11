@@ -394,17 +394,6 @@ class VideoDisplayUI:
                     self._last_uploaded_frame_index = current_frame_index
                     self._texture_update_count += 1
 
-                # Log performance stats every 5 seconds (when skipping)
-                if not frame_changed and self._last_uploaded_frame_index is not None:
-                    import time
-                    current_time = time.time()
-                    if current_time - self._last_perf_log_time > 5.0:
-                        total = self._texture_update_count + self._texture_skip_count
-                        if total > 0:
-                            cache_hit_rate = (self._texture_skip_count / total) * 100
-                            self.app.logger.info(f"Video Texture Performance - Updates: {self._texture_update_count}, Skipped: {self._texture_skip_count}, Cache hit rate: {cache_hit_rate:.1f}%")
-                        self._last_perf_log_time = current_time
-
                 # Render video (either new frame or reuse existing texture)
                 if video_frame_available:
                     available_w_video, available_h_video = imgui.get_content_region_available()
