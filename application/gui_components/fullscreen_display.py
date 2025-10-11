@@ -17,6 +17,7 @@ import imgui
 import numpy as np
 from typing import Optional, Tuple, Callable
 import time
+from application.utils import get_icon_texture_manager
 
 try:
     import OpenGL.GL as gl
@@ -284,32 +285,50 @@ class FullscreenDisplayManager:
         )
         
         # Control buttons
-        button_width = 60
+        icon_mgr = get_icon_texture_manager()
+        button_size = 40
         button_spacing = 10
-        
-        # Play/Pause button
-        play_text = "⏸" if self._is_playing() else "▶"
-        if imgui.button(play_text, button_width, 40):
+
+        # Play/Pause button (dynamic based on state)
+        is_playing = self._is_playing()
+        play_pause_icon_name = 'pause.png' if is_playing else 'play.png'
+        play_pause_fallback = "⏸" if is_playing else "▶"
+
+        play_pause_tex, _, _ = icon_mgr.get_icon_texture(play_pause_icon_name)
+        if play_pause_tex and imgui.image_button(play_pause_tex, button_size, button_size):
             if self.on_play_pause:
                 self.on_play_pause()
-        
+        elif not play_pause_tex and imgui.button(play_pause_fallback, button_size, button_size):
+            if self.on_play_pause:
+                self.on_play_pause()
+
         imgui.same_line(spacing=button_spacing)
-        
+
         # Stop button
-        if imgui.button("⏹", button_width, 40):
+        stop_tex, _, _ = icon_mgr.get_icon_texture('stop.png')
+        if stop_tex and imgui.image_button(stop_tex, button_size, button_size):
             if self.on_stop:
                 self.on_stop()
-        
+        elif not stop_tex and imgui.button("⏹", button_size, button_size):
+            if self.on_stop:
+                self.on_stop()
+
         imgui.same_line(spacing=button_spacing)
-        
+
         # Exit fullscreen button
-        if imgui.button("⛶", button_width, 40):
+        fullscreen_exit_tex, _, _ = icon_mgr.get_icon_texture('fullscreen-exit.png')
+        if fullscreen_exit_tex and imgui.image_button(fullscreen_exit_tex, button_size, button_size):
             return False  # Exit fullscreen
-        
+        elif not fullscreen_exit_tex and imgui.button("⛶", button_size, button_size):
+            return False  # Exit fullscreen
+
         imgui.same_line(spacing=button_spacing)
-        
-        # Volume/settings button
-        if imgui.button("⚙", button_width, 40):
+
+        # Settings button
+        settings_tex, _, _ = icon_mgr.get_icon_texture('settings.png')
+        if settings_tex and imgui.image_button(settings_tex, button_size, button_size):
+            pass  # Settings popup
+        elif not settings_tex and imgui.button("⚙", button_size, button_size):
             pass  # Settings popup
         
         return True

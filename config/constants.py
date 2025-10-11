@@ -371,6 +371,42 @@ SPLASH_EMOJI_URLS = {
     'splash/lollipop.png': 'https://em-content.zobj.net/source/apple/391/lollipop_1f36d.png'
 }
 
+# UI control icon URLs (Apple emoji style)
+# These icons are used throughout the UI for buttons and controls
+# Downloaded to assets/ui/icons/ subdirectory
+UI_CONTROL_ICON_URLS = {
+    # Playback controls (video display overlay)
+    'ui/icons/jump-start.png': 'https://em-content.zobj.net/source/apple/391/last-track-button_23ee-fe0f.png',
+    'ui/icons/prev-frame.png': 'https://em-content.zobj.net/source/apple/391/fast-reverse-button_23ea.png',
+    'ui/icons/play.png': 'https://em-content.zobj.net/source/apple/391/play-button_25b6-fe0f.png',
+    'ui/icons/pause.png': 'https://em-content.zobj.net/source/apple/391/pause-button_23f8-fe0f.png',
+    'ui/icons/stop.png': 'https://em-content.zobj.net/source/apple/391/stop-button_23f9-fe0f.png',
+    'ui/icons/next-frame.png': 'https://em-content.zobj.net/source/apple/391/fast-forward-button_23e9.png',
+    'ui/icons/jump-end.png': 'https://em-content.zobj.net/source/apple/391/next-track-button_23ed-fe0f.png',
+
+    # View/zoom controls - using magnifying glass (+ and - emojis blocked by CDN)
+    'ui/icons/zoom-in.png': 'https://em-content.zobj.net/source/apple/391/magnifying-glass-tilted-right_1f50e.png',
+    'ui/icons/zoom-out.png': 'https://em-content.zobj.net/source/apple/391/magnifying-glass-tilted-left_1f50d.png',
+    'ui/icons/reset.png': 'https://em-content.zobj.net/source/apple/391/counterclockwise-arrows-button_1f504.png',
+
+    # Fullscreen controls - cinema for enter, door for exit
+    'ui/icons/fullscreen.png': 'https://em-content.zobj.net/source/apple/391/cinema_1f3a6.png',
+    'ui/icons/fullscreen-exit.png': 'https://em-content.zobj.net/source/apple/391/door_1f6aa.png',
+
+    # General UI controls
+    'ui/icons/settings.png': 'https://em-content.zobj.net/source/apple/391/gear_2699-fe0f.png',
+    'ui/icons/gamepad.png': 'https://em-content.zobj.net/source/apple/391/video-game_1f3ae.png',
+
+    # File operations
+    'ui/icons/folder.png': 'https://em-content.zobj.net/source/apple/391/file-folder_1f4c1.png',
+    'ui/icons/save.png': 'https://em-content.zobj.net/source/apple/391/floppy-disk_1f4be.png',
+
+    # Status indicators
+    'ui/icons/check.png': 'https://em-content.zobj.net/source/apple/391/check-mark-button_2705.png',
+    'ui/icons/error.png': 'https://em-content.zobj.net/source/apple/391/cross-mark_274c.png',
+    'ui/icons/warning.png': 'https://em-content.zobj.net/source/apple/391/warning_26a0-fe0f.png',
+}
+
 ####################################################################################################
 # UPDATER & GITHUB
 ####################################################################################################
