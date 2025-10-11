@@ -1,6 +1,7 @@
 import glfw
 from typing import Optional
 import imgui
+import platform
 
 
 class ShortcutManager:
@@ -8,6 +9,38 @@ class ShortcutManager:
         self.app = app_instance
         self.is_recording_shortcut_for: Optional[str] = None
         self._initialize_reverse_key_map()
+
+    def should_handle_shortcuts(self) -> bool:
+        """
+        Check if shortcuts should be processed based on current UI state.
+
+        Returns False when:
+        - User is typing in a text input field
+        - A text widget is active and being edited
+        - Currently recording a new shortcut
+        - ImGui wants to capture keyboard input
+
+        This prevents shortcuts from interfering with text input.
+        """
+        io = imgui.get_io()
+
+        # CRITICAL: Block shortcuts when ImGui wants keyboard input
+        # This includes text inputs, combo boxes, and other interactive widgets
+        if io.want_capture_keyboard or io.want_text_input:
+            return False
+
+        # Block during shortcut recording (ESC is handled separately)
+        if self.is_recording_shortcut_for:
+            return False
+
+        # Additional safety: check if any item is being edited
+        # This catches edge cases where want_text_input might not be set
+        if imgui.is_any_item_active():
+            # Allow navigation keys even when items are active
+            # but block character keys that would type
+            return False
+
+        return True
 
     def _initialize_reverse_key_map(self):
         """Initializes a map from key names to GLFW key codes."""
@@ -66,8 +99,15 @@ class ShortcutManager:
             self.cancel_shortcut_recording()  # Cancel previous recording
 
         self.is_recording_shortcut_for = action_name
+
+        # Platform-specific modifier key name for user feedback
+        mod_key_name = "CMD" if platform.system() == "Darwin" else "CTRL"
+
         self.app.logger.info(
-            f"Recording for '{action_name.replace('_', ' ').title()}'. Press key combination or ESC to cancel.", extra={'status_message': True})
+            f"🎹 Recording shortcut for '{action_name.replace('_', ' ').title()}' - "
+            f"Press desired key combination (e.g., {mod_key_name}+K) or ESC to cancel",
+            extra={'status_message': True}
+        )
 
     def cancel_shortcut_recording(self):
         """Cancels the current shortcut recording."""
@@ -146,6 +186,7 @@ class ShortcutManager:
 
         io = imgui.get_io()
 
+        # ESC always cancels recording
         if imgui.is_key_pressed(glfw.KEY_ESCAPE):
             self.cancel_shortcut_recording()
             return
@@ -158,10 +199,12 @@ class ShortcutManager:
         for key_code in range(glfw.KEY_SPACE, glfw.KEY_LAST + 1):  # Iterate through relevant GLFW key codes
             if imgui.is_key_pressed(key_code):  # Checks for initial press this frame
                 # Ignore modifier keys themselves as the "main" key for the shortcut
+                # Also ignore LEFT_SUPER and RIGHT_SUPER on macOS
                 is_modifier_key = key_code in [
                     glfw.KEY_LEFT_CONTROL, glfw.KEY_RIGHT_CONTROL,
                     glfw.KEY_LEFT_ALT, glfw.KEY_RIGHT_ALT,
                     glfw.KEY_LEFT_SHIFT, glfw.KEY_RIGHT_SHIFT,
+                    glfw.KEY_LEFT_SUPER, glfw.KEY_RIGHT_SUPER,  # CMD key on macOS
                     glfw.KEY_ESCAPE  # Escape is for cancel only
                 ]
                 if is_modifier_key:
@@ -174,11 +217,18 @@ class ShortcutManager:
                     break  # Found the primary key for this frame
 
         if captured_this_frame and main_key_pressed_name:
+            # Platform-aware modifier naming
             # Modifiers are checked *after* a main key is confirmed to be pressed
-            if io.key_ctrl: key_str_parts.append("CTRL")
-            if io.key_alt: key_str_parts.append("ALT")
-            if io.key_shift: key_str_parts.append("SHIFT")
-            if io.key_super: key_str_parts.append("SUPER")
+            if io.key_ctrl:
+                key_str_parts.append("CTRL")
+            if io.key_alt:
+                key_str_parts.append("ALT")
+            if io.key_shift:
+                key_str_parts.append("SHIFT")
+            if io.key_super:
+                # On macOS, display as "CMD" for user clarity, but store as "SUPER" internally
+                # This allows the shortcut to work consistently across platforms
+                key_str_parts.append("SUPER")
 
             key_str_parts.append(main_key_pressed_name)
             final_shortcut_str = "+".join(key_str_parts)
