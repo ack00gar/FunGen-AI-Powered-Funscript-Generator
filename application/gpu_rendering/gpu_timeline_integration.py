@@ -175,31 +175,46 @@ class GPUTimelineIntegration:
     
     def _select_optimal_backend(self, actions_list: List[Dict], app_state: Any) -> RenderBackend:
         """Intelligently select the best rendering backend for current conditions"""
-        
+
         point_count = len(actions_list) if actions_list else 0
-        
+
         # If GPU is not available or has failed too many times
-        if (not self.gpu_renderer or 
+        if (not self.gpu_renderer or
             not self.gpu_renderer.gl_initialized or
             self.consecutive_gpu_failures >= self.max_gpu_failures):
-            return RenderBackend.CPU_IMGUI
-        
+            selected_backend = RenderBackend.CPU_IMGUI
+            self.logger.debug(
+                f"Backend: CPU_IMGUI (GPU unavailable or too many failures: {self.consecutive_gpu_failures})"
+            )
+            return selected_backend
+
         # Force backend if explicitly set
         if self.preferred_backend != RenderBackend.AUTO:
+            self.logger.debug(
+                f"Backend: {self.preferred_backend.value} (explicitly set, points: {point_count})"
+            )
             return self.preferred_backend
-        
+
         # Auto-selection logic
         if point_count < self.gpu_threshold_points:
             # Small datasets: CPU is probably fine and simpler
-            return RenderBackend.CPU_IMGUI
-        
+            selected_backend = RenderBackend.CPU_IMGUI
+            reason = f"point_count ({point_count}) < threshold ({self.gpu_threshold_points})"
         elif point_count < 50000:
             # Medium datasets: GPU gives good benefits
-            return RenderBackend.GPU_INSTANCED
-        
+            selected_backend = RenderBackend.GPU_INSTANCED
+            reason = f"medium dataset (points: {point_count})"
         else:
             # Large datasets: GPU is essential for performance
-            return RenderBackend.GPU_INSTANCED
+            selected_backend = RenderBackend.GPU_INSTANCED
+            reason = f"large dataset (points: {point_count})"
+
+        # Log backend selection with reasoning
+        self.logger.debug(
+            f"Backend: {selected_backend.value} - {reason}"
+        )
+
+        return selected_backend
     
     def _render_with_gpu(self,
                         actions_list: List[Dict],
@@ -248,12 +263,16 @@ class GPUTimelineIntegration:
             if len(visible_indices) == 0:
                 return True
             
-            # GPU-style LOD (Level of Detail)
+            # GPU-style LOD (Level of Detail) - NOW UNIFIED WITH CPU
             avg_interval = np.mean(np.diff(ats)) if len(ats) > 1 else 50
             points_per_pixel = zoom_factor_ms_per_px / avg_interval if avg_interval > 0 else 1.0
-            
-            # Adaptive rendering based on density
-            if points_per_pixel > 8.0:
+
+            # CRITICAL FIX: Unified LOD logic matching CPU behavior
+            # Always show ALL points for small datasets (< 1000)
+            if len(actions_list) < 1000:
+                # Small datasets: render ALL visible points (matches CPU behavior)
+                render_indices = visible_indices
+            elif points_per_pixel > 8.0:
                 # Ultra-dense: waveform mode - drastically reduce points
                 step = max(1, int(points_per_pixel / 2.0))
                 render_indices = visible_indices[::step]
@@ -371,23 +390,31 @@ class GPUTimelineIntegration:
                         mouse_pos: tuple,
                         selected_indices: List[int],
                         hovered_index: int) -> bool:
-        """Fallback to existing CPU/ImGui rendering"""
-        
+        """
+        Delegate to timeline's native CPU rendering.
+
+        CRITICAL FIX: Return False to force timeline to use its proven CPU fallback path.
+        For datasets < gpu_threshold_points, this ensures the timeline's optimized
+        CPU rendering (with proper LOD for < 1000 points) handles the drawing.
+        """
+
         try:
-            # This would call the existing optimized CPU rendering logic
-            # from interactive_timeline.py that we already implemented
-            
-            # For now, simulate CPU rendering
-            self.logger.debug(f"CPU rendering {len(actions_list)} points")
-            
-            # In real implementation, this would call the existing
-            # timeline rendering code with all our previous optimizations
-            # (vectorized colors, cached arrays, conditional point rendering, etc.)
-            
-            return True
-        
+            # Log that we're deferring to timeline's CPU rendering
+            self.logger.debug(
+                f"Deferring {len(actions_list)} points to timeline's native CPU rendering "
+                f"(point count < GPU threshold: {self.gpu_threshold_points})"
+            )
+
+            # Return False to signal timeline should use its CPU fallback path
+            # This leverages the existing, well-tested CPU rendering with proper:
+            # - LOD logic (shows ALL points for < 1000)
+            # - Vectorized color calculations
+            # - Cached array operations
+            # - Conditional point rendering
+            return False
+
         except Exception as e:
-            self.logger.error(f"CPU rendering failed: {e}")
+            self.logger.error(f"CPU rendering delegation failed: {e}")
             return False
     
     def _render_with_hybrid(self,
