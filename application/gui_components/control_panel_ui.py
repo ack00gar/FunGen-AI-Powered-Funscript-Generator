@@ -4216,11 +4216,20 @@ class ControlPanelUI:
             # Initialize streamer manager lazily
             if self._native_sync_manager is None:
                 from streamer.integration_manager import NativeSyncManager
-                self._native_sync_manager = NativeSyncManager(
-                    self.app.processor,
-                    logger=self.app.logger,
-                    app_logic=self.app  # For HereSphere auto-load functionality
-                )
+                try:
+                    # Try with app_logic parameter (newer streamer versions)
+                    self._native_sync_manager = NativeSyncManager(
+                        self.app.processor,
+                        logger=self.app.logger,
+                        app_logic=self.app  # For HereSphere auto-load functionality
+                    )
+                except TypeError:
+                    # Fall back to old signature (older streamer versions)
+                    self.app.logger.warning("Streamer version doesn't support app_logic parameter - using backward-compatible initialization")
+                    self._native_sync_manager = NativeSyncManager(
+                        self.app.processor,
+                        logger=self.app.logger
+                    )
 
             # Cache status to avoid expensive lookups every frame (throttle to 500ms)
             import time
