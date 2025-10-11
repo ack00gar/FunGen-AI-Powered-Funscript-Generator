@@ -368,9 +368,7 @@ class MainMenu:
             self._render_edit_menu(app_state)
             self._render_view_menu(app_state, stage_proc)
             self._render_tools_menu(app_state, file_mgr)
-            self._render_ai_menu()
-            self._render_updates_menu()
-            self._render_support_menu()
+            self._render_help_menu()
 
             # Render device control indicator after Support menu
             self._render_device_control_indicator()
@@ -398,7 +396,7 @@ class MainMenu:
                 app.reset_project_state(for_new_project=True)
                 pm.project_dirty = True
 
-            if _menu_item_simple("Project..."):
+            if _menu_item_simple("Open Project..."):
                 pm.open_project_dialog()
 
             if _menu_item_simple("Video..."):
@@ -535,51 +533,83 @@ class MainMenu:
 
     def _render_view_menu(self, app_state, stage_proc):
         if imgui.begin_menu("View", True):
-            self._render_ui_mode_section(app_state)
+            # UI Mode submenu
+            self._render_ui_mode_submenu(app_state)
+
+            # Layout submenu
+            self._render_layout_submenu(app_state)
+
             imgui.separator()
-            self._render_ui_layout_section(app_state)
-            imgui.separator()
+
+            # Panels submenu (floating mode only)
             self._render_panels_submenu(app_state)
+
             imgui.separator()
-            self._render_layout_options_section(app_state)
+
+            # Timelines submenu
+            self._render_timelines_submenu(app_state)
+
             imgui.separator()
-            self._render_timeline_editors_section(app_state)
+
+            # Windows submenu
+            self._render_windows_submenu(app_state)
+
             imgui.separator()
-            self._render_overlays_section(app_state, stage_proc)
+
+            # Video Overlays submenu
+            self._render_video_overlays_submenu(app_state, stage_proc)
+
             imgui.end_menu()
 
-    def _render_ui_mode_section(self, app_state):
+    def _render_ui_mode_submenu(self, app_state):
         settings = self.app.app_settings
-        imgui.text("UI Mode")
-        imgui.indent()
+        if imgui.begin_menu("UI Mode"):
+            current = app_state.ui_view_mode
+            if _radio_line("Simple Mode", current == "simple"):
+                if current != "simple":
+                    app_state.ui_view_mode = "simple"
+                    settings.set("ui_view_mode", "simple")
+            if _radio_line("Expert Mode", current == "expert"):
+                if current != "expert":
+                    app_state.ui_view_mode = "expert"
+                    settings.set("ui_view_mode", "expert")
+            imgui.end_menu()
 
-        current = app_state.ui_view_mode
-        if _radio_line("Expert Mode##UIModeExpertMode", current == "expert"):
-            if current != "expert":
-                app_state.ui_view_mode = "expert"
-                settings.set("ui_view_mode", "expert")
-        if _radio_line("Simple Mode##UIModeSimpleMode", current == "simple"):
-            if current != "simple":
-                app_state.ui_view_mode = "simple"
-                settings.set("ui_view_mode", "simple")
-        imgui.unindent()
+    def _render_layout_submenu(self, app_state):
+        pm = self.app.project_manager
+        if imgui.begin_menu("Layout"):
+            # Layout mode selection
+            current = app_state.ui_layout_mode
+            if _radio_line("Fixed Panels", current == "fixed"):
+                if current != "fixed":
+                    app_state.ui_layout_mode = "fixed"
+                    pm.project_dirty = True
 
-    def _render_ui_layout_section(self, app_state):
-        imgui.text("UI Layout Mode")
-        imgui.indent()
+            if _radio_line("Floating Windows", current == "floating"):
+                if current != "floating":
+                    app_state.ui_layout_mode = "floating"
+                    app_state.just_switched_to_floating = True
+                    pm.project_dirty = True
 
-        current = app_state.ui_layout_mode
-        if _radio_line("Fixed Panels##UILayoutModeFixedPanels", current == "fixed"):
-            if current != "fixed":
-                app_state.ui_layout_mode = "fixed"
-                self.app.project_manager.project_dirty = True
+            imgui.separator()
 
-        if _radio_line("Floating Windows##UILayoutModeFloatingWindows", current == "floating"):
-            if current != "floating":
-                app_state.ui_layout_mode = "floating"
-                app_state.just_switched_to_floating = True
-                self.app.project_manager.project_dirty = True
-        imgui.unindent()
+            # Full-width navigation (Fixed mode only)
+            if not hasattr(app_state, "full_width_nav"):
+                app_state.full_width_nav = False
+
+            is_fixed = app_state.ui_layout_mode == "fixed"
+            clicked, selected = imgui.menu_item(
+                "Full-Width Navigation (Fixed mode only)",
+                selected=app_state.full_width_nav,
+                enabled=is_fixed,
+            )
+            if clicked:
+                app_state.full_width_nav = selected
+                pm.project_dirty = True
+            if imgui.is_item_hovered() and not is_fixed:
+                imgui.set_tooltip("Only available in 'Fixed Panels' layout mode.")
+
+            imgui.end_menu()
 
     def _render_panels_submenu(self, app_state):
         pm = self.app.project_manager
@@ -604,219 +634,311 @@ class MainMenu:
         if imgui.is_item_hovered() and not is_floating:
             imgui.set_tooltip("Window toggles are for floating mode.")
 
-    def _render_layout_options_section(self, app_state):
-        pm = self.app.project_manager
-        imgui.text("Layout Options")
-        imgui.indent()
-
-        if not hasattr(app_state, "full_width_nav"):
-            app_state.full_width_nav = False
-
-        is_fixed = app_state.ui_layout_mode == "fixed"
-        clicked, selected = imgui.menu_item(
-            "Full-Width Navigation Bar",
-            selected=app_state.full_width_nav,
-            enabled=is_fixed,
-        )
-        if clicked:
-            app_state.full_width_nav = selected
-            pm.project_dirty = True
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Only available in 'Fixed Panels' layout mode.")
-        imgui.unindent()
-
-    def _render_timeline_editors_section(self, app_state):
+    def _render_timelines_submenu(self, app_state):
         app = self.app
         pm = app.project_manager
         settings = app.app_settings
 
-        imgui.text("Timeline Editors & Previews")
-        imgui.indent()
+        if imgui.begin_menu("Timelines"):
+            # Interactive editors
+            for label, attr in (
+                ("Interactive Timeline 1", "show_funscript_interactive_timeline"),
+                ("Interactive Timeline 2", "show_funscript_interactive_timeline2"),
+            ):
+                cur = getattr(app_state, attr)
+                clicked, val = imgui.menu_item(label, selected=cur)
+                if clicked:
+                    setattr(app_state, attr, val)
+                    pm.project_dirty = True
+            imgui.separator()
 
-        # Editors
-        for label, attr in (
-            ("Interactive Timeline 1", "show_funscript_interactive_timeline"),
-            ("Interactive Timeline 2", "show_funscript_interactive_timeline2"),
-        ):
-            cur = getattr(app_state, attr)
-            clicked, val = imgui.menu_item(label, selected=cur)
+            # Preview displays
+            for label, attr in (
+                ("Funscript Preview Bar", "show_funscript_timeline"),
+                ("Heatmap", "show_heatmap"),
+            ):
+                cur = getattr(app_state, attr)
+                clicked, val = imgui.menu_item(label, selected=cur)
+                if clicked:
+                    setattr(app_state, attr, val)
+                    pm.project_dirty = True
+            imgui.separator()
+
+            # Preview options
+            enhanced_preview = settings.get("enable_enhanced_funscript_preview", True)
+            clicked, new_val = imgui.menu_item(
+                "Enhanced Preview (Zoom + Frame)", selected=enhanced_preview
+            )
+            if clicked and new_val != enhanced_preview:
+                settings.set("enable_enhanced_funscript_preview", new_val)
+
+            use_simplified = settings.get("use_simplified_funscript_preview", False)
+            clicked, new_val = imgui.menu_item(
+                "Use Simplified Preview", selected=use_simplified
+            )
+            if clicked and new_val != use_simplified:
+                settings.set("use_simplified_funscript_preview", new_val)
+                app.app_state_ui.funscript_preview_dirty = True
+
+            clicked, val = imgui.menu_item(
+                "Show Timeline Editor Buttons",
+                selected=app_state.show_timeline_editor_buttons
+            )
             if clicked:
-                setattr(app_state, attr, val)
+                app_state.show_timeline_editor_buttons = val
+                settings.set("show_timeline_editor_buttons", val)
                 pm.project_dirty = True
-        imgui.separator()
 
-        # Previews
-        for label, attr in (
-            ("Funscript Preview Bar", "show_funscript_timeline"),
-            ("Heatmap", "show_heatmap"),
-        ):
-            cur = getattr(app_state, attr)
-            clicked, val = imgui.menu_item(label, selected=cur)
+            clicked, val = imgui.menu_item(
+                "Show Advanced Options",
+                selected=app_state.show_advanced_options
+            )
             if clicked:
-                setattr(app_state, attr, val)
+                app_state.show_advanced_options = val
+                settings.set("show_advanced_options", val)
                 pm.project_dirty = True
 
-        use_simplified = settings.get("use_simplified_funscript_preview", False)
-        clicked, new_val = imgui.menu_item(
-            "Use Simplified Funscript Preview", selected=use_simplified
-        )
-        if clicked and new_val != use_simplified:
-            settings.set("use_simplified_funscript_preview", new_val)
-            app.app_state_ui.funscript_preview_dirty = True
+            imgui.end_menu()
 
-        enhanced_preview = settings.get("enable_enhanced_funscript_preview", True)
-        clicked, new_val = imgui.menu_item(
-            "Enhanced Funscript Preview (Zoom + Video Frame)", selected=enhanced_preview
-        )
-        if clicked and new_val != enhanced_preview:
-            settings.set("enable_enhanced_funscript_preview", new_val)
-        imgui.separator()
+    def _render_windows_submenu(self, app_state):
+        pm = self.app.project_manager
+        if imgui.begin_menu("Windows"):
+            # Gauge windows
+            for label, attr in (
+                ("Script Gauge (Timeline 1)", "show_gauge_window_timeline1"),
+                ("Script Gauge (Timeline 2)", "show_gauge_window_timeline2"),
+            ):
+                cur = getattr(app_state, attr)
+                clicked, val = imgui.menu_item(label, selected=cur)
+                if clicked:
+                    setattr(app_state, attr, val)
+                    pm.project_dirty = True
 
-        for label, attr, key in (
-            ("Show Timeline Editor Buttons", "show_timeline_editor_buttons", "show_timeline_editor_buttons"),
-            ("Show Advanced Options", "show_advanced_options", "show_advanced_options"),
-        ):
-            cur = getattr(app_state, attr)
-            clicked, val = imgui.menu_item(label, selected=cur)
+            # Movement bar
+            clicked, val = imgui.menu_item(
+                "Movement Bar", selected=app_state.show_lr_dial_graph
+            )
             if clicked:
-                setattr(app_state, attr, val)
-                settings.set(key, val)
+                app_state.show_lr_dial_graph = val
                 pm.project_dirty = True
-        imgui.unindent()
 
-    def _render_overlays_section(self, app_state, stage_proc):
+            # 3D Simulator with nested logo option
+            clicked, val = imgui.menu_item(
+                "3D Simulator", selected=app_state.show_simulator_3d
+            )
+            if clicked:
+                app_state.show_simulator_3d = val
+                pm.project_dirty = True
+
+            # Indented submenu item for 3D logo
+            imgui.indent()
+            clicked, val = imgui.menu_item(
+                "Show Logo on Cylinder",
+                selected=self.app.app_settings.get('show_3d_simulator_logo', True)
+            )
+            if clicked:
+                self.app.app_settings.set('show_3d_simulator_logo', val)
+            imgui.unindent()
+
+            # Chapter list
+            if not hasattr(app_state, "show_chapter_list_window"):
+                app_state.show_chapter_list_window = False
+
+            clicked, val = imgui.menu_item(
+                "Chapter List", selected=app_state.show_chapter_list_window
+            )
+            if clicked:
+                app_state.show_chapter_list_window = val
+                pm.project_dirty = True
+
+            # Audio waveform
+            clicked, _ = imgui.menu_item(
+                "Audio Waveform", selected=app_state.show_audio_waveform
+            )
+            if clicked:
+                self.app.toggle_waveform_visibility()
+                pm.project_dirty = True
+
+            imgui.end_menu()
+
+    def _render_video_overlays_submenu(self, app_state, stage_proc):
         pm = self.app.project_manager
         app = self.app
 
-        imgui.text("Overlays & Aux Windows")
-        imgui.indent()
-
-        for label, attr in (
-            ("Script Gauge (Timeline 1)", "show_gauge_window_timeline1"),
-            ("Script Gauge (Timeline 2)", "show_gauge_window_timeline2"),
-        ):
-            cur = getattr(app_state, attr)
-            clicked, val = imgui.menu_item(label, selected=cur)
+        if imgui.begin_menu("Video Overlays"):
+            # Video feed toggle
+            clicked, val = imgui.menu_item(
+                "Show Video Feed", selected=app_state.show_video_feed
+            )
             if clicked:
-                setattr(app_state, attr, val)
+                app_state.show_video_feed = val
+                app.app_settings.set("show_video_feed", val)
                 pm.project_dirty = True
 
-        label = "Movement Bar"
-        cur = getattr(app_state, "show_lr_dial_graph")
-        clicked, val = imgui.menu_item(label, selected=cur)
-        if clicked:
-            setattr(app_state, "show_lr_dial_graph", val)
-            pm.project_dirty = True
+            imgui.separator()
 
-        label = "3D Simulator"
-        cur = getattr(app_state, "show_simulator_3d")
-        clicked, val = imgui.menu_item(label, selected=cur)
-        if clicked:
-            setattr(app_state, "show_simulator_3d", val)
-            pm.project_dirty = True
+            # Stage 2 overlay
+            can_show_s2 = stage_proc.stage2_overlay_data is not None
+            clicked, val = imgui.menu_item(
+                "Show Stage 2 Overlay",
+                selected=app_state.show_stage2_overlay,
+                enabled=can_show_s2,
+            )
+            if clicked:
+                app_state.show_stage2_overlay = val
+                pm.project_dirty = True
 
-        # Indented option for 3D Simulator logo
-        imgui.indent()
-        clicked, val = imgui.menu_item(
-            "Show Logo on Cylinder",
-            selected=self.app.app_settings.get('show_3d_simulator_logo', True)
-        )
-        if clicked:
-            self.app.app_settings.set('show_3d_simulator_logo', val)
-        imgui.unindent()
-
-        if not hasattr(app_state, "show_chapter_list_window"):
-            app_state.show_chapter_list_window = False
-
-        clicked, val = imgui.menu_item(
-            "Chapter List", selected=app_state.show_chapter_list_window
-        )
-        if clicked:
-            app_state.show_chapter_list_window = val
-            pm.project_dirty = True
-
-        imgui.separator()
-        imgui.text("Overlay Modes")
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
-        imgui.text("(Render on video display)")
-        imgui.pop_style_color()
-
-        clicked, val = imgui.menu_item(
-            "Gauges as Overlay", selected=self.app.app_settings.get('gauge_overlay_mode', False)
-        )
-        if clicked:
-            self.app.app_settings.set('gauge_overlay_mode', val)
-
-        clicked, val = imgui.menu_item(
-            "Movement Bar as Overlay", selected=self.app.app_settings.get('movement_bar_overlay_mode', False)
-        )
-        if clicked:
-            self.app.app_settings.set('movement_bar_overlay_mode', val)
-
-        clicked, val = imgui.menu_item(
-            "3D Simulator as Overlay", selected=self.app.app_settings.get('simulator_3d_overlay_mode', False)
-        )
-        if clicked:
-            self.app.app_settings.set('simulator_3d_overlay_mode', val)
-
-        imgui.separator()
-
-        # Tracker flags
-        tracker = app.tracker
-        if tracker:
-            for label, flag in (
-                ("Show Detections/Masks", "ui_show_masks"),
-                ("Show Optical Flow", "ui_show_flow"),
-            ):
-                cur = getattr(app_state, flag)
-                clicked, val = imgui.menu_item(label, selected=cur)
+            # Tracker overlays (only if tracker exists)
+            tracker = app.tracker
+            if tracker:
+                clicked, val = imgui.menu_item(
+                    "Show Detections/Masks",
+                    selected=app_state.ui_show_masks
+                )
                 if clicked:
-                    app_state.set_tracker_ui_flag(flag.replace("ui_", ""), val)
+                    app_state.set_tracker_ui_flag("show_masks", val)
 
-        can_show_s2 = stage_proc.stage2_overlay_data is not None
-        clicked, val = imgui.menu_item(
-            "Show Stage 2 Overlay",
-            selected=app_state.show_stage2_overlay,
-            enabled=can_show_s2,
-        )
-        if clicked:
-            app_state.show_stage2_overlay = val
-            pm.project_dirty = True
+                clicked, val = imgui.menu_item(
+                    "Show Optical Flow",
+                    selected=app_state.ui_show_flow
+                )
+                if clicked:
+                    app_state.set_tracker_ui_flag("show_flow", val)
 
-        clicked, _ = imgui.menu_item(
-            "Audio Waveform", selected=app_state.show_audio_waveform
-        )
-        if clicked:
-            app.toggle_waveform_visibility()
-            pm.project_dirty = True
+            imgui.separator()
 
-        clicked, val = imgui.menu_item(
-            "Show Video Feed", selected=app_state.show_video_feed
-        )
-        if clicked:
-            app_state.show_video_feed = val
-            self.app.app_settings.set("show_video_feed", val)
-            pm.project_dirty = True
-            
-        imgui.unindent()
+            # Overlay modes (render windows on video)
+            clicked, val = imgui.menu_item(
+                "Gauges as Overlay",
+                selected=app.app_settings.get('gauge_overlay_mode', False)
+            )
+            if clicked:
+                app.app_settings.set('gauge_overlay_mode', val)
+
+            clicked, val = imgui.menu_item(
+                "Movement Bar as Overlay",
+                selected=app.app_settings.get('movement_bar_overlay_mode', False)
+            )
+            if clicked:
+                app.app_settings.set('movement_bar_overlay_mode', val)
+
+            clicked, val = imgui.menu_item(
+                "3D Simulator as Overlay",
+                selected=app.app_settings.get('simulator_3d_overlay_mode', False)
+            )
+            if clicked:
+                app.app_settings.set('simulator_3d_overlay_mode', val)
+
+            imgui.end_menu()
 
     def _render_tools_menu(self, app_state, file_mgr):
         app = self.app
 
         if imgui.begin_menu("Tools", True):
-            can_calibrate = file_mgr.video_path is not None
-            if _menu_item_simple("Start Latency Calibration...", enabled=can_calibrate):
-                calibration = getattr(app, "calibration", None)
-                if calibration:
-                    calibration.start_latency_calibration()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Calibrate latency. Requires a video to be loaded and points "
-                    "on Timeline 1."
-                    if can_calibrate
-                    else "Please load a video to enable calibration."
-                )
+            # AI Models submenu
+            if imgui.begin_menu("AI Models"):
+                if _menu_item_simple("Download Default Models"):
+                    dl = getattr(app, "download_default_models", None)
+                    if dl:
+                        dl()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Download default AI models if they don't already exist."
+                    )
+                imgui.end_menu()
 
+            imgui.separator()
+
+            # Calibration & Analysis submenu
+            if imgui.begin_menu("Calibration && Analysis"):
+                can_calibrate = file_mgr.video_path is not None
+                if _menu_item_simple("Start Latency Calibration...", enabled=can_calibrate):
+                    calibration = getattr(app, "calibration", None)
+                    if calibration:
+                        calibration.start_latency_calibration()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Calibrate latency. Requires a video to be loaded and points "
+                        "on Timeline 1."
+                        if can_calibrate
+                        else "Please load a video to enable calibration."
+                    )
+
+                fs_proc = getattr(app, "funscript_processor", None)
+                can_compare = (
+                    fs_proc is not None
+                    and fs_proc.get_actions("primary")
+                    and fs_proc.get_actions("secondary")
+                )
+                if _menu_item_simple("Compare Timelines...", enabled=can_compare):
+                    trigger = getattr(app, "trigger_timeline_comparison", None)
+                    if trigger:
+                        trigger()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Compares the signals on Timeline 1 and Timeline 2 to "
+                        "calculate the optimal time offset."
+                    )
+
+                if not hasattr(app_state, "show_autotuner_window"):
+                    app_state.show_autotuner_window = False
+                clicked, _ = imgui.menu_item(
+                    "Performance Autotuner...",
+                    selected=app_state.show_autotuner_window,
+                )
+                if clicked:
+                    app_state.show_autotuner_window = not app_state.show_autotuner_window
+
+                imgui.end_menu()
+
+            imgui.separator()
+
+            # Compilation submenu
+            if imgui.begin_menu("Compilation"):
+                if not hasattr(app, "tensorrt_compiler_window"):
+                    app.tensorrt_compiler_window = None
+
+                if _menu_item_simple("Compile YOLO to TensorRT (.engine)..."):
+                    from application.gui_components.engine_compiler.tensorrt_compiler_window import (  # noqa: E501
+                        TensorRTCompilerWindow,
+                    )
+
+                    def on_close():
+                        app.tensorrt_compiler_window = None
+
+                    tw = app.tensorrt_compiler_window
+                    if tw is None:
+                        app.tensorrt_compiler_window = TensorRTCompilerWindow(
+                            app, on_close_callback=on_close
+                        )
+                    else:
+                        tw._reset_state()
+                        tw.is_open = True
+
+                imgui.end_menu()
+
+            imgui.separator()
+
+            # Plugins submenu
+            if imgui.begin_menu("Plugins"):
+                if _menu_item_simple("Reload Plugin Filters"):
+                    # Reload plugins for all interactive timelines
+                    timeline1 = getattr(app, "interactive_funscript_timeline1", None)
+                    timeline2 = getattr(app, "interactive_funscript_timeline2", None)
+                    if timeline1:
+                        timeline1._reload_plugins()
+                    if timeline2:
+                        timeline2._reload_plugins()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Reload funscript filter plugins from the plugins directories. "
+                        "Use this after adding new plugin files."
+                    )
+                imgui.end_menu()
+
+            imgui.separator()
+
+            # Manage Generated Files (standalone)
             clicked, _ = imgui.menu_item(
                 "Manage Generated Files...",
                 selected=app_state.show_generated_file_manager,
@@ -824,156 +946,88 @@ class MainMenu:
             if clicked:
                 app.toggle_file_manager_window()
 
-            if not hasattr(app_state, "show_autotuner_window"):
-                app_state.show_autotuner_window = False
-            clicked, _ = imgui.menu_item(
-                "Performance Autotuner...",
-                selected=app_state.show_autotuner_window,
-            )
-            if clicked:
-                app_state.show_autotuner_window = not app_state.show_autotuner_window
-
-            fs_proc = getattr(app, "funscript_processor", None)
-            can_compare = (
-                fs_proc is not None
-                and fs_proc.get_actions("primary")
-                and fs_proc.get_actions("secondary")
-            )
-            if _menu_item_simple("Compare Timelines...", enabled=can_compare):
-                trigger = getattr(app, "trigger_timeline_comparison", None)
-                if trigger:
-                    trigger()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Compares the signals on Timeline 1 and Timeline 2 to "
-                    "calculate the optimal time offset."
-                )
-
-            if _menu_item_simple("Reload Plugin Filters"):
-                # Reload plugins for all interactive timelines
-                timeline1 = getattr(app, "interactive_funscript_timeline1", None)
-                timeline2 = getattr(app, "interactive_funscript_timeline2", None)
-                if timeline1:
-                    timeline1._reload_plugins()
-                if timeline2:
-                    timeline2._reload_plugins()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Reload funscript filter plugins from the plugins directories. "
-                    "Use this after adding new plugin files."
-                )
-
-            if not hasattr(app, "tensorrt_compiler_window"):
-                app.tensorrt_compiler_window = None
-
-            if _menu_item_simple("Compile YOLO Model to TensorRT (.engine)..."):
-                from application.gui_components.engine_compiler.tensorrt_compiler_window import (  # noqa: E501
-                    TensorRTCompilerWindow,
-                )
-
-                def on_close():
-                    app.tensorrt_compiler_window = None
-
-                tw = app.tensorrt_compiler_window
-                if tw is None:
-                    app.tensorrt_compiler_window = TensorRTCompilerWindow(
-                        app, on_close_callback=on_close
-                    )
-                else:
-                    tw._reset_state()
-                    tw.is_open = True
-
             imgui.end_menu()
 
-    def _render_ai_menu(self):
-        app = self.app
-        if imgui.begin_menu("AI", True):
-            if _menu_item_simple("Download Default Models"):
-                dl = getattr(app, "download_default_models", None)
-                if dl:
-                    dl()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Download default AI models if they don't already exist."
-                )
-            imgui.end_menu()
-
-    def _render_updates_menu(self):
+    def _render_help_menu(self):
         app = self.app
         settings = app.app_settings
         updater = app.updater
 
-        if imgui.begin_menu("Updates", True):
-            # settings toggles
-            for key, label, default in (
-                ("updater_check_on_startup", "Check for Updates on Startup", True),
-                ("updater_check_periodically", "Check Periodically in Background (Hourly)", True),  # noqa: E501
-            ):
-                cur = settings.get(key, default)
-                clicked, new_val = imgui.menu_item(label, selected=cur)
-                if clicked and new_val != cur:
-                    settings.set(key, new_val)
-                if key == "updater_suppress_popup" and imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "If suppressed, only the menu bar indicator will be shown."
-                    )
-            imgui.separator()
-
-            if _menu_item_simple("Select Update Commit"):
-                app.app_state_ui.show_update_settings_dialog = True
-            if imgui.is_item_hovered():
-                token = updater.token_manager.get_token()
-                imgui.set_tooltip(
-                    "GitHub token and version selection."
-                    if token
-                    else "GitHub token and version selection.\nNo token set."
-                )
-
-            can_apply = updater.update_available and not updater.update_in_progress
-            if _menu_item_simple("Apply Pending Update...", enabled=can_apply):
-                updater.show_update_dialog = True
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Shows the update dialog if an update has been detected."
-                )
-            imgui.end_menu()
-
-    def _render_support_menu(self):
-        app = self.app
-        if imgui.begin_menu("Support", True):
+        if imgui.begin_menu("Help", True):
+            # About
             if _menu_item_simple("About FunGen..."):
                 self._show_about_dialog = True
 
             imgui.separator()
 
-            if _menu_item_simple("Become a Supporter"):
-                try:
-                    webbrowser.open("https://ko-fi.com/k00gar")
-                except Exception as e:
-                    if hasattr(app, 'logger') and app.logger:
-                        app.logger.warning(f"Could not open Ko-fi link: {e}")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Unlock device control features and support development!\n"
-                    "Supporters get access to:\n"
-                    "• Hardware device integration (Handy, OSR2, etc.)\n"
-                    "• Live tracking with device control\n"
-                    "• Video + funscript synchronized playback\n"
-                    "• Advanced device parameterization\n\n"
-                    "After supporting, use !device_control command in Discord to get your folder!"
-                )
+            # Updates submenu
+            if imgui.begin_menu("Updates"):
+                # Settings toggles
+                for key, label, default in (
+                    ("updater_check_on_startup", "Check for Updates on Startup", True),
+                    ("updater_check_periodically", "Check Periodically (Hourly)", True),
+                ):
+                    cur = settings.get(key, default)
+                    clicked, new_val = imgui.menu_item(label, selected=cur)
+                    if clicked and new_val != cur:
+                        settings.set(key, new_val)
+                imgui.separator()
 
-            if _menu_item_simple("Join Discord Community"):
-                try:
-                    webbrowser.open("https://discord.com/invite/WYkjMbtCZA")
-                except Exception as e:
-                    if hasattr(app, 'logger') and app.logger:
-                        app.logger.warning(f"Could not open Discord link: {e}")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Join the FunGen Discord community\n"
-                    "Get help, share results, and discuss features!"
-                )
+                if _menu_item_simple("Select Update Commit..."):
+                    app.app_state_ui.show_update_settings_dialog = True
+                if imgui.is_item_hovered():
+                    token = updater.token_manager.get_token()
+                    imgui.set_tooltip(
+                        "GitHub token and version selection."
+                        if token
+                        else "GitHub token and version selection.\nNo token set."
+                    )
+
+                can_apply = updater.update_available and not updater.update_in_progress
+                if _menu_item_simple("Apply Pending Update...", enabled=can_apply):
+                    updater.show_update_dialog = True
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Shows the update dialog if an update has been detected."
+                    )
+
+                imgui.end_menu()
+
+            imgui.separator()
+
+            # Support submenu
+            if imgui.begin_menu("Support"):
+                if _menu_item_simple("Become a Supporter"):
+                    try:
+                        webbrowser.open("https://ko-fi.com/k00gar")
+                    except Exception as e:
+                        if hasattr(app, 'logger') and app.logger:
+                            app.logger.warning(f"Could not open Ko-fi link: {e}")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Unlock device control features and support development!\n"
+                        "Supporters get access to:\n"
+                        "• Hardware device integration (Handy, OSR2, etc.)\n"
+                        "• Live tracking with device control\n"
+                        "• Video + funscript synchronized playback\n"
+                        "• Advanced device parameterization\n\n"
+                        "After supporting, use !device_control command in Discord to get your folder!"
+                    )
+
+                if _menu_item_simple("Join Discord Community"):
+                    try:
+                        webbrowser.open("https://discord.com/invite/WYkjMbtCZA")
+                    except Exception as e:
+                        if hasattr(app, 'logger') and app.logger:
+                            app.logger.warning(f"Could not open Discord link: {e}")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Join the FunGen Discord community\n"
+                        "Get help, share results, and discuss features!"
+                    )
+
+                imgui.end_menu()
+
             imgui.end_menu()
 
     def _render_menu_bar_logo(self):
