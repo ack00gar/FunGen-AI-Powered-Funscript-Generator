@@ -22,6 +22,12 @@ class VideoDisplayUI:
         self._render_quality_mode = "auto"  # auto/high/medium/low
         self._frame_skip_counter = 0  # Skip expensive operations during load
 
+        # Video texture update optimization (dirty flag)
+        self._last_uploaded_frame_index = None  # Track which frame is currently in GPU texture
+        self._texture_update_count = 0  # Count actual texture updates
+        self._texture_skip_count = 0  # Count skipped updates (cache hits)
+        self._last_perf_log_time = 0  # For periodic performance logging
+
         # ROI Drawing state for User Defined ROI
         self.is_drawing_user_roi: bool = False
         self.user_roi_draw_start_screen_pos: tuple = (0, 0)  # In ImGui screen space
@@ -319,18 +325,45 @@ class VideoDisplayUI:
             else:
                 # --- Original logic when video feed is enabled ---
                 current_frame_for_texture = None
+                current_frame_index = getattr(self.app.processor, 'current_frame_index', None)
+
+                # PERFORMANCE: Check if frame changed before copying/uploading to GPU
+                frame_changed = (current_frame_index != self._last_uploaded_frame_index)
+
                 if self.app.processor and self.app.processor.current_frame is not None:
                     with self.app.processor.frame_lock:
                         if self.app.processor.current_frame is not None:
                             # Check if current_frame is actually a frame (numpy array) and not just a frame number (int)
                             if hasattr(self.app.processor.current_frame, 'copy'):
-                                current_frame_for_texture = self.app.processor.current_frame.copy()
+                                # Only copy frame if it changed
+                                if frame_changed:
+                                    current_frame_for_texture = self.app.processor.current_frame.copy()
+                                else:
+                                    # Frame hasn't changed - skip expensive copy
+                                    self._texture_skip_count += 1
                             # else: current_frame is just an int (frame number), no image to display
 
-                video_frame_available = current_frame_for_texture is not None
+                video_frame_available = current_frame_for_texture is not None or (not frame_changed and self._last_uploaded_frame_index is not None)
 
-                if video_frame_available:
+                # Upload new frame to GPU if we copied one
+                if current_frame_for_texture is not None:
                     self.gui_instance.update_texture(self.gui_instance.frame_texture_id, current_frame_for_texture)
+                    self._last_uploaded_frame_index = current_frame_index
+                    self._texture_update_count += 1
+
+                # Log performance stats every 5 seconds (when skipping)
+                if not frame_changed and self._last_uploaded_frame_index is not None:
+                    import time
+                    current_time = time.time()
+                    if current_time - self._last_perf_log_time > 5.0:
+                        total = self._texture_update_count + self._texture_skip_count
+                        if total > 0:
+                            cache_hit_rate = (self._texture_skip_count / total) * 100
+                            self.app.logger.info(f"Video Texture Performance - Updates: {self._texture_update_count}, Skipped: {self._texture_skip_count}, Cache hit rate: {cache_hit_rate:.1f}%")
+                        self._last_perf_log_time = current_time
+
+                # Render video (either new frame or reuse existing texture)
+                if video_frame_available:
                     available_w_video, available_h_video = imgui.get_content_region_available()
 
                     if available_w_video > 0 and available_h_video > 0:

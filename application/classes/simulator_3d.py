@@ -28,6 +28,16 @@ class Simulator3DWindow:
         self.window_size = (400, 500)
         self.logo_texture = None  # OpenGL texture for logo
 
+        # Performance: Dirty flags to prevent unnecessary re-renders
+        self.needs_render = True  # Force initial render
+        self.last_positions = (50, 50, 50)  # Track previous funscript positions (primary, secondary, tertiary)
+        self.last_logo_enabled = True  # Track logo setting changes
+
+        # Performance metrics
+        self.render_count = 0  # Total actual renders
+        self.skip_count = 0  # Total skipped renders (cache hits)
+        self.last_perf_report_time = 0  # Last time we logged performance
+
         self.vertex_shader_source = """
         #version 330 core
         layout (location = 0) in vec3 aPos;
@@ -355,8 +365,8 @@ class Simulator3DWindow:
             # Create texture for framebuffer
             self.texture = glGenTextures(1)
             glBindTexture(GL_TEXTURE_2D, self.texture)
-            # Use GL_RGB format
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, self.window_size[0], self.window_size[1], 0, GL_RGB, GL_UNSIGNED_BYTE, None)
+            # Use GL_RGBA format for transparency support
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, self.window_size[0], self.window_size[1], 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, self.texture, 0)
@@ -414,13 +424,14 @@ class Simulator3DWindow:
         window_size = imgui.get_window_size()
         if self.window_size != (window_size.x, window_size.y) and window_size.x > 0 and window_size.y > 0:
             self.window_size = (int(window_size.x), int(window_size.y))
+            self.needs_render = True  # Mark as needing re-render after resize
             if self.initialized:
                 # Resize framebuffer
                 glBindFramebuffer(GL_FRAMEBUFFER, self.fbo)
-                
+
                 glBindTexture(GL_TEXTURE_2D, self.texture)
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, self.window_size[0], self.window_size[1], 0, GL_RGB, GL_UNSIGNED_BYTE, None)
-                
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, self.window_size[0], self.window_size[1], 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+
                 glBindRenderbuffer(GL_RENDERBUFFER, self.rbo)
                 glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, self.window_size[0], self.window_size[1])
 
@@ -428,7 +439,7 @@ class Simulator3DWindow:
                 if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
                     print("Framebuffer is not complete after resize!")
                     check_gl_error("Framebuffer resize")
-                
+
                 glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
 
@@ -445,36 +456,56 @@ class Simulator3DWindow:
             imgui.end()
             return
 
-        # TEST: Recreate framebuffer on every frame to avoid state issues
-        if hasattr(self, 'test_fbo'):
-            glDeleteFramebuffers(1, [self.test_fbo])
-        if hasattr(self, 'test_texture'):
-            glDeleteTextures(1, [self.test_texture])
-            
-        # Create new framebuffer
-        self.test_fbo = glGenFramebuffers(1)
-        glBindFramebuffer(GL_FRAMEBUFFER, self.test_fbo)
-        
-        # Create new texture
-        self.test_texture = glGenTextures(1)
-        glBindTexture(GL_TEXTURE_2D, self.test_texture)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, self.window_size[0], self.window_size[1], 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, self.test_texture, 0)
+        # Get funscript positions
+        primary_pos = getattr(app_state, 'gauge_value_t1', 50)  # 0-100 (up/down)
+        secondary_pos = getattr(app_state, 'gauge_value_t2', 50)  # 0-100 (roll)
 
-        # Check status
-        if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
-            print("❌ Test framebuffer incomplete!")
+        # Check for third axis (when available in future)
+        tertiary_pos = getattr(app_state, 'gauge_value_t3', None)  # Third axis (pitch)
+        if tertiary_pos is None:
+            tertiary_pos = 50  # No pitch movement when third axis not available
 
-        check_gl_error("Creating fresh framebuffer")
+        # Check logo setting
+        logo_enabled = self.app.app_settings.get('show_3d_simulator_logo', True)
 
+        # Performance: Check if positions or settings changed (dirty flag)
+        current_positions = (primary_pos, secondary_pos, tertiary_pos)
+        positions_changed = current_positions != self.last_positions
+        logo_changed = logo_enabled != self.last_logo_enabled
+
+        # Only render if something changed or forced render is needed
+        if not (self.needs_render or positions_changed or logo_changed):
+            # Nothing changed - just display cached texture
+            self.skip_count += 1
+            if hasattr(self, 'texture') and self.texture is not None:
+                imgui.image(self.texture, self.window_size[0], self.window_size[1], (0, 1), (1, 0))
+            imgui.end()
+
+            # Log performance stats every 5 seconds
+            import time
+            current_time = time.time()
+            if current_time - self.last_perf_report_time > 5.0:
+                total = self.render_count + self.skip_count
+                if total > 0:
+                    skip_rate = (self.skip_count / total) * 100
+                    self.app.logger.info(f"3D Simulator Performance - Renders: {self.render_count}, Skipped: {self.skip_count}, Cache hit rate: {skip_rate:.1f}%")
+                self.last_perf_report_time = current_time
+            return
+
+        # Update state tracking
+        self.last_positions = current_positions
+        self.last_logo_enabled = logo_enabled
+        self.needs_render = False  # Reset dirty flag
+
+        # Performance: Increment render count
+        self.render_count += 1
+
+        # Bind framebuffer for rendering
+        glBindFramebuffer(GL_FRAMEBUFFER, self.fbo)
         glViewport(0, 0, self.window_size[0], self.window_size[1])
-        check_gl_error("Setting viewport")
 
         glClearColor(0.0, 0.0, 0.0, 0.0)  # Transparent black background
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        check_gl_error("Clearing buffers")
 
         # Enable alpha blending for transparency
         glEnable(GL_BLEND)
@@ -488,47 +519,29 @@ class Simulator3DWindow:
 
         # Ensure solid fill mode (no wireframe)
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
-        
-        check_gl_error("Setting up rendering mode")
 
         glUseProgram(self.shader)
-        check_gl_error("Using shader program")
 
-        # Get funscript positions
-        primary_pos = getattr(app_state, 'gauge_value_t1', 50)  # 0-100 (up/down)
-        secondary_pos = getattr(app_state, 'gauge_value_t2', 50)  # 0-100 (roll)
-        
-        # Check for third axis (when available in future)
-        tertiary_pos = getattr(app_state, 'gauge_value_t3', None)  # Third axis (pitch)
-        if tertiary_pos is None:
-            tertiary_pos = 50  # No pitch movement when third axis not available
-        
         # Convert to shader values
         vertical_pos = primary_pos / 100.0  # 0.0 to 1.0
         roll_angle = np.radians((secondary_pos - 50) * 0.9)  # ±45° max roll
         pitch_angle = np.radians((tertiary_pos - 50) * 0.6) if tertiary_pos != 50 else 0.0  # ±30° max pitch
-        
-        # Update debug frame counter
-        if not hasattr(self, '_debug_frame_count'):
-            self._debug_frame_count = 0
-        self._debug_frame_count += 1
 
         # Set shader uniforms
         vertical_loc = glGetUniformLocation(self.shader, "verticalPos")
         roll_loc = glGetUniformLocation(self.shader, "rollAngle")
         pitch_loc = glGetUniformLocation(self.shader, "pitchAngle")
-        
+
         if vertical_loc != -1:
             glUniform1f(vertical_loc, vertical_pos)
-            
+
         if roll_loc != -1:
             glUniform1f(roll_loc, roll_angle)
-            
+
         if pitch_loc != -1:
             glUniform1f(pitch_loc, pitch_angle)
 
         # Bind logo texture if available and enabled in settings
-        logo_enabled = self.app.app_settings.get('show_3d_simulator_logo', True)
         if self.logo_texture is not None and logo_enabled:
             glActiveTexture(GL_TEXTURE0)
             glBindTexture(GL_TEXTURE_2D, self.logo_texture)
@@ -565,9 +578,9 @@ class Simulator3DWindow:
 
         # Display the rendered texture in ImGui
         # UV coordinates: (0,1) to (1,0) flips the Y axis since OpenGL and ImGui have different Y directions
-        if hasattr(self, 'test_texture'):
-            imgui.image(self.test_texture, self.window_size[0], self.window_size[1], (0, 1), (1, 0))
-            check_gl_error("Displaying test texture in ImGui")
+        if hasattr(self, 'texture') and self.texture is not None:
+            imgui.image(self.texture, self.window_size[0], self.window_size[1], (0, 1), (1, 0))
+            check_gl_error("Displaying texture in ImGui")
         else:
             imgui.text("No texture to display")
 
@@ -594,9 +607,26 @@ class Simulator3DWindow:
             width = self.window_size[0]
             height = self.window_size[1]
 
-        # Update window size if different
+        # Update window size if different and resize framebuffer
         if (width, height) != self.window_size and width > 0 and height > 0:
             self.window_size = (int(width), int(height))
+            self.needs_render = True  # Mark as needing re-render after resize
+            if self.initialized:
+                # Resize framebuffer
+                glBindFramebuffer(GL_FRAMEBUFFER, self.fbo)
+
+                glBindTexture(GL_TEXTURE_2D, self.texture)
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+
+                glBindRenderbuffer(GL_RENDERBUFFER, self.rbo)
+                glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height)
+
+                # Check if framebuffer is still complete after resize
+                if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
+                    print("Framebuffer is not complete after resize in render_3d_content!")
+                    check_gl_error("Framebuffer resize")
+
+                glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
         # Initialize OpenGL if needed
         if not self.initialized:
@@ -610,30 +640,8 @@ class Simulator3DWindow:
             imgui.text("Check console for error messages")
             return
 
-        # Create fresh framebuffer for this frame
-        if hasattr(self, 'test_fbo'):
-            glDeleteFramebuffers(1, [self.test_fbo])
-        if hasattr(self, 'test_texture'):
-            glDeleteTextures(1, [self.test_texture])
-
-        self.test_fbo = glGenFramebuffers(1)
-        glBindFramebuffer(GL_FRAMEBUFFER, self.test_fbo)
-
-        self.test_texture = glGenTextures(1)
-        glBindTexture(GL_TEXTURE_2D, self.test_texture)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, self.test_texture, 0)
-
-        if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
-            imgui.text("Framebuffer incomplete!")
-            glBindFramebuffer(GL_FRAMEBUFFER, 0)
-            return
-
-        check_gl_error("Creating fresh framebuffer")
-
-        # Set up rendering
+        # Bind framebuffer for rendering
+        glBindFramebuffer(GL_FRAMEBUFFER, self.fbo)
         glViewport(0, 0, width, height)
         glClearColor(0.0, 0.0, 0.0, 0.0)  # Transparent black background
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -706,8 +714,8 @@ class Simulator3DWindow:
         glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
         # Display the rendered texture
-        if hasattr(self, 'test_texture'):
-            imgui.image(self.test_texture, width, height, (0, 1), (1, 0))
+        if hasattr(self, 'texture') and self.texture is not None:
+            imgui.image(self.texture, width, height, (0, 1), (1, 0))
         else:
             imgui.text("No texture to display")
 
