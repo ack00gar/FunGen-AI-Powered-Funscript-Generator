@@ -1040,6 +1040,11 @@ class GUI:
             draw_list.add_line(x_pos, slider_y - 6, x_pos, slider_y + 6, color_u32, thickness=1.5)
 
     def _handle_global_shortcuts(self):
+        # CRITICAL: Check if shortcuts should be processed
+        # This prevents shortcuts from firing when user is typing in text inputs
+        if not self.app.shortcut_manager.should_handle_shortcuts():
+            return
+
         io = imgui.get_io()
         app_state = self.app.app_state_ui
 

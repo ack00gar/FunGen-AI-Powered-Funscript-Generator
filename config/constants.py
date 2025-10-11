@@ -105,12 +105,17 @@ AI_MODEL_TOOLTIP_EXTENSIONS = ".pt, .onnx, .engine, .mlpackage"
 MOD_KEY = "SUPER" if platform.system() == "Darwin" else "CTRL"
 
 DEFAULT_SHORTCUTS = {
+    # Video Navigation (Layout-independent - work on all keyboards)
     "seek_next_frame": "RIGHT_ARROW",
     "seek_prev_frame": "LEFT_ARROW",
-    "jump_to_next_point": ".",
-    "jump_to_prev_point": ",",
     "pan_timeline_left": "ALT+LEFT_ARROW",
     "pan_timeline_right": "ALT+RIGHT_ARROW",
+
+    # Point Navigation (Character-based - may need layout adaptation)
+    "jump_to_next_point": ".",       # QWERTY: period | AZERTY: SHIFT+; | QWERTZ: period
+    "jump_to_prev_point": ",",       # QWERTY: comma | AZERTY: ; | QWERTZ: comma
+
+    # Editing (Layout-independent modifier+key combinations)
     "delete_selected_point": "DELETE",
     "delete_selected_point_alt": "BACKSPACE",
     "delete_selected_chapter": "DELETE",
@@ -123,22 +128,26 @@ DEFAULT_SHORTCUTS = {
     "redo_timeline2": f"{MOD_KEY}+ALT+Y",
     "copy_selection": f"{MOD_KEY}+C",
     "paste_selection": f"{MOD_KEY}+V",
+
+    # Playback (Universal)
     "toggle_playback": "SPACE",
-    "add_point_0" : "0",
-    "add_point_10" : "1",
-    "add_point_20" : "2",
-    "add_point_30" : "3",
-    "add_point_40" : "4",
-    "add_point_50" : "5",
-    "add_point_60" : "6",
-    "add_point_70" : "7",
-    "add_point_80" : "8",
-    "add_point_90" : "9",
-    "add_point_100" : "°",
-    
-    # Chapter Creation Shortcuts (Video Editing Style)
-    "set_chapter_start": "I",      # In-point (start of chapter)
-    "set_chapter_end": "O",        # Out-point (end of chapter)
+
+    # Add Points (Number row - layout-independent)
+    "add_point_0"   : "0",
+    "add_point_10"  : "1",
+    "add_point_20"  : "2",
+    "add_point_30"  : "3",
+    "add_point_40"  : "4",
+    "add_point_50"  : "5",
+    "add_point_60"  : "6",
+    "add_point_70"  : "7",
+    "add_point_80"  : "8",
+    "add_point_90"  : "9",
+    "add_point_100" : "=",           # Changed from "°" (not available on most keyboards)
+
+    # Chapter Creation (Video Editing Style - universal letters)
+    "set_chapter_start": "I",        # In-point (start of chapter)
+    "set_chapter_end": "O",          # Out-point (end of chapter)
 }
 
 
