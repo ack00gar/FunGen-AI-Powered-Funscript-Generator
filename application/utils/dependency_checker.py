@@ -246,6 +246,9 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     # 7. Check for ffmpeg, ffprobe, and ffplay (auto-install if needed)
     check_ffmpeg_ffprobe(non_interactive=non_interactive, auto_install=auto_install)
 
+    # 8. Download splash screen emojis (optional, non-blocking)
+    check_and_download_emojis(auto_download=auto_install)
+
     logger.info("=== Dependency Check Finished ===\n")
 
 
@@ -322,6 +325,91 @@ def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = F
             sys.exit(1)
     else:
         logger.info("ffmpeg and ffprobe are available.")
+
+
+def check_and_download_emojis(*, auto_download: bool = True):
+    """
+    Checks for and downloads splash screen emoji assets if missing.
+    Emojis are optional decorative elements for the splash screen.
+    Uses URLs from config.constants.SPLASH_EMOJI_URLS.
+    """
+    try:
+        import requests
+        from tqdm import tqdm
+        from config.constants import SPLASH_EMOJI_URLS
+    except ImportError:
+        logger.debug("requests, tqdm, or config not available, skipping emoji download")
+        return
+
+    # Get assets directory
+    assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets')
+    os.makedirs(assets_dir, exist_ok=True)
+
+    # Check which emojis are missing
+    missing_emojis = []
+    for filename in SPLASH_EMOJI_URLS.keys():
+        filepath = os.path.join(assets_dir, filename)
+        if not os.path.exists(filepath):
+            missing_emojis.append(filename)
+
+    if not missing_emojis:
+        logger.debug(f"All {len(SPLASH_EMOJI_URLS)} splash screen emojis are present")
+        return
+
+    if not auto_download:
+        logger.info(f"💬 {len(missing_emojis)}/{len(SPLASH_EMOJI_URLS)} splash screen emojis missing (skipping auto-download)")
+        return
+
+    logger.info(f"💬 Downloading {len(missing_emojis)}/{len(SPLASH_EMOJI_URLS)} splash screen emojis...")
+
+    downloaded = 0
+    failed = []
+
+    for filename in missing_emojis:
+        url = SPLASH_EMOJI_URLS[filename]
+        filepath = os.path.join(assets_dir, filename)
+
+        try:
+            response = requests.get(url, stream=True, timeout=10)
+            response.raise_for_status()
+
+            # Get file size for progress bar
+            total_size = int(response.headers.get('content-length', 0))
+
+            # Download with progress bar
+            with open(filepath, 'wb') as f:
+                if total_size > 0:
+                    with tqdm(total=total_size, unit='B', unit_scale=True,
+                             desc=f"  {filename}", leave=False, ncols=80) as pbar:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                            pbar.update(len(chunk))
+                else:
+                    # No content-length header, just download
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+            # Verify the file is not empty
+            if os.path.getsize(filepath) < 1000:  # Emojis should be at least 1KB
+                os.remove(filepath)
+                failed.append(filename)
+                logger.debug(f"  ✗ {filename} (file too small, removed)")
+            else:
+                downloaded += 1
+                logger.debug(f"  ✓ {filename}")
+
+        except Exception as e:
+            failed.append(filename)
+            logger.debug(f"  ✗ {filename}: {str(e)}")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+
+    if downloaded > 0:
+        logger.info(f"✅ Downloaded {downloaded} splash screen emoji(s)")
+
+    if failed:
+        logger.debug(f"Failed to download {len(failed)} emoji(s): {', '.join(failed)}")
+        logger.debug("Splash screen will use available emojis only")
 
 
 def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: bool = True):

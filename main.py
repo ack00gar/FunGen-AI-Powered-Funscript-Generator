@@ -98,8 +98,13 @@ def _setup_bootstrap_logger():
 def run_gui():
     """Initializes and runs the graphical user interface."""
     from application.logic.app_logic import ApplicationLogic
-    from application.gui_components.app_gui import GUI
-    core_app = ApplicationLogic(is_cli=False)
+    from application.gui_components import GUI, show_splash_during_init
+
+    # Show splash screen during ApplicationLogic initialization
+    def init_app_logic():
+        return ApplicationLogic(is_cli=False)
+
+    core_app = show_splash_during_init(init_app_logic)
     gui = GUI(app_logic=core_app)
     core_app.gui_instance = gui
     gui.run()

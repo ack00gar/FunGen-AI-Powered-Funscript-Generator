@@ -715,6 +715,16 @@ class MainMenu:
             setattr(app_state, "show_simulator_3d", val)
             pm.project_dirty = True
 
+        # Indented option for 3D Simulator logo
+        imgui.indent()
+        clicked, val = imgui.menu_item(
+            "Show Logo on Cylinder",
+            selected=self.app.app_settings.get('show_3d_simulator_logo', True)
+        )
+        if clicked:
+            self.app.app_settings.set('show_3d_simulator_logo', val)
+        imgui.unindent()
+
         if not hasattr(app_state, "show_chapter_list_window"):
             app_state.show_chapter_list_window = False
 
@@ -724,6 +734,31 @@ class MainMenu:
         if clicked:
             app_state.show_chapter_list_window = val
             pm.project_dirty = True
+
+        imgui.separator()
+        imgui.text("Overlay Modes")
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+        imgui.text("(Render on video display)")
+        imgui.pop_style_color()
+
+        clicked, val = imgui.menu_item(
+            "Gauges as Overlay", selected=self.app.app_settings.get('gauge_overlay_mode', False)
+        )
+        if clicked:
+            self.app.app_settings.set('gauge_overlay_mode', val)
+
+        clicked, val = imgui.menu_item(
+            "Movement Bar as Overlay", selected=self.app.app_settings.get('movement_bar_overlay_mode', False)
+        )
+        if clicked:
+            self.app.app_settings.set('movement_bar_overlay_mode', val)
+
+        clicked, val = imgui.menu_item(
+            "3D Simulator as Overlay", selected=self.app.app_settings.get('simulator_3d_overlay_mode', False)
+        )
+        if clicked:
+            self.app.app_settings.set('simulator_3d_overlay_mode', val)
+
         imgui.separator()
 
         # Tracker flags

@@ -355,6 +355,26 @@ MODEL_DOWNLOAD_URLS = {
     "pose_pt": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.pt"
 }
 
+# Splash screen emoji URLs (optional decorative assets)
+SPLASH_EMOJI_URLS = {
+    'peach.png': 'https://em-content.zobj.net/source/apple/391/peach_1f351.png',
+    'eggplant.png': 'https://em-content.zobj.net/source/apple/391/eggplant_1f346.png',
+    'cherries.png': 'https://em-content.zobj.net/source/apple/391/cherries_1f352.png',
+    'droplet.png': 'https://em-content.zobj.net/source/apple/391/sweat-droplets_1f4a6.png',
+    'lips.png': 'https://em-content.zobj.net/source/apple/391/mouth_1f444.png',
+    'ok-hand.png': 'https://em-content.zobj.net/source/apple/391/ok-hand_1f44c.png',
+    'tongue.png': 'https://em-content.zobj.net/source/apple/391/tongue_1f445.png',
+    'woman-face.png': 'https://em-content.zobj.net/source/apple/391/woman_1f469.png',
+    'hot-pepper.png': 'https://em-content.zobj.net/source/apple/391/hot-pepper_1f336-fe0f.png',
+    'fire.png': 'https://em-content.zobj.net/source/apple/391/fire_1f525.png',
+    'face-screaming.png': 'https://em-content.zobj.net/source/apple/391/face-screaming-in-fear_1f631.png',
+    'banana.png': 'https://em-content.zobj.net/source/apple/391/banana_1f34c.png',
+    'lollipop.png': 'https://em-content.zobj.net/source/apple/391/lollipop_1f36d.png',
+    'doughnut.png': 'https://em-content.zobj.net/source/apple/391/doughnut_1f369.png',
+    'rocket.png': 'https://em-content.zobj.net/source/apple/391/rocket_1f680.png',
+    'bottle-popping.png': 'https://em-content.zobj.net/source/apple/391/bottle-with-popping-cork_1f37e.png'
+}
+
 ####################################################################################################
 # UPDATER & GITHUB
 ####################################################################################################

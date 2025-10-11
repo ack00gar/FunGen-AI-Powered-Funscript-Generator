@@ -17,11 +17,12 @@ from config.element_group_colors import AppGUIColors, UpdateSettingsColors
 class GitHubAPIClient:
     """Centralized GitHub API client to reduce code duplication."""
     
-    def __init__(self, repo_owner: str, repo_name: str, token_manager: GitHubTokenManager):
+    def __init__(self, repo_owner: str, repo_name: str, token_manager: GitHubTokenManager, logger=None):
         self.repo_owner = repo_owner
         self.repo_name = repo_name
         self.token_manager = token_manager
         self.base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
+        self.logger = logger
         
     def _get_headers(self) -> Dict[str, str]:
         """Get common headers for GitHub API requests."""
@@ -43,9 +44,10 @@ class GitHubAPIClient:
             remaining = response.headers.get('X-RateLimit-Remaining')
             limit = response.headers.get('X-RateLimit-Limit')
             reset_time = response.headers.get('X-RateLimit-Reset')
-            
+
             if remaining and limit:
-                print(f"GitHub API: {remaining}/{limit} requests remaining")
+                if self.logger:
+                    self.logger.debug(f"GitHub API: {remaining}/{limit} requests remaining")
             
             if response.status_code == 403:
                 if remaining == '0':
@@ -147,7 +149,7 @@ class AutoUpdater:
         self.test_mode_enabled = False  # Manual test mode toggle
         
         self.token_manager = GitHubTokenManager()
-        self.github_api = GitHubAPIClient(self.REPO_OWNER, self.REPO_NAME, self.token_manager)
+        self.github_api = GitHubAPIClient(self.REPO_OWNER, self.REPO_NAME, self.token_manager, self.logger)
         
         # Multi-branch migration support
         self.active_branch = self.FALLBACK_BRANCH  # Start with v0.5.0
