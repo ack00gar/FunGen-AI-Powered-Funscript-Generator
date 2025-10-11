@@ -249,6 +249,9 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
     # 8. Download splash screen emojis (optional, non-blocking)
     check_and_download_emojis(auto_download=auto_install)
 
+    # 9. Download UI control icons (optional, non-blocking)
+    check_and_download_ui_icons(auto_download=auto_install)
+
     logger.info("=== Dependency Check Finished ===\n")
 
 
@@ -410,6 +413,92 @@ def check_and_download_emojis(*, auto_download: bool = True):
     if failed:
         logger.debug(f"Failed to download {len(failed)} emoji(s): {', '.join(failed)}")
         logger.debug("Splash screen will use available emojis only")
+
+
+def check_and_download_ui_icons(*, auto_download: bool = True):
+    """
+    Checks for and downloads UI control icon assets if missing.
+    Icons are used for playback controls, zoom, fullscreen, and other UI buttons.
+    Uses URLs from config.constants.UI_CONTROL_ICON_URLS.
+    """
+    try:
+        import requests
+        from tqdm import tqdm
+        from config.constants import UI_CONTROL_ICON_URLS
+    except ImportError:
+        logger.debug("requests, tqdm, or config not available, skipping UI icon download")
+        return
+
+    # Get assets directory
+    assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets')
+
+    # Check which icons are missing
+    missing_icons = []
+    for filename in UI_CONTROL_ICON_URLS.keys():
+        filepath = os.path.join(assets_dir, filename)
+        # Ensure parent directory exists
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        if not os.path.exists(filepath):
+            missing_icons.append(filename)
+
+    if not missing_icons:
+        logger.debug(f"All {len(UI_CONTROL_ICON_URLS)} UI control icons are present")
+        return
+
+    if not auto_download:
+        logger.info(f"🎨 {len(missing_icons)}/{len(UI_CONTROL_ICON_URLS)} UI control icons missing (skipping auto-download)")
+        return
+
+    logger.info(f"🎨 Downloading {len(missing_icons)}/{len(UI_CONTROL_ICON_URLS)} UI control icons...")
+
+    downloaded = 0
+    failed = []
+
+    for filename in missing_icons:
+        url = UI_CONTROL_ICON_URLS[filename]
+        filepath = os.path.join(assets_dir, filename)
+
+        try:
+            response = requests.get(url, stream=True, timeout=10)
+            response.raise_for_status()
+
+            # Get file size for progress bar
+            total_size = int(response.headers.get('content-length', 0))
+
+            # Download with progress bar
+            with open(filepath, 'wb') as f:
+                if total_size > 0:
+                    with tqdm(total=total_size, unit='B', unit_scale=True,
+                             desc=f"  {os.path.basename(filename)}", leave=False, ncols=80) as pbar:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                            pbar.update(len(chunk))
+                else:
+                    # No content-length header, just download
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+            # Verify the file is not empty
+            if os.path.getsize(filepath) < 1000:  # Icons should be at least 1KB
+                os.remove(filepath)
+                failed.append(filename)
+                logger.debug(f"  ✗ {filename} (file too small, removed)")
+            else:
+                downloaded += 1
+                logger.debug(f"  ✓ {filename}")
+
+        except Exception as e:
+            failed.append(filename)
+            logger.debug(f"  ✗ {filename}: {str(e)}")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+
+    if downloaded > 0:
+        logger.info(f"✅ Downloaded {downloaded} UI control icon(s)")
+
+    if failed:
+        logger.debug(f"Failed to download {len(failed)} icon(s): {', '.join(failed)}")
+        logger.debug("UI will fall back to text labels for missing icons")
 
 
 def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: bool = True):

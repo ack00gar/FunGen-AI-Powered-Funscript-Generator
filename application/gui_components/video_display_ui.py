@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 import config.constants as constants
 from config.element_group_colors import VideoDisplayColors
-from application.utils import get_logo_texture_manager
+from application.utils import get_logo_texture_manager, get_icon_texture_manager
 
 
 class VideoDisplayUI:
@@ -157,11 +157,14 @@ class VideoDisplayUI:
         
         controls_disabled = stage_proc.full_analysis_active or is_live_tracking_running or not file_mgr.video_path
 
-        ICON_JUMP_START, ICON_PREV_FRAME, ICON_PLAY, ICON_PAUSE, ICON_STOP, ICON_NEXT_FRAME, ICON_JUMP_END = "|<", "<<", ">", "||", "[]", ">>", ">|"
-        button_h_ref = imgui.get_frame_height()
-        pb_icon_w, pb_play_w, pb_stop_w, pb_btn_spacing = button_h_ref * 1.5, button_h_ref * 1.7, button_h_ref * 1.5, 4.0
+        # Get icon texture manager for playback controls
+        icon_mgr = get_icon_texture_manager()
 
-        total_controls_width = (pb_icon_w * 4) + pb_play_w + pb_stop_w + (pb_btn_spacing * 5)
+        # Button sizing
+        button_h_ref = imgui.get_frame_height()
+        pb_icon_w, pb_play_w, pb_stop_w, pb_btn_spacing = button_h_ref, button_h_ref, button_h_ref, 4.0
+
+        total_controls_width = (pb_icon_w * 7) + (pb_btn_spacing * 6)
 
         img_rect = self._actual_video_image_rect_on_screen
         if img_rect['w'] <= 0 or img_rect['h'] <= 0:
@@ -178,22 +181,62 @@ class VideoDisplayUI:
             imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
 
         imgui.begin_group()
-        if imgui.button(ICON_JUMP_START + "##VidOverStart", width=pb_icon_w): event_handlers.handle_playback_control("jump_start")
-        imgui.same_line(spacing=pb_btn_spacing)
-        if imgui.button(ICON_PREV_FRAME + "##VidOverPrev", width=pb_icon_w): event_handlers.handle_playback_control("prev_frame")
-        imgui.same_line(spacing=pb_btn_spacing)
-        # The condition now checks for the "not paused" state to accurately reflect playing vs. paused.
-        is_playing = self.app.processor and self.app.processor.is_processing and not self.app.processor.pause_event.is_set()
-        play_pause_icon = ICON_PAUSE if is_playing else ICON_PLAY
 
-        #play_pause_icon = ICON_PAUSE if self.app.processor and self.app.processor.is_processing else ICON_PLAY
-        if imgui.button(play_pause_icon + "##VidOverPlayPause", width=pb_play_w): event_handlers.handle_playback_control("play_pause")
+        # Jump Start button
+        jump_start_tex, _, _ = icon_mgr.get_icon_texture('jump-start.png')
+        if jump_start_tex and imgui.image_button(jump_start_tex, pb_icon_w, pb_icon_w):
+            event_handlers.handle_playback_control("jump_start")
+        elif not jump_start_tex and imgui.button("|<##VidOverStart", width=pb_icon_w):
+            event_handlers.handle_playback_control("jump_start")
+
+        imgui.same_line(spacing=pb_btn_spacing)
+
+        # Previous Frame button
+        prev_frame_tex, _, _ = icon_mgr.get_icon_texture('prev-frame.png')
+        if prev_frame_tex and imgui.image_button(prev_frame_tex, pb_icon_w, pb_icon_w):
+            event_handlers.handle_playback_control("prev_frame")
+        elif not prev_frame_tex and imgui.button("<<##VidOverPrev", width=pb_icon_w):
+            event_handlers.handle_playback_control("prev_frame")
+
+        imgui.same_line(spacing=pb_btn_spacing)
+
+        # Play/Pause button (dynamic based on state)
+        is_playing = self.app.processor and self.app.processor.is_processing and not self.app.processor.pause_event.is_set()
+        play_pause_icon_name = 'pause.png' if is_playing else 'play.png'
+        play_pause_fallback = "||" if is_playing else ">"
+
+        play_pause_tex, _, _ = icon_mgr.get_icon_texture(play_pause_icon_name)
+        if play_pause_tex and imgui.image_button(play_pause_tex, pb_play_w, pb_icon_w):
+            event_handlers.handle_playback_control("play_pause")
+        elif not play_pause_tex and imgui.button(f"{play_pause_fallback}##VidOverPlayPause", width=pb_play_w):
+            event_handlers.handle_playback_control("play_pause")
+
         imgui.same_line(spacing=2)
-        if imgui.button(ICON_STOP + "##VidOverStop", width=pb_stop_w): event_handlers.handle_playback_control("stop")
+
+        # Stop button
+        stop_tex, _, _ = icon_mgr.get_icon_texture('stop.png')
+        if stop_tex and imgui.image_button(stop_tex, pb_stop_w, pb_icon_w):
+            event_handlers.handle_playback_control("stop")
+        elif not stop_tex and imgui.button("[]##VidOverStop", width=pb_stop_w):
+            event_handlers.handle_playback_control("stop")
+
         imgui.same_line(spacing=pb_btn_spacing)
-        if imgui.button(ICON_NEXT_FRAME + "##VidOverNext", width=pb_icon_w): event_handlers.handle_playback_control("next_frame")
+
+        # Next Frame button
+        next_frame_tex, _, _ = icon_mgr.get_icon_texture('next-frame.png')
+        if next_frame_tex and imgui.image_button(next_frame_tex, pb_icon_w, pb_icon_w):
+            event_handlers.handle_playback_control("next_frame")
+        elif not next_frame_tex and imgui.button(">>##VidOverNext", width=pb_icon_w):
+            event_handlers.handle_playback_control("next_frame")
+
         imgui.same_line(spacing=pb_btn_spacing)
-        if imgui.button(ICON_JUMP_END + "##VidOverEnd", width=pb_icon_w): event_handlers.handle_playback_control("jump_end")
+
+        # Jump End button
+        jump_end_tex, _, _ = icon_mgr.get_icon_texture('jump-end.png')
+        if jump_end_tex and imgui.image_button(jump_end_tex, pb_icon_w, pb_icon_w):
+            event_handlers.handle_playback_control("jump_end")
+        elif not jump_end_tex and imgui.button(">|##VidOverEnd", width=pb_icon_w):
+            event_handlers.handle_playback_control("jump_end")
         
         # Add Handy control button inline with playback controls
         self._render_handy_control_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
@@ -624,9 +667,6 @@ class VideoDisplayUI:
                                 self._render_live_tracker_overlay(draw_list)
                                 draw_list.pop_clip_rect()
 
-                            self._render_playback_controls_overlay()
-                            self._render_video_zoom_pan_controls(app_state)
-
                             # --- Overlay: Top-right buttons for L/R Dial and Gauge ---
                             def render_overlay_toggle(label, visible_attr):
                                 pushed = False
@@ -661,6 +701,11 @@ class VideoDisplayUI:
 
                             # --- Render Component Overlays (if enabled) ---
                             self._render_component_overlays(app_state)
+
+                            # --- Render Playback Controls (AFTER all overlays so they're clickable) ---
+                            # Note: draw_list operations render on top of ImGui widgets, so buttons must be last
+                            self._render_playback_controls_overlay()
+                            self._render_video_zoom_pan_controls(app_state)
 
                 # --- Interactive Refinement Overlay and Click Handling ---
                 if self.app.app_state_ui.interactive_refinement_mode_enabled:
@@ -908,15 +953,35 @@ class VideoDisplayUI:
 
         imgui.begin_group()
 
-        # Zoom Settings Block (Z-In, Z-Out, Rst, Text on one line)
-        if imgui.button("Z-In##VidOverZoomIn"):
+        # Get icon texture manager for zoom controls
+        icon_mgr = get_icon_texture_manager()
+        zoom_btn_size = button_h_ref
+
+        # Zoom In button
+        zoom_in_tex, _, _ = icon_mgr.get_icon_texture('zoom-in.png')
+        if zoom_in_tex and imgui.image_button(zoom_in_tex, zoom_btn_size, zoom_btn_size):
             app_state.adjust_video_zoom(1.2)
+        elif not zoom_in_tex and imgui.button("Z-In##VidOverZoomIn"):
+            app_state.adjust_video_zoom(1.2)
+
         imgui.same_line(spacing=4)
-        if imgui.button("Z-Out##VidOverZoomOut"):
+
+        # Zoom Out button
+        zoom_out_tex, _, _ = icon_mgr.get_icon_texture('zoom-out.png')
+        if zoom_out_tex and imgui.image_button(zoom_out_tex, zoom_btn_size, zoom_btn_size):
             app_state.adjust_video_zoom(1 / 1.2)
+        elif not zoom_out_tex and imgui.button("Z-Out##VidOverZoomOut"):
+            app_state.adjust_video_zoom(1 / 1.2)
+
         imgui.same_line(spacing=4)
-        if imgui.button("Rst##VidOverZoomReset"):
+
+        # Reset button (counterclockwise arrow icon)
+        reset_tex, _, _ = icon_mgr.get_icon_texture('reset.png')
+        if reset_tex and imgui.image_button(reset_tex, zoom_btn_size, zoom_btn_size):
             app_state.reset_video_zoom_pan()
+        elif not reset_tex and imgui.button("Rst##VidOverZoomReset"):
+            app_state.reset_video_zoom_pan()
+
         imgui.same_line(spacing=4)
         imgui.text(f"{app_state.video_zoom_factor:.1f}x")
 
@@ -1231,29 +1296,38 @@ class VideoDisplayUI:
         if is_live_tracking and video_loaded:
             fullscreen_button_disabled = False
         
-        # Determine button state and styling
+        # Get icon texture manager
+        icon_mgr = get_icon_texture_manager()
+
+        # Determine button state, styling, and icon
         if has_fullscreen_process:
             # Exit fullscreen mode
             imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
-            button_text = "Exit FS"
+            button_icon_name = 'fullscreen-exit.png'
+            button_text_fallback = "Exit FS"
             button_enabled = True
         else:
             # Enter fullscreen mode - highlight during live tracking
             if is_live_tracking:
                 imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2, 1.0)  # Green (live tracking)
-                button_text = "FS Live"
+                button_text_fallback = "FS Live"
             else:
                 imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.8, 1.0)  # Blue (normal)
-                button_text = "FS"
+                button_text_fallback = "FS"
+            button_icon_name = 'fullscreen.png'
             button_enabled = video_loaded
-        
+
         # Apply disabled styling if needed (but NOT during live tracking)
         if fullscreen_button_disabled:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
-        
-        # Render the button
-        button_clicked = imgui.button(f"{button_text}##FullscreenControl", width=button_width)
+
+        # Render the button with icon or fallback text
+        fs_tex, _, _ = icon_mgr.get_icon_texture(button_icon_name)
+        if fs_tex:
+            button_clicked = imgui.image_button(fs_tex, button_width, button_width)
+        else:
+            button_clicked = imgui.button(f"{button_text_fallback}##FullscreenControl", width=button_width)
         
         # Use our fullscreen-specific logic, not parent controls_disabled
         if button_clicked and not fullscreen_button_disabled:
