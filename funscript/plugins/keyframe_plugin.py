@@ -166,20 +166,15 @@ class KeyframePlugin(FunscriptTransformationPlugin):
             }
     
     def _find_keyframes(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
-        """OPTIMIZED: Find significant keyframes using vectorized operations for large datasets."""
+        """OPTIMIZED: Find significant keyframes using vectorized numpy operations."""
         position_tolerance = params['position_tolerance']
         time_tolerance_ms = params['time_tolerance_ms']
 
         if len(segment) < 3:
             return segment
 
-        # BREAKTHROUGH OPTIMIZATION: Use different algorithms based on dataset size
-        if len(segment) > 50000:
-            return self._find_keyframes_ultra_fast(segment, params)
-        elif len(segment) > 2000:
-            return self._find_keyframes_vectorized(segment, params)
-        else:
-            return self._find_keyframes_original(segment, params)
+        # Use vectorized algorithm for all dataset sizes (simpler, nearly as fast for small, much faster for large)
+        return self._find_keyframes_vectorized(segment, params)
     
     def _find_keyframes_vectorized(self, segment: List[Dict], params: Dict[str, Any]) -> List[Dict]:
         """Vectorized keyframe detection for large datasets."""
