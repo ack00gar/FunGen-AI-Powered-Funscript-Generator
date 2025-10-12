@@ -255,7 +255,7 @@ class KeyboardShortcutsDialog:
             if imgui.is_item_hovered():
                 tooltip = "The following shortcuts are assigned to multiple actions:\n\n"
                 for shortcut, actions in conflicts[:5]:  # Show first 5
-                    tooltip += f"• {shortcut}:\n"
+                    tooltip += f"{shortcut}:\n"
                     for action in actions:
                         tooltip += f"  - {action}\n"
                     tooltip += "\n"
@@ -281,7 +281,7 @@ class KeyboardShortcutsDialog:
                                     display_name = disp_name
                                     break
 
-                        imgui.text(f"• {display_name}")
+                        imgui.text(f"- {display_name}")
                         imgui.same_line()
                         if imgui.small_button(f"Clear##{action}"):
                             # Clear this specific conflicting shortcut
@@ -441,9 +441,9 @@ class KeyboardShortcutsDialog:
                 is_active = (profile_name == self.profile_manager.active_profile_name)
 
                 if is_active:
-                    imgui.text_colored(f"• {profile_name} (Active)", 0.2, 1.0, 0.2, 1.0)
+                    imgui.text_colored(f"{profile_name} (Active)", 0.2, 1.0, 0.2, 1.0)
                 else:
-                    imgui.text(f"• {profile_name}")
+                    imgui.text(profile_name)
 
                 if profile.description:
                     imgui.same_line()
@@ -483,9 +483,9 @@ class KeyboardShortcutsDialog:
                     is_active = (profile_name == self.profile_manager.active_profile_name)
 
                     if is_active:
-                        imgui.text_colored(f"• {profile_name} (Active)", 0.2, 1.0, 0.2, 1.0)
+                        imgui.text_colored(f"{profile_name} (Active)", 0.2, 1.0, 0.2, 1.0)
                     else:
-                        imgui.text(f"• {profile_name}")
+                        imgui.text(profile_name)
 
                     if profile.description:
                         imgui.same_line()
