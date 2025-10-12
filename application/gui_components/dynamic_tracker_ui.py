@@ -195,13 +195,13 @@ class DynamicTrackerUI:
         ]
         
         if info.requires_intervention:
-            tooltip_lines.append("⚠️ Requires user setup (ROI, etc.)")
-        
+            tooltip_lines.append("! Requires user setup (ROI, etc.)")
+
         if info.supports_batch:
-            tooltip_lines.append("✅ Batch processing supported")
-        
+            tooltip_lines.append("+ Batch processing supported")
+
         if info.supports_realtime:
-            tooltip_lines.append("🔴 Real-time processing supported")
+            tooltip_lines.append("* Real-time processing supported")
         
         if info.cli_aliases:
             tooltip_lines.append(f"CLI aliases: {', '.join(info.cli_aliases)}")
