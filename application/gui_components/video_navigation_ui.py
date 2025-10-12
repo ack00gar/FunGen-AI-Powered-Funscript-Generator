@@ -1508,10 +1508,12 @@ class ChapterListWindow:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-            if imgui.button("Create Chapter in Gap & Track"):
-                if can_create_in_gap:
-                    self._handle_create_chapter_in_gap(fs_proc, create_c1, gap_start, gap_end)
-                    self.list_context_selected_chapters.clear()
+            # Create Chapter in Gap & Track button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Create Chapter in Gap & Track"):
+                    if can_create_in_gap:
+                        self._handle_create_chapter_in_gap(fs_proc, create_c1, gap_start, gap_end)
+                        self.list_context_selected_chapters.clear()
 
             if not can_create_in_gap:
                 imgui.pop_style_var()

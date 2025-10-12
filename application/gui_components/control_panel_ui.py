@@ -2342,16 +2342,20 @@ class ControlPanelUI:
             imgui.text_wrapped("2. Now, use video controls (seek, frame step) to find the")
             imgui.text_wrapped("   EXACT visual moment corresponding to the selected point.")
             imgui.text_wrapped("3. Press 'Confirm Visual Match' below.")
-        if imgui.button("Confirm Visual Match##ConfirmCalibration", width=-1):
-            if calibration_mgr.calibration_reference_point_selected:
-                calibration_mgr.confirm_latency_calibration()
-            else:
-                self.app.logger.info("Please select a reference point on Timeline 1 first.", extra={"status_message": True})
-        if imgui.button("Cancel Calibration##CancelCalibration", width=-1):
-            calibration_mgr.is_calibration_mode_active = False
-            calibration_mgr.calibration_reference_point_selected = False
-            self.app.logger.info("Latency calibration cancelled.", extra={"status_message": True})
-            self.app.energy_saver.reset_activity_timer()
+        # Confirm Visual Match button (PRIMARY - positive action)
+        with primary_button_style():
+            if imgui.button("Confirm Visual Match##ConfirmCalibration", width=-1):
+                if calibration_mgr.calibration_reference_point_selected:
+                    calibration_mgr.confirm_latency_calibration()
+                else:
+                    self.app.logger.info("Please select a reference point on Timeline 1 first.", extra={"status_message": True})
+        # Cancel Calibration button (DESTRUCTIVE - cancels process)
+        with destructive_button_style():
+            if imgui.button("Cancel Calibration##CancelCalibration", width=-1):
+                calibration_mgr.is_calibration_mode_active = False
+                calibration_mgr.calibration_reference_point_selected = False
+                self.app.logger.info("Latency calibration cancelled.", extra={"status_message": True})
+                self.app.energy_saver.reset_activity_timer()
 
     # ------- Range selection -------
 
@@ -4389,8 +4393,10 @@ class ControlPanelUI:
 
                     # Buttons row
                     button_width = imgui.get_content_region_available_width() / 2 - 5
-                    if imgui.button("Open in Browser", width=button_width):
-                        self._open_in_browser(viewer_url)
+                    # Open in Browser button (PRIMARY - positive action)
+                    with primary_button_style():
+                        if imgui.button("Open in Browser", width=button_width):
+                            self._open_in_browser(viewer_url)
                     imgui.same_line()
                     if imgui.button("Copy URL", width=button_width):
                         self._copy_to_clipboard(viewer_url)
@@ -4635,9 +4641,10 @@ class ControlPanelUI:
                     )
 
                     imgui.spacing()
-                    # Discover XBVR button
-                    if imgui.button("Discover XBVR Address", width=-1):
-                        self._discover_xbvr_address()
+                    # Discover XBVR button (PRIMARY - positive action)
+                    with primary_button_style():
+                        if imgui.button("Discover XBVR Address", width=-1):
+                            self._discover_xbvr_address()
 
             # Local Folder Browser Section
             imgui.spacing()
