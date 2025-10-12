@@ -2829,11 +2829,12 @@ class ControlPanelUI:
             _tooltip_if_hovered("Your Handy connection key (e.g., 'DH7Hc')")
             
             imgui.spacing()
-            
-            # Connect button
+
+            # Connect button (PRIMARY - positive action)
             if connection_key and len(connection_key) > 0:
-                if imgui.button("Connect to Handy##HandyConnect"):
-                    self._connect_handy(connection_key)
+                with primary_button_style():
+                    if imgui.button("Connect to Handy##HandyConnect"):
+                        self._connect_handy(connection_key)
                 _tooltip_if_hovered("Connect to your Handy device")
             else:
                 imgui.text_disabled("Enter connection key to enable connect button")

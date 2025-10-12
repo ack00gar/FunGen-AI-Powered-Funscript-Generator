@@ -1469,11 +1469,13 @@ class ChapterListWindow:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-            if imgui.button("Merge Selected"):
-                if can_merge:
-                    chaps_to_merge = sorted(self.list_context_selected_chapters, key=lambda c: c.start_frame_id)
-                    fs_proc.merge_selected_chapters(chaps_to_merge[0], chaps_to_merge[1])
-                    self.list_context_selected_chapters.clear()
+            # Merge Selected button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Merge Selected"):
+                    if can_merge:
+                        chaps_to_merge = sorted(self.list_context_selected_chapters, key=lambda c: c.start_frame_id)
+                        fs_proc.merge_selected_chapters(chaps_to_merge[0], chaps_to_merge[1])
+                        self.list_context_selected_chapters.clear()
 
             if not can_merge:
                 imgui.pop_style_var()
@@ -1489,10 +1491,12 @@ class ChapterListWindow:
                 imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
 
-            if imgui.button("Track Gap & Merge"):
-                if can_track_gap:
-                    self._handle_track_gap_and_merge(fs_proc, gap_c1, gap_c2)
-                    self.list_context_selected_chapters.clear()
+            # Track Gap & Merge button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Track Gap & Merge"):
+                    if can_track_gap:
+                        self._handle_track_gap_and_merge(fs_proc, gap_c1, gap_c2)
+                        self.list_context_selected_chapters.clear()
 
             if not can_track_gap:
                 imgui.pop_style_var()
