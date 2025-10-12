@@ -559,6 +559,18 @@ class MainMenu:
             # Video Overlays submenu
             self._render_video_overlays_submenu(app_state, stage_proc)
 
+            imgui.separator()
+
+            # Show Advanced Options (last item in View menu)
+            clicked, val = imgui.menu_item(
+                "Show Advanced Options",
+                selected=app_state.show_advanced_options
+            )
+            if clicked:
+                app_state.show_advanced_options = val
+                self.app.app_settings.set("show_advanced_options", val)
+                self.app.project_manager.project_dirty = True
+
             imgui.end_menu()
 
     def _render_ui_mode_submenu(self, app_state):
@@ -687,15 +699,6 @@ class MainMenu:
             if clicked:
                 app_state.show_timeline_editor_buttons = val
                 settings.set("show_timeline_editor_buttons", val)
-                pm.project_dirty = True
-
-            clicked, val = imgui.menu_item(
-                "Show Advanced Options",
-                selected=app_state.show_advanced_options
-            )
-            if clicked:
-                app_state.show_advanced_options = val
-                settings.set("show_advanced_options", val)
                 pm.project_dirty = True
 
             imgui.end_menu()
@@ -957,6 +960,12 @@ class MainMenu:
             # About
             if _menu_item_simple("About FunGen..."):
                 self._show_about_dialog = True
+
+            # Keyboard Shortcuts
+            clicked, _ = imgui.menu_item("Keyboard Shortcuts...", "F1")
+            if clicked:
+                if hasattr(app, 'gui_instance') and app.gui_instance:
+                    app.gui_instance.keyboard_shortcuts_dialog.open()
 
             imgui.separator()
 

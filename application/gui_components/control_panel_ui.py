@@ -1059,6 +1059,8 @@ class ControlPanelUI:
             imgui.push_item_width(120)
             gpu_threshold = settings.get("timeline_gpu_threshold_points", 5000)
             changed, gpu_threshold = imgui.input_int("##GPUThreshold", gpu_threshold)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Minimum points to use GPU rendering (higher = use CPU more often, lower = use GPU more often)")
             if changed:
                 gpu_threshold = max(1000, min(100000, gpu_threshold))  # Clamp between 1k-100k
                 settings.set("timeline_gpu_threshold_points", gpu_threshold)
@@ -1289,12 +1291,16 @@ class ControlPanelUI:
         if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu")[0]:
             cur_conf = settings.get("live_tracker_confidence_threshold")
             ch, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", cur_conf, 0.1, 0.95, "%.2f")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Minimum confidence for object detection (higher = fewer false positives, lower = more detections)")
             if ch and new_conf != cur_conf:
                 settings.set("live_tracker_confidence_threshold", new_conf)
                 tr.confidence_threshold = new_conf
 
             cur_pad = settings.get("live_tracker_roi_padding")
             ch, new_pad = imgui.input_int("ROI Padding##ROIPadTrackerMenu", cur_pad)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Pixels to expand the region of interest beyond detected object (larger = more context)")
             if ch:
                 v = max(0, new_pad)
                 if v != cur_pad:
@@ -1303,6 +1309,8 @@ class ControlPanelUI:
 
             cur_int = settings.get("live_tracker_roi_update_interval")
             ch, new_int = imgui.input_int("ROI Update Interval (frames)##ROIIntervalTrackerMenu", cur_int)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("How often to run object detection (higher = better performance, lower = more responsive tracking)")
             if ch:
                 v = max(1, new_int)
                 if v != cur_int:
@@ -1311,12 +1319,16 @@ class ControlPanelUI:
 
             cur_sm = settings.get("live_tracker_roi_smoothing_factor")
             ch, new_sm = imgui.slider_float("ROI Smoothing Factor##ROISmoothTrackerMenu", cur_sm, 0.0, 1.0, "%.2f")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Smooths ROI position changes between frames (0=instant changes, 1=maximum smoothing)")
             if ch and new_sm != cur_sm:
                 settings.set("live_tracker_roi_smoothing_factor", new_sm)
                 tr.roi_smoothing_factor = new_sm
 
             cur_persist = settings.get("live_tracker_roi_persistence_frames")
             ch, new_pf = imgui.input_int("ROI Persistence (frames)##ROIPersistTrackerMenu", cur_persist)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("How many frames to keep tracking after losing detection (0=stop immediately, higher=keep tracking longer)")
             if ch:
                 v = max(0, new_pf)
                 if v != cur_persist:
@@ -1342,6 +1354,8 @@ class ControlPanelUI:
             except ValueError:
                 p_idx = 0
             ch, nidx = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu", p_idx, presets)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Optical flow quality preset (ULTRAFAST=best performance, MEDIUM=best quality)")
             if ch:
                 nv = presets[nidx]
                 if nv != cur_p:
@@ -1350,6 +1364,8 @@ class ControlPanelUI:
 
             cur_scale = settings.get("live_tracker_dis_finest_scale")
             ch, new_scale = imgui.input_int("DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu", cur_scale)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Optical flow scale detail level (0=auto, lower=more detail but slower)")
             if ch and new_scale != cur_scale:
                 settings.set("live_tracker_dis_finest_scale", new_scale)
                 tr.update_dis_flow_config(finest_scale=new_scale)
@@ -1361,12 +1377,16 @@ class ControlPanelUI:
             if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu"):
                 cur_sens = settings.get("live_tracker_sensitivity")
                 ch, ns = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu", cur_sens, 0.0, 100.0, "%.1f")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("How responsive the output is to motion changes (higher = more sensitive to small movements)")
                 if ch and ns != cur_sens:
                     settings.set("live_tracker_sensitivity", ns)
                     tr.sensitivity = ns
 
                 cur_amp = settings.get("live_tracker_base_amplification")
                 ch, na = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu", cur_amp, 0.1, 5.0, "%.2f")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("Multiplier for output range (higher = more movement, lower = gentler motion)")
                 if ch:
                     v = max(0.1, na)
                     if v != cur_amp:
@@ -2497,6 +2517,8 @@ class ControlPanelUI:
 
             imgui.text("RDP Simplification")
             ch, nv = imgui.slider_float("Epsilon##RDPEps", fs_proc.rdp_epsilon_input, 0.01, 20.0, "%.2f")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Curve simplification strength (lower = more detail, higher = smoother/fewer points)")
             if ch:
                 fs_proc.rdp_epsilon_input = nv
             # Apply button (PRIMARY - positive action)

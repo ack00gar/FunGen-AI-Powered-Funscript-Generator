@@ -105,15 +105,38 @@ AI_MODEL_TOOLTIP_EXTENSIONS = ".pt, .onnx, .engine, .mlpackage"
 MOD_KEY = "SUPER" if platform.system() == "Darwin" else "CTRL"
 
 DEFAULT_SHORTCUTS = {
+    # File Operations (Standard shortcuts across all platforms)
+    "save_project": f"{MOD_KEY}+S",
+    "open_project": f"{MOD_KEY}+O",
+
     # Video Navigation (Layout-independent - work on all keyboards)
     "seek_next_frame": "RIGHT_ARROW",
     "seek_prev_frame": "LEFT_ARROW",
     "pan_timeline_left": "ALT+LEFT_ARROW",
     "pan_timeline_right": "ALT+RIGHT_ARROW",
+    "jump_to_start": "HOME",
+    "jump_to_end": "END",
 
     # Point Navigation (Character-based - may need layout adaptation)
     "jump_to_next_point": ".",       # QWERTY: period | AZERTY: SHIFT+; | QWERTZ: period
     "jump_to_prev_point": ",",       # QWERTY: comma | AZERTY: ; | QWERTZ: comma
+
+    # Timeline View Controls
+    "zoom_in_timeline": f"{MOD_KEY}+EQUAL",   # CTRL+= (same key as + on most keyboards)
+    "zoom_out_timeline": f"{MOD_KEY}+MINUS",  # CTRL+-
+
+    # Window Toggles
+    "toggle_video_display": "V",
+    "toggle_timeline2": "T",
+    "toggle_gauge_window": "G",
+    "toggle_3d_simulator": "S",
+    "toggle_movement_bar": "M",
+    "toggle_chapter_list": "L",
+    "toggle_heatmap": "H",
+    "toggle_funscript_preview": "P",
+    "toggle_waveform": "W",
+    "toggle_video_feed": "F",
+    "reset_timeline_view": "R",
 
     # Editing (Layout-independent modifier+key combinations)
     "delete_selected_point": "DELETE",
