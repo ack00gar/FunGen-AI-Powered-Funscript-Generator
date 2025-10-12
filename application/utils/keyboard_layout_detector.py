@@ -261,17 +261,17 @@ class KeyboardLayoutDetector:
 
         if layout.name == KeyboardLayout.AZERTY:
             info += "AZERTY Layout Adjustments:\n"
-            info += "• Jump to Next Point: SHIFT+; (instead of .)\n"
-            info += "• Jump to Previous Point: ; (instead of ,)\n"
+            info += "- Jump to Next Point: SHIFT+; (instead of .)\n"
+            info += "- Jump to Previous Point: ; (instead of ,)\n"
             info += "\nNote: These adjustments match your physical keyboard layout."
         elif layout.name == KeyboardLayout.QWERTZ:
             info += "QWERTZ Layout:\n"
-            info += "• No punctuation adjustments needed\n"
-            info += "• Period and comma work as expected\n"
+            info += "- No punctuation adjustments needed\n"
+            info += "- Period and comma work as expected\n"
         else:  # QWERTY
             info += "QWERTY Layout:\n"
-            info += "• Standard US keyboard layout\n"
-            info += "• No adjustments needed\n"
+            info += "- Standard US keyboard layout\n"
+            info += "- No adjustments needed\n"
 
         return info
 
