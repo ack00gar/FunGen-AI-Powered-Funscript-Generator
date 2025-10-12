@@ -17,7 +17,6 @@ import imgui
 import glfw
 import platform
 from application.utils.keyboard_layout_detector import get_layout_detector, KeyboardLayout
-from application.utils.shortcut_profiles import ShortcutProfileManager
 from application.utils import get_icon_texture_manager
 
 
@@ -31,17 +30,10 @@ class KeyboardShortcutsDialog:
         self.shortcut_categories = self._organize_shortcuts()
         self._is_macos = platform.system() == "Darwin"
 
-        # Phase 3: Keyboard layout detection
+        # Keyboard layout detection
         from application.utils.keyboard_layout_detector import KeyboardLayoutDetector
         self.layout_detector = KeyboardLayoutDetector(app.app_settings)
         self.selected_layout_idx = self._get_layout_index(self.layout_detector.get_layout().name)
-
-        # Phase 4: Profiles system
-        self.profile_manager = ShortcutProfileManager(app.app_settings)
-        self.selected_profile_idx = self._get_profile_index(self.profile_manager.active_profile_name)
-
-        # Active tab (0=Shortcuts, 1=Profiles, 2=Settings)
-        self.active_tab = 0
 
         # Cheat sheet window state
         self.show_cheat_sheet = False
@@ -51,14 +43,6 @@ class KeyboardShortcutsDialog:
         layouts = self.layout_detector.get_available_layouts()
         try:
             return layouts.index(layout_name)
-        except ValueError:
-            return 0
-
-    def _get_profile_index(self, profile_name: str) -> int:
-        """Get index of profile in profiles list"""
-        profiles = self.profile_manager.get_profile_names()
-        try:
-            return profiles.index(profile_name)
         except ValueError:
             return 0
 
@@ -171,11 +155,6 @@ class KeyboardShortcutsDialog:
                     self._render_shortcuts_tab()
                     imgui.end_tab_item()
 
-                # Profiles Tab
-                if imgui.begin_tab_item("Profiles")[0]:
-                    self._render_profiles_tab()
-                    imgui.end_tab_item()
-
                 # Settings Tab
                 if imgui.begin_tab_item("Settings")[0]:
                     self._render_settings_tab()
@@ -200,22 +179,7 @@ class KeyboardShortcutsDialog:
         )
         imgui.spacing()
 
-        # Profile selector
-        profiles = self.profile_manager.get_profile_names()
-        imgui.text("Active Profile:")
-        imgui.same_line()
-        imgui.set_next_item_width(200)
-        changed, self.selected_profile_idx = imgui.combo(
-            "##ProfileSelector",
-            self.selected_profile_idx,
-            profiles
-        )
-        if changed:
-            profile_name = profiles[self.selected_profile_idx]
-            if self.profile_manager.set_active_profile(profile_name):
-                self.app.logger.info(f"Switched to profile: {profile_name}", extra={'status_message': True})
-
-        imgui.same_line()
+        # Cheat sheet button
         if imgui.button("Cheat Sheet"):
             self.show_cheat_sheet = True
 
@@ -240,7 +204,7 @@ class KeyboardShortcutsDialog:
 
         # Conflict detection warning
         shortcuts_settings = self.app.app_settings.get("funscript_editor_shortcuts", {})
-        conflicts = self.profile_manager.detect_conflicts(shortcuts_settings)
+        conflicts = self._detect_conflicts(shortcuts_settings)
         if conflicts:
             # Get warning icon
             icon_mgr = get_icon_texture_manager()
@@ -364,6 +328,24 @@ class KeyboardShortcutsDialog:
 
         return visible_shortcuts
 
+    def _detect_conflicts(self, shortcuts):
+        """
+        Detect conflicting shortcuts in a shortcuts dictionary.
+
+        Returns:
+            List of (shortcut_string, [action_names]) tuples for conflicts
+        """
+        conflicts_map = {}
+
+        for action_name, shortcut_str in shortcuts.items():
+            if shortcut_str:
+                if shortcut_str not in conflicts_map:
+                    conflicts_map[shortcut_str] = []
+                conflicts_map[shortcut_str].append(action_name)
+
+        # Return only actual conflicts (2+ actions with same shortcut)
+        return [(shortcut, actions) for shortcut, actions in conflicts_map.items() if len(actions) > 1]
+
     def _render_shortcut_row(self, action_name, display_name, shortcuts_settings, sm):
         """Render a single shortcut row with customize button"""
         # Get current binding
@@ -410,120 +392,6 @@ class KeyboardShortcutsDialog:
         if self._is_macos:
             return key_str.replace("SUPER", "CMD")
         return key_str
-
-    def _render_profiles_tab(self):
-        """Render the profiles management tab"""
-        imgui.text_wrapped(
-            "Manage shortcut profiles for different workflows. Create custom profiles or use built-in presets."
-        )
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # Current profile info
-        active_profile = self.profile_manager.get_active_profile()
-        imgui.text(f"Active Profile: {active_profile.name}")
-        if active_profile.description:
-            imgui.text_colored(active_profile.description, 0.7, 0.7, 0.7, 1.0)
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # Profile list
-        if imgui.begin_child("ProfilesList", height=-80):
-            # Built-in profiles
-            imgui.text_colored("Built-in Profiles", 0.6, 0.8, 1.0, 1.0)
-            imgui.spacing()
-
-            for profile_name in self.profile_manager.get_builtin_profile_names():
-                profile = self.profile_manager.get_profile(profile_name)
-                is_active = (profile_name == self.profile_manager.active_profile_name)
-
-                if is_active:
-                    imgui.text_colored(f"{profile_name} (Active)", 0.2, 1.0, 0.2, 1.0)
-                else:
-                    imgui.text(profile_name)
-
-                if profile.description:
-                    imgui.same_line()
-                    imgui.text_colored(f"- {profile.description}", 0.7, 0.7, 0.7, 1.0)
-
-                # Action buttons
-                imgui.same_line()
-                imgui.dummy(20, 0)
-                imgui.same_line()
-
-                if not is_active:
-                    if imgui.button(f"Activate##Activate{profile_name}"):
-                        if self.profile_manager.set_active_profile(profile_name):
-                            self.app.logger.info(f"Activated profile: {profile_name}", extra={'status_message': True})
-
-                imgui.same_line()
-                if imgui.button(f"Duplicate##Dup{profile_name}"):
-                    imgui.open_popup(f"DuplicateProfile##{profile_name}")
-
-                # Duplicate popup
-                self._render_duplicate_profile_popup(profile_name)
-
-                imgui.spacing()
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            # Custom profiles
-            custom_profiles = self.profile_manager.get_custom_profile_names()
-            if custom_profiles:
-                imgui.text_colored("Custom Profiles", 0.6, 0.8, 1.0, 1.0)
-                imgui.spacing()
-
-                for profile_name in custom_profiles:
-                    profile = self.profile_manager.get_profile(profile_name)
-                    is_active = (profile_name == self.profile_manager.active_profile_name)
-
-                    if is_active:
-                        imgui.text_colored(f"{profile_name} (Active)", 0.2, 1.0, 0.2, 1.0)
-                    else:
-                        imgui.text(profile_name)
-
-                    if profile.description:
-                        imgui.same_line()
-                        imgui.text_colored(f"- {profile.description}", 0.7, 0.7, 0.7, 1.0)
-
-                    # Action buttons
-                    imgui.same_line()
-                    imgui.dummy(20, 0)
-                    imgui.same_line()
-
-                    if not is_active:
-                        if imgui.button(f"Activate##Activate{profile_name}"):
-                            if self.profile_manager.set_active_profile(profile_name):
-                                self.app.logger.info(f"Activated profile: {profile_name}", extra={'status_message': True})
-
-                    imgui.same_line()
-                    if imgui.button(f"Rename##Rename{profile_name}"):
-                        imgui.open_popup(f"RenameProfile##{profile_name}")
-
-                    imgui.same_line()
-                    if imgui.button(f"Delete##Delete{profile_name}"):
-                        imgui.open_popup(f"DeleteProfile##{profile_name}")
-
-                    # Rename and delete popups
-                    self._render_rename_profile_popup(profile_name)
-                    self._render_delete_profile_popup(profile_name)
-
-                    imgui.spacing()
-
-            imgui.end_child()
-
-        imgui.separator()
-
-        # Bottom buttons
-        if imgui.button("Create New Profile##CreateProfile", width=200):
-            imgui.open_popup("CreateNewProfile")
-
-        self._render_create_profile_popup()
 
     def _render_settings_tab(self):
         """Render the settings tab"""
@@ -641,189 +509,6 @@ class KeyboardShortcutsDialog:
                 self.show_cheat_sheet = False
 
         imgui.end()
-
-    def _render_create_profile_popup(self):
-        """Popup for creating a new profile"""
-        if imgui.begin_popup_modal(
-            "CreateNewProfile",
-            True,
-            imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        )[0]:
-            imgui.text("Create a new shortcut profile")
-            imgui.spacing()
-
-            # Profile name input
-            imgui.text("Profile Name:")
-            if not hasattr(self, '_new_profile_name'):
-                self._new_profile_name = ""
-            changed, self._new_profile_name = imgui.input_text(
-                "##NewProfileName",
-                self._new_profile_name,
-                256
-            )
-
-            imgui.spacing()
-
-            # Description input
-            imgui.text("Description (optional):")
-            if not hasattr(self, '_new_profile_desc'):
-                self._new_profile_desc = ""
-            changed, self._new_profile_desc = imgui.input_text(
-                "##NewProfileDesc",
-                self._new_profile_desc,
-                256
-            )
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            # Buttons
-            if imgui.button("Create##CreateProfileBtn", width=120):
-                if self._new_profile_name.strip():
-                    # Create profile with current shortcuts
-                    current_shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
-                    if self.profile_manager.create_profile(
-                        self._new_profile_name,
-                        current_shortcuts,
-                        self._new_profile_desc
-                    ):
-                        self.app.logger.info(f"Created profile: {self._new_profile_name}", extra={'status_message': True})
-                        self._new_profile_name = ""
-                        self._new_profile_desc = ""
-                        imgui.close_current_popup()
-                    else:
-                        self.app.logger.warning("Profile name already exists", extra={'status_message': True})
-
-            imgui.same_line()
-            if imgui.button("Cancel##CancelCreateBtn", width=120):
-                self._new_profile_name = ""
-                self._new_profile_desc = ""
-                imgui.close_current_popup()
-
-            imgui.end_popup()
-
-    def _render_duplicate_profile_popup(self, source_name: str):
-        """Popup for duplicating a profile"""
-        popup_id = f"DuplicateProfile##{source_name}"
-        if imgui.begin_popup_modal(
-            popup_id,
-            True,
-            imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        )[0]:
-            imgui.text(f"Duplicate profile: {source_name}")
-            imgui.spacing()
-
-            # New name input
-            imgui.text("New Profile Name:")
-            attr_name = f'_dup_profile_name_{source_name}'
-            if not hasattr(self, attr_name):
-                setattr(self, attr_name, f"{source_name} Copy")
-
-            changed, new_name = imgui.input_text(
-                f"##DupProfileName{source_name}",
-                getattr(self, attr_name),
-                256
-            )
-            setattr(self, attr_name, new_name)
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            # Buttons
-            if imgui.button(f"Duplicate##DupBtn{source_name}", width=120):
-                if new_name.strip():
-                    if self.profile_manager.duplicate_profile(source_name, new_name):
-                        self.app.logger.info(f"Duplicated profile: {new_name}", extra={'status_message': True})
-                        delattr(self, attr_name)
-                        imgui.close_current_popup()
-                    else:
-                        self.app.logger.warning("Profile name already exists", extra={'status_message': True})
-
-            imgui.same_line()
-            if imgui.button(f"Cancel##CancelDup{source_name}", width=120):
-                if hasattr(self, attr_name):
-                    delattr(self, attr_name)
-                imgui.close_current_popup()
-
-            imgui.end_popup()
-
-    def _render_rename_profile_popup(self, profile_name: str):
-        """Popup for renaming a profile"""
-        popup_id = f"RenameProfile##{profile_name}"
-        if imgui.begin_popup_modal(
-            popup_id,
-            True,
-            imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        )[0]:
-            imgui.text(f"Rename profile: {profile_name}")
-            imgui.spacing()
-
-            # New name input
-            imgui.text("New Name:")
-            attr_name = f'_rename_profile_name_{profile_name}'
-            if not hasattr(self, attr_name):
-                setattr(self, attr_name, profile_name)
-
-            changed, new_name = imgui.input_text(
-                f"##RenameProfileName{profile_name}",
-                getattr(self, attr_name),
-                256
-            )
-            setattr(self, attr_name, new_name)
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            # Buttons
-            if imgui.button(f"Rename##RenameBtn{profile_name}", width=120):
-                if new_name.strip() and new_name != profile_name:
-                    if self.profile_manager.rename_profile(profile_name, new_name):
-                        self.app.logger.info(f"Renamed profile to: {new_name}", extra={'status_message': True})
-                        delattr(self, attr_name)
-                        imgui.close_current_popup()
-                    else:
-                        self.app.logger.warning("Profile name already exists", extra={'status_message': True})
-
-            imgui.same_line()
-            if imgui.button(f"Cancel##CancelRename{profile_name}", width=120):
-                if hasattr(self, attr_name):
-                    delattr(self, attr_name)
-                imgui.close_current_popup()
-
-            imgui.end_popup()
-
-    def _render_delete_profile_popup(self, profile_name: str):
-        """Popup for deleting a profile"""
-        popup_id = f"DeleteProfile##{profile_name}"
-        if imgui.begin_popup_modal(
-            popup_id,
-            True,
-            imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        )[0]:
-            imgui.text(f"Delete profile: {profile_name}?")
-            imgui.spacing()
-            imgui.text_colored("This cannot be undone.", 0.9, 0.6, 0.2, 1.0)
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            # Buttons
-            if imgui.button(f"Delete##DeleteBtn{profile_name}", width=120):
-                if self.profile_manager.delete_profile(profile_name):
-                    self.app.logger.info(f"Deleted profile: {profile_name}", extra={'status_message': True})
-                    imgui.close_current_popup()
-                else:
-                    self.app.logger.warning("Cannot delete built-in profile", extra={'status_message': True})
-
-            imgui.same_line()
-            if imgui.button(f"Cancel##CancelDelete{profile_name}", width=120):
-                imgui.close_current_popup()
-
-            imgui.end_popup()
-
     def _render_reset_confirmation_popup(self):
         """Confirmation dialog for resetting all shortcuts"""
         if imgui.begin_popup_modal(

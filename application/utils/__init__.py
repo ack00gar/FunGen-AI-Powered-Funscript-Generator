@@ -15,4 +15,3 @@ from .video_segment import VideoSegment
 from .write_access import check_write_access
 from .button_styles import primary_button_style, destructive_button_style
 from .keyboard_layout_detector import KeyboardLayoutDetector, KeyboardLayout, get_layout_detector
-from .shortcut_profiles import ShortcutProfile, ShortcutProfileManager
