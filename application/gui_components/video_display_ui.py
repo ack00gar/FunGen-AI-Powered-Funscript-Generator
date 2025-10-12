@@ -1254,7 +1254,7 @@ class VideoDisplayUI:
     def _render_fullscreen_button_inline(self, spacing: float, button_height: float, controls_disabled: bool):
         """Render fullscreen button inline with playback controls."""
         style = imgui.get_style()
-        button_width = button_height * 1.5  # Compact width for inline display
+        button_width = button_height  # Square button for consistency with other playback controls
         
         # Add spacing and render inline with other controls
         imgui.same_line(spacing=spacing)
