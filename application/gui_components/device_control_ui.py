@@ -399,18 +399,22 @@ class DeviceControlUI:
         imgui.separator()
         
         # Profile management
-        if imgui.button("Save Profile"):
-            if active_profile:
-                self.parameter_manager.save_profile(active_profile)
-                self.app.logger.info("Device profile saved")
-        
+        # Save Profile button (PRIMARY - positive action)
+        with primary_button_style():
+            if imgui.button("Save Profile"):
+                if active_profile:
+                    self.parameter_manager.save_profile(active_profile)
+                    self.app.logger.info("Device profile saved")
+
         imgui.same_line()
-        if imgui.button("Reset to Defaults"):
-            # Reset to default profile
-            if self.connected_device_info:
-                default_profile = self.parameter_manager.create_profile_for_device(self.connected_device_info)
-                self.parameter_manager.profiles[active_profile.device_id] = default_profile
-                self.parameter_manager.set_active_profile(active_profile.device_id)
+        # Reset to Defaults button (DESTRUCTIVE - resets to defaults)
+        with destructive_button_style():
+            if imgui.button("Reset to Defaults"):
+                # Reset to default profile
+                if self.connected_device_info:
+                    default_profile = self.parameter_manager.create_profile_for_device(self.connected_device_info)
+                    self.parameter_manager.profiles[active_profile.device_id] = default_profile
+                    self.parameter_manager.set_active_profile(active_profile.device_id)
     
     def _render_live_tracking_tab(self):
         """Render live tracking tab."""
@@ -501,15 +505,19 @@ class DeviceControlUI:
         
         # File loading
         imgui.text("Load Files:")
-        
-        if imgui.button("Load Video"):
-            # This would integrate with the app's file dialog
-            # For now, just show the concept
-            imgui.text("Video loading would integrate with file dialog")
-        
+
+        # Load Video button (PRIMARY - positive action)
+        with primary_button_style():
+            if imgui.button("Load Video"):
+                # This would integrate with the app's file dialog
+                # For now, just show the concept
+                imgui.text("Video loading would integrate with file dialog")
+
         imgui.same_line()
-        if imgui.button("Load Funscript"):
-            imgui.text("Funscript loading would integrate with file dialog")
+        # Load Funscript button (PRIMARY - positive action)
+        with primary_button_style():
+            if imgui.button("Load Funscript"):
+                imgui.text("Funscript loading would integrate with file dialog")
         
         # Status
         imgui.separator()
