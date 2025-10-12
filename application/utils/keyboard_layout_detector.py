@@ -7,6 +7,7 @@ layout-aware shortcuts for better international support.
 
 import platform
 import locale
+import subprocess
 import glfw
 
 
@@ -73,7 +74,8 @@ class KeyboardLayout:
 class KeyboardLayoutDetector:
     """Detects and manages keyboard layout"""
 
-    def __init__(self):
+    def __init__(self, app_settings=None):
+        self.app_settings = app_settings
         self.detected_layout = None
         self._detect_layout()
 
@@ -82,11 +84,25 @@ class KeyboardLayoutDetector:
         Attempt to detect keyboard layout from OS settings.
 
         Detection strategy:
-        1. Check system locale
-        2. Check platform-specific keyboard APIs
-        3. Fall back to QWERTY
+        1. Check saved user preference in settings
+        2. Check platform-specific keyboard APIs (macOS, Windows, Linux)
+        3. Check system locale as fallback
+        4. Default to QWERTY
         """
-        # Try to detect from locale
+        # Priority 1: Check saved user preference
+        if self.app_settings:
+            saved_layout = self.app_settings.get("keyboard_layout", None)
+            if saved_layout in [KeyboardLayout.QWERTY, KeyboardLayout.AZERTY, KeyboardLayout.QWERTZ]:
+                self.detected_layout = KeyboardLayout(saved_layout)
+                return
+
+        # Priority 2: Platform-specific detection
+        detected = self._detect_platform_specific()
+        if detected:
+            self.detected_layout = KeyboardLayout(detected)
+            return
+
+        # Priority 3: Try to detect from locale (less reliable)
         try:
             system_locale = locale.getdefaultlocale()[0] or ""
 
@@ -103,17 +119,117 @@ class KeyboardLayoutDetector:
         except Exception:
             pass  # Fall back to default
 
-        # Default to QWERTY (most common)
+        # Priority 4: Default to QWERTY (most common)
         self.detected_layout = KeyboardLayout(KeyboardLayout.QWERTY)
+
+    def _detect_platform_specific(self):
+        """
+        Detect keyboard layout using platform-specific methods.
+
+        Returns:
+            Layout name string or None if detection fails
+        """
+        system = platform.system()
+
+        if system == "Darwin":  # macOS
+            return self._detect_macos_layout()
+        elif system == "Windows":
+            return self._detect_windows_layout()
+        elif system == "Linux":
+            return self._detect_linux_layout()
+
+        return None
+
+    def _detect_macos_layout(self):
+        """Detect keyboard layout on macOS using defaults command"""
+        try:
+            # Try to get keyboard layout from macOS system
+            result = subprocess.run(
+                ["defaults", "read", "-g", "AppleKeyboardUIMode"],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+
+            # Alternative: check current input source
+            result = subprocess.run(
+                ["defaults", "read", "com.apple.HIToolbox", "AppleSelectedInputSources"],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+
+            output = result.stdout.lower()
+
+            # Check for French keyboard indicators
+            if 'french' in output or 'azerty' in output or 'fr_' in output:
+                return KeyboardLayout.AZERTY
+
+            # Check for German keyboard indicators
+            if 'german' in output or 'qwertz' in output or 'de_' in output:
+                return KeyboardLayout.QWERTZ
+
+        except Exception:
+            pass
+
+        return None
+
+    def _detect_windows_layout(self):
+        """Detect keyboard layout on Windows"""
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            layout_id = user32.GetKeyboardLayout(0) & 0xFFFF
+
+            # French layouts: 0x040c (French - France), 0x080c (French - Belgium)
+            if layout_id in [0x040c, 0x080c]:
+                return KeyboardLayout.AZERTY
+
+            # German layouts: 0x0407 (German - Germany), 0x0807 (German - Switzerland)
+            if layout_id in [0x0407, 0x0807, 0x0c07, 0x1007, 0x1407]:
+                return KeyboardLayout.QWERTZ
+
+        except Exception:
+            pass
+
+        return None
+
+    def _detect_linux_layout(self):
+        """Detect keyboard layout on Linux"""
+        try:
+            # Try using setxkbmap to get current layout
+            result = subprocess.run(
+                ["setxkbmap", "-query"],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+
+            output = result.stdout.lower()
+
+            # Check for layout indicators
+            if 'fr' in output or 'azerty' in output:
+                return KeyboardLayout.AZERTY
+
+            if 'de' in output or 'qwertz' in output:
+                return KeyboardLayout.QWERTZ
+
+        except Exception:
+            pass
+
+        return None
 
     def get_layout(self) -> KeyboardLayout:
         """Get the detected keyboard layout"""
         return self.detected_layout
 
     def set_layout(self, layout_name: str):
-        """Manually set the keyboard layout"""
+        """Manually set the keyboard layout and save to settings"""
         if layout_name in [KeyboardLayout.QWERTY, KeyboardLayout.AZERTY, KeyboardLayout.QWERTZ]:
             self.detected_layout = KeyboardLayout(layout_name)
+            # Save user preference
+            if self.app_settings:
+                self.app_settings.set("keyboard_layout", layout_name)
 
     def get_available_layouts(self):
         """Get list of available layout names"""

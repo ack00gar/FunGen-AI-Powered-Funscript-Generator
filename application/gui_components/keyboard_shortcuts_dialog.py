@@ -32,7 +32,8 @@ class KeyboardShortcutsDialog:
         self._is_macos = platform.system() == "Darwin"
 
         # Phase 3: Keyboard layout detection
-        self.layout_detector = get_layout_detector()
+        from application.utils.keyboard_layout_detector import KeyboardLayoutDetector
+        self.layout_detector = KeyboardLayoutDetector(app.app_settings)
         self.selected_layout_idx = self._get_layout_index(self.layout_detector.get_layout().name)
 
         # Phase 4: Profiles system
@@ -378,8 +379,15 @@ class KeyboardShortcutsDialog:
         imgui.same_line(position=350)  # Align all keys at same position
 
         if is_recording:
-            # Show recording indicator
-            imgui.text_colored("🎹 PRESS KEY...", 1.0, 0.5, 0.0, 1.0)
+            # Show recording indicator with edit icon
+            icon_mgr = get_icon_texture_manager()
+            edit_tex, _, _ = icon_mgr.get_icon_texture('edit.png')
+
+            if edit_tex:
+                imgui.image(edit_tex, 16, 16)
+                imgui.same_line()
+
+            imgui.text_colored("PRESS KEY...", 1.0, 0.5, 0.0, 1.0)
         else:
             # Platform-aware display (show CMD instead of SUPER on macOS)
             display_key = self._platform_aware_key_display(current_key)
@@ -512,20 +520,10 @@ class KeyboardShortcutsDialog:
         imgui.separator()
 
         # Bottom buttons
-        if imgui.button("Create New Profile##CreateProfile", width=150):
+        if imgui.button("Create New Profile##CreateProfile", width=200):
             imgui.open_popup("CreateNewProfile")
 
         self._render_create_profile_popup()
-
-        imgui.same_line()
-        if imgui.button("Import Profile##ImportProfile", width=150):
-            # TODO: Open file dialog for import
-            self.app.logger.info("Import profile functionality coming soon", extra={'status_message': True})
-
-        imgui.same_line()
-        if imgui.button("Export Active##ExportProfile", width=150):
-            # TODO: Open file dialog for export
-            self.app.logger.info("Export profile functionality coming soon", extra={'status_message': True})
 
     def _render_settings_tab(self):
         """Render the settings tab"""
@@ -537,11 +535,17 @@ class KeyboardShortcutsDialog:
         imgui.spacing()
 
         # Keyboard layout section
-        imgui.text_colored("Keyboard Layout", 0.6, 0.8, 1.0, 1.0)
+        imgui.text_colored("Keyboard Layout Configuration", 0.6, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text_wrapped(
+            "Select your physical keyboard layout. This adjusts shortcuts to match "
+            "your keyboard's key positions (e.g., period and comma keys on AZERTY)."
+        )
         imgui.spacing()
 
         layouts = self.layout_detector.get_available_layouts()
-        imgui.text("Detected Layout:")
+        imgui.text("Your Keyboard Layout:")
         imgui.same_line()
         imgui.set_next_item_width(200)
 
@@ -567,7 +571,13 @@ class KeyboardShortcutsDialog:
         imgui.spacing()
 
         # Apply layout adjustments button
-        if imgui.button("Apply Layout Adjustments to Current Profile", width=300):
+        imgui.text_wrapped(
+            "After changing your keyboard layout, apply the adjustments to update "
+            "your shortcuts automatically:"
+        )
+        imgui.spacing()
+
+        if imgui.button("Apply Layout Adjustments to Active Profile", width=300):
             current_shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
             from config.constants import DEFAULT_SHORTCUTS
             adjusted_shortcuts = self.layout_detector.get_layout_adjusted_shortcuts(DEFAULT_SHORTCUTS)
@@ -576,8 +586,9 @@ class KeyboardShortcutsDialog:
 
         if imgui.is_item_hovered():
             imgui.set_tooltip(
-                "Adjust shortcuts like period/comma for your keyboard layout.\n"
-                "This will modify the active profile's shortcuts."
+                "Adjusts shortcuts like period/comma for your keyboard layout.\n"
+                "Example: On AZERTY, '.' becomes 'SHIFT+;' and ',' becomes ';'\n"
+                "This modifies the active profile's shortcuts."
             )
 
     def _render_cheat_sheet(self):
