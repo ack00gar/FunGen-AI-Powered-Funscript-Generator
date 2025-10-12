@@ -188,6 +188,8 @@ class VideoDisplayUI:
             event_handlers.handle_playback_control("jump_start")
         elif not jump_start_tex and imgui.button("|<##VidOverStart", width=pb_icon_w):
             event_handlers.handle_playback_control("jump_start")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Jump to Start (HOME)")
 
         imgui.same_line(spacing=pb_btn_spacing)
 
@@ -197,6 +199,8 @@ class VideoDisplayUI:
             event_handlers.handle_playback_control("prev_frame")
         elif not prev_frame_tex and imgui.button("<<##VidOverPrev", width=pb_icon_w):
             event_handlers.handle_playback_control("prev_frame")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Previous Frame (LEFT ARROW)")
 
         imgui.same_line(spacing=pb_btn_spacing)
 
@@ -210,6 +214,8 @@ class VideoDisplayUI:
             event_handlers.handle_playback_control("play_pause")
         elif not play_pause_tex and imgui.button(f"{play_pause_fallback}##VidOverPlayPause", width=pb_play_w):
             event_handlers.handle_playback_control("play_pause")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Toggle Play/Pause (SPACE)")
 
         imgui.same_line(spacing=2)
 
@@ -228,6 +234,8 @@ class VideoDisplayUI:
             event_handlers.handle_playback_control("next_frame")
         elif not next_frame_tex and imgui.button(">>##VidOverNext", width=pb_icon_w):
             event_handlers.handle_playback_control("next_frame")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Next Frame (RIGHT ARROW)")
 
         imgui.same_line(spacing=pb_btn_spacing)
 
@@ -237,7 +245,9 @@ class VideoDisplayUI:
             event_handlers.handle_playback_control("jump_end")
         elif not jump_end_tex and imgui.button(">|##VidOverEnd", width=pb_icon_w):
             event_handlers.handle_playback_control("jump_end")
-        
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Jump to End (END)")
+
         # Add Handy control button inline with playback controls
         self._render_handy_control_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
         
