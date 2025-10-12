@@ -13,7 +13,7 @@ from collections import deque
 
 from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
-from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow
+from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
 
 
@@ -102,6 +102,7 @@ class GUI:
         self.chapter_list_window_ui = ChapterListWindow(app, nav_ui=self.video_navigation_ui)
         self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
         self.autotuner_window_ui = AutotunerWindow(app)
+        self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -1081,14 +1082,31 @@ class GUI:
             if not map_result:
                 return False
             mapped_key, mapped_mods_from_string = map_result
-            return (imgui.is_key_down(mapped_key) and 
+            return (imgui.is_key_down(mapped_key) and
                    mapped_mods_from_string['ctrl'] == io.key_ctrl and
                    mapped_mods_from_string['alt'] == io.key_alt and
                    mapped_mods_from_string['shift'] == io.key_shift and
                    mapped_mods_from_string['super'] == io.key_super)
 
-        # Handle non-repeating shortcuts first  
-        if check_and_run_shortcut("undo_timeline1", fs_proc.perform_undo_redo, 1, 'undo'):
+        # F1 key - Open Keyboard Shortcuts Dialog (no modifiers)
+        f1_map = self.app._map_shortcut_to_glfw_key("F1")
+        if f1_map:
+            f1_key, f1_mods = f1_map
+            if (imgui.is_key_pressed(f1_key) and
+                not io.key_ctrl and not io.key_alt and not io.key_shift and not io.key_super):
+                self.keyboard_shortcuts_dialog.toggle()
+                return
+
+        # Handle non-repeating shortcuts first
+
+        # File Operations
+        if check_and_run_shortcut("save_project", self._handle_save_project_shortcut):
+            pass
+        elif check_and_run_shortcut("open_project", self._handle_open_project_shortcut):
+            pass
+
+        # Editing
+        elif check_and_run_shortcut("undo_timeline1", fs_proc.perform_undo_redo, 1, 'undo'):
             pass
         elif check_and_run_shortcut("redo_timeline1", fs_proc.perform_undo_redo, 1, 'redo'):
             pass
@@ -1096,12 +1114,56 @@ class GUI:
             check_and_run_shortcut("undo_timeline2", fs_proc.perform_undo_redo, 2, 'undo')
             or check_and_run_shortcut("redo_timeline2", fs_proc.perform_undo_redo, 2, 'redo')
         ): pass
+
+        # Playback & Navigation
         elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control, "play_pause"):
             pass
         elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
             pass
         elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
             pass
+        elif video_loaded and check_and_run_shortcut("jump_to_start", self._handle_jump_to_start_shortcut):
+            pass
+        elif video_loaded and check_and_run_shortcut("jump_to_end", self._handle_jump_to_end_shortcut):
+            pass
+
+        # Timeline View Controls
+        elif check_and_run_shortcut("zoom_in_timeline", self._handle_zoom_in_timeline_shortcut):
+            pass
+        elif check_and_run_shortcut("zoom_out_timeline", self._handle_zoom_out_timeline_shortcut):
+            pass
+
+        # Window Toggles
+        elif check_and_run_shortcut("toggle_video_display", self._handle_toggle_video_display_shortcut):
+            pass
+        elif check_and_run_shortcut("toggle_timeline2", self._handle_toggle_timeline2_shortcut):
+            pass
+        elif check_and_run_shortcut("toggle_gauge_window", self._handle_toggle_gauge_window_shortcut):
+            pass
+        elif check_and_run_shortcut("toggle_3d_simulator", self._handle_toggle_3d_simulator_shortcut):
+            pass
+        elif check_and_run_shortcut("toggle_movement_bar", self._handle_toggle_movement_bar_shortcut):
+            pass
+        elif check_and_run_shortcut("toggle_chapter_list", self._handle_toggle_chapter_list_shortcut):
+            pass
+
+        # Timeline Displays
+        elif check_and_run_shortcut("toggle_heatmap", self._handle_toggle_heatmap_shortcut):
+            pass
+        elif check_and_run_shortcut("toggle_funscript_preview", self._handle_toggle_funscript_preview_shortcut):
+            pass
+
+        # Video Overlays
+        elif check_and_run_shortcut("toggle_video_feed", self._handle_toggle_video_feed_shortcut):
+            pass
+        elif check_and_run_shortcut("toggle_waveform", self._handle_toggle_waveform_shortcut):
+            pass
+
+        # View Controls
+        elif check_and_run_shortcut("reset_timeline_view", self._handle_reset_timeline_view_shortcut):
+            pass
+
+        # Chapters
         elif check_and_run_shortcut("set_chapter_start", self._handle_set_chapter_start_shortcut):
             pass
         elif check_and_run_shortcut("set_chapter_end", self._handle_set_chapter_end_shortcut):
@@ -1289,6 +1351,215 @@ class GUI:
                 delattr(self, '_stored_chapter_start_frame')
             if hasattr(self, '_stored_chapter_end_frame'):
                 delattr(self, '_stored_chapter_end_frame')
+
+    # --- New Shortcut Handlers ---
+
+    def _handle_save_project_shortcut(self):
+        """Handle keyboard shortcut for saving project (CMD+S / CTRL+S)"""
+        self.app.project_manager.save_project_dialog()
+
+    def _handle_open_project_shortcut(self):
+        """Handle keyboard shortcut for opening project (CMD+O / CTRL+O)"""
+        self.app.project_manager.open_project_dialog()
+
+    def _handle_jump_to_start_shortcut(self):
+        """Handle keyboard shortcut for jumping to video start (HOME)"""
+        if self.app.processor:
+            self.app.processor.seek_video(0)
+            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            if self.app.project_manager:
+                self.app.project_manager.project_dirty = True
+            self.app.energy_saver.reset_activity_timer()
+
+    def _handle_jump_to_end_shortcut(self):
+        """Handle keyboard shortcut for jumping to video end (END)"""
+        if self.app.processor:
+            last_frame = max(0, self.app.processor.total_frames - 1) if self.app.processor.total_frames > 0 else 0
+            self.app.processor.seek_video(last_frame)
+            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            if self.app.project_manager:
+                self.app.project_manager.project_dirty = True
+            self.app.energy_saver.reset_activity_timer()
+
+    def _handle_zoom_in_timeline_shortcut(self):
+        """Handle keyboard shortcut for zooming in timeline (CMD+= / CTRL+=)"""
+        # Apply zoom in with scale factor (0.85 = zoom in)
+        app_state = self.app.app_state_ui
+        scale_factor = 0.85
+
+        # Zoom around current time (center of view)
+        effective_total_duration_s, _, _ = self.app.get_effective_video_duration_params()
+        effective_total_duration_ms = effective_total_duration_s * 1000.0
+
+        # Get current center time
+        if self.timeline_editor1:
+            # Use timeline 1's center marker position
+            center_time_ms = app_state.timeline_pan_offset_ms
+        else:
+            center_time_ms = 0.0
+
+        # Apply zoom
+        min_ms_per_px, max_ms_per_px = 0.01, 2000.0
+        old_zoom = app_state.timeline_zoom_factor_ms_per_px
+        app_state.timeline_zoom_factor_ms_per_px = max(
+            min_ms_per_px,
+            min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, max_ms_per_px),
+        )
+
+        # Adjust pan offset to keep center time roughly in place
+        if old_zoom != app_state.timeline_zoom_factor_ms_per_px:
+            self.app.energy_saver.reset_activity_timer()
+
+    def _handle_zoom_out_timeline_shortcut(self):
+        """Handle keyboard shortcut for zooming out timeline (CMD+- / CTRL+-)"""
+        # Apply zoom out with scale factor (1.15 = zoom out)
+        app_state = self.app.app_state_ui
+        scale_factor = 1.15
+
+        # Zoom around current time (center of view)
+        effective_total_duration_s, _, _ = self.app.get_effective_video_duration_params()
+        effective_total_duration_ms = effective_total_duration_s * 1000.0
+
+        # Get current center time
+        if self.timeline_editor1:
+            # Use timeline 1's center marker position
+            center_time_ms = app_state.timeline_pan_offset_ms
+        else:
+            center_time_ms = 0.0
+
+        # Apply zoom
+        min_ms_per_px, max_ms_per_px = 0.01, 2000.0
+        old_zoom = app_state.timeline_zoom_factor_ms_per_px
+        app_state.timeline_zoom_factor_ms_per_px = max(
+            min_ms_per_px,
+            min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, max_ms_per_px),
+        )
+
+        # Adjust pan offset to keep center time roughly in place
+        if old_zoom != app_state.timeline_zoom_factor_ms_per_px:
+            self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_video_display_shortcut(self):
+        """Handle keyboard shortcut for toggling video display (V)"""
+        app_state = self.app.app_state_ui
+        app_state.show_video_display_window = not app_state.show_video_display_window
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_video_display_window else "hidden"
+        self.app.logger.info(f"Video display {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_timeline2_shortcut(self):
+        """Handle keyboard shortcut for toggling timeline 2 (T)"""
+        app_state = self.app.app_state_ui
+        app_state.show_funscript_interactive_timeline2 = not app_state.show_funscript_interactive_timeline2
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_funscript_interactive_timeline2 else "hidden"
+        self.app.logger.info(f"Timeline 2 {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_gauge_window_shortcut(self):
+        """Handle keyboard shortcut for toggling gauge window (G)"""
+        app_state = self.app.app_state_ui
+        # Toggle gauge window for timeline 1
+        if not hasattr(app_state, 'show_gauge_window_timeline1'):
+            app_state.show_gauge_window_timeline1 = False
+        app_state.show_gauge_window_timeline1 = not app_state.show_gauge_window_timeline1
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_gauge_window_timeline1 else "hidden"
+        self.app.logger.info(f"Gauge window {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_3d_simulator_shortcut(self):
+        """Handle keyboard shortcut for toggling 3D simulator (S)"""
+        app_state = self.app.app_state_ui
+        app_state.show_simulator_3d = not app_state.show_simulator_3d
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_simulator_3d else "hidden"
+        self.app.logger.info(f"3D Simulator {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_movement_bar_shortcut(self):
+        """Handle keyboard shortcut for toggling movement bar (M)"""
+        app_state = self.app.app_state_ui
+        app_state.show_lr_dial_graph = not app_state.show_lr_dial_graph
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_lr_dial_graph else "hidden"
+        self.app.logger.info(f"Movement Bar {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_chapter_list_shortcut(self):
+        """Handle keyboard shortcut for toggling chapter list (L)"""
+        app_state = self.app.app_state_ui
+        if not hasattr(app_state, 'show_chapter_list_window'):
+            app_state.show_chapter_list_window = False
+        app_state.show_chapter_list_window = not app_state.show_chapter_list_window
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_chapter_list_window else "hidden"
+        self.app.logger.info(f"Chapter List {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_heatmap_shortcut(self):
+        """Handle keyboard shortcut for toggling heatmap (H)"""
+        app_state = self.app.app_state_ui
+        app_state.show_heatmap = not app_state.show_heatmap
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_heatmap else "hidden"
+        self.app.logger.info(f"Heatmap {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_funscript_preview_shortcut(self):
+        """Handle keyboard shortcut for toggling funscript preview bar (P)"""
+        app_state = self.app.app_state_ui
+        app_state.show_funscript_timeline = not app_state.show_funscript_timeline
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_funscript_timeline else "hidden"
+        self.app.logger.info(f"Funscript Preview {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_video_feed_shortcut(self):
+        """Handle keyboard shortcut for toggling video feed overlay (F)"""
+        app_state = self.app.app_state_ui
+        app_state.show_video_feed = not app_state.show_video_feed
+        self.app.app_settings.set("show_video_feed", app_state.show_video_feed)
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_video_feed else "hidden"
+        self.app.logger.info(f"Video Feed {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_waveform_shortcut(self):
+        """Handle keyboard shortcut for toggling audio waveform (W)"""
+        app_state = self.app.app_state_ui
+        app_state.show_audio_waveform = not app_state.show_audio_waveform
+        if self.app.project_manager:
+            self.app.project_manager.project_dirty = True
+        status = "shown" if app_state.show_audio_waveform else "hidden"
+        self.app.logger.info(f"Audio Waveform {status}", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
+
+    def _handle_reset_timeline_view_shortcut(self):
+        """Handle keyboard shortcut for resetting timeline zoom/pan (R)"""
+        app_state = self.app.app_state_ui
+
+        # Reset zoom to default (20.0 ms per pixel is a good default)
+        app_state.timeline_zoom_factor_ms_per_px = 20.0
+
+        # Reset pan to start
+        app_state.timeline_pan_offset_ms = 0.0
+
+        # Force timeline to pan to current frame
+        app_state.force_timeline_pan_to_current_frame = True
+
+        self.app.logger.info("Timeline view reset to default", extra={'status_message': True})
+        self.app.energy_saver.reset_activity_timer()
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()
@@ -1773,6 +2044,9 @@ class GUI:
         self.app.updater.render_update_error_dialog()
         self.app.updater.render_migration_warning_dialog()
         self.app.updater.render_update_settings_dialog()
+
+        # Keyboard Shortcuts Dialog (accessible via F1 or Help menu)
+        self.keyboard_shortcuts_dialog.render()
 
     def run(self):
         colors = self.colors
