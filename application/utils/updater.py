@@ -1680,7 +1680,7 @@ class AutoUpdater:
                     if result['user_info']:
                         imgui.text(f"Username: {result['user_info'].get('login', 'Unknown')}")
                 else:
-                    imgui.text_colored("✗ Token validation failed", *UpdateSettingsColors.TOKEN_INVALID)
+                    imgui.text_colored("X Token validation failed", *UpdateSettingsColors.TOKEN_INVALID)
                     imgui.text(result['message'])
 
                 imgui.separator()
