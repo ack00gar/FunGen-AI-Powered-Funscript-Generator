@@ -148,6 +148,18 @@ class VideoNavigationUI:
             if imgui.button(label):
                 setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
                 self.app.project_manager.project_dirty = True
+            if imgui.is_item_hovered():
+                # Add tooltips with keyboard shortcuts where applicable
+                if label == "T1":
+                    imgui.set_tooltip("Toggle Timeline 1")
+                elif label == "T2":
+                    imgui.set_tooltip("Toggle Timeline 2 (T)")
+                elif label == "Preview":
+                    imgui.set_tooltip("Toggle Funscript Preview Bar (P)")
+                elif label == "Heatmap":
+                    imgui.set_tooltip("Toggle Heatmap (H)")
+                elif label == "FullWidth":
+                    imgui.set_tooltip("Toggle Full Width Navigation")
             if pushed:
                 imgui.pop_style_var()
 
@@ -993,15 +1005,21 @@ class VideoNavigationUI:
 
             if imgui.button("Set Range##ChapterCreateSetRangeWinBtn"):
                 self._set_chapter_range_by_selection()
-            
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Set chapter range from timeline selection")
+
             # New enhanced chapter creation buttons
             imgui.same_line()
             if imgui.button("Set Start##ChapterCreateSetStartBtn"):
                 self._set_chapter_start_to_current_frame()
-            
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Set chapter start to current frame")
+
             imgui.same_line()
             if imgui.button("Set End##ChapterCreateSetEndBtn"):
                 self._set_chapter_end_to_current_frame()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Set chapter end to current frame")
             
             # Show current frame info for reference
             current_frame = self._get_current_frame()
@@ -1027,6 +1045,8 @@ class VideoNavigationUI:
                     imgui.text("Create")
                 else:
                     clicked = imgui.button("Create##ChapterCreateWinBtn")
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Create new chapter")
 
                 if clicked and self.app.funscript_processor:
                     self.app.funscript_processor.create_new_chapter_from_data(self.chapter_edit_data.copy())
@@ -1034,6 +1054,8 @@ class VideoNavigationUI:
             imgui.same_line()
             if imgui.button("Cancel##ChapterCreateWinCancelBtn"):
                 self.show_create_chapter_dialog = False
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Cancel chapter creation")
         imgui.end()
 
     def _render_edit_chapter_window(self):
@@ -1088,15 +1110,21 @@ class VideoNavigationUI:
 
             if imgui.button("Set Range##ChapterUpdateSetRangeWinBtn"):
                 self._set_chapter_range_by_selection()
-            
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Set chapter range from timeline selection")
+
             # Enhanced chapter editing buttons
             imgui.same_line()
             if imgui.button("Set Start##ChapterEditSetStartBtn"):
                 self._set_chapter_start_to_current_frame()
-            
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Set chapter start to current frame")
+
             imgui.same_line()
             if imgui.button("Set End##ChapterEditSetEndBtn"):
                 self._set_chapter_end_to_current_frame()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Set chapter end to current frame")
             
             # Show current frame info for reference
             current_frame = self._get_current_frame()
@@ -1122,6 +1150,8 @@ class VideoNavigationUI:
                     imgui.text("Save")
                 else:
                     clicked = imgui.button("Save##ChapterEditWinBtn")
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Save chapter changes")
 
                 if clicked and self.app.funscript_processor and self.chapter_to_edit_id:
                     self.app.funscript_processor.update_chapter_from_data(self.chapter_to_edit_id, self.chapter_edit_data.copy())
@@ -1131,6 +1161,8 @@ class VideoNavigationUI:
             if imgui.button("Cancel##ChapterEditWinCancelBtn"):
                 self.show_edit_chapter_dialog = False
                 self.chapter_to_edit_id = None
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Cancel chapter editing")
         imgui.end()
         if not self.show_edit_chapter_dialog:
             self.chapter_to_edit_id = None
@@ -1620,6 +1652,8 @@ class ChapterListWindow:
                     else:
                         if imgui.button("Edit"):
                             self._open_edit_dialog(chapter)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Edit chapter")
 
                     imgui.same_line()
 
@@ -1637,6 +1671,8 @@ class ChapterListWindow:
                                 fs_proc.delete_video_chapters_by_ids([chapter.unique_id])
                                 if chapter in self.list_context_selected_chapters:
                                     chapters_to_remove_from_selection.append(chapter)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip("Delete chapter")
 
                     imgui.pop_id()
 

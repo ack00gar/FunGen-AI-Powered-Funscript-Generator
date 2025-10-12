@@ -225,6 +225,8 @@ class VideoDisplayUI:
             event_handlers.handle_playback_control("stop")
         elif not stop_tex and imgui.button("[]##VidOverStop", width=pb_stop_w):
             event_handlers.handle_playback_control("stop")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Stop Playback")
 
         imgui.same_line(spacing=pb_btn_spacing)
 
@@ -675,6 +677,14 @@ class VideoDisplayUI:
                                 if imgui.button(label):
                                     setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
                                     self.app.project_manager.project_dirty = True
+                                if imgui.is_item_hovered():
+                                    # Add tooltips with keyboard shortcuts where applicable
+                                    if label == "Gauge T1":
+                                        imgui.set_tooltip("Toggle Gauge Window for Timeline 1 (G)")
+                                    elif label == "Gauge T2":
+                                        imgui.set_tooltip("Toggle Gauge Window for Timeline 2")
+                                    elif label == "3D Simulator":
+                                        imgui.set_tooltip("Toggle 3D Simulator Window (S)")
                                 if pushed:
                                     imgui.pop_style_var()
 
@@ -962,6 +972,8 @@ class VideoDisplayUI:
             app_state.adjust_video_zoom(1.2)
         elif not zoom_in_tex and imgui.button("Z-In##VidOverZoomIn"):
             app_state.adjust_video_zoom(1.2)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Zoom In Video")
 
         imgui.same_line(spacing=4)
 
@@ -971,6 +983,8 @@ class VideoDisplayUI:
             app_state.adjust_video_zoom(1 / 1.2)
         elif not zoom_out_tex and imgui.button("Z-Out##VidOverZoomOut"):
             app_state.adjust_video_zoom(1 / 1.2)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Zoom Out Video")
 
         imgui.same_line(spacing=4)
 
@@ -980,6 +994,8 @@ class VideoDisplayUI:
             app_state.reset_video_zoom_pan()
         elif not reset_tex and imgui.button("Rst##VidOverZoomReset"):
             app_state.reset_video_zoom_pan()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Reset Zoom and Pan (R)")
 
         imgui.same_line(spacing=4)
         imgui.text(f"{app_state.video_zoom_factor:.1f}x")
@@ -988,15 +1004,23 @@ class VideoDisplayUI:
             # Pan Arrows Block (Left, Right, Up, Down on one line)
             if imgui.arrow_button("##VidOverPanLeft", imgui.DIRECTION_LEFT):
                 app_state.pan_video_normalized_delta(-app_state.video_pan_step, 0)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Pan Video Left")
             imgui.same_line(spacing=4)
             if imgui.arrow_button("##VidOverPanRight", imgui.DIRECTION_RIGHT):
                 app_state.pan_video_normalized_delta(app_state.video_pan_step, 0)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Pan Video Right")
             imgui.same_line(spacing=4)
             if imgui.arrow_button("##VidOverPanUp", imgui.DIRECTION_UP):
                 app_state.pan_video_normalized_delta(0, -app_state.video_pan_step)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Pan Video Up")
             imgui.same_line(spacing=4)
             if imgui.arrow_button("##VidOverPanDown", imgui.DIRECTION_DOWN):
                 app_state.pan_video_normalized_delta(0, app_state.video_pan_step)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Pan Video Down")
 
         imgui.end_group()
 
