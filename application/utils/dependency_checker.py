@@ -436,13 +436,17 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
     missing_icons = []
     for filename in UI_CONTROL_ICON_URLS.keys():
         filepath = os.path.join(assets_dir, filename)
+        failed_marker = filepath + '.failed'
+
         # Ensure parent directory exists
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        if not os.path.exists(filepath):
+
+        # Skip if file exists or has a failed marker (CDN blocking, etc.)
+        if not os.path.exists(filepath) and not os.path.exists(failed_marker):
             missing_icons.append(filename)
 
     if not missing_icons:
-        logger.debug(f"All {len(UI_CONTROL_ICON_URLS)} UI control icons are present")
+        logger.debug(f"All {len(UI_CONTROL_ICON_URLS)} UI control icons are present or marked as failed")
         return
 
     if not auto_download:
@@ -457,6 +461,7 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
     for filename in missing_icons:
         url = UI_CONTROL_ICON_URLS[filename]
         filepath = os.path.join(assets_dir, filename)
+        failed_marker = filepath + '.failed'
 
         try:
             response = requests.get(url, stream=True, timeout=10)
@@ -483,6 +488,12 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
                 os.remove(filepath)
                 failed.append(filename)
                 logger.debug(f"  ✗ {filename} (file too small, removed)")
+                # Create failed marker to prevent repeated download attempts
+                try:
+                    with open(failed_marker, 'w') as f:
+                        f.write("Failed: Downloaded file was too small (CDN may be blocking)\n")
+                except:
+                    pass
             else:
                 downloaded += 1
                 logger.debug(f"  ✓ {filename}")
@@ -492,12 +503,18 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
             logger.debug(f"  ✗ {filename}: {str(e)}")
             if os.path.exists(filepath):
                 os.remove(filepath)
+            # Create failed marker to prevent repeated download attempts
+            try:
+                with open(failed_marker, 'w') as f:
+                    f.write(f"Failed to download: {str(e)}\n")
+            except:
+                pass
 
     if downloaded > 0:
         logger.info(f"✅ Downloaded {downloaded} UI control icon(s)")
 
     if failed:
-        logger.debug(f"Failed to download {len(failed)} icon(s): {', '.join(failed)}")
+        logger.debug(f"Failed to download {len(failed)} icon(s) (marked to skip future attempts): {', '.join(failed)}")
         logger.debug("UI will fall back to text labels for missing icons")
 
 

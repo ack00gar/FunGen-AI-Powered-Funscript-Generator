@@ -445,7 +445,7 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/trash.png': 'https://em-content.zobj.net/source/apple/391/wastebasket_1f5d1-fe0f.png',
 
     # Chapter management
-    'ui/icons/plus-circle.png': 'https://em-content.zobj.net/source/apple/391/heavy-plus-sign_2795.png',
+    'ui/icons/plus-circle.png': 'https://em-content.zobj.net/source/apple/391/plus_2795.png',  # Fixed: original URL was 403
     'ui/icons/merge.png': 'https://em-content.zobj.net/source/apple/391/link_1f517.png',
     'ui/icons/scissors.png': 'https://em-content.zobj.net/source/apple/391/scissors_2702-fe0f.png',
 
@@ -455,7 +455,7 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/error.png': 'https://em-content.zobj.net/source/apple/391/cross-mark_274c.png',
     'ui/icons/warning.png': 'https://em-content.zobj.net/source/apple/391/warning_26a0-fe0f.png',
     'ui/icons/energy-leaf.png': 'https://em-content.zobj.net/source/apple/391/leaf-fluttering-in-wind_1f343.png',  # 🍃 leaf for energy saver
-    'ui/icons/red-circle.png': 'https://em-content.zobj.net/source/apple/391/red-circle_1f534.png',  # 🔴 red circle for real-time
+    'ui/icons/red-circle.png': 'https://em-content.zobj.net/source/apple/391/large-red-circle_1f534.png',  # 🔴 red circle for real-time (fixed: original was 403)
     'ui/icons/wrench.png': 'https://em-content.zobj.net/source/apple/391/wrench_1f527.png',  # 🔧 wrench for tools/devices
 }
 
