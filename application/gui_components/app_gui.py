@@ -720,11 +720,15 @@ class GUI:
         colors = self.colors
         """Renders a constant indicator when energy saver mode is active."""
         if self.app.energy_saver.energy_saver_active:
-            indicator_text = "⚡ Energy Saver Active"
+            indicator_text = "Energy Saver Active"
             main_viewport = imgui.get_main_viewport()
             style = imgui.get_style()
             text_size = imgui.calc_text_size(indicator_text)
-            win_size = (text_size[0] + style.window_padding[0] * 2, text_size[1] + style.window_padding[1] * 2)
+
+            # Account for icon size (16x16) + spacing
+            icon_width = 20  # 16px icon + 4px spacing
+            win_size = (text_size[0] + icon_width + style.window_padding[0] * 2,
+                       max(text_size[1], 16) + style.window_padding[1] * 2)
             position = (main_viewport.pos[0] + 10, main_viewport.pos[1] + main_viewport.size[1] - win_size[1] - 10)
 
             imgui.set_next_window_position(position[0], position[1])
@@ -738,6 +742,15 @@ class GUI:
                             imgui.WINDOW_NO_NAV)
 
             imgui.begin("EnergySaverIndicator", closable=False, flags=window_flags)
+
+            # Show leaf icon + text
+            icon_mgr = getattr(self, 'icon_manager', None)
+            if icon_mgr:
+                leaf_tex, _, _ = icon_mgr.get_icon_texture('energy-leaf.png')
+                if leaf_tex:
+                    imgui.image(leaf_tex, 16, 16)
+                    imgui.same_line()
+
             imgui.text_colored(indicator_text, *colors.ENERGY_SAVER_INDICATOR)
             imgui.end()
 
