@@ -5,8 +5,6 @@ Allows users to create, save, and switch between different shortcut profiles
 for different workflows (e.g., "Video Editor", "Funscript Expert", "Custom").
 """
 
-import json
-import os
 from typing import Dict, List, Optional
 from config.constants import DEFAULT_SHORTCUTS
 
@@ -260,54 +258,6 @@ class ShortcutProfileManager:
     def get_custom_profile_names(self) -> List[str]:
         """Get list of custom profile names"""
         return [name for name, profile in self.profiles.items() if not profile.is_builtin]
-
-    def export_profile(self, name: str, filepath: str) -> bool:
-        """
-        Export a profile to JSON file.
-
-        Returns:
-            True if successful, False if profile doesn't exist or export fails
-        """
-        if name not in self.profiles:
-            return False
-
-        try:
-            profile_data = self.profiles[name].to_dict()
-            with open(filepath, 'w') as f:
-                json.dump(profile_data, f, indent=2)
-            return True
-        except Exception as e:
-            print(f"Error exporting profile: {e}")
-            return False
-
-    def import_profile(self, filepath: str) -> Optional[str]:
-        """
-        Import a profile from JSON file.
-
-        Returns:
-            Profile name if successful, None if import fails
-        """
-        try:
-            with open(filepath, 'r') as f:
-                profile_data = json.load(f)
-
-            profile = ShortcutProfile.from_dict(profile_data)
-            profile.is_builtin = False  # Imported profiles are always custom
-
-            # Ensure unique name
-            base_name = profile.name
-            counter = 1
-            while profile.name in self.profiles:
-                profile.name = f"{base_name} ({counter})"
-                counter += 1
-
-            self.profiles[profile.name] = profile
-            self._save_custom_profiles()
-
-            return profile.name
-        except Exception as e:
-            print(f"Error importing profile: {e}")
-            return None
 
     def detect_conflicts(self, shortcuts: Dict[str, str]) -> List[tuple]:
         """
