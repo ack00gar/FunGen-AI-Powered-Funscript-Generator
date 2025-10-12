@@ -503,7 +503,7 @@ class VideoProcessor:
             self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
             return
 
-        self.logger.info(f"⚙️ Applying video settings...", extra={'status_message': True})
+        self.logger.info(f"Applying video settings...", extra={'status_message': True})
         self.logger.info(f"Reapplying video settings (self.vr_input_format is currently: {self.vr_input_format})")
         was_processing = self.is_processing
         stored_frame_index = self.current_frame_index
@@ -528,7 +528,7 @@ class VideoProcessor:
             self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
         else:
             self.logger.info("Settings applied. Video remains paused/stopped.")
-        self.logger.info("✅ Video settings applied successfully", extra={'status_message': True})
+        self.logger.info("Video settings applied successfully", extra={'status_message': True})
 
     def get_frames_batch(self, start_frame_num: int, num_frames_to_fetch: int) -> Dict[int, np.ndarray]:
         """
