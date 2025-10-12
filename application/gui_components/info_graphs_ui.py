@@ -518,7 +518,12 @@ class InfoGraphsUI:
             )
 
             if processor.is_video_open():
-                processor.reapply_video_settings()
+                # Run reapply in background thread to avoid blocking UI
+                threading.Thread(
+                    target=processor.reapply_video_settings,
+                    daemon=True,
+                    name='HWAccelReapply'
+                ).start()
 
         imgui.separator()
         video_types = ["auto", "2D", "VR"]
@@ -532,7 +537,12 @@ class InfoGraphsUI:
         )
         if changed:
             processor.set_active_video_type_setting(video_types[new_idx])
-            processor.reapply_video_settings()
+            # Run reapply in background thread to avoid blocking UI
+            threading.Thread(
+                target=processor.reapply_video_settings,
+                daemon=True,
+                name='VideoTypeReapply'
+            ).start()
 
         if processor.is_vr_active_or_potential():
             imgui.separator()
@@ -556,7 +566,12 @@ class InfoGraphsUI:
             )
             if changed:
                 processor.set_active_vr_parameters(input_format=vr_fmt_val[new_idx])
-                processor.reapply_video_settings()
+                # Run reapply in background thread to avoid blocking UI
+                threading.Thread(
+                    target=processor.reapply_video_settings,
+                    daemon=True,
+                    name='VRFormatReapply'
+                ).start()
 
             # VR Unwarp Method dropdown
             imgui.spacing()
@@ -577,7 +592,12 @@ class InfoGraphsUI:
                 processor.vr_unwarp_method_override = unwarp_method_val[new_unwarp_idx]
                 # Save to settings
                 self.app.app_settings.set("vr_unwarp_method", unwarp_method_val[new_unwarp_idx])
-                processor.reapply_video_settings()
+                # Run reapply in background thread to avoid blocking UI
+                threading.Thread(
+                    target=processor.reapply_video_settings,
+                    daemon=True,
+                    name='UnwarpMethodReapply'
+                ).start()
 
             if imgui.is_item_hovered():
                 imgui.set_tooltip(

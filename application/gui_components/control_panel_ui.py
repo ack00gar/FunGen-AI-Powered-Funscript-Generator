@@ -258,17 +258,38 @@ class ControlPanelUI:
 
     def _status_indicator(self, text, status, help_text=None):
         c = self.ControlPanelColors
+        icon_mgr = get_icon_texture_manager()
+
+        # Set color and get emoji texture based on status
         if status == "ready":
-            color, icon = c.STATUS_READY, "[OK]"
+            color, icon_text = c.STATUS_READY, "[OK]"
+            icon_texture, _, _ = icon_mgr.get_icon_texture('check.png')
         elif status == "warning":
-            color, icon = c.STATUS_WARNING, "[!]"
+            color, icon_text = c.STATUS_WARNING, "[!]"
+            icon_texture, _, _ = icon_mgr.get_icon_texture('warning.png')
         elif status == "error":
-            color, icon = c.STATUS_ERROR, "[X]"
+            color, icon_text = c.STATUS_ERROR, "[X]"
+            icon_texture, _, _ = icon_mgr.get_icon_texture('error.png')
         else:
-            color, icon = c.STATUS_INFO, "[i]"
+            color, icon_text = c.STATUS_INFO, "[i]"
+            icon_texture = None
+
+        # Display icon (emoji image if available, fallback to text)
+        if icon_texture:
+            icon_size = imgui.get_text_line_height()
+            imgui.image(icon_texture, icon_size, icon_size)
+            imgui.same_line(spacing=4)
+        else:
+            imgui.push_style_color(imgui.COLOR_TEXT, *color)
+            imgui.text(icon_text)
+            imgui.pop_style_color()
+            imgui.same_line(spacing=4)
+
+        # Display status text
         imgui.push_style_color(imgui.COLOR_TEXT, *color)
-        imgui.text("%s %s" % (icon, text))
+        imgui.text(text)
         imgui.pop_style_color()
+
         if help_text:
             _tooltip_if_hovered(help_text)
 
