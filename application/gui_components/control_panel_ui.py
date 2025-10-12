@@ -1822,16 +1822,22 @@ class ControlPanelUI:
         )
 
         set_text = "Cancel Set Oscillation Area" if app.is_setting_oscillation_area_mode else "Set Oscillation Area"
-        if imgui.button("%s##SetOscillationArea" % set_text, width=btn_w):
-            if app.is_setting_oscillation_area_mode:
-                app.exit_set_oscillation_area_mode()
-            else:
-                app.enter_set_oscillation_area_mode()
+        # Set Oscillation Area button - PRIMARY when starting, DESTRUCTIVE when canceling
+        if app.is_setting_oscillation_area_mode:
+            with destructive_button_style():
+                if imgui.button("%s##SetOscillationArea" % set_text, width=btn_w):
+                    app.exit_set_oscillation_area_mode()
+        else:
+            with primary_button_style():
+                if imgui.button("%s##SetOscillationArea" % set_text, width=btn_w):
+                    app.enter_set_oscillation_area_mode()
 
         if has_area:
             imgui.same_line()
-            if imgui.button("Clear Oscillation Area##ClearOscillationArea", width=btn_w):
-                tr.clear_oscillation_area_and_point()
+            # Clear Oscillation Area button (DESTRUCTIVE - clears user data)
+            with destructive_button_style():
+                if imgui.button("Clear Oscillation Area##ClearOscillationArea", width=btn_w):
+                    tr.clear_oscillation_area_and_point()
                 if hasattr(app, "is_setting_oscillation_area_mode"):
                     app.is_setting_oscillation_area_mode = False
                 gi = getattr(app, "gui_instance", None)
@@ -2055,18 +2061,24 @@ class ControlPanelUI:
             )
 
             set_text = "Cancel Set ROI" if app.is_setting_user_roi_mode else "Set ROI & Point"
-            if imgui.button("%s##UserSetROI_RunTab" % set_text, width=btn_w):
-                if app.is_setting_user_roi_mode:
-                    app.exit_set_user_roi_mode()
-                else:
-                    app.enter_set_user_roi_mode()
+            # Set ROI button - PRIMARY when starting, DESTRUCTIVE when canceling
+            if app.is_setting_user_roi_mode:
+                with destructive_button_style():
+                    if imgui.button("%s##UserSetROI_RunTab" % set_text, width=btn_w):
+                        app.exit_set_user_roi_mode()
+            else:
+                with primary_button_style():
+                    if imgui.button("%s##UserSetROI_RunTab" % set_text, width=btn_w):
+                        app.enter_set_user_roi_mode()
 
             if has_roi:
                 imgui.same_line()
-                if imgui.button("Clear ROI##UserClearROI_RunTab", width=btn_w):
-                    if tr and hasattr(tr, "clear_user_defined_roi_and_point"):
-                        tr.stop_tracking()
-                        tr.clear_user_defined_roi_and_point()
+                # Clear ROI button (DESTRUCTIVE - clears user data)
+                with destructive_button_style():
+                    if imgui.button("Clear ROI##UserClearROI_RunTab", width=btn_w):
+                        if tr and hasattr(tr, "clear_user_defined_roi_and_point"):
+                            tr.stop_tracking()
+                            tr.clear_user_defined_roi_and_point()
                         app.logger.info("User ROI cleared.", extra={"status_message": True})
 
         if app.is_setting_user_roi_mode:
@@ -2469,9 +2481,11 @@ class ControlPanelUI:
                 prep_op()
                 fs_proc.handle_funscript_operation("invert")
             imgui.same_line()
-            if imgui.button("Clear##ClearPoints"):
-                prep_op()
-                fs_proc.handle_funscript_operation("clear")
+            # Clear button (DESTRUCTIVE - deletes all points)
+            with destructive_button_style():
+                if imgui.button("Clear##ClearPoints"):
+                    prep_op()
+                    fs_proc.handle_funscript_operation("clear")
 
             imgui.text("Amplify Values")
             ch, nv = imgui.slider_float("Factor##AmplifyFactor", fs_proc.amplify_factor_input, 0.1, 3.0, "%.2f")
@@ -4372,21 +4386,15 @@ class ControlPanelUI:
 
                 # Start/Stop button
                 if is_running:
-                    # Running - show stop button
-                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2)
-                    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.9, 0.3, 0.3)
-                    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.7, 0.1, 0.1)
-                    if imgui.button("Stop Streaming Server", width=-1):
-                        self._stop_native_sync()
-                    imgui.pop_style_color(3)
+                    # Running - show stop button (DESTRUCTIVE - stops server)
+                    with destructive_button_style():
+                        if imgui.button("Stop Streaming Server", width=-1):
+                            self._stop_native_sync()
                 else:
-                    # Not running - show start button
-                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2)
-                    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.9, 0.3)
-                    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.7, 0.1)
-                    if imgui.button("Start Streaming Server", width=-1):
-                        self._start_native_sync()
-                    imgui.pop_style_color(3)
+                    # Not running - show start button (PRIMARY - positive action)
+                    with primary_button_style():
+                        if imgui.button("Start Streaming Server", width=-1):
+                            self._start_native_sync()
 
             # Connection Info Section (only when running)
             if is_running:
