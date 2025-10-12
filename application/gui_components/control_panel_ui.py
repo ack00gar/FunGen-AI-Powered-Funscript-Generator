@@ -756,9 +756,6 @@ class ControlPanelUI:
         if app_state.show_advanced_options:
             if imgui.collapsing_header("Logging & Autosave##SettingsMenuLogging")[0]:
                 self._render_settings_logging_autosave()
-
-            if imgui.collapsing_header("View/Edit Hotkeys##FSHotkeysMenuSettingsDetail")[0]:
-                self._render_settings_hotkeys()
         imgui.spacing()
 
         # Reset All Settings button (DESTRUCTIVE - resets all settings)
@@ -778,10 +775,12 @@ class ControlPanelUI:
             avail_w = imgui.get_content_region_available_width()
             pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
 
-            if imgui.button("Confirm Reset", width=pw):
-                app.app_settings.reset_to_defaults()
-                app.logger.info("All settings have been reset to default.", extra={"status_message": True})
-                imgui.close_current_popup()
+            # Confirm Reset button (DESTRUCTIVE - irreversible action)
+            with destructive_button_style():
+                if imgui.button("Confirm Reset", width=pw):
+                    app.app_settings.reset_to_defaults()
+                    app.logger.info("All settings have been reset to default.", extra={"status_message": True})
+                    imgui.close_current_popup()
 
             imgui.same_line()
             if imgui.button("Cancel", width=pw):
@@ -1233,31 +1232,6 @@ class ControlPanelUI:
                 if nv != interval:
                     settings.set("autosave_interval_seconds", nv)
             imgui.pop_item_width()
-
-# ------- Settings: hotkeys -------
-
-    def _render_settings_hotkeys(self):
-        app = self.app
-        shortcuts_settings = app.app_settings.get("funscript_editor_shortcuts", {})
-        sm = app.shortcut_manager
-        c = self.ControlPanelColors.ACTIVE_PROGRESS
-
-        for action_name, key_str in list(shortcuts_settings.items()):
-            disp = action_name.replace("_", " ").title()
-            imgui.text("%s: " % disp)
-            imgui.same_line()
-
-            recording = (sm.is_recording_shortcut_for == action_name)
-            display_key = "PRESS KEY..." if recording else key_str
-            btn_text = "Cancel" if recording else "Record"
-
-            imgui.text_colored(display_key, *c)
-            imgui.same_line()
-            if imgui.button("%s##record_btn_%s" % (btn_text, action_name)):
-                if recording:
-                    sm.cancel_shortcut_recording()
-                else:
-                    sm.start_shortcut_recording(action_name)
 
 # ------- Execution/progress -------
 
@@ -2319,13 +2293,15 @@ class ControlPanelUI:
                 app.app_settings.set("auto_post_processing_amplification_config", config_copy)
                 app.project_manager.project_dirty = True
 
-            if imgui.button("Reset All Profiles to Defaults##ResetAutoPostProcessing", width=-1):
-                app.app_settings.set(
-                    "auto_post_processing_amplification_config",
-                    self.constants.DEFAULT_AUTO_POST_AMP_CONFIG,
-                )
-                app.project_manager.project_dirty = True
-                app.logger.info("All post-processing profiles reset to defaults.", extra={"status_message": True})
+            # Reset All Profiles button (DESTRUCTIVE - resets to defaults)
+            with destructive_button_style():
+                if imgui.button("Reset All Profiles to Defaults##ResetAutoPostProcessing", width=-1):
+                    app.app_settings.set(
+                        "auto_post_processing_amplification_config",
+                        self.constants.DEFAULT_AUTO_POST_AMP_CONFIG,
+                    )
+                    app.project_manager.project_dirty = True
+                    app.logger.info("All post-processing profiles reset to defaults.", extra={"status_message": True})
 
             imgui.text("Final Smoothing Pass")
             en = app.app_settings.get("auto_post_proc_final_rdp_enabled", False)
