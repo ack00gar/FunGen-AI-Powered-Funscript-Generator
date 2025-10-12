@@ -14,6 +14,7 @@ import time
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
+from application.utils import primary_button_style, destructive_button_style
 
 # Device control imports (conditional)
 try:
@@ -424,12 +425,16 @@ class DeviceControlUI:
         # Live tracking controls
         if self.live_tracking_active:
             imgui.text_colored("Live Tracking: ACTIVE", 0.0, 1.0, 0.0)
-            if imgui.button("Stop Live Tracking"):
-                asyncio.create_task(self._stop_live_tracking())
+            # Stop button (DESTRUCTIVE - stops process)
+            with destructive_button_style():
+                if imgui.button("Stop Live Tracking"):
+                    asyncio.create_task(self._stop_live_tracking())
         else:
             imgui.text("Live Tracking: INACTIVE")
-            if imgui.button("Start Live Tracking"):
-                asyncio.create_task(self._start_live_tracking())
+            # Start button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Start Live Tracking"):
+                    asyncio.create_task(self._start_live_tracking())
         
         imgui.separator()
         
@@ -517,16 +522,20 @@ class DeviceControlUI:
             imgui.separator()
             imgui.text("Playback Controls:")
             
-            if imgui.button("Play"):
-                asyncio.create_task(self._play_video())
-            
+            # Play button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Play"):
+                    asyncio.create_task(self._play_video())
+
             imgui.same_line()
             if imgui.button("Pause"):
                 asyncio.create_task(self._pause_video())
-            
+
             imgui.same_line()
-            if imgui.button("Stop"):
-                asyncio.create_task(self._stop_video())
+            # Stop button (DESTRUCTIVE - stops playback)
+            with destructive_button_style():
+                if imgui.button("Stop"):
+                    asyncio.create_task(self._stop_video())
             
             # Playback status
             if self.playback_status:

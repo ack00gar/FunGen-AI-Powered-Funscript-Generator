@@ -77,6 +77,10 @@ class ControlPanelUI:
         "_prev_client_count",
         "_native_sync_status_cache",
         "_native_sync_status_time",
+        # Local video browser attributes
+        "_local_video_folder",
+        "_local_video_files",
+        "_selected_local_video",
     )
 
     def __init__(self, app):
@@ -120,6 +124,11 @@ class ControlPanelUI:
         self._prev_client_count = 0
         self._native_sync_status_cache = None
         self._native_sync_status_time = 0
+        
+        # Local video browser attributes
+        self._local_video_folder = ""
+        self._local_video_files = []
+        self._selected_local_video = ""
 
     # ------- Helpers -------
     
@@ -669,10 +678,12 @@ class ControlPanelUI:
                 bw, cw = 150, 100
                 total = bw + cw + imgui.get_style().item_spacing[0]
                 imgui.set_cursor_pos_x((w - total) * 0.5)
-                if imgui.button("Yes, clear all", width=bw):
-                    app.funscript_processor.video_chapters.clear()
-                    app.project_manager.project_dirty = True
-                    imgui.close_current_popup()
+                # Confirm button (DESTRUCTIVE - irreversible action)
+                with destructive_button_style():
+                    if imgui.button("Yes, clear all", width=bw):
+                        app.funscript_processor.video_chapters.clear()
+                        app.project_manager.project_dirty = True
+                        imgui.close_current_popup()
                 imgui.same_line()
                 if imgui.button("Cancel", width=cw):
                     imgui.close_current_popup()
@@ -1461,8 +1472,10 @@ class ControlPanelUI:
                 current_video_name = os.path.basename(self.app.batch_video_paths[current_idx]["path"])
                 imgui.text_wrapped(f"Processing {current_idx + 1}/{total_videos}:")
                 imgui.text_wrapped(f"{current_video_name}")
-            if imgui.button("Abort Batch Process", width=-1):
-                self.app.abort_batch_processing()
+            # Abort button (DESTRUCTIVE - stops batch process)
+            with destructive_button_style():
+                if imgui.button("Abort Batch Process", width=-1):
+                    self.app.abort_batch_processing()
             return
 
         selected_mode = self.app.app_state_ui.selected_tracker_name
@@ -2254,9 +2267,11 @@ class ControlPanelUI:
                 app.logger.info("Automatic post-processing on completion %s." % ("enabled" if nv else "disabled"), extra={"status_message": True})
             _tooltip_if_hovered("If checked, the profiles below will be applied automatically\nafter an offline analysis or live tracking session finishes.")
 
-            if imgui.button("Run Post-Processing Now##RunAutoPostProcessButton", width=-1):
-                if hasattr(fs_proc, "apply_automatic_post_processing"):
-                    fs_proc.apply_automatic_post_processing()
+            # Run post-processing button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Run Post-Processing Now##RunAutoPostProcessButton", width=-1):
+                    if hasattr(fs_proc, "apply_automatic_post_processing"):
+                        fs_proc.apply_automatic_post_processing()
 
             use_chapter = app.app_settings.get("auto_processing_use_chapter_profiles", True)
             ch, nv = imgui.checkbox("Apply Per-Chapter Settings (if available)", use_chapter)
@@ -2465,9 +2480,11 @@ class ControlPanelUI:
             ch, nv = imgui.slider_int("Center##AmplifyCenter", fs_proc.amplify_center_input, 0, 100)
             if ch:
                 fs_proc.amplify_center_input = nv
-            if imgui.button("Apply Amplify##ApplyAmplify"):
-                prep_op()
-                fs_proc.handle_funscript_operation("amplify")
+            # Apply button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Apply Amplify##ApplyAmplify"):
+                    prep_op()
+                    fs_proc.handle_funscript_operation("amplify")
 
             imgui.text("Savitzky-Golay Filter")
             ch, nv = imgui.slider_int("Window Length##SGWin", fs_proc.sg_window_length_input, 3, 99)
@@ -2478,17 +2495,21 @@ class ControlPanelUI:
             ch, nv = imgui.slider_int("Polyorder##SGPoly", po_val, 1, max_po)
             if ch:
                 fs_proc.sg_polyorder_input = nv
-            if imgui.button("Apply Savitzky-Golay##ApplySG"):
-                prep_op()
-                fs_proc.handle_funscript_operation("apply_sg")
+            # Apply button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Apply Savitzky-Golay##ApplySG"):
+                    prep_op()
+                    fs_proc.handle_funscript_operation("apply_sg")
 
             imgui.text("RDP Simplification")
             ch, nv = imgui.slider_float("Epsilon##RDPEps", fs_proc.rdp_epsilon_input, 0.01, 20.0, "%.2f")
             if ch:
                 fs_proc.rdp_epsilon_input = nv
-            if imgui.button("Apply RDP##ApplyRDP"):
-                prep_op()
-                fs_proc.handle_funscript_operation("apply_rdp")
+            # Apply button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Apply RDP##ApplyRDP"):
+                    prep_op()
+                    fs_proc.handle_funscript_operation("apply_rdp")
 
             imgui.text("Dynamic Amplification")
             if not hasattr(fs_proc, "dynamic_amp_window_ms_input"):
@@ -2498,9 +2519,11 @@ class ControlPanelUI:
                 fs_proc.dynamic_amp_window_ms_input = nv
             _tooltip_if_hovered("The size of the 'before/after' window in milliseconds to consider for amplification.")
 
-            if imgui.button("Apply Dynamic Amplify##ApplyDynAmp"):
-                prep_op()
-                fs_proc.handle_funscript_operation("apply_dynamic_amp")
+            # Apply button (PRIMARY - positive action)
+            with primary_button_style():
+                if imgui.button("Apply Dynamic Amplify##ApplyDynAmp"):
+                    prep_op()
+                    fs_proc.handle_funscript_operation("apply_dynamic_amp")
 
         # If disabled, show a tooltip on hover (outside the disabled scope)
         if disabled and imgui.is_item_hovered():
