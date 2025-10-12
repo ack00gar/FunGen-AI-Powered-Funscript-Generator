@@ -367,19 +367,37 @@ class VideoProcessor:
 
         width = self.video_info.get('width', 0)
         height = self.video_info.get('height', 0)
+
+        # Check for VR-like aspect ratios
+        # SBS VR: width roughly 2x height (e.g., 3840x1920)
+        # TB VR: height roughly 2x width (e.g., 1920x3840)
         is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
         is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
 
-        # Resolution-based pre-filter: rule out VR if resolution is too low
-        # VR videos are typically 3840x1920 minimum (SBS) or 1920x3840 (TB)
-        # Standard 2D videos like 1920x1080, 1280x720, etc. cannot be VR
-        is_definitely_2d = (
-            (width <= 2560 and height <= 1440) or  # Standard 2D resolutions (1080p, 720p, 1440p)
-            (width < 3000 and not is_sbs_resolution and not is_tb_resolution)  # Not wide/tall enough
-        )
+        # Improved heuristic: Skip ML for likely 2D content
+        # Most VR content is 4K (2160p) or higher. Below that, only trust VR if aspect ratio is suspicious.
+        # This avoids the ML misclassifying 2D content as VR.
+        is_likely_2d = False
 
-        if is_definitely_2d and self.video_type_setting == 'auto':
-            self.logger.info(f"Resolution {width}x{height} is too low for VR - classified as 2D (skipping ML)")
+        # Under 2160p (4K) - assume 2D unless aspect ratio strongly suggests VR
+        if height < 2160 and width < 3840:
+            if not is_sbs_resolution and not is_tb_resolution:
+                # Standard aspect ratio (16:9, 21:9, etc.) - definitely 2D
+                is_likely_2d = True
+                self.logger.info(f"Resolution {width}x{height} is below 4K with standard aspect ratio - classified as 2D (skipping ML)")
+            else:
+                # Suspicious aspect ratio even at low res - let ML decide
+                self.logger.info(f"Resolution {width}x{height} is below 4K but has VR-like aspect ratio - running ML to confirm")
+        # At 4K or above with standard aspect ratio - likely 2D
+        elif not is_sbs_resolution and not is_tb_resolution:
+            # Check if it's a standard 2D aspect ratio
+            aspect_ratio = width / height if height > 0 else 0
+            # Standard 2D: 16:9 (~1.78), 21:9 (~2.35), 4:3 (~1.33), etc. - all under 1.8
+            if 1.2 < aspect_ratio < 1.8:
+                is_likely_2d = True
+                self.logger.info(f"Resolution {width}x{height} at 4K+ with standard 2D aspect ratio ({aspect_ratio:.2f}) - classified as 2D (skipping ML)")
+
+        if is_likely_2d and self.video_type_setting == 'auto':
             self.determined_video_type = '2D'
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
             self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
@@ -485,6 +503,7 @@ class VideoProcessor:
             self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
             return
 
+        self.logger.info(f"⚙️ Applying video settings...", extra={'status_message': True})
         self.logger.info(f"Reapplying video settings (self.vr_input_format is currently: {self.vr_input_format})")
         was_processing = self.is_processing
         stored_frame_index = self.current_frame_index
@@ -509,7 +528,7 @@ class VideoProcessor:
             self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
         else:
             self.logger.info("Settings applied. Video remains paused/stopped.")
-        self.logger.info("Video settings reapplication complete.")
+        self.logger.info("✅ Video settings applied successfully", extra={'status_message': True})
 
     def get_frames_batch(self, start_frame_num: int, num_frames_to_fetch: int) -> Dict[int, np.ndarray]:
         """
@@ -548,7 +567,7 @@ class VideoProcessor:
                 cmd2 = common_ffmpeg_prefix[:]
                 cmd2.extend(['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn'])
                 effective_vf_pipe2 = self.ffmpeg_filter_string
-                if not effective_vf_pipe2: effective_vf_pipe2 = f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+                if not effective_vf_pipe2: effective_vf_pipe2 = f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
                 cmd2.extend(['-vf', effective_vf_pipe2])
                 cmd2.extend(['-frames:v', str(num_frames_to_fetch)])
                 # Always use BGR24 - GPU unwarp worker handles BGR->RGBA conversion internally
@@ -576,7 +595,7 @@ class VideoProcessor:
                 if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
                 cmd_single = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
                 effective_vf = self.ffmpeg_filter_string
-                if not effective_vf: effective_vf = f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+                if not effective_vf: effective_vf = f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
                 cmd_single.extend(['-vf', effective_vf])
                 cmd_single.extend(['-frames:v', str(num_frames_to_fetch)])
                 # Always use BGR24 - GPU unwarp worker handles BGR->RGBA conversion internally
@@ -989,10 +1008,41 @@ class VideoProcessor:
 
     def _get_2d_video_filters(self) -> List[str]:
         """Builds the list of FFmpeg filter segments for standard 2D video."""
-        return [
-            f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
-            f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
-        ]
+        if not self.video_info:
+            # Fallback if no video info
+            return [
+                f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
+                f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
+            ]
+
+        width = self.video_info.get('width', 0)
+        height = self.video_info.get('height', 0)
+
+        if width == 0 or height == 0:
+            # Fallback if dimensions unknown
+            return [
+                f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
+                f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
+            ]
+
+        aspect_ratio = width / height
+
+        # Check if video is square (or nearly square)
+        if 0.95 < aspect_ratio < 1.05:
+            # Square video - just scale, no padding needed
+            return [f"scale={self.yolo_input_size}:{self.yolo_input_size}"]
+        elif aspect_ratio > 1.05:
+            # Wider than tall (landscape) - scale and pad top/bottom
+            return [
+                f"scale={self.yolo_input_size}:-1:force_original_aspect_ratio=decrease",
+                f"pad={self.yolo_input_size}:{self.yolo_input_size}:0:(oh-ih)/2:black"
+            ]
+        else:
+            # Taller than wide (portrait) - scale and pad left/right
+            return [
+                f"scale=-1:{self.yolo_input_size}:force_original_aspect_ratio=decrease",
+                f"pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:0:black"
+            ]
 
     def _init_gpu_unwarp_worker(self):
         """Initialize GPU unwarp worker for VR video processing."""
@@ -1351,7 +1401,7 @@ class VideoProcessor:
 
             cmd2 = common_ffmpeg_prefix[:]
             cmd2.extend(['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn'])
-            effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
             cmd2.extend(['-vf', effective_vf_pipe2])
             if num_frames_to_output_ffmpeg and num_frames_to_output_ffmpeg > 0:
                 cmd2.extend(['-frames:v', str(num_frames_to_output_ffmpeg)])
@@ -1387,7 +1437,7 @@ class VideoProcessor:
             if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
 
             cmd = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
-            effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
             cmd.extend(['-vf', effective_vf])
             if num_frames_to_output_ffmpeg and num_frames_to_output_ffmpeg > 0:
                 cmd.extend(['-frames:v', str(num_frames_to_output_ffmpeg)])
@@ -1912,7 +1962,7 @@ class VideoProcessor:
 
             cmd2 = common_ffmpeg_prefix[:]
             cmd2.extend(['-hwaccel', 'cuda', '-i', 'pipe:0', '-an', '-sn'])
-            effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            effective_vf_pipe2 = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
             cmd2.extend(['-vf', effective_vf_pipe2])
             if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
                 cmd2.extend(['-frames:v', str(num_frames_to_stream_hint)])
@@ -1939,7 +1989,7 @@ class VideoProcessor:
             ffmpeg_input_options = hwaccel_cmd_list[:]
             if start_time_seconds > 0.001: ffmpeg_input_options.extend(['-ss', str(start_time_seconds)])
             ffmpeg_cmd = common_ffmpeg_prefix + ffmpeg_input_options + ['-i', self._active_video_source_path, '-an', '-sn']
-            effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+            effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
             ffmpeg_cmd.extend(['-vf', effective_vf])
 
             if num_frames_to_stream_hint and num_frames_to_stream_hint > 0:
@@ -2184,7 +2234,7 @@ class VideoProcessor:
         cmd.extend(['-an', '-sn'])  # No audio, no subtitles initially (dual processor handles audio separately)
         
         # Add video filter for processing
-        effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}"
+        effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
         cmd.extend(['-vf', effective_vf])
         
         return cmd
