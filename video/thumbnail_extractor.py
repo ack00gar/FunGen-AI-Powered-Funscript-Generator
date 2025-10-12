@@ -34,7 +34,8 @@ class ThumbnailExtractor:
             logger: Optional logger instance
             gpu_unwarp_worker: Optional GPU unwarp worker for VR content
             output_size: Size for output thumbnails (width and height)
-            vr_input_format: VR format (e.g., 'fisheye_sbs', 'he_tb') for panel cropping
+            vr_input_format: VR format (e.g., 'fisheye_sbs', 'he_tb') for panel cropping.
+                           If None, video is treated as 2D and will be padded to square.
         """
         self.video_path = video_path
         self.logger = logger or logging.getLogger(__name__)
@@ -56,6 +57,9 @@ class ThumbnailExtractor:
         # VR format detection
         self.is_sbs = '_sbs' in (vr_input_format or '')
         self.is_tb = '_tb' in (vr_input_format or '')
+
+        # 2D video handling (if vr_input_format is None, treat as 2D)
+        self.is_2d = vr_input_format is None
 
         # Open video
         self._open_video()
@@ -134,9 +138,37 @@ class ThumbnailExtractor:
                 frame = frame[:half_height, :]
                 self.logger.debug(f"Cropped TB to top panel: {frame.shape}")
 
-            # Resize to output size
-            frame_resized = cv2.resize(frame, (self.output_size, self.output_size),
-                                      interpolation=cv2.INTER_AREA)
+            # For 2D videos, pad to square. For VR, resize (already cropped to single eye)
+            if self.is_2d:
+                # Pad 2D video to square (letterbox/pillarbox)
+                h, w = frame.shape[:2]
+
+                if h == w:
+                    # Already square, just resize
+                    frame_resized = cv2.resize(frame, (self.output_size, self.output_size),
+                                              interpolation=cv2.INTER_AREA)
+                else:
+                    # Calculate scaling to fit within output_size while maintaining aspect ratio
+                    scale = self.output_size / max(h, w)
+                    new_h = int(h * scale)
+                    new_w = int(w * scale)
+
+                    # Resize maintaining aspect ratio
+                    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+                    # Create black canvas
+                    frame_resized = np.zeros((self.output_size, self.output_size, 3), dtype=np.uint8)
+
+                    # Center the resized frame on the canvas
+                    y_offset = (self.output_size - new_h) // 2
+                    x_offset = (self.output_size - new_w) // 2
+                    frame_resized[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+
+                    self.logger.debug(f"Padded 2D frame from {w}x{h} to {self.output_size}x{self.output_size}")
+            else:
+                # VR content: just resize (already cropped to single eye)
+                frame_resized = cv2.resize(frame, (self.output_size, self.output_size),
+                                          interpolation=cv2.INTER_AREA)
 
             # Apply GPU unwarp for VR content if available
             if use_gpu_unwarp and self.gpu_unwarp_worker is not None:
