@@ -148,7 +148,7 @@ class DeviceControlUI:
         
         # Main device control window with flags to ensure visibility
         window_flags = imgui.WINDOW_NO_COLLAPSE
-        expanded, opened = imgui.begin("🎮 Device Control", True, window_flags)
+        expanded, opened = imgui.begin("Device Control", True, window_flags)
         
         self.app.logger.debug(f"Device Control: imgui.begin returned expanded={expanded}, opened={opened}")
         
@@ -263,8 +263,18 @@ class DeviceControlUI:
                 device_type = device.device_type.value
                 
                 # Device info with visual indicators
-                icon = "🎮" if device_type == "stroker" else "🔧"
-                if imgui.tree_node(f"{icon} {device_name} ({device_type})##device_{i}"):
+                # Get icon texture
+                icon_mgr = getattr(self.app, 'icon_manager', None)
+                icon_name = 'gamepad.png' if device_type == "stroker" else 'wrench.png'
+
+                # Render icon before tree node
+                if icon_mgr:
+                    icon_tex, _, _ = icon_mgr.get_icon_texture(icon_name)
+                    if icon_tex:
+                        imgui.image(icon_tex, 16, 16)
+                        imgui.same_line()
+
+                if imgui.tree_node(f"{device_name} ({device_type})##device_{i}"):
                     imgui.text(f"ID: {device.device_id}")
                     imgui.text(f"Manufacturer: {device.manufacturer}")
                     imgui.text(f"Model: {device.model}")
@@ -272,7 +282,14 @@ class DeviceControlUI:
                     # Show connection info for Handy
                     if "handy" in device.device_id.lower():
                         if "local" in device.metadata.get("connection_mode", ""):
-                            imgui.text_colored("✓ Local WiFi Connection", 0.0, 1.0, 0.0)
+                            # Show checkmark icon + text
+                            icon_mgr = getattr(self.app, 'icon_manager', None)
+                            if icon_mgr:
+                                checkmark_tex, _, _ = icon_mgr.get_icon_texture('checkmark.png')
+                                if checkmark_tex:
+                                    imgui.image(checkmark_tex, 16, 16)
+                                    imgui.same_line()
+                            imgui.text_colored("Local WiFi Connection", 0.0, 1.0, 0.0)
                             if "local_ip" in device.metadata:
                                 imgui.text(f"IP: {device.metadata['local_ip']}")
                         firmware = device.metadata.get("firmware", "unknown")
@@ -818,18 +835,24 @@ class DeviceControlUI:
         
         # Main window
         window_flags = imgui.WINDOW_NO_COLLAPSE
-        expanded, opened = imgui.begin("🎮 Device Control", True, window_flags)
-        
+        expanded, opened = imgui.begin("Device Control", True, window_flags)
+
         if not opened:
             self.app.app_state_ui.show_device_control_window = False
-        
+
         if expanded:
             # Center the content
             imgui.dummy(0, 20)
-            
-            # Title
+
+            # Title with icon
             imgui.push_font(None)  # Use default font but we can make it bold
-            imgui.text_colored("🎮 Device Control", 0.2, 0.8, 1.0)
+            icon_mgr = getattr(self.app, 'icon_manager', None)
+            if icon_mgr:
+                gamepad_tex, _, _ = icon_mgr.get_icon_texture('gamepad.png')
+                if gamepad_tex:
+                    imgui.image(gamepad_tex, 20, 20)
+                    imgui.same_line()
+            imgui.text_colored("Device Control", 0.2, 0.8, 1.0)
             imgui.pop_font()
             
             imgui.separator()

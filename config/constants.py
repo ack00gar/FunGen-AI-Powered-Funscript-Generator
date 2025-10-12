@@ -451,8 +451,12 @@ UI_CONTROL_ICON_URLS = {
 
     # Status indicators
     'ui/icons/check.png': 'https://em-content.zobj.net/source/apple/391/check-mark-button_2705.png',
+    'ui/icons/checkmark.png': 'https://em-content.zobj.net/source/apple/391/check-mark_2714-fe0f.png',  # ✓ simple checkmark
     'ui/icons/error.png': 'https://em-content.zobj.net/source/apple/391/cross-mark_274c.png',
     'ui/icons/warning.png': 'https://em-content.zobj.net/source/apple/391/warning_26a0-fe0f.png',
+    'ui/icons/energy-leaf.png': 'https://em-content.zobj.net/source/apple/391/leaf-fluttering-in-wind_1f343.png',  # 🍃 leaf for energy saver
+    'ui/icons/red-circle.png': 'https://em-content.zobj.net/source/apple/391/red-circle_1f534.png',  # 🔴 red circle for real-time
+    'ui/icons/wrench.png': 'https://em-content.zobj.net/source/apple/391/wrench_1f527.png',  # 🔧 wrench for tools/devices
 }
 
 ####################################################################################################
