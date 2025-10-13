@@ -409,6 +409,29 @@ class TrackerManager:
         if self._current_tracker and hasattr(self._current_tracker, 'update_oscillation_sensitivity'):
             self._current_tracker.update_oscillation_sensitivity()
 
+    def unload_detection_model(self):
+        """Unloads the detection model."""
+        self.logger.info("Unloading detection model.")
+        self.det_model_path = None
+        if self._current_tracker:
+            if hasattr(self._current_tracker, 'det_model_path'):
+                self._current_tracker.det_model_path = None
+            self._load_models()
+
+    def unload_pose_model(self):
+        """Unloads the pose model."""
+        self.logger.info("Unloading pose model.")
+        self.pose_model_path = None
+        if self._current_tracker:
+            if hasattr(self._current_tracker, 'pose_model_path'):
+                self._current_tracker.pose_model_path = None
+            self._load_models()
+
+    def unload_models():
+        """Unloads models from the current tracker by cleaning up the tracker."""
+        self.logger.info("Unloading models by cleaning up the current tracker.")
+        self._cleanup_current_tracker()
+
     def _load_models(self):
         """Reload models in current tracker after model paths change."""
         if not self._current_tracker:

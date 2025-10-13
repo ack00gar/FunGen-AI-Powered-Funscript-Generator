@@ -825,157 +825,166 @@ class ControlPanelUI:
         settings = app.app_settings
         style = imgui.get_style()
 
-        def show_model_file_dialog(title, current_path, callback):
-            gi = getattr(app, "gui_instance", None)
-            if not gi:
-                return
-            init_dir = os.path.dirname(current_path) if current_path else None
-            gi.file_dialog.show(
-                title=title,
-                is_save=False,
-                callback=callback,
-                extension_filter=self.AI_modelExtensionsFilter,
-                initial_path=init_dir,
-            )
+        is_batch_mode = app.is_batch_processing_active
+        is_analysis_running = stage_proc.full_analysis_active
+        is_live_tracking_running = (app.processor and
+                                    app.processor.is_processing and
+                                    app.processor.enable_tracker_processing)
+        is_setting_roi = app.is_setting_user_roi_mode
+        is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi
 
-        # Precompute widths
-        tp = style.frame_padding.x * 2
-        browse_w = imgui.calc_text_size("Browse").x + tp
-        unload_w = imgui.calc_text_size("Unload").x + tp
-        total_btn_w = browse_w + unload_w + style.item_spacing.x
-        avail_w = imgui.get_content_region_available_width()
-        input_w = avail_w - total_btn_w - style.item_spacing.x
-
-        # Detection model
-        imgui.text("Detection Model")
-        _readonly_input("##S1YOLOPath", app.yolo_detection_model_path_setting, input_w)
-        imgui.same_line()
-        # Browse button with folder-open icon
-        icon_mgr = get_icon_texture_manager()
-        folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-        btn_size = imgui.get_frame_height()
-        if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
-            show_model_file_dialog(
-                "Select YOLO Detection Model",
-                app.yolo_detection_model_path_setting,
-                self._update_detection_model_path,
-            )
-        elif not folder_open_tex and imgui.button("Browse##S1YOLOBrowse"):
-            show_model_file_dialog(
-                "Select YOLO Detection Model",
-                app.yolo_detection_model_path_setting,
-                self._update_detection_model_path,
-            )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Browse for detection model file")
-        imgui.same_line()
-        # Unload button (DESTRUCTIVE - unloads model from memory)
-        with destructive_button_style():
-            if imgui.button("Unload##S1YOLOUnload"):
-                app.unload_model("detection")
-        _tooltip_if_hovered("Path to the YOLO object detection model file (%s)." % self.AI_modelTooltipExtensions)
-
-        # Pose model
-        imgui.text("Pose Model")
-        _readonly_input("##PoseYOLOPath", app.yolo_pose_model_path_setting, input_w)
-        imgui.same_line()
-        # Browse button with folder-open icon
-        folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-        if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
-            show_model_file_dialog(
-                "Select YOLO Pose Model",
-                app.yolo_pose_model_path_setting,
-                self._update_pose_model_path,
-            )
-        elif not folder_open_tex and imgui.button("Browse##PoseYOLOBrowse"):
-            show_model_file_dialog(
-                "Select YOLO Pose Model",
-                app.yolo_pose_model_path_setting,
-                self._update_pose_model_path,
-            )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Browse for pose model file")
-        imgui.same_line()
-        # Unload button (DESTRUCTIVE - unloads model from memory)
-        with destructive_button_style():
-            if imgui.button("Unload##PoseYOLOUnload"):
-                app.unload_model("pose")
-        _tooltip_if_hovered("Path to the YOLO pose estimation model file (%s). This model is optional." % self.AI_modelTooltipExtensions)
-
-        imgui.text("Pose Model Artifacts Dir")
-        dir_input_w = avail_w - browse_w - style.item_spacing.x if avail_w > browse_w else -1
-        _readonly_input("##PoseArtifactsDirPath", app.pose_model_artifacts_dir, dir_input_w)
-        imgui.same_line()
-        # Browse button with folder-open icon
-        folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-        if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
-            gi = getattr(app, "gui_instance", None)
-            if gi:
+        with _DisabledScope(is_any_process_active):
+            def show_model_file_dialog(title, current_path, callback):
+                gi = getattr(app, "gui_instance", None)
+                if not gi:
+                    return
+                init_dir = os.path.dirname(current_path) if current_path else None
                 gi.file_dialog.show(
-                    title="Select Pose Model Artifacts Directory",
-                    callback=self._update_artifacts_dir_path,
-                    is_folder_dialog=True,
-                    initial_path=app.pose_model_artifacts_dir,
+                    title=title,
+                    is_save=False,
+                    callback=callback,
+                    extension_filter=self.AI_modelExtensionsFilter,
+                    initial_path=init_dir,
                 )
-        elif not folder_open_tex and imgui.button("Browse##PoseArtifactsDirBrowse"):
-            gi = getattr(app, "gui_instance", None)
-            if gi:
-                gi.file_dialog.show(
-                    title="Select Pose Model Artifacts Directory",
-                    callback=self._update_artifacts_dir_path,
-                    is_folder_dialog=True,
-                    initial_path=app.pose_model_artifacts_dir,
-                )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Browse for pose model artifacts directory")
-        _tooltip_if_hovered(
-            "Path to the folder containing your trained classifier,\n"
-            "imputer, and other .joblib model artifacts."
-        )
 
-        mode = app.app_state_ui.selected_tracker_name
-        if self._is_offline_tracker(mode):
-            imgui.text("Stage 1 Inference Workers:")
-            imgui.push_item_width(100)
-            is_save_pre = getattr(stage_proc, "save_preprocessed_video", False)
-            with _DisabledScope(is_save_pre):
-                ch_p, n_p = imgui.input_int(
-                    "Producers##S1Producers", stage_proc.num_producers_stage1
-                )
-                if ch_p and not is_save_pre:
-                    v = max(1, n_p)
-                    if v != stage_proc.num_producers_stage1:
-                        stage_proc.num_producers_stage1 = v
-                        settings.set("num_producers_stage1", v)
-            if is_save_pre:
-                _tooltip_if_hovered("Producers are forced to 1 when 'Save/Reuse Preprocessed Video' is enabled.")
-            else:
-                _tooltip_if_hovered("Number of threads for video decoding & preprocessing.")
+            # Precompute widths
+            tp = style.frame_padding.x * 2
+            browse_w = imgui.calc_text_size("Browse").x + tp
+            unload_w = imgui.calc_text_size("Unload").x + tp
+            total_btn_w = browse_w + unload_w + style.item_spacing.x
+            avail_w = imgui.get_content_region_available_width()
+            input_w = avail_w - total_btn_w - style.item_spacing.x
 
+            # Detection model
+            imgui.text("Detection Model")
+            _readonly_input("##S1YOLOPath", app.yolo_detection_model_path_setting, input_w)
             imgui.same_line()
-            ch_c, n_c = imgui.input_int("Consumers##S1Consumers", stage_proc.num_consumers_stage1)
-            if ch_c:
-                v = max(1, n_c)
-                if v != stage_proc.num_consumers_stage1:
-                    stage_proc.num_consumers_stage1 = v
-                    settings.set("num_consumers_stage1", v)
-            _tooltip_if_hovered("Number of threads for AI model inference. Match to available cores for best performance.")
-            imgui.pop_item_width()
-
-            imgui.text("Stage 2 OF Workers")
+            # Browse button with folder-open icon
+            icon_mgr = get_icon_texture_manager()
+            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
+            btn_size = imgui.get_frame_height()
+            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
+                show_model_file_dialog(
+                    "Select YOLO Detection Model",
+                    app.yolo_detection_model_path_setting,
+                    self._update_detection_model_path,
+                )
+            elif not folder_open_tex and imgui.button("Browse##S1YOLOBrowse"):
+                show_model_file_dialog(
+                    "Select YOLO Detection Model",
+                    app.yolo_detection_model_path_setting,
+                    self._update_detection_model_path,
+                )
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Browse for detection model file")
             imgui.same_line()
-            imgui.push_item_width(120)
-            cur_s2 = settings.get("num_workers_stage2_of", self.constants.DEFAULT_S2_OF_WORKERS)
-            ch, new_s2 = imgui.input_int("##S2OFWorkers", cur_s2)
-            if ch:
-                v = max(1, new_s2)
-                if v != cur_s2:
-                    settings.set("num_workers_stage2_of", v)
-            imgui.pop_item_width()
+            # Unload button (DESTRUCTIVE - unloads model from memory)
+            with destructive_button_style():
+                if imgui.button("Unload##S1YOLOUnload"):
+                    app.unload_model("detection")
+            _tooltip_if_hovered("Path to the YOLO object detection model file (%s)." % self.AI_modelTooltipExtensions)
+
+            # Pose model
+            imgui.text("Pose Model")
+            _readonly_input("##PoseYOLOPath", app.yolo_pose_model_path_setting, input_w)
+            imgui.same_line()
+            # Browse button with folder-open icon
+            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
+            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
+                show_model_file_dialog(
+                    "Select YOLO Pose Model",
+                    app.yolo_pose_model_path_setting,
+                    self._update_pose_model_path,
+                )
+            elif not folder_open_tex and imgui.button("Browse##PoseYOLOBrowse"):
+                show_model_file_dialog(
+                    "Select YOLO Pose Model",
+                    app.yolo_pose_model_path_setting,
+                    self._update_pose_model_path,
+                )
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Browse for pose model file")
+            imgui.same_line()
+            # Unload button (DESTRUCTIVE - unloads model from memory)
+            with destructive_button_style():
+                if imgui.button("Unload##PoseYOLOUnload"):
+                    app.unload_model("pose")
+            _tooltip_if_hovered("Path to the YOLO pose estimation model file (%s). This model is optional." % self.AI_modelTooltipExtensions)
+
+            imgui.text("Pose Model Artifacts Dir")
+            dir_input_w = avail_w - browse_w - style.item_spacing.x if avail_w > browse_w else -1
+            _readonly_input("##PoseArtifactsDirPath", app.pose_model_artifacts_dir, dir_input_w)
+            imgui.same_line()
+            # Browse button with folder-open icon
+            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
+            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
+                gi = getattr(app, "gui_instance", None)
+                if gi:
+                    gi.file_dialog.show(
+                        title="Select Pose Model Artifacts Directory",
+                        callback=self._update_artifacts_dir_path,
+                        is_folder_dialog=True,
+                        initial_path=app.pose_model_artifacts_dir,
+                    )
+            elif not folder_open_tex and imgui.button("Browse##PoseArtifactsDirBrowse"):
+                gi = getattr(app, "gui_instance", None)
+                if gi:
+                    gi.file_dialog.show(
+                        title="Select Pose Model Artifacts Directory",
+                        callback=self._update_artifacts_dir_path,
+                        is_folder_dialog=True,
+                        initial_path=app.pose_model_artifacts_dir,
+                    )
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Browse for pose model artifacts directory")
             _tooltip_if_hovered(
-                "Number of processes for Stage 2 Optical Flow gap recovery.\n"
-                "More may be faster on high-core CPUs."
+                "Path to the folder containing your trained classifier,\n"
+                "imputer, and other .joblib model artifacts."
             )
+
+            mode = app.app_state_ui.selected_tracker_name
+            if self._is_offline_tracker(mode):
+                imgui.text("Stage 1 Inference Workers:")
+                imgui.push_item_width(100)
+                is_save_pre = getattr(stage_proc, "save_preprocessed_video", False)
+                with _DisabledScope(is_save_pre):
+                    ch_p, n_p = imgui.input_int(
+                        "Producers##S1Producers", stage_proc.num_producers_stage1
+                    )
+                    if ch_p and not is_save_pre:
+                        v = max(1, n_p)
+                        if v != stage_proc.num_producers_stage1:
+                            stage_proc.num_producers_stage1 = v
+                            settings.set("num_producers_stage1", v)
+                if is_save_pre:
+                    _tooltip_if_hovered("Producers are forced to 1 when 'Save/Reuse Preprocessed Video' is enabled.")
+                else:
+                    _tooltip_if_hovered("Number of threads for video decoding & preprocessing.")
+
+                imgui.same_line()
+                ch_c, n_c = imgui.input_int("Consumers##S1Consumers", stage_proc.num_consumers_stage1)
+                if ch_c:
+                    v = max(1, n_c)
+                    if v != stage_proc.num_consumers_stage1:
+                        stage_proc.num_consumers_stage1 = v
+                        settings.set("num_consumers_stage1", v)
+                _tooltip_if_hovered("Number of threads for AI model inference. Match to available cores for best performance.")
+                imgui.pop_item_width()
+
+                imgui.text("Stage 2 OF Workers")
+                imgui.same_line()
+                imgui.push_item_width(120)
+                cur_s2 = settings.get("num_workers_stage2_of", self.constants.DEFAULT_S2_OF_WORKERS)
+                ch, new_s2 = imgui.input_int("##S2OFWorkers", cur_s2)
+                if ch:
+                    v = max(1, new_s2)
+                    if v != cur_s2:
+                        settings.set("num_workers_stage2_of", v)
+                imgui.pop_item_width()
+                _tooltip_if_hovered(
+                    "Number of processes for Stage 2 Optical Flow gap recovery.\n"
+                    "More may be faster on high-core CPUs."
+                )
 
     # ------- Settings: interface/perf -------
 
