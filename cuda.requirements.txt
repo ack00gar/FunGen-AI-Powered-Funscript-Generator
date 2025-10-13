@@ -5,4 +5,4 @@ torchaudio==2.8.0+cu128
 # Ensure sympy version is compatible with other packages
 sympy>=1.13.3
 # Add tensorrt for .engine model compilation
-tensorrt
+tensorrt-cu13
