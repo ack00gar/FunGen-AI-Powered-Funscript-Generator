@@ -1027,6 +1027,29 @@ class FunGenUniversalInstaller:
                 print(f"  Skipping {gpu_type.upper()} requirements (PyTorch already installed via conda)")
             else:
                 print(f"  No specific requirements for {gpu_type} GPU type")
+
+            # Install torch-tensorrt and tensorrt separately using the nightly index
+            if gpu_type == "cuda":
+                cuda_version = None
+                if req_file == "cuda.requirements.txt":
+                    cuda_version = "cu128"
+                elif req_file == "cuda.50series.requirements.txt":
+                    cuda_version = "cu129"
+                
+                if cuda_version:
+                    nightly_index_url = f"https://download.pytorch.org/whl/nightly/{cuda_version}"
+                    print(f"  Installing torch-tensorrt and tensorrt for {cuda_version} from nightly index...")
+                    ret, stdout, stderr = self.run_command([
+                        str(python_exe), "-m", "pip", "install", 
+                        "torch-tensorrt", "tensorrt", 
+                        "--extra-index-url", nightly_index_url
+                    ], check=False)
+
+                    if ret != 0:
+                        self.print_warning(f"Failed to install torch-tensorrt and tensorrt for {cuda_version}: {stderr}")
+                        self.print_warning("TensorRT acceleration may not work properly.")
+                    else:
+                        print(f"    torch-tensorrt and tensorrt for {cuda_version} installed successfully")
             
             # Install device_control requirements if available (supporter feature)
             device_control_req_path = self.project_path / "device_control" / "requirements.txt"
