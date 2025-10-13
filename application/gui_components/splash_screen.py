@@ -485,20 +485,25 @@ class StandaloneSplashWindow:
         if monitor:
             mode = glfw.get_video_mode(monitor)
             splash_width = mode.size.width
-            splash_height = mode.size.height
+            splash_height = mode.size.height - 1
         else:
             # Fallback if no monitor detected
             splash_width = 1920
             splash_height = 1080
 
-        # Create FULLSCREEN borderless window for maximum dramatic effect
+        # Create a borderless window just shy of fullscreen
         self.window = glfw.create_window(splash_width, splash_height, "FunGen", None, None)
         if not self.window:
             glfw.terminate()
             return False
 
-        # Position at top-left corner (0, 0) for fullscreen coverage
-        glfw.set_window_pos(self.window, 0, 0)
+        # Center the window
+        if monitor:
+            mode = glfw.get_video_mode(monitor)
+            xpos = (mode.size.width - splash_width) // 2
+            ypos = (mode.size.height - splash_height) // 2
+            glfw.set_window_pos(self.window, xpos, ypos)
+
         glfw.make_context_current(self.window)
         glfw.swap_interval(1)  # Enable vsync
 
