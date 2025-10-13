@@ -924,19 +924,6 @@ class MainMenu:
 
             # Plugins submenu
             if imgui.begin_menu("Plugins"):
-                if _menu_item_simple("Reload Plugin Filters"):
-                    # Reload plugins for all interactive timelines
-                    timeline1 = getattr(app, "interactive_funscript_timeline1", None)
-                    timeline2 = getattr(app, "interactive_funscript_timeline2", None)
-                    if timeline1:
-                        timeline1._reload_plugins()
-                    if timeline2:
-                        timeline2._reload_plugins()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Reload funscript filter plugins from the plugins directories. "
-                        "Use this after adding new plugin files."
-                    )
                 imgui.end_menu()
 
             imgui.separator()
