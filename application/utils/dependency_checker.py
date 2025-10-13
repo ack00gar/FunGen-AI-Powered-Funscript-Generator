@@ -206,16 +206,76 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
                     else:
                         gpu_packages.append(line)
 
-            if gpu_packages:
-                logger.info("Checking GPU-specific packages...")
+            # Handle pip index URLs (like -i https://download.pytorch.org/whl/cu128)
+            pip_extra_args = []
+            pytorch_packages = []
+            tensorrt_packages = []
+            
+            for line in lines:
+                if line.startswith('-i ') or line.startswith('--index-url '):
+                    pip_extra_args.extend(line.split())
+                elif line.startswith('torch==') or line.startswith('torchvision==') or line.startswith('torchaudio=='):
+                    pytorch_packages.append(line)
+                elif line.startswith('tensorrt-cu13') or line.startswith('tensorrt-cu129'): # Assuming these are the correct package names
+                    tensorrt_packages.append(line)
+                else:
+                    # Add other GPU-specific packages to pytorch_packages to be installed with custom index
+                    # This assumes other GPU packages also need the custom PyTorch index
+                    # If not, they should be handled separately or moved to core.requirements.txt
+                    pytorch_packages.append(line)
+
+            if pytorch_packages:
+                logger.info("Checking PyTorch-related GPU packages...")
                 if pip_extra_args:
                     logger.info(f"Using custom index: {' '.join(pip_extra_args)}")
-                    gpu_changed = _ensure_packages(gpu_packages, pip_args=pip_extra_args, non_interactive=non_interactive, auto_install=auto_install)
+                    gpu_changed_pytorch = _ensure_packages(pytorch_packages, pip_args=pip_extra_args, non_interactive=non_interactive, auto_install=auto_install)
                 else:
-                    gpu_changed = _ensure_packages(gpu_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+                    gpu_changed_pytorch = _ensure_packages(pytorch_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+                if gpu_changed_pytorch:
+                    gpu_changed = True
+
+            if tensorrt_packages:
+                logger.info("Checking TensorRT packages from PyPI...")
+                # Install TensorRT packages from PyPI (no custom index)
+                tensorrt_changed = _ensure_packages(tensorrt_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+                if tensorrt_changed:
+                    gpu_changed = True
                     
         except FileNotFoundError:
             logger.warning(f"{requirements_file} not found. Continuing with core packages only.")
+
+    # Install torch-tensorrt and tensorrt separately using the nightly index
+    if requirements_file == "cuda.requirements.txt" or requirements_file == "cuda.50series.requirements.txt":
+        cuda_version = None
+        if requirements_file == "cuda.requirements.txt":
+            cuda_version = "cu128"
+        elif requirements_file == "cuda.50series.requirements.txt":
+            cuda_version = "cu129"
+        
+        if cuda_version:
+            nightly_index_url = f"https://download.pytorch.org/whl/nightly/{cuda_version}"
+            logger.info(f"Checking torch-tensorrt and tensorrt for {cuda_version} from nightly index...")
+            
+            # Check if torch-tensorrt is already installed
+            try:
+                version('torch_tensorrt')
+                logger.info(f"torch-tensorrt for {cuda_version} already installed.")
+            except PackageNotFoundError:
+                logger.warning(f"torch-tensorrt for {cuda_version} is missing.")
+                install_cmd = [sys.executable, "-m", "pip", "install", 
+                               "torch-tensorrt", "tensorrt", 
+                               "--extra-index-url", nightly_index_url]
+                try:
+                    if auto_install: # Only install if auto_install is True
+                        logger.info(f"Auto-installing torch-tensorrt and tensorrt with custom args (--extra-index-url {nightly_index_url})...")
+                        subprocess.check_call(install_cmd)
+                        gpu_changed = True # Indicate that a package was installed
+                    else:
+                        logger.warning("Auto-install is disabled: skipping installation of torch-tensorrt. Application may not function correctly.")
+                except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                    logger.error(f"Failed to install torch-tensorrt and tensorrt: {e}")
+                    logger.error("Please install them manually and restart.")
+                    sys.exit(1)
 
     # Check if we need to restart due to major package changes
     major_changes = bootstrap_changed or core_changed or macos_changed or gpu_changed
