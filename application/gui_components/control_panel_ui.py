@@ -889,6 +889,7 @@ class ControlPanelUI:
             _readonly_input("##PoseYOLOPath", app.yolo_pose_model_path_setting, input_w)
             imgui.same_line()
             # Browse button with folder-open icon
+            imgui.push_id("PoseYOLOBrowse")
             folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
             if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
                 show_model_file_dialog(
@@ -896,12 +897,13 @@ class ControlPanelUI:
                     app.yolo_pose_model_path_setting,
                     self._update_pose_model_path,
                 )
-            elif not folder_open_tex and imgui.button("Browse##PoseYOLOBrowse"):
+            elif not folder_open_tex and imgui.button("Browse"):
                 show_model_file_dialog(
                     "Select YOLO Pose Model",
                     app.yolo_pose_model_path_setting,
                     self._update_pose_model_path,
                 )
+            imgui.pop_id()
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Browse for pose model file")
             imgui.same_line()
@@ -916,6 +918,7 @@ class ControlPanelUI:
             _readonly_input("##PoseArtifactsDirPath", app.pose_model_artifacts_dir, dir_input_w)
             imgui.same_line()
             # Browse button with folder-open icon
+            imgui.push_id("PoseArtifactsDirBrowse")
             folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
             if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
                 gi = getattr(app, "gui_instance", None)
@@ -926,7 +929,7 @@ class ControlPanelUI:
                         is_folder_dialog=True,
                         initial_path=app.pose_model_artifacts_dir,
                     )
-            elif not folder_open_tex and imgui.button("Browse##PoseArtifactsDirBrowse"):
+            elif not folder_open_tex and imgui.button("Browse"):
                 gi = getattr(app, "gui_instance", None)
                 if gi:
                     gi.file_dialog.show(
@@ -935,6 +938,7 @@ class ControlPanelUI:
                         is_folder_dialog=True,
                         initial_path=app.pose_model_artifacts_dir,
                     )
+            imgui.pop_id()
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Browse for pose model artifacts directory")
             _tooltip_if_hovered(
@@ -4698,6 +4702,99 @@ class ControlPanelUI:
                     with primary_button_style():
                         if imgui.button("Discover XBVR Address", width=-1):
                             self._discover_xbvr_address()
+
+            # Stash Configuration Section
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            open_, _ = imgui.collapsing_header(
+                "Stash Integration##StashSettings",
+                flags=imgui.TREE_NODE_DEFAULT_OPEN if not is_running else 0,
+            )
+            if open_:
+                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                imgui.text_colored(
+                    "Browse and load videos from your Stash library directly in the VR viewer. "
+                    "Access scene markers, organized collections, and interactive funscripts.",
+                    0.7, 0.7, 0.7
+                )
+                imgui.pop_text_wrap_pos()
+                imgui.spacing()
+
+                # Get current settings (Stash default port is 9999, same as XBVR)
+                stash_host = self.app.app_settings.get('stash_host', 'localhost')
+                stash_port = self.app.app_settings.get('stash_port', 9999)
+                stash_api_key = self.app.app_settings.get('stash_api_key', '')
+
+                imgui.spacing()
+
+                # Stash Host
+                imgui.text("Stash Host/IP:")
+                imgui.push_item_width(200)
+                changed, new_host = imgui.input_text(
+                    "##stash_host",
+                    str(stash_host),
+                    256
+                )
+                imgui.pop_item_width()
+                if changed or imgui.is_item_deactivated_after_edit():
+                    self.app.app_settings.set('stash_host', new_host)
+                    self.app.app_settings.save_settings()
+
+                # Stash Port
+                imgui.text("Stash Port:")
+                imgui.push_item_width(100)
+                changed, new_port_str = imgui.input_text(
+                    "##stash_port",
+                    str(stash_port),
+                    256
+                )
+                imgui.pop_item_width()
+                if changed or imgui.is_item_deactivated_after_edit():
+                    try:
+                        new_port = int(new_port_str)
+                        self.app.app_settings.set('stash_port', new_port)
+                        self.app.app_settings.save_settings()
+                    except ValueError:
+                        pass  # Ignore invalid port input
+
+                # Stash API Key
+                imgui.text("API Key:")
+                imgui.same_line()
+                imgui.text_colored("(required for authentication)", 0.6, 0.6, 0.6)
+                imgui.push_item_width(300)
+                changed, new_api_key = imgui.input_text(
+                    "##stash_api_key",
+                    str(stash_api_key),
+                    256,
+                    imgui.INPUT_TEXT_PASSWORD
+                )
+                imgui.pop_item_width()
+                if changed or imgui.is_item_deactivated_after_edit():
+                    self.app.app_settings.set('stash_api_key', new_api_key)
+                    self.app.app_settings.save_settings()
+
+                imgui.spacing()
+                imgui.text_colored(
+                    f"Stash URL: http://{stash_host}:{stash_port}",
+                    0.5, 0.8, 1.0
+                )
+                imgui.text_colored(
+                    "Find your API key in Stash: Settings -> Security -> API Key",
+                    0.5, 0.5, 0.5
+                )
+
+                imgui.spacing()
+                # Open Stash Browser button (PRIMARY - positive action)
+                with primary_button_style():
+                    if imgui.button("Open Stash Browser", width=-1):
+                        # Open Stash browser in default browser
+                        import webbrowser
+                        local_ip = self._get_local_ip()
+                        stash_browser_url = f"http://{local_ip}:8080/stash"
+                        webbrowser.open(stash_browser_url)
+                        self.app.logger.info(f"Opening Stash browser: {stash_browser_url}")
 
             # Local Folder Browser Section
             imgui.spacing()
