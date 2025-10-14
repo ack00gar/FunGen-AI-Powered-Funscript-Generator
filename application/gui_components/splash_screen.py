@@ -1559,6 +1559,7 @@ def show_splash_during_init(init_function, *args, **kwargs):
 
     splash = StandaloneSplashWindow()
     result_container = {"result": None, "exception": None}
+    start_time = time.time()
 
     def run_init():
         try:
@@ -1566,6 +1567,11 @@ def show_splash_during_init(init_function, *args, **kwargs):
         except Exception as e:
             result_container["exception"] = e
         finally:
+            # Enforce minimum display time
+            elapsed_time = time.time() - start_time
+            remaining_time = 3.0 - elapsed_time
+            if remaining_time > 0:
+                time.sleep(remaining_time)
             splash.stop()
 
     # Start initialization in a separate thread
