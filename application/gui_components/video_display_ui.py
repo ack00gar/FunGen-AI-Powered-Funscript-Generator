@@ -371,12 +371,9 @@ class VideoDisplayUI:
         if should_render_content:
             stage_proc = self.app.stage_processor
 
-            # If video feed is disabled, just show the drop prompt if no video is loaded,
-            # otherwise show a blank placeholder and skip all expensive processing.
+            # If video feed is disabled, show logo + button to reactivate (never show drop text)
             if not app_state.show_video_feed:
-                if not (self.app.processor and self.app.processor.current_frame is not None):
-                    self._render_drop_video_prompt()
-                # Otherwise, do nothing, leaving the panel blank.
+                self._render_reactivate_feed_button()
             else:
                 # --- Original logic when video feed is enabled ---
                 current_frame_for_texture = None
@@ -1023,6 +1020,58 @@ class VideoDisplayUI:
                 imgui.set_tooltip("Pan Video Down")
 
         imgui.end_group()
+
+    def _render_reactivate_feed_button(self):
+        """Renders logo and button to re-activate the video feed."""
+        cursor_start_pos = imgui.get_cursor_pos()
+        win_size = imgui.get_window_size()
+
+        # Load logo texture
+        logo_manager = get_logo_texture_manager()
+        logo_texture = logo_manager.get_texture_id()
+        logo_width, logo_height = logo_manager.get_dimensions()
+
+        button_text = "Show Video Feed"
+        button_size = imgui.calc_text_size(button_text)
+        button_width = button_size[0] + imgui.get_style().frame_padding[0] * 2
+        button_height = button_size[1] + imgui.get_style().frame_padding[1] * 2
+
+        if logo_texture and logo_width > 0 and logo_height > 0:
+            # Scale logo to reasonable size (max 200px while maintaining aspect ratio)
+            max_logo_size = 200
+            if logo_width > logo_height:
+                display_logo_w = min(logo_width, max_logo_size)
+                display_logo_h = int(logo_height * (display_logo_w / logo_width))
+            else:
+                display_logo_h = min(logo_height, max_logo_size)
+                display_logo_w = int(logo_width * (display_logo_h / logo_height))
+
+            # Calculate total height (logo + spacing + button)
+            spacing = 20
+            total_height = display_logo_h + spacing + button_height
+
+            # Center vertically
+            start_y = (win_size[1] - total_height) * 0.5 + cursor_start_pos[1]
+
+            # Draw logo centered horizontally
+            logo_x = (win_size[0] - display_logo_w) * 0.5 + cursor_start_pos[0]
+            imgui.set_cursor_pos((logo_x, start_y))
+
+            # Draw logo with slight transparency
+            imgui.image(logo_texture, display_logo_w, display_logo_h, tint_color=(1.0, 1.0, 1.0, 0.6))
+
+            # Draw button below logo
+            button_y = start_y + display_logo_h + spacing
+            button_x = (win_size[0] - button_width) * 0.5 + cursor_start_pos[0]
+            imgui.set_cursor_pos((button_x, button_y))
+        else:
+            # Fallback to button-only if logo fails to load
+            button_x = (win_size[0] - button_width) / 2 + cursor_start_pos[0]
+            button_y = (win_size[1] - button_height) / 2 + cursor_start_pos[1]
+            imgui.set_cursor_pos((button_x, button_y))
+
+        if imgui.button(button_text):
+            self.app.app_state_ui.show_video_feed = True
 
     def _render_drop_video_prompt(self):
         """Render logo and drop prompt when no video is loaded."""
