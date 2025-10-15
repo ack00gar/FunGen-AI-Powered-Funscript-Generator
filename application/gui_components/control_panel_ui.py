@@ -4635,6 +4635,94 @@ class ControlPanelUI:
                         imgui.text("When enabled, the video feed will be hidden\nwhen clients are connected, and restored when\nall clients disconnect.")
                         imgui.end_tooltip()
 
+                # Rolling Autotune Section (when streaming)
+                imgui.spacing()
+                open_, _ = imgui.collapsing_header(
+                    "Rolling Autotune (Live Tracking)##RollingAutotuneStreamer",
+                    flags=0,  # Collapsed by default
+                )
+                if open_:
+                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                    imgui.text_colored(
+                        "Automatically apply Ultimate Autotune to live tracking data every N seconds. "
+                        "Perfect for streaming with a 5+ second buffer - ensures the cleanest possible "
+                        "funscript signal reaches viewers/devices by the time they play it.",
+                        0.7, 0.7, 0.7
+                    )
+                    imgui.pop_text_wrap_pos()
+                    imgui.spacing()
+
+                    settings = self.app.app_settings
+                    tr = self.app.tracker
+
+                    if not tr:
+                        imgui.text_colored("Tracker not initialized", 1.0, 0.5, 0.0)
+                    else:
+                        # Enable/disable toggle (enabled by default for streamer mode)
+                        cur_enabled = settings.get("live_tracker_rolling_autotune_enabled", True)
+                        ch, new_enabled = imgui.checkbox("Enable Rolling Autotune##RollingAutotuneEnable", cur_enabled)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip(
+                                "Apply Ultimate Autotune to the last N seconds of funscript data every N seconds\n"
+                                "Recommended: Keep processing ahead of browser playback by at least the window size"
+                            )
+                        if ch:
+                            settings.set("live_tracker_rolling_autotune_enabled", new_enabled)
+                            tr.rolling_autotune_enabled = new_enabled
+                            if new_enabled:
+                                self.app.logger.info("Rolling autotune enabled for live tracking", extra={'status_message': True})
+                            else:
+                                self.app.logger.info("Rolling autotune disabled", extra={'status_message': True})
+
+                        # Only show advanced settings if enabled
+                        if cur_enabled:
+                            imgui.spacing()
+                            imgui.separator()
+                            imgui.spacing()
+
+                            imgui.text_colored("Advanced Settings:", 0.5, 0.8, 1.0)
+                            imgui.spacing()
+
+                            # Interval setting
+                            cur_interval = settings.get("live_tracker_rolling_autotune_interval_ms", 5000)
+                            imgui.text("Autotune Interval (ms):")
+                            imgui.push_item_width(150)
+                            ch, new_interval = imgui.input_int("##RollingAutotuneInterval", cur_interval, 1000)
+                            imgui.pop_item_width()
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip("How often to apply autotune (in milliseconds). Default: 5000ms (5 seconds)")
+                            if ch:
+                                v = max(1000, min(30000, new_interval))  # 1-30 seconds
+                                if v != cur_interval:
+                                    settings.set("live_tracker_rolling_autotune_interval_ms", v)
+                                    tr.rolling_autotune_interval_ms = v
+
+                            # Window size setting
+                            cur_window = settings.get("live_tracker_rolling_autotune_window_ms", 5000)
+                            imgui.text("Processing Window (ms):")
+                            imgui.push_item_width(150)
+                            ch, new_window = imgui.input_int("##RollingAutotuneWindow", cur_window, 1000)
+                            imgui.pop_item_width()
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip(
+                                    "Size of data window to process each time (in milliseconds).\n"
+                                    "Should match your buffer size. Default: 5000ms (5 seconds)"
+                                )
+                            if ch:
+                                v = max(1000, min(30000, new_window))  # 1-30 seconds
+                                if v != cur_window:
+                                    settings.set("live_tracker_rolling_autotune_window_ms", v)
+                                    tr.rolling_autotune_window_ms = v
+
+                            imgui.spacing()
+                            imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                            imgui.text_colored(
+                                "💡 Tip: Keep your processing position at least 5-10 seconds ahead of "
+                                "browser playback to ensure cleaned data is ready when needed.",
+                                0.5, 1.0, 0.5
+                            )
+                            imgui.pop_text_wrap_pos()
+
             # XBVR Configuration Section
             imgui.spacing()
             imgui.separator()
