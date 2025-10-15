@@ -247,19 +247,30 @@ class ApplicationLogic:
         self.undo_manager_t2: Optional[UndoRedoManager] = None
 
         # --- Initialize Tracker Manager ---
+        # Yield before heavy YOLO loading to allow splash rendering
+        time.sleep(0.001)  # 1ms yield - forces GIL release
+
         self.tracker = create_tracker_manager(
             app_logic_instance=self,
             tracker_model_path=self.yolo_detection_model_path_setting)
+
+        # Yield after tracker creation (YOLO model loaded)
+        time.sleep(0.001)  # 1ms yield - forces GIL release
+
         if self.tracker:
             self.tracker.show_stats = False  # Default internal tracker states
             self.tracker.show_funscript_preview = False
 
         # --- NOW Sync Tracker UI Flags as tracker and app_state_ui exist ---
+        time.sleep(0.001)  # Yield before sync
         self.app_state_ui.sync_tracker_ui_flags()
 
         # --- Initialize Processor (after tracker and logger/app_state_ui are ready) ---
         # _check_model_paths can be called now before processor if it's critical for processor init
+        time.sleep(0.001)  # Yield before model check
         self._check_model_paths()
+
+        time.sleep(0.001)  # Yield before processor creation
         self.processor = VideoProcessor(self, self.tracker, yolo_input_size=self.yolo_input_size, cache_size=1000)
 
         # --- Modular Components Initialization ---

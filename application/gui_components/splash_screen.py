@@ -12,6 +12,9 @@ import os
 import time
 import math
 import threading
+import multiprocessing
+import gc
+import queue
 
 
 class SplashScreen:
@@ -466,6 +469,18 @@ class StandaloneSplashWindow:
         self.logo_texture = None
         self.emoji_textures = {}  # Store emoji textures
 
+        # Performance management for buttery smooth rendering
+        self.quality_level = 1.0  # 1.0 = full quality, lower = reduced effects for performance
+        self.frame_time_history = []  # Track recent frame times
+        self.max_history_size = 30  # Track last 30 frames
+
+        # Pre-rendered frames for buttery smooth playback (no GIL contention!)
+        self.prerendered_frame_paths = []
+        self.prerendered_textures = []
+        self.prerendered_metadata = None
+        self.use_prerendered = False
+        self._load_prerendered_frames()
+
     def _init_window(self):
         """Initialize a minimal GLFW window for the splash screen."""
         if not glfw.init():
@@ -505,7 +520,7 @@ class StandaloneSplashWindow:
             glfw.set_window_pos(self.window, xpos, ypos)
 
         glfw.make_context_current(self.window)
-        glfw.swap_interval(1)  # Enable vsync
+        glfw.swap_interval(0)  # Disable vsync - we do manual frame limiting for better control
 
         # Initialize ImGui
         imgui.create_context()
@@ -514,6 +529,10 @@ class StandaloneSplashWindow:
         # Load logo texture after OpenGL context is created
         self._load_logo_texture()
         self._load_emoji_textures()
+
+        # Load pre-rendered frame textures if using pre-rendered mode
+        if self.use_prerendered:
+            self._load_prerendered_textures()
 
         return True
 
@@ -590,33 +609,234 @@ class StandaloneSplashWindow:
         except Exception as e:
             print(f"Failed to load emoji textures: {e}")
 
+    def _load_prerendered_frames(self):
+        """Load pre-rendered splash frames if available for buttery smooth playback."""
+        try:
+            import json
+            from pathlib import Path
+
+            # Check for pre-rendered frames directory
+            frames_dir = Path(__file__).parent.parent.parent / "assets" / "splash_frames"
+
+            if not frames_dir.exists():
+                return  # No pre-rendered frames, will use live rendering
+
+            # Load metadata
+            metadata_path = frames_dir / "metadata.json"
+            if not metadata_path.exists():
+                return
+
+            with open(metadata_path, 'r') as f:
+                self.prerendered_metadata = json.load(f)
+
+            # Load frame paths (we'll load textures later in OpenGL context)
+            frame_files = sorted(frames_dir.glob("frame_*.png"))
+            if not frame_files:
+                return
+
+            self.prerendered_frame_paths = frame_files
+            self.use_prerendered = True
+
+            print(f"Found {len(frame_files)} pre-rendered splash frames - using for smooth playback")
+
+        except Exception as e:
+            print(f"Could not load pre-rendered frames (will use live rendering): {e}")
+            self.use_prerendered = False
+
+    def _load_prerendered_textures(self):
+        """Load pre-rendered frame images as OpenGL textures."""
+        try:
+            print("Loading pre-rendered splash frame textures...")
+            self.prerendered_textures = []
+
+            for i, frame_path in enumerate(self.prerendered_frame_paths):
+                # Load image
+                img = Image.open(frame_path)
+                img = img.convert("RGBA")
+                img_data = np.array(img, dtype=np.uint8)
+
+                # Create OpenGL texture
+                texture_id = gl.glGenTextures(1)
+                gl.glBindTexture(gl.GL_TEXTURE_2D, texture_id)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+                gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, img.width, img.height,
+                              0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, img_data)
+                gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+
+                self.prerendered_textures.append(texture_id)
+
+                # Progress indicator
+                if i % 30 == 0:
+                    print(f"Loaded {i}/{len(self.prerendered_frame_paths)} frame textures...")
+
+            print(f"✅ Loaded all {len(self.prerendered_textures)} pre-rendered frame textures")
+
+        except Exception as e:
+            print(f"Failed to load pre-rendered textures: {e}")
+            self.use_prerendered = False
+            self.prerendered_textures = []
+
 
     def _render_loop(self):
-        """Main render loop for the splash window."""
+        """Main render loop for the splash window with buttery smooth frame timing."""
         try:
+            # Disable garbage collection during rendering to prevent GC pauses
+            # We'll manually collect between frames when we have time
+            gc_was_enabled = gc.isenabled()
+            gc.disable()
+
+            # Target 60 FPS for smooth animation
+            target_fps = 60
+            target_frame_time = 1.0 / target_fps
+            last_frame_time = time.perf_counter()
+
+            # Frame time accumulator for consistent timing
+            time_accumulator = 0.0
+
+            # Frame timing stats (for debugging)
+            frame_count = 0
+            total_frame_time = 0.0
+            max_frame_time = 0.0
+
+            # GC timing
+            last_gc_time = time.perf_counter()
+            gc_interval = 1.0  # Run GC every 1 second
+
             while self.running and not glfw.window_should_close(self.window):
-                glfw.poll_events()
-                if self.impl:
-                    self.impl.process_inputs()
+                frame_start = time.perf_counter()
 
-                gl.glClearColor(0.0, 0.0, 0.0, 0.0)
-                gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+                # Calculate delta time since last frame
+                delta_time = frame_start - last_frame_time
+                last_frame_time = frame_start
+                time_accumulator += delta_time
 
-                imgui.new_frame()
+                # Only render if enough time has passed (frame limiting)
+                # This prevents unnecessary work and ensures consistent timing
+                if time_accumulator >= target_frame_time:
+                    time_accumulator -= target_frame_time
 
-                # Render splash screen content
-                self._render_splash_content()
+                    # Cap accumulator to prevent spiral of death
+                    if time_accumulator > target_frame_time * 2:
+                        time_accumulator = 0.0
 
-                imgui.render()
-                if self.impl:
-                    self.impl.render(imgui.get_draw_data())
+                    # Process window events
+                    glfw.poll_events()
+                    if self.impl:
+                        self.impl.process_inputs()
 
-                glfw.swap_buffers(self.window)
+                    # Brief yield before rendering to allow init thread to run
+                    time.sleep(0.0001)
+
+                    gl.glClearColor(0.0, 0.0, 0.0, 0.0)
+                    gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+
+                    imgui.new_frame()
+
+                    # Render splash screen content (pre-rendered or live)
+                    if self.use_prerendered and hasattr(self, 'prerendered_textures'):
+                        self._render_prerendered_frame(frame_count)
+                    else:
+                        self._render_splash_content()
+
+                    imgui.render()
+                    if self.impl:
+                        self.impl.render(imgui.get_draw_data())
+
+                    glfw.swap_buffers(self.window)
+
+                    # Track frame timing stats
+                    frame_time = time.perf_counter() - frame_start
+                    total_frame_time += frame_time
+                    max_frame_time = max(max_frame_time, frame_time)
+                    frame_count += 1
+
+                    # Adaptive quality management for buttery smooth rendering
+                    self.frame_time_history.append(frame_time)
+                    if len(self.frame_time_history) > self.max_history_size:
+                        self.frame_time_history.pop(0)
+
+                    # Every 30 frames, check if we need to adjust quality
+                    if frame_count % 30 == 0 and len(self.frame_time_history) >= 30:
+                        avg_recent_frame_time = sum(self.frame_time_history) / len(self.frame_time_history)
+                        # If average frame time is over 20ms (50 FPS), reduce quality
+                        if avg_recent_frame_time > 0.020:
+                            self.quality_level = max(0.5, self.quality_level - 0.1)
+                        # If we're doing well (under 14ms = ~70 FPS), increase quality
+                        elif avg_recent_frame_time < 0.014 and self.quality_level < 1.0:
+                            self.quality_level = min(1.0, self.quality_level + 0.1)
+                else:
+                    # Aggressively yield CPU to other threads/processes
+                    # This is crucial for reducing GIL contention with the init thread
+                    sleep_time = target_frame_time - time_accumulator
+                    if sleep_time > 0.001:  # Only sleep if meaningful
+                        # Sleep for 90% of remaining time to give init thread maximum CPU
+                        time.sleep(sleep_time * 0.9)
+                    else:
+                        # Even with no time left, yield briefly to allow context switching
+                        time.sleep(0.0001)  # 0.1ms yield
+
+                # Periodically run garbage collection during idle time
+                # This prevents GC from running during frame rendering
+                current_time = time.perf_counter()
+                if current_time - last_gc_time > gc_interval:
+                    gc.collect(generation=0)  # Only collect generation 0 (fastest)
+                    last_gc_time = current_time
 
         except Exception as e:
             print(f"Splash window error: {e}")
         finally:
+            # Restore garbage collection state
+            if gc_was_enabled:
+                gc.enable()
+
+            # Print frame timing stats if there were any stutters
+            if frame_count > 0:
+                avg_frame_time = total_frame_time / frame_count
+                if max_frame_time > target_frame_time * 2:
+                    print(f"Splash render stats: Avg frame time: {avg_frame_time*1000:.2f}ms, Max: {max_frame_time*1000:.2f}ms, FPS: {1.0/avg_frame_time:.1f}")
             self._cleanup()
+
+    def _render_prerendered_frame(self, frame_count):
+        """Render a pre-rendered splash frame (buttery smooth - no GIL contention!)."""
+        window_width, window_height = glfw.get_window_size(self.window)
+
+        # Calculate which frame to display based on FPS
+        fps = self.prerendered_metadata.get('fps', 60)
+        frame_index = frame_count % len(self.prerendered_textures)
+
+        # Get the texture for this frame
+        texture = self.prerendered_textures[frame_index]
+
+        # Render as fullscreen image
+        imgui.set_next_window_position(0, 0)
+        imgui.set_next_window_size(window_width, window_height)
+        imgui.push_style_var(imgui.STYLE_WINDOW_ROUNDING, 0.0)
+        imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0.0, 0.0))
+        imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, 0.0, 0.0, 0.0, 0.0)
+        imgui.push_style_color(imgui.COLOR_BORDER, 0.0, 0.0, 0.0, 0.0)
+
+        window_flags = (
+            imgui.WINDOW_NO_TITLE_BAR |
+            imgui.WINDOW_NO_RESIZE |
+            imgui.WINDOW_NO_MOVE |
+            imgui.WINDOW_NO_SCROLLBAR |
+            imgui.WINDOW_NO_SCROLL_WITH_MOUSE |
+            imgui.WINDOW_NO_COLLAPSE |
+            imgui.WINDOW_NO_NAV
+        )
+
+        imgui.begin("##PrerenderedSplash", flags=window_flags)
+
+        # Display the pre-rendered frame as a fullscreen image
+        imgui.set_cursor_pos((0, 0))
+        imgui.image(texture, window_width, window_height)
+
+        imgui.end()
+        imgui.pop_style_color(2)
+        imgui.pop_style_var(2)
 
     def _render_splash_content(self):
         """Render the splash screen content (minimalist: just logo)."""
@@ -685,7 +905,8 @@ class StandaloneSplashWindow:
             imgui.image(self.logo_texture, logo_size, logo_size, tint_color=(1, 1, 1, fade_alpha))
 
             # Draw enhanced lasers AFTER logo (so they appear IN FRONT)
-            if current_time > 0.3:  # Start lasers after fade-in
+            # Quality-adaptive rendering: reduce effects if frame rate drops
+            if current_time > 0.3 and self.quality_level > 0.3:  # Start lasers after fade-in
                 self._render_enhanced_laser_eyes(logo_x, logo_y + float_offset, logo_size, current_time - 0.3)
 
             # "Loading FunGen..." text below the logo
@@ -703,8 +924,9 @@ class StandaloneSplashWindow:
                 # Get draw list for manual text rendering
                 draw_list_text = imgui.get_window_draw_list()
 
-                # Enhanced glow effect (multiple layers with more depth)
-                for i in range(5, 0, -1):  # More glow layers
+                # Enhanced glow effect (multiple layers with more depth, quality-adaptive)
+                max_text_glow = max(2, int(5 * self.quality_level))
+                for i in range(max_text_glow, 0, -1):
                     glow_offset = i * 3  # Larger offset
                     glow_alpha = (0.4 * fade_alpha * text_pulse) / (i * 1.0)  # Brighter glow
                     # Match the glow color to the laser colors for consistency
@@ -1198,9 +1420,11 @@ class StandaloneSplashWindow:
             right_edge_x = target_x - perp_x * cone_width
             right_edge_y = target_y - perp_y * cone_width
 
-            # Draw multiple layers for advanced glow effect
+            # Draw multiple layers for advanced glow effect (quality-adaptive)
             # Outer glow (most transparent, widest)
-            for i in range(6, 0, -1):  # More glow layers for enhanced effect
+            # Reduce glow layers based on quality level for better performance
+            max_glow_layers = max(2, int(6 * self.quality_level))
+            for i in range(max_glow_layers, 0, -1):
                 spread = i * 0.3
                 glow_left_x = target_x + perp_x * cone_width * (1 + spread * 0.3)
                 glow_left_y = target_y + perp_y * cone_width * (1 + spread * 0.3)
@@ -1228,8 +1452,8 @@ class StandaloneSplashWindow:
                 core_color
             )
 
-            # Add particle trail effect along the path
-            particles_count = 8
+            # Add particle trail effect along the path (quality-adaptive)
+            particles_count = max(2, int(8 * self.quality_level))
             for p in range(particles_count):
                 p_progress = p / particles_count
                 p_x = eye_x + (target_x - eye_x) * p_progress
@@ -1247,9 +1471,10 @@ class StandaloneSplashWindow:
             # Circle size MATCHES the cone width at the endpoint (not independent!)
             circle_radius = cone_width
 
-            # Draw scan target circle at endpoint with enhanced effects
+            # Draw scan target circle at endpoint with enhanced effects (quality-adaptive)
             # Multiple rings for glow
-            for i in range(4, 0, -1):  # More glow rings
+            max_glow_rings = max(2, int(4 * self.quality_level))
+            for i in range(max_glow_rings, 0, -1):
                 ring_alpha = (0.25 * pulse) / i
                 ring_color = imgui.get_color_u32_rgba(laser_r, laser_g, laser_b, ring_alpha)
                 draw_list.add_circle_filled(target_x, target_y, circle_radius * (1 + i * 0.2), ring_color)
@@ -1294,9 +1519,10 @@ class StandaloneSplashWindow:
         right_target_x = target_x_center + horizontal_drift + eye_separation
         right_target_y = target_y
 
-        # Draw bright glow at eye positions (source of the laser) with enhanced effects
+        # Draw bright glow at eye positions (source of the laser) with enhanced effects (quality-adaptive)
         eye_glow_radius = 10  # Slightly larger
-        for i in range(4, 0, -1):  # More glow layers
+        max_eye_glow_layers = max(2, int(4 * self.quality_level))
+        for i in range(max_eye_glow_layers, 0, -1):
             glow_alpha = (0.35 * pulse) / i
             glow_color = imgui.get_color_u32_rgba(laser_r, laser_g, laser_b, glow_alpha)
             draw_list.add_circle_filled(left_eye_x, eye_y, eye_glow_radius * i * 0.8, glow_color)
@@ -1474,6 +1700,15 @@ class StandaloneSplashWindow:
 
     def _cleanup(self):
         """Clean up resources."""
+        # Clean up pre-rendered textures
+        if self.prerendered_textures:
+            for texture_id in self.prerendered_textures:
+                try:
+                    gl.glDeleteTextures([texture_id])
+                except:
+                    pass
+            self.prerendered_textures = []
+
         # Clean up logo texture
         if self.logo_texture is not None:
             try:
@@ -1543,42 +1778,86 @@ class StandaloneSplashWindow:
             self.status_message = message
 
 
-def show_splash_during_init(init_function, *args, **kwargs):
+def show_splash_during_init(init_function, *args, use_multiprocessing=False, **kwargs):
     """
     Show splash window while running an initialization function.
 
+    This function ensures buttery smooth splash rendering by:
+    - Running splash on main thread (GLFW requirement for macOS)
+    - Running initialization in a lower-priority background thread OR separate process
+    - Using precise timing for minimum display duration
+    - Reducing GIL contention with strategic thread cooperation
+    - Disabling GC during rendering to prevent pauses
+
     Args:
         init_function: Function to run during splash display
-        *args, **kwargs: Arguments to pass to init_function
+        *args: Arguments to pass to init_function
+        use_multiprocessing: If True, run init in separate process (no GIL contention)
+        **kwargs: Keyword arguments to pass to init_function
 
     Returns:
         Result of init_function
     """
+    if use_multiprocessing:
+        return _show_splash_multiprocessing(init_function, *args, **kwargs)
+    else:
+        return _show_splash_threading(init_function, *args, **kwargs)
+
+
+def _show_splash_threading(init_function, *args, **kwargs):
+    """Threading-based splash (limited by GIL but simpler)."""
     # Note: GLFW must run on the main thread on macOS, so we'll run
     # the initialization in a separate thread instead
 
     splash = StandaloneSplashWindow()
     result_container = {"result": None, "exception": None}
-    start_time = time.time()
+    start_time = time.perf_counter()
 
     def run_init():
         try:
+            # Try to set this thread to a lower priority to avoid starving the render thread
+            # This is a best-effort approach and may not work on all platforms
+            try:
+                import os
+                # On Unix-like systems, increase the nice value (lower priority)
+                if hasattr(os, 'nice'):
+                    try:
+                        # Increase nice value by 5 (lower priority)
+                        # This helps the render thread get more CPU time
+                        current_nice = os.nice(0)
+                        os.nice(5)
+                    except (OSError, PermissionError):
+                        pass  # May fail without permissions, that's okay
+            except Exception:
+                pass  # If priority adjustment fails, continue anyway
+
+            # Run the initialization function
             result_container["result"] = init_function(*args, **kwargs)
         except Exception as e:
             result_container["exception"] = e
         finally:
-            # Enforce minimum display time
-            elapsed_time = time.time() - start_time
-            remaining_time = 3.0 - elapsed_time
+            # Enforce minimum display time of 5 seconds for smooth experience
+            elapsed_time = time.perf_counter() - start_time
+            remaining_time = 5.0 - elapsed_time
             if remaining_time > 0:
-                time.sleep(remaining_time)
+                # Use smaller sleep intervals to be more responsive
+                sleep_interval = 0.1
+                while remaining_time > 0:
+                    time.sleep(min(sleep_interval, remaining_time))
+                    remaining_time = 5.0 - (time.perf_counter() - start_time)
             splash.stop()
 
-    # Start initialization in a separate thread
-    init_thread = threading.Thread(target=run_init, daemon=False)
+    # Start initialization in a separate thread with lower priority
+    init_thread = threading.Thread(
+        target=run_init,
+        daemon=False,
+        name="ApplicationInit"  # Named thread for easier debugging
+    )
+
     init_thread.start()
 
     # Run splash on main thread (required for macOS)
+    # This thread will have higher priority by default as it's the main thread
     splash.start()
 
     # Wait for initialization to complete
@@ -1589,3 +1868,82 @@ def show_splash_during_init(init_function, *args, **kwargs):
         raise result_container["exception"]
 
     return result_container["result"]
+
+
+def _init_process_wrapper(init_function, result_queue, *args, **kwargs):
+    """Wrapper to run init function in subprocess and return result via queue."""
+    try:
+        # Lower process priority to not starve the main process
+        try:
+            import os
+            if hasattr(os, 'nice'):
+                os.nice(10)  # Even lower priority for subprocess
+        except Exception:
+            pass
+
+        result = init_function(*args, **kwargs)
+        # Try to pickle and send the result
+        try:
+            result_queue.put(("success", result))
+        except Exception as pickle_error:
+            # If result can't be pickled, send error message
+            result_queue.put(("error", f"Result cannot be pickled: {pickle_error}"))
+    except Exception as e:
+        result_queue.put(("exception", e))
+
+
+def _show_splash_multiprocessing(init_function, *args, **kwargs):
+    """
+    Multiprocessing-based splash (NO GIL contention - buttery smooth!).
+
+    WARNING: init_function result must be picklable. If not, use threading mode.
+    """
+    splash = StandaloneSplashWindow()
+    start_time = time.perf_counter()
+
+    # Create a multiprocessing Queue for communication
+    result_queue = multiprocessing.Queue()
+
+    # Create the initialization process
+    init_process = multiprocessing.Process(
+        target=_init_process_wrapper,
+        args=(init_function, result_queue, *args),
+        kwargs=kwargs,
+        name="ApplicationInit"
+    )
+
+    init_process.start()
+
+    # Monitor process in a background thread so we can stop splash when done
+    def monitor_process():
+        while init_process.is_alive():
+            time.sleep(0.1)
+
+        # Enforce minimum display time
+        elapsed_time = time.perf_counter() - start_time
+        remaining_time = 5.0 - elapsed_time
+        if remaining_time > 0:
+            time.sleep(remaining_time)
+
+        splash.stop()
+
+    monitor_thread = threading.Thread(target=monitor_process, daemon=True)
+    monitor_thread.start()
+
+    # Run splash on main thread (required for macOS)
+    splash.start()
+
+    # Wait for process to finish
+    init_process.join()
+
+    # Get result from queue
+    if not result_queue.empty():
+        status, result = result_queue.get()
+        if status == "success":
+            return result
+        elif status == "exception":
+            raise result
+        else:  # "error"
+            raise RuntimeError(result)
+    else:
+        raise RuntimeError("Initialization process failed to return a result")

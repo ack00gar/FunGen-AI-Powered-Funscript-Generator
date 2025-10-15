@@ -96,7 +96,7 @@ class TrackerManager:
         self.user_roi_current_flow_vector = (0.0, 0.0)  # For user ROI trackers
         self.user_roi_initial_point_relative = None
         self.user_roi_tracked_point_relative = None
-        
+
         # More oscillation tracker properties
         self.oscillation_cell_persistence = {}  # Dictionary for cell persistence
         self._gray_full_buffer = None  # Gray frame buffer
@@ -106,7 +106,19 @@ class TrackerManager:
         self.oscillation_grid_size = 8  # Integer for compatibility
         self.oscillation_threshold = 0.5  # Oscillation detection threshold
         self.initialized = False  # Tracker initialization status
-        
+
+        # Rolling Ultimate Autotune for live tracking (streamer mode)
+        # Load from settings if app instance is available (enabled by default)
+        if app_logic_instance and hasattr(app_logic_instance, 'app_settings'):
+            self.rolling_autotune_enabled = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_enabled", True)
+            self.rolling_autotune_interval_ms = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_interval_ms", 5000)
+            self.rolling_autotune_window_ms = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_window_ms", 5000)
+        else:
+            self.rolling_autotune_enabled = True  # Enable periodic autotune on live data by default
+            self.rolling_autotune_interval_ms = 5000  # Apply autotune every 5 seconds
+            self.rolling_autotune_window_ms = 5000  # Process last 5 seconds of data
+        self.rolling_autotune_last_time = 0  # Last time autotune was applied
+
         self.logger.info("TrackerManager initialized - Direct modular tracker interface")
 
     def set_tracking_mode(self, mode_name: str) -> bool:
@@ -207,10 +219,16 @@ class TrackerManager:
             
             # Add actions to funscript
             self._add_actions_to_funscript(action_log)
-            
+
+            # Apply rolling autotune if enabled (for streamer mode)
+            if (self.rolling_autotune_enabled and
+                frame_time_ms - self.rolling_autotune_last_time >= self.rolling_autotune_interval_ms):
+                self._apply_rolling_autotune(frame_time_ms)
+                self.rolling_autotune_last_time = frame_time_ms
+
             # Update visualization state
             self._update_visualization_state()
-            
+
             return processed_frame, action_log
             
         except Exception as e:
@@ -542,13 +560,20 @@ class TrackerManager:
         """Initialize tracker with error handling."""
         if not self._current_tracker:
             return False
-            
+
         try:
+            # Yield before potentially heavy initialization (YOLO model loading)
+            import time
+            time.sleep(0.001)  # 1ms yield - forces GIL release
+
             if hasattr(self._current_tracker, 'initialize'):
                 init_result = self._current_tracker.initialize(self.app, tracker_model_path=self.tracker_model_path)
                 if isinstance(init_result, bool) and not init_result:
                     self.logger.error(f"Tracker {self._current_mode} initialization failed")
                     return False
+
+            # Yield after initialization completes
+            time.sleep(0.001)  # 1ms yield - forces GIL release
             return True
         except Exception as e:
             self.logger.error(f"Error initializing tracker {self._current_mode}: {e}")
@@ -618,7 +643,7 @@ class TrackerManager:
         """Add action log entries to the funscript."""
         if not action_log or not self.funscript:
             return
-            
+
         try:
             for action in action_log:
                 if isinstance(action, dict) and 'at' in action and 'pos' in action:
@@ -627,6 +652,93 @@ class TrackerManager:
                     self.funscript.add_action(timestamp_ms, position)
         except Exception as e:
             self.logger.error(f"Error adding actions to funscript: {e}")
+
+    def _apply_rolling_autotune(self, current_time_ms: int):
+        """
+        Apply Ultimate Autotune to the last N seconds of funscript data.
+        This creates a rolling window of cleaned-up data for streaming scenarios.
+
+        The cleaned data should be ahead of the actual playback position by at least
+        the window size, ensuring smooth, optimized output reaches devices/clients.
+
+        Args:
+            current_time_ms: Current timestamp in milliseconds
+        """
+        if not self.funscript:
+            return
+
+        # Check which axes have data
+        has_primary = self.funscript.primary_actions and len(self.funscript.primary_actions) > 0
+        has_secondary = self.funscript.secondary_actions and len(self.funscript.secondary_actions) > 0
+
+        if not has_primary and not has_secondary:
+            return
+
+        # Calculate time window
+        start_time = current_time_ms - self.rolling_autotune_window_ms
+
+        try:
+            # Apply Ultimate Autotune to this window only
+            from funscript.plugins.ultimate_autotune_plugin import UltimateAutotunePlugin
+            autotune = UltimateAutotunePlugin()
+
+            axes_processed = []
+
+            # Acquire lock to prevent race conditions with timeline rendering
+            # This ensures the funscript isn't being modified while the GUI is reading it
+            if hasattr(self.funscript, '_lock'):
+                lock = self.funscript._lock
+            else:
+                # Create a lock if it doesn't exist (for backwards compatibility)
+                import threading
+                lock = threading.RLock()
+                self.funscript._lock = lock
+
+            with lock:
+                # Process primary axis if it has data
+                if has_primary:
+                    primary_actions = self.funscript.primary_actions
+                    primary_indices = [
+                        i for i, action in enumerate(primary_actions)
+                        if start_time <= action['at'] <= current_time_ms
+                    ]
+
+                    if len(primary_indices) >= 2:
+                        result = autotune.transform(
+                            self.funscript,
+                            axis='primary',
+                            selected_indices=primary_indices
+                        )
+                        if result:
+                            axes_processed.append(f"primary({len(primary_indices)} pts)")
+
+                # Process secondary axis if it has data
+                if has_secondary:
+                    secondary_actions = self.funscript.secondary_actions
+                    secondary_indices = [
+                        i for i, action in enumerate(secondary_actions)
+                        if start_time <= action['at'] <= current_time_ms
+                    ]
+
+                    if len(secondary_indices) >= 2:
+                        result = autotune.transform(
+                            self.funscript,
+                            axis='secondary',
+                            selected_indices=secondary_indices
+                        )
+                        if result:
+                            axes_processed.append(f"secondary({len(secondary_indices)} pts)")
+
+            if axes_processed:
+                self.logger.info(f"🔧 Rolling autotune applied to {', '.join(axes_processed)} "
+                               f"({start_time}ms - {current_time_ms}ms)")
+            else:
+                self.logger.debug(f"Not enough data for rolling autotune in window")
+
+        except Exception as e:
+            self.logger.error(f"Error applying rolling autotune: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _init_device_bridge(self):
         """Initialize device control bridge if available."""
