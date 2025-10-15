@@ -3014,65 +3014,71 @@ class InteractiveFunscriptTimeline:
                         cached_data = self._get_or_compute_cached_arrays(actions_to_render)
                         all_ats, all_poss = cached_data["ats"], cached_data["poss"]
 
-                        point_indices = np.array(list(indices_to_draw))
-                        point_ats = all_ats[point_indices]
-                        point_poss = all_poss[point_indices]
-                        pxs = time_to_x_vec(point_ats)
-                        pys = pos_to_y_vec(point_poss)
+                        # Filter out invalid indices (can happen if funscript is modified by rolling autotune)
+                        max_index = len(all_ats) - 1
+                        valid_indices = [idx for idx in indices_to_draw if 0 <= idx <= max_index]
 
-                        hover_radius_sq = (app_state.timeline_point_radius + 4) ** 2
-                        distances_sq = (mouse_pos[0] - pxs) ** 2 + (mouse_pos[1] - pys) ** 2
-                        hovered_mask = distances_sq < hover_radius_sq
+                        # Only proceed if we have valid indices
+                        if valid_indices:
+                            point_indices = np.array(valid_indices)
+                            point_ats = all_ats[point_indices]
+                            point_poss = all_poss[point_indices]
+                            pxs = time_to_x_vec(point_ats)
+                            pys = pos_to_y_vec(point_poss)
 
-                        for i_loop, original_list_idx in enumerate(point_indices):
-                            px, py = pxs[i_loop], pys[i_loop]
-                            is_hovered_pt = hovered_mask[i_loop]
-                            is_primary_selected = (original_list_idx == self.selected_action_idx)
-                            is_in_multi_selection = (original_list_idx in self.multi_selected_action_indices)
-                            is_being_dragged = (original_list_idx == self.dragging_action_idx)
-                            
-                            # PERFORMANCE: ONLY render interactive points (hovered/selected/dragged)
-                            # This dramatically improves performance by not rendering non-interactive points
-                            is_interactive = (is_primary_selected or is_in_multi_selection or is_being_dragged or is_hovered_pt)
-                            
-                            # Track hovered point for mouse interaction even if we don't render it
-                            if is_hovered_pt and self.dragging_action_idx == -1:
-                                hovered_action_idx_current_timeline = original_list_idx
-                            
-                            # Skip rendering ALL non-interactive points
-                            if not is_interactive:
-                                continue  # Skip rendering this point
-                            
-                            point_radius_draw = app_state.timeline_point_radius
-                            pt_color_tuple = TimelineColors.POINT_DEFAULT
+                            hover_radius_sq = (app_state.timeline_point_radius + 4) ** 2
+                            distances_sq = (mouse_pos[0] - pxs) ** 2 + (mouse_pos[1] - pys) ** 2
+                            hovered_mask = distances_sq < hover_radius_sq
 
-                            if is_being_dragged:
-                                pt_color_tuple = TimelineColors.POINT_DRAGGING
-                                point_radius_draw += 1
-                            elif is_primary_selected or is_in_multi_selection:
-                                pt_color_tuple = TimelineColors.POINT_SELECTED
-                                if is_in_multi_selection and not is_primary_selected: point_radius_draw += 0.5
-                            elif is_hovered_pt and imgui.is_window_hovered() and not self.is_marqueeing:
-                                pt_color_tuple = TimelineColors.POINT_HOVER
-                                if self.dragging_action_idx == -1:
+                            for i_loop, original_list_idx in enumerate(point_indices):
+                                px, py = pxs[i_loop], pys[i_loop]
+                                is_hovered_pt = hovered_mask[i_loop]
+                                is_primary_selected = (original_list_idx == self.selected_action_idx)
+                                is_in_multi_selection = (original_list_idx in self.multi_selected_action_indices)
+                                is_being_dragged = (original_list_idx == self.dragging_action_idx)
+
+                                # PERFORMANCE: ONLY render interactive points (hovered/selected/dragged)
+                                # This dramatically improves performance by not rendering non-interactive points
+                                is_interactive = (is_primary_selected or is_in_multi_selection or is_being_dragged or is_hovered_pt)
+
+                                # Track hovered point for mouse interaction even if we don't render it
+                                if is_hovered_pt and self.dragging_action_idx == -1:
                                     hovered_action_idx_current_timeline = original_list_idx
 
-                            point_alpha = 0.3 if self.is_previewing else 1.0
-                            final_pt_color = imgui.get_color_u32_rgba(
-                                pt_color_tuple[0],
-                                pt_color_tuple[1],
-                                pt_color_tuple[2],
-                                pt_color_tuple[3] * point_alpha
-                            )
+                                # Skip rendering ALL non-interactive points
+                                if not is_interactive:
+                                    continue  # Skip rendering this point
 
-                            draw_list.add_circle_filled(px, py, point_radius_draw, final_pt_color)
+                                point_radius_draw = app_state.timeline_point_radius
+                                pt_color_tuple = TimelineColors.POINT_DEFAULT
 
-                            if is_primary_selected and not is_being_dragged:
-                                draw_list.add_circle(
-                                    px, py, point_radius_draw + 1,
-                                    imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER),
-                                    thickness=1.0
+                                if is_being_dragged:
+                                    pt_color_tuple = TimelineColors.POINT_DRAGGING
+                                    point_radius_draw += 1
+                                elif is_primary_selected or is_in_multi_selection:
+                                    pt_color_tuple = TimelineColors.POINT_SELECTED
+                                    if is_in_multi_selection and not is_primary_selected: point_radius_draw += 0.5
+                                elif is_hovered_pt and imgui.is_window_hovered() and not self.is_marqueeing:
+                                    pt_color_tuple = TimelineColors.POINT_HOVER
+                                    if self.dragging_action_idx == -1:
+                                        hovered_action_idx_current_timeline = original_list_idx
+
+                                point_alpha = 0.3 if self.is_previewing else 1.0
+                                final_pt_color = imgui.get_color_u32_rgba(
+                                    pt_color_tuple[0],
+                                    pt_color_tuple[1],
+                                    pt_color_tuple[2],
+                                    pt_color_tuple[3] * point_alpha
                                 )
+
+                                draw_list.add_circle_filled(px, py, point_radius_draw, final_pt_color)
+
+                                if is_primary_selected and not is_being_dragged:
+                                    draw_list.add_circle(
+                                        px, py, point_radius_draw + 1,
+                                        imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER),
+                                        thickness=1.0
+                                    )
 
             # --- Draw Ultimate Autotune Preview (if enabled) ---
             if self.ultimate_autotune_preview_actions:

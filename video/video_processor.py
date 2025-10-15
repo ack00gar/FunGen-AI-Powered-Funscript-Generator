@@ -1618,6 +1618,8 @@ class VideoProcessor:
             was_processing = self.is_processing
             was_paused = self.is_processing and self.pause_event.is_set()
             stored_end_limit = self.processing_end_frame_limit
+            # Remember if tracker was active before stopping (important for streamer mode)
+            was_tracking = self.tracker and self.tracker.tracking_active
 
             if was_processing:
                 # Stop processing without joining thread to avoid blocking
@@ -1642,6 +1644,10 @@ class VideoProcessor:
 
             if was_processing and not was_paused:
                 self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
+                # Restart tracker if it was active before seeking (e.g., in streamer mode without chapters)
+                if was_tracking and self.tracker and not self.tracker.tracking_active:
+                    self.logger.info("Restarting tracker after seek")
+                    self.tracker.start_tracking()
             # If was_paused, do not restart processing (remain paused after seek)
 
         except Exception as e:
