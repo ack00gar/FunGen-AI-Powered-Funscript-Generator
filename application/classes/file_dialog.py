@@ -261,9 +261,10 @@ class ImGuiFileDialog:
                 imgui.next_column()
                 self._draw_directory_navigation()
                 self._draw_filter_selector()
-                if imgui.begin_child("Files", width=0, height=-75, border=True):
-                    self._draw_file_list()
-                    imgui.end_child()
+                # Always call end_child() after begin_child(), regardless of return value
+                imgui.begin_child("Files", width=0, height=-75, border=True)
+                self._draw_file_list()
+                imgui.end_child()
                 should_close = self._draw_bottom_bar()
                 if should_close:
                     self.open = False
