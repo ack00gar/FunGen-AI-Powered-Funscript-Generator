@@ -4658,15 +4658,61 @@ class ControlPanelUI:
                     if not tr:
                         imgui.text_colored("Tracker not initialized", 1.0, 0.5, 0.0)
                     else:
-                        # Enable/disable toggle (enabled by default for streamer mode)
-                        cur_enabled = settings.get("live_tracker_rolling_autotune_enabled", True)
+                        # Check if streamer is available and has connected clients
+                        streamer_available = False
+                        clients_connected = False
+                        try:
+                            from application.utils.feature_detection import is_feature_enabled
+                            streamer_available = is_feature_enabled("streamer")
+                            if streamer_available and self._native_sync_manager and self._native_sync_manager.sync_server:
+                                clients_connected = len(self._native_sync_manager.sync_server.websocket_clients) > 0
+                        except Exception as e:
+                            self.app.logger.debug(f"Error checking streamer availability: {e}")
+
+                        can_enable = streamer_available and clients_connected
+
+                        # Show requirement message if conditions not met
+                        if not can_enable:
+                            # Get warning icon
+                            icon_mgr = get_icon_texture_manager()
+                            warning_tex, _, _ = icon_mgr.get_icon_texture('warning.png')
+
+                            imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                            if warning_tex:
+                                imgui.image(warning_tex, 20, 20)
+                                imgui.same_line()
+
+                            if not streamer_available:
+                                imgui.text_colored("Requires Streamer module to be available", 1.0, 0.7, 0.0)
+                            elif not clients_connected:
+                                imgui.text_colored("Requires an active streamer session with connected clients", 1.0, 0.7, 0.0)
+                            imgui.pop_text_wrap_pos()
+                            imgui.spacing()
+
+                        # Enable/disable toggle (disabled by default, requires streamer + connected session)
+                        cur_enabled = settings.get("live_tracker_rolling_autotune_enabled", False)
+
+                        # Disable checkbox if requirements not met
+                        if not can_enable:
+                            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.5, 1.0)
+                            imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND, 0.2, 0.2, 0.2, 0.5)
+                            imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND_HOVERED, 0.2, 0.2, 0.2, 0.5)
+                            imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND_ACTIVE, 0.2, 0.2, 0.2, 0.5)
+                            imgui.push_style_color(imgui.COLOR_CHECK_MARK, 0.5, 0.5, 0.5, 0.5)
+
                         ch, new_enabled = imgui.checkbox("Enable Rolling Autotune##RollingAutotuneEnable", cur_enabled)
+
+                        if not can_enable:
+                            imgui.pop_style_color(5)
+
                         if imgui.is_item_hovered():
-                            imgui.set_tooltip(
-                                "Apply Ultimate Autotune to the last N seconds of funscript data every N seconds\n"
-                                "Recommended: Keep processing ahead of browser playback by at least the window size"
-                            )
-                        if ch:
+                            if not can_enable:
+                                tooltip_msg = "Rolling autotune requires:\n• Streamer module available\n• Active streamer session with connected clients"
+                            else:
+                                tooltip_msg = "Apply Ultimate Autotune to the last N seconds of funscript data every N seconds\nRecommended: Keep processing ahead of browser playback by at least the window size"
+                            imgui.set_tooltip(tooltip_msg)
+
+                        if ch and can_enable:
                             settings.set("live_tracker_rolling_autotune_enabled", new_enabled)
                             tr.rolling_autotune_enabled = new_enabled
                             if new_enabled:
