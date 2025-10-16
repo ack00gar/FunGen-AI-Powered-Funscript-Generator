@@ -108,13 +108,13 @@ class TrackerManager:
         self.initialized = False  # Tracker initialization status
 
         # Rolling Ultimate Autotune for live tracking (streamer mode)
-        # Load from settings if app instance is available (enabled by default)
+        # Load from settings if app instance is available (disabled by default, requires streamer + connected session)
         if app_logic_instance and hasattr(app_logic_instance, 'app_settings'):
-            self.rolling_autotune_enabled = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_enabled", True)
+            self.rolling_autotune_enabled = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_enabled", False)
             self.rolling_autotune_interval_ms = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_interval_ms", 5000)
             self.rolling_autotune_window_ms = app_logic_instance.app_settings.get("live_tracker_rolling_autotune_window_ms", 5000)
         else:
-            self.rolling_autotune_enabled = True  # Enable periodic autotune on live data by default
+            self.rolling_autotune_enabled = False  # Disabled by default - requires streamer with connected session
             self.rolling_autotune_interval_ms = 5000  # Apply autotune every 5 seconds
             self.rolling_autotune_window_ms = 5000  # Process last 5 seconds of data
         self.rolling_autotune_last_time = 0  # Last time autotune was applied
