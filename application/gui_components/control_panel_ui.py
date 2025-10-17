@@ -4459,38 +4459,6 @@ class ControlPanelUI:
                     if imgui.button("Copy URL", width=button_width):
                         self._copy_to_clipboard(viewer_url)
 
-                    # HereSphere URLs (if enabled)
-                    if status.get('heresphere_enabled', False):
-                        imgui.spacing()
-                        imgui.separator()
-                        imgui.text_colored("HereSphere Integration:", 0.5, 0.8, 1.0)
-                        imgui.spacing()
-
-                        # HereSphere API URL
-                        local_ip = self._get_local_ip()
-                        heresphere_api_port = status.get('heresphere_api_port', 8091)
-                        heresphere_event_port = status.get('heresphere_event_port', 8090)
-
-                        api_url = f"http://{local_ip}:{heresphere_api_port}/heresphere"
-                        imgui.text("API Server (POST):")
-                        imgui.same_line()
-                        imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 1.0, 0.8)
-                        imgui.text(api_url)
-                        imgui.pop_style_color()
-
-                        # Copy button for API URL
-                        if imgui.button("Copy API URL", width=-1):
-                            self._copy_to_clipboard(api_url)
-
-                        imgui.spacing()
-                        imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                        imgui.text_colored(
-                            "Configure HereSphere to use the API URL above as a library source. "
-                            "The Event URL is automatically provided to HereSphere via video metadata.",
-                            0.6, 0.6, 0.6
-                        )
-                        imgui.pop_text_wrap_pos()
-
                 # Status Section
                 open_, _ = imgui.collapsing_header(
                     "Status##NativeSyncStatus",
@@ -4572,6 +4540,40 @@ class ControlPanelUI:
                                 imgui.text_colored("  Waiting for browser position updates...", 0.7, 0.7, 0.7)
                         else:
                             imgui.text_colored("  No sync data available", 0.7, 0.7, 0.7)
+
+                # Connection Info Section (continued)
+                if open_:
+                    # HereSphere URLs (if enabled)
+                    if status.get('heresphere_enabled', False):
+                        imgui.spacing()
+                        imgui.separator()
+                        imgui.text_colored("HereSphere Integration:", 0.5, 0.8, 1.0)
+                        imgui.spacing()
+
+                        # HereSphere API URL
+                        local_ip = self._get_local_ip()
+                        heresphere_api_port = status.get('heresphere_api_port', 8091)
+                        heresphere_event_port = status.get('heresphere_event_port', 8090)
+
+                        api_url = f"http://{local_ip}:{heresphere_api_port}/heresphere"
+                        imgui.text("API Server (POST):")
+                        imgui.same_line()
+                        imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 1.0, 0.8)
+                        imgui.text(api_url)
+                        imgui.pop_style_color()
+
+                        # Copy button for API URL
+                        if imgui.button("Copy API URL", width=-1):
+                            self._copy_to_clipboard(api_url)
+
+                        imgui.spacing()
+                        imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
+                        imgui.text_colored(
+                            "Configure HereSphere to use the API URL above as a library source. "
+                            "The Event URL is automatically provided to HereSphere via video metadata.",
+                            0.6, 0.6, 0.6
+                        )
+                        imgui.pop_text_wrap_pos()
 
                 # Video Display Options (when streaming)
                 open_, _ = imgui.collapsing_header(
@@ -4813,6 +4815,17 @@ class ControlPanelUI:
                     with primary_button_style():
                         if imgui.button("Discover XBVR Address", width=-1):
                             self._discover_xbvr_address()
+
+                    imgui.spacing()
+                    # Open XBVR Browser button (PRIMARY - positive action)
+                    with primary_button_style():
+                        if imgui.button("Open XBVR Browser", width=-1):
+                            # Open XBVR browser in default browser
+                            import webbrowser
+                            local_ip = self._get_local_ip()
+                            xbvr_browser_url = f"http://{local_ip}:8080/xbvr"
+                            webbrowser.open(xbvr_browser_url)
+                            self.app.logger.info(f"Opening XBVR browser: {xbvr_browser_url}")
 
             # Stash Configuration Section
             imgui.spacing()
