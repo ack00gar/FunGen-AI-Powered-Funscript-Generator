@@ -533,10 +533,13 @@ class VideoProcessor:
             self.logger.info("Settings applied. Video remains paused/stopped.")
         self.logger.info("Video settings applied successfully", extra={'status_message': True})
 
-    def get_frames_batch(self, start_frame_num: int, num_frames_to_fetch: int) -> Dict[int, np.ndarray]:
+    def get_frames_batch(self, start_frame_num: int, num_frames_to_fetch: int, immediate_display_frame: Optional[int] = None) -> Dict[int, np.ndarray]:
         """
         Fetches a batch of frames using FFmpeg.
         This method now supports 2-pipe 10-bit CUDA processing.
+
+        Args:
+            immediate_display_frame: If specified, immediately display this frame when decoded
         """
         decode_start = time.perf_counter()  # Performance tracking
         frames_batch: Dict[int, np.ndarray] = {}
@@ -652,6 +655,12 @@ class VideoProcessor:
 
                 frames_batch[start_frame_num + i] = frame
 
+                # Immediate display: update current frame as soon as target is decoded
+                if immediate_display_frame is not None and (start_frame_num + i) == immediate_display_frame:
+                    with self.frame_lock:
+                        self.current_frame = frame
+                        self.current_frame_index = immediate_display_frame
+
                 # Update frame buffer progress
                 self.frame_buffer_current = i + 1
                 self.frame_buffer_progress = self.frame_buffer_current / self.frame_buffer_total if self.frame_buffer_total > 0 else 1.0
@@ -679,7 +688,7 @@ class VideoProcessor:
             f"get_frames_batch: Complete. Got {len(frames_batch)} frames for start {start_frame_num} (requested {num_frames_to_fetch}). Decode time: {decode_time:.2f}ms")
         return frames_batch
 
-    def _get_specific_frame(self, frame_index_abs: int, update_current_index: bool = True) -> Optional[np.ndarray]:
+    def _get_specific_frame(self, frame_index_abs: int, update_current_index: bool = True, immediate_display: bool = False) -> Optional[np.ndarray]:
         if not self.video_path or not self.video_info or self.video_info.get('fps', 0) <= 0:
             self.logger.warning("Cannot get frame: video not loaded/invalid FPS.")
             if update_current_index:
@@ -716,7 +725,9 @@ class VideoProcessor:
         elif num_frames_to_fetch_actual < 1 and self.total_frames == 0:
             num_frames_to_fetch_actual = self.batch_fetch_size
 
-        fetched_batch = self.get_frames_batch(batch_start_frame, num_frames_to_fetch_actual)
+        # Pass immediate_display flag for responsive seeking
+        immediate_frame = frame_index_abs if immediate_display else None
+        fetched_batch = self.get_frames_batch(batch_start_frame, num_frames_to_fetch_actual, immediate_display_frame=immediate_frame)
 
         retrieved_frame: Optional[np.ndarray] = None
         with self.frame_cache_lock:
@@ -1626,7 +1637,8 @@ class VideoProcessor:
 
             # Use FFmpeg for accurate seeking (not thumbnail extractor)
             # Thumbnail extractor is only for navigator hover previews
-            new_frame = self._get_specific_frame(target_frame)
+            # Enable immediate_display to show frame as soon as it's decoded during batch fetch
+            new_frame = self._get_specific_frame(target_frame, immediate_display=True)
 
             with self.frame_lock:
                 self.current_frame = new_frame
