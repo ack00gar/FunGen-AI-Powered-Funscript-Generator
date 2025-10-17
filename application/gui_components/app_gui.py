@@ -127,7 +127,7 @@ class GUI:
             'last_seek_time': 0.0,
             'seek_interval': 0.033,  # Will be updated based on video FPS
             'initial_press_time': 0.0,  # When key was first pressed
-            'continuous_delay': 0.5,  # Delay before continuous scrolling starts (500ms)
+            'continuous_delay': 0.2,  # 200ms delay before continuous playback (allows frame-by-frame taps)
         }
 
         self.batch_videos_data: List[Dict] = []
@@ -1266,32 +1266,38 @@ class GUI:
         """SIMPLE frame seeking - cache first, then direct VideoProcessor method"""
         if not self.app.processor or not self.app.processor.video_info:
             return
-            
+
+        # Skip if already seeking to avoid frame jump issues
+        if self.app.processor.seek_in_progress:
+            return
+
         new_frame = self.app.processor.current_frame_index + delta_frames
         total_frames = self.app.processor.total_frames
         new_frame = max(0, min(new_frame, total_frames - 1 if total_frames > 0 else 0))
 
         if new_frame == self.app.processor.current_frame_index:
             return  # No change needed
-            
+
         # SIMPLE STRATEGY: Check cache first, otherwise use VideoProcessor's optimized method
         frame_from_cache = None
         with self.app.processor.frame_cache_lock:
             if new_frame in self.app.processor.frame_cache:
                 frame_from_cache = self.app.processor.frame_cache[new_frame]
                 self.app.processor.frame_cache.move_to_end(new_frame)
-        
+
         if frame_from_cache is not None:
-            # Cache hit: instant update
+            # Cache hit: instant update (no async seek needed)
             self.app.processor.current_frame_index = new_frame
             self.app.processor.current_frame = frame_from_cache
         else:
-            # Cache miss: let VideoProcessor handle it optimally
+            # Cache miss: let VideoProcessor handle it optimally with async seek
+            # Update index immediately to prevent double-seeking on rapid key presses
+            self.app.processor.current_frame_index = new_frame
             self.app.processor.seek_video(new_frame)
-        
+
         # Update UI
         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-        if self.app.project_manager: 
+        if self.app.project_manager:
             self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
 
