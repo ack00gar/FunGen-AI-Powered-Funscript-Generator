@@ -123,11 +123,13 @@ class GUI:
         self.app.energy_saver.reset_activity_timer()
         
         # Simple arrow key navigation state
+        current_time = time.time()
         self.arrow_key_state = {
-            'last_seek_time': 0.0,
+            'last_seek_time': current_time,
             'seek_interval': 0.033,  # Will be updated based on video FPS
-            'initial_press_time': 0.0,  # When key was first pressed
+            'initial_press_time': current_time,
             'continuous_delay': 0.2,  # 200ms delay before continuous playback (allows frame-by-frame taps)
+            'last_direction': 0,  # Track direction to prevent double-navigation
         }
 
         self.batch_videos_data: List[Dict] = []
@@ -1236,28 +1238,35 @@ class GUI:
             seek_direction = -1
         elif right_held and not left_held:
             seek_direction = 1
-        
+
+        # Reset direction tracking when key is released
+        if seek_direction == 0:
+            self.arrow_key_state['last_direction'] = 0
+
         # Apply navigation with proper frame-by-frame then continuous logic
         if seek_direction != 0:
             time_since_last = current_time - self.arrow_key_state['last_seek_time']
             key_just_pressed = (left_held and imgui.is_key_pressed(left_key)) or (right_held and imgui.is_key_pressed(right_key))
-            
+
             should_navigate = False
-            
+
             if key_just_pressed:
-                # INITIAL KEY PRESS: Always navigate immediately (frame-by-frame response)
-                should_navigate = True
-                self.arrow_key_state['initial_press_time'] = current_time
+                # INITIAL KEY PRESS: Only navigate if this is a new direction
+                if self.arrow_key_state['last_direction'] != seek_direction:
+                    should_navigate = True
+                    self.arrow_key_state['initial_press_time'] = current_time
+                    self.arrow_key_state['last_direction'] = seek_direction
             else:
-                # KEY HELD DOWN: Check if enough time passed for continuous scrolling
-                time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
-                
-                if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
-                    # Continuous scrolling: only navigate after interval
-                    if time_since_last >= self.arrow_key_state['seek_interval']:
-                        should_navigate = True
-                # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
-            
+                # KEY HELD DOWN: Only allow if already in an active key session
+                if self.arrow_key_state['last_direction'] == seek_direction:
+                    time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
+
+                    if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
+                        # Continuous scrolling: only navigate after interval
+                        if time_since_last >= self.arrow_key_state['seek_interval']:
+                            should_navigate = True
+                    # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
+
             if should_navigate:
                 self._perform_frame_seek(seek_direction)
                 self.arrow_key_state['last_seek_time'] = current_time
