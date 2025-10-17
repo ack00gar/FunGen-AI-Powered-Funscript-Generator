@@ -83,6 +83,9 @@ class VideoProcessor:
         self.seek_request_frame_index = None
         self.seek_in_progress = False  # Flag to track if seek operation is running
         self.seek_thread = None  # Thread for async seek operations
+        self.frame_buffer_progress = 0.0  # Progress of frame buffer creation (0.0 to 1.0)
+        self.frame_buffer_total = 0  # Total frames to buffer
+        self.frame_buffer_current = 0  # Current frames buffered
         self.total_frames = 0
         self.current_frame_index = 0
         self.current_stream_start_frame_abs = 0
@@ -615,6 +618,11 @@ class VideoProcessor:
             # Always use BGR24 (3 bytes per pixel)
             frame_size = self.yolo_input_size * self.yolo_input_size * 3
 
+            # Initialize progress tracking for frame buffer creation
+            self.frame_buffer_total = num_frames_to_fetch
+            self.frame_buffer_current = 0
+            self.frame_buffer_progress = 0.0
+
             for i in range(num_frames_to_fetch):
                 raw_frame_data = local_p2_proc.stdout.read(frame_size)
                 if len(raw_frame_data) < frame_size:
@@ -644,6 +652,10 @@ class VideoProcessor:
 
                 frames_batch[start_frame_num + i] = frame
 
+                # Update frame buffer progress
+                self.frame_buffer_current = i + 1
+                self.frame_buffer_progress = self.frame_buffer_current / self.frame_buffer_total if self.frame_buffer_total > 0 else 1.0
+
         except Exception as e:
             self.logger.error(f"get_frames_batch: Error fetching batch @{start_frame_num}: {e}", exc_info=True)
         finally:
@@ -657,7 +669,12 @@ class VideoProcessor:
         decode_time = (time.perf_counter() - decode_start) * 1000
         if hasattr(self.app, 'gui_instance') and self.app.gui_instance:
             self.app.gui_instance.track_video_decode_time(decode_time)
-        
+
+        # Reset progress tracking
+        self.frame_buffer_progress = 0.0
+        self.frame_buffer_total = 0
+        self.frame_buffer_current = 0
+
         self.logger.debug(
             f"get_frames_batch: Complete. Got {len(frames_batch)} frames for start {start_frame_num} (requested {num_frames_to_fetch}). Decode time: {decode_time:.2f}ms")
         return frames_batch
@@ -678,30 +695,8 @@ class VideoProcessor:
                     self.current_frame_index = frame_index_abs
                 return frame
 
-        # For thumbnail generation (batch_size=1), use fast OpenCV extractor if available
-        # This is MUCH faster than spawning FFmpeg (3s vs 20ms)
-        # Note: Actual video seeks use FFmpeg for accuracy, this is only for UI tooltips
-        if self.batch_fetch_size == 1 and self.thumbnail_extractor is not None:
-            self.logger.debug(f"Using fast thumbnail extractor for single frame {frame_index_abs}")
-            frame = self.thumbnail_extractor.get_frame(frame_index_abs, use_gpu_unwarp=False)
-
-            if frame is not None:
-                # Cache the frame
-                with self.frame_cache_lock:
-                    if len(self.frame_cache) >= self.frame_cache_max_size:
-                        try:
-                            self.frame_cache.popitem(last=False)
-                        except KeyError:
-                            pass
-                    self.frame_cache[frame_index_abs] = frame
-                    self.frame_cache.move_to_end(frame_index_abs)
-
-                if update_current_index:
-                    self.current_frame_index = frame_index_abs
-                return frame
-            else:
-                self.logger.warning(f"Thumbnail extractor failed for frame {frame_index_abs}, falling back to FFmpeg")
-
+        # Thumbnail extractor is ONLY for navigator hover previews (via get_thumbnail_frame)
+        # All video seeks and playback use FFmpeg for accuracy
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(
                 f"Cache MISS for frame {frame_index_abs}. Attempting batch fetch using get_frames_batch (batch size: {self.batch_fetch_size}).")
@@ -1629,11 +1624,9 @@ class VideoProcessor:
 
             self.logger.info(f"Seeking to frame {target_frame}")
 
-            # Use batch_fetch_size=1 for fast seeking via thumbnail extractor
-            original_batch_size = self.batch_fetch_size
-            self.batch_fetch_size = 1
+            # Use FFmpeg for accurate seeking (not thumbnail extractor)
+            # Thumbnail extractor is only for navigator hover previews
             new_frame = self._get_specific_frame(target_frame)
-            self.batch_fetch_size = original_batch_size
 
             with self.frame_lock:
                 self.current_frame = new_frame
