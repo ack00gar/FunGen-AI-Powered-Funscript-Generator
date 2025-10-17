@@ -2672,6 +2672,15 @@ class ControlPanelUI:
     
     def _render_device_control_content(self):
         """Render the main device control interface with improved UX."""
+        # Version info
+        try:
+            import device_control
+            version = getattr(device_control, '__version__', 'legacy')
+            imgui.text_colored(f"Device Control Module Version: {version}", 0.5, 0.5, 0.5)
+            imgui.spacing()
+        except:
+            pass
+
         # Connection Status Section
         if imgui.collapsing_header("Connection Status##DeviceConnectionStatus", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
             self._render_connection_status_section()
@@ -4394,6 +4403,15 @@ class ControlPanelUI:
                 flags=imgui.TREE_NODE_DEFAULT_OPEN,
             )
             if open_:
+                # Version info
+                try:
+                    import streamer
+                    version = getattr(streamer, '__version__', 'legacy')
+                    imgui.text_colored(f"Streamer Module Version: {version}", 0.5, 0.5, 0.5)
+                    imgui.spacing()
+                except:
+                    pass
+
                 # Description
                 imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
                 imgui.text_colored(
@@ -4441,16 +4459,6 @@ class ControlPanelUI:
                     if imgui.button("Copy URL", width=button_width):
                         self._copy_to_clipboard(viewer_url)
 
-                    imgui.spacing()
-
-                    # WebSocket URL
-                    ws_url = f"ws://{self._get_local_ip()}:{status.get('sync_port', 8765)}"
-                    imgui.text("WebSocket Sync:")
-                    imgui.same_line()
-                    imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 1.0, 0.5)
-                    imgui.text(ws_url)
-                    imgui.pop_style_color()
-
                     # HereSphere URLs (if enabled)
                     if status.get('heresphere_enabled', False):
                         imgui.spacing()
@@ -4473,20 +4481,6 @@ class ControlPanelUI:
                         # Copy button for API URL
                         if imgui.button("Copy API URL", width=-1):
                             self._copy_to_clipboard(api_url)
-
-                        imgui.spacing()
-
-                        # HereSphere Event URL
-                        event_url = f"http://{local_ip}:{heresphere_event_port}/heresphere/event"
-                        imgui.text("Event Server (POST):")
-                        imgui.same_line()
-                        imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 1.0, 0.8)
-                        imgui.text(event_url)
-                        imgui.pop_style_color()
-
-                        # Copy button for Event URL
-                        if imgui.button("Copy Event URL", width=-1):
-                            self._copy_to_clipboard(event_url)
 
                         imgui.spacing()
                         imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
