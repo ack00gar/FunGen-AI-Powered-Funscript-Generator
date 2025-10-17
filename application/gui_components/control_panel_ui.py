@@ -77,10 +77,6 @@ class ControlPanelUI:
         "_prev_client_count",
         "_native_sync_status_cache",
         "_native_sync_status_time",
-        # Local video browser attributes
-        "_local_video_folder",
-        "_local_video_files",
-        "_selected_local_video",
     )
 
     def __init__(self, app):
@@ -124,11 +120,6 @@ class ControlPanelUI:
         self._prev_client_count = 0
         self._native_sync_status_cache = None
         self._native_sync_status_time = 0
-        
-        # Local video browser attributes
-        self._local_video_folder = ""
-        self._local_video_files = []
-        self._selected_local_video = ""
 
     # ------- Helpers -------
     
@@ -4356,14 +4347,6 @@ class ControlPanelUI:
                         self.app.processor,
                         logger=self.app.logger
                     )
-            
-            # Initialize local video browser attributes if they don't exist
-            if not hasattr(self, '_local_video_folder'):
-                self._local_video_folder = ""
-            if not hasattr(self, '_local_video_files'):
-                self._local_video_files = []
-            if not hasattr(self, '_selected_local_video'):
-                self._selected_local_video = ""
 
             # Cache status to avoid expensive lookups every frame (throttle to 500ms)
             import time
@@ -4930,79 +4913,6 @@ class ControlPanelUI:
                         webbrowser.open(stash_browser_url)
                         self.app.logger.info(f"Opening Stash browser: {stash_browser_url}")
 
-            # Local Folder Browser Section
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            open_, _ = imgui.collapsing_header(
-                "Local Video Browser##LocalVideoBrowser",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN if not is_running else 0,
-            )
-            if open_:
-                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                imgui.text_colored(
-                    "Browse and load videos from your local folders directly in the VR viewer. "
-                    "Displays video thumbnails and enables remote playback control.",
-                    0.7, 0.7, 0.7
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.spacing()
-
-                # Browse Local Folders button
-                if imgui.button("Browse Local Folders", width=-1):
-                    # Open file dialog to select a video folder
-                    if hasattr(self.app, 'gui_instance') and self.app.gui_instance and self.app.gui_instance.file_dialog:
-                        self.app.gui_instance.file_dialog.show(
-                            title="Select Video Folder",
-                            is_folder_dialog=True,
-                            callback=lambda folder_path: self._browse_local_videos(folder_path)
-                        )
-                
-                # Show currently selected folder and available videos if any
-                if self._local_video_folder:
-                    imgui.spacing()
-                    imgui.text_colored(f"Selected Folder: {self._local_video_folder}", 0.5, 0.8, 1.0)
-                    
-                    if self._local_video_files:
-                        imgui.text(f"Found {len(self._local_video_files)} videos:")
-                        
-                        # Show video selection list
-                        imgui.begin_child("LocalVideoList", height=150, border=True)
-                        for i, video_path in enumerate(self._local_video_files):
-                            video_name = os.path.basename(video_path)
-                            is_selected = self._selected_local_video == video_path
-                            
-                            if imgui.selectable(f"{i+1:2d}. {video_name}", is_selected, flags=imgui.SELECTABLE_ALLOW_DOUBLE_CLICK):
-                                self._selected_local_video = video_path
-                                
-                                # If double-clicked, load the video
-                                if imgui.is_mouse_double_clicked(0):
-                                    self._load_selected_local_video()
-                        
-                        imgui.end_child()
-                        
-                        # Load selected video button
-                        can_load = bool(self._selected_local_video)
-                        if not can_load:
-                            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-                        
-                        if imgui.button("Load Selected Video", width=-1) and self._selected_local_video:
-                            self._load_selected_local_video()
-                        
-                        if not can_load:
-                            imgui.pop_style_var()
-                            imgui.internal.pop_item_flag()
-                        
-                        # Or load first video button if none selected
-                        if not self._selected_local_video and self._local_video_files:
-                            if imgui.button("Load First Video", width=-1):
-                                self._selected_local_video = self._local_video_files[0]
-                                self._load_selected_local_video()
-                    else:
-                        imgui.text_colored("No video files found in this folder.", 1.0, 0.5, 0.5)
-
             # Info Section (only when not running)
             if not is_running:
                 open_, _ = imgui.collapsing_header(
@@ -5089,61 +4999,6 @@ class ControlPanelUI:
         except:
             # Fallback - just log
             self.app.logger.info(f"URL to copy: {text}")
-
-    def _browse_local_videos(self, folder_path):
-        """Browse local video folder and handle video selection."""
-        try:
-            self.app.logger.info(f"Scanning folder for videos: {folder_path}")
-            
-            # Use the file manager's existing scan method
-            video_files = self.app.file_manager._scan_folder_for_videos(folder_path)
-            
-            if not video_files:
-                self.app.logger.warning(f"No video files found in: {folder_path}")
-                self._local_video_folder = ""
-                self._local_video_files = []
-                self._selected_local_video = ""
-                return
-            
-            self.app.logger.info(f"Found {len(video_files)} video files in: {folder_path}")
-            
-            self._local_video_folder = folder_path
-            self._local_video_files = video_files
-            self._selected_local_video = ""
-                
-        except Exception as e:
-            self.app.logger.error(f"Error browsing local videos: {e}")
-            import traceback
-            self.app.logger.error(traceback.format_exc())
-
-    def _load_selected_local_video(self):
-        """Load the currently selected local video."""
-        try:
-            if not self._selected_local_video or not os.path.exists(self._selected_local_video):
-                self.app.logger.warning("No valid video selected to load")
-                return
-            
-            video_path = self._selected_local_video
-            self.app.logger.info(f"Loading selected video: {os.path.basename(video_path)}")
-            
-            # Use the file manager to load the video
-            success = self.app.file_manager.open_video_from_path(video_path)
-            
-            if success:
-                self.app.logger.info(f"Successfully loaded video: {os.path.basename(video_path)}", 
-                                   extra={'status_message': True})
-                
-                # If streamer is running, the video will be available for streaming
-                if self._native_sync_manager and self._native_sync_manager.get_status().get('is_running', False):
-                    self.app.logger.info("Video is now available for streaming", extra={'status_message': True})
-            else:
-                self.app.logger.error(f"Failed to load video: {os.path.basename(video_path)}", 
-                                    extra={'status_message': True})
-                
-        except Exception as e:
-            self.app.logger.error(f"Error loading selected local video: {e}")
-            import traceback
-            self.app.logger.error(traceback.format_exc())
 
     def _discover_xbvr_address(self):
         """Attempt to discover XBVR on the local network."""
