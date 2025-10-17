@@ -874,18 +874,32 @@ class GUI:
                                     self._preview_cached_pos is not None and 
                                     abs(self._preview_cached_pos - normalized_pos) <= position_tolerance):
                                     
-                                    # If we need video frame but cached data doesn't have it, update the cache
+                                    # If we need video frame but cached data doesn't have it, fetch async
                                     cached_frame_data = self._preview_cached_tooltip_data.get('frame_data')
                                     if show_video_frame and (cached_frame_data is None or cached_frame_data.size == 0):
-                                        try:
-                                            # Use the cached frame number to avoid mismatch
+                                        # Check if we already have a pending fetch for this frame
+                                        if not hasattr(self, '_preview_frame_fetch_pending'):
+                                            self._preview_frame_fetch_pending = False
+
+                                        if not self._preview_frame_fetch_pending:
+                                            # Start async fetch in background thread
+                                            self._preview_frame_fetch_pending = True
                                             cached_hover_frame = self._preview_cached_tooltip_data.get('hover_frame', hover_frame)
-                                            frame_data, actual_frame = self._get_frame_direct_cv2(cached_hover_frame)
-                                            if frame_data is not None and frame_data.size > 0:
-                                                self._preview_cached_tooltip_data['frame_data'] = frame_data
-                                                self._preview_cached_tooltip_data['actual_frame'] = actual_frame
-                                        except Exception as e:
-                                            pass  # Frame extraction failed, tooltip will show error message
+
+                                            def fetch_frame_async():
+                                                try:
+                                                    frame_data, actual_frame = self._get_frame_direct_cv2(cached_hover_frame)
+                                                    if frame_data is not None and frame_data.size > 0:
+                                                        self._preview_cached_tooltip_data['frame_data'] = frame_data
+                                                        self._preview_cached_tooltip_data['actual_frame'] = actual_frame
+                                                        self._preview_cached_tooltip_data['frame_loading'] = False
+                                                except Exception:
+                                                    self._preview_cached_tooltip_data['frame_loading'] = False
+                                                finally:
+                                                    self._preview_frame_fetch_pending = False
+
+                                            import threading
+                                            threading.Thread(target=fetch_frame_async, daemon=True).start()
                                     
                                     # Use cached tooltip data (frame number and video frame are consistent)
                                     self._render_instant_enhanced_tooltip(self._preview_cached_tooltip_data, show_video_frame)
@@ -897,6 +911,30 @@ class GUI:
                                         )
                                         self._preview_cached_tooltip_data = tooltip_data
                                         self._preview_cached_pos = normalized_pos
+
+                                        # Launch async frame fetch if needed
+                                        if show_video_frame and tooltip_data.get('frame_loading', False):
+                                            if not hasattr(self, '_preview_frame_fetch_pending'):
+                                                self._preview_frame_fetch_pending = False
+
+                                            if not self._preview_frame_fetch_pending:
+                                                self._preview_frame_fetch_pending = True
+
+                                                def fetch_frame_async():
+                                                    try:
+                                                        frame_data, actual_frame = self._get_frame_direct_cv2(hover_frame)
+                                                        if frame_data is not None and frame_data.size > 0:
+                                                            self._preview_cached_tooltip_data['frame_data'] = frame_data
+                                                            self._preview_cached_tooltip_data['actual_frame'] = actual_frame
+                                                            self._preview_cached_tooltip_data['frame_loading'] = False
+                                                    except Exception:
+                                                        self._preview_cached_tooltip_data['frame_loading'] = False
+                                                    finally:
+                                                        self._preview_frame_fetch_pending = False
+
+                                                import threading
+                                                threading.Thread(target=fetch_frame_async, daemon=True).start()
+
                                         self._render_instant_enhanced_tooltip(tooltip_data, show_video_frame)
                                     except Exception as e:
                                         # Fallback to simple tooltip
@@ -909,6 +947,7 @@ class GUI:
             if hasattr(self, '_preview_hover_start_time'):
                 self._preview_hover_start_time = None
                 self._preview_hover_pos = None
+                self._preview_frame_fetch_pending = False
 
         # Draw playback marker over the image
         if self.app.file_manager.video_path and self.app.processor and self.app.processor.video_info and self.app.processor.current_frame_index >= 0:
@@ -2153,7 +2192,7 @@ class GUI:
             'zoom_start_s': 0,
             'zoom_end_s': 0,
             'frame_data': None,
-            'frame_loading': False,
+            'frame_loading': include_frame,  # Set to True immediately if frame will be fetched
             'actual_frame': None  # Track actual frame if different from requested
         }
         
@@ -2173,20 +2212,10 @@ class GUI:
                 if zoom_start_s <= action_time_s <= zoom_end_s:
                     zoom_actions.append(action)
             tooltip_data['zoom_actions'] = zoom_actions
-        
-        # Only extract video frame if requested (after delay)
-        if include_frame:
-            try:
-                # Use direct cv2 frame reading for better performance
-                frame_data, actual_frame = self._get_frame_direct_cv2(hover_frame)
-                if frame_data is not None and frame_data.size > 0:
-                    tooltip_data['frame_data'] = frame_data
-                    tooltip_data['actual_frame'] = actual_frame
-                else:
-                    tooltip_data['frame_loading'] = True
-            except Exception as e:
-                tooltip_data['frame_loading'] = False
-        
+
+        # Frame extraction is handled asynchronously by the caller to avoid blocking UI
+        # frame_loading is already set to True in dict initialization if include_frame is True
+
         return tooltip_data
     
     def _get_frame_direct_cv2(self, frame_index: int):
@@ -2195,12 +2224,13 @@ class GUI:
         """
         if not self.app.processor or not self.app.processor.video_path:
             return None, None
-            
+
         import numpy as np
-        
+
         try:
             # Use OpenCV-based thumbnail extractor for fast seeking (no FFmpeg process spawning!)
             # This is much faster than spawning FFmpeg for each tooltip hover
+            # Note: This still blocks briefly for OpenCV seek, but much faster than FFmpeg
             frame = self.app.processor.get_thumbnail_frame(frame_index, use_gpu_unwarp=False)
             
             if frame is None:
