@@ -1312,7 +1312,7 @@ class GUI:
                 self.arrow_key_state['last_seek_time'] = current_time
 
     def _perform_frame_seek(self, delta_frames):
-        """SIMPLE frame seeking - cache first, then direct VideoProcessor method"""
+        """Arrow key navigation with rolling backward buffer"""
         if not self.app.processor or not self.app.processor.video_info:
             return
 
@@ -1327,22 +1327,34 @@ class GUI:
         if new_frame == self.app.processor.current_frame_index:
             return  # No change needed
 
-        # SIMPLE STRATEGY: Check cache first, otherwise use VideoProcessor's optimized method
-        frame_from_cache = None
-        with self.app.processor.frame_cache_lock:
-            if new_frame in self.app.processor.frame_cache:
-                frame_from_cache = self.app.processor.frame_cache[new_frame]
-                self.app.processor.frame_cache.move_to_end(new_frame)
-
-        if frame_from_cache is not None:
-            # Cache hit: instant update (no async seek needed)
-            self.app.processor.current_frame_index = new_frame
-            self.app.processor.current_frame = frame_from_cache
+        # Only use rolling buffer when NOT tracking/processing
+        if not self.app.processor.is_processing and not (self.app.tracker and self.app.tracker.tracking_active):
+            if delta_frames > 0:
+                # Forward: sequential read + add to backward buffer
+                frame = self.app.processor.arrow_nav_forward(new_frame)
+                if frame is not None:
+                    self.app.processor.current_frame = frame
+                    # Add to rolling backward buffer for future backward navigation
+                    self.app.processor.add_frame_to_backward_buffer(new_frame, frame)
+            else:
+                # Backward: use rolling buffer (with async refill if needed)
+                frame = self.app.processor.arrow_nav_backward(new_frame)
+                if frame is not None:
+                    self.app.processor.current_frame = frame
         else:
-            # Cache miss: let VideoProcessor handle it optimally with async seek
-            # Update index immediately to prevent double-seeking on rapid key presses
-            self.app.processor.current_frame_index = new_frame
-            self.app.processor.seek_video(new_frame)
+            # During tracking/processing: use standard cache-based seek
+            frame_from_cache = None
+            with self.app.processor.frame_cache_lock:
+                if new_frame in self.app.processor.frame_cache:
+                    frame_from_cache = self.app.processor.frame_cache[new_frame]
+                    self.app.processor.frame_cache.move_to_end(new_frame)
+
+            if frame_from_cache is not None:
+                self.app.processor.current_frame_index = new_frame
+                self.app.processor.current_frame = frame_from_cache
+            else:
+                self.app.processor.current_frame_index = new_frame
+                self.app.processor.seek_video(new_frame)
 
         # Update UI
         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
