@@ -884,6 +884,7 @@ class GUI:
                                         if not self._preview_frame_fetch_pending:
                                             # Start async fetch in background thread
                                             self._preview_frame_fetch_pending = True
+                                            self._preview_cached_tooltip_data['frame_loading'] = True  # Set immediately so tooltip shows "Loading..."
                                             cached_hover_frame = self._preview_cached_tooltip_data.get('hover_frame', hover_frame)
 
                                             def fetch_frame_async():
