@@ -140,11 +140,18 @@ class VideoProcessor:
         else:
             self.logger.debug("Tracker is available, but processing is DISABLED by default. An explicit call is needed to enable it.")
 
-        # Frame Caching
+        # Frame Caching with rolling backward buffer for arrow navigation
         self.frame_cache = OrderedDict()
         self.frame_cache_max_size = cache_size
         self.frame_cache_lock = threading.Lock()
-        self.batch_fetch_size = 600
+        self.batch_fetch_size = 600  # For explicit batch fetches only
+
+        # Rolling backward buffer for arrow key navigation (deque for efficient FIFO)
+        from collections import deque
+        self.arrow_nav_backward_buffer = deque(maxlen=600)  # Last 600 frames
+        self.arrow_nav_backward_buffer_lock = threading.Lock()
+        self.arrow_nav_refill_threshold = 120  # Refill when < 120 frames in backward buffer
+        self.arrow_nav_refilling = False  # Flag to prevent concurrent refills
         
         # Single FFmpeg dual-output processor integration
         from video.dual_frame_processor import SingleFFmpegDualOutputProcessor
@@ -704,8 +711,30 @@ class VideoProcessor:
                     self.current_frame_index = frame_index_abs
                 return frame
 
-        # Thumbnail extractor is ONLY for navigator hover previews (via get_thumbnail_frame)
-        # All video seeks and playback use FFmpeg for accuracy
+        # For instant seek preview (batch_size=1), use fast thumbnail extractor
+        # This provides immediate visual feedback (~20ms) while batch buffer loads in background
+        if self.batch_fetch_size == 1 and self.thumbnail_extractor is not None:
+            self.logger.debug(f"Using fast thumbnail extractor for instant seek preview of frame {frame_index_abs}")
+            frame = self.thumbnail_extractor.get_frame(frame_index_abs, use_gpu_unwarp=False)
+
+            if frame is not None:
+                # Cache the thumbnail frame
+                with self.frame_cache_lock:
+                    if len(self.frame_cache) >= self.frame_cache_max_size:
+                        try:
+                            self.frame_cache.popitem(last=False)
+                        except KeyError:
+                            pass
+                    self.frame_cache[frame_index_abs] = frame
+                    self.frame_cache.move_to_end(frame_index_abs)
+
+                if update_current_index:
+                    self.current_frame_index = frame_index_abs
+                return frame
+            else:
+                self.logger.warning(f"Thumbnail extractor failed for frame {frame_index_abs}, falling back to FFmpeg")
+
+        # Standard FFmpeg batch fetch for all other cases
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(
                 f"Cache MISS for frame {frame_index_abs}. Attempting batch fetch using get_frames_batch (batch size: {self.batch_fetch_size}).")
@@ -1635,10 +1664,12 @@ class VideoProcessor:
 
             self.logger.info(f"Seeking to frame {target_frame}")
 
-            # Use FFmpeg for accurate seeking (not thumbnail extractor)
-            # Thumbnail extractor is only for navigator hover previews
-            # Enable immediate_display to show frame as soon as it's decoded during batch fetch
-            new_frame = self._get_specific_frame(target_frame, immediate_display=True)
+            # Show instant thumbnail preview only (no buffer loading for scrubbing)
+            # Rolling backward buffer is only for arrow key navigation
+            original_batch_size = self.batch_fetch_size
+            self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+            new_frame = self._get_specific_frame(target_frame, immediate_display=False)
+            self.batch_fetch_size = original_batch_size
 
             with self.frame_lock:
                 self.current_frame = new_frame
@@ -1685,6 +1716,89 @@ class VideoProcessor:
                     with self.frame_lock: self.current_frame = processed_frame_tuple[0]
             except Exception as e:
                 self.logger.error(f"Error processing frame with tracker in display_current_frame: {e}", exc_info=True)
+
+    def arrow_nav_forward(self, target_frame: int) -> Optional[np.ndarray]:
+        """
+        Navigate forward by reading next frame sequentially.
+        Adds frame to rolling backward buffer as we go.
+        Returns the frame at target_frame.
+        """
+        # For forward navigation, just get the frame (will be added to backward buffer by caller)
+        frame = self._get_specific_frame(target_frame, update_current_index=True)
+        return frame
+
+    def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
+        """
+        Navigate backward using rolling buffer.
+        Returns frame from buffer if available, triggers async refill if needed.
+        """
+        # Check if frame is in backward buffer
+        with self.arrow_nav_backward_buffer_lock:
+            # Buffer stores (frame_index, frame_data) tuples
+            for frame_index, frame_data in reversed(self.arrow_nav_backward_buffer):
+                if frame_index == target_frame:
+                    self.current_frame_index = target_frame
+                    return frame_data
+
+            # Check buffer size for refill trigger
+            buffer_size = len(self.arrow_nav_backward_buffer)
+            if buffer_size > 0:
+                oldest_frame_index = self.arrow_nav_backward_buffer[0][0]
+                frames_behind = target_frame - oldest_frame_index
+
+                # Trigger async refill if < 120 frames in buffer behind us
+                if frames_behind < self.arrow_nav_refill_threshold and not self.arrow_nav_refilling:
+                    self._trigger_backward_buffer_refill(oldest_frame_index)
+
+        # Frame not in buffer, fetch it (this shouldn't happen often)
+        self.logger.debug(f"Frame {target_frame} not in backward buffer, fetching")
+        return self._get_specific_frame(target_frame, update_current_index=True)
+
+    def _trigger_backward_buffer_refill(self, oldest_frame_index: int):
+        """Async refill backward buffer with 480 frames."""
+        self.arrow_nav_refilling = True
+
+        def refill_worker():
+            try:
+                # Fetch 480 frames backward from oldest buffered frame
+                refill_end = oldest_frame_index - 1
+                refill_start = max(0, refill_end - 479)  # 480 frames
+                num_frames = refill_end - refill_start + 1
+
+                if num_frames <= 0:
+                    self.arrow_nav_refilling = False
+                    return
+
+                self.logger.debug(f"Refilling backward buffer: {num_frames} frames from {refill_start}")
+
+                # Fetch batch
+                fetched_batch = self.get_frames_batch(refill_start, num_frames)
+
+                # Add to front of backward buffer (in correct order)
+                with self.arrow_nav_backward_buffer_lock:
+                    # Convert to list of tuples sorted by frame index
+                    new_frames = sorted([(idx, frame) for idx, frame in fetched_batch.items()])
+
+                    # Add to front of buffer (prepend in order)
+                    for frame_tuple in new_frames:
+                        self.arrow_nav_backward_buffer.appendleft(frame_tuple)
+
+                    self.logger.debug(f"Backward buffer refilled: {len(new_frames)} frames added, buffer size: {len(self.arrow_nav_backward_buffer)}")
+
+            except Exception as e:
+                self.logger.error(f"Error refilling backward buffer: {e}", exc_info=True)
+            finally:
+                self.arrow_nav_refilling = False
+
+        # Run in background thread
+        refill_thread = threading.Thread(target=refill_worker, daemon=True)
+        refill_thread.start()
+
+    def add_frame_to_backward_buffer(self, frame_index: int, frame_data: np.ndarray):
+        """Add a frame to the rolling backward buffer (used during forward navigation)."""
+        with self.arrow_nav_backward_buffer_lock:
+            # Deque automatically removes oldest when at maxlen
+            self.arrow_nav_backward_buffer.append((frame_index, frame_data))
 
     def _processing_loop(self):
         if not self.ffmpeg_process or self.ffmpeg_process.stdout is None:
