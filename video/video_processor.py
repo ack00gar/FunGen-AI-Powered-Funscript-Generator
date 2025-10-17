@@ -553,6 +553,10 @@ class VideoProcessor:
         # Skip detection if user has manually set the video type
         if self.video_type_setting != 'auto':
             self.determined_video_type = self.video_type_setting
+            # Clear VR metadata if manually set to 2D
+            if self.video_type_setting == '2D':
+                self.vr_input_format = ""
+                self.vr_fov = 0
             self.logger.info(f"Using configured video type: {self.determined_video_type}")
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
             self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
@@ -564,6 +568,9 @@ class VideoProcessor:
         if filename_result['type'] == '2D':
             self.logger.info(f"Filename indicates 2D video (contains _2D or _FLAT)")
             self.determined_video_type = '2D'
+            # Clear VR metadata for 2D videos
+            self.vr_input_format = ""
+            self.vr_fov = 0
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
             self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
             return
@@ -592,6 +599,9 @@ class VideoProcessor:
         if resolution_classification == '2D':
             self.logger.info(f"Resolution {width}x{height} classified as 2D (< 1080p or standard 2D resolution)")
             self.determined_video_type = '2D'
+            # Clear VR metadata for 2D videos
+            self.vr_input_format = ""
+            self.vr_fov = 0
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
             self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
             return
@@ -625,6 +635,10 @@ class VideoProcessor:
                             self.vr_input_format = ml_result['format_string']
                             if ml_result.get('fov'):
                                 self.vr_fov = ml_result['fov']
+                        else:
+                            # ML detected 2D - clear VR metadata
+                            self.vr_input_format = ""
+                            self.vr_fov = 0
 
                         self._ml_detection_cached = True  # Cache result to avoid re-running on settings changes
                         self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
@@ -655,6 +669,9 @@ class VideoProcessor:
         else:
             self.logger.info(f"Resolution {width}x{height} does not suggest VR - defaulting to 2D")
             self.determined_video_type = '2D'
+            # Clear VR metadata for 2D videos
+            self.vr_input_format = ""
+            self.vr_fov = 0
 
         self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
         self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
