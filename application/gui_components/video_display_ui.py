@@ -422,6 +422,58 @@ class VideoDisplayUI:
                             self._video_display_rect_min = imgui.get_item_rect_min()
                             self._video_display_rect_max = imgui.get_item_rect_max()
 
+                            # Show "Seeking..." indicator when video is seeking
+                            if self.app.processor and self.app.processor.seek_in_progress:
+                                draw_list = imgui.get_window_draw_list()
+                                # Draw semi-transparent overlay
+                                overlay_color = imgui.get_color_u32_rgba(0.0, 0.0, 0.0, 0.5)
+                                draw_list.add_rect_filled(
+                                    self._video_display_rect_min[0],
+                                    self._video_display_rect_min[1],
+                                    self._video_display_rect_max[0],
+                                    self._video_display_rect_max[1],
+                                    overlay_color
+                                )
+
+                                center_x = (self._video_display_rect_min[0] + self._video_display_rect_max[0]) / 2
+                                center_y = (self._video_display_rect_min[1] + self._video_display_rect_max[1]) / 2
+
+                                # Draw "Seeking..." text in center
+                                text = "Seeking..."
+                                text_size = imgui.calc_text_size(text)
+                                text_x = center_x - text_size.x / 2
+                                text_y = center_y - text_size.y / 2 - 30  # Move up to make room for progress bar
+                                text_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 1.0)
+                                draw_list.add_text(text_x, text_y, text_color, text)
+
+                                # Draw progress bar if we're creating frame buffer
+                                if self.app.processor.frame_buffer_progress > 0:
+                                    # Progress text
+                                    progress_text = f"Creating frames buffer: {self.app.processor.frame_buffer_current}/{self.app.processor.frame_buffer_total}"
+                                    progress_text_size = imgui.calc_text_size(progress_text)
+                                    progress_text_x = center_x - progress_text_size.x / 2
+                                    progress_text_y = center_y - 5
+                                    draw_list.add_text(progress_text_x, progress_text_y, text_color, progress_text)
+
+                                    # Progress bar
+                                    bar_width = 300
+                                    bar_height = 20
+                                    bar_x = center_x - bar_width / 2
+                                    bar_y = center_y + 15
+
+                                    # Background
+                                    bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.8)
+                                    draw_list.add_rect_filled(bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, bg_color)
+
+                                    # Foreground (progress)
+                                    progress = self.app.processor.frame_buffer_progress
+                                    fg_color = imgui.get_color_u32_rgba(0.2, 0.6, 1.0, 0.9)
+                                    draw_list.add_rect_filled(bar_x, bar_y, bar_x + bar_width * progress, bar_y + bar_height, fg_color)
+
+                                    # Border
+                                    border_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 0.8)
+                                    draw_list.add_rect(bar_x, bar_y, bar_x + bar_width, bar_y + bar_height, border_color, thickness=2)
+
                             #--- User Defined ROI Drawing/Selection Logic ---
                             io = imgui.get_io()
                             #  Check hover based on the actual image rect stored by _update_actual_video_image_rect
