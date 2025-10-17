@@ -452,6 +452,23 @@ class InfoGraphsUI:
             imgui.text(f"{self.app.processor.determined_video_type or 'N/A'}")
             imgui.next_column()
 
+            # Show VR format and FOV if VR video
+            if self.app.processor.determined_video_type == 'VR':
+                imgui.text("VR Format:")
+                imgui.next_column()
+                vr_format = self.app.processor.vr_input_format or 'N/A'
+                imgui.text(vr_format.upper())
+                imgui.next_column()
+
+                imgui.text("VR FOV:")
+                imgui.next_column()
+                vr_fov = self.app.processor.vr_fov if hasattr(self.app.processor, 'vr_fov') else 0
+                if vr_fov > 0:
+                    imgui.text(f"{vr_fov}°")
+                else:
+                    imgui.text("N/A")
+                imgui.next_column()
+
             imgui.text("Active Source:")
             imgui.next_column()
             processor = self.app.processor
@@ -629,6 +646,77 @@ class InfoGraphsUI:
                 processor.vr_pitch = new_pitch
                 self.last_pitch_value = new_pitch
                 self._schedule_video_render(new_pitch)
+
+        # Navigation Buffer Settings
+        imgui.separator()
+        imgui.text("Navigation Buffer")
+
+        # Get current buffer size from settings (default 600)
+        DEFAULT_BUFFER_SIZE = 600
+        current_buffer_size = self.app.app_settings.get('arrow_nav_buffer_size', DEFAULT_BUFFER_SIZE)
+
+        # Buffer size slider (100-2000 frames)
+        changed_buffer, new_buffer_size = imgui.slider_int(
+            "Buffer Size (frames)##navBuffer",
+            current_buffer_size,
+            100,  # min
+            2000,  # max
+        )
+
+        if changed_buffer:
+            self.app.app_settings.set('arrow_nav_buffer_size', new_buffer_size)
+            if hasattr(self.app, 'project_manager') and self.app.project_manager:
+                self.app.project_manager.project_dirty = True
+
+            # Log the change
+            self.app.logger.info(
+                f"Navigation buffer size set to {new_buffer_size} frames. "
+                "Restart video playback to apply changes.",
+                extra={'status_message': True, 'duration': 5.0}
+            )
+
+        imgui.same_line()
+
+        # Reset to default button (in red)
+        imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.3, 0.3, 1.0)  # Lighter red on hover
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.1, 0.1, 1.0)  # Darker red when clicked
+        if imgui.button("Reset to Default##resetNavBuffer"):
+            self.app.app_settings.set('arrow_nav_buffer_size', DEFAULT_BUFFER_SIZE)
+            if hasattr(self.app, 'project_manager') and self.app.project_manager:
+                self.app.project_manager.project_dirty = True
+            self.app.logger.info(
+                f"Navigation buffer size reset to default ({DEFAULT_BUFFER_SIZE} frames).",
+                extra={'status_message': True}
+            )
+        imgui.pop_style_color(3)
+
+        # RAM estimate
+        if processor and hasattr(processor, 'frame_size_bytes'):
+            buffer_size_to_display = new_buffer_size if changed_buffer else current_buffer_size
+            ram_bytes = buffer_size_to_display * processor.frame_size_bytes
+            ram_mb = ram_bytes / (1024 * 1024)
+
+            # Color code based on RAM usage
+            if ram_mb < 500:
+                ram_color = (0.2, 0.8, 0.2, 1.0)  # Green
+            elif ram_mb < 1000:
+                ram_color = (1.0, 0.8, 0.2, 1.0)  # Yellow
+            else:
+                ram_color = (1.0, 0.4, 0.2, 1.0)  # Orange/Red
+
+            imgui.text("Estimated RAM usage: ")
+            imgui.same_line()
+            imgui.text_colored(f"{ram_mb:.1f} MB", *ram_color)
+
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    f"Buffer Size: {buffer_size_to_display} frames\n"
+                    f"Frame Size: {processor.frame_size_bytes / (1024 * 1024):.2f} MB\n"
+                    f"Total RAM: {ram_mb:.1f} MB\n\n"
+                    "This buffer is used for backward arrow navigation.\n"
+                    "Larger buffers allow scrolling further back but use more RAM."
+                )
 
         self.video_settings_perf.end_timing()
 
@@ -868,6 +956,58 @@ class InfoGraphsUI:
         imgui.next_column()
 
         imgui.columns(1)
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Navigation Buffer Status
+        imgui.text_colored("Navigation Buffer Status:", 0.8, 0.9, 1.0, 1.0)
+        imgui.spacing()
+
+        # Get buffer information
+        if hasattr(processor, 'arrow_nav_backward_buffer'):
+            with processor.arrow_nav_backward_buffer_lock:
+                current_buffer_fill = len(processor.arrow_nav_backward_buffer)
+                max_buffer_size = processor.arrow_nav_backward_buffer.maxlen if processor.arrow_nav_backward_buffer.maxlen else 600
+
+            # Calculate fill percentage
+            fill_percentage = (current_buffer_fill / max_buffer_size) if max_buffer_size > 0 else 0.0
+
+            # Color code based on fill level
+            if fill_percentage < 0.3:
+                buffer_color = (1.0, 0.4, 0.2, 1.0)  # Red (low buffer)
+            elif fill_percentage < 0.7:
+                buffer_color = (1.0, 0.8, 0.2, 1.0)  # Yellow (moderate buffer)
+            else:
+                buffer_color = (0.2, 0.8, 0.2, 1.0)  # Green (good buffer)
+
+            imgui.text(f"Buffer Fill: {current_buffer_fill} / {max_buffer_size} frames")
+
+            # Progress bar showing buffer fill
+            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *buffer_color)
+            imgui.progress_bar(
+                fill_percentage,
+                size=(0, 0),
+                overlay=f"{fill_percentage*100:.1f}% filled"
+            )
+            imgui.pop_style_color()
+
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    f"Navigation Buffer Status:\n"
+                    f"Current frames cached: {current_buffer_fill}\n"
+                    f"Maximum capacity: {max_buffer_size}\n"
+                    f"Fill level: {fill_percentage*100:.1f}%\n\n"
+                    "This buffer allows backward arrow navigation.\n"
+                    "Higher fill = more frames available for scrolling back.\n\n"
+                    "Color coding:\n"
+                    "Green (>70%): Good buffer availability\n"
+                    "Yellow (30-70%): Moderate buffer\n"
+                    "Red (<30%): Low buffer - limited backward navigation"
+                )
+        else:
+            imgui.text_disabled("Navigation buffer not available")
+
         imgui.spacing()
 
         # Performance recommendations

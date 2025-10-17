@@ -148,9 +148,13 @@ class VideoProcessor:
 
         # Rolling backward buffer for arrow key navigation (deque for efficient FIFO)
         from collections import deque
-        self.arrow_nav_backward_buffer = deque(maxlen=600)  # Last 600 frames
+        # Get buffer size from settings (default 600)
+        buffer_size = 600  # Default
+        if self.app and hasattr(self.app, 'app_settings'):
+            buffer_size = self.app.app_settings.get('arrow_nav_buffer_size', 600)
+        self.arrow_nav_backward_buffer = deque(maxlen=buffer_size)
         self.arrow_nav_backward_buffer_lock = threading.Lock()
-        self.arrow_nav_refill_threshold = 120  # Refill when < 120 frames in backward buffer
+        self.arrow_nav_refill_threshold = max(120, buffer_size // 5)  # Refill when < 20% of buffer size
         self.arrow_nav_refilling = False  # Flag to prevent concurrent refills
         
         # Single FFmpeg dual-output processor integration
@@ -367,10 +371,178 @@ class VideoProcessor:
             f"{self.total_frames}fr, {self.fps:.2f}fps, {self.video_info.get('bit_depth', 'N/A')}bit)")
         return True
 
+    @staticmethod
+    def _detect_format_from_filename(filename: str) -> dict:
+        """
+        Detects video format information from filename suffixes.
+
+        Returns:
+            dict with keys:
+            - 'type': 'VR', '2D', or None (if cannot determine)
+            - 'projection': projection type if VR (e.g., 'fisheye', 'he', 'eac')
+            - 'layout': stereoscopic layout if VR (e.g., '_sbs', '_tb', '_lr')
+            - 'fov': FOV value if specific lens detected (e.g., 200 for MKX200)
+        """
+        upper_filename = filename.upper()
+        result = {
+            'type': None,
+            'projection': None,
+            'layout': None,
+            'fov': None
+        }
+
+        # Check for 2D markers first
+        if '_2D' in upper_filename or '_FLAT' in upper_filename:
+            result['type'] = '2D'
+            return result
+
+        # Check for custom fisheye lenses
+        if '_MKX200' in upper_filename or 'MKX200' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'fisheye'
+            result['layout'] = '_sbs'
+            result['fov'] = 200
+            return result
+        elif '_MKX220' in upper_filename or 'MKX220' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'fisheye'
+            result['layout'] = '_sbs'
+            result['fov'] = 220
+            return result
+        elif '_RF52' in upper_filename or 'RF52' in upper_filename or '_VRCA220' in upper_filename or 'VRCA220' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'fisheye'
+            result['layout'] = '_sbs'
+            return result
+
+        # Check for standard fisheye (flexible matching - with or without underscore)
+        if '_F180' in upper_filename or 'F180_' in upper_filename or '_180F' in upper_filename or '180F_' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'fisheye'
+            result['layout'] = '_sbs'
+            result['fov'] = 180
+            return result
+        if 'FISHEYE190' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'fisheye'
+            result['layout'] = '_sbs'
+            result['fov'] = 190
+            return result
+        if 'FISHEYE200' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'fisheye'
+            result['layout'] = '_sbs'
+            result['fov'] = 200
+            return result
+        if 'FISHEYE220' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'fisheye'
+            result['layout'] = '_sbs'
+            result['fov'] = 220
+            return result
+        if 'FISHEYE' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'fisheye'
+            result['layout'] = '_sbs'
+            result['fov'] = 190
+            return result
+
+        # Check for equiangular cubemap
+        if '_EAC360' in upper_filename or '_360EAC' in upper_filename or 'EAC360' in upper_filename or '360EAC' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'eac'
+            if '_LR' in upper_filename:
+                result['layout'] = '_lr'
+            elif '_RL' in upper_filename:
+                result['layout'] = '_rl'
+            elif '_TB' in upper_filename or '_BT' in upper_filename:
+                result['layout'] = '_tb'
+            elif '_3DH' in upper_filename:
+                result['layout'] = '_sbs'
+            elif '_3DV' in upper_filename:
+                result['layout'] = '_tb'
+            else:
+                result['layout'] = '_sbs'
+            return result
+
+        # Check for equirectangular 360
+        if '_360' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'he'
+            if '_LR' in upper_filename:
+                result['layout'] = '_lr'
+            elif '_RL' in upper_filename:
+                result['layout'] = '_rl'
+            elif '_TB' in upper_filename or '_BT' in upper_filename:
+                result['layout'] = '_tb'
+            elif '_3DH' in upper_filename:
+                result['layout'] = '_sbs'
+            elif '_3DV' in upper_filename:
+                result['layout'] = '_tb'
+            else:
+                result['layout'] = '_sbs'
+            return result
+
+        # Check for equirectangular 180
+        if '_180' in upper_filename:
+            result['type'] = 'VR'
+            result['projection'] = 'he'
+            if '_LR' in upper_filename:
+                result['layout'] = '_lr'
+            elif '_RL' in upper_filename:
+                result['layout'] = '_rl'
+            elif '_TB' in upper_filename or '_BT' in upper_filename:
+                result['layout'] = '_tb'
+            elif '_3DH' in upper_filename:
+                result['layout'] = '_sbs'
+            elif '_3DV' in upper_filename:
+                result['layout'] = '_tb'
+            else:
+                result['layout'] = '_sbs'
+            return result
+
+        return result
+
+    @staticmethod
+    def _classify_by_resolution(width: int, height: int) -> str:
+        """
+        Classifies video as '2D', 'most_likely_VR', or 'uncertain' based on resolution.
+
+        Returns:
+            '2D': Definitely 2D based on resolution
+            'most_likely_VR': Resolution suggests VR (should trigger ML)
+            'uncertain': Cannot determine (should check other heuristics)
+        """
+        # < 1080p -> 2D
+        if height < 1080 and width < 1920:
+            return '2D'
+
+        # Exactly 1920x1080p or 3840x2160p -> 2D
+        if (width == 1920 and height == 1080) or (width == 3840 and height == 2160):
+            return '2D'
+
+        # Check if width = 2x height or height = 2x width (VR aspect ratios)
+        is_sbs_aspect = width > 1000 and 1.8 <= (width / height) <= 2.2
+        is_tb_aspect = height > 1000 and 1.8 <= (height / width) <= 2.2
+
+        if is_sbs_aspect or is_tb_aspect:
+            return 'most_likely_VR'
+
+        # Bigger than 2160p -> most likely VR
+        if height > 2160 or width > 3840:
+            return 'most_likely_VR'
+
+        return 'uncertain'
+
     def _update_video_parameters(self):
         """
-        [NEW HELPER] Consolidates logic for determining video type and building the FFmpeg filter string.
+        Consolidates logic for determining video type and building the FFmpeg filter string.
         Called from open_video and reapply_video_settings.
+
+        Detection priority:
+        1. Filename-based detection (most specific)
+        2. Resolution-based classification
+        3. ML detection (only if resolution suggests VR)
         """
         if not self.video_info:
             return
@@ -378,130 +550,111 @@ class VideoProcessor:
         width = self.video_info.get('width', 0)
         height = self.video_info.get('height', 0)
 
-        # Check for VR-like aspect ratios
-        # SBS VR: width roughly 2x height (e.g., 3840x1920)
-        # TB VR: height roughly 2x width (e.g., 1920x3840)
-        is_sbs_resolution = width > 1000 and 1.8 * height <= width <= 2.2 * height
-        is_tb_resolution = height > 1000 and 1.8 * width <= height <= 2.2 * width
+        # Skip detection if user has manually set the video type
+        if self.video_type_setting != 'auto':
+            self.determined_video_type = self.video_type_setting
+            self.logger.info(f"Using configured video type: {self.determined_video_type}")
+            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            return
 
-        # Improved heuristic: Skip ML for likely 2D content
-        # Most VR content is 4K (2160p) or higher. Below that, only trust VR if aspect ratio is suspicious.
-        # This avoids the ML misclassifying 2D content as VR.
-        is_likely_2d = False
+        # STEP 1: Try filename-based detection first
+        filename_result = self._detect_format_from_filename(self.video_path)
 
-        # Under 2160p (4K) - assume 2D unless aspect ratio strongly suggests VR
-        if height < 2160 and width < 3840:
-            if not is_sbs_resolution and not is_tb_resolution:
-                # Standard aspect ratio (16:9, 21:9, etc.) - definitely 2D
-                is_likely_2d = True
-                self.logger.info(f"Resolution {width}x{height} is below 4K with standard aspect ratio - classified as 2D (skipping ML)")
-            else:
-                # Suspicious aspect ratio even at low res - let ML decide
-                self.logger.info(f"Resolution {width}x{height} is below 4K but has VR-like aspect ratio - running ML to confirm")
-        # At 4K or above with standard aspect ratio - likely 2D
-        elif not is_sbs_resolution and not is_tb_resolution:
-            # Check if it's a standard 2D aspect ratio
-            aspect_ratio = width / height if height > 0 else 0
-            # Standard 2D: 16:9 (~1.78), 21:9 (~2.35), 4:3 (~1.33), etc. - all under 1.8
-            if 1.2 < aspect_ratio < 1.8:
-                is_likely_2d = True
-                self.logger.info(f"Resolution {width}x{height} at 4K+ with standard 2D aspect ratio ({aspect_ratio:.2f}) - classified as 2D (skipping ML)")
-
-        if is_likely_2d and self.video_type_setting == 'auto':
+        if filename_result['type'] == '2D':
+            self.logger.info(f"Filename indicates 2D video (contains _2D or _FLAT)")
             self.determined_video_type = '2D'
             self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
             self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
             return
 
-        # Try ML detection first if in auto mode and model available
-        # Cache ML detection to avoid re-running expensive inference on every settings change
-        ml_detection_succeeded = False
-        if self.video_type_setting == 'auto' and os.path.exists(self.ml_model_path) and not hasattr(self, '_ml_detection_cached'):
-            try:
-                # Lazy load detector
-                if self.ml_detector is None:
-                    self.logger.info("Loading ML format detector...")
-                    self.ml_detector = RealMLVRFormatDetector(logger=self.logger)
-                    self.ml_detector.load_model(self.ml_model_path)
-                    self.logger.info("ML format detector loaded successfully")
+        if filename_result['type'] == 'VR':
+            self.logger.info(f"Filename indicates VR video: projection={filename_result['projection']}, layout={filename_result['layout']}, fov={filename_result['fov']}")
+            self.determined_video_type = 'VR'
 
-                # Detect format
-                ml_result = self.ml_detector.detect(self.video_path, self.video_info, num_frames=3)
+            # Apply detected format
+            if filename_result['projection'] and filename_result['layout']:
+                self.vr_input_format = f"{filename_result['projection']}{filename_result['layout']}"
+                self.logger.info(f"Set VR format to: {self.vr_input_format}")
 
-                if ml_result and ml_result.get('confidence', 0) > 0.5:
-                    self.logger.info(f"ML detected format: {ml_result.get('format_string')} "
-                                   f"(confidence: {ml_result.get('confidence'):.2f})")
+            # Apply detected FOV if available
+            if filename_result['fov']:
+                self.vr_fov = filename_result['fov']
+                self.logger.info(f"Set VR FOV to: {self.vr_fov}")
 
-                    # Apply ML results
-                    self.determined_video_type = ml_result['video_type']
+            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            return
 
-                    if ml_result['video_type'] == 'VR':
-                        self.vr_input_format = ml_result['format_string']
-                        if ml_result.get('fov'):
-                            self.vr_fov = ml_result['fov']
+        # STEP 2: Filename inconclusive - check resolution
+        resolution_classification = self._classify_by_resolution(width, height)
 
-                    ml_detection_succeeded = True
-                    self._ml_detection_cached = True  # Cache result to avoid re-running on settings changes
-                    self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
-                    self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
-                    self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
-                    return  # Skip filename heuristics
-                else:
-                    self.logger.info("ML detection confidence low, falling back to filename heuristics")
+        if resolution_classification == '2D':
+            self.logger.info(f"Resolution {width}x{height} classified as 2D (< 1080p or standard 2D resolution)")
+            self.determined_video_type = '2D'
+            self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+            self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+            return
 
-            except Exception as e:
-                self.logger.warning(f"ML detection failed: {e}, falling back to filename heuristics")
+        # STEP 3: Resolution suggests VR - run ML detection
+        if resolution_classification == 'most_likely_VR':
+            self.logger.info(f"Resolution {width}x{height} suggests VR - running ML detection")
 
-        # Fallback to filename heuristics
-        if self.video_type_setting == 'auto':
-            upper_video_path = self.video_path.upper()
-            vr_keywords = ['VR', '_180', '_360', 'SBS', '_TB', 'FISHEYE', 'EQUIRECTANGULAR', 'LR_', 'Oculus', '_3DH', 'MKX200']
-            has_vr_keyword = any(kw in upper_video_path for kw in vr_keywords)
+            # Try ML detection if model available
+            # Cache ML detection to avoid re-running expensive inference on every settings change
+            if os.path.exists(self.ml_model_path) and not hasattr(self, '_ml_detection_cached'):
+                try:
+                    # Lazy load detector
+                    if self.ml_detector is None:
+                        self.logger.info("Loading ML format detector...")
+                        self.ml_detector = RealMLVRFormatDetector(logger=self.logger)
+                        self.ml_detector.load_model(self.ml_model_path)
+                        self.logger.info("ML format detector loaded successfully")
 
-            self.determined_video_type = 'VR' if is_sbs_resolution or is_tb_resolution or has_vr_keyword else '2D'
-            self.logger.debug(
-                f"Auto-detected video type: {self.determined_video_type} (SBS Res: {is_sbs_resolution}, TB Res: {is_tb_resolution}, Keyword: {has_vr_keyword})")
+                    # Detect format
+                    ml_result = self.ml_detector.detect(self.video_path, self.video_info, num_frames=3)
+
+                    if ml_result and ml_result.get('confidence', 0) > 0.5:
+                        self.logger.info(f"ML detected format: {ml_result.get('format_string')} "
+                                       f"(confidence: {ml_result.get('confidence'):.2f})")
+
+                        # Apply ML results
+                        self.determined_video_type = ml_result['video_type']
+
+                        if ml_result['video_type'] == 'VR':
+                            self.vr_input_format = ml_result['format_string']
+                            if ml_result.get('fov'):
+                                self.vr_fov = ml_result['fov']
+
+                        self._ml_detection_cached = True  # Cache result to avoid re-running on settings changes
+                        self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
+                        self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
+                        self.logger.info(f"Frame size bytes updated to: {self.frame_size_bytes} for YOLO size {self.yolo_input_size}")
+                        return
+                    else:
+                        self.logger.info("ML detection confidence low, falling back to resolution heuristics")
+
+                except Exception as e:
+                    self.logger.warning(f"ML detection failed: {e}, falling back to resolution heuristics")
+
+        # STEP 4: Fallback - use resolution-based heuristics
+        # Check for VR-like aspect ratios
+        is_sbs_resolution = width > 1000 and 1.8 <= (width / height) <= 2.2
+        is_tb_resolution = height > 1000 and 1.8 <= (height / width) <= 2.2
+
+        if is_sbs_resolution or is_tb_resolution:
+            self.logger.info(f"Resolution aspect ratio suggests VR (SBS: {is_sbs_resolution}, TB: {is_tb_resolution})")
+            self.determined_video_type = 'VR'
+
+            # Determine format based on aspect ratio
+            suggested_base = 'he'
+            suggested_layout = '_tb' if is_tb_resolution else '_sbs'
+
+            self.vr_input_format = f"{suggested_base}{suggested_layout}"
+            self.logger.info(f"Auto-detected VR format: {self.vr_input_format}")
         else:
-            self.determined_video_type = self.video_type_setting
-            self.logger.info(f"Using configured video type: {self.determined_video_type}")
-
-        if self.determined_video_type == 'VR':
-            # Only perform auto-detection of the specific VR format if the main setting is 'auto'.
-            # If the user has explicitly set the type to 'VR', this block is skipped,
-            # thereby preserving the manually selected format.
-            if self.video_type_setting == 'auto':
-                suggested_base = 'he'
-                suggested_layout = '_sbs'
-                upper_video_path = self.video_path.upper()
-
-                if is_tb_resolution:
-                    suggested_layout = '_tb'
-                    self.logger.info("Resolution (H > 1.8*W) suggests Top-Bottom (TB) layout.")
-
-                fisheye_keywords = ['FISHEYE', 'MKX', 'RF52']
-                if any(kw in upper_video_path for kw in fisheye_keywords):
-                    suggested_base = 'fisheye'
-                    self.logger.info("Filename keyword suggests 'fisheye' base format.")
-
-                tb_keywords = ['_TB', 'TB_', 'TOPBOTTOM', 'OVERUNDER', '_OU', 'OU_']
-                if any(kw in upper_video_path for kw in tb_keywords):
-                    suggested_layout = '_tb'
-                    self.logger.info("Filename keyword confirms 'Top-Bottom' layout.")
-                elif 'SBS' in upper_video_path:
-                    suggested_layout = '_sbs'
-                    self.logger.info("Filename keyword confirms 'Side-by-Side' layout.")
-
-                final_suggested_vr_input_format = f"{suggested_base}{suggested_layout}"
-
-                self.logger.debug(
-                    f"Auto-detection suggests VR format: {final_suggested_vr_input_format} for '{os.path.basename(self.video_path)}'. Setting it."
-                )
-                self.vr_input_format = final_suggested_vr_input_format
-
-                if 'MKX' in upper_video_path and 'fisheye' in self.vr_input_format and self.vr_fov != 200:
-                    self.logger.info(
-                        f"Filename suggests VR FOV: 200 (MKX) for fisheye. Overriding current: {self.vr_fov}")
-                    self.vr_fov = 200
+            self.logger.info(f"Resolution {width}x{height} does not suggest VR - defaulting to 2D")
+            self.determined_video_type = '2D'
 
         self.ffmpeg_filter_string = self._build_ffmpeg_filter_string()
         self.frame_size_bytes = self.yolo_input_size * self.yolo_input_size * 3
