@@ -1259,22 +1259,17 @@ class StandaloneSplashWindow:
         screen_center_y = window_height / 2
 
         if pattern_index == 0:
-            # PATTERN 1: ADVANCED SPIRAL - Outward and back with easing
-            # 4 rotations outward (0 to 0.6), then 3 rotations back (0.6 to 1.0)
-            if t < 0.6:
-                # Spiraling outward (4 rotations)
-                progress = t / 0.6
-                eased_progress = ease_out_elastic(progress)
-                angle = eased_progress * 4 * 2 * math.pi
-                radius_factor = eased_progress
-            else:
-                # Spiraling back inward (3 rotations)
-                progress = (t - 0.6) / 0.4
-                eased_progress = 1.0 - ease_out_elastic(progress)
-                angle = (1.0 - eased_progress) * 3 * 2 * math.pi + 4 * 2 * math.pi
-                radius_factor = eased_progress
+            # PATTERN 1: PULSING ORBIT - Continuous circular motion with pulsing radius
+            # 3 full rotations during the pattern with smooth radius oscillation
+            angle = eased_t * 3 * 2 * math.pi  # 3 complete circles
 
-            # Calculate position
+            # Pulsing radius: oscillates between 30% and 90% of max radius
+            # Uses multiple frequency components for interesting motion
+            radius_pulse1 = math.sin(eased_t * 2 * math.pi * 2)  # 2 pulses per cycle
+            radius_pulse2 = math.sin(eased_t * 2 * math.pi * 3) * 0.3  # 3 pulses (secondary)
+            radius_factor = 0.6 + 0.3 * radius_pulse1 + radius_pulse2  # Range: 0.3 to 0.9
+
+            # Calculate position with pulsing radius
             max_radius_x = window_width * 0.45
             max_radius_y = window_height * 0.45
             target_x_center = screen_center_x + math.cos(angle) * max_radius_x * radius_factor
