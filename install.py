@@ -1028,28 +1028,36 @@ class FunGenUniversalInstaller:
             else:
                 print(f"  No specific requirements for {gpu_type} GPU type")
 
-            # Install torch-tensorrt and tensorrt separately using the nightly index
+            # Install torch-tensorrt and tensorrt with version constraints to prevent PyTorch upgrade
             if gpu_type == "cuda":
                 cuda_version = None
+                torch_version = "2.8.0"  # Constrain to installed version
+
                 if req_file == "cuda.requirements.txt":
                     cuda_version = "cu128"
                 elif req_file == "cuda.50series.requirements.txt":
                     cuda_version = "cu129"
-                
+
                 if cuda_version:
                     nightly_index_url = f"https://download.pytorch.org/whl/nightly/{cuda_version}"
                     print(f"  Installing torch-tensorrt and tensorrt for {cuda_version} from nightly index...")
+                    print(f"  Constraining torch to version {torch_version} to prevent upgrade...")
+
+                    # Install with version constraint to prevent torch from upgrading to 2.9.0
                     ret, stdout, stderr = self.run_command([
-                        str(python_exe), "-m", "pip", "install", 
-                        "torch-tensorrt", "tensorrt", 
+                        str(python_exe), "-m", "pip", "install",
+                        "torch-tensorrt", "tensorrt",
+                        f"torch=={torch_version}+{cuda_version}",  # Constrain torch version
                         "--extra-index-url", nightly_index_url
                     ], check=False)
 
                     if ret != 0:
                         self.print_warning(f"Failed to install torch-tensorrt and tensorrt for {cuda_version}: {stderr}")
                         self.print_warning("TensorRT acceleration may not work properly.")
+                        self.print_warning("FunGen will fall back to standard PyTorch inference.")
                     else:
                         print(f"    torch-tensorrt and tensorrt for {cuda_version} installed successfully")
+                        print(f"    torch constrained to {torch_version}+{cuda_version}")
             
             # Install device_control requirements if available (supporter feature)
             device_control_req_path = self.project_path / "device_control" / "requirements.txt"
