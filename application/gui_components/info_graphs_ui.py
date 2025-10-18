@@ -675,9 +675,7 @@ class InfoGraphsUI:
                 extra={'status_message': True, 'duration': 5.0}
             )
 
-        imgui.same_line()
-
-        # Reset to default button (in red)
+        # Reset to default button (in red) - on its own line for better visibility
         imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
         imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.3, 0.3, 1.0)  # Lighter red on hover
         imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.1, 0.1, 1.0)  # Darker red when clicked
