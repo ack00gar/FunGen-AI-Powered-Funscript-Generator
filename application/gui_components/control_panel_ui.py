@@ -3026,10 +3026,10 @@ class ControlPanelUI:
             config = self.device_manager.config
             
             # Update rate
-            changed, new_rate = imgui.slider_float("Update Rate##DeviceRate", config.max_position_rate_hz, 1.0, 50.0, "%.1f Hz")
+            changed, new_rate = imgui.slider_float("Update Rate##DeviceRate", config.max_position_rate_hz, 1.0, 120.0, "%.1f Hz")
             if changed:
                 config.max_position_rate_hz = new_rate
-            _tooltip_if_hovered("How often device position is updated per second")
+            _tooltip_if_hovered("How often device position is updated per second (T-Code devices can handle 60-120Hz)")
             
             # Position smoothing
             changed, new_smoothing = imgui.slider_float("Position Smoothing##DeviceSmooth", config.position_smoothing, 0.0, 1.0, "%.2f")

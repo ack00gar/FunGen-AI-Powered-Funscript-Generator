@@ -277,13 +277,19 @@ class VideoProcessor:
     def open_video(self, video_path: str, from_project_load: bool = False) -> bool:
         video_filename = os.path.basename(video_path)
         self.logger.info(f"Opening video: {video_filename}...", extra={'status_message': True, 'duration': 2.0})
-        
+
         self.stop_processing()
         self.video_path = video_path # This will always be the ORIGINAL video path
         self._clear_cache()
         # Clear ML detection cache when opening new video
         if hasattr(self, '_ml_detection_cached'):
             delattr(self, '_ml_detection_cached')
+
+        # Re-read VR unwarp method from settings in case it changed
+        if self.app and hasattr(self.app, 'app_settings'):
+            self.vr_unwarp_method_override = self.app.app_settings.get('vr_unwarp_method', 'auto')
+            self.logger.info(f"VR unwarp method from settings: {self.vr_unwarp_method_override}")
+
         self.video_info = self._get_video_info(video_path)
         if not self.video_info or self.video_info.get("total_frames", 0) == 0:
             self.logger.warning(f"Failed to get valid video info for {video_path}")
@@ -369,6 +375,29 @@ class VideoProcessor:
             f"Opened: {active_source_name} ({source_type}, {self.determined_video_type}, "
             f"format: {self.vr_input_format if self.determined_video_type == 'VR' else 'N/A'}), "
             f"{self.total_frames}fr, {self.fps:.2f}fps, {self.video_info.get('bit_depth', 'N/A')}bit)")
+
+        # Notify sync server (streamer) that video was loaded in desktop FunGen
+        # BUT: Don't broadcast if this is a remote video (Stash/XBVR stream)
+        # because the browser already knows it's loading it - no need to reload
+        is_remote_video = video_path.startswith(('http://', 'https://'))
+
+        if not is_remote_video and hasattr(self, 'sync_server') and self.sync_server and hasattr(self.sync_server, 'loop') and self.sync_server.loop:
+            try:
+                import asyncio
+                self.logger.info(f"📹 Notifying streamer of video load: {os.path.basename(video_path)}")
+                asyncio.run_coroutine_threadsafe(
+                    self.sync_server.broadcast_video_loaded(video_path),
+                    self.sync_server.loop
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not notify sync server: {e}")
+                import traceback
+                self.logger.warning(traceback.format_exc())
+        elif is_remote_video:
+            self.logger.info(f"📹 Remote video loaded (no page reload broadcast needed)")
+        else:
+            self.logger.info(f"📹 Streamer not available (sync_server: {hasattr(self, 'sync_server')})")
+
         return True
 
     @staticmethod
@@ -693,6 +722,9 @@ class VideoProcessor:
 
         # [REDUNDANCY REMOVED] - Call the new helper method
         self._update_video_parameters()
+
+        # Reinitialize GPU unwarp worker in case unwarp method changed
+        self._init_gpu_unwarp_worker()
 
         self.logger.info(f"Attempting to fetch frame {stored_frame_index} with new settings.")
         new_frame = self._get_specific_frame(stored_frame_index)
@@ -1256,11 +1288,21 @@ class VideoProcessor:
         # Check if user wants CPU v360 instead of GPU unwarp
         if self.vr_unwarp_method_override == 'v360':
             self.logger.info("User selected CPU v360 unwarp method - GPU unwarp disabled")
+            # Clean up existing GPU unwarp worker if switching from GPU to CPU v360
+            if self.gpu_unwarp_worker:
+                self.logger.info("Stopping existing GPU unwarp worker (switching to v360)")
+                self.gpu_unwarp_worker.stop()
+                self.gpu_unwarp_worker = None
             self.gpu_unwarp_enabled = False
             return
 
         # Only initialize for VR videos when GPU unwarp is enabled
         if self.determined_video_type != 'VR' or not ENABLE_GPU_UNWARP:
+            # Clean up GPU unwarp worker if it exists but shouldn't be used
+            if self.gpu_unwarp_worker:
+                self.logger.info("Stopping GPU unwarp worker (not VR or GPU unwarp disabled)")
+                self.gpu_unwarp_worker.stop()
+                self.gpu_unwarp_worker = None
             self.gpu_unwarp_enabled = False
             return
 
