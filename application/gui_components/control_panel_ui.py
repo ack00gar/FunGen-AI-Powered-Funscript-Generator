@@ -2631,9 +2631,12 @@ class ControlPanelUI:
             self.app.logger.info("Device Control: Creating DeviceParameterManager...")
             self.param_manager = DeviceParameterManager()
             self.app.logger.info("Device Control: DeviceParameterManager created successfully")
-            
+
+            # Initialize OSR profiles if not already present
+            self._initialize_osr_profiles()
+
             # UI state already initialized in __init__
-            
+
             self._device_control_initialized = True
             self.app.logger.info("Device Control initialized in Control Panel successfully")
             
@@ -2669,7 +2672,39 @@ class ControlPanelUI:
             self.app.logger.warning(f"Failed to update existing tracker managers: {e}")
             import traceback
             self.app.logger.warning(f"Traceback: {traceback.format_exc()}")
-    
+
+    def _initialize_osr_profiles(self):
+        """Initialize OSR profiles in app settings if not present."""
+        try:
+            from device_control.axis_control import DEFAULT_PROFILES, save_profile_to_settings
+
+            # Check if profiles already exist
+            existing_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
+
+            if not existing_profiles:
+                self.app.logger.info("Initializing OSR profiles from defaults...")
+
+                # Convert DEFAULT_PROFILES to settings format
+                profiles_dict = {}
+                for profile_name, profile_obj in DEFAULT_PROFILES.items():
+                    profiles_dict[profile_name] = save_profile_to_settings(profile_obj)
+
+                # Save to settings
+                self.app.app_settings.set("device_control_osr_profiles", profiles_dict)
+
+                # Set default selected profile if not set
+                if not self.app.app_settings.get("device_control_selected_profile"):
+                    self.app.app_settings.set("device_control_selected_profile", "Balanced")
+
+                self.app.logger.info(f"Initialized {len(profiles_dict)} OSR profiles")
+            else:
+                self.app.logger.info(f"OSR profiles already initialized ({len(existing_profiles)} profiles)")
+
+        except Exception as e:
+            self.app.logger.error(f"Failed to initialize OSR profiles: {e}")
+            import traceback
+            self.app.logger.error(f"Traceback: {traceback.format_exc()}")
+
     def _render_device_control_content(self):
         """Render the main device control interface with improved UX."""
         # Version info
@@ -4643,8 +4678,19 @@ class ControlPanelUI:
                         try:
                             from application.utils.feature_detection import is_feature_enabled
                             streamer_available = is_feature_enabled("streamer")
-                            if streamer_available and self._native_sync_manager and self._native_sync_manager.sync_server:
-                                clients_connected = len(self._native_sync_manager.sync_server.websocket_clients) > 0
+                            if streamer_available and self._native_sync_manager:
+                                # Check browser websocket clients
+                                if self._native_sync_manager.sync_server:
+                                    clients_connected = len(self._native_sync_manager.sync_server.websocket_clients) > 0
+
+                                # Also check HereSphere connections (active within last 30 seconds)
+                                if not clients_connected and self._native_sync_manager.heresphere_event_bridge:
+                                    import time
+                                    heresphere = self._native_sync_manager.heresphere_event_bridge
+                                    if heresphere.is_running and heresphere.last_event_time > 0:
+                                        time_since_last_event = time.time() - heresphere.last_event_time
+                                        if time_since_last_event < 30.0:  # Active within last 30 seconds
+                                            clients_connected = True
                         except Exception as e:
                             self.app.logger.debug(f"Error checking streamer availability: {e}")
 
