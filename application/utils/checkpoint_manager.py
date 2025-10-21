@@ -126,8 +126,16 @@ class CheckpointManager:
         self._active_checkpoints: Dict[str, CheckpointData] = {}
         # Throttling for verbose find logs: {video_path: (last_checkpoint_id, last_log_time)}
         self._last_find_log: Dict[str, Tuple[str, float]] = {}
-        
+
         logger.info(f"CheckpointManager initialized: dir={checkpoint_dir}, interval={checkpoint_interval}s")
+
+        # Auto-cleanup old checkpoints with missing videos on startup
+        try:
+            cleaned = self.cleanup_missing_video_checkpoints()
+            if cleaned > 0:
+                logger.info(f"Startup cleanup: removed {cleaned} orphaned checkpoint(s)")
+        except Exception as e:
+            logger.warning(f"Failed to perform startup checkpoint cleanup: {e}")
     
     def _generate_checkpoint_id(self, video_path: str, stage: ProcessingStage) -> str:
         """Generate unique checkpoint ID."""
@@ -511,7 +519,7 @@ class CheckpointManager:
                 if cleaned_count > 0:
                     logger.info(f"Cleaned up {cleaned_count} checkpoints with missing videos")
                 else:
-                    logger.info("No checkpoints with missing videos found")
+                    logger.debug("No checkpoints with missing videos found")
 
                 return cleaned_count
 
