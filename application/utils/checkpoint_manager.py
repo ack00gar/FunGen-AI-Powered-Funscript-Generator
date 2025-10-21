@@ -240,9 +240,9 @@ class CheckpointManager:
                 ]
                 
                 is_test_path = any(pattern in checkpoint_data.video_path for pattern in test_path_patterns)
-                
+
                 if not is_test_path and not os.path.exists(checkpoint_data.video_path):
-                    logger.warning(f"Video file missing for checkpoint: {checkpoint_data.video_path}")
+                    logger.debug(f"Video file missing for checkpoint: {checkpoint_data.video_path}")
                     return None
                 
                 logger.debug(f"Checkpoint loaded: {checkpoint_id}")
@@ -440,25 +440,85 @@ class CheckpointManager:
         """Remove all corrupted or invalid checkpoints."""
         with self._lock:
             cleaned_count = 0
-            
+
             try:
                 for checkpoint_file in self.checkpoint_dir.glob("*.checkpoint"):
                     checkpoint_id = checkpoint_file.stem
                     checkpoint_data = self.load_checkpoint(checkpoint_id)
-                    
+
                     if checkpoint_data is None:
                         # Corrupted or invalid
                         checkpoint_file.unlink()
                         cleaned_count += 1
                         logger.info(f"Removed corrupted checkpoint: {checkpoint_id}")
-                
+
                 logger.info(f"Cleaned up {cleaned_count} corrupted checkpoints")
                 return cleaned_count
-                
+
             except Exception as e:
                 logger.error(f"Failed to cleanup corrupted checkpoints: {e}")
                 return 0
-    
+
+    def cleanup_missing_video_checkpoints(self) -> int:
+        """
+        Remove checkpoints for videos that no longer exist.
+
+        This is useful for cleaning up old checkpoints when videos have been
+        moved or deleted, preventing console spam in CLI mode.
+
+        Returns:
+            Number of checkpoints removed
+        """
+        with self._lock:
+            cleaned_count = 0
+
+            try:
+                # Define test path patterns to skip
+                test_path_patterns = [
+                    "/path/to/",
+                    "/tmp/",
+                    "test_video",
+                    "dummy_video",
+                    "mock_video",
+                    "fake_video"
+                ]
+
+                for checkpoint_file in self.checkpoint_dir.glob("*.checkpoint"):
+                    try:
+                        checkpoint_id = checkpoint_file.stem
+
+                        # Read checkpoint without full validation
+                        with open(checkpoint_file, 'r') as f:
+                            data_dict = json.load(f)
+
+                        video_path = data_dict.get('video_path', '')
+
+                        # Skip test paths
+                        is_test_path = any(pattern in video_path for pattern in test_path_patterns)
+                        if is_test_path:
+                            continue
+
+                        # Check if video exists
+                        if not os.path.exists(video_path):
+                            checkpoint_file.unlink()
+                            cleaned_count += 1
+                            logger.info(f"Removed checkpoint for missing video: {video_path}")
+
+                    except Exception as e:
+                        logger.warning(f"Error checking checkpoint {checkpoint_file.name}: {e}")
+                        continue
+
+                if cleaned_count > 0:
+                    logger.info(f"Cleaned up {cleaned_count} checkpoints with missing videos")
+                else:
+                    logger.info("No checkpoints with missing videos found")
+
+                return cleaned_count
+
+            except Exception as e:
+                logger.error(f"Failed to cleanup missing video checkpoints: {e}")
+                return 0
+
     def shutdown(self):
         """Clean shutdown of checkpoint manager."""
         with self._lock:
