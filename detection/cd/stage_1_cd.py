@@ -563,6 +563,14 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
 
     det_model, pose_model = None, None
     try:
+        # Pre-import torchvision to prevent circular import errors during YOLO warmup
+        # This ensures torchvision.extension is fully initialized before lazy imports
+        try:
+            import torchvision
+            consumer_logger.debug(f"[S1 Consumer-{consumer_idx}] Pre-imported torchvision v{torchvision.__version__}")
+        except Exception as e:
+            consumer_logger.warning(f"[S1 Consumer-{consumer_idx}] Failed to pre-import torchvision: {e}")
+
         # Load BOTH models in the same worker
         consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Loading models...")
         det_model = YOLO(yolo_det_model_path, task='detect')
