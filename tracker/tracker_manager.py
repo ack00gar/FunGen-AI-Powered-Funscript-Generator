@@ -35,6 +35,11 @@ class TrackerManager:
         
         # Create funscript instance for accumulating tracking data
         self.funscript = DualAxisFunscript(logger=self.logger)
+
+        # Apply point simplification setting from app settings
+        if app_logic_instance and hasattr(app_logic_instance, 'app_settings'):
+            simplification_enabled = app_logic_instance.app_settings.get('funscript_point_simplification_enabled', True)
+            self.funscript.enable_point_simplification = simplification_enabled
         
         # Tracking state
         self.tracking_active = False
@@ -306,6 +311,12 @@ class TrackerManager:
         """Clean up current tracker and manager state."""
         self._cleanup_current_tracker()
         self.funscript = DualAxisFunscript(logger=self.logger)
+
+        # Reapply point simplification setting
+        if self.app and hasattr(self.app, 'app_settings'):
+            simplification_enabled = self.app.app_settings.get('funscript_point_simplification_enabled', True)
+            self.funscript.enable_point_simplification = simplification_enabled
+
         self.tracking_active = False
     
     def update_tracker_settings(self, **kwargs) -> bool:

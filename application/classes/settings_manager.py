@@ -143,7 +143,10 @@ class AppSettings:
             
             "live_oscillation_dynamic_amp_enabled": True,
             "live_oscillation_amp_window_ms": 4000,  # 4-second analysis window
-            
+
+            # --- Funscript Generation Settings ---
+            "funscript_point_simplification_enabled": True,  # Enable on-the-fly point simplification
+
             # --- Signal Enhancement Settings ---
             "enable_signal_enhancement": True,  # Enable frame difference based signal enhancement
             "signal_enhancement_motion_threshold_low": 12.0,  # Minimum motion for significant movement
