@@ -34,6 +34,9 @@ class DualAxisFunscript:
         self._cache_dirty_primary: bool = True
         self._cache_dirty_secondary: bool = True
 
+        # Point simplification settings
+        self.enable_point_simplification: bool = True  # Enable by default
+
 
         if logger:
             self.logger = logger
@@ -48,6 +51,53 @@ class DualAxisFunscript:
             self._cache_dirty_primary = True
         if axis == 'secondary' or axis == 'both':
             self._cache_dirty_secondary = True
+
+    def _simplify_last_points(self, actions_list: List[Dict]) -> None:
+        """
+        Ultra-lightweight point simplification that only checks the last 3 points.
+        Removes middle point if all 3 have equal position OR are collinear.
+
+        This runs on every frame so it must be EXTREMELY fast:
+        - Only checks last 3 points (constant time O(1))
+        - Simple integer arithmetic only
+        - No loops, no numpy, no complex math
+        - Early exits for common cases
+        """
+        # Need at least 3 points to simplify
+        if len(actions_list) < 3:
+            return
+
+        # Get the last 3 points (direct list access is fastest)
+        p1 = actions_list[-3]
+        p2 = actions_list[-2]
+        p3 = actions_list[-1]
+
+        pos1, pos2, pos3 = p1['pos'], p2['pos'], p3['pos']
+
+        # Fast check 1: All positions equal (most common redundant case)
+        if pos1 == pos2 == pos3:
+            actions_list.pop(-2)  # Remove middle point
+            return
+
+        # Fast check 2: Collinear test using integer cross product
+        # For points (t1,pos1), (t2,pos2), (t3,pos3) to be collinear:
+        # (t2-t1)*(pos3-pos1) == (t3-t1)*(pos2-pos1)
+        # We allow tolerance of 1 position unit for floating point errors
+
+        t1, t2, t3 = p1['at'], p2['at'], p3['at']
+
+        # Cross product calculation (all integer math)
+        cross = (t2 - t1) * (pos3 - pos1) - (t3 - t1) * (pos2 - pos1)
+
+        # Normalize by time range to make it position-based
+        time_range = t3 - t1
+        if time_range == 0:
+            return  # Can't determine if timestamps are identical
+
+        # If normalized cross product is ≤ time_range (equivalent to 1 pos unit tolerance)
+        # then points are collinear within tolerance
+        if abs(cross) <= time_range:
+            actions_list.pop(-2)  # Remove redundant middle point
 
     def _get_timestamps_for_axis(self, axis: str) -> List[int]:
         """
@@ -100,6 +150,10 @@ class DualAxisFunscript:
                 actions_target_list.insert(idx, new_action)
                 action_inserted_or_updated = True
                 self._invalidate_cache(axis_name) # Cache is now dirty
+
+                # Apply lightweight point simplification after insertion
+                if self.enable_point_simplification:
+                    self._simplify_last_points(actions_target_list)
 
         if action_inserted_or_updated and min_interval_ms > 0:
             if not actions_target_list:

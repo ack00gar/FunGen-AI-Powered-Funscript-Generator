@@ -1211,6 +1211,16 @@ class ControlPanelUI:
         if ch:
             settings.set("generate_roll_file", v)
 
+        # Point simplification
+        cur_simplify = settings.get("funscript_point_simplification_enabled", True)
+        ch, nv_simplify = imgui.checkbox("On the fly funscript simplification##EnablePointSimplify", cur_simplify)
+        if ch and nv_simplify != cur_simplify:
+            settings.set("funscript_point_simplification_enabled", nv_simplify)
+            # Apply to current funscript if exists
+            if hasattr(self.app, 'funscript') and self.app.funscript:
+                self.app.funscript.enable_point_simplification = nv_simplify
+        _tooltip_if_hovered("Remove redundant points on-the-fly (collinear/flat sections)\nReduces file size by 50-80% with negligible CPU overhead")
+
         imgui.text("Batch Processing Default:")
         cur = settings.get("batch_mode_overwrite_strategy", 0)
         if imgui.radio_button("Process All (skips own matching version)", cur == 0):
@@ -1919,7 +1929,7 @@ class ControlPanelUI:
         if ch and nv_decay != cur_decay:
             settings.set("oscillation_enable_decay", nv_decay)
         _tooltip_if_hovered("Gradually return to center when no motion is detected")
-        
+
         if cur_decay:
             # Hold duration
             imgui.text("Hold Duration (ms)")
