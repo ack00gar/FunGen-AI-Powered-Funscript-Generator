@@ -424,6 +424,8 @@ def video_processor_producer_proc(
         vp_app_proxy = VPAppProxy()
         vp_app_proxy.hardware_acceleration_method = hwaccel_method_producer
         vp_app_proxy.available_ffmpeg_hwaccels = hwaccel_avail_list_producer if hwaccel_avail_list_producer is not None else []
+        # Force v360 unwarp method for offline tracking to avoid low FPS with GPU unwarp (metal/opengl)
+        vp_app_proxy.app_settings = {'vr_unwarp_method': 'v360'}
 
         # Instantiate the VideoProcessor using the proxy object.
         vp_instance = VideoProcessor(
@@ -903,6 +905,8 @@ def perform_yolo_analysis(
     vp_app_proxy = VPAppProxy()
     vp_app_proxy.hardware_acceleration_method = hwaccel_method_arg
     vp_app_proxy.available_ffmpeg_hwaccels = hwaccel_avail_list_arg if hwaccel_avail_list_arg is not None else []
+    # Force v360 unwarp method for offline tracking to avoid low FPS with GPU unwarp (metal/opengl)
+    vp_app_proxy.app_settings = {'vr_unwarp_method': 'v360'}
 
     main_vp_for_info = VideoProcessor(app_instance=vp_app_proxy,
                                       fallback_logger_config={'logger_instance': process_logger})
