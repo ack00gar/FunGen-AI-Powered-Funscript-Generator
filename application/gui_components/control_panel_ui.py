@@ -1003,6 +1003,8 @@ class ControlPanelUI:
             nv = values[new_idx]
             if nv != cur_val:
                 settings.set("global_font_scale", nv)
+                # Disable auto system scaling when user manually changes font scale
+                settings.set("auto_system_scaling_enabled", False)
                 energy.reset_activity_timer()
         imgui.pop_item_width()
         _tooltip_if_hovered("Adjust the global UI font size. Applied instantly.")
@@ -1042,6 +1044,8 @@ class ControlPanelUI:
                 
                 if abs(recommended_scale - current_scale) > 0.05:  # Only update if significantly different
                     settings.set("global_font_scale", recommended_scale)
+                    # Disable auto system scaling when user manually detects scaling
+                    settings.set("auto_system_scaling_enabled", False)
                     energy.reset_activity_timer()
                     app.logger.info(f"Font scale updated to {recommended_scale} based on system scaling")
                 else:
