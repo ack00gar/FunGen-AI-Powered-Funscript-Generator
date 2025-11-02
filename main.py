@@ -185,6 +185,28 @@ def main():
         # Note: Windows uses 'spawn' by default, but we ensure it's set explicitly
         # This helps maintain consistent behavior across different Python versions
 
+        # Windows-specific: Suppress ConnectionResetError in asyncio
+        # This is a known Windows issue where the remote host forcibly closes connections
+        # https://github.com/python/cpython/issues/83413
+        import asyncio
+        def silence_asyncio_windows_errors(loop, context):
+            """Suppress ConnectionResetError on Windows (WinError 10054)"""
+            exception = context.get('exception')
+            if isinstance(exception, ConnectionResetError):
+                # This is normal when a client disconnects during streaming
+                logger.debug(f"Client disconnected (ConnectionResetError suppressed): {context.get('message', '')}")
+                return
+            # For other exceptions, use the default handler
+            loop.default_exception_handler(context)
+
+        # Set the custom exception handler for the current event loop
+        try:
+            loop = asyncio.get_event_loop()
+            loop.set_exception_handler(silence_asyncio_windows_errors)
+        except RuntimeError:
+            # No event loop yet, it will be created later
+            pass
+
     # Step 4: Parse command-line arguments
     parser = argparse.ArgumentParser(description="FunGen - Automatic Funscript Generation and Processing")
     parser.add_argument('input_path', nargs='?', default=None, help='Path to a video file, folder of videos, or funscript file. If omitted, GUI will start.')
