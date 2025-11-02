@@ -37,6 +37,11 @@ class DualAxisFunscript:
         # Point simplification settings
         self.enable_point_simplification: bool = True  # Enable by default
 
+        # Point simplification statistics
+        self._simplification_stats_primary = {'total_removed': 0, 'total_considered': 0, 'start_time_ms': 0}
+        self._simplification_stats_secondary = {'total_removed': 0, 'total_considered': 0, 'start_time_ms': 0}
+        self._last_simplification_log_time = 0
+        self._simplification_log_interval_sec = 10  # Log every 10 seconds
 
         if logger:
             self.logger = logger
@@ -52,7 +57,75 @@ class DualAxisFunscript:
         if axis == 'secondary' or axis == 'both':
             self._cache_dirty_secondary = True
 
-    def _simplify_last_points(self, actions_list: List[Dict]) -> None:
+    def _maybe_log_simplification_stats(self):
+        """
+        Periodically log point simplification statistics (every 10 seconds).
+        Shows time window, frames considered, and reduction percentage.
+        """
+        import time
+        current_time = time.time()
+
+        # Only log every N seconds to avoid spam
+        if current_time - self._last_simplification_log_time < self._simplification_log_interval_sec:
+            return
+
+        self._last_simplification_log_time = current_time
+        self._log_simplification_stats_internal()
+
+    def _log_simplification_stats_internal(self):
+        """Internal helper to log stats (called by periodic logger and final summary)."""
+        # Log stats for primary axis if active
+        stats_p = self._simplification_stats_primary
+        if stats_p['total_considered'] > 0:
+            reduction_pct = (stats_p['total_removed'] / stats_p['total_considered']) * 100
+            current_points = len(self.primary_actions)
+            would_have_been = current_points + stats_p['total_removed']
+
+            # Calculate time window
+            if current_points > 0 and stats_p['start_time_ms'] > 0:
+                time_window_ms = self.primary_actions[-1]['at'] - stats_p['start_time_ms']
+                time_window_sec = time_window_ms / 1000.0
+
+                self.logger.info(
+                    f"📊 Point Simplification (Primary): {time_window_sec:.1f}s window, "
+                    f"{stats_p['total_considered']:,} frames → {stats_p['total_removed']:,} points removed ({reduction_pct:.1f}% reduction), "
+                    f"{would_have_been:,} → {current_points:,} points"
+                )
+
+        # Log stats for secondary axis if active
+        stats_s = self._simplification_stats_secondary
+        if stats_s['total_considered'] > 0:
+            reduction_pct = (stats_s['total_removed'] / stats_s['total_considered']) * 100
+            current_points = len(self.secondary_actions)
+            would_have_been = current_points + stats_s['total_removed']
+
+            # Calculate time window
+            if current_points > 0 and stats_s['start_time_ms'] > 0:
+                time_window_ms = self.secondary_actions[-1]['at'] - stats_s['start_time_ms']
+                time_window_sec = time_window_ms / 1000.0
+
+                self.logger.info(
+                    f"📊 Point Simplification (Secondary): {time_window_sec:.1f}s window, "
+                    f"{stats_s['total_considered']:,} frames → {stats_s['total_removed']:,} points removed ({reduction_pct:.1f}% reduction), "
+                    f"{would_have_been:,} → {current_points:,} points"
+                )
+
+    def log_final_simplification_summary(self):
+        """
+        Log final point simplification summary (called when tracking stops).
+        Forces a log regardless of time interval.
+        """
+        # Force log if any simplification happened
+        if (self._simplification_stats_primary['total_considered'] > 0 or
+            self._simplification_stats_secondary['total_considered'] > 0):
+            self.logger.info("📊 Final Point Simplification Summary:")
+            self._log_simplification_stats_internal()
+            # Reset stats for next session
+            self._simplification_stats_primary = {'total_removed': 0, 'total_considered': 0, 'start_time_ms': 0}
+            self._simplification_stats_secondary = {'total_removed': 0, 'total_considered': 0, 'start_time_ms': 0}
+            self._last_simplification_log_time = 0
+
+    def _simplify_last_points(self, actions_list: List[Dict], axis: str = 'primary') -> None:
         """
         Ultra-lightweight point simplification that only checks the last 3 points.
         Removes middle point if all 3 have equal position OR are collinear.
@@ -63,9 +136,18 @@ class DualAxisFunscript:
         - No loops, no numpy, no complex math
         - Early exits for common cases
         """
+        # Track statistics for this axis
+        stats = self._simplification_stats_primary if axis == 'primary' else self._simplification_stats_secondary
+
         # Need at least 3 points to simplify
         if len(actions_list) < 3:
             return
+
+        # Initialize start time if first simplification
+        if stats['start_time_ms'] == 0 and len(actions_list) >= 3:
+            stats['start_time_ms'] = actions_list[-3]['at']
+
+        stats['total_considered'] += 1
 
         # Get the last 3 points (direct list access is fastest)
         p1 = actions_list[-3]
@@ -77,6 +159,8 @@ class DualAxisFunscript:
         # Fast check 1: All positions equal (most common redundant case)
         if pos1 == pos2 == pos3:
             actions_list.pop(-2)  # Remove middle point
+            stats['total_removed'] += 1
+            self._maybe_log_simplification_stats()
             return
 
         # Fast check 2: Collinear test using integer cross product
@@ -98,6 +182,8 @@ class DualAxisFunscript:
         # then points are collinear within tolerance
         if abs(cross) <= time_range:
             actions_list.pop(-2)  # Remove redundant middle point
+            stats['total_removed'] += 1
+            self._maybe_log_simplification_stats()
 
     def _get_timestamps_for_axis(self, axis: str) -> List[int]:
         """
@@ -153,7 +239,7 @@ class DualAxisFunscript:
 
                 # Apply lightweight point simplification after insertion
                 if self.enable_point_simplification:
-                    self._simplify_last_points(actions_target_list)
+                    self._simplify_last_points(actions_target_list, axis=axis_name)
 
         if action_inserted_or_updated and min_interval_ms > 0:
             if not actions_target_list:
