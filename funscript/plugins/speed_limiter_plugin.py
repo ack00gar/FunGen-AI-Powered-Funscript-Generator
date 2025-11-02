@@ -58,11 +58,11 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
                 'constraints': {'min': 0, 'max': 50}
             },
             'speed_threshold': {
-                'type': float,
+                'type': int,
                 'required': False,
-                'default': 500.0,
+                'default': 500,
                 'description': 'Maximum allowed speed (position change per time)',
-                'constraints': {'min': 0.1, 'max': 1000.0}
+                'constraints': {'min': 50, 'max': 1000, 'step': 50}
             },
             'small_movement_threshold': {
                 'type': int,
