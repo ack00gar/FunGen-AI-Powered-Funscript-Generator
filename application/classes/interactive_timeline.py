@@ -76,11 +76,7 @@ class InteractiveFunscriptTimeline:
         self.keyframe_time_tolerance = self.app.app_settings.get(
             f"timeline{self.timeline_num}_keyframe_default_time_tol", 50)
 
-        # --- SPEED LIMITER STATE ---
-        self.show_speed_limiter_popup = False
-        self.min_interval = self.app.app_settings.get(f"timeline{self.timeline_num}_min_interval", 60)
-        self.vibe_amount = self.app.app_settings.get(f"timeline{self.timeline_num}_vibe_amount", 0)
-        self.speed_threshold = self.app.app_settings.get(f"timeline{self.timeline_num}_speed_threshold", 500.0)
+        # Speed Limiter migrated to plugin system - parameters managed by PluginUIManager
 
         # Get initial defaults from app_settings (AppLogic holds app_settings directly)
         self.sg_window_length = self.app.app_settings.get(f"timeline{self.timeline_num}_sg_default_window", 5)
@@ -137,8 +133,6 @@ class InteractiveFunscriptTimeline:
         self.is_marqueeing = False
         self.marquee_start_screen_pos = None
         self.marquee_end_screen_pos = None
-
-        self.shift_frames_amount = 1
 
         # Unified interaction flag, replacing is_interacting_with_pan_zoom and app_state.timeline_interaction_active
         self.is_interacting: bool = False
@@ -514,28 +508,6 @@ class InteractiveFunscriptTimeline:
             self.clear_preview()
 
 
-    def _perform_time_shift(self, frame_delta: int):
-        fs_proc = self.app.funscript_processor
-        video_fps_for_calc = self.app.processor.fps if self.app.processor and self.app.processor.fps and self.app.processor.fps > 0 else 0
-        if video_fps_for_calc <= 0:
-            self.app.logger.warning(
-                f"T{self.timeline_num}: Cannot shift time. Video FPS is not available.",
-                extra={"status_message": True},
-            )
-            return
-
-        time_delta_ms = int(round((frame_delta / video_fps_for_calc) * 1000.0))
-        op_desc = f"Shifted All Points by {frame_delta} frames"
-
-        fs_proc._record_timeline_action(self.timeline_num, op_desc)
-        if self._call_funscript_method('shift_points_time', 'time shift', time_delta_ms=time_delta_ms):
-            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-            self.app.logger.info(
-                f"{op_desc} on T{self.timeline_num}.",
-                extra={"status_message": True},
-            )
-
-    # --- COPY/PASTE HELPER METHODS ---
     def _get_selected_actions_for_copy(self) -> List[Dict]:
         actions_list_ref = self._get_actions_list_ref()
         if not actions_list_ref: return []
@@ -762,66 +734,6 @@ class InteractiveFunscriptTimeline:
         self.selected_action_idx = min(new_indices) if new_indices else -1
 
     # --- Bulk Operations Direct Calls to Funscript Object ---
-    def _call_funscript_method(self, method_name: str, error_context: str, **kwargs) -> bool:
-        funscript_instance, axis_name = self._get_target_funscript_details()
-        if not funscript_instance or not axis_name:
-            self.app.logger.warning(
-                f"T{self.timeline_num}: Cannot {error_context}. Funscript object not found.",
-                extra={"status_message": True},
-            )
-            return False
-        try:
-            method_to_call = getattr(funscript_instance, method_name)
-            method_to_call(axis=axis_name, **kwargs)
-            return True
-        except Exception as e:
-            self.app.logger.error(
-                f"T{self.timeline_num} Error in {error_context} ({method_name}): {str(e)}",
-                exc_info=True,
-                extra={"status_message": True},
-            )
-            return False
-
-    def _call_funscript_method_with_result(self, method_name: str, error_context: str, **kwargs) -> Optional[Dict]:
-        """ Helper to call a method on the funscript object that is expected to return a result dictionary. """
-        funscript_instance, axis_name = self._get_target_funscript_details()
-        if not funscript_instance or not axis_name:
-            self.app.logger.warning(
-                f"T{self.timeline_num}: Cannot {error_context}. Funscript object not found.",
-                extra={"status_message": True},
-            )
-            return None
-        try:
-            method_to_call = getattr(funscript_instance, method_name)
-            result = method_to_call(axis=axis_name, **kwargs)
-            return result
-        except Exception as e:
-            self.app.logger.error(
-                f"T{self.timeline_num} Error in {error_context} ({method_name}): {str(e)}",
-                exc_info=True,
-                extra={"status_message": True},
-            )
-            return None
-
-    def _perform_autotune_sg(
-            self,
-            sat_low: int,
-            sat_high: int,
-            max_window: int,
-            polyorder: int,
-            selected_indices: Optional[List[int]],
-        ):
-            """Wrapper to call the auto_tune_sg_filter method on the funscript object."""
-            return self._call_funscript_method_with_result(
-                "auto_tune_sg_filter",
-                "auto-tune",
-                saturation_low=sat_low,
-                saturation_high=sat_high,
-                max_window_size=max_window,
-                polyorder=polyorder,
-                selected_indices=selected_indices,
-            )
-
     def _perform_ultimate_autotune(self) -> bool:
         """
         Runs the ultimate autotune pipeline and applies the result using the undo system.
@@ -857,104 +769,6 @@ class InteractiveFunscriptTimeline:
             )
             return False
 
-    def _perform_sg_filter(self, window_length: int, polyorder: int, selected_indices: Optional[List[int]]):
-        return self._call_funscript_method(
-            "apply_savitzky_golay",
-            "SG filter",
-            window_length=window_length,
-            polyorder=polyorder,
-            selected_indices=selected_indices,
-        )
-
-    def _perform_speed_limiter(self, min_interval: int, vibe_amount: int, speed_threshold: float):
-        return self._call_funscript_method(
-            "apply_speed_limiter",
-            "Speed Limiter",
-            min_interval=min_interval,
-            vibe_amount=vibe_amount,
-            speed_threshold=speed_threshold,
-        )
-
-    def _perform_rdp_simplification(
-            self,
-            epsilon: float,
-            selected_indices: Optional[List[int]],
-        ):
-            return self._call_funscript_method(
-                "simplify_rdp",
-                "RDP simplification",
-                epsilon=epsilon,
-                selected_indices=selected_indices,
-            )
-
-    def _perform_peaks_simplification(
-            self,
-            height: float,
-            threshold: float,
-            distance: float,
-            prominence: float,
-            width: float,
-            selected_indices: Optional[List[int]],
-        ):
-            return self._call_funscript_method(
-                "find_peaks_and_valleys",
-                "Peak finding",
-                height=height,
-                threshold=threshold,
-                distance=distance,
-                prominence=prominence,
-                width=width,
-                selected_indices=selected_indices,
-            )
-
-    def _perform_inversion(self, selected_indices: Optional[List[int]]):
-        return self._call_funscript_method(
-            "invert_points_values",
-            "inversion",
-            selected_indices=selected_indices,
-        )
-
-    def _perform_clamp(self, clamp_value: int, selected_indices: Optional[List[int]]):
-        return self._call_funscript_method(
-            "clamp_points_values",
-            f"clamp to {clamp_value}",
-            clamp_value=clamp_value,
-            selected_indices=selected_indices,
-        )
-
-    def _perform_amplify(self, scale_factor: float, center_value: int, selected_indices: Optional[List[int]]):
-        return self._call_funscript_method(
-            "amplify_points_values",
-            "Amplify",
-            scale_factor=scale_factor,
-            center_value=center_value,
-            selected_indices=selected_indices,
-        )
-
-    def _perform_resample(self, selected_indices: Optional[List[int]]):
-        # We can hardcode the resample rate for now, or add a popup later.
-        # 50ms is a good starting point.
-        resample_rate = 50
-        return self._call_funscript_method(
-            "apply_peak_preserving_resample",
-            "Resample",
-            resample_rate_ms=resample_rate,
-            selected_indices=selected_indices,
-        )
-
-    def _perform_keyframe_simplification(
-            self,
-            position_tolerance: int,
-            time_tolerance_ms: int,
-            selected_indices: Optional[List[int]],
-        ):
-            return self._call_funscript_method(
-                "simplify_to_keyframes",
-                "Keyframe Extraction",
-                position_tolerance=position_tolerance,
-                time_tolerance_ms=time_tolerance_ms,
-                selected_indices=selected_indices,
-            )
 
     def _get_ultimate_autotune_params(self) -> Dict:
         """Helper to gather all Ultimate Autotune settings from the UI state."""
@@ -1033,8 +847,20 @@ class InteractiveFunscriptTimeline:
             # Get selection information for apply to selection
             context = self.plugin_manager.plugin_contexts.get(plugin_name)
             selected_indices = None
-            if context and context.apply_to_selection and self.multi_selected_action_indices:
-                selected_indices = list(self.multi_selected_action_indices)
+
+            # For direct-apply plugins (no popup), automatically use selection if points are selected
+            # For popup plugins, respect the apply_to_selection checkbox
+            if context:
+                is_direct_apply = (hasattr(context.plugin_instance, 'ui_preference') and
+                                  context.plugin_instance.ui_preference == 'direct')
+
+                if is_direct_apply:
+                    # Direct apply: use selection if points are selected
+                    if self.multi_selected_action_indices:
+                        selected_indices = list(self.multi_selected_action_indices)
+                elif context.apply_to_selection and self.multi_selected_action_indices:
+                    # Popup plugin: only use selection if checkbox is checked
+                    selected_indices = list(self.multi_selected_action_indices)
             
             # Apply the plugin
             result = self.plugin_manager.apply_plugin(plugin_name, funscript_instance, axis_name, selected_indices)
@@ -1076,87 +902,6 @@ class InteractiveFunscriptTimeline:
         
         # Fallback to legacy system for hardcoded filters
         self._legacy_update_preview(filter_type, funscript_instance, axis_name)
-
-    def _try_plugin_preview(self, filter_type: str, funscript_instance, axis_name: str) -> bool:
-        """Try to generate preview using the new plugin system."""
-        # Map filter types to plugin names
-        plugin_mapping = {
-            "ultimate": "Ultimate Autotune",
-            "autotune": "Ultimate Autotune",  # Fixed: autotune filter maps to same plugin
-            # Add other plugins as they're converted
-        }
-
-        plugin_name = plugin_mapping.get(filter_type)
-        if not plugin_name:
-            return False
-        
-        try:
-            success = self.plugin_manager.generate_preview(plugin_name, funscript_instance, axis_name)
-            if success:
-                preview_actions = self.plugin_manager.get_preview_actions(plugin_name)
-                self.set_preview_actions(preview_actions)
-                return True
-        except Exception as e:
-            self.app.logger.error(f"Plugin preview failed for {plugin_name}: {e}")
-        
-        return False
-
-    def _legacy_update_preview(self, filter_type: str, funscript_instance, axis_name: str):
-        """Legacy preview system for hardcoded filters."""
-        # Map filter to selection flag attribute name
-        selection_flag_attr = {
-            "sg": "sg_apply_to_selection",
-            "rdp": "rdp_apply_to_selection",
-            "amp": "amp_apply_to_selection",
-            "keyframe": "keyframe_apply_to_selection",
-            "peaks": "peaks_apply_to_selection",
-            "autotune": "autotune_apply_to_selection",
-            # Intentionally no dedicated flag for "speed_limiter" (defaults to full timeline)
-        }
-
-        apply_to_selection = bool(getattr(self, selection_flag_attr.get(filter_type, ""), False))
-        indices_to_process = list(self.multi_selected_action_indices) if apply_to_selection else None
-
-        # Parameter builders per filter for clarity and minimal branching
-        s = self
-        param_builders = {
-            "sg": lambda: {"window_length": s.sg_window_length, "polyorder": s.sg_poly_order},
-            "rdp": lambda: {"epsilon": s.rdp_epsilon},
-            "amp": lambda: {"scale_factor": s.amp_scale_factor, "center_value": s.amp_center_value},
-            "keyframe": lambda: {
-                "position_tolerance": s.keyframe_position_tolerance,
-                "time_tolerance_ms": s.keyframe_time_tolerance,
-            },
-            "peaks": lambda: {
-                "height": s.peaks_height,
-                "threshold": s.peaks_threshold,
-                "distance": s.peaks_distance,
-                "prominence": s.peaks_prominence,
-                "width": s.peaks_width,
-            },
-            "autotune": lambda: {
-                "saturation_low": s.autotune_sat_low,
-                "saturation_high": s.autotune_sat_high,
-                "max_window_size": s.autotune_max_window,
-                "polyorder": s.autotune_polyorder,
-            },
-            "speed_limiter": lambda: {
-                "min_interval": s.min_interval,
-                "vibe_amount": s.vibe_amount,
-                "speed_threshold": s.speed_threshold,
-            },
-        }
-
-        params_builder = param_builders.get(filter_type)
-        params = params_builder() if params_builder else {}
-
-        generated_preview_actions = funscript_instance.calculate_filter_preview(
-            axis=axis_name,
-            filter_type=filter_type,
-            filter_params=params,
-            selected_indices=indices_to_process,
-        )
-        self.set_preview_actions(generated_preview_actions)
 
     def _handle_copy_full_timeline_to_other(self):
         fs_proc = self.app.funscript_processor
@@ -1436,35 +1181,8 @@ class InteractiveFunscriptTimeline:
                         imgui.pop_style_var()
                         imgui.internal.pop_item_flag()
 
-                # --- Time Shift controls ---
-                imgui.same_line()
-                time_shift_disabled_bool = not allow_editing_timeline or not has_actions or not (
-                        self.app.processor and self.app.processor.fps and self.app.processor.fps > 0)
-                if time_shift_disabled_bool:
-                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-                if imgui.button(f"<<##ShiftLeft{window_id_suffix}"):
-                    if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(
-                        -self.shift_frames_amount)
-                imgui.same_line()
-
-                imgui.push_item_width(80 * self.app.app_settings.get("global_font_scale", 1.0))
-                _, self.shift_frames_amount = imgui.input_int(
-                    f"Frames##ShiftAmount{window_id_suffix}",
-                    self.shift_frames_amount,
-                    1,
-                    10,
-                )
-                if self.shift_frames_amount < 0: self.shift_frames_amount = 0
-                imgui.pop_item_width()
-                imgui.same_line()
-                if imgui.button(f">>##ShiftRight{window_id_suffix}"):
-                    if not time_shift_disabled_bool and self.shift_frames_amount > 0: self._perform_time_shift(self.shift_frames_amount)
-                if time_shift_disabled_bool: imgui.pop_style_var(); imgui.internal.pop_item_flag()
-                imgui.same_line()
-
                 # --- Zoom Buttons ---
+                imgui.same_line()
                 video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
                 # Allow scrubbing if not actively processing, or if paused (is_processing True and pause_event is set)
                 processor = self.app.processor
@@ -1515,82 +1233,7 @@ class InteractiveFunscriptTimeline:
 
             # --- Popup Windows ---
             # region Popups
-            # --- Speed Limiter Settings Window ---
-            speed_window_title = f"Speed Limiter Settings (Timeline {self.timeline_num})##SpeedLimiterSettingsWindow{window_id_suffix}"
-            if self.show_speed_limiter_popup:
-                # On first open, generate an initial preview
-                if not self.is_previewing:
-                    self._update_preview("speed_limiter")
-
-                main_viewport = imgui.get_main_viewport()
-                popup_pos_x = main_viewport.pos[0] + (main_viewport.size[0] - 400) * 0.5
-                popup_pos_y = main_viewport.pos[1] + (main_viewport.size[1] - 220) * 0.5
-                imgui.set_next_window_position(popup_pos_x, popup_pos_y, condition=imgui.APPEARING)
-                imgui.set_next_window_size(400, 0, condition=imgui.APPEARING)
-                window_expanded, self.show_speed_limiter_popup = imgui.begin(
-                    speed_window_title,
-                    closable=True,
-                    flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE,
-                )
-
-                if window_expanded:
-                    imgui.text(f"Speed Limiter (Timeline {self.timeline_num})")
-                    imgui.separator()
-
-                    interval_changed, self.min_interval = imgui.slider_int(
-                        "Min Interval (ms)##HandyMinIntervalPopup",
-                        self.min_interval,
-                        0,
-                        200,
-                    )
-                    if interval_changed: self._update_preview("speed_limiter")
-                    if imgui.is_item_hovered(): imgui.set_tooltip("Action points closer than this (in ms) are removed.")
-
-                    # vibe_changed, self.vibe_amount = imgui.slider_int("Vibration Amplitude##HandyVibeAmountPopup",
-                    #                                                        self.vibe_amount, 0, 100)
-                    # if vibe_changed: self._update_preview('speed_limiter')
-                    # if imgui.is_item_hovered(): imgui.set_tooltip("Vibration starting amplitude (1-100).")
-
-                    speed_changed, self.speed_threshold = imgui.slider_float(
-                        "Speed Threshold##HandySpeedThresholdPopup",
-                        self.speed_threshold,
-                        100.0,
-                        1000.0,
-                        "%.1f",
-                    )
-                    if speed_changed: self._update_preview("speed_limiter")
-                    if imgui.is_item_hovered(): imgui.set_tooltip(
-                        "Speed limit for the script. 500 is the default 'Handy' limit.")
-
-                    imgui.separator()
-
-                    if imgui.button(f"Apply##HandyBTApplyPop{window_id_suffix}"):
-                        op_desc = f"Applied Speed Limiter (Interval:{self.min_interval}, Vibe:{self.vibe_amount}, Speed:{self.speed_threshold:.1f})"
-                        fs_proc._record_timeline_action(self.timeline_num, op_desc)
-
-                        if self._perform_speed_limiter(self.min_interval, self.vibe_amount, self.speed_threshold):
-                            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_min_interval", self.min_interval)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_vibe_amount", self.vibe_amount)
-                            self.app.app_settings.set(f"timeline{self.timeline_num}_speed_threshold", self.speed_threshold)
-                            self.app.logger.info(
-                                f"{op_desc} on T{self.timeline_num}.",
-                                extra={"status_message": True},
-                            )
-
-                        self.clear_preview()
-                        self.show_speed_limiter_popup = False
-
-                    imgui.same_line()
-                    if imgui.button(f"Cancel##HandyBTCancelPop{window_id_suffix}"):
-                        self.clear_preview()
-                        self.show_speed_limiter_popup = False
-
-                if not self.show_speed_limiter_popup:
-                    self.clear_preview()
-
-                if window_expanded:
-                    imgui.end()
+            # Speed Limiter migrated to plugin system - window rendered by PluginUIRenderer
 
             # --- SG Settings Window ---
             sg_window_title = f"Savitzky-Golay Filter Settings (Timeline {self.timeline_num})##SGSettingsWindow{window_id_suffix}"
@@ -3120,9 +2763,6 @@ class InteractiveFunscriptTimeline:
                     for i in range(len(pxs) - 1):
                         draw_list.add_line(pxs[i], pys[i], pxs[i + 1], pys[i + 1], preview_line_color, 2.0)
 
-                # REMOVED: No longer rendering preview points unconditionally
-                # Points should only be shown when hovered or selected, even for previews
-            
             # --- Draw Plugin Preview Overlays ---
             # Render preview overlays from the new plugin system
             if self.plugin_preview_renderer:

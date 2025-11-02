@@ -933,15 +933,15 @@ class AppFunscriptProcessor:
         self._record_timeline_action(timeline_num, action_desc)  # Record state BEFORE
 
         op_dispatch = {
-            'clamp_0': lambda: target_fs_obj.clamp_points_values(axis, 0, s_time, e_time, sel_idx),
-            'clamp_100': lambda: target_fs_obj.clamp_points_values(axis, 100, s_time, e_time, sel_idx),
-            'invert': lambda: target_fs_obj.invert_points_values(axis, s_time, e_time, sel_idx),
+            'clamp_0': lambda: target_fs_obj.apply_plugin('Value Clamp', axis=axis, clamp_value=0, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
+            'clamp_100': lambda: target_fs_obj.apply_plugin('Value Clamp', axis=axis, clamp_value=100, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
+            'invert': lambda: target_fs_obj.apply_plugin('Invert', axis=axis, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
             'clear': lambda: target_fs_obj.clear_points(axis, s_time, e_time, sel_idx),
-            'amplify': lambda: target_fs_obj.amplify_points_values(axis, self.amplify_factor_input,
-                                                                   self.amplify_center_input, s_time, e_time, sel_idx),
-            'apply_sg': lambda: target_fs_obj.apply_savitzky_golay(axis, self.sg_window_length_input,
-                                                                   self.sg_polyorder_input, s_time, e_time, sel_idx),
-            'apply_rdp': lambda: target_fs_obj.simplify_rdp(axis, self.rdp_epsilon_input, s_time, e_time, sel_idx),
+            'amplify': lambda: target_fs_obj.apply_plugin('Amplify', axis=axis, scale_factor=self.amplify_factor_input,
+                                                         center_value=self.amplify_center_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
+            'apply_sg': lambda: target_fs_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=self.sg_window_length_input,
+                                                           polyorder=self.sg_polyorder_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
+            'apply_rdp': lambda: target_fs_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=self.rdp_epsilon_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
             'apply_dynamic_amp': lambda: self.apply_dynamic_amplification(axis, self.dynamic_amp_window_ms_input,
                                                                           s_time, e_time, sel_idx)
 
@@ -1489,13 +1489,11 @@ class AppFunscriptProcessor:
                     self.logger.debug(
                         f"Processing {axis} in '{chapter.position_long_name}' ({effective_start_ms}-{effective_end_ms}ms) with params: {params}")
 
-                    funscript_obj.apply_savitzky_golay(axis, sg_win, sg_poly, effective_start_ms, effective_end_ms)
-                    funscript_obj.simplify_rdp(axis, rdp_eps, effective_start_ms, effective_end_ms)
+                    funscript_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=sg_win, polyorder=sg_poly, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
+                    funscript_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=rdp_eps, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
                     if axis == 'primary':
-                        funscript_obj.clamp_points_thresholded(axis, clamp_low, clamp_high, effective_start_ms,
-                                                               effective_end_ms)
-                    funscript_obj.amplify_points_values(axis, amp_scale, amp_center, effective_start_ms,
-                                                        effective_end_ms)
+                        funscript_obj.apply_plugin('Threshold Clamp', axis=axis, lower_threshold=clamp_low, upper_threshold=clamp_high, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
+                    funscript_obj.apply_plugin('Amplify', axis=axis, scale_factor=amp_scale, center_value=amp_center, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
                     # if output_min != 0 or output_max != 100: # Only apply if it's not the default 0-100
                     #     funscript_obj.scale_points_to_range(axis, output_min, output_max, effective_start_ms, effective_end_ms)
 
@@ -1503,14 +1501,11 @@ class AppFunscriptProcessor:
                 self.logger.info(f"No chapters found. Applying default settings to {axis} axis for the full range.")
                 params = default_params  # Use the robust defaults
                 # Direct access is now safe because we guaranteed the keys exist.
-                funscript_obj.apply_savitzky_golay(axis, params["sg_window"], params["sg_polyorder"], range_start_ms,
-                                                   range_end_ms)
-                funscript_obj.simplify_rdp(axis, params["rdp_epsilon"], range_start_ms, range_end_ms)
+                funscript_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=params["sg_window"], polyorder=params["sg_polyorder"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
+                funscript_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=params["rdp_epsilon"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 if axis == 'primary':
-                    funscript_obj.clamp_points_thresholded(axis, params["clamp_lower"], params["clamp_upper"],
-                                                           range_start_ms, range_end_ms)
-                funscript_obj.amplify_points_values(axis, params["scale_factor"], params["center_value"],
-                                                    range_start_ms, range_end_ms)
+                    funscript_obj.apply_plugin('Threshold Clamp', axis=axis, lower_threshold=params["clamp_lower"], upper_threshold=params["clamp_upper"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
+                funscript_obj.apply_plugin('Amplify', axis=axis, scale_factor=params["scale_factor"], center_value=params["center_value"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 # output_min = params.get("output_min", 0)
                 # output_max = params.get("output_max", 100)
                 # if output_min != 0 or output_max != 100:
@@ -1529,8 +1524,7 @@ class AppFunscriptProcessor:
             final_op_desc = op_desc + " + Final RDP"
             for axis in ['primary', 'secondary']:
                 if getattr(funscript_obj, f"{axis}_actions", []):
-                    funscript_obj.simplify_rdp(axis=axis, epsilon=final_rdp_epsilon, start_time_ms=None,
-                                               end_time_ms=None, selected_indices=None)
+                    funscript_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=final_rdp_epsilon, start_time_ms=None, end_time_ms=None, selected_indices=None)
             if funscript_obj.primary_actions:
                 self._finalize_action_and_update_ui(1, final_op_desc)
             if funscript_obj.secondary_actions:

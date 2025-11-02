@@ -70,6 +70,13 @@ class PluginUIRenderer:
                 else:
                     # Open configuration window
                     self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
+
+                    # Auto-tick "apply to selection" if points are selected
+                    if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
+                        if self.timeline_reference.multi_selected_action_indices:
+                            context = self.plugin_manager.plugin_contexts.get(plugin_name)
+                            if context:
+                                context.apply_to_selection = True
                 any_button_clicked = True
             
             # Add tooltip
