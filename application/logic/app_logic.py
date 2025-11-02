@@ -1441,7 +1441,7 @@ class ApplicationLogic:
 
                 # 3. SAVE THE FINAL FUNSCRIPT
                 any_processing_applied = post_processing_enabled or autotune_enabled or simple_mode_autotune_applied
-                
+
                 if any_processing_applied:
                     self.logger.info("Saving final (post-processed) funscript.")
                     chapters_for_save = self.funscript_processor.video_chapters

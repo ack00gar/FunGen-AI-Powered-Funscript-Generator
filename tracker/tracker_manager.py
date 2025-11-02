@@ -193,13 +193,17 @@ class TrackerManager:
         """Stop tracking with direct tracker call."""
         if not self._current_tracker:
             return
-            
+
         try:
             self.tracking_active = False
             if hasattr(self._current_tracker, 'stop_tracking'):
                 self._current_tracker.stop_tracking()
             elif hasattr(self._current_tracker, 'cleanup'):
                 self._current_tracker.cleanup()
+
+            # Log final point simplification summary
+            if self.funscript and hasattr(self.funscript, 'log_final_simplification_summary'):
+                self.funscript.log_final_simplification_summary()
         except Exception as e:
             self.logger.error(f"Failed to stop tracking: {e}")
 

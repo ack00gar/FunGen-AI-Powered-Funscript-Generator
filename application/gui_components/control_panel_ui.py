@@ -1220,9 +1220,10 @@ class ControlPanelUI:
         ch, nv_simplify = imgui.checkbox("On the fly funscript simplification##EnablePointSimplify", cur_simplify)
         if ch and nv_simplify != cur_simplify:
             settings.set("funscript_point_simplification_enabled", nv_simplify)
-            # Apply to current funscript if exists
-            if hasattr(self.app, 'funscript') and self.app.funscript:
-                self.app.funscript.enable_point_simplification = nv_simplify
+            # Apply to active funscript (used during live tracking)
+            if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
+                self.app.processor.tracker.funscript.enable_point_simplification = nv_simplify
+                self.app.logger.info(f"Point simplification {'enabled' if nv_simplify else 'disabled'} for active funscript")
         _tooltip_if_hovered("Remove redundant points on-the-fly (collinear/flat sections)\nReduces file size by 50-80% with negligible CPU overhead")
 
         imgui.text("Batch Processing Default:")
