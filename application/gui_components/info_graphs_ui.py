@@ -721,11 +721,20 @@ class InfoGraphsUI:
     def _render_content_funscript_info(self, timeline_num):
         self.funscript_info_perf.start_timing()
         fs_proc = self.app.funscript_processor
-        stats = (
-            fs_proc.funscript_stats_t1
-            if timeline_num == 1
-            else fs_proc.funscript_stats_t2
-        )
+
+        # Get stats directly from the funscript object (always current)
+        target_funscript, axis_name = fs_proc._get_target_funscript_object_and_axis(timeline_num)
+        if target_funscript and axis_name:
+            # Get live stats directly from the funscript object
+            stats = target_funscript.get_actions_statistics(axis=axis_name)
+            # Get source info from cached stats (for display purposes only)
+            cached_stats = fs_proc.funscript_stats_t1 if timeline_num == 1 else fs_proc.funscript_stats_t2
+            stats["source_type"] = cached_stats.get("source_type", "N/A")
+            stats["path"] = cached_stats.get("path", "N/A")
+        else:
+            # Fallback to cached stats if funscript object not available
+            stats = fs_proc.funscript_stats_t1 if timeline_num == 1 else fs_proc.funscript_stats_t2
+
         source_text = stats.get("source_type", "N/A")
 
         if source_text == "File" and stats.get("path", "N/A") != "N/A":
