@@ -377,14 +377,14 @@ class VideoProcessor:
             f"{self.total_frames}fr, {self.fps:.2f}fps, {self.video_info.get('bit_depth', 'N/A')}bit)")
 
         # Notify sync server (streamer) that video was loaded in desktop FunGen
-        # BUT: Don't broadcast if this is a remote video (Stash/XBVR stream)
-        # because the browser already knows it's loading it - no need to reload
-        is_remote_video = video_path.startswith(('http://', 'https://'))
-
-        if not is_remote_video and hasattr(self, 'sync_server') and self.sync_server and hasattr(self.sync_server, 'loop') and self.sync_server.loop:
+        # This broadcasts to ALL connected browser clients (VR viewer, etc.)
+        # even if the video was loaded from XBVR/Stash browser
+        if hasattr(self, 'sync_server') and self.sync_server and hasattr(self.sync_server, 'loop') and self.sync_server.loop:
             try:
                 import asyncio
-                self.logger.info(f"📹 Notifying streamer of video load: {os.path.basename(video_path)}")
+                is_remote_video = video_path.startswith(('http://', 'https://'))
+                source_desc = "remote" if is_remote_video else "local"
+                self.logger.info(f"📹 Notifying streamer of {source_desc} video load: {os.path.basename(video_path)}")
                 asyncio.run_coroutine_threadsafe(
                     self.sync_server.broadcast_video_loaded(video_path),
                     self.sync_server.loop
@@ -393,8 +393,6 @@ class VideoProcessor:
                 self.logger.warning(f"Could not notify sync server: {e}")
                 import traceback
                 self.logger.warning(traceback.format_exc())
-        elif is_remote_video:
-            self.logger.info(f"📹 Remote video loaded (no page reload broadcast needed)")
         else:
             self.logger.info(f"📹 Streamer not available (sync_server: {hasattr(self, 'sync_server')})")
 

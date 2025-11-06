@@ -2211,11 +2211,15 @@ class InteractiveFunscriptTimeline:
             # ALWAYS honor forced sync, regardless of playback state - this ensures timeline stays synchronized
             force_sync_requested = video_loaded and app_state.force_timeline_pan_to_current_frame
             pan_to_current_frame = video_loaded and not is_playing and force_sync_requested
-            
+
             # Timeline should sync during playback OR when explicitly requested (even during playback)
             # However, if force sync is requested, we should honor it even during interaction (for critical sync needs)
+            # Critical sync bypasses timeline_interaction_active check if not actively panning/zooming
             critical_sync_needed = force_sync_requested and not (self.is_panning_active or self.is_zooming_active)
-            should_sync_timeline = (is_playing or pan_to_current_frame or critical_sync_needed) and not app_state.timeline_interaction_active
+
+            # Allow sync during playback, or when pan_to_current_frame is requested AND not interacting,
+            # or when critical sync is needed (even if timeline_interaction_active is true, as long as not panning/zooming)
+            should_sync_timeline = is_playing or (pan_to_current_frame and not app_state.timeline_interaction_active) or critical_sync_needed
             if should_sync_timeline:
                 # No manual interaction right now
                 current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
@@ -2242,7 +2246,7 @@ class InteractiveFunscriptTimeline:
                 current_video_time_ms = (self.app.processor.current_frame_index / video_fps_for_calc) * 1000.0
                 time_at_center = x_to_time(center_x_marker)
                 time_diff_ms = abs(current_video_time_ms - time_at_center)
-                
+
                 # If video time is more than 2 seconds off from timeline center, auto-sync
                 if time_diff_ms > 2000.0 and not is_playing:
                     target_pan_offset = current_video_time_ms - center_marker_offset_ms
