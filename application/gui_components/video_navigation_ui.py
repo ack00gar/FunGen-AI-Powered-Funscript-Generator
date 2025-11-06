@@ -530,7 +530,10 @@ class VideoNavigationUI:
 
         is_mouse_over_bar = full_bar_rect_min[0] <= mouse_pos[0] <= full_bar_rect_max[0] and full_bar_rect_min[1] <= mouse_pos[1] <= full_bar_rect_max[1]
 
-        if is_mouse_over_bar and imgui.is_mouse_clicked(1) and not action_on_segment_this_frame:
+        # Prevent create dialog if context menu or any other dialog is already open
+        is_any_popup_open = imgui.is_popup_open(self.chapter_bar_popup_id, imgui.POPUP_ANY_POPUP_ID)
+
+        if is_mouse_over_bar and imgui.is_mouse_clicked(1) and not action_on_segment_this_frame and not is_any_popup_open:
 
             clicked_x_on_bar = mouse_pos[0] - bar_start_x
             norm_click_pos = clicked_x_on_bar / bar_width
