@@ -51,6 +51,9 @@ class VideoNavigationUI:
         self.resize_original_start = 0
         self.resize_original_end = 0
 
+        # Store frame position when context menu opens for chapter split
+        self.context_menu_opened_at_frame = None
+
         try:
             self.selected_position_idx_in_dialog = self.position_short_name_keys.index(
                 self.chapter_edit_data["position_short_name_key"])
@@ -307,10 +310,18 @@ class VideoNavigationUI:
                 text_color = imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_BLACK) if lum > 0.6 else imgui.get_color_u32_rgba(*VideoNavigationColors.TEXT_WHITE)
                 draw_list.add_text(text_pos_x, text_pos_y, text_color, text_to_draw)
 
-            imgui.set_cursor_screen_pos((seg_start_x, bar_start_y))
+            # Expand clickable area to include selection borders (which extend 2px beyond segment)
+            # to ensure clicks on borders are properly detected
+            border_expansion = 3  # Slightly larger than the largest border offset (2px)
+            expanded_start_x = seg_start_x - border_expansion
+            expanded_start_y = bar_start_y - border_expansion
+            expanded_width = seg_width + (border_expansion * 2)
+            expanded_height = bar_height + (border_expansion * 2)
+
+            imgui.set_cursor_screen_pos((expanded_start_x, expanded_start_y))
             button_id = f"chapter_bar_segment_btn_{segment.unique_id}"
 
-            imgui.invisible_button(button_id, seg_width, bar_height)
+            imgui.invisible_button(button_id, expanded_width, expanded_height)
 
             if imgui.is_item_hovered():
                 self.chapter_tooltip_segment = segment
@@ -385,8 +396,10 @@ class VideoNavigationUI:
                     if segment not in self.context_selected_chapters:
                         self.context_selected_chapters.clear()
                         self.context_selected_chapters.append(segment)
+                    # Store current frame position for chapter split operation
+                    self.context_menu_opened_at_frame = self.app.processor.current_frame_index if self.app.processor else None
                     self.app.logger.debug(
-                        f"Right clicked on chapter {segment.unique_id}. Current selection: {[s.unique_id for s in self.context_selected_chapters]}. Opening context menu: {self.chapter_bar_popup_id}")
+                        f"Right clicked on chapter {segment.unique_id} at frame {self.context_menu_opened_at_frame}. Current selection: {[s.unique_id for s in self.context_selected_chapters]}. Opening context menu: {self.chapter_bar_popup_id}")
                     imgui.open_popup(self.chapter_bar_popup_id)
 
         # Smart chapter resizing - check for edge hover and handle resize drags
@@ -929,7 +942,9 @@ class VideoNavigationUI:
                         self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
             # --- Split Chapter ---
             can_split = False
-            split_frame = self.app.processor.current_frame_index if self.app.processor else None
+            # Use the frame position when the context menu was opened, not the current frame
+            # This ensures the split happens where the user right-clicked, even if they seek afterwards
+            split_frame = self.context_menu_opened_at_frame
             split_pos_key = None
             if num_selected == 1 and self.context_selected_chapters:
                 chapter = self.context_selected_chapters[0]
