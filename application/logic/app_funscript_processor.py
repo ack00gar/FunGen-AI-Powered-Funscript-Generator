@@ -942,8 +942,8 @@ class AppFunscriptProcessor:
             'apply_sg': lambda: target_fs_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=self.sg_window_length_input,
                                                            polyorder=self.sg_polyorder_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
             'apply_rdp': lambda: target_fs_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=self.rdp_epsilon_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
-            'apply_dynamic_amp': lambda: self.apply_dynamic_amplification(axis, self.dynamic_amp_window_ms_input,
-                                                                          s_time, e_time, sel_idx)
+            'apply_dynamic_amp': lambda: target_fs_obj.apply_plugin('Dynamic Amplify', axis=axis, window_ms=self.dynamic_amp_window_ms_input,
+                                                                    start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx)
 
         }
         op_func = op_dispatch.get(operation_name)
@@ -1534,79 +1534,6 @@ class AppFunscriptProcessor:
         self.app.set_status_message("Post-processing applied.", duration=5.0)
         self.app.energy_saver.reset_activity_timer()
 
-    def apply_dynamic_amplification(self, axis: str, window_ms: int,
-                                    start_time_ms: Optional[int] = None, end_time_ms: Optional[int] = None,
-                                    selected_indices: Optional[List[int]] = None):
-        """
-        Dynamically amplifies the signal by normalizing each point based on the
-        min/max position within a sliding time window around it.
-        """
-        # Get the action list from the DualAxisFunscript object instead of self
-        actions_list_ref = self.get_actions(axis)
-        if not actions_list_ref or len(actions_list_ref) < 3:
-            self.logger.info("Not enough points for dynamic amplification.")
-            return
-
-        # Make a copy to read from while modifying the original
-        actions_copy = list(actions_list_ref)
-
-        # Determine the full set of indices to process
-        # Since _get_indices_for_operation is not defined, we'll implement its logic here directly
-        indices_to_process: List[int] = []
-        if selected_indices is not None:
-            indices_to_process = sorted([i for i in selected_indices if 0 <= i < len(actions_list_ref)])
-        elif start_time_ms is not None and end_time_ms is not None:
-            funscript_obj = self.get_funscript_obj()
-            if funscript_obj:
-                s_idx, e_idx = funscript_obj._get_action_indices_in_time_range(actions_list_ref, start_time_ms,
-                                                                               end_time_ms)
-                if s_idx is not None and e_idx is not None:
-                    indices_to_process = list(range(s_idx, e_idx + 1))
-        else:
-            indices_to_process = list(range(len(actions_list_ref)))
-
-        if not indices_to_process:
-            self.logger.warning("No points in specified range/selection for dynamic amplification.")
-            return
-
-        # Create a list of timestamps for efficient searching
-        action_timestamps = [a['at'] for a in actions_copy]
-
-        for i in indices_to_process:
-            current_action = actions_copy[i]
-            current_time = current_action['at']
-
-            # Define the local window for analysis
-            start_window = current_time - (window_ms // 2)
-            end_window = current_time + (window_ms // 2)
-
-            # Find the indices of the actions within this window
-            start_idx = bisect_left(action_timestamps, start_window)
-            end_idx = bisect_right(action_timestamps, end_window)
-
-            local_actions = actions_copy[start_idx:end_idx]
-            if not local_actions:
-                continue
-
-            # Find the min/max position within the local window
-            local_positions = [a['pos'] for a in local_actions]
-            local_min = min(local_positions)
-            local_max = max(local_positions)
-            local_range = local_max - local_min
-
-            if local_range < 5:  # Don't amplify if local motion is negligible
-                continue
-
-            # Normalize the current point's position within its local range
-            normalized_pos = (current_action['pos'] - local_min) / local_range
-
-            # Scale the normalized position to the full 0-100 range
-            new_pos = int(round(np.clip(normalized_pos * 100, 0, 100)))
-
-            # Update the original list
-            actions_list_ref[i]['pos'] = new_pos
-
-        self.logger.info(f"Applied dynamic amplification to {len(indices_to_process)} points on {axis} axis.")
 
 
     def select_points_in_chapters(self, chapters_to_select_in: List[VideoSegment], target_timeline: str = 'both'):
