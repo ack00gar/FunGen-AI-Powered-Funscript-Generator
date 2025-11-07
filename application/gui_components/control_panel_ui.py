@@ -408,96 +408,181 @@ class ControlPanelUI:
     # ------- Tabs -------
 
     def _render_simple_mode_ui(self):
+        """Render Simple Mode UI with step-by-step workflow."""
         app = self.app
         app_state = app.app_state_ui
-        # TrackerMode removed - using dynamic discovery system
+        processor = app.processor
+        stage_proc = app.stage_processor
+        fs_proc = app.funscript_processor
 
         flags = imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
         imgui.begin("FunGen Simple##SimpleControlPanel", flags=flags)
 
-        imgui.text("FunGen Simple Workflow")
+        # Title
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
+        imgui.text("Simple Mode")
+        imgui.pop_style_color()
+        imgui.text_wrapped("Easy 3-step workflow for beginners")
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
 
-        if app_state.show_advanced_options:
-            c = self.ControlPanelColors
-            imgui.push_style_color(imgui.COLOR_TEXT, *c.STATUS_WARNING)
-            imgui.text("[ADV] Advanced Options Enabled")
-            imgui.pop_style_color()
-            imgui.same_line()
-            imgui.text_disabled("(View menu > Show Advanced Options)")
+        # STEP 1: Load Video
+        self._section_header("Step 1: Load Video", "Open a video file to analyze")
 
-        processor = app.processor
         if processor and processor.video_info:
-            self._status_indicator(
-                "Video loaded",
-                "ready",
-                "Loaded: %s" % os.path.basename(processor.video_path or "Unknown"),
-            )
+            self._status_indicator("Video loaded", "ready", "Video is ready for analysis")
+            imgui.text_wrapped("File: %s" % os.path.basename(processor.video_path or "Unknown"))
+            video_info = processor.video_info
+            if video_info:
+                duration_str = "%.0f:%02.0f" % divmod(video_info.get('duration', 0), 60)
+                imgui.text_wrapped("Duration: %s | %dx%d | %.0f fps" % (
+                    duration_str,
+                    video_info.get('width', 0),
+                    video_info.get('height', 0),
+                    video_info.get('fps', 0)
+                ))
         else:
-            self._status_indicator(
-                "Drag & drop a video onto the window",
-                "info",
-                "Supported formats: MP4, AVI, MOV, MKV",
-            )
+            self._status_indicator("No video loaded", "info", "Drag and drop a video file onto the window")
+            imgui.text_wrapped("Supported formats: MP4, AVI, MOV, MKV")
 
-        imgui.text_wrapped("2. Choose an analysis method below.")
-        imgui.text_wrapped("3. Click Start.")
-        self._section_header(
-            ">> Step 2: Choose Analysis Method",
-            "Select the best analysis method for your video content type",
-        )
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
 
-        stage_proc = app.stage_processor
-        fs_proc = app.funscript_processor
-        if stage_proc.full_analysis_active:
-            self._status_indicator("Analysis in progress...", "info", "Processing your video. Please wait.")
-        else:
-            acts = fs_proc.get_actions("primary")
-            if acts:
-                self._status_indicator(
-                    "Analysis complete - %d points generated" % len(acts),
-                    "ready",
-                    "Ultimate Autotune preview is visible in timeline. Ready for next step.",
-                )
-            else:
-                self._status_indicator(
-                    "Ready to analyze",
-                    "info",
-                    "Click Start when you're ready to begin analysis",
-                )
+        # STEP 2: Choose Analysis Method
+        self._section_header("Step 2: Choose What to Track", "Select analysis method for your video")
 
-        # Use dynamic tracker discovery
+        # Use dynamic tracker discovery (simplified for simple mode)
         modes_display, modes_enum, discovered_trackers = self._get_tracker_lists_for_ui(simple_mode=True)
         try:
             cur_idx = modes_enum.index(app_state.selected_tracker_name)
         except ValueError:
             cur_idx = 0
-            # Set default to first available tracker or fallback to default
             from config.constants import DEFAULT_TRACKER_NAME
             default_tracker = modes_enum[cur_idx] if modes_enum else DEFAULT_TRACKER_NAME
             app_state.selected_tracker_name = default_tracker
 
         imgui.push_item_width(-1)
-        clicked, new_idx = imgui.combo(
-            "Analysis Method##SimpleTrackerMode", cur_idx, modes_display
-        )
+        clicked, new_idx = imgui.combo("##SimpleTrackerMode", cur_idx, modes_display)
         imgui.pop_item_width()
-        self._help_tooltip(self._generate_combined_tooltip(discovered_trackers))
+
         if clicked and new_idx != cur_idx:
             new_mode = modes_enum[new_idx]
-            # Clear overlays only when switching modes
             if app_state.selected_tracker_name != new_mode:
                 if hasattr(app, 'logger') and app.logger:
-                    app.logger.info(f"UI(Simple): Mode change requested {app_state.selected_tracker_name} -> {new_mode}. Clearing overlays.")
+                    app.logger.info(f"UI(Simple): Tracker changed to {new_mode}")
                 if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
                     app.clear_all_overlays_and_ui_drawings()
             app_state.selected_tracker_name = new_mode
-            # Persist user choice (store tracker name directly)
             if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
                 app.app_settings.set("selected_tracker_name", new_mode)
 
-        self._render_execution_progress_display()
-        self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
+        # Show brief description based on selected tracker
+        if discovered_trackers and cur_idx < len(discovered_trackers):
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+            imgui.text_wrapped(self._get_simple_tracker_description(discovered_trackers[cur_idx]))
+            imgui.pop_style_color()
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # STEP 3: Generate Funscript
+        self._section_header("Step 3: Generate Funscript", "Start the analysis process")
+
+        # Show progress or start button
+        if stage_proc.full_analysis_active:
+            self._render_simple_progress_display()
+        else:
+            acts = fs_proc.get_actions("primary")
+            if acts:
+                # Analysis complete - show completion state
+                self._status_indicator(
+                    "Analysis Complete",
+                    "ready",
+                    "Generated %d motion points" % len(acts)
+                )
+                imgui.spacing()
+
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+                imgui.text_wrapped("What's next?")
+                imgui.pop_style_color()
+                imgui.spacing()
+
+                # Export button (primary action)
+                from application.utils import primary_button_style
+                with primary_button_style():
+                    if imgui.button("Export Funscript", width=-1):
+                        # Trigger export for Timeline 1
+                        from application.logic.event_handlers import EventType
+                        app.event_handlers.emit_event(EventType.EXPORT_FUNSCRIPT_TIMELINE1)
+
+                # Fine-tune button (secondary action)
+                imgui.spacing()
+                if imgui.button("Fine-Tune Results (Switch to Expert Mode)", width=-1):
+                    app_state.ui_view_mode = "expert"
+                    app.logger.info("Switched to Expert Mode", extra={"status_message": True})
+            else:
+                # Ready to start
+                self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Switch to Expert Mode link
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
+        imgui.text_wrapped("Need more control?")
+        imgui.pop_style_color()
+        if imgui.button("Switch to Expert Mode", width=-1):
+            app_state.ui_view_mode = "expert"
+            app.logger.info("Switched to Expert Mode", extra={"status_message": True})
+
         imgui.end()
+
+    def _get_simple_tracker_description(self, tracker_name):
+        """Get a simple, user-friendly description for a tracker."""
+        descriptions = {
+            "body_tracking_pov": "Tracks body movement from first-person perspective",
+            "object_tracking": "Follows a specific object in the video",
+            "hip_tracking": "Focuses on hip motion detection",
+            "hand_tracking": "Tracks hand movements",
+            "oscillation_experimental": "Detects rhythmic back-and-forth motion",
+        }
+        # Try to match tracker name to description
+        for key, desc in descriptions.items():
+            if key in tracker_name.lower():
+                return desc
+        # Default description
+        return "Analyzes motion in your video"
+
+    def _render_simple_progress_display(self):
+        """Render simplified progress display for Simple Mode (no technical details)."""
+        app = self.app
+        stage_proc = app.stage_processor
+
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
+        imgui.text("Processing...")
+        imgui.pop_style_color()
+
+        # Simple progress bar (no technical details like Stage 1/2, FPS, etc.)
+        progress = stage_proc.get_overall_progress()
+        imgui.progress_bar(progress, (-1, 0))
+
+        # Simple time estimate
+        if progress > 0.01:
+            elapsed = stage_proc.get_elapsed_time()
+            estimated_total = elapsed / progress
+            remaining = estimated_total - elapsed
+            if remaining > 0:
+                mins = int(remaining // 60)
+                if mins > 0:
+                    imgui.text_wrapped("About %d minute%s remaining" % (mins, "s" if mins != 1 else ""))
+                else:
+                    imgui.text_wrapped("Less than 1 minute remaining")
+
+        imgui.spacing()
 
     def _render_processing_speed_controls(self, app_state):
         app = self.app
