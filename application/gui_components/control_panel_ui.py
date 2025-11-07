@@ -357,20 +357,18 @@ class ControlPanelUI:
 
         tab_selected = None
         if imgui.begin_tab_bar("ControlPanelTabs"):
-            if imgui.begin_tab_item("Run Control")[0]:
-                tab_selected = "run_control"
-                imgui.end_tab_item()
-            if imgui.begin_tab_item("Configuration")[0]:
-                tab_selected = "configuration"
+            # Core tabs (always visible)
+            if imgui.begin_tab_item("Run")[0]:
+                tab_selected = "run"
                 imgui.end_tab_item()
             if imgui.begin_tab_item("Post-Processing")[0]:
                 tab_selected = "post_processing"
                 imgui.end_tab_item()
-            if imgui.begin_tab_item("Settings")[0]:
-                tab_selected = "settings"
+            if imgui.begin_tab_item("Advanced")[0]:
+                tab_selected = "advanced"
                 imgui.end_tab_item()
-            
-            # Device Control tab (supporter feature)
+
+            # Device Control tab (supporter feature - conditional)
             try:
                 from application.utils.feature_detection import is_feature_available
                 if is_feature_available("device_control"):
@@ -380,7 +378,7 @@ class ControlPanelUI:
             except ImportError:
                 pass
 
-            # Streamer tab (supporter feature)
+            # Streamer tab (supporter feature - conditional)
             try:
                 from application.utils.feature_detection import is_feature_available
                 if is_feature_available("streamer"):
@@ -394,14 +392,12 @@ class ControlPanelUI:
 
         avail = imgui.get_content_region_available()
         imgui.begin_child("TabContentRegion", width=0, height=avail[1], border=False)
-        if tab_selected == "run_control":
+        if tab_selected == "run":
             self._render_run_control_tab()
-        elif tab_selected == "configuration":
-            self._render_configuration_tab()
         elif tab_selected == "post_processing":
             self._render_post_processing_tab()
-        elif tab_selected == "settings":
-            self._render_settings_tab()
+        elif tab_selected == "advanced":
+            self._render_advanced_tab()
         elif tab_selected == "device_control":
             self._render_device_control_tab()
         elif tab_selected == "native_sync":
@@ -807,6 +803,83 @@ class ControlPanelUI:
             self._render_funscript_processing_tools(app.funscript_processor, app.event_handlers)
         if imgui.collapsing_header("Automated Post-Processing##PostProcAuto")[0]:
             self._render_automatic_post_processing_new(app.funscript_processor)
+
+    def _render_advanced_tab(self):
+        """Render Advanced tab combining Configuration and Settings."""
+        app = self.app
+        app_state = app.app_state_ui
+        tmode = app_state.selected_tracker_name
+
+        imgui.text("Advanced settings for AI models, tracking, and performance.")
+        imgui.spacing()
+
+        # AI Models & Inference section (from Configuration tab)
+        if self._is_live_tracker(tmode) or self._is_offline_tracker(tmode):
+            if imgui.collapsing_header("AI Models & Inference##AdvancedAIModels")[0]:
+                self._render_ai_model_settings()
+
+        # Tracking Parameters section (from Configuration tab)
+        adv = app_state.show_advanced_options
+        if self._is_live_tracker(tmode) and adv:
+            if imgui.collapsing_header("Live Tracker Settings##AdvancedLiveTracker")[0]:
+                self._render_live_tracker_settings()
+
+        # Class filtering (from Configuration tab)
+        if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
+            if imgui.collapsing_header("Class Filtering##AdvancedClassFilter")[0]:
+                self._render_class_filtering_content()
+
+        # Oscillation detector settings (from Configuration tab)
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(tmode)
+        if tracker_info and 'oscillation' in tracker_info.display_name.lower():
+            if imgui.collapsing_header("Oscillation Detector Settings##AdvancedOscillation")[0]:
+                self._render_oscillation_detector_settings()
+
+        # Interface & Performance settings (from Settings tab)
+        if imgui.collapsing_header("Interface & Performance##AdvancedInterfacePerf")[0]:
+            self._render_settings_interface_perf()
+
+        # File & Output settings (from Settings tab)
+        if imgui.collapsing_header("File & Output##AdvancedFileOutput")[0]:
+            self._render_settings_file_output()
+
+        # Logging & Autosave settings (from Settings tab)
+        if app_state.show_advanced_options:
+            if imgui.collapsing_header("Logging & Autosave##AdvancedLogging")[0]:
+                self._render_settings_logging_autosave()
+
+        imgui.spacing()
+
+        # Reset All Settings button
+        with destructive_button_style():
+            if imgui.button("Reset All Settings to Default##ResetAllSettingsButton", width=-1):
+                imgui.open_popup("Confirm Reset##ResetSettingsPopup")
+
+        if imgui.begin_popup_modal(
+            "Confirm Reset##ResetSettingsPopup", True, imgui.WINDOW_ALWAYS_AUTO_RESIZE
+        )[0]:
+            imgui.text(
+                "This will reset all application settings to their defaults.\n"
+                "Your projects will not be affected.\n"
+                "This action cannot be undone."
+            )
+
+            avail_w = imgui.get_content_region_available_width()
+            pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
+
+            # Confirm Reset button
+            with destructive_button_style():
+                if imgui.button("Confirm Reset", width=pw):
+                    app.app_settings.reset_to_defaults()
+                    app.logger.info("All settings have been reset to default.", extra={"status_message": True})
+                    imgui.close_current_popup()
+
+            imgui.same_line()
+            if imgui.button("Cancel", width=pw):
+                imgui.close_current_popup()
+            imgui.end_popup()
 
     # ------- AI model settings -------
 
