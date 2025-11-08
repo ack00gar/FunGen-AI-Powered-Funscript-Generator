@@ -234,16 +234,13 @@ class InfoGraphsUI:
             if imgui.begin_tab_item("Funscript")[0]:
                 tab_selected = "funscript"
                 imgui.end_tab_item()
-            if imgui.begin_tab_item("History")[0]:
-                tab_selected = "history"
-                imgui.end_tab_item()
-            if imgui.begin_tab_item("Performance")[0]:
-                tab_selected = "performance"
+            if imgui.begin_tab_item("Advanced")[0]:
+                tab_selected = "advanced"
                 imgui.end_tab_item()
             imgui.end_tab_bar()
 
         # Update performance tab visibility tracking
-        performance_tab_now_active = tab_selected == "performance"
+        performance_tab_now_active = tab_selected == "advanced"
         if performance_tab_now_active != self._last_performance_tab_active:
             self._last_performance_tab_active = performance_tab_now_active
             if hasattr(self, "system_monitor"):
@@ -287,44 +284,41 @@ class InfoGraphsUI:
                 imgui.text_disabled(
                     "Enable Interactive Timeline 2 to see its stats."
                 )
-        elif tab_selected == "history":
+        elif tab_selected == "advanced":
             imgui.spacing()
-            if imgui.collapsing_header(
-                "Undo-Redo History##UndoRedoSection",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
-            )[0]:
+            # Undo-Redo History section (collapsed by default)
+            if imgui.collapsing_header("Undo-Redo History##UndoRedoSection")[0]:
                 self._render_content_undo_redo_history()
-        elif tab_selected == "performance":
-            imgui.spacing()
-            # OPTIMIZATION: Only render performance data if tab is actually visible and focused
-            if performance_tab_now_active:
-                # Performance Panel Performance at the top
-                self.perf_monitor.render_info(show_detailed=True)
             imgui.separator()
-            # --- Pipeline Timing Section (Video Processing Performance) ---
-            if imgui.collapsing_header(
-                "Video Pipeline Performance##PipelineTimingSection",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
-            )[0]:
-                self._render_content_pipeline_timing()
-            imgui.separator()
-            if imgui.collapsing_header(
-                "System Monitor##PerformanceSection",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
-            )[0]:
-                self._render_content_performance()
-            imgui.separator()
-            # --- Disk I/O Section (independent, collapsible) ---
-            if imgui.collapsing_header(
-                "Disk I/O##DiskIOSection", flags=imgui.TREE_NODE_DEFAULT_OPEN
-            )[0]:
-                self._render_disk_io_section()
-            imgui.separator()
-            if imgui.collapsing_header(
-                "UI Performance##UIPerformanceSection",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
-            )[0]:
-                self._render_content_ui_performance()
+
+            # Performance Monitoring section (collapsed by default)
+            if imgui.collapsing_header("Performance Monitoring##PerformanceSection")[0]:
+                # OPTIMIZATION: Only render performance data if section is expanded
+                if performance_tab_now_active:
+                    self.perf_monitor.render_info(show_detailed=True)
+                imgui.separator()
+
+                # Video Pipeline Performance subsection
+                if imgui.collapsing_header(
+                    "Video Pipeline Performance##PipelineTimingSection",
+                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
+                )[0]:
+                    self._render_content_pipeline_timing()
+
+                # System Monitor subsection
+                if imgui.collapsing_header(
+                    "System Monitor##SystemMonitorSection",
+                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
+                )[0]:
+                    self._render_content_performance()
+
+                # Disk I/O subsection
+                if imgui.collapsing_header("Disk I/O##DiskIOSection")[0]:
+                    self._render_disk_io_section()
+
+                # UI Performance subsection
+                if imgui.collapsing_header("UI Performance##UIPerformanceSection")[0]:
+                    self._render_content_ui_performance()
 
         # Always check memory alerts
         if hasattr(self, "system_monitor"):
