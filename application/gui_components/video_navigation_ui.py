@@ -143,7 +143,7 @@ class VideoNavigationUI:
             if self.show_edit_chapter_dialog: self._render_edit_chapter_window()
 
         # --- Timeline Visibility Toggles as Small Buttons ---
-        def render_timeline_toggle(label, visible_attr):
+        def render_timeline_toggle(label, visible_attr, tooltip):
             pushed = False
             if not getattr(app_state, visible_attr):
                 imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
@@ -152,46 +152,52 @@ class VideoNavigationUI:
                 setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
                 self.app.project_manager.project_dirty = True
             if imgui.is_item_hovered():
-                # Add tooltips with keyboard shortcuts where applicable
-                if label == "T1":
-                    imgui.set_tooltip("Toggle Timeline 1")
-                elif label == "T2":
-                    imgui.set_tooltip("Toggle Timeline 2 (T)")
-                elif label == "Preview":
-                    imgui.set_tooltip("Toggle Funscript Preview Bar (P)")
-                elif label == "Heatmap":
-                    imgui.set_tooltip("Toggle Heatmap (H)")
-                elif label == "FullWidth":
-                    imgui.set_tooltip("Toggle Full Width Navigation")
+                imgui.set_tooltip(tooltip)
             if pushed:
                 imgui.pop_style_var()
 
         use_small_font = hasattr(self.gui_instance, 'small_font') and self.gui_instance.small_font and getattr(self.gui_instance.small_font, 'is_loaded', lambda: True)()
         if use_small_font:
             imgui.push_font(self.gui_instance.small_font)
-        # Left-aligned: T1, T2
-        render_timeline_toggle("T1", "show_funscript_interactive_timeline")
-        imgui.same_line(spacing=4)
-        render_timeline_toggle("T2", "show_funscript_interactive_timeline2")
 
-        # Right-aligned: Preview, Heatmap, Full Width Nav
-        # Calculate width for right-aligned buttons
-        button_labels = ["Preview", "Heatmap", "FullWidth"]
-        button_attrs = ["show_funscript_timeline", "show_heatmap", "full_width_nav"]
-        button_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in button_labels]
-        total_button_width = sum(button_widths)
-        avail = imgui.get_content_region_available()[0]
-        imgui.same_line(avail - total_button_width + 20)
-        # Preview
-        render_timeline_toggle("Preview", "show_funscript_timeline")
+        # Left-aligned: T1, T2, Options dropdown
+        render_timeline_toggle("T1", "show_funscript_interactive_timeline", "Toggle Timeline 1")
         imgui.same_line(spacing=4)
-        # Heatmap
-        render_timeline_toggle("Heatmap", "show_heatmap")
+        render_timeline_toggle("T2", "show_funscript_interactive_timeline2", "Toggle Timeline 2 (T)")
         imgui.same_line(spacing=4)
-        # Full Width Nav Bar (hasattr check)
-        if not hasattr(app_state, 'full_width_nav'):
-            app_state.full_width_nav = False
-        render_timeline_toggle("FullWidth", "full_width_nav")
+
+        # Options dropdown button
+        if imgui.button("Options"):
+            imgui.open_popup("VideoNavOptions")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Show video navigation options")
+
+        # Options dropdown menu
+        if imgui.begin_popup("VideoNavOptions"):
+            # Ensure full_width_nav attribute exists
+            if not hasattr(app_state, 'full_width_nav'):
+                app_state.full_width_nav = False
+
+            # Preview checkbox
+            changed, new_val = imgui.checkbox("Show Funscript Preview (P)", app_state.show_funscript_timeline)
+            if changed:
+                app_state.show_funscript_timeline = new_val
+                self.app.project_manager.project_dirty = True
+
+            # Heatmap checkbox
+            changed, new_val = imgui.checkbox("Show Heatmap (H)", app_state.show_heatmap)
+            if changed:
+                app_state.show_heatmap = new_val
+                self.app.project_manager.project_dirty = True
+
+            # Full Width Nav checkbox
+            changed, new_val = imgui.checkbox("Full Width Navigation", app_state.full_width_nav)
+            if changed:
+                app_state.full_width_nav = new_val
+                self.app.project_manager.project_dirty = True
+
+            imgui.end_popup()
+
         if use_small_font:
             imgui.pop_font()
 
