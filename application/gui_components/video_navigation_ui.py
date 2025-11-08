@@ -54,6 +54,9 @@ class VideoNavigationUI:
         # Store frame position when context menu opens for chapter split
         self.context_menu_opened_at_frame = None
 
+        # Track if context menu was opened this frame to prevent create dialog from opening
+        self.context_menu_opened_this_frame = False
+
         try:
             self.selected_position_idx_in_dialog = self.position_short_name_keys.index(
                 self.chapter_edit_data["position_short_name_key"])
@@ -204,10 +207,13 @@ class VideoNavigationUI:
         imgui.end()
 
     def _render_chapter_bar(self, fs_proc, total_video_frames: int, bar_width: float, bar_height: float):
+        # Reset flag at start of each frame to prevent stale state
+        self.context_menu_opened_this_frame = False
+
         ###########################################################################################
         # TEMPORARY: Assign random colors to chapters for visual distinction when all chapters have the same position_short_name (e.g., 'NR').
         # Remove this logic once position detection is implemented for "Scene Detection without AI analysis"
-        
+
         # AI Analysis = fixed colors per position
         # Scene Detection without AI analysis = returns all 'NR', will then assign random colors
         ###########################################################################################
@@ -404,6 +410,8 @@ class VideoNavigationUI:
                         self.context_selected_chapters.append(segment)
                     # Store current frame position for chapter split operation
                     self.context_menu_opened_at_frame = self.app.processor.current_frame_index if self.app.processor else None
+                    # Set flag to prevent create dialog from opening in the same frame
+                    self.context_menu_opened_this_frame = True
                     self.app.logger.debug(
                         f"Right clicked on chapter {segment.unique_id} at frame {self.context_menu_opened_at_frame}. Current selection: {[s.unique_id for s in self.context_selected_chapters]}. Opening context menu: {self.chapter_bar_popup_id}")
                     imgui.open_popup(self.chapter_bar_popup_id)
@@ -539,7 +547,9 @@ class VideoNavigationUI:
         # Prevent create dialog if context menu or any other dialog is already open
         is_any_popup_open = imgui.is_popup_open(self.chapter_bar_popup_id, imgui.POPUP_ANY_POPUP_ID)
 
-        if is_mouse_over_bar and imgui.is_mouse_clicked(1) and not action_on_segment_this_frame and not is_any_popup_open:
+        # Additional check: prevent create dialog if context menu was just opened this frame
+        # This is needed because is_popup_open returns False immediately after open_popup is called
+        if is_mouse_over_bar and imgui.is_mouse_clicked(1) and not action_on_segment_this_frame and not is_any_popup_open and not self.context_menu_opened_this_frame:
 
             clicked_x_on_bar = mouse_pos[0] - bar_start_x
             norm_click_pos = clicked_x_on_bar / bar_width
