@@ -7,16 +7,27 @@ body part interactions using YOLO detection results from Stage 1. It performs
 contact analysis, pose estimation, and generates funscript signals based on
 detected interactions.
 
-Author: Migrated from Stage 2 CD system  
-Version: 1.0.0
+Author: Migrated from Stage 2 CD system
+Version: 1.1.0
 """
 
 import logging
 import os
 import time
-import threading
 from typing import Dict, Any, Optional, List, Tuple, Callable
 from multiprocessing import Event
+
+# Constants
+DEFAULT_YOLO_INPUT_SIZE = 640
+DEFAULT_NUM_WORKERS = 4
+DEFAULT_CHUNK_SIZE = 100
+DEFAULT_OF_RECOVERY_WINDOW = 10
+DEFAULT_MIN_CONTACT_CONFIDENCE = 0.3
+DEFAULT_CONTACT_SMOOTHING_WINDOW = 5
+DEFAULT_ENHANCEMENT_STRENGTH = 1.0
+PROCESSING_TIME_BUFFER_SECONDS = 30.0
+CONSERVATIVE_BASE_FPS = 15.0
+DEFAULT_TIME_ESTIMATE_FALLBACK = 300.0
 
 try:
     from ..core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
@@ -32,12 +43,14 @@ try:
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
-    
+
     import detection.cd.stage_2_cd as stage2_module
+    STAGE2_MODULE_AVAILABLE = True
 except ImportError as e:
     stage2_module = None
-    import warnings
-    warnings.warn(f"Stage 2 module not available: {e}")
+    STAGE2_MODULE_AVAILABLE = False
+    import logging
+    logging.getLogger(__name__).error(f"Stage 2 module not available: {e}. This tracker will not function.")
 
 
 class Stage2ContactAnalysisTracker(BaseOfflineTracker):
@@ -54,34 +67,34 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
     
     def __init__(self):
         super().__init__()
-        
+
         # Stage 2 specific settings
-        self.yolo_input_size = 640
+        self.yolo_input_size = DEFAULT_YOLO_INPUT_SIZE
         self.video_type = "auto"
         self.vr_input_format = "he"
         self.vr_fov = 190
         self.vr_pitch = 0
         self.generate_funscript_actions = True
         self.generate_overlay_data = True
-        
+
         # Processing parameters
         self.enable_optical_flow_recovery = True
-        self.of_recovery_frame_window = 10
-        self.min_contact_confidence = 0.3
-        self.contact_smoothing_window = 5
-        
+        self.of_recovery_frame_window = DEFAULT_OF_RECOVERY_WINDOW
+        self.min_contact_confidence = DEFAULT_MIN_CONTACT_CONFIDENCE
+        self.contact_smoothing_window = DEFAULT_CONTACT_SMOOTHING_WINDOW
+
         # Output configuration
         self.output_msgpack_path = None
         self.output_overlay_path = None
         self.output_sqlite_path = None
-        
+
         # Signal enhancement
         self.enable_signal_enhancement = True
-        self.enhancement_strength = 1.0
-        
+        self.enhancement_strength = DEFAULT_ENHANCEMENT_STRENGTH
+
         # Performance settings
-        self.num_workers = 4
-        self.chunk_size = 100
+        self.num_workers = DEFAULT_NUM_WORKERS
+        self.chunk_size = DEFAULT_CHUNK_SIZE
     
     @property
     def metadata(self) -> TrackerMetadata:
@@ -139,9 +152,10 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
         """Initialize the Stage 2 contact analysis tracker."""
         try:
             self.app = app_instance
-            
-            if not stage2_module:
-                self.logger.error("Stage 2 module not available - cannot initialize tracker")
+
+            if not STAGE2_MODULE_AVAILABLE or stage2_module is None:
+                self.logger.error("Stage 2 module not available - cannot initialize tracker. "
+                                "Check that detection.cd.stage_2_cd module is installed.")
                 return False
             
             # Load settings
@@ -256,17 +270,28 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
                     success=False,
                     error_message="Stage 1 output file not found"
                 )
+
+            # Validate Stage 1 output file format
+            if not self._validate_stage1_output(stage1_output_path):
+                return OfflineProcessingResult(
+                    success=False,
+                    error_message=f"Stage 1 output file is invalid or corrupted: {stage1_output_path}"
+                )
             
             # Set up output paths
             if not output_directory:
                 output_directory = os.path.dirname(stage1_output_path)
-            
-            self.output_msgpack_path = os.path.join(output_directory, 
-                                                   os.path.basename(video_path).replace('.', '_') + '_stage2_output.msgpack')
-            
+
+            # Use proper path handling to avoid issues with multiple dots in filename
+            video_basename = os.path.basename(video_path)
+            video_name_no_ext = os.path.splitext(video_basename)[0]
+
+            self.output_msgpack_path = os.path.join(output_directory,
+                                                   f"{video_name_no_ext}_stage2_output.msgpack")
+
             if self.generate_overlay_data:
                 self.output_overlay_path = os.path.join(output_directory,
-                                                       os.path.basename(video_path).replace('.', '_') + '_stage2_overlay.msgpack')
+                                                       f"{video_name_no_ext}_stage2_overlay.msgpack")
             
             # Check for SQLite database option
             self.output_sqlite_path = kwargs.get('sqlite_output_path')
@@ -298,12 +323,15 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
                 range_is_active, range_start_frame, range_end_frame = self.app.funscript_processor.get_effective_scripting_range()
             
             # Call the Stage 2 module
+            # Use multiprocessing.Event() for proper multiprocessing support
+            stop_event = self.stop_event if self.stop_event is not None else Event()
+
             stage2_results = stage2_module.perform_contact_analysis(
                 video_path_arg=video_path,
                 msgpack_file_path_arg=stage1_output_path,
                 preprocessed_video_path_arg=preprocessed_video_path,
                 progress_callback=progress_wrapper,
-                stop_event=self.stop_event or threading.Event(),
+                stop_event=stop_event,
                 app=self.app,
                 ml_model_dir_path_arg=getattr(self.app, 'pose_model_artifacts_dir', None),
                 parent_logger_arg=self.logger,
@@ -388,7 +416,11 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
         except Exception as e:
             self.processing_active = False
             self.current_stage = None
-            self.logger.error(f"Stage 2 processing error: {e}")
+            self.logger.error(f"Stage 2 processing error: {e}", exc_info=True)
+
+            # Clean up partial outputs on failure
+            self._cleanup_partial_outputs()
+
             return OfflineProcessingResult(
                 success=False,
                 error_message=f"Stage 2 processing failed: {e}"
@@ -419,31 +451,31 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
             # Estimation based on empirical data:
             # Stage 2 processes approximately 10-30 frames per second depending on complexity
             # Contact analysis is CPU intensive
-            base_fps = 15.0  # Conservative estimate
-            
+            base_fps = CONSERVATIVE_BASE_FPS
+
             # Adjust based on settings
             if self.enable_optical_flow_recovery:
                 base_fps *= 0.7  # OF recovery adds overhead
-            
+
             if self.enable_signal_enhancement:
                 base_fps *= 0.9  # Signal enhancement adds overhead
-            
+
             # Adjust based on resolution (YOLO input size)
-            if self.yolo_input_size > 640:
+            if self.yolo_input_size > DEFAULT_YOLO_INPUT_SIZE:
                 base_fps *= 0.8
-            elif self.yolo_input_size < 640:
+            elif self.yolo_input_size < DEFAULT_YOLO_INPUT_SIZE:
                 base_fps *= 1.2
-            
+
             estimated_time = frame_count / base_fps
-            
+
             # Add buffer for initialization and cleanup
-            estimated_time += 30.0  # 30 second buffer
-            
+            estimated_time += PROCESSING_TIME_BUFFER_SECONDS
+
             return estimated_time
-            
+
         except Exception as e:
             self.logger.warning(f"Could not estimate processing time: {e}")
-            return 300.0  # 5 minute fallback
+            return DEFAULT_TIME_ESTIMATE_FALLBACK
     
     def validate_settings(self, settings: Dict[str, Any]) -> bool:
         """Validate Stage 2 specific settings."""
@@ -507,13 +539,66 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
         """Clean up Stage 2 resources."""
         # Stop any ongoing processing
         self.stop_processing()
-        
+
         # Clean up temporary files if configured
-        temp_files = []
+        # Note: Overlay files are preserved as they're needed for UI
         if self.intermediate_cleanup:
-            if self.output_overlay_path and os.path.exists(self.output_overlay_path):
-                # Don't cleanup overlay - it's needed for UI
-                pass
-        
+            temp_files = []
+            # Add any temporary files that should be cleaned up here
+            # Currently overlay is preserved intentionally
+
         super().cleanup()
-        # self.logger.info("Stage 2 contact analysis tracker cleaned up")
+        self.logger.debug("Stage 2 contact analysis tracker cleaned up")
+
+    def _validate_stage1_output(self, stage1_output_path: str) -> bool:
+        """
+        Validate Stage 1 output file format and integrity.
+
+        Args:
+            stage1_output_path: Path to Stage 1 output file
+
+        Returns:
+            bool: True if file is valid, False otherwise
+        """
+        try:
+            import msgpack
+
+            # Check file size (should be > 0)
+            file_size = os.path.getsize(stage1_output_path)
+            if file_size == 0:
+                self.logger.error(f"Stage 1 output file is empty: {stage1_output_path}")
+                return False
+
+            # Try to open and read header of msgpack file
+            with open(stage1_output_path, 'rb') as f:
+                unpacker = msgpack.Unpacker(f, raw=False)
+                try:
+                    # Try to read first item to verify format
+                    _ = next(unpacker)
+                    return True
+                except StopIteration:
+                    self.logger.error(f"Stage 1 output file has no data: {stage1_output_path}")
+                    return False
+                except msgpack.exceptions.ExtraData:
+                    # This is actually OK - means there's valid data
+                    return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to validate Stage 1 output: {e}")
+            return False
+
+    def _cleanup_partial_outputs(self):
+        """Clean up partial output files after processing failure."""
+        files_to_cleanup = [
+            self.output_msgpack_path,
+            self.output_overlay_path,
+            self.output_sqlite_path
+        ]
+
+        for file_path in files_to_cleanup:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    self.logger.debug(f"Cleaned up partial output: {file_path}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to clean up partial output {file_path}: {e}")
