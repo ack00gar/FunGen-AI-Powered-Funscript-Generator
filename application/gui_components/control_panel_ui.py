@@ -77,6 +77,8 @@ class ControlPanelUI:
         "_prev_client_count",
         "_native_sync_status_cache",
         "_native_sync_status_time",
+        # Advanced tab search
+        "_advanced_search_query",
     )
 
     def __init__(self, app):
@@ -120,6 +122,9 @@ class ControlPanelUI:
         self._prev_client_count = 0
         self._native_sync_status_cache = None
         self._native_sync_status_time = 0
+
+        # Advanced tab search
+        self._advanced_search_query = ""
 
     # ------- Helpers -------
     
@@ -458,9 +463,15 @@ class ControlPanelUI:
         try:
             cur_idx = modes_enum.index(app_state.selected_tracker_name)
         except ValueError:
-            cur_idx = 0
-            from config.constants import DEFAULT_TRACKER_NAME
-            default_tracker = modes_enum[cur_idx] if modes_enum else DEFAULT_TRACKER_NAME
+            # Default to oscillation_experimental_2 for Simple Mode
+            preferred_simple_default = "oscillation_experimental_2"
+            if preferred_simple_default in modes_enum:
+                cur_idx = modes_enum.index(preferred_simple_default)
+                default_tracker = preferred_simple_default
+            else:
+                cur_idx = 0
+                from config.constants import DEFAULT_TRACKER_NAME
+                default_tracker = modes_enum[cur_idx] if modes_enum else DEFAULT_TRACKER_NAME
             app_state.selected_tracker_name = default_tracker
 
         imgui.push_item_width(-1)
@@ -898,42 +909,64 @@ class ControlPanelUI:
         imgui.text("Advanced settings for AI models, tracking, and performance.")
         imgui.spacing()
 
+        # Search box for filtering settings
+        imgui.push_item_width(-1)
+        _, self._advanced_search_query = imgui.input_text_with_hint(
+            "##AdvancedSearch",
+            "Search settings...",
+            self._advanced_search_query,
+            256
+        )
+        imgui.pop_item_width()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Filter settings by keyword")
+        imgui.spacing()
+
+        search_query = self._advanced_search_query.lower()
+
         # AI Models & Inference section (from Configuration tab)
         if self._is_live_tracker(tmode) or self._is_offline_tracker(tmode):
-            if imgui.collapsing_header("AI Models & Inference##AdvancedAIModels")[0]:
-                self._render_ai_model_settings()
+            if not search_query or any(term in "ai models inference" for term in search_query.split()):
+                if imgui.collapsing_header("AI Models & Inference##AdvancedAIModels")[0]:
+                    self._render_ai_model_settings()
 
         # Tracking Parameters section (from Configuration tab)
         adv = app_state.show_advanced_options
         if self._is_live_tracker(tmode) and adv:
-            if imgui.collapsing_header("Live Tracker Settings##AdvancedLiveTracker")[0]:
-                self._render_live_tracker_settings()
+            if not search_query or any(term in "live tracker settings roi detection optical flow" for term in search_query.split()):
+                if imgui.collapsing_header("Live Tracker Settings##AdvancedLiveTracker")[0]:
+                    self._render_live_tracker_settings()
 
         # Class filtering (from Configuration tab)
         if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
-            if imgui.collapsing_header("Class Filtering##AdvancedClassFilter")[0]:
-                self._render_class_filtering_content()
+            if not search_query or any(term in "class filtering filter" for term in search_query.split()):
+                if imgui.collapsing_header("Class Filtering##AdvancedClassFilter")[0]:
+                    self._render_class_filtering_content()
 
         # Oscillation detector settings (from Configuration tab)
         from config.tracker_discovery import get_tracker_discovery
         discovery = get_tracker_discovery()
         tracker_info = discovery.get_tracker_info(tmode)
         if tracker_info and 'oscillation' in tracker_info.display_name.lower():
-            if imgui.collapsing_header("Oscillation Detector Settings##AdvancedOscillation")[0]:
-                self._render_oscillation_detector_settings()
+            if not search_query or any(term in "oscillation detector" for term in search_query.split()):
+                if imgui.collapsing_header("Oscillation Detector Settings##AdvancedOscillation")[0]:
+                    self._render_oscillation_detector_settings()
 
         # Interface & Performance settings (from Settings tab)
-        if imgui.collapsing_header("Interface & Performance##AdvancedInterfacePerf")[0]:
-            self._render_settings_interface_perf()
+        if not search_query or any(term in "interface performance gpu theme font" for term in search_query.split()):
+            if imgui.collapsing_header("Interface & Performance##AdvancedInterfacePerf")[0]:
+                self._render_settings_interface_perf()
 
         # File & Output settings (from Settings tab)
-        if imgui.collapsing_header("File & Output##AdvancedFileOutput")[0]:
-            self._render_settings_file_output()
+        if not search_query or any(term in "file output save export" for term in search_query.split()):
+            if imgui.collapsing_header("File & Output##AdvancedFileOutput")[0]:
+                self._render_settings_file_output()
 
         # Logging & Autosave settings (from Settings tab)
         if app_state.show_advanced_options:
-            if imgui.collapsing_header("Logging & Autosave##AdvancedLogging")[0]:
-                self._render_settings_logging_autosave()
+            if not search_query or any(term in "logging autosave log debug" for term in search_query.split()):
+                if imgui.collapsing_header("Logging & Autosave##AdvancedLogging")[0]:
+                    self._render_settings_logging_autosave()
 
         imgui.spacing()
 
@@ -1486,6 +1519,7 @@ class ControlPanelUI:
 
         settings = app.app_settings
 
+        imgui.indent()
         if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu")[0]:
             cur_conf = settings.get("live_tracker_confidence_threshold")
             ch, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", cur_conf, 0.1, 0.95, "%.2f")
@@ -1626,6 +1660,8 @@ class ControlPanelUI:
                 settings.set("funscript_output_delay_frames", nd)
                 app.calibration.funscript_output_delay_frames = nd
                 app.calibration.update_tracker_delay_params()
+
+        imgui.unindent()
 
 # ------- Oscillation detector -------
 
