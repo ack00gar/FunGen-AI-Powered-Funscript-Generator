@@ -228,11 +228,8 @@ class InfoGraphsUI:
     def _render_tabbed_content(self):
         tab_selected = None
         if imgui.begin_tab_bar("InfoGraphsTabs"):
-            if imgui.begin_tab_item("Video")[0]:
-                tab_selected = "video"
-                imgui.end_tab_item()
-            if imgui.begin_tab_item("Funscript")[0]:
-                tab_selected = "funscript"
+            if imgui.begin_tab_item("Info")[0]:
+                tab_selected = "info"
                 imgui.end_tab_item()
             if imgui.begin_tab_item("Advanced")[0]:
                 tab_selected = "advanced"
@@ -253,31 +250,37 @@ class InfoGraphsUI:
         imgui.begin_child(
             "InfoGraphsTabContent", width=0, height=avail[1], border=False
         )
-        if tab_selected == "video":
+        if tab_selected == "info":
             imgui.spacing()
+            # Video Information (expanded by default)
             if imgui.collapsing_header(
                 "Video Information##VideoInfoSection",
                 flags=imgui.TREE_NODE_DEFAULT_OPEN,
             )[0]:
                 self._render_content_video_info()
+
             imgui.separator()
+
+            # Video Settings (collapsed by default)
             if imgui.collapsing_header(
                 "Video Settings##VideoSettingsSection",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
             )[0]:
                 self._render_content_video_settings()
-        elif tab_selected == "funscript":
-            imgui.spacing()
+
+            imgui.separator()
+
+            # Funscript Info Timeline 1 (collapsed by default)
             if imgui.collapsing_header(
                 "Funscript Info (Timeline 1)##FSInfoT1Section",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
             )[0]:
                 self._render_content_funscript_info(1)
+
             imgui.separator()
+
+            # Funscript Info Timeline 2 (collapsed by default, if visible)
             if self.app.app_state_ui.show_funscript_interactive_timeline2:
                 if imgui.collapsing_header(
                     "Funscript Info (Timeline 2)##FSInfoT2Section",
-                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
                 )[0]:
                     self._render_content_funscript_info(2)
             else:
@@ -641,74 +644,73 @@ class InfoGraphsUI:
                 self.last_pitch_value = new_pitch
                 self._schedule_video_render(new_pitch)
 
-        # Navigation Buffer Settings
+        # Navigation Buffer Settings (collapsed by default)
         imgui.separator()
-        imgui.text("Navigation Buffer")
+        if imgui.collapsing_header("Navigation Buffer##NavBufferSection")[0]:
+            # Get current buffer size from settings (default 600)
+            DEFAULT_BUFFER_SIZE = 600
+            current_buffer_size = self.app.app_settings.get('arrow_nav_buffer_size', DEFAULT_BUFFER_SIZE)
 
-        # Get current buffer size from settings (default 600)
-        DEFAULT_BUFFER_SIZE = 600
-        current_buffer_size = self.app.app_settings.get('arrow_nav_buffer_size', DEFAULT_BUFFER_SIZE)
-
-        # Buffer size slider (100-2000 frames)
-        changed_buffer, new_buffer_size = imgui.slider_int(
-            "Buffer Size (frames)##navBuffer",
-            current_buffer_size,
-            100,  # min
-            2000,  # max
-        )
-
-        if changed_buffer:
-            self.app.app_settings.set('arrow_nav_buffer_size', new_buffer_size)
-            if hasattr(self.app, 'project_manager') and self.app.project_manager:
-                self.app.project_manager.project_dirty = True
-
-            # Log the change
-            self.app.logger.info(
-                f"Navigation buffer size set to {new_buffer_size} frames. "
-                "Restart video playback to apply changes.",
-                extra={'status_message': True, 'duration': 5.0}
+            # Buffer size slider (100-2000 frames)
+            changed_buffer, new_buffer_size = imgui.slider_int(
+                "Buffer Size (frames)##navBuffer",
+                current_buffer_size,
+                100,  # min
+                2000,  # max
             )
 
-        # Reset to default button (in red) - on its own line for better visibility
-        imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
-        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.3, 0.3, 1.0)  # Lighter red on hover
-        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.1, 0.1, 1.0)  # Darker red when clicked
-        if imgui.button("Reset to Default##resetNavBuffer"):
-            self.app.app_settings.set('arrow_nav_buffer_size', DEFAULT_BUFFER_SIZE)
-            if hasattr(self.app, 'project_manager') and self.app.project_manager:
-                self.app.project_manager.project_dirty = True
-            self.app.logger.info(
-                f"Navigation buffer size reset to default ({DEFAULT_BUFFER_SIZE} frames).",
-                extra={'status_message': True}
-            )
-        imgui.pop_style_color(3)
+            if changed_buffer:
+                self.app.app_settings.set('arrow_nav_buffer_size', new_buffer_size)
+                if hasattr(self.app, 'project_manager') and self.app.project_manager:
+                    self.app.project_manager.project_dirty = True
 
-        # RAM estimate
-        if processor and hasattr(processor, 'frame_size_bytes'):
-            buffer_size_to_display = new_buffer_size if changed_buffer else current_buffer_size
-            ram_bytes = buffer_size_to_display * processor.frame_size_bytes
-            ram_mb = ram_bytes / (1024 * 1024)
-
-            # Color code based on RAM usage
-            if ram_mb < 500:
-                ram_color = (0.2, 0.8, 0.2, 1.0)  # Green
-            elif ram_mb < 1000:
-                ram_color = (1.0, 0.8, 0.2, 1.0)  # Yellow
-            else:
-                ram_color = (1.0, 0.4, 0.2, 1.0)  # Orange/Red
-
-            imgui.text("Estimated RAM usage: ")
-            imgui.same_line()
-            imgui.text_colored(f"{ram_mb:.1f} MB", *ram_color)
-
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    f"Buffer Size: {buffer_size_to_display} frames\n"
-                    f"Frame Size: {processor.frame_size_bytes / (1024 * 1024):.2f} MB\n"
-                    f"Total RAM: {ram_mb:.1f} MB\n\n"
-                    "This buffer is used for backward arrow navigation.\n"
-                    "Larger buffers allow scrolling further back but use more RAM."
+                # Log the change
+                self.app.logger.info(
+                    f"Navigation buffer size set to {new_buffer_size} frames. "
+                    "Restart video playback to apply changes.",
+                    extra={'status_message': True, 'duration': 5.0}
                 )
+
+            # Reset to default button (in red) - on its own line for better visibility
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.3, 0.3, 1.0)  # Lighter red on hover
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.1, 0.1, 1.0)  # Darker red when clicked
+            if imgui.button("Reset to Default##resetNavBuffer"):
+                self.app.app_settings.set('arrow_nav_buffer_size', DEFAULT_BUFFER_SIZE)
+                if hasattr(self.app, 'project_manager') and self.app.project_manager:
+                    self.app.project_manager.project_dirty = True
+                self.app.logger.info(
+                    f"Navigation buffer size reset to default ({DEFAULT_BUFFER_SIZE} frames).",
+                    extra={'status_message': True}
+                )
+            imgui.pop_style_color(3)
+
+            # RAM estimate
+            if processor and hasattr(processor, 'frame_size_bytes'):
+                buffer_size_to_display = new_buffer_size if changed_buffer else current_buffer_size
+                ram_bytes = buffer_size_to_display * processor.frame_size_bytes
+                ram_mb = ram_bytes / (1024 * 1024)
+
+                # Color code based on RAM usage
+                if ram_mb < 500:
+                    ram_color = (0.2, 0.8, 0.2, 1.0)  # Green
+                elif ram_mb < 1000:
+                    ram_color = (1.0, 0.8, 0.2, 1.0)  # Yellow
+                else:
+                    ram_color = (1.0, 0.4, 0.2, 1.0)  # Orange/Red
+
+                imgui.text("Estimated RAM usage: ")
+                imgui.same_line()
+                imgui.text_colored(f"{ram_mb:.1f} MB", *ram_color)
+
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        f"Buffer Size: {buffer_size_to_display} frames\n"
+                        f"Frame Size: {processor.frame_size_bytes / (1024 * 1024):.2f} MB\n"
+                        f"Total RAM: {ram_mb:.1f} MB\n\n"
+                        "This buffer is used for backward arrow navigation.\n"
+                        "Larger buffers allow scrolling further back but use more RAM."
+                    )
 
         self.video_settings_perf.end_timing()
 

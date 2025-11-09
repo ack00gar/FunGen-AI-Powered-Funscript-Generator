@@ -335,7 +335,7 @@ class MainMenu:
             # GitHub link button
             if imgui.button("GitHub Repository", width=-1):
                 try:
-                    webbrowser.open("https://github.com/k00gar/FunGen")
+                    webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator")
                 except Exception as e:
                     if hasattr(self.app, 'logger') and self.app.logger:
                         self.app.logger.warning(f"Could not open GitHub link: {e}")
@@ -604,6 +604,11 @@ class MainMenu:
 
             imgui.separator()
 
+            # Navigation submenu
+            self._render_navigation_submenu(app_state)
+
+            imgui.separator()
+
             # Timelines submenu
             self._render_timelines_submenu(app_state)
 
@@ -717,24 +722,12 @@ class MainMenu:
         if imgui.is_item_hovered() and not is_floating:
             imgui.set_tooltip("Window toggles are for floating mode.")
 
-    def _render_timelines_submenu(self, app_state):
+    def _render_navigation_submenu(self, app_state):
         app = self.app
         pm = app.project_manager
         settings = app.app_settings
 
-        if imgui.begin_menu("Timelines"):
-            # Interactive editors
-            for label, attr in (
-                ("Interactive Timeline 1", "show_funscript_interactive_timeline"),
-                ("Interactive Timeline 2", "show_funscript_interactive_timeline2"),
-            ):
-                cur = getattr(app_state, attr)
-                clicked, val = imgui.menu_item(label, selected=cur)
-                if clicked:
-                    setattr(app_state, attr, val)
-                    pm.project_dirty = True
-            imgui.separator()
-
+        if imgui.begin_menu("Navigation"):
             # Preview displays
             for label, attr in (
                 ("Funscript Preview Bar", "show_funscript_timeline"),
@@ -745,6 +738,7 @@ class MainMenu:
                 if clicked:
                     setattr(app_state, attr, val)
                     pm.project_dirty = True
+
             imgui.separator()
 
             # Preview options
@@ -763,6 +757,19 @@ class MainMenu:
                 settings.set("use_simplified_funscript_preview", new_val)
                 app.app_state_ui.funscript_preview_dirty = True
 
+            imgui.separator()
+
+            # Full Width Navigation
+            if not hasattr(app_state, 'full_width_nav'):
+                app_state.full_width_nav = True
+            clicked, val = imgui.menu_item(
+                "Full Width Navigation",
+                selected=app_state.full_width_nav
+            )
+            if clicked:
+                app_state.full_width_nav = val
+                pm.project_dirty = True
+
             clicked, val = imgui.menu_item(
                 "Show Timeline Editor Buttons",
                 selected=app_state.show_timeline_editor_buttons
@@ -771,6 +778,24 @@ class MainMenu:
                 app_state.show_timeline_editor_buttons = val
                 settings.set("show_timeline_editor_buttons", val)
                 pm.project_dirty = True
+
+            imgui.end_menu()
+
+    def _render_timelines_submenu(self, app_state):
+        app = self.app
+        pm = app.project_manager
+
+        if imgui.begin_menu("Timelines"):
+            # Interactive editors only
+            for label, attr in (
+                ("Interactive Timeline 1", "show_funscript_interactive_timeline"),
+                ("Interactive Timeline 2", "show_funscript_interactive_timeline2"),
+            ):
+                cur = getattr(app_state, attr)
+                clicked, val = imgui.menu_item(label, selected=cur)
+                if clicked:
+                    setattr(app_state, attr, val)
+                    pm.project_dirty = True
 
             imgui.end_menu()
 
@@ -796,23 +821,13 @@ class MainMenu:
                 app_state.show_lr_dial_graph = val
                 pm.project_dirty = True
 
-            # 3D Simulator with nested logo option
+            # 3D Simulator
             clicked, val = imgui.menu_item(
                 "3D Simulator", selected=app_state.show_simulator_3d
             )
             if clicked:
                 app_state.show_simulator_3d = val
                 pm.project_dirty = True
-
-            # Indented submenu item for 3D logo
-            imgui.indent()
-            clicked, val = imgui.menu_item(
-                "Show Logo on Cylinder",
-                selected=self.app.app_settings.get('show_3d_simulator_logo', True)
-            )
-            if clicked:
-                self.app.app_settings.set('show_3d_simulator_logo', val)
-            imgui.unindent()
 
             # Chapter list
             if not hasattr(app_state, "show_chapter_list_window"):
@@ -920,20 +935,6 @@ class MainMenu:
                 app_state.show_ai_models_dialog = not app_state.show_ai_models_dialog
             if imgui.is_item_hovered():
                 imgui.set_tooltip("Configure AI model paths and download default models")
-
-            imgui.separator()
-
-            # Chapter List
-            if not hasattr(app_state, "show_chapter_list_window"):
-                app_state.show_chapter_list_window = False
-            clicked, _ = imgui.menu_item(
-                "Chapter List...",
-                selected=app_state.show_chapter_list_window,
-            )
-            if clicked:
-                app_state.show_chapter_list_window = not app_state.show_chapter_list_window
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("View and manage video chapters")
 
             imgui.separator()
 
@@ -1060,11 +1061,6 @@ class MainMenu:
             if _menu_item_simple("About FunGen..."):
                 self._show_about_dialog = True
 
-            # Support (link to GitHub)
-            if _menu_item_simple("Support..."):
-                import webbrowser
-                webbrowser.open("https://github.com/FunGenAI/FunGen/issues")
-
             imgui.separator()
 
             # Keyboard Shortcuts
@@ -1139,6 +1135,19 @@ class MainMenu:
                     imgui.set_tooltip(
                         "Join the FunGen Discord community\n"
                         "Get help, share results, and discuss features!"
+                    )
+
+                imgui.separator()
+
+                if _menu_item_simple("Report Issue on GitHub"):
+                    try:
+                        webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/issues")
+                    except Exception as e:
+                        if hasattr(app, 'logger') and app.logger:
+                            app.logger.warning(f"Could not open GitHub issues link: {e}")
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(
+                        "Report bugs or request features on GitHub"
                     )
 
                 imgui.end_menu()

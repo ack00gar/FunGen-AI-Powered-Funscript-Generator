@@ -90,6 +90,13 @@ class ToolbarUI:
         icon_mgr = get_icon_texture_manager()
         btn_size = self._icon_size
 
+        # --- MODE TOGGLE SECTION ---
+        self._render_mode_toggle_section(icon_mgr, btn_size)
+
+        imgui.same_line(spacing=12)
+        self._render_separator()
+        imgui.same_line(spacing=12)
+
         # --- FILE OPERATIONS SECTION ---
         self._render_file_section(icon_mgr, btn_size)
 
@@ -106,13 +113,6 @@ class ToolbarUI:
 
         # --- PLAYBACK CONTROLS SECTION ---
         self._render_playback_section(icon_mgr, btn_size)
-
-        imgui.same_line(spacing=12)
-        self._render_separator()
-        imgui.same_line(spacing=12)
-
-        # --- NAVIGATION SECTION (Points) ---
-        self._render_navigation_section(icon_mgr, btn_size)
 
         imgui.same_line(spacing=12)
         self._render_separator()
@@ -163,6 +163,42 @@ class ToolbarUI:
 
         # Advance cursor by 1 pixel for the line
         imgui.dummy(1, height)
+
+    def _render_mode_toggle_section(self, icon_mgr, btn_size):
+        """Render Expert/Simple mode toggle button."""
+        app_state = self.app.app_state_ui
+
+        # Get current mode
+        current_mode = getattr(app_state, 'ui_view_mode', 'simple')
+        is_expert = (current_mode == 'expert')
+
+        # Tooltip text
+        if is_expert:
+            tooltip = "Expert Mode (Click to switch to Simple Mode)"
+        else:
+            tooltip = "Simple Mode (Click to switch to Expert Mode)"
+
+        # Apply blue background when Expert mode is active (same as other toggle buttons)
+        if is_expert:
+            imgui.pop_style_color(3)  # Pop default colors
+            # Blue tint for active state (matches Timeline toggles)
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.3, 0.5, 0.7, 0.8)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.4, 0.6, 0.8, 0.9)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.2, 0.4, 0.6, 1.0)
+
+        # Nerd face emoji button
+        if self._toolbar_button(icon_mgr, 'nerd-face.png', btn_size, tooltip):
+            # Toggle mode
+            new_mode = 'simple' if is_expert else 'expert'
+            app_state.ui_view_mode = new_mode
+            self.app.app_settings.set('ui_view_mode', new_mode)
+
+        # Restore default colors if we changed them
+        if is_expert:
+            imgui.pop_style_color(3)
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.3, 0.3, 0.7)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.15, 0.15, 0.9)
 
     def _render_file_section(self, icon_mgr, btn_size):
         """Render file operation buttons."""
@@ -275,10 +311,32 @@ class ToolbarUI:
         has_video = processor and processor.is_video_open() if processor else False
         is_playing = processor.is_processing and not processor.pause_event.is_set() if has_video else False
 
+        # Jump Start
+        if has_video:
+            if self._toolbar_button(icon_mgr, 'jump-start.png', btn_size, "Jump to Start (HOME)"):
+                app.event_handlers.handle_playback_control("jump_start")
+        else:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+            self._toolbar_button(icon_mgr, 'jump-start.png', btn_size, "Jump to Start (No video)")
+            imgui.pop_style_var()
+
+        imgui.same_line()
+
+        # Previous Frame
+        if has_video:
+            if self._toolbar_button(icon_mgr, 'prev-frame.png', btn_size, "Previous Frame (LEFT)"):
+                app.event_handlers.handle_playback_control("prev_frame")
+        else:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+            self._toolbar_button(icon_mgr, 'prev-frame.png', btn_size, "Previous Frame (No video)")
+            imgui.pop_style_var()
+
+        imgui.same_line()
+
         # Play/Pause button
         if has_video:
             icon_name = 'pause.png' if is_playing else 'play.png'
-            tooltip = "Pause" if is_playing else "Play"
+            tooltip = "Pause (SPACE)" if is_playing else "Play (SPACE)"
             if self._toolbar_button(icon_mgr, icon_name, btn_size, tooltip):
                 app.event_handlers.handle_playback_control("play_pause")
         else:
@@ -288,25 +346,48 @@ class ToolbarUI:
 
         imgui.same_line()
 
-        # Previous Frame
+        # Stop button
         if has_video:
-            if self._toolbar_button(icon_mgr, 'prev-frame.png', btn_size, "Previous Frame"):
-                app.event_handlers.handle_playback_control("prev_frame")
+            if self._toolbar_button(icon_mgr, 'stop.png', btn_size, "Stop"):
+                app.event_handlers.handle_playback_control("stop")
         else:
             imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'prev-frame.png', btn_size, "Previous Frame (No video)")
+            self._toolbar_button(icon_mgr, 'stop.png', btn_size, "Stop (No video)")
             imgui.pop_style_var()
 
         imgui.same_line()
 
         # Next Frame
         if has_video:
-            if self._toolbar_button(icon_mgr, 'next-frame.png', btn_size, "Next Frame"):
+            if self._toolbar_button(icon_mgr, 'next-frame.png', btn_size, "Next Frame (RIGHT)"):
                 app.event_handlers.handle_playback_control("next_frame")
         else:
             imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
             self._toolbar_button(icon_mgr, 'next-frame.png', btn_size, "Next Frame (No video)")
             imgui.pop_style_var()
+
+        imgui.same_line()
+
+        # Jump End
+        if has_video:
+            if self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Jump to End (END)"):
+                app.event_handlers.handle_playback_control("jump_end")
+        else:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+            self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Jump to End (No video)")
+            imgui.pop_style_var()
+
+        imgui.same_line()
+
+        # Show/Hide Video button
+        app_state = app.app_state_ui
+        show_video = app_state.show_video_feed if hasattr(app_state, 'show_video_feed') else True
+
+        tooltip = "Hide Video (F)" if show_video else "Show Video (F)"
+        if self._toolbar_button(icon_mgr, 'video-camera.png', btn_size, tooltip):
+            if hasattr(app_state, 'show_video_feed'):
+                app_state.show_video_feed = not app_state.show_video_feed
+                app.app_settings.set("show_video_feed", app_state.show_video_feed)
 
     def _render_navigation_section(self, icon_mgr, btn_size):
         """Render navigation buttons (points and chapters)."""
@@ -462,8 +543,21 @@ class ToolbarUI:
                     self.app.logger.debug(f"Error getting streamer status: {e}")
 
             # Satellite emoji - clickable to start/stop streaming
+            # Red when inactive, green when active
+            imgui.pop_style_color(3)  # Pop default colors
+            if is_running:
+                # Green when active
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
+            else:
+                # Red when inactive
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.0, 0.0, 0.7)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.0, 0.0, 0.85)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.0, 0.0, 0.9)
+
             tooltip = "Stop Streaming Server" if is_running else "Start Streaming Server"
-            if self._toolbar_toggle_button(icon_mgr, 'satellite.png', btn_size, tooltip, is_running):
+            if self._toolbar_button(icon_mgr, 'satellite.png', btn_size, tooltip):
                 # Toggle streaming server
                 if sync_mgr:
                     try:
@@ -483,10 +577,95 @@ class ToolbarUI:
                 else:
                     self.app.logger.warning("Toolbar: Streamer module available but NativeSyncManager failed to initialize")
 
+            imgui.pop_style_color(3)
+
             rendered_any = True
 
-        # Device Control - hidden for now (not very useful as a toolbar button)
-        # Users should use the Device Control tab instead
+        # Device Control button
+        if has_device_control:
+            # Get device manager from control_panel_ui (where it's actually stored)
+            control_panel_ui = getattr(self.app.gui_instance, 'control_panel_ui', None) if hasattr(self.app, 'gui_instance') else None
+            device_manager = getattr(control_panel_ui, 'device_manager', None) if control_panel_ui else None
+
+            is_connected = False
+            if device_manager:
+                try:
+                    is_connected = bool(device_manager.is_connected())
+                except Exception as e:
+                    self.app.logger.error(f"Toolbar: Error checking device connection status: {e}")
+                    import traceback
+                    self.app.logger.error(traceback.format_exc())
+
+            if rendered_any:
+                imgui.same_line()
+
+            # Flashlight emoji - red when inactive, green when active
+            if is_connected:
+                # Green when connected
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
+            else:
+                # Red when disconnected
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.0, 0.0, 0.7)
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.0, 0.0, 0.85)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.0, 0.0, 0.9)
+
+            tooltip = "Disconnect Device" if is_connected else "Connect Device"
+            if self._toolbar_button(icon_mgr, 'flashlight.png', btn_size, tooltip):
+                # Toggle device connection
+                if device_manager:
+                    try:
+                        if is_connected:
+                            # Disconnect the device using the existing event loop
+                            self.app.logger.info("Toolbar: Disconnecting device...")
+                            import asyncio
+                            import threading
+
+                            def run_disconnect():
+                                try:
+                                    loop = asyncio.get_event_loop()
+                                    if loop.is_running():
+                                        # Schedule disconnect in the existing loop
+                                        future = asyncio.run_coroutine_threadsafe(device_manager.stop(), loop)
+                                        future.result(timeout=10)  # Wait up to 10 seconds
+                                    else:
+                                        # Use the existing loop if not running
+                                        loop.run_until_complete(device_manager.stop())
+                                except RuntimeError:
+                                    # No event loop exists, create a new one
+                                    loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(loop)
+                                    try:
+                                        loop.run_until_complete(device_manager.stop())
+                                    finally:
+                                        loop.close()
+
+                                self.app.logger.info("Toolbar: Device disconnected successfully")
+
+                            # Run disconnect in a separate thread to avoid blocking
+                            thread = threading.Thread(target=run_disconnect, daemon=True)
+                            thread.start()
+                        else:
+                            # Open Device Control tab to let user connect
+                            self.app.logger.info("Toolbar: Opening Device Control to connect...")
+                            self.app.app_state_ui.active_control_panel_tab = 4
+                    except Exception as e:
+                        self.app.logger.error(f"Toolbar: Failed to toggle device connection: {e}")
+                        import traceback
+                        self.app.logger.error(traceback.format_exc())
+                else:
+                    self.app.logger.warning("Toolbar: Device Control available but DeviceManager not initialized")
+
+            imgui.pop_style_color(3)
+
+            rendered_any = True
+
+        # Restore default button colors if any features were rendered
+        if rendered_any:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.3, 0.3, 0.7)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.15, 0.15, 0.9)
 
         return rendered_any
 
