@@ -8,15 +8,30 @@ algorithms as sub-components to generate high-quality funscript output with
 precise timing and motion detection.
 
 Author: Migrated from Stage 3 OF system
-Version: 1.0.0
+Version: 1.1.0
 """
 
 import logging
 import os
 import time
-import threading
 from typing import Dict, Any, Optional, List, Tuple, Callable
 from multiprocessing import Event
+
+# Constants
+DEFAULT_LIVE_TRACKER = "oscillation_experimental_2"
+DEFAULT_CHUNK_OVERLAP_FRAMES = 30
+DEFAULT_MIN_SEGMENT_DURATION = 2.0
+DEFAULT_SEGMENT_PADDING_FRAMES = 15
+DEFAULT_NUM_WORKERS = 4
+DEFAULT_CHUNK_SIZE_FRAMES = 1000
+DEFAULT_SMOOTHING_WINDOW = 5
+DEFAULT_QUALITY_MODE = "balanced"
+PROCESSING_TIME_BUFFER_SECONDS = 60.0
+DEFAULT_TIME_ESTIMATE_FALLBACK = 600.0
+ESTIMATED_SEGMENT_COVERAGE = 0.45
+FAST_MODE_FPS = 45.0
+BALANCED_MODE_FPS = 25.0
+HIGH_QUALITY_MODE_FPS = 15.0
 
 try:
     from ..core.base_offline_tracker import BaseOfflineTracker, OfflineProcessingResult, OfflineProcessingStage
@@ -32,15 +47,15 @@ try:
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
-    
+
     import detection.cd.stage_3_of_processor as stage3_module
     from detection.cd.data_structures import Segment, FrameObject
-    # Lazy import to avoid circular dependency during registry initialization
-    TrackerManager = None
+    STAGE3_MODULE_AVAILABLE = True
 except ImportError as e:
     stage3_module = None
-    import warnings
-    warnings.warn(f"Stage 3 module not available: {e}")
+    STAGE3_MODULE_AVAILABLE = False
+    import logging
+    logging.getLogger(__name__).error(f"Stage 3 module not available: {e}. This tracker will not function.")
 
 
 class Stage3OpticalFlowTracker(BaseOfflineTracker):
@@ -57,25 +72,25 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
     
     def __init__(self):
         super().__init__()
-        
+
         # Live tracker integration
-        self.live_tracker_name = "oscillation_experimental_2"  # Default live tracker to use
+        self.live_tracker_name = DEFAULT_LIVE_TRACKER
         self.tracker_manager = None
-        
+
         # Optical flow settings
-        self.chunk_overlap_frames = 30  # Overlap between processing chunks
-        self.min_segment_duration_seconds = 2.0  # Skip very short segments
-        self.segment_padding_frames = 15  # Padding around segments
-        
+        self.chunk_overlap_frames = DEFAULT_CHUNK_OVERLAP_FRAMES
+        self.min_segment_duration_seconds = DEFAULT_MIN_SEGMENT_DURATION
+        self.segment_padding_frames = DEFAULT_SEGMENT_PADDING_FRAMES
+
         # Processing parameters
-        self.num_workers = 4
+        self.num_workers = DEFAULT_NUM_WORKERS
         self.enable_sqlite = True  # Prefer SQLite for memory efficiency
-        self.chunk_size_frames = 1000  # Frames per processing chunk
-        
+        self.chunk_size_frames = DEFAULT_CHUNK_SIZE_FRAMES
+
         # Quality settings
-        self.quality_mode = "balanced"  # "fast", "balanced", "high_quality"
+        self.quality_mode = DEFAULT_QUALITY_MODE
         self.enable_motion_smoothing = True
-        self.smoothing_window_size = 5
+        self.smoothing_window_size = DEFAULT_SMOOTHING_WINDOW
         
         # Output configuration
         self.output_funscript_path = None
@@ -151,12 +166,12 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
     
     def initialize(self, app_instance, **kwargs) -> bool:
         """Initialize the Stage 3 optical flow tracker."""
-        global TrackerManager  # Declare at function start
         try:
             self.app = app_instance
-            
-            if not stage3_module:
-                self.logger.error("Stage 3 module not available - cannot initialize tracker")
+
+            if not STAGE3_MODULE_AVAILABLE or stage3_module is None:
+                self.logger.error("Stage 3 module not available - cannot initialize tracker. "
+                                "Check that detection.cd.stage_3_of_processor module is installed.")
                 return False
             
             # Load settings
@@ -186,13 +201,15 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
             
             # Initialize live tracker manager
             try:
-                # Lazy import to avoid circular dependency
-                if TrackerManager is None:
-                    from tracker.tracker_manager import TrackerManager as TM
-                    TrackerManager = TM
-                
+                # Import TrackerManager directly (avoids global variable pattern)
+                from tracker.tracker_manager import TrackerManager
+
                 # Get tracker model path from app instance
                 tracker_model_path = getattr(app_instance, 'yolo_det_model_path', '') or ''
+                if not tracker_model_path:
+                    self.logger.error("No tracker model path available from app instance")
+                    return False
+
                 self.tracker_manager = TrackerManager(app_instance, tracker_model_path)
                 if not self.tracker_manager.set_tracking_mode(self.live_tracker_name):
                     self.logger.warning(f"Failed to set live tracker {self.live_tracker_name}, using default")
@@ -434,7 +451,7 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
         except Exception as e:
             self.processing_active = False
             self.current_stage = None
-            self.logger.error(f"Stage 3 processing error: {e}")
+            self.logger.error(f"Stage 3 processing error: {e}", exc_info=True)
             return OfflineProcessingResult(
                 success=False,
                 error_message=f"Stage 3 processing failed: {e}"
@@ -464,39 +481,39 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
             
             # Estimation based on segments and quality settings
             # Stage 3 typically processes 30-60% of video frames (only segments)
-            estimated_processed_frames = frame_count * 0.45  # Conservative estimate
-            
+            estimated_processed_frames = frame_count * ESTIMATED_SEGMENT_COVERAGE
+
             # Base processing rate depends on quality mode and live tracker
             if self.quality_mode == "fast":
-                base_fps = 45.0
+                base_fps = FAST_MODE_FPS
             elif self.quality_mode == "high_quality":
-                base_fps = 15.0
+                base_fps = HIGH_QUALITY_MODE_FPS
             else:  # balanced
-                base_fps = 25.0
-            
+                base_fps = BALANCED_MODE_FPS
+
             # Adjust for live tracker type
             if "experimental_2" in self.live_tracker_name:
                 base_fps *= 0.85  # More sophisticated algorithm
             elif "legacy" in self.live_tracker_name:
                 base_fps *= 0.75  # More intensive processing
-            
+
             # Adjust for multiprocessing
             worker_efficiency = min(self.num_workers * 0.75, 4.0)  # Diminishing returns
             base_fps *= worker_efficiency
-            
+
             # Adjust for chunking overhead
             base_fps *= 0.9
-            
+
             estimated_time = estimated_processed_frames / base_fps
-            
+
             # Add buffer for initialization, loading, and saving
-            estimated_time += 60.0  # 1 minute buffer
-            
+            estimated_time += PROCESSING_TIME_BUFFER_SECONDS
+
             return estimated_time
-            
+
         except Exception as e:
             self.logger.warning(f"Could not estimate processing time: {e}")
-            return 600.0  # 10 minute fallback
+            return DEFAULT_TIME_ESTIMATE_FALLBACK
     
     def _load_stage2_results(self, stage2_output_path: str, sqlite_db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Load Stage 2 results from msgpack or SQLite."""
@@ -517,34 +534,43 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
     
     def _load_from_sqlite(self, sqlite_path: str) -> Dict[str, Any]:
         """Load data from SQLite database."""
+        storage = None
         try:
             from detection.cd.stage_2_sqlite_storage import Stage2SQLiteStorage
-            
+
             storage = Stage2SQLiteStorage(sqlite_path, self.logger)
-            
+
             # Load segments
             segments_data = storage.get_segments()
             segments = []
-            
+
             # Convert to Segment objects if needed
             for segment_data in segments_data:
-                # This would need to be implemented based on the actual Segment class structure
                 segments.append(segment_data)
-            
-            # For Stage 3, we typically don't load all frame objects into memory
-            # Instead, we'll let Stage 3 module access them on-demand via SQLite
-            frame_objects = {}  # Empty - will be loaded on-demand by Stage 3
-            
+
+            # For Stage 3 with SQLite, we pass the database path instead of loading
+            # all frame objects into memory. The Stage 3 processor will query on-demand.
+            # We keep a reference to indicate SQLite should be used
+            frame_objects = {'_use_sqlite': True, '_sqlite_path': sqlite_path}
+
             return {
                 'segments': segments,
                 'frame_objects': frame_objects,
                 'data_source': 'sqlite',
                 'sqlite_path': sqlite_path
             }
-            
+
         except Exception as e:
             self.logger.error(f"Failed to load from SQLite: {e}")
             raise
+        finally:
+            # Ensure storage connection is closed
+            if storage is not None:
+                try:
+                    storage.close()
+                except AttributeError:
+                    # Storage may not have close method, that's OK
+                    pass
     
     def _load_from_msgpack(self, msgpack_path: str) -> Dict[str, Any]:
         """Load data from msgpack file."""
@@ -605,19 +631,41 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
     def _save_funscript_output(self, funscript_data: Any, output_path: str):
         """Save funscript data to file."""
         try:
-            # If funscript_data is already a DualAxisFunscript object
-            if hasattr(funscript_data, 'save'):
+            import json
+
+            # If funscript_data is already a DualAxisFunscript object with save method
+            if hasattr(funscript_data, 'save') and callable(funscript_data.save):
                 funscript_data.save(output_path)
-            else:
-                # Handle raw data format
-                import json
+            elif isinstance(funscript_data, dict):
+                # Handle dict format - ensure it has required funscript structure
+                if 'actions' not in funscript_data:
+                    funscript_data = {
+                        'version': '1.0',
+                        'inverted': False,
+                        'range': 100,
+                        'actions': funscript_data.get('data', [])
+                    }
                 with open(output_path, 'w') as f:
                     json.dump(funscript_data, f, indent=2)
-            
+            elif isinstance(funscript_data, list):
+                # Handle list of actions
+                output_data = {
+                    'version': '1.0',
+                    'inverted': False,
+                    'range': 100,
+                    'actions': funscript_data
+                }
+                with open(output_path, 'w') as f:
+                    json.dump(output_data, f, indent=2)
+            else:
+                # Unsupported format
+                raise ValueError(f"Unsupported funscript data type: {type(funscript_data)}. "
+                               f"Expected object with save() method, dict, or list.")
+
             self.logger.info(f"Saved funscript output to {output_path}")
-            
+
         except Exception as e:
-            self.logger.error(f"Failed to save funscript output: {e}")
+            self.logger.error(f"Failed to save funscript output: {e}", exc_info=True)
             raise
     
     def validate_settings(self, settings: Dict[str, Any]) -> bool:
@@ -666,7 +714,7 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
         """Clean up Stage 3 resources."""
         # Stop any ongoing processing
         self.stop_processing()
-        
+
         # Cleanup live tracker manager
         if self.tracker_manager:
             try:
@@ -674,6 +722,6 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
             except Exception as e:
                 self.logger.warning(f"Error cleaning up tracker manager: {e}")
             self.tracker_manager = None
-        
+
         super().cleanup()
-        # self.logger.info("Stage 3 optical flow tracker cleaned up")
+        self.logger.debug("Stage 3 optical flow tracker cleaned up")

@@ -194,29 +194,58 @@ class BaseOfflineTracker(ABC):
         """
         pass
     
-    def validate_dependencies(self, 
+    def validate_dependencies(self,
                             stage: OfflineProcessingStage,
                             available_data: Dict[str, Any],
                             available_files: Dict[str, str]) -> bool:
         """
         Validate that dependencies for a stage are satisfied.
-        
+
         Args:
             stage: Stage to validate
             available_data: Available input data
             available_files: Available input files
-        
+
         Returns:
             bool: True if dependencies are satisfied
         """
         dependencies = self.stage_dependencies.get(stage, [])
-        
+
         for dep_stage in dependencies:
             # Check if required stage outputs are available
-            if dep_stage.value not in available_data and dep_stage.value not in available_files:
-                self.logger.error(f"Missing dependency {dep_stage.value} for stage {stage.value}")
+            stage_key = dep_stage.value
+            found_in_data = stage_key in available_data
+            found_in_files = stage_key in available_files
+
+            if not found_in_data and not found_in_files:
+                self.logger.error(f"Missing dependency {stage_key} for stage {stage.value}")
                 return False
-        
+
+            # Validate data content if found
+            if found_in_data:
+                data = available_data[stage_key]
+                if data is None:
+                    self.logger.error(f"Dependency {stage_key} data is None")
+                    return False
+                # Check if it's an empty dict/list (likely invalid)
+                if isinstance(data, (dict, list)) and len(data) == 0:
+                    self.logger.warning(f"Dependency {stage_key} has empty data structure")
+
+            # Validate file exists and is readable if found
+            if found_in_files:
+                import os
+                file_path = available_files[stage_key]
+                if not file_path or not os.path.exists(file_path):
+                    self.logger.error(f"Dependency {stage_key} file does not exist: {file_path}")
+                    return False
+                if not os.access(file_path, os.R_OK):
+                    self.logger.error(f"Dependency {stage_key} file is not readable: {file_path}")
+                    return False
+                # Check file is not empty
+                if os.path.getsize(file_path) == 0:
+                    self.logger.error(f"Dependency {stage_key} file is empty: {file_path}")
+                    return False
+
         return True
     
     def set_stop_event(self, stop_event: Event):
@@ -228,6 +257,17 @@ class BaseOfflineTracker(ABC):
         if self.stop_event:
             self.stop_event.set()
         self.processing_active = False
+
+    def should_stop(self) -> bool:
+        """
+        Check if processing should be stopped.
+
+        Returns:
+            bool: True if stop has been requested
+        """
+        if self.stop_event and self.stop_event.is_set():
+            return True
+        return not self.processing_active
     
     def get_checkpoint_data(self) -> Dict[str, Any]:
         """
@@ -266,17 +306,26 @@ class BaseOfflineTracker(ABC):
     def get_progress_info(self) -> Dict[str, Any]:
         """
         Get current progress information for UI display.
-        
+
         Returns:
-            Dict: Progress information
+            Dict: Progress information including stage, status, and settings
         """
-        return {
+        info = {
             'current_stage': self.current_stage.value if self.current_stage else None,
+            'current_stage_name': self.current_stage.name if self.current_stage else None,
             'processing_active': self.processing_active,
             'tracker_name': self.metadata.display_name,
+            'tracker_category': self.metadata.category,
             'num_workers': self.num_workers,
-            'checkpointing_enabled': self.enable_checkpointing
+            'checkpointing_enabled': self.enable_checkpointing,
+            'intermediate_cleanup': self.intermediate_cleanup
         }
+
+        # Add stop event status if available
+        if self.stop_event:
+            info['stop_requested'] = self.stop_event.is_set()
+
+        return info
     
     def validate_settings(self, settings: Dict[str, Any]) -> bool:
         """
