@@ -125,13 +125,6 @@ class ToolbarUI:
         self._render_separator()
         imgui.same_line(spacing=12)
 
-        # --- FUNSCRIPT ACTIONS SECTION (Auto-simplify, Ultimate Autotune) ---
-        self._render_funscript_actions_section(icon_mgr, btn_size)
-
-        imgui.same_line(spacing=12)
-        self._render_separator()
-        imgui.same_line(spacing=12)
-
         # --- FEATURES SECTION (Streamer, Device Control - conditional) ---
         has_features = self._render_features_section(icon_mgr, btn_size)
         if has_features:
@@ -245,9 +238,20 @@ class ToolbarUI:
             imgui.end_popup()
 
     def _render_edit_section(self, icon_mgr, btn_size):
-        """Render edit operation buttons (undo/redo for both timelines)."""
+        """Render timeline sections (toggle + undo/redo + ultimate autotune for each timeline)."""
         app = self.app
+        app_state = self.app.app_state_ui
         fs_proc = app.funscript_processor
+        has_video = app.processor and app.processor.is_video_open() if app.processor else False
+
+        # === TIMELINE 1 SECTION ===
+        # Timeline 1 Toggle - Keycap 1 emoji
+        active = app_state.show_funscript_interactive_timeline if hasattr(app_state, 'show_funscript_interactive_timeline') else True
+        if self._toolbar_toggle_button(icon_mgr, 'keycap-1.png', btn_size, "Toggle Timeline 1", active):
+            app_state.show_funscript_interactive_timeline = not active
+            self.app.project_manager.project_dirty = True
+
+        imgui.same_line()
 
         # Undo Timeline 1
         undo1 = fs_proc._get_undo_manager(1) if fs_proc else None
@@ -274,9 +278,29 @@ class ToolbarUI:
             self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T1 (Nothing to redo)")
             imgui.pop_style_var()
 
+        imgui.same_line()
+
+        # Ultimate Autotune Timeline 1 - Magic wand emoji (🪄)
+        if has_video:
+            if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (Timeline 1)"):
+                app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+        else:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+            self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune T1 (No video)")
+            imgui.pop_style_var()
+
         imgui.same_line(spacing=4)
         imgui.text("|")  # Simple text separator
         imgui.same_line(spacing=4)
+
+        # === TIMELINE 2 SECTION ===
+        # Timeline 2 Toggle - Keycap 2 emoji
+        active = app_state.show_funscript_interactive_timeline2 if hasattr(app_state, 'show_funscript_interactive_timeline2') else False
+        if self._toolbar_toggle_button(icon_mgr, 'keycap-2.png', btn_size, "Toggle Timeline 2", active):
+            app_state.show_funscript_interactive_timeline2 = not active
+            self.app.project_manager.project_dirty = True
+
+        imgui.same_line()
 
         # Undo Timeline 2
         undo2 = fs_proc._get_undo_manager(2) if fs_proc else None
@@ -301,6 +325,17 @@ class ToolbarUI:
         else:
             imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
             self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T2 (Nothing to redo)")
+            imgui.pop_style_var()
+
+        imgui.same_line()
+
+        # Ultimate Autotune Timeline 2 - Magic wand emoji (🪄)
+        if has_video:
+            if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (Timeline 2)"):
+                app.trigger_ultimate_autotune_with_defaults(timeline_num=2)
+        else:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+            self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune T2 (No video)")
             imgui.pop_style_var()
 
     def _render_playback_section(self, icon_mgr, btn_size):
@@ -415,9 +450,10 @@ class ToolbarUI:
             imgui.pop_style_var()
 
     def _render_tracking_section(self, icon_mgr, btn_size):
-        """Render tracking control buttons - Robot emoji with red when tracking."""
+        """Render tracking controls (start/stop + auto-simplify + auto-post-processing)."""
         app = self.app
         processor = app.processor
+        settings = app.app_settings
 
         if not processor:
             # No processor - show disabled
@@ -431,6 +467,7 @@ class ToolbarUI:
                       hasattr(processor, 'enable_tracker_processing') and
                       processor.enable_tracker_processing)
 
+        # Start/Stop Tracking button
         if not is_tracking:
             # Start button - no special background, just normal state
             if self._toolbar_button(icon_mgr, 'robot.png', btn_size, "Start Tracking"):
@@ -451,20 +488,17 @@ class ToolbarUI:
             imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.3, 0.3, 0.7)
             imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.15, 0.15, 0.9)
 
-    def _render_funscript_actions_section(self, icon_mgr, btn_size):
-        """Render funscript action buttons (auto-simplify, ultimate autotune)."""
-        app = self.app
-        settings = app.app_settings
+        imgui.same_line()
 
-        # Auto-Simplification Toggle - synced with Advanced tab
+        # Auto-Simplification Toggle - Wrench emoji (🔧)
         auto_simplify = settings.get('funscript_point_simplification_enabled', True)
         if self._toolbar_toggle_button(icon_mgr, 'wrench.png', btn_size,
                                        "On-the-fly Funscript Simplification", auto_simplify):
             new_value = not auto_simplify
             settings.set('funscript_point_simplification_enabled', new_value)
             # Apply to active funscript if tracking
-            if app.processor and hasattr(app.processor, 'active_funscript') and app.processor.active_funscript:
-                app.processor.active_funscript.simplification_enabled = new_value
+            if processor and hasattr(processor, 'active_funscript') and processor.active_funscript:
+                processor.active_funscript.simplification_enabled = new_value
 
         imgui.same_line()
 
@@ -475,18 +509,6 @@ class ToolbarUI:
             new_value = not auto_post_proc
             settings.set('enable_auto_post_processing', new_value)
             app.logger.info(f"Automatic post-processing {'enabled' if new_value else 'disabled'}", extra={"status_message": True})
-
-        imgui.same_line()
-
-        # Ultimate Autotune button - Rocket emoji (🚀)
-        has_video = app.processor and app.processor.is_video_open() if app.processor else False
-        if has_video:
-            if self._toolbar_button(icon_mgr, 'rocket.png', btn_size, "Ultimate Autotune (Timeline 1)"):
-                app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
-        else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'rocket.png', btn_size, "Ultimate Autotune (No video)")
-            imgui.pop_style_var()
 
     def _render_features_section(self, icon_mgr, btn_size):
         """Render supporter feature toggles (streamer, device control).
@@ -675,22 +697,6 @@ class ToolbarUI:
     def _render_view_section(self, icon_mgr, btn_size):
         """Render view toggle buttons."""
         app_state = self.app.app_state_ui
-
-        # Timeline 1 Toggle - Keycap 1 emoji
-        active = app_state.show_funscript_interactive_timeline if hasattr(app_state, 'show_funscript_interactive_timeline') else True
-        if self._toolbar_toggle_button(icon_mgr, 'keycap-1.png', btn_size, "Toggle Timeline 1", active):
-            app_state.show_funscript_interactive_timeline = not active
-            self.app.project_manager.project_dirty = True
-
-        imgui.same_line()
-
-        # Timeline 2 Toggle - Keycap 2 emoji
-        active = app_state.show_funscript_interactive_timeline2 if hasattr(app_state, 'show_funscript_interactive_timeline2') else False
-        if self._toolbar_toggle_button(icon_mgr, 'keycap-2.png', btn_size, "Toggle Timeline 2", active):
-            app_state.show_funscript_interactive_timeline2 = not active
-            self.app.project_manager.project_dirty = True
-
-        imgui.same_line()
 
         # Chapter List Toggle - Books emoji (📚)
         if not hasattr(app_state, 'show_chapter_list_window'):
