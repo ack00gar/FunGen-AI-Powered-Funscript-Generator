@@ -7,8 +7,20 @@ and dynamically calculates regions of interest for optical flow-based motion tra
 It provides automated ROI management with object persistence and interaction detection.
 
 Author: Migrated from YOLO ROI system
-Version: 1.0.0
+Version: 1.1.0
 """
+
+# Constants
+MIN_FLOW_HISTORY_WINDOW = 3
+POSITION_HISTORY_SMOOTH_SIZE = 2
+SIGNAL_AMPLIFIER_HISTORY_SIZE = 120  # 4 seconds @ 30fps
+SIGNAL_AMPLIFIER_SMOOTHING_ALPHA = 0.7
+FINAL_SMOOTHING_ALPHA = 0.7
+MIN_ROI_SIZE = 128
+VR_ASPECT_RATIO_THRESHOLD = 1.8
+VR_ROI_MULTIPLIER_FACE_HAND = 2.5
+VR_ROI_MULTIPLIER_DEFAULT = 2
+FPS_UPDATE_FRAME_COUNT = 30
 
 import logging
 import time
@@ -65,21 +77,21 @@ class YoloRoiTracker(BaseTracker):
         self.prev_features_main_roi = None
         
         # Position tracking (minimal smoothing for responsiveness)
-        self.flow_history_window_smooth = max(3, constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW)  # Minimum 3 frames
+        self.flow_history_window_smooth = max(MIN_FLOW_HISTORY_WINDOW, constants.DEFAULT_FLOW_HISTORY_SMOOTHING_WINDOW)
         self.primary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
         self.secondary_flow_history_smooth = deque(maxlen=self.flow_history_window_smooth)
-        
+
         # Reduced smoothing for lower latency (<100ms total delay)
-        self.position_history_smooth = deque(maxlen=2)  # Minimal final smoothing (reduced from 3)
+        self.position_history_smooth = deque(maxlen=POSITION_HISTORY_SMOOTH_SIZE)
         self.last_primary_position = None  # Initialize as None to detect first frame
         self.last_secondary_position = None
         self.first_valid_position_captured = False  # Flag for startup calibration
 
         # Enhanced signal mastering using helper module
         self.signal_amplifier = SignalAmplifier(
-            history_size=120,  # 4 seconds @ 30fps
+            history_size=SIGNAL_AMPLIFIER_HISTORY_SIZE,
             enable_live_amp=True,  # Enable dynamic amplification by default
-            smoothing_alpha=0.7,  # Reduced EMA smoothing for lower latency (was 0.3)
+            smoothing_alpha=SIGNAL_AMPLIFIER_SMOOTHING_ALPHA,
             logger=self.logger
         )
         
@@ -90,11 +102,12 @@ class YoloRoiTracker(BaseTracker):
         self.flow_max_secondary_adaptive = 0.1
         
         # VR and motion mode detection (from original tracker.py)
-        self.enable_inversion_detection = True
-        self.motion_mode = 'thrusting'  # 'thrusting' or 'riding'
-        self.motion_mode_history = []  # For tracking mode changes
+        self.enable_inversion_detection = False  # Disabled by default, enabled via settings
+        self.motion_mode = 'undetermined'  # 'thrusting', 'riding', or 'undetermined'
+        self.motion_mode_history = deque(maxlen=30)  # Use deque for automatic size management
         self.motion_inversion_threshold = 1.5
         self.motion_mode_history_window = 30
+        self.inversion_detection_split_ratio = 3.0
         
         # Flow calculation modes
         self.use_sparse_flow = False
@@ -125,15 +138,10 @@ class YoloRoiTracker(BaseTracker):
         self._fps_counter = 0
         self._fps_last_time = time.time()
         self.stats_display = []
-        
-        # Motion inversion detection
-        self.enable_inversion_detection = False
-        self.motion_mode = 'undetermined'
-        self.motion_mode_history = deque(maxlen=30)
-        self.motion_mode_history_window = 30
-        self.motion_inversion_threshold = 1.5
-        self.inversion_detection_split_ratio = 3.0
-        
+
+        # VR detection cache (to avoid repeated aspect ratio calculations)
+        self._is_vr_video_cached = None
+
         # ROI smoothing (will be overridden by app settings)
         self.roi_smoothing_factor = constants.DEFAULT_ROI_SMOOTHING_FACTOR
         self.previous_roi = None
@@ -319,7 +327,7 @@ class YoloRoiTracker(BaseTracker):
             return True
             
         except Exception as e:
-            self.logger.error(f"Initialization failed: {e}")
+            self.logger.error(f"Initialization failed: {e}", exc_info=True)
             return False
     
     def update_settings(self, **kwargs) -> bool:
@@ -358,14 +366,14 @@ class YoloRoiTracker(BaseTracker):
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to update settings: {e}")
+            self.logger.error(f"Failed to update settings: {e}", exc_info=True)
             return False
     
-    def process_frame(self, frame: np.ndarray, frame_time_ms: int, 
+    def process_frame(self, frame: np.ndarray, frame_time_ms: int,
                      frame_index: Optional[int] = None) -> TrackerResult:
         """
         Process a frame using YOLO ROI tracking.
-        
+
         This implementation:
         1. Runs YOLO detection at intervals to find penis and interaction objects
         2. Calculates combined ROI based on detected objects
@@ -374,6 +382,25 @@ class YoloRoiTracker(BaseTracker):
         5. Generates funscript actions based on motion
         """
         try:
+            # Validate frame dimensions
+            if frame is None or frame.size == 0:
+                self.logger.error("Received invalid frame (None or empty)")
+                return TrackerResult(
+                    processed_frame=frame if frame is not None else np.zeros((480, 640, 3), dtype=np.uint8),
+                    action_log=None,
+                    debug_info={'error': 'Invalid frame'},
+                    status_message="Error: Invalid frame"
+                )
+
+            if len(frame.shape) != 3 or frame.shape[2] != 3:
+                self.logger.error(f"Invalid frame shape: {frame.shape}. Expected (H, W, 3)")
+                return TrackerResult(
+                    processed_frame=frame,
+                    action_log=None,
+                    debug_info={'error': f'Invalid frame shape: {frame.shape}'},
+                    status_message=f"Error: Invalid frame shape {frame.shape}"
+                )
+
             self.internal_frame_counter += 1
             self._update_fps()
             processed_frame = self._preprocess_frame(frame)
@@ -456,7 +483,7 @@ class YoloRoiTracker(BaseTracker):
             )
             
         except Exception as e:
-            self.logger.error(f"Frame processing error: {e}")
+            self.logger.error(f"Frame processing error: {e}", exc_info=True)
             return TrackerResult(
                 processed_frame=frame,
                 action_log=None,
@@ -525,7 +552,7 @@ class YoloRoiTracker(BaseTracker):
             return True
             
         except Exception as e:
-            self.logger.error(f"Settings validation error: {e}")
+            self.logger.error(f"Settings validation error: {e}", exc_info=True)
             return False
     
     def get_status_info(self) -> Dict[str, Any]:
@@ -559,7 +586,8 @@ class YoloRoiTracker(BaseTracker):
         self.secondary_flow_history_smooth.clear()
         self.penis_max_size_history.clear()
         self.motion_mode_history.clear()
-        # self.logger.info("YOLO ROI tracker cleaned up")
+        self._is_vr_video_cached = None
+        self.logger.debug("YOLO ROI tracker cleaned up")
     
     # Private helper methods
     
@@ -642,9 +670,7 @@ class YoloRoiTracker(BaseTracker):
                     detected_objects.append(detection)
                     
         except Exception as e:
-            self.logger.error(f"YOLO detection error: {e}")
-            import traceback
-            traceback.print_exc()
+            self.logger.error(f"YOLO detection error: {e}", exc_info=True)
         
         return detected_objects
     
@@ -721,70 +747,69 @@ class YoloRoiTracker(BaseTracker):
         
         return interacting_objects
     
-    def _calculate_combined_roi(self, frame_shape: Tuple[int, int], 
-                              penis_box_xywh: Tuple[int, int, int, int], 
+    def _calculate_combined_roi(self, frame_shape: Tuple[int, int],
+                              penis_box_xywh: Tuple[int, int, int, int],
                               interacting_objects: List[Dict]) -> Tuple[int, int, int, int]:
         """Calculate combined ROI from penis and interacting objects (from original tracker)."""
         entities = [penis_box_xywh] + [obj["box"] for obj in interacting_objects]
-        
+
         min_x = min(e[0] for e in entities)
         min_y = min(e[1] for e in entities)
         max_x_coord = max(e[0] + e[2] for e in entities)
         max_y_coord = max(e[1] + e[3] for e in entities)
-        
+
         # Apply padding
         rx1 = max(0, min_x - self.roi_padding)
         ry1 = max(0, min_y - self.roi_padding)
         rx2 = min(frame_shape[1], max_x_coord + self.roi_padding)
         ry2 = min(frame_shape[0], max_y_coord + self.roi_padding)
-        
+
         rw = rx2 - rx1
         rh = ry2 - ry1
-        
+
         # Ensure minimum size
-        min_w, min_h = 128, 128
-        if rw < min_w:
-            deficit = min_w - rw
+        if rw < MIN_ROI_SIZE:
+            deficit = MIN_ROI_SIZE - rw
             rx1 = max(0, rx1 - deficit // 2)
-            rw = min_w
-        if rh < min_h:
-            deficit = min_h - rh
+            rw = MIN_ROI_SIZE
+        if rh < MIN_ROI_SIZE:
+            deficit = MIN_ROI_SIZE - rh
             ry1 = max(0, ry1 - deficit // 2)
-            rh = min_h
-        
+            rh = MIN_ROI_SIZE
+
         # Ensure ROI stays within frame bounds
         if rx1 + rw > frame_shape[1]:
             rx1 = frame_shape[1] - rw
         if ry1 + rh > frame_shape[0]:
             ry1 = frame_shape[0] - rh
-        
+
         return (int(rx1), int(ry1), int(rw), int(rh))
     
     def _apply_vr_roi_limits(self, roi_candidate: Tuple[int, int, int, int], frame_width: int) -> Tuple[int, int, int, int]:
         """Apply VR-specific ROI width limitations."""
         if not self.penis_last_known_box:
             return roi_candidate
-        
+
         penis_w = self.penis_last_known_box[2]
         rx, ry, rw, rh = roi_candidate
-        
+
         # Determine new width based on interaction type
         # Increased width for face/hand to accommodate horizontal motion (blowjob/handjob)
         if self.main_interaction_class in ["face", "hand"]:
-            new_rw = penis_w * 2.5  # Wider ROI to keep moving objects in frame
+            new_rw = penis_w * VR_ROI_MULTIPLIER_FACE_HAND
         else:
-            new_rw = min(rw, penis_w * 2)
-        
+            new_rw = min(rw, penis_w * VR_ROI_MULTIPLIER_DEFAULT)
+
         if new_rw > 0:
             # Recenter the ROI
             original_center_x = rx + rw / 2
             new_rx = int(original_center_x - new_rw / 2)
-            
+
             final_rw = int(min(new_rw, frame_width))
             final_rx = max(0, min(new_rx, frame_width - final_rw))
-            
+
             return (final_rx, ry, final_rw, rh)
-        
+
         return roi_candidate
     
     def _smooth_roi_transition(self, new_roi: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
@@ -984,17 +1009,15 @@ class YoloRoiTracker(BaseTracker):
             return primary_pos, secondary_pos
 
         # Exponential moving average with reduced lag
-        alpha = 0.7  # Higher alpha = less lag (was 0.3, now 0.7 for <100ms delay)
-
         # Apply EMA smoothing
-        smoothed_primary = int(alpha * primary_pos + (1 - alpha) * self.last_primary_position)
-        smoothed_secondary = int(alpha * secondary_pos + (1 - alpha) * self.last_secondary_position)
+        smoothed_primary = int(FINAL_SMOOTHING_ALPHA * primary_pos + (1 - FINAL_SMOOTHING_ALPHA) * self.last_primary_position)
+        smoothed_secondary = int(FINAL_SMOOTHING_ALPHA * secondary_pos + (1 - FINAL_SMOOTHING_ALPHA) * self.last_secondary_position)
 
         # Store position history for minimal additional smoothing
         self.position_history_smooth.append((smoothed_primary, smoothed_secondary))
 
-        # Apply median smoothing only if we have 2+ samples (reduced from 3)
-        if len(self.position_history_smooth) >= 2:
+        # Apply median smoothing only if we have POSITION_HISTORY_SMOOTH_SIZE samples
+        if len(self.position_history_smooth) >= POSITION_HISTORY_SMOOTH_SIZE:
             primary_values = [pos[0] for pos in list(self.position_history_smooth)]
             secondary_values = [pos[1] for pos in list(self.position_history_smooth)]
 
@@ -1034,7 +1057,7 @@ class YoloRoiTracker(BaseTracker):
                         return dx_raw, dy_raw, None, good_features
                         
             except Exception as e:
-                self.logger.error(f"Sparse flow calculation error: {e}")
+                self.logger.error(f"Sparse flow calculation error: {e}", exc_info=True)
                 
         return 0.0, 0.0, None, None
     
@@ -1215,7 +1238,7 @@ class YoloRoiTracker(BaseTracker):
             return primary_pos, secondary_pos
             
         except Exception as e:
-            self.logger.error(f"ROI motion analysis error: {e}")
+            self.logger.error(f"ROI motion analysis error: {e}", exc_info=True)
             return 50, 50
     
     def get_current_penis_size_factor(self) -> float:
@@ -1399,15 +1422,23 @@ class YoloRoiTracker(BaseTracker):
             return getattr(self, 'confidence_threshold', 0.7)
     
     def _is_vr_video(self) -> bool:
-        """Detect if this is a VR video based on aspect ratio."""
+        """Detect if this is a VR video based on aspect ratio (cached)."""
+        # Return cached result if available
+        if self._is_vr_video_cached is not None:
+            return self._is_vr_video_cached
+
+        # Calculate and cache result
         try:
             if hasattr(self.app, 'get_video_dimensions'):
                 width, height = self.app.get_video_dimensions()
                 if width and height:
                     aspect_ratio = width / height
-                    return aspect_ratio >= 1.8  # Threshold for VR detection
+                    self._is_vr_video_cached = aspect_ratio >= VR_ASPECT_RATIO_THRESHOLD
+                    return self._is_vr_video_cached
         except Exception:
             pass
+
+        self._is_vr_video_cached = False
         return False
 
     def _update_flow_preset(self, preset: str):
@@ -1447,7 +1478,7 @@ class YoloRoiTracker(BaseTracker):
                         self.flow_dense.setFinestScale(finest_scale)
                     self.logger.info(f"Updated DIS finest scale to: {finest_scale}")
             except Exception as e:
-                self.logger.error(f"Failed to update finest scale: {e}")
+                self.logger.error(f"Failed to update finest scale: {e}", exc_info=True)
                 
     # Methods for real-time setting updates (called by control panel)
     def update_oscillation_sensitivity(self):
@@ -1459,10 +1490,10 @@ class YoloRoiTracker(BaseTracker):
         """Update FPS calculation based on actual frame processing rate."""
         current_time = time.time()
         self._fps_counter += 1
-        
-        # Update FPS every 30 frames or every second, whichever comes first
+
+        # Update FPS every FPS_UPDATE_FRAME_COUNT frames or every second, whichever comes first
         time_diff = current_time - self._fps_last_time
-        if self._fps_counter >= 30 or time_diff >= 1.0:
+        if self._fps_counter >= FPS_UPDATE_FRAME_COUNT or time_diff >= 1.0:
             if time_diff > 0:
                 self.current_fps = self._fps_counter / time_diff
                 self._fps_counter = 0
