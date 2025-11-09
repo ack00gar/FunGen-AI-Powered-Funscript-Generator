@@ -924,23 +924,45 @@ class ControlPanelUI:
 
         search_query = self._advanced_search_query.lower()
 
+        # Define searchable keywords for each section (including sub-options)
+        section_keywords = {
+            "ai_models": "ai models inference detection yolo stage1 stage2 stage3 model path mlpackage onnx pt",
+            "live_tracker": "live tracker settings roi detection optical flow confidence padding interval smoothing persistence sparse dis preset scale sensitivity amplification delay face hand class",
+            "class_filter": "class filtering filter person face hand foot genitals body parts",
+            "oscillation": "oscillation detector frequency amplitude threshold smoothing window peak valley timing",
+            "interface": "interface performance gpu theme font scale dark light color vsync fps timeline rendering",
+            "file_output": "file output save export path format funscript metadata json",
+            "logging": "logging autosave log debug verbose checkpoint interval backup"
+        }
+
+        # Helper to check if search matches section
+        def matches_section(section_key):
+            if not search_query:
+                return True
+            keywords = section_keywords.get(section_key, "")
+            return any(term in keywords for term in search_query.split())
+
         # AI Models & Inference section (from Configuration tab)
         if self._is_live_tracker(tmode) or self._is_offline_tracker(tmode):
-            if not search_query or any(term in "ai models inference" for term in search_query.split()):
-                if imgui.collapsing_header("AI Models & Inference##AdvancedAIModels")[0]:
+            if matches_section("ai_models"):
+                # Auto-expand if search query matches
+                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("ai_models") else 0
+                if imgui.collapsing_header("AI Models & Inference##AdvancedAIModels", flags=flags)[0]:
                     self._render_ai_model_settings()
 
         # Tracking Parameters section (from Configuration tab)
         adv = app_state.show_advanced_options
         if self._is_live_tracker(tmode) and adv:
-            if not search_query or any(term in "live tracker settings roi detection optical flow" for term in search_query.split()):
-                if imgui.collapsing_header("Live Tracker Settings##AdvancedLiveTracker")[0]:
+            if matches_section("live_tracker"):
+                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("live_tracker") else 0
+                if imgui.collapsing_header("Live Tracker Settings##AdvancedLiveTracker", flags=flags)[0]:
                     self._render_live_tracker_settings()
 
         # Class filtering (from Configuration tab)
         if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
-            if not search_query or any(term in "class filtering filter" for term in search_query.split()):
-                if imgui.collapsing_header("Class Filtering##AdvancedClassFilter")[0]:
+            if matches_section("class_filter"):
+                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("class_filter") else 0
+                if imgui.collapsing_header("Class Filtering##AdvancedClassFilter", flags=flags)[0]:
                     self._render_class_filtering_content()
 
         # Oscillation detector settings (from Configuration tab)
@@ -948,24 +970,28 @@ class ControlPanelUI:
         discovery = get_tracker_discovery()
         tracker_info = discovery.get_tracker_info(tmode)
         if tracker_info and 'oscillation' in tracker_info.display_name.lower():
-            if not search_query or any(term in "oscillation detector" for term in search_query.split()):
-                if imgui.collapsing_header("Oscillation Detector Settings##AdvancedOscillation")[0]:
+            if matches_section("oscillation"):
+                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("oscillation") else 0
+                if imgui.collapsing_header("Oscillation Detector Settings##AdvancedOscillation", flags=flags)[0]:
                     self._render_oscillation_detector_settings()
 
         # Interface & Performance settings (from Settings tab)
-        if not search_query or any(term in "interface performance gpu theme font" for term in search_query.split()):
-            if imgui.collapsing_header("Interface & Performance##AdvancedInterfacePerf")[0]:
+        if matches_section("interface"):
+            flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("interface") else 0
+            if imgui.collapsing_header("Interface & Performance##AdvancedInterfacePerf", flags=flags)[0]:
                 self._render_settings_interface_perf()
 
         # File & Output settings (from Settings tab)
-        if not search_query or any(term in "file output save export" for term in search_query.split()):
-            if imgui.collapsing_header("File & Output##AdvancedFileOutput")[0]:
+        if matches_section("file_output"):
+            flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("file_output") else 0
+            if imgui.collapsing_header("File & Output##AdvancedFileOutput", flags=flags)[0]:
                 self._render_settings_file_output()
 
         # Logging & Autosave settings (from Settings tab)
         if app_state.show_advanced_options:
-            if not search_query or any(term in "logging autosave log debug" for term in search_query.split()):
-                if imgui.collapsing_header("Logging & Autosave##AdvancedLogging")[0]:
+            if matches_section("logging"):
+                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("logging") else 0
+                if imgui.collapsing_header("Logging & Autosave##AdvancedLogging", flags=flags)[0]:
                     self._render_settings_logging_autosave()
 
         imgui.spacing()
