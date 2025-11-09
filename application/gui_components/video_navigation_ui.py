@@ -615,17 +615,54 @@ class VideoNavigationUI:
             self.show_create_chapter_dialog = True
             self.context_selected_chapters.clear()
 
-        # Enhanced UX: Regular drag on empty space to create chapter range
-        if is_mouse_over_bar and not action_on_segment_this_frame:
-            if imgui.is_mouse_clicked(0):
+        # Enhanced UX: Click in gap between chapters to fill it
+        if is_mouse_over_bar and not action_on_segment_this_frame and imgui.is_mouse_clicked(0):
+            clicked_x_on_bar = mouse_pos[0] - bar_start_x
+            norm_click_pos = clicked_x_on_bar / bar_width
+            clicked_frame = int(norm_click_pos * total_video_frames)
+
+            # Check if click is in a gap between two chapters
+            gap_detected = False
+            if fs_proc.video_chapters:
+                chapters_sorted = sorted(fs_proc.video_chapters, key=lambda c: c.start_frame_id)
+
+                # Find if clicked frame is in a gap
+                for i in range(len(chapters_sorted) - 1):
+                    current_chapter = chapters_sorted[i]
+                    next_chapter = chapters_sorted[i + 1]
+
+                    gap_start = current_chapter.end_frame_id + 1
+                    gap_end = next_chapter.start_frame_id - 1
+
+                    # Check if click is within this gap
+                    if gap_start <= clicked_frame <= gap_end:
+                        gap_detected = True
+
+                        # Create chapter to fill the gap
+                        default_pos_key = self.position_short_name_keys[0] if self.position_short_name_keys else "N/A"
+                        chapter_data = {
+                            "start_frame_str": str(gap_start),
+                            "end_frame_str": str(gap_end),
+                            "segment_type": "SexAct",
+                            "position_short_name_key": default_pos_key,
+                            "source": "gap_fill_click"
+                        }
+
+                        if self.app.funscript_processor:
+                            self.app.funscript_processor.create_new_chapter_from_data(chapter_data)
+                            self.app.logger.info(f"Created chapter to fill gap ({gap_end - gap_start + 1} frames)", extra={'status_message': True})
+                        break
+
+            # If no gap detected, start normal drag to create chapter
+            if not gap_detected:
                 # Start dragging
-                clicked_x_on_bar = mouse_pos[0] - bar_start_x
-                norm_click_pos = clicked_x_on_bar / bar_width
-                self.drag_start_frame = int(norm_click_pos * total_video_frames)
+                self.drag_start_frame = clicked_frame
                 self.is_dragging_chapter_range = True
                 self.app.logger.info("Drag started - creating chapter range", extra={'status_message': True})
-            
-            elif self.is_dragging_chapter_range and imgui.is_mouse_dragging(0):
+
+        # Handle ongoing drag (separate check)
+        if is_mouse_over_bar and not action_on_segment_this_frame:
+            if self.is_dragging_chapter_range and imgui.is_mouse_dragging(0):
                 # Update drag end position
                 dragged_x_on_bar = mouse_pos[0] - bar_start_x
                 norm_drag_pos = max(0, min(1, dragged_x_on_bar / bar_width))
@@ -646,8 +683,8 @@ class VideoNavigationUI:
                 # Draw border
                 border_color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 0.8)
                 draw_list.add_rect(start_x, bar_start_y, start_x + preview_width, bar_start_y + bar_height, border_color, thickness=2.0)
-            
-            elif self.is_dragging_chapter_range and imgui.is_mouse_released(0):
+
+            if self.is_dragging_chapter_range and imgui.is_mouse_released(0):
                 # Finish drag and create chapter
                 start_frame = min(self.drag_start_frame, self.drag_current_frame)
                 end_frame = max(self.drag_start_frame, self.drag_current_frame)
