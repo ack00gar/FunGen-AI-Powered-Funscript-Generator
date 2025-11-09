@@ -7,6 +7,7 @@ from .control_panel_ui import ControlPanelUI
 from .generated_file_manager_window import GeneratedFileManagerWindow
 from .info_graphs_ui import InfoGraphsUI
 from .keyboard_shortcuts_dialog import KeyboardShortcutsDialog
+from .toolbar_ui import ToolbarUI
 from .video_display_ui import VideoDisplayUI
 from .video_navigation_ui import VideoNavigationUI, ChapterListWindow
 from .app_gui import GUI

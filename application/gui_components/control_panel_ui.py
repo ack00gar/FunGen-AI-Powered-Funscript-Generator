@@ -997,42 +997,56 @@ class ControlPanelUI:
                     param_type = param_info.get('type')
                     param_label = param_info.get('label', param_name)
                     param_desc = param_info.get('description', '')
-                    param_min = param_info.get('min', 0)
-                    param_max = param_info.get('max', 100)
+
+                    # Get constraints from schema
+                    constraints = param_info.get('constraints', {})
+                    param_min = constraints.get('min', 0)
+                    param_max = constraints.get('max', 100)
                     default_value = param_info.get('default')
 
                     current_value = params.get(param_name, default_value)
 
+                    # Skip internal parameters that shouldn't be shown in UI
+                    if param_name in ['start_time_ms', 'end_time_ms', 'selected_indices']:
+                        continue
+
                     # Render different UI elements based on parameter type
-                    if param_type == 'float':
+                    # Compare against Python type objects, not strings
+                    if param_type == float or param_type == 'float':
+                        if current_value is None:
+                            current_value = default_value if default_value is not None else 0.0
                         imgui.push_item_width(200)
                         _, new_value = imgui.slider_float(
                             f"{param_label}##PP_{plugin_name}_{param_name}",
-                            current_value,
-                            param_min,
-                            param_max,
+                            float(current_value),
+                            float(param_min),
+                            float(param_max),
                             "%.2f"
                         )
                         imgui.pop_item_width()
                         params[param_name] = new_value
-                    elif param_type == 'int':
+                    elif param_type == int or param_type == 'int':
+                        if current_value is None:
+                            current_value = default_value if default_value is not None else 0
                         imgui.push_item_width(200)
                         _, new_value = imgui.slider_int(
                             f"{param_label}##PP_{plugin_name}_{param_name}",
-                            current_value,
+                            int(current_value),
                             int(param_min),
                             int(param_max)
                         )
                         imgui.pop_item_width()
                         params[param_name] = new_value
-                    elif param_type == 'bool':
+                    elif param_type == bool or param_type == 'bool':
+                        if current_value is None:
+                            current_value = default_value if default_value is not None else False
                         _, new_value = imgui.checkbox(
                             f"{param_label}##PP_{plugin_name}_{param_name}",
-                            current_value
+                            bool(current_value)
                         )
                         params[param_name] = new_value
-                    elif param_type == 'choice':
-                        choices = param_info.get('choices', [])
+                    elif param_type == str or param_type == 'str' or param_type == 'choice':
+                        choices = constraints.get('choices', [])
                         if choices:
                             try:
                                 current_idx = choices.index(current_value) if current_value in choices else 0
@@ -1072,7 +1086,7 @@ class ControlPanelUI:
             axis = "primary" if timeline_choice == 0 else "secondary"
 
             # Get the funscript object
-            funscript_obj = fs_proc.funscript
+            funscript_obj = fs_proc.get_funscript_obj()
             if not funscript_obj:
                 self.app.logger.warning("No funscript loaded", extra={"status_message": True})
                 return

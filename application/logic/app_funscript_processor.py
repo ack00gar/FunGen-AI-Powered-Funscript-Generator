@@ -941,7 +941,7 @@ class AppFunscriptProcessor:
                                                          center_value=self.amplify_center_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
             'apply_sg': lambda: target_fs_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=self.sg_window_length_input,
                                                            polyorder=self.sg_polyorder_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
-            'apply_rdp': lambda: target_fs_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=self.rdp_epsilon_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
+            'apply_rdp': lambda: target_fs_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=self.rdp_epsilon_input, start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx),
             'apply_dynamic_amp': lambda: target_fs_obj.apply_plugin('Dynamic Amplify', axis=axis, window_ms=self.dynamic_amp_window_ms_input,
                                                                     start_time_ms=s_time, end_time_ms=e_time, selected_indices=sel_idx)
 
@@ -1490,7 +1490,7 @@ class AppFunscriptProcessor:
                         f"Processing {axis} in '{chapter.position_long_name}' ({effective_start_ms}-{effective_end_ms}ms) with params: {params}")
 
                     funscript_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=sg_win, polyorder=sg_poly, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
-                    funscript_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=rdp_eps, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
+                    funscript_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=rdp_eps, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
                     if axis == 'primary':
                         funscript_obj.apply_plugin('Threshold Clamp', axis=axis, lower_threshold=clamp_low, upper_threshold=clamp_high, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
                     funscript_obj.apply_plugin('Amplify', axis=axis, scale_factor=amp_scale, center_value=amp_center, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
@@ -1502,7 +1502,7 @@ class AppFunscriptProcessor:
                 params = default_params  # Use the robust defaults
                 # Direct access is now safe because we guaranteed the keys exist.
                 funscript_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=params["sg_window"], polyorder=params["sg_polyorder"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
-                funscript_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=params["rdp_epsilon"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
+                funscript_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=params["rdp_epsilon"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 if axis == 'primary':
                     funscript_obj.apply_plugin('Threshold Clamp', axis=axis, lower_threshold=params["clamp_lower"], upper_threshold=params["clamp_upper"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 funscript_obj.apply_plugin('Amplify', axis=axis, scale_factor=params["scale_factor"], center_value=params["center_value"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
@@ -1524,7 +1524,7 @@ class AppFunscriptProcessor:
             final_op_desc = op_desc + " + Final RDP"
             for axis in ['primary', 'secondary']:
                 if getattr(funscript_obj, f"{axis}_actions", []):
-                    funscript_obj.apply_plugin('RDP Simplify', axis=axis, epsilon=final_rdp_epsilon, start_time_ms=None, end_time_ms=None, selected_indices=None)
+                    funscript_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=final_rdp_epsilon, start_time_ms=None, end_time_ms=None, selected_indices=None)
             if funscript_obj.primary_actions:
                 self._finalize_action_and_update_ui(1, final_op_desc)
             if funscript_obj.secondary_actions:
