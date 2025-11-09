@@ -20,6 +20,10 @@ class GeneratedFileManagerWindow:
     def render(self):
         """Orchestrates the rendering of the Generated File Manager window UI."""
         app_state = self.app.app_state_ui
+
+        # Set window size constraints for better auto-resize behavior
+        imgui.set_next_window_size_constraints((600, 300), (1200, 800))
+
         is_open, new_visibility = imgui.begin("Generated File Manager", closable=True, flags=imgui.WINDOW_NO_COLLAPSE)
         if new_visibility != app_state.show_generated_file_manager:
             app_state.show_generated_file_manager = new_visibility
@@ -27,9 +31,20 @@ class GeneratedFileManagerWindow:
             # Render header and controls (sticky)
             self._render_header_controls()
             # Begin a scrollable child region for the file/folder list
-            # Use -1 for width/height to fill remaining space
-            child_height = imgui.get_window_height() - imgui.get_cursor_pos_y() - 8  # 8px padding
-            imgui.begin_child("FileListRegion", width=0, height=child_height, border=True)
+            # Calculate dynamic height based on number of items
+            folder_items = self.file_manager.get_sorted_file_tree(self.sort_by)
+            # Estimate rows: each folder + its files
+            estimated_rows = 0
+            for folder_name, files in folder_items:
+                estimated_rows += 1  # Folder row
+                if folder_name in self.expanded_folders or self.expand_all:
+                    estimated_rows += len(files)  # File rows if expanded
+
+            # Calculate height: min 200px, max 600px, or based on content
+            row_height = 25  # Approximate height per row
+            content_height = min(max(estimated_rows * row_height, 200), 600)
+
+            imgui.begin_child("FileListRegion", width=0, height=content_height, border=True)
             self._render_file_tree()
             imgui.end_child()
             # Render popups/modals

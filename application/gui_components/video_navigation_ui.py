@@ -146,63 +146,12 @@ class VideoNavigationUI:
             if self.show_edit_chapter_dialog: self._render_edit_chapter_window()
 
         # --- Timeline Visibility Toggles as Small Buttons ---
-        def render_timeline_toggle(label, visible_attr, tooltip):
-            pushed = False
-            if not getattr(app_state, visible_attr):
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-                pushed = True
-            if imgui.button(label):
-                setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
-                self.app.project_manager.project_dirty = True
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(tooltip)
-            if pushed:
-                imgui.pop_style_var()
-
-        use_small_font = hasattr(self.gui_instance, 'small_font') and self.gui_instance.small_font and getattr(self.gui_instance.small_font, 'is_loaded', lambda: True)()
-        if use_small_font:
-            imgui.push_font(self.gui_instance.small_font)
-
-        # Left-aligned: T1, T2, Options dropdown
-        render_timeline_toggle("T1", "show_funscript_interactive_timeline", "Toggle Timeline 1")
-        imgui.same_line(spacing=4)
-        render_timeline_toggle("T2", "show_funscript_interactive_timeline2", "Toggle Timeline 2 (T)")
-        imgui.same_line(spacing=4)
-
-        # Options dropdown button
-        if imgui.button("Options"):
-            imgui.open_popup("VideoNavOptions")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Show video navigation options")
-
-        # Options dropdown menu
-        if imgui.begin_popup("VideoNavOptions"):
-            # Ensure full_width_nav attribute exists
-            if not hasattr(app_state, 'full_width_nav'):
-                app_state.full_width_nav = False
-
-            # Preview checkbox
-            changed, new_val = imgui.checkbox("Show Funscript Preview (P)", app_state.show_funscript_timeline)
-            if changed:
-                app_state.show_funscript_timeline = new_val
-                self.app.project_manager.project_dirty = True
-
-            # Heatmap checkbox
-            changed, new_val = imgui.checkbox("Show Heatmap (H)", app_state.show_heatmap)
-            if changed:
-                app_state.show_heatmap = new_val
-                self.app.project_manager.project_dirty = True
-
-            # Full Width Nav checkbox
-            changed, new_val = imgui.checkbox("Full Width Navigation", app_state.full_width_nav)
-            if changed:
-                app_state.full_width_nav = new_val
-                self.app.project_manager.project_dirty = True
-
-            imgui.end_popup()
-
-        if use_small_font:
-            imgui.pop_font()
+        # REMOVED: T1, T2, Options buttons - moved to View menu
+        # Force full width navigation to always be True
+        if not hasattr(app_state, 'full_width_nav'):
+            app_state.full_width_nav = True
+        else:
+            app_state.full_width_nav = True
 
         imgui.end()
 

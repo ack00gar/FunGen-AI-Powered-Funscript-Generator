@@ -2053,12 +2053,12 @@ class GUI:
         app = self.app
         app_state = app.app_state_ui
 
-        window_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE | imgui.WINDOW_NO_COLLAPSE
+        window_flags = imgui.WINDOW_NO_COLLAPSE
         main_viewport = imgui.get_main_viewport()
         center_x = main_viewport.pos[0] + main_viewport.size[0] * 0.5
         center_y = main_viewport.pos[1] + main_viewport.size[1] * 0.5
-        imgui.set_next_window_position(center_x, center_y, imgui.APPEARING, 0.5, 0.5)
-        imgui.set_next_window_size(600, 0, imgui.APPEARING)
+        imgui.set_next_window_position(center_x, center_y, imgui.ONCE, 0.5, 0.5)
+        imgui.set_next_window_size(700, 400, imgui.ONCE)
 
         is_open, app_state.show_ai_models_dialog = imgui.begin(
             "AI Models Configuration##AIModelsDialog",
@@ -2067,102 +2067,16 @@ class GUI:
         )
 
         if is_open:
-            imgui.text("Configure AI Model Paths")
+            imgui.text("Configure AI Model Paths and Inference Settings")
             imgui.separator()
             imgui.spacing()
 
-            settings = app.app_settings
-            stage_proc = app.stage_processor
-
-            # Stage 1 Model Path
-            imgui.text("Stage 1 Detection Model:")
-            stage1_path = settings.get("stage_1_model_path", "")
-            imgui.push_item_width(-100)
-            _, new_path = imgui.input_text("##Stage1ModelPath", stage1_path, 512)
-            imgui.pop_item_width()
-            if new_path != stage1_path:
-                settings.set("stage_1_model_path", new_path)
-
-            imgui.same_line()
-            if imgui.button("Browse##Stage1"):
-                import tkinter as tk
-                from tkinter import filedialog
-                root = tk.Tk()
-                root.withdraw()
-                filepath = filedialog.askopenfilename(
-                    title="Select Stage 1 Model",
-                    filetypes=[("Model files", "*.mlpackage *.onnx *.pt *.engine"), ("All files", "*.*")]
-                )
-                if filepath:
-                    settings.set("stage_1_model_path", filepath)
-                root.destroy()
-
-            imgui.spacing()
-
-            # Stage 2 Model Path
-            imgui.text("Stage 2 Detection Model:")
-            stage2_path = settings.get("stage_2_model_path", "")
-            imgui.push_item_width(-100)
-            _, new_path = imgui.input_text("##Stage2ModelPath", stage2_path, 512)
-            imgui.pop_item_width()
-            if new_path != stage2_path:
-                settings.set("stage_2_model_path", new_path)
-
-            imgui.same_line()
-            if imgui.button("Browse##Stage2"):
-                import tkinter as tk
-                from tkinter import filedialog
-                root = tk.Tk()
-                root.withdraw()
-                filepath = filedialog.askopenfilename(
-                    title="Select Stage 2 Model",
-                    filetypes=[("Model files", "*.mlpackage *.onnx *.pt *.engine"), ("All files", "*.*")]
-                )
-                if filepath:
-                    settings.set("stage_2_model_path", filepath)
-                root.destroy()
-
-            imgui.spacing()
-
-            # Stage 3 Model Path
-            imgui.text("Stage 3 Detection Model:")
-            stage3_path = settings.get("stage_3_model_path", "")
-            imgui.push_item_width(-100)
-            _, new_path = imgui.input_text("##Stage3ModelPath", stage3_path, 512)
-            imgui.pop_item_width()
-            if new_path != stage3_path:
-                settings.set("stage_3_model_path", new_path)
-
-            imgui.same_line()
-            if imgui.button("Browse##Stage3"):
-                import tkinter as tk
-                from tkinter import filedialog
-                root = tk.Tk()
-                root.withdraw()
-                filepath = filedialog.askopenfilename(
-                    title="Select Stage 3 Model",
-                    filetypes=[("Model files", "*.mlpackage *.onnx *.pt *.engine"), ("All files", "*.*")]
-                )
-                if filepath:
-                    settings.set("stage_3_model_path", filepath)
-                root.destroy()
+            # Use the same rendering as control panel
+            if hasattr(self, 'control_panel_ui') and self.control_panel_ui:
+                self.control_panel_ui._render_ai_model_settings()
 
             imgui.spacing()
             imgui.separator()
-            imgui.spacing()
-
-            # Download Default Models button
-            from application.utils import primary_button_style
-            with primary_button_style():
-                if imgui.button("Download Default Models", width=-1):
-                    dl = getattr(app, "download_default_models", None)
-                    if dl:
-                        dl()
-                        app.logger.info("Downloading default models...", extra={"status_message": True})
-
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Download and install the default AI models if they don't exist")
-
             imgui.spacing()
 
             # Close button
