@@ -1,5 +1,6 @@
 import os
 import webbrowser
+import platform
 import imgui
 from config.element_group_colors import MenuColors
 from application.utils import get_logo_texture_manager
@@ -35,7 +36,7 @@ def _radio_line(label, is_selected):
 
 class MainMenu:
     __slots__ = ("app", "gui", "FRAME_OFFSET", "_last_menu_log_time", "_show_about_dialog",
-                 "_kofi_texture_id", "_kofi_width", "_kofi_height")
+                 "_kofi_texture_id", "_kofi_width", "_kofi_height", "_is_macos")
 
     def __init__(self, app_instance, gui_instance=None):
         self.app = app_instance
@@ -46,6 +47,58 @@ class MainMenu:
         self._kofi_texture_id = None
         self._kofi_width = 0
         self._kofi_height = 0
+        self._is_macos = platform.system() == "Darwin"
+
+    # ------------------------- HELPER METHODS -------------------------
+
+    def _get_shortcut_display(self, action_name: str) -> str:
+        """
+        Get formatted shortcut string for display in menus.
+
+        Args:
+            action_name: Internal action name (e.g., "save_project", "toggle_playback")
+
+        Returns:
+            Formatted shortcut string for menu display (e.g., "Cmd+S", "Ctrl+Z")
+            Returns empty string if no shortcut is defined.
+        """
+        shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+        shortcut_str = shortcuts.get(action_name, "")
+
+        if not shortcut_str:
+            return ""
+
+        # Format for display: SUPER→Cmd/Win, CTRL→Ctrl, ALT→Alt, SHIFT→Shift
+        display_str = shortcut_str
+
+        if self._is_macos:
+            display_str = display_str.replace("SUPER", "Cmd")
+        else:
+            display_str = display_str.replace("SUPER", "Win")
+
+        display_str = display_str.replace("CTRL", "Ctrl")
+        display_str = display_str.replace("ALT", "Alt")
+        display_str = display_str.replace("SHIFT", "Shift")
+
+        # Format arrow keys
+        display_str = display_str.replace("RIGHT_ARROW", "→")
+        display_str = display_str.replace("LEFT_ARROW", "←")
+        display_str = display_str.replace("UP_ARROW", "↑")
+        display_str = display_str.replace("DOWN_ARROW", "↓")
+
+        # Format other keys
+        display_str = display_str.replace("SPACE", "Space")
+        display_str = display_str.replace("ENTER", "Enter")
+        display_str = display_str.replace("BACKSPACE", "Backspace")
+        display_str = display_str.replace("DELETE", "Del")
+        display_str = display_str.replace("HOME", "Home")
+        display_str = display_str.replace("END", "End")
+        display_str = display_str.replace("PAGE_UP", "PgUp")
+        display_str = display_str.replace("PAGE_DOWN", "PgDn")
+        display_str = display_str.replace("EQUAL", "=")
+        display_str = display_str.replace("MINUS", "-")
+
+        return display_str
 
     # ------------------------- POPUPS -------------------------
 
@@ -396,7 +449,7 @@ class MainMenu:
                 app.reset_project_state(for_new_project=True)
                 pm.project_dirty = True
 
-            if _menu_item_simple("Open Project..."):
+            if imgui.menu_item("Open Project...", self._get_shortcut_display("open_project"))[0]:
                 pm.open_project_dialog()
 
             if _menu_item_simple("Video..."):
@@ -424,7 +477,8 @@ class MainMenu:
             # Save options
             can_save = pm.project_file_path is not None
 
-            if _menu_item_simple("Save Project", enabled=can_save):
+            if imgui.menu_item("Save Project", self._get_shortcut_display("save_project"),
+                               selected=False, enabled=can_save)[0]:
                 pm.save_project_dialog()
             if _menu_item_simple("Save Project As...", enabled=True):
                 pm.save_project_dialog(save_as=True)
@@ -508,11 +562,13 @@ class MainMenu:
             can_undo1 = undo1.can_undo() if undo1 else False
             can_redo1 = undo1.can_redo() if undo1 else False
             if imgui.menu_item(
-                "Undo T1 Change", "Ctrl+Z", selected=False, enabled=can_undo1
+                "Undo T1 Change", self._get_shortcut_display("undo_timeline1"),
+                selected=False, enabled=can_undo1
             )[0]:
                 fs_proc.perform_undo_redo(1, "undo")
             if imgui.menu_item(
-                "Redo T1 Change", "Ctrl+Y", selected=False, enabled=can_redo1
+                "Redo T1 Change", self._get_shortcut_display("redo_timeline1"),
+                selected=False, enabled=can_redo1
             )[0]:
                 fs_proc.perform_undo_redo(1, "redo")
             imgui.separator()
@@ -522,11 +578,13 @@ class MainMenu:
             can_undo2 = undo2.can_undo() if undo2 else False
             can_redo2 = undo2.can_redo() if undo2 else False
             if imgui.menu_item(
-                "Undo T2 Change", "Alt+Ctrl+Z", selected=False, enabled=can_undo2
+                "Undo T2 Change", self._get_shortcut_display("undo_timeline2"),
+                selected=False, enabled=can_undo2
             )[0]:
                 fs_proc.perform_undo_redo(2, "undo")
             if imgui.menu_item(
-                "Redo T2 Change", "Alt+Ctrl+Y", selected=False, enabled=can_redo2
+                "Redo T2 Change", self._get_shortcut_display("redo_timeline2"),
+                selected=False, enabled=can_redo2
             )[0]:
                 fs_proc.perform_undo_redo(2, "redo")
             imgui.end_menu()
@@ -558,6 +616,19 @@ class MainMenu:
 
             # Video Overlays submenu
             self._render_video_overlays_submenu(app_state, stage_proc)
+
+            imgui.separator()
+
+            # Show Toolbar
+            if not hasattr(app_state, 'show_toolbar'):
+                app_state.show_toolbar = True
+            clicked, val = imgui.menu_item(
+                "Show Toolbar",
+                selected=app_state.show_toolbar
+            )
+            if clicked:
+                app_state.show_toolbar = val
+                self.app.project_manager.project_dirty = True
 
             imgui.separator()
 
@@ -988,6 +1059,13 @@ class MainMenu:
             # About
             if _menu_item_simple("About FunGen..."):
                 self._show_about_dialog = True
+
+            # Support (link to GitHub)
+            if _menu_item_simple("Support..."):
+                import webbrowser
+                webbrowser.open("https://github.com/FunGenAI/FunGen/issues")
+
+            imgui.separator()
 
             # Keyboard Shortcuts
             clicked, _ = imgui.menu_item("Keyboard Shortcuts...", "F1")
