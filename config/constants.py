@@ -479,7 +479,8 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/flashlight.png': 'https://em-content.zobj.net/source/apple/391/flashlight_1f526.png',  # 📡 satellite antenna for streamer
 
     # Enhancement/optimization indicators
-    'ui/icons/rocket.png': 'https://em-content.zobj.net/source/apple/391/rocket_1f680.png',  # 🚀 rocket for Ultimate Autotune
+    'ui/icons/rocket.png': 'https://em-content.zobj.net/source/apple/391/rocket_1f680.png',  # 🚀 rocket
+    'ui/icons/magic-wand.png': 'https://em-content.zobj.net/source/apple/391/magic-wand_1fa84.png',  # 🪄 magic wand for Ultimate Autotune
 
     # Tracking/automation indicators
     'ui/icons/robot.png': 'https://em-content.zobj.net/source/apple/391/robot_1f916.png',  # 🤖 robot for tracking
