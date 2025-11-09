@@ -79,6 +79,9 @@ class ControlPanelUI:
         "_native_sync_status_time",
         # Advanced tab search
         "_advanced_search_query",
+        # Post-Processing tab state
+        "_pp_timeline_choice",
+        "_pp_scope_choice",
     )
 
     def __init__(self, app):
@@ -125,6 +128,10 @@ class ControlPanelUI:
 
         # Advanced tab search
         self._advanced_search_query = ""
+
+        # Post-Processing tab state
+        self._pp_timeline_choice = 0
+        self._pp_scope_choice = 0
 
     # ------- Helpers -------
     
