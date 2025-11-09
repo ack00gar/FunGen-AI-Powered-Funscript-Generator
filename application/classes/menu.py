@@ -838,17 +838,31 @@ class MainMenu:
         app = self.app
 
         if imgui.begin_menu("Tools", True):
-            # AI Models submenu
-            if imgui.begin_menu("AI Models"):
-                if _menu_item_simple("Download Default Models"):
-                    dl = getattr(app, "download_default_models", None)
-                    if dl:
-                        dl()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Download default AI models if they don't already exist."
-                    )
-                imgui.end_menu()
+            # AI Models dialog
+            if not hasattr(app_state, "show_ai_models_dialog"):
+                app_state.show_ai_models_dialog = False
+            clicked, _ = imgui.menu_item(
+                "AI Models...",
+                selected=app_state.show_ai_models_dialog,
+            )
+            if clicked:
+                app_state.show_ai_models_dialog = not app_state.show_ai_models_dialog
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Configure AI model paths and download default models")
+
+            imgui.separator()
+
+            # Chapter List
+            if not hasattr(app_state, "show_chapter_list_window"):
+                app_state.show_chapter_list_window = False
+            clicked, _ = imgui.menu_item(
+                "Chapter List...",
+                selected=app_state.show_chapter_list_window,
+            )
+            if clicked:
+                app_state.show_chapter_list_window = not app_state.show_chapter_list_window
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("View and manage video chapters")
 
             imgui.separator()
 
@@ -924,6 +938,33 @@ class MainMenu:
 
             # Plugins submenu
             if imgui.begin_menu("Plugins"):
+                # Get plugin manager from timeline
+                plugin_manager = None
+                if hasattr(app, 'gui_instance') and app.gui_instance:
+                    if hasattr(app.gui_instance, 'timeline1') and app.gui_instance.timeline1:
+                        plugin_manager = getattr(app.gui_instance.timeline1, 'plugin_manager', None)
+
+                if plugin_manager:
+                    available_plugins = plugin_manager.get_available_plugins()
+                    if available_plugins:
+                        imgui.text_disabled(f"{len(available_plugins)} plugins loaded")
+                        imgui.separator()
+
+                        # List plugins with their status
+                        for plugin_name in sorted(available_plugins):
+                            ui_data = plugin_manager.get_plugin_ui_data(plugin_name)
+                            if ui_data:
+                                display_name = ui_data.get('display_name', plugin_name)
+                                description = ui_data.get('description', '')
+
+                                imgui.text(f"• {display_name}")
+                                if description and imgui.is_item_hovered():
+                                    imgui.set_tooltip(description)
+                    else:
+                        imgui.text_disabled("No plugins loaded")
+                else:
+                    imgui.text_disabled("Plugin system not initialized")
+
                 imgui.end_menu()
 
             imgui.separator()
