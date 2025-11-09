@@ -679,24 +679,6 @@ class MainMenu:
                     app_state.just_switched_to_floating = True
                     pm.project_dirty = True
 
-            imgui.separator()
-
-            # Full-width navigation (Fixed mode only)
-            if not hasattr(app_state, "full_width_nav"):
-                app_state.full_width_nav = False
-
-            is_fixed = app_state.ui_layout_mode == "fixed"
-            clicked, selected = imgui.menu_item(
-                "Full-Width Navigation (Fixed mode only)",
-                selected=app_state.full_width_nav,
-                enabled=is_fixed,
-            )
-            if clicked:
-                app_state.full_width_nav = selected
-                pm.project_dirty = True
-            if imgui.is_item_hovered() and not is_fixed:
-                imgui.set_tooltip("Only available in 'Fixed Panels' layout mode.")
-
             imgui.end_menu()
 
     def _render_panels_submenu(self, app_state):
@@ -761,7 +743,7 @@ class MainMenu:
 
             # Full Width Navigation
             if not hasattr(app_state, 'full_width_nav'):
-                app_state.full_width_nav = True
+                app_state.full_width_nav = False
             clicked, val = imgui.menu_item(
                 "Full Width Navigation",
                 selected=app_state.full_width_nav
@@ -770,20 +752,12 @@ class MainMenu:
                 app_state.full_width_nav = val
                 pm.project_dirty = True
 
-            clicked, val = imgui.menu_item(
-                "Show Timeline Editor Buttons",
-                selected=app_state.show_timeline_editor_buttons
-            )
-            if clicked:
-                app_state.show_timeline_editor_buttons = val
-                settings.set("show_timeline_editor_buttons", val)
-                pm.project_dirty = True
-
             imgui.end_menu()
 
     def _render_timelines_submenu(self, app_state):
         app = self.app
         pm = app.project_manager
+        settings = app.app_settings
 
         if imgui.begin_menu("Timelines"):
             # Interactive editors only
@@ -796,6 +770,18 @@ class MainMenu:
                 if clicked:
                     setattr(app_state, attr, val)
                     pm.project_dirty = True
+
+            imgui.separator()
+
+            # Timeline editor buttons
+            clicked, val = imgui.menu_item(
+                "Show Timeline Editor Buttons",
+                selected=app_state.show_timeline_editor_buttons
+            )
+            if clicked:
+                app_state.show_timeline_editor_buttons = val
+                settings.set("show_timeline_editor_buttons", val)
+                pm.project_dirty = True
 
             imgui.end_menu()
 
@@ -1003,39 +989,6 @@ class MainMenu:
                     else:
                         tw._reset_state()
                         tw.is_open = True
-
-                imgui.end_menu()
-
-            imgui.separator()
-
-            # Plugins submenu
-            if imgui.begin_menu("Plugins"):
-                # Get plugin manager from timeline
-                plugin_manager = None
-                if hasattr(app, 'gui_instance') and app.gui_instance:
-                    if hasattr(app.gui_instance, 'timeline1') and app.gui_instance.timeline1:
-                        plugin_manager = getattr(app.gui_instance.timeline1, 'plugin_manager', None)
-
-                if plugin_manager:
-                    available_plugins = plugin_manager.get_available_plugins()
-                    if available_plugins:
-                        imgui.text_disabled(f"{len(available_plugins)} plugins loaded")
-                        imgui.separator()
-
-                        # List plugins with their status
-                        for plugin_name in sorted(available_plugins):
-                            ui_data = plugin_manager.get_plugin_ui_data(plugin_name)
-                            if ui_data:
-                                display_name = ui_data.get('display_name', plugin_name)
-                                description = ui_data.get('description', '')
-
-                                imgui.text(f"• {display_name}")
-                                if description and imgui.is_item_hovered():
-                                    imgui.set_tooltip(description)
-                    else:
-                        imgui.text_disabled("No plugins loaded")
-                else:
-                    imgui.text_disabled("Plugin system not initialized")
 
                 imgui.end_menu()
 

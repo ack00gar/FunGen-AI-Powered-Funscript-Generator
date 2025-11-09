@@ -146,12 +146,9 @@ class VideoNavigationUI:
             if self.show_edit_chapter_dialog: self._render_edit_chapter_window()
 
         # --- Timeline Visibility Toggles as Small Buttons ---
-        # REMOVED: T1, T2, Options buttons - moved to View menu
-        # Force full width navigation to always be True
+        # Ensure full_width_nav attribute exists (user-controlled via View > Layout menu)
         if not hasattr(app_state, 'full_width_nav'):
-            app_state.full_width_nav = True
-        else:
-            app_state.full_width_nav = True
+            app_state.full_width_nav = False
 
         imgui.end()
 
