@@ -717,53 +717,12 @@ class VideoDisplayUI:
                                 self._render_live_tracker_overlay(draw_list)
                                 draw_list.pop_clip_rect()
 
-                            # --- Overlay: Top-right buttons for L/R Dial and Gauge ---
-                            def render_overlay_toggle(label, visible_attr):
-                                pushed = False
-                                if not getattr(app_state, visible_attr, False):
-                                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-                                    pushed = True
-                                if imgui.button(label):
-                                    setattr(app_state, visible_attr, not getattr(app_state, visible_attr))
-                                    self.app.project_manager.project_dirty = True
-                                if imgui.is_item_hovered():
-                                    # Add tooltips with keyboard shortcuts where applicable
-                                    if label == "Gauge T1":
-                                        imgui.set_tooltip("Toggle Gauge Window for Timeline 1 (G)")
-                                    elif label == "Gauge T2":
-                                        imgui.set_tooltip("Toggle Gauge Window for Timeline 2")
-                                    elif label == "3D Simulator":
-                                        imgui.set_tooltip("Toggle 3D Simulator Window (S)")
-                                if pushed:
-                                    imgui.pop_style_var()
-
-                            # Position at top right of video frame
-                            btn_labels = ["Gauge T1", "Gauge T2", "3D Simulator"]
-                            btn_attrs = ["show_gauge_window_timeline1", "show_gauge_window_timeline2", "show_simulator_3d"]
-                            btn_widths = [imgui.calc_text_size(lbl)[0] + imgui.get_style().frame_padding[0]*2 + imgui.get_style().item_spacing[0] for lbl in btn_labels]
-                            total_btn_width = sum(btn_widths)
-                            # btn_height = imgui.get_frame_height()
-                            img_rect = self._actual_video_image_rect_on_screen
-                            top_right_x = img_rect['max_x'] - total_btn_width + 4
-                            top_right_y = img_rect['min_y'] + 8
-                            imgui.set_cursor_screen_pos((top_right_x, top_right_y))
-                            use_small_font = hasattr(self.gui_instance, 'small_font') and self.gui_instance.small_font and getattr(self.gui_instance.small_font, 'is_loaded', lambda: True)()
-                            if use_small_font:
-                                imgui.push_font(self.gui_instance.small_font)
-                            for i, (lbl, attr) in enumerate(zip(btn_labels, btn_attrs)):
-                                render_overlay_toggle(lbl, attr)
-                                if i < len(btn_labels) - 1:
-                                    imgui.same_line(spacing=4)
-                            if use_small_font:
-                                imgui.pop_font()
-
                             # --- Render Component Overlays (if enabled) ---
                             self._render_component_overlays(app_state)
 
-                            # --- Render Playback Controls (AFTER all overlays so they're clickable) ---
-                            # Note: draw_list operations render on top of ImGui widgets, so buttons must be last
-                            self._render_playback_controls_overlay()
-                            self._render_video_zoom_pan_controls(app_state)
+                            # REMOVED: Gauge/Simulator buttons moved to View menu
+                            # REMOVED: Zoom/Pan controls moved to View menu
+                            # REMOVED: Playback controls moved to toolbar
 
                 # --- Interactive Refinement Overlay and Click Handling ---
                 if self.app.app_state_ui.interactive_refinement_mode_enabled:
