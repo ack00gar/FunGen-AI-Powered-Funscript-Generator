@@ -598,6 +598,9 @@ class ToolbarUI:
 
             if rendered_any:
                 imgui.same_line()
+            else:
+                # First button in features section - pop default colors
+                imgui.pop_style_color(3)
 
             # Flashlight emoji - red when inactive, green when active
             if is_connected:
