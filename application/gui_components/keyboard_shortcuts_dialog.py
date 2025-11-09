@@ -100,8 +100,12 @@ class KeyboardShortcutsDialog:
                 ("paste_selection", "Paste Selection"),
             ],
             "Point Navigation": [
-                ("jump_to_next_point", "Jump to Next Point"),
-                ("jump_to_prev_point", "Jump to Previous Point"),
+                ("jump_to_next_point", "Jump to Next Point (Primary)"),
+                ("jump_to_next_point_alt", "Jump to Next Point (Alt)"),
+                ("jump_to_prev_point", "Jump to Previous Point (Primary)"),
+                ("jump_to_prev_point_alt", "Jump to Previous Point (Alt)"),
+                ("nudge_selection_pos_up", "Raise Selected Point Value"),
+                ("nudge_selection_pos_down", "Lower Selected Point Value"),
             ],
             "Chapters": [
                 ("set_chapter_start", "Set Chapter Start (In-point)"),

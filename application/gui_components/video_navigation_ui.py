@@ -1542,13 +1542,17 @@ class ChapterListWindow:
         self.nav_ui = nav_ui
         self.list_context_selected_chapters = []
 
+        # Thumbnail cache for chapter previews
+        from application.classes.chapter_thumbnail_cache import ChapterThumbnailCache
+        self.thumbnail_cache = ChapterThumbnailCache(app, thumbnail_height=60)
+
     def render(self):
         app_state = self.app.app_state_ui
         if not hasattr(app_state, 'show_chapter_list_window') or not app_state.show_chapter_list_window:
             return
 
         window_flags = imgui.WINDOW_NO_COLLAPSE
-        imgui.set_next_window_size(650, 350, condition=imgui.APPEARING)
+        imgui.set_next_window_size(850, 400, condition=imgui.APPEARING)
 
         is_open, app_state.show_chapter_list_window = imgui.begin(
             "Chapter List##ChapterListWindow",
@@ -1641,9 +1645,10 @@ class ChapterListWindow:
                            imgui.TABLE_RESIZABLE |
                            imgui.TABLE_SIZING_STRETCH_PROP)
 
-            if imgui.begin_table("ChapterListTable", 7, flags=table_flags):
+            if imgui.begin_table("ChapterListTable", 8, flags=table_flags):
                 imgui.table_setup_column("##Select", init_width_or_weight=0.15)
                 imgui.table_setup_column("#", init_width_or_weight=0.15)
+                imgui.table_setup_column("Preview", init_width_or_weight=0.8)
                 imgui.table_setup_column("Color", init_width_or_weight=0.25)
                 imgui.table_setup_column("Position", init_width_or_weight=1.0)
                 imgui.table_setup_column("Start", init_width_or_weight=0.9)
@@ -1677,6 +1682,19 @@ class ChapterListWindow:
                     # Chapter Number
                     imgui.table_next_column()
                     imgui.text(str(i + 1))
+
+                    # Thumbnail Preview
+                    imgui.table_next_column()
+                    thumbnail_data = self.thumbnail_cache.get_thumbnail(chapter)
+                    if thumbnail_data:
+                        texture_id, thumb_width, thumb_height = thumbnail_data
+                        # Draw thumbnail with slight padding
+                        imgui.image(texture_id, thumb_width, thumb_height)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip(f"Preview from start frame {chapter.start_frame_id}")
+                    else:
+                        # Placeholder if thumbnail failed to load
+                        imgui.text_disabled("(no preview)")
 
                     # Color
                     imgui.table_next_column()

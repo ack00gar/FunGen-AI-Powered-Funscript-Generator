@@ -14,7 +14,7 @@ except ImportError:
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.5.1"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION} - AI Computer Vision"
 FUNSCRIPT_AUTHOR = "FunGen"
 
@@ -117,9 +117,15 @@ DEFAULT_SHORTCUTS = {
     "jump_to_start": "HOME",
     "jump_to_end": "END",
 
-    # Point Navigation (Character-based - may need layout adaptation)
-    "jump_to_next_point": ".",       # QWERTY: period | AZERTY: SHIFT+; | QWERTZ: period
-    "jump_to_prev_point": ",",       # QWERTY: comma | AZERTY: ; | QWERTZ: comma
+    # Point Navigation
+    "jump_to_next_point": "UP_ARROW",     # Up arrow for next point
+    "jump_to_prev_point": "DOWN_ARROW",   # Down arrow for previous point
+    "jump_to_next_point_alt": ".",        # Alternative: period
+    "jump_to_prev_point_alt": ",",        # Alternative: comma
+
+    # Point Value Adjustment (nudge selected points)
+    "nudge_selection_pos_up": "SHIFT+UP_ARROW",      # Shift+Up to raise selected point value
+    "nudge_selection_pos_down": "SHIFT+DOWN_ARROW",  # Shift+Down to lower selected point value
 
     # Timeline View Controls
     "zoom_in_timeline": f"{MOD_KEY}+EQUAL",   # CTRL+= (same key as + on most keyboards)
@@ -457,6 +463,26 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/energy-leaf.png': 'https://em-content.zobj.net/source/apple/391/leaf-fluttering-in-wind_1f343.png',  # 🍃 leaf for energy saver
     'ui/icons/red-circle.png': 'https://em-content.zobj.net/source/apple/391/large-red-circle_1f534.png',  # 🔴 red circle for real-time (fixed: original was 403)
     'ui/icons/wrench.png': 'https://em-content.zobj.net/source/apple/391/wrench_1f527.png',  # 🔧 wrench for tools/devices
+
+    # Timeline/number indicators (for toolbar) - using keycap digits
+    'ui/icons/keycap-1.png': 'https://em-content.zobj.net/source/apple/391/keycap-digit-one_31-fe0f-20e3.png',  # 1️⃣ keycap digit one
+    'ui/icons/keycap-2.png': 'https://em-content.zobj.net/source/apple/391/keycap-digit-two_32-fe0f-20e3.png',  # 2️⃣ keycap digit two
+
+    # Chapter/content indicators
+    'ui/icons/books.png': 'https://em-content.zobj.net/source/apple/391/books_1f4da.png',  # 📚 books for chapter list
+
+    # Network/streaming indicators
+    'ui/icons/satellite.png': 'https://em-content.zobj.net/source/apple/391/satellite-antenna_1f4e1.png',  # 📡 satellite antenna for streamer
+
+    # Enhancement/optimization indicators
+    'ui/icons/rocket.png': 'https://em-content.zobj.net/source/apple/391/rocket_1f680.png',  # 🚀 rocket for Ultimate Autotune
+
+    # Tracking/automation indicators
+    'ui/icons/robot.png': 'https://em-content.zobj.net/source/apple/391/robot_1f916.png',  # 🤖 robot for tracking
+    'ui/icons/sparkles.png': 'https://em-content.zobj.net/source/apple/391/sparkles_2728.png',  # ✨ sparkles for auto post-processing
+
+    # Visualization/analysis indicators
+    'ui/icons/chart-increasing.png': 'https://em-content.zobj.net/source/apple/391/chart-increasing_1f4c8.png',  # 📈 chart for 3D simulator
 }
 
 ####################################################################################################

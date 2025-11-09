@@ -13,7 +13,7 @@ from collections import deque
 
 from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
-from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog
+from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
 
 
@@ -86,6 +86,7 @@ class GUI:
         # Standard Components (owned by GUI)
         self.file_dialog = ImGuiFileDialog(app_logic_instance=app)
         self.main_menu = MainMenu(app, gui_instance=self)
+        self.toolbar_ui = ToolbarUI(app)
         self.gauge_window_ui_t1 = GaugeWindow(app, timeline_num=1)
         self.gauge_window_ui_t2 = GaugeWindow(app, timeline_num=2)
         self.movement_bar_ui = LRDialWindow(app)  # Movement Bar (backward compatible name)
@@ -1175,7 +1176,11 @@ class GUI:
             pass
         elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
             pass
+        elif check_and_run_shortcut("jump_to_next_point_alt", self.app.event_handlers.handle_jump_to_point, 'next'):
+            pass
         elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
+            pass
+        elif check_and_run_shortcut("jump_to_prev_point_alt", self.app.event_handlers.handle_jump_to_point, 'prev'):
             pass
         elif video_loaded and check_and_run_shortcut("jump_to_start", self._handle_jump_to_start_shortcut):
             pass
@@ -1847,6 +1852,9 @@ class GUI:
 
         self._time_render("MainMenu", self.main_menu.render)
 
+        # Render toolbar
+        self._time_render("Toolbar", self.toolbar_ui.render)
+
         font_scale = self.app.app_settings.get("global_font_scale", 1.0)
         imgui.get_io().font_global_scale = font_scale
 
@@ -1855,13 +1863,18 @@ class GUI:
         else:
             self.main_menu_bar_height = imgui.get_frame_height_with_spacing() if self.main_menu else 0
 
+        # Account for toolbar height (icon size + padding + spacing) - only if shown
+        if not hasattr(app_state, 'show_toolbar'):
+            app_state.show_toolbar = True
+        toolbar_height = (self.toolbar_ui._icon_size + (self.toolbar_ui._button_padding * 2) + 8) if app_state.show_toolbar else 0
+
         if not app_state.gauge_pos_initialized and self.main_menu_bar_height > 0:
-            app_state.initialize_gauge_default_y(self.main_menu_bar_height)
+            app_state.initialize_gauge_default_y(self.main_menu_bar_height + toolbar_height)
 
         app_state.update_current_script_display_values()
 
         if app_state.ui_layout_mode == 'fixed':
-            panel_y_start = self.main_menu_bar_height
+            panel_y_start = self.main_menu_bar_height + toolbar_height
             timeline1_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline else 0
             timeline2_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline2 else 0
             interactive_timelines_total_height = timeline1_render_h + timeline2_render_h
