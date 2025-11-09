@@ -893,12 +893,202 @@ class ControlPanelUI:
 
     def _render_post_processing_tab(self):
         app = self.app
-        if imgui.collapsing_header(
-            "Manual Adjustments##PostProcManual", flags=imgui.TREE_NODE_DEFAULT_OPEN
-        )[0]:
-            self._render_funscript_processing_tools(app.funscript_processor, app.event_handlers)
-        if imgui.collapsing_header("Automated Post-Processing##PostProcAuto")[0]:
-            self._render_automatic_post_processing_new(app.funscript_processor)
+        fs_proc = app.funscript_processor
+
+        # Get plugin manager from timeline
+        plugin_manager = None
+        if self.timeline_editor1 and hasattr(self.timeline_editor1, 'plugin_manager'):
+            plugin_manager = self.timeline_editor1.plugin_manager
+
+        if not plugin_manager:
+            imgui.text_disabled("Plugin system not initialized")
+            return
+
+        # Timeline and scope selection
+        imgui.text("Apply to:")
+        imgui.spacing()
+
+        # Timeline selection
+        timeline_choice = getattr(self, '_pp_timeline_choice', 0)
+        imgui.push_item_width(200)
+        _, timeline_choice = imgui.combo("Timeline##PostProcTimeline", timeline_choice, ["Timeline 1", "Timeline 2"])
+        self._pp_timeline_choice = timeline_choice
+        imgui.pop_item_width()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Select which timeline to apply processing to")
+
+        # Scope selection
+        scope_choice = getattr(self, '_pp_scope_choice', 0)
+        imgui.push_item_width(200)
+        _, scope_choice = imgui.combo("Scope##PostProcScope", scope_choice, ["Full Script", "Selection Only"])
+        self._pp_scope_choice = scope_choice
+        imgui.pop_item_width()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Apply to entire script or selected points only")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Get all plugins
+        all_plugins = plugin_manager.get_available_plugins()
+        if not all_plugins:
+            imgui.text_disabled("No plugins available")
+            return
+
+        # Prioritize Ultimate Autotune plugin first
+        ultimate_autotune = None
+        other_plugins = []
+        for plugin_name in all_plugins:
+            if 'ultimate' in plugin_name.lower() and 'autotune' in plugin_name.lower():
+                ultimate_autotune = plugin_name
+            else:
+                other_plugins.append(plugin_name)
+
+        # Sort other plugins alphabetically
+        other_plugins.sort()
+
+        # Render plugins in order: Ultimate Autotune first, then others
+        plugins_to_render = ([ultimate_autotune] if ultimate_autotune else []) + other_plugins
+
+        for plugin_name in plugins_to_render:
+            ui_data = plugin_manager.get_plugin_ui_data(plugin_name)
+            if not ui_data or not ui_data['available']:
+                continue
+
+            # Render plugin section
+            self._render_plugin_section(plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
+
+    def _render_plugin_section(self, plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice):
+        """Render a collapsible section for a plugin with its parameters and apply button."""
+        display_name = ui_data.get('display_name', plugin_name)
+        description = ui_data.get('description', '')
+
+        # Collapsible header for this plugin (collapsed by default)
+        if imgui.collapsing_header(f"{display_name}##Plugin_{plugin_name}")[0]:
+            if description:
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+                imgui.text_wrapped(description)
+                imgui.pop_style_color()
+                imgui.spacing()
+
+            # Get plugin context and parameters
+            context = plugin_manager.plugin_contexts.get(plugin_name)
+            if not context:
+                imgui.text_disabled("Plugin context not available")
+                return
+
+            plugin_instance = context.plugin_instance
+            if not plugin_instance or not hasattr(plugin_instance, 'parameters_schema'):
+                imgui.text_disabled("No parameters available")
+            else:
+                # Render parameters
+                schema = plugin_instance.parameters_schema
+                params = context.parameters
+
+                for param_name, param_info in schema.items():
+                    param_type = param_info.get('type')
+                    param_label = param_info.get('label', param_name)
+                    param_desc = param_info.get('description', '')
+                    param_min = param_info.get('min', 0)
+                    param_max = param_info.get('max', 100)
+                    default_value = param_info.get('default')
+
+                    current_value = params.get(param_name, default_value)
+
+                    # Render different UI elements based on parameter type
+                    if param_type == 'float':
+                        imgui.push_item_width(200)
+                        _, new_value = imgui.slider_float(
+                            f"{param_label}##PP_{plugin_name}_{param_name}",
+                            current_value,
+                            param_min,
+                            param_max,
+                            "%.2f"
+                        )
+                        imgui.pop_item_width()
+                        params[param_name] = new_value
+                    elif param_type == 'int':
+                        imgui.push_item_width(200)
+                        _, new_value = imgui.slider_int(
+                            f"{param_label}##PP_{plugin_name}_{param_name}",
+                            current_value,
+                            int(param_min),
+                            int(param_max)
+                        )
+                        imgui.pop_item_width()
+                        params[param_name] = new_value
+                    elif param_type == 'bool':
+                        _, new_value = imgui.checkbox(
+                            f"{param_label}##PP_{plugin_name}_{param_name}",
+                            current_value
+                        )
+                        params[param_name] = new_value
+                    elif param_type == 'choice':
+                        choices = param_info.get('choices', [])
+                        if choices:
+                            try:
+                                current_idx = choices.index(current_value) if current_value in choices else 0
+                            except (ValueError, TypeError):
+                                current_idx = 0
+                            imgui.push_item_width(200)
+                            _, new_idx = imgui.combo(
+                                f"{param_label}##PP_{plugin_name}_{param_name}",
+                                current_idx,
+                                choices
+                            )
+                            imgui.pop_item_width()
+                            params[param_name] = choices[new_idx]
+
+                    if param_desc and imgui.is_item_hovered():
+                        imgui.set_tooltip(param_desc)
+
+            imgui.spacing()
+
+            # Reset to default button
+            if imgui.button(f"Reset to Default##PP_{plugin_name}_Reset"):
+                default_params = plugin_manager._get_default_parameters(plugin_instance)
+                context.parameters = default_params.copy()
+
+            # Apply button (PRIMARY styling)
+            imgui.same_line()
+            with primary_button_style():
+                if imgui.button(f"Apply##PP_{plugin_name}_Apply"):
+                    self._apply_plugin(plugin_name, context.parameters, timeline_choice, scope_choice, fs_proc)
+
+            imgui.spacing()
+
+    def _apply_plugin(self, plugin_name, parameters, timeline_choice, scope_choice, fs_proc):
+        """Apply a plugin with the given parameters."""
+        try:
+            # Determine which funscript object to use
+            axis = "primary" if timeline_choice == 0 else "secondary"
+
+            # Get the funscript object
+            funscript_obj = fs_proc.funscript
+            if not funscript_obj:
+                self.app.logger.warning("No funscript loaded", extra={"status_message": True})
+                return
+
+            # Determine selection scope
+            selected_indices = None
+            if scope_choice == 1:  # Selection Only
+                # Get selected indices from the appropriate timeline
+                timeline = self.timeline_editor1 if timeline_choice == 0 else self.timeline_editor2
+                if timeline and hasattr(timeline, 'multi_selected_action_indices'):
+                    selected_indices = timeline.multi_selected_action_indices.copy() if timeline.multi_selected_action_indices else None
+
+            # Apply the plugin
+            plugin_params = parameters.copy()
+            plugin_params['axis'] = axis
+            if selected_indices:
+                plugin_params['selected_indices'] = selected_indices
+
+            funscript_obj.apply_plugin(plugin_name, **plugin_params)
+            self.app.logger.info(f"Applied {plugin_name} to {axis}", extra={"status_message": True})
+
+        except Exception as e:
+            self.app.logger.error(f"Failed to apply plugin {plugin_name}: {e}", extra={"status_message": True})
 
     def _render_advanced_tab(self):
         """Render Advanced tab combining Configuration and Settings."""
