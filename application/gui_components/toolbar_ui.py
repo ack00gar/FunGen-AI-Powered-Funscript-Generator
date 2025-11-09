@@ -104,6 +104,13 @@ class ToolbarUI:
         self._render_separator()
         imgui.same_line(spacing=12)
 
+        # --- PLAYBACK CONTROLS SECTION ---
+        self._render_playback_section(icon_mgr, btn_size)
+
+        imgui.same_line(spacing=12)
+        self._render_separator()
+        imgui.same_line(spacing=12)
+
         # --- EDIT OPERATIONS SECTION (Undo/Redo T1/T2) ---
         self._render_edit_section(icon_mgr, btn_size)
 
@@ -111,8 +118,8 @@ class ToolbarUI:
         self._render_separator()
         imgui.same_line(spacing=12)
 
-        # --- PLAYBACK CONTROLS SECTION ---
-        self._render_playback_section(icon_mgr, btn_size)
+        # --- VIEW TOGGLES SECTION ---
+        self._render_view_section(icon_mgr, btn_size)
 
         imgui.same_line(spacing=12)
         self._render_separator()
@@ -131,9 +138,6 @@ class ToolbarUI:
             imgui.same_line(spacing=12)
             self._render_separator()
             imgui.same_line(spacing=12)
-
-        # --- VIEW TOGGLES SECTION ---
-        self._render_view_section(icon_mgr, btn_size)
 
         imgui.pop_style_color(3)
         imgui.pop_style_var(2)
@@ -244,99 +248,118 @@ class ToolbarUI:
         fs_proc = app.funscript_processor
         has_video = app.processor and app.processor.is_video_open() if app.processor else False
 
+        # Check if timelines are active
+        t1_active = app_state.show_funscript_interactive_timeline if hasattr(app_state, 'show_funscript_interactive_timeline') else True
+        t2_active = app_state.show_funscript_interactive_timeline2 if hasattr(app_state, 'show_funscript_interactive_timeline2') else False
+
+        rendered_t1 = False
+        rendered_t2 = False
+
         # === TIMELINE 1 SECTION ===
         # Timeline 1 Toggle - Keycap 1 emoji
-        active = app_state.show_funscript_interactive_timeline if hasattr(app_state, 'show_funscript_interactive_timeline') else True
-        if self._toolbar_toggle_button(icon_mgr, 'keycap-1.png', btn_size, "Toggle Timeline 1", active):
-            app_state.show_funscript_interactive_timeline = not active
+        if self._toolbar_toggle_button(icon_mgr, 'keycap-1.png', btn_size, "Toggle Timeline 1", t1_active):
+            app_state.show_funscript_interactive_timeline = not t1_active
             self.app.project_manager.project_dirty = True
+            t1_active = not t1_active  # Update for this render cycle
 
-        imgui.same_line()
+        # Only show T1 action buttons if timeline is active
+        if t1_active:
+            imgui.same_line()
 
-        # Undo Timeline 1
-        undo1 = fs_proc._get_undo_manager(1) if fs_proc else None
-        can_undo1 = undo1.can_undo() if undo1 else False
+            # Undo Timeline 1
+            undo1 = fs_proc._get_undo_manager(1) if fs_proc else None
+            can_undo1 = undo1.can_undo() if undo1 else False
 
-        if can_undo1:
-            if self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T1"):
-                fs_proc.perform_undo_redo(1, "undo")
-        else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T1 (Nothing to undo)")
-            imgui.pop_style_var()
+            if can_undo1:
+                if self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T1"):
+                    fs_proc.perform_undo_redo(1, "undo")
+            else:
+                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+                self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T1 (Nothing to undo)")
+                imgui.pop_style_var()
 
-        imgui.same_line()
+            imgui.same_line()
 
-        # Redo Timeline 1
-        can_redo1 = undo1.can_redo() if undo1 else False
+            # Redo Timeline 1
+            can_redo1 = undo1.can_redo() if undo1 else False
 
-        if can_redo1:
-            if self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T1"):
-                fs_proc.perform_undo_redo(1, "redo")
-        else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T1 (Nothing to redo)")
-            imgui.pop_style_var()
+            if can_redo1:
+                if self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T1"):
+                    fs_proc.perform_undo_redo(1, "redo")
+            else:
+                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+                self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T1 (Nothing to redo)")
+                imgui.pop_style_var()
 
-        imgui.same_line()
+            imgui.same_line()
 
-        # Ultimate Autotune Timeline 1 - Magic wand emoji (🪄)
-        if has_video:
-            if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (Timeline 1)"):
-                app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
-        else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune T1 (No video)")
-            imgui.pop_style_var()
+            # Ultimate Autotune Timeline 1 - Magic wand emoji (🪄)
+            if has_video:
+                if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (Timeline 1)"):
+                    app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
+            else:
+                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+                self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune T1 (No video)")
+                imgui.pop_style_var()
 
-        imgui.same_line(spacing=4)
-        imgui.text("|")  # Simple text separator
-        imgui.same_line(spacing=4)
+            rendered_t1 = True
+
+        # Always continue on same line for T2 section
+        imgui.same_line(spacing=12)
+
+        # Show separator if T1 rendered action buttons
+        if rendered_t1:
+            self._render_separator()
+            imgui.same_line(spacing=12)
 
         # === TIMELINE 2 SECTION ===
         # Timeline 2 Toggle - Keycap 2 emoji
-        active = app_state.show_funscript_interactive_timeline2 if hasattr(app_state, 'show_funscript_interactive_timeline2') else False
-        if self._toolbar_toggle_button(icon_mgr, 'keycap-2.png', btn_size, "Toggle Timeline 2", active):
-            app_state.show_funscript_interactive_timeline2 = not active
+        if self._toolbar_toggle_button(icon_mgr, 'keycap-2.png', btn_size, "Toggle Timeline 2", t2_active):
+            app_state.show_funscript_interactive_timeline2 = not t2_active
             self.app.project_manager.project_dirty = True
+            t2_active = not t2_active  # Update for this render cycle
 
-        imgui.same_line()
+        # Only show T2 action buttons if timeline is active
+        if t2_active:
+            imgui.same_line()
 
-        # Undo Timeline 2
-        undo2 = fs_proc._get_undo_manager(2) if fs_proc else None
-        can_undo2 = undo2.can_undo() if undo2 else False
+            # Undo Timeline 2
+            undo2 = fs_proc._get_undo_manager(2) if fs_proc else None
+            can_undo2 = undo2.can_undo() if undo2 else False
 
-        if can_undo2:
-            if self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T2"):
-                fs_proc.perform_undo_redo(2, "undo")
-        else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T2 (Nothing to undo)")
-            imgui.pop_style_var()
+            if can_undo2:
+                if self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T2"):
+                    fs_proc.perform_undo_redo(2, "undo")
+            else:
+                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+                self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T2 (Nothing to undo)")
+                imgui.pop_style_var()
 
-        imgui.same_line()
+            imgui.same_line()
 
-        # Redo Timeline 2
-        can_redo2 = undo2.can_redo() if undo2 else False
+            # Redo Timeline 2
+            can_redo2 = undo2.can_redo() if undo2 else False
 
-        if can_redo2:
-            if self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T2"):
-                fs_proc.perform_undo_redo(2, "redo")
-        else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T2 (Nothing to redo)")
-            imgui.pop_style_var()
+            if can_redo2:
+                if self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T2"):
+                    fs_proc.perform_undo_redo(2, "redo")
+            else:
+                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+                self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T2 (Nothing to redo)")
+                imgui.pop_style_var()
 
-        imgui.same_line()
+            imgui.same_line()
 
-        # Ultimate Autotune Timeline 2 - Magic wand emoji (🪄)
-        if has_video:
-            if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (Timeline 2)"):
-                app.trigger_ultimate_autotune_with_defaults(timeline_num=2)
-        else:
-            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-            self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune T2 (No video)")
-            imgui.pop_style_var()
+            # Ultimate Autotune Timeline 2 - Magic wand emoji (🪄)
+            if has_video:
+                if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (Timeline 2)"):
+                    app.trigger_ultimate_autotune_with_defaults(timeline_num=2)
+            else:
+                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+                self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune T2 (No video)")
+                imgui.pop_style_var()
+
+            rendered_t2 = True
 
     def _render_playback_section(self, icon_mgr, btn_size):
         """Render playback control buttons."""
