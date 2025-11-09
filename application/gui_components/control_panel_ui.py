@@ -619,9 +619,8 @@ class ControlPanelUI:
             tooltip = "Control the processing speed for live analysis and video playback"
         else:
             tooltip = "Control the video playback speed"
-        
-        self._section_header(">> Processing Speed", tooltip)
 
+        # Processing Speed section header removed
         current_speed_mode = app_state.selected_processing_speed_mode
  
         if imgui.radio_button("Real Time", current_speed_mode == config.ProcessingSpeedMode.REALTIME):
@@ -811,10 +810,7 @@ class ControlPanelUI:
         imgui.text("Configure settings for the selected mode.")
         imgui.spacing()
 
-        # Show AI model settings for live and offline trackers
-        if self._is_live_tracker(tmode) or self._is_offline_tracker(tmode):
-            if imgui.collapsing_header("AI Models & Inference##ConfigAIModels")[0]:
-                self._render_ai_model_settings()
+        # AI Models & Inference moved to Tools > AI Models dialog
 
         adv = app.app_state_ui.show_advanced_options
         if self._is_live_tracker(tmode) and adv:
@@ -1137,7 +1133,7 @@ class ControlPanelUI:
 
         # Define searchable keywords for each section (including sub-options)
         section_keywords = {
-            "ai_models": "ai models inference detection yolo stage1 stage2 stage3 model path mlpackage onnx pt",
+            # "ai_models" removed - moved to Tools > AI Models dialog
             "live_tracker": "live tracker settings roi detection optical flow confidence padding interval smoothing persistence sparse dis preset scale sensitivity amplification delay face hand class",
             "class_filter": "class filtering filter person face hand foot genitals body parts",
             "oscillation": "oscillation detector frequency amplitude threshold smoothing window peak valley timing",
@@ -1153,13 +1149,7 @@ class ControlPanelUI:
             keywords = section_keywords.get(section_key, "")
             return any(term in keywords for term in search_query.split())
 
-        # AI Models & Inference section (from Configuration tab)
-        if self._is_live_tracker(tmode) or self._is_offline_tracker(tmode):
-            if matches_section("ai_models"):
-                # Auto-expand if search query matches
-                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("ai_models") else 0
-                if imgui.collapsing_header("AI Models & Inference##AdvancedAIModels", flags=flags)[0]:
-                    self._render_ai_model_settings()
+        # AI Models & Inference moved to Tools > AI Models dialog
 
         # Tracking Parameters section (from Configuration tab)
         adv = app_state.show_advanced_options
@@ -1716,30 +1706,7 @@ class ControlPanelUI:
             return
 
         if self._is_live_tracker(mode):
-            tr = app.tracker
-            imgui.text(">> Tracker Status")
-            imgui.separator()
-            # Show video processor FPS (more accurate for MAX_SPEED performance)
-            video_fps = (app.processor.actual_fps if app.processor and hasattr(app.processor, 'actual_fps') else 0.0)
-            tracker_fps = (tr.current_fps if tr else 0.0)
-            
-            # Prefer video processor FPS for accuracy, fallback to tracker FPS
-            display_fps = video_fps if video_fps > 0 else tracker_fps
-            imgui.text(" - Video FPS: %.1f" % (video_fps if isinstance(video_fps, (int, float)) else 0.0))
-            imgui.text(" - Tracker FPS: %.1f" % (tracker_fps if isinstance(tracker_fps, (int, float)) else 0.0))
-            roi_status = "Not Set"
-            if tr:
-                if mode == "yolo_roi":
-                    roi_status = (
-                        "Tracking '%s'" % tr.main_interaction_class
-                        if getattr(tr, "main_interaction_class", None)
-                        else "Searching..."
-                    )
-                elif mode == "user_roi":
-                    roi_status = "Set" if getattr(tr, "user_roi_fixed", False) else "Not Set"
-                elif mode in ["oscillation_experimental", "oscillation_legacy", "oscillation_experimental_2"]:
-                    roi_status = "Set" if getattr(tr, "oscillation_area_fixed", None) else "Not Set"
-            imgui.text(" - ROI Status: %s" % roi_status)
+            # Tracker Status block removed
 
             if mode == "user_roi":
                 self._render_user_roi_controls_for_run_tab()

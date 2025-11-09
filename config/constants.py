@@ -14,7 +14,7 @@ except ImportError:
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.5.2"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION} - AI Computer Vision"
 FUNSCRIPT_AUTHOR = "FunGen"
 
@@ -431,6 +431,9 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/fullscreen.png': 'https://em-content.zobj.net/source/apple/391/cinema_1f3a6.png',
     'ui/icons/fullscreen-exit.png': 'https://em-content.zobj.net/source/apple/391/door_1f6aa.png',
 
+    # Video display control
+    'ui/icons/video-camera.png': 'https://em-content.zobj.net/source/apple/391/movie-camera_1f3a5.png',
+
     # General UI controls
     'ui/icons/settings.png': 'https://em-content.zobj.net/source/apple/391/gear_2699-fe0f.png',
     'ui/icons/gamepad.png': 'https://em-content.zobj.net/source/apple/391/video-game_1f3ae.png',
@@ -472,7 +475,8 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/books.png': 'https://em-content.zobj.net/source/apple/391/books_1f4da.png',  # 📚 books for chapter list
 
     # Network/streaming indicators
-    'ui/icons/satellite.png': 'https://em-content.zobj.net/source/apple/391/satellite-antenna_1f4e1.png',  # 📡 satellite antenna for streamer
+    'ui/icons/satellite.png': 'https://em-content.zobj.net/source/apple/391/satellite-antenna_1f4e1.png',
+    'ui/icons/flashlight.png': 'https://em-content.zobj.net/source/apple/391/flashlight_1f526.png',  # 📡 satellite antenna for streamer
 
     # Enhancement/optimization indicators
     'ui/icons/rocket.png': 'https://em-content.zobj.net/source/apple/391/rocket_1f680.png',  # 🚀 rocket for Ultimate Autotune
@@ -480,6 +484,9 @@ UI_CONTROL_ICON_URLS = {
     # Tracking/automation indicators
     'ui/icons/robot.png': 'https://em-content.zobj.net/source/apple/391/robot_1f916.png',  # 🤖 robot for tracking
     'ui/icons/sparkles.png': 'https://em-content.zobj.net/source/apple/391/sparkles_2728.png',  # ✨ sparkles for auto post-processing
+    'ui/icons/bot.png': 'https://em-content.zobj.net/source/apple/391/robot_1f916.png',  # 🤖 bot for live tracking button
+    'ui/icons/eraser.png': 'https://em-content.zobj.net/source/apple/391/eraser_1f9fd.png',  # 🧽 eraser for clear chapters
+    'ui/icons/nerd-face.png': 'https://em-content.zobj.net/source/apple/391/nerd-face_1f913.png',  # 🤓 nerd face for Expert/Simple mode toggle
 
     # Visualization/analysis indicators
     'ui/icons/chart-increasing.png': 'https://em-content.zobj.net/source/apple/391/chart-increasing_1f4c8.png',  # 📈 chart for 3D simulator
