@@ -76,6 +76,9 @@ class InteractiveFunscriptTimeline:
         self.keyframe_time_tolerance = self.app.app_settings.get(
             f"timeline{self.timeline_num}_keyframe_default_time_tol", 50)
 
+        # --- TIME SHIFT STATE ---
+        self.shift_frames_amount = 1
+
         # Speed Limiter migrated to plugin system - parameters managed by PluginUIManager
 
         # Get initial defaults from app_settings (AppLogic holds app_settings directly)
@@ -1180,6 +1183,37 @@ class InteractiveFunscriptTimeline:
                     if plugin_disabled:
                         imgui.pop_style_var()
                         imgui.internal.pop_item_flag()
+
+                # --- Time Shift controls ---
+                imgui.same_line()
+                time_shift_disabled_bool = not allow_editing_timeline or not has_actions or not (
+                        self.app.processor and self.app.processor.fps and self.app.processor.fps > 0)
+                if time_shift_disabled_bool:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+
+                if imgui.button(f"<<##ShiftLeft{window_id_suffix}"):
+                    if not time_shift_disabled_bool and self.shift_frames_amount > 0:
+                        self._perform_time_shift(-self.shift_frames_amount)
+                imgui.same_line()
+
+                imgui.push_item_width(80 * self.app.app_settings.get("global_font_scale", 1.0))
+                _, self.shift_frames_amount = imgui.input_int(
+                    f"Frames##ShiftAmount{window_id_suffix}",
+                    self.shift_frames_amount,
+                    1,
+                    10,
+                )
+                if self.shift_frames_amount < 0:
+                    self.shift_frames_amount = 0
+                imgui.pop_item_width()
+                imgui.same_line()
+                if imgui.button(f">>##ShiftRight{window_id_suffix}"):
+                    if not time_shift_disabled_bool and self.shift_frames_amount > 0:
+                        self._perform_time_shift(self.shift_frames_amount)
+                if time_shift_disabled_bool:
+                    imgui.pop_style_var()
+                    imgui.internal.pop_item_flag()
 
                 # --- Zoom Buttons ---
                 imgui.same_line()
@@ -3275,5 +3309,51 @@ class InteractiveFunscriptTimeline:
             last_action = actions_list[-1]
             last_pos = last_action.get('pos', 50) if isinstance(last_action, dict) else last_action[1]
             return float(last_pos)
-        
+
         return None
+
+    def _perform_time_shift(self, frame_delta: int):
+        """Shift all funscript points by a specified number of frames using the Time Shift plugin."""
+        fs_proc = self.app.funscript_processor
+        video_fps_for_calc = self.app.processor.fps if self.app.processor and self.app.processor.fps and self.app.processor.fps > 0 else 0
+        if video_fps_for_calc <= 0:
+            self.app.logger.warning(
+                f"T{self.timeline_num}: Cannot shift time. Video FPS is not available.",
+                extra={"status_message": True},
+            )
+            return
+
+        time_delta_ms = int(round((frame_delta / video_fps_for_calc) * 1000.0))
+        op_desc = f"Shifted All Points by {frame_delta} frames"
+
+        # Get the target funscript object
+        funscript_obj, axis = self._get_target_funscript_details()
+        if not funscript_obj:
+            self.app.logger.warning(
+                f"T{self.timeline_num}: No funscript object available for time shift.",
+                extra={"status_message": True},
+            )
+            return
+
+        # Record undo action
+        fs_proc._record_timeline_action(self.timeline_num, op_desc)
+
+        try:
+            # Apply time shift using the plugin system
+            funscript_obj.apply_plugin('Time Shift', axis=axis, time_delta_ms=time_delta_ms)
+
+            # Finalize and update UI
+            fs_proc._finalize_action_and_update_ui(self.timeline_num, op_desc)
+            self.app.logger.info(
+                f"{op_desc} on T{self.timeline_num}.",
+                extra={"status_message": True},
+            )
+        except Exception as e:
+            self.app.logger.error(
+                f"T{self.timeline_num}: Failed to apply time shift: {e}",
+                extra={"status_message": True},
+            )
+            # Undo the recorded action since it failed
+            undo_mgr = fs_proc._get_undo_manager(self.timeline_num)
+            if undo_mgr:
+                undo_mgr.undo()
