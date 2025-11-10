@@ -520,8 +520,9 @@ class ToolbarUI:
             new_value = not auto_simplify
             settings.set('funscript_point_simplification_enabled', new_value)
             # Apply to active funscript if tracking
-            if processor and hasattr(processor, 'active_funscript') and processor.active_funscript:
-                processor.active_funscript.simplification_enabled = new_value
+            if processor and hasattr(processor, 'tracker') and processor.tracker and hasattr(processor.tracker, 'funscript') and processor.tracker.funscript:
+                processor.tracker.funscript.enable_point_simplification = new_value
+                app.logger.info(f"On-the-fly simplification {'enabled' if new_value else 'disabled'}", extra={"status_message": True})
 
         imgui.same_line()
 
