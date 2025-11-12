@@ -126,13 +126,22 @@ class ProgressBar:
 class FunGenUniversalInstaller:
     """Universal FunGen installer - assumes Python is available"""
     
-    def __init__(self, install_dir: Optional[str] = None, force: bool = False, bootstrap_version: Optional[str] = None):
+    def __init__(self, install_dir: Optional[str] = None, force: bool = False, 
+                bootstrap_version: Optional[str] = None, skip_clone: bool = False):
         self.platform = platform.system()
         self.arch = platform.machine().lower()
         self.force = force
         self.bootstrap_version = bootstrap_version
-        self.install_dir = Path(install_dir) if install_dir else Path.cwd()
-        self.project_path = self.install_dir / CONFIG["project_name"]
+        self.skip_clone = skip_clone
+        
+        if skip_clone:
+            # Use the directory where this script is located
+            self.install_dir = Path(__file__).parent.resolve()
+            self.project_path = self.install_dir
+            print(f"{Colors.CYAN}Using existing repository at: {self.project_path}{Colors.ENDC}")
+        else:
+            self.install_dir = Path(install_dir) if install_dir else Path.cwd()
+            self.project_path = self.install_dir / CONFIG["project_name"]
         
         # Setup paths
         self.setup_paths()
@@ -468,10 +477,44 @@ class FunGenUniversalInstaller:
     
     def clone_repository(self) -> bool:
         """Clone or update the FunGen repository"""
+        if self.skip_clone:
+            # Verify we're in a valid git repository
+            if not (self.project_path / ".git").exists():
+                self.print_error("--skip-clone specified but current directory is not a git repository")
+                self.print_error(f"Expected .git directory in: {self.project_path}")
+                return False
+            
+            # Verify it's the FunGen repository
+            ret, stdout, _ = self.run_command(
+                ["git", "config", "--get", "remote.origin.url"],
+                cwd=self.project_path,
+                capture=True,
+                check=False
+            )
+            
+            if ret == 0 and "FunGen" in stdout:
+                ret, stdout, _ = self.run_command(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    cwd=self.project_path,
+                    capture=True,
+                    check=False
+                )
+                if ret == 0:
+                    commit = stdout.strip()
+                    self.print_success(f"Using existing repository (commit: {commit})")
+                else:
+                    self.print_success("Using existing repository")
+                return True
+            else:
+                self.print_warning("Repository URL does not match FunGen - continuing anyway")
+                self.print_success("Using existing repository")
+                return True
+        
         if self.project_path.exists():
             if self.force:
                 print("  Removing existing project directory...")
-                shutil.rmtree(self.project_path)
+                if not self.safe_rmtree(self.project_path):
+                    return False
             else:
                 print("  Project directory exists, updating...")
                 ret, _, stderr = self.run_command(
@@ -725,9 +768,16 @@ class FunGenUniversalInstaller:
             # Continue even if this fails - may already be accepted
 
         # Check if environment exists
+        print(f"  [DEBUG] Checking for existing environment '{CONFIG['env_name']}'...")
         ret, stdout, _ = self.run_command([str(conda_exe), "env", "list"], capture=True, check=False)
 
+        print(f"  [DEBUG] conda env list return code: {ret}")
+        print(f"  [DEBUG] conda env list output:\n{stdout}")
+    
         env_exists = CONFIG["env_name"] in stdout if ret == 0 else False
+    
+        print(f"  [DEBUG] Looking for: '{CONFIG['env_name']}'")
+        print(f"  [DEBUG] Environment exists: {env_exists}")
 
         if not env_exists:
             print(f"  Creating conda environment '{CONFIG['env_name']}'...")
@@ -1516,6 +1566,12 @@ Examples:
   python install.py --uninstall
         """
     )
+
+    parser.add_argument(
+        "--skip-clone",
+        action="store_true",
+        help="Skip git clone and use the current directory (must be run from FunGen repository)"
+    )
     
     parser.add_argument(
         "--dir", "--install-dir",
@@ -1576,7 +1632,8 @@ Examples:
     installer = FunGenUniversalInstaller(
         install_dir=args.dir,
         force=args.force,
-        bootstrap_version=args.bootstrap_version
+        bootstrap_version=args.bootstrap_version,
+        skip_clone=args.skip_clone
     )
     
     success = installer.install()
