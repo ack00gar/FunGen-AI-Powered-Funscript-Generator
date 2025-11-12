@@ -3037,7 +3037,53 @@ class ControlPanelUI:
             # Share device manager with app for TrackerManager integration
             self.app.device_manager = self.device_manager
             self.app.logger.info("Device Control: DeviceManager created and shared with app")
-            
+
+            # Initialize video integration (observer pattern for desktop video playback)
+            self.app.logger.info("Device Control: Setting up video playback integration...")
+            from device_control.video_integration import DeviceControlVideoIntegration
+            from device_control.bridges.video_playback_bridge import VideoPlaybackBridge
+
+            # Create integration (connects to video_processor via observer pattern)
+            self.device_video_integration = DeviceControlVideoIntegration(
+                self.app.processor,
+                self.device_manager,
+                app_instance=self.app,
+                logger=self.app.logger
+            )
+
+            # Create video playback bridge (polls integration at device update rate)
+            self.device_video_bridge = VideoPlaybackBridge(
+                self.device_manager,
+                video_integration=self.device_video_integration
+            )
+
+            # Start integration (registers callbacks with video_processor)
+            self.device_video_integration.start()
+
+            # Start bridge in background thread with its own event loop
+            import threading
+            import asyncio
+
+            def run_bridge_loop():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.device_video_bridge.start())
+                try:
+                    loop.run_forever()
+                except KeyboardInterrupt:
+                    pass
+                finally:
+                    loop.close()
+
+            self.device_bridge_thread = threading.Thread(
+                target=run_bridge_loop,
+                daemon=True,
+                name="DeviceVideoBridge"
+            )
+            self.device_bridge_thread.start()
+
+            self.app.logger.info("Device Control: Video playback integration active")
+
             # Update existing tracker managers to use the shared device manager
             self._update_existing_tracker_managers()
             
