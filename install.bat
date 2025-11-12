@@ -50,7 +50,7 @@ set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows
 set "MINICONDA_INSTALLER=%TEMP_DIR%\Miniconda3-latest.exe"
 set "MINICONDA_PATH=%USERPROFILE%\miniconda3"
 set "CONDA_EXE=%MINICONDA_PATH%\Scripts\conda.exe"
-set "ENV_NAME=fungen"
+set "ENV_NAME=FunGen"
 
 REM Note: ARM64 Windows should use x86_64 version via emulation
 REM Miniconda does not provide native ARM64 builds for Windows
