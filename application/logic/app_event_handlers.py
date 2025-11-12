@@ -123,6 +123,19 @@ class AppEventHandlers:
             self.logger.error("Tracker not initialized for live tracking.")
             return
 
+        # RULE: Desktop live tracking with device control only allowed in REALTIME or SLOW_MOTION modes
+        # Exception: Allow if streamer has control (streamer can handle MAX_SPEED)
+        device_manager = getattr(self.app, 'device_manager', None)
+        if device_manager and device_manager.is_connected():
+            control_source = device_manager.get_active_control_source()
+            # Only block if desktop has control (not if streamer has control)
+            if control_source == 'desktop':
+                from config.constants import ProcessingSpeedMode
+                current_mode = self.app.app_state_ui.selected_processing_speed_mode
+                if current_mode == ProcessingSpeedMode.MAX_SPEED:
+                    self.logger.error("Desktop live tracking with device control is not allowed in MAX SPEED mode. Switch to REALTIME or SLOW-MO mode first.", extra={'status_message': True, 'duration': 5.0})
+                    return
+
         selected_tracker_name = self.app.app_state_ui.selected_tracker_name
         
         # Set tracker using dynamic discovery

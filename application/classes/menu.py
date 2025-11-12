@@ -1141,24 +1141,51 @@ class MainMenu:
             # Count connected devices
             device_count = len(device_manager.connected_devices)
 
-            # Green button showing device count
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)  # Green
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.6, 0.1, 1.0)
-            button_label = f"Device: {device_count}"
+            # Get active control source
+            control_source = device_manager.get_active_control_source()
+
+            # Choose color based on control source
+            if control_source == 'streamer':
+                # Blue for streamer control
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.5, 0.9, 1.0)  # Blue
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.6, 1.0, 1.0)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.4, 0.8, 1.0)
+                button_label = f"[S] Device: {device_count}"
+            elif control_source == 'desktop':
+                # Green for desktop control
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)  # Green
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.6, 0.1, 1.0)
+                button_label = f"[D] Device: {device_count}"
+            else:
+                # Yellow for idle/no control
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.7, 0.2, 1.0)  # Yellow
+                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.8, 0.8, 0.3, 1.0)
+                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.6, 0.1, 1.0)
+                button_label = f"[-] Device: {device_count}"
+
             button_clicked = imgui.small_button(button_label)
             imgui.pop_style_color(3)
 
             if imgui.is_item_hovered():
                 connected_devices = list(device_manager.connected_devices.keys())
+
+                # Build tooltip with control source info
+                if control_source == 'streamer':
+                    control_info = "Controlled by: Streamer (Browser)"
+                elif control_source == 'desktop':
+                    control_info = "Controlled by: Desktop (FunGen)"
+                else:
+                    control_info = "Controlled by: None (Idle)"
+
                 if device_count == 1:
                     device_name = connected_devices[0] if connected_devices else "Unknown"
-                    imgui.set_tooltip(f"Device: {device_name}\nActive for live tracking and video playback")
+                    imgui.set_tooltip(f"Device: {device_name}\n{control_info}\n\n[S] = Streamer  [D] = Desktop  [-] = Idle")
                 else:
                     device_list = ", ".join(connected_devices[:3])  # Show up to 3
                     if device_count > 3:
                         device_list += f" (+{device_count - 3} more)"
-                    imgui.set_tooltip(f"{device_count} devices connected\n{device_list}")
+                    imgui.set_tooltip(f"{device_count} devices connected\n{device_list}\n{control_info}\n\n[S] = Streamer  [D] = Desktop  [-] = Idle")
         else:
             # Red button for inactive/disconnected
             imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.3, 0.3, 1.0)  # Red
