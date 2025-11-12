@@ -54,13 +54,13 @@ class ControlPanelUI:
         "tracker_ui",
         # Performance optimization attributes
         "_last_tab_hash",
-        "_cached_tab_content", 
+        "_cached_tab_content",
         "_widget_visibility_cache",
         "_update_throttle_counter",
         "_heavy_operation_frame_skip",
         # Device Control attributes (supporter feature)
         "device_manager",
-        "param_manager", 
+        "param_manager",
         "_device_control_initialized",
         "_first_frame_rendered",
         "device_list",
@@ -72,6 +72,10 @@ class ControlPanelUI:
         # Bridge attributes for live control
         "video_playback_bridge",
         "live_tracker_bridge",
+        # Device video integration (observer pattern)
+        "device_video_integration",
+        "device_video_bridge",
+        "device_bridge_thread",
         # Streamer attributes (supporter feature)
         "_native_sync_manager",
         "_prev_client_count",
@@ -115,6 +119,11 @@ class ControlPanelUI:
         self.device_list = []  # List of discovered devices
         self._available_osr_ports = []
         self._osr_scan_performed = False
+
+        # Device video integration (observer pattern)
+        self.device_video_integration = None
+        self.device_video_bridge = None
+        self.device_bridge_thread = None
         
         # Buttplug device discovery UI state
         self._discovered_buttplug_devices = []
@@ -3175,32 +3184,197 @@ class ControlPanelUI:
         except:
             pass
 
-        # Connection Status Section
-        if imgui.collapsing_header("Connection Status##DeviceConnectionStatus", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_connection_status_section()
-        
-        # Device Types (without header)
-        imgui.indent(15)
-        
-        # OSR2/OSR6 Devices
-        if imgui.collapsing_header("OSR2/OSR6 Devices (USB/Serial)##OSRDevices")[0]:
-            self._render_osr_controls()
-            
-        # Buttplug.io Universal Devices  
-        if imgui.collapsing_header("Buttplug.io Devices (Universal)##ButtplugDevices")[0]:
-            self._render_buttplug_controls()
-        
-        # Handy Direct Control
-        if imgui.collapsing_header("Handy (Direct API)##HandyDirect")[0]:
-            self._render_handy_controls()
-            
-        imgui.unindent(15)
-        
-        # Settings Section (only show if connected)
+        # SIMPLIFIED: Compact connection status (always visible)
+        self._render_compact_connection_status()
+
+        imgui.separator()
+
+        # SIMPLIFIED: Quick controls when connected (always visible)
         if self.device_manager.is_connected():
-            if imgui.collapsing_header("Device Settings##DeviceSettings")[0]:
-                self._render_device_settings_section()
+            self._render_quick_controls()
+            imgui.separator()
+
+        # Device Types (collapsible)
+        if not self.device_manager.is_connected():
+            imgui.text("Connect a Device:")
+            imgui.spacing()
+
+        # OSR2/OSR6 Devices
+        if imgui.collapsing_header("OSR2/OSR6 (USB)##OSRDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+            self._render_osr_controls()
+
+        # Buttplug.io Universal Devices
+        if imgui.collapsing_header("Buttplug.io (Universal)##ButtplugDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+            self._render_buttplug_controls()
+
+        # Handy Direct Control
+        if imgui.collapsing_header("Handy (Direct)##HandyDirect", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+            self._render_handy_controls()
+
+        # SIMPLIFIED: All settings in one collapsible section
+        if self.device_manager.is_connected():
+            imgui.separator()
+            if imgui.collapsing_header("Advanced Settings##DeviceAdvancedAll")[0]:
+                self._render_all_advanced_settings()
     
+    def _render_compact_connection_status(self):
+        """Render compact connection status (always visible)."""
+        if self.device_manager.is_connected():
+            device_name = self.device_manager.get_connected_device_name()
+            control_source = self.device_manager.get_active_control_source()
+
+            # Status line with color indicator
+            if control_source == 'streamer':
+                imgui.text_colored("[STREAMER]", 0.2, 0.5, 0.9)  # Blue
+                imgui.same_line()
+                imgui.text(f"{device_name}")
+            elif control_source == 'desktop':
+                imgui.text_colored("[DESKTOP]", 0.2, 0.7, 0.2)  # Green
+                imgui.same_line()
+                imgui.text(f"{device_name}")
+            else:
+                imgui.text_colored("[IDLE]", 0.7, 0.7, 0.2)  # Yellow
+                imgui.same_line()
+                imgui.text(f"{device_name}")
+
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Blue = Streamer Control | Green = Desktop Control | Yellow = Idle")
+
+            imgui.same_line()
+            if imgui.small_button("Disconnect"):
+                self._disconnect_current_device()
+        else:
+            imgui.text_colored("Device: Not Connected", 0.7, 0.3, 0.3)
+
+    def _render_quick_controls(self):
+        """Render quick controls for connected device (always visible when connected)."""
+        imgui.text("Quick Controls:")
+        imgui.spacing()
+
+        # Global stroke range for all active axes
+        imgui.text("Stroke Range (All Active Axes):")
+
+        # Get current profile settings
+        current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
+        osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
+
+        if current_profile_name in osr_profiles:
+            profile_data = osr_profiles[current_profile_name]
+
+            # Calculate global min/max from enabled axes
+            active_axes = []
+            for axis_key in ["up_down", "left_right", "front_back", "twist", "roll", "pitch"]:
+                if axis_key in profile_data and profile_data[axis_key].get("enabled", False):
+                    active_axes.append(axis_key)
+
+            if active_axes:
+                # Get average min/max from active axes
+                avg_min = int(sum(profile_data[axis].get("min_position", 0) for axis in active_axes) / len(active_axes))
+                avg_max = int(sum(profile_data[axis].get("max_position", 9999) for axis in active_axes) / len(active_axes))
+
+                # Global min slider
+                changed_min, new_min = imgui.slider_int("Min Extent##GlobalMin", avg_min, 0, 5000, "%d")
+                if changed_min:
+                    # Apply to all active axes
+                    for axis_key in active_axes:
+                        profile_data[axis_key]["min_position"] = new_min
+                    osr_profiles[current_profile_name] = profile_data
+                    self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
+                    self._preview_global_extent(new_min, "min")
+
+                # Global max slider
+                changed_max, new_max = imgui.slider_int("Max Extent##GlobalMax", avg_max, 5000, 9999, "%d")
+                if changed_max:
+                    # Apply to all active axes
+                    for axis_key in active_axes:
+                        profile_data[axis_key]["max_position"] = new_max
+                    osr_profiles[current_profile_name] = profile_data
+                    self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
+                    self._preview_global_extent(new_max, "max")
+
+                _tooltip_if_hovered("Adjust min/max for all active axes at once. Drag to feel the limits in real-time.")
+            else:
+                imgui.text_colored("No active axes configured", 0.7, 0.5, 0.0)
+
+        imgui.spacing()
+
+        # Quick position test
+        imgui.text("Test Position:")
+        current_pos = self.device_manager.current_position
+        changed, new_pos = imgui.slider_float("##QuickTestPos", current_pos, 0.0, 100.0, "%.1f%%")
+        if changed:
+            self.device_manager.update_position(new_pos, 50.0)
+        _tooltip_if_hovered("Drag to test device movement")
+
+    def _preview_global_extent(self, value, extent_type):
+        """Preview global min or max extent by moving device to that position."""
+        try:
+            # Convert T-code value (0-9999) to percentage (0-100)
+            percentage = (value / 9999.0) * 100.0
+            self.device_manager.update_position(percentage, 50.0)
+        except Exception as e:
+            self.app.logger.error(f"Error previewing global extent: {e}")
+
+    def _render_all_advanced_settings(self):
+        """Render all advanced settings in one section."""
+        imgui.indent(10)
+
+        # Performance Settings
+        imgui.text_colored("Performance:", 0.8, 0.8, 0.2)
+        config = self.device_manager.config
+
+        changed, new_rate = imgui.slider_float("Update Rate##DeviceRate", config.max_position_rate_hz, 1.0, 120.0, "%.1f Hz")
+        if changed:
+            config.max_position_rate_hz = new_rate
+        _tooltip_if_hovered("How often device position is updated per second")
+
+        changed, new_smoothing = imgui.slider_float("Smoothing##DeviceSmooth", config.position_smoothing, 0.0, 1.0, "%.2f")
+        if changed:
+            config.position_smoothing = new_smoothing
+        _tooltip_if_hovered("Smooths position changes (0=no smoothing, 1=maximum smoothing)")
+
+        changed, new_latency = imgui.slider_int("Latency Comp.##DeviceLatency", config.latency_compensation_ms, 0, 200, "%d ms")
+        if changed:
+            config.latency_compensation_ms = new_latency
+        _tooltip_if_hovered("Compensates for device response delay")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Integration Settings
+        imgui.text_colored("Integration:", 0.8, 0.8, 0.2)
+
+        live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
+        changed, new_live_tracking = imgui.checkbox("Live Tracking Control##DeviceLiveTracking", live_tracking_enabled)
+        if changed:
+            self.app.app_settings.set("device_control_live_tracking", new_live_tracking)
+            self.app.app_settings.save_settings()
+            self._update_live_tracking_control(new_live_tracking)
+        _tooltip_if_hovered("Stream live tracker data directly to device in real-time")
+
+        video_playback_enabled = self.app.app_settings.get("device_control_video_playback", False)
+        changed, new_video_playback = imgui.checkbox("Video Playback Control##DeviceVideoPlayback", video_playback_enabled)
+        if changed:
+            self.app.app_settings.set("device_control_video_playback", new_video_playback)
+            self.app.app_settings.save_settings()
+            self._update_video_playback_control(new_video_playback)
+        _tooltip_if_hovered("Sync device with video timeline and funscript playback")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Per-Axis Configuration (for OSR devices)
+        connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
+        if connected_device and "osr" in connected_device.device_id.lower():
+            if imgui.tree_node("Per-Axis Configuration##PerAxis"):
+                imgui.text_colored("Configure individual axes:", 0.7, 0.7, 0.7)
+                self._render_osr_axis_configuration()
+                imgui.tree_pop()
+
+        imgui.unindent(10)
+
     def _render_connection_status_section(self):
         """Render connection status section with consistent UX."""
         imgui.indent(15)
@@ -3319,12 +3493,28 @@ class ControlPanelUI:
         if is_handy_connected:
             # Connected state
             self._status_indicator(f"Connected to {connected_device.name}", "ready", "Handy connected and ready")
-            
+
+            # Upload Funscript button (PRIMARY action)
+            has_funscript = (hasattr(self.app, 'funscript_processor') and
+                           self.app.funscript_processor and
+                           self.app.funscript_processor.get_actions('primary'))
+
+            if has_funscript:
+                with primary_button_style():
+                    if imgui.button("Upload Funscript to Handy##HandyUpload", width=-1):
+                        self._upload_funscript_to_handy()
+                _tooltip_if_hovered("Upload current funscript to Handy for HSSP streaming mode")
+            else:
+                imgui.text_colored("No funscript loaded", 0.7, 0.5, 0.0)
+                _tooltip_if_hovered("Load a funscript first to enable Handy upload")
+
+            imgui.spacing()
+
             # Disconnect button
             if imgui.button("Disconnect Handy##HandyDisconnect"):
                 self._disconnect_handy()
             _tooltip_if_hovered("Disconnect from Handy device")
-            
+
             imgui.spacing()
             imgui.separator()
             imgui.spacing()
@@ -4829,6 +5019,80 @@ class ControlPanelUI:
             
         except Exception as e:
             self.app.logger.error(f"Failed to start Handy test: {e}")
+
+    def _upload_funscript_to_handy(self):
+        """Upload current funscript to Handy for HSSP streaming."""
+        try:
+            import threading
+
+            def upload_async():
+                import asyncio
+
+                async def run_upload():
+                    try:
+                        # Check if Handy is connected
+                        if not hasattr(self.device_manager, '_handy_backend') or not self.device_manager._handy_backend:
+                            self.app.logger.error("No Handy connected")
+                            return
+
+                        backend = self.device_manager._handy_backend
+
+                        # Get funscript from processor
+                        if not hasattr(self.app, 'funscript_processor') or not self.app.funscript_processor:
+                            self.app.logger.error("No funscript loaded")
+                            return
+
+                        primary_actions = self.app.funscript_processor.get_actions('primary')
+                        if not primary_actions:
+                            self.app.logger.error("No funscript actions available")
+                            return
+
+                        # Prepare funscript data
+                        funscript_data = {
+                            'version': '1.0',
+                            'inverted': False,
+                            'range': 100,
+                            'actions': [{'at': int(action['at']), 'pos': int(action['pos'])} for action in primary_actions]
+                        }
+
+                        self.app.logger.info(f"📤 Uploading funscript to Handy ({len(primary_actions)} actions)...")
+
+                        # Upload funscript
+                        script_url = await backend.upload_funscript(funscript_data, use_csv_format=True)
+
+                        if not script_url:
+                            self.app.logger.error("❌ Failed to upload funscript to Handy")
+                            return
+
+                        self.app.logger.info(f"✅ Funscript uploaded: {script_url}")
+
+                        # Setup HSSP streaming
+                        self.app.logger.info("⏳ Setting up HSSP streaming mode...")
+                        success = await backend.setup_hssp_streaming(script_url)
+
+                        if success:
+                            self.app.logger.info("✅ Handy HSSP streaming ready! Play video to start synchronized playback.")
+                        else:
+                            self.app.logger.error("❌ Failed to setup HSSP streaming")
+
+                    except Exception as e:
+                        self.app.logger.error(f"Error uploading funscript to Handy: {e}")
+                        import traceback
+                        self.app.logger.error(traceback.format_exc())
+
+                # Run in new event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(run_upload())
+                finally:
+                    loop.close()
+
+            thread = threading.Thread(target=upload_async, daemon=True)
+            thread.start()
+
+        except Exception as e:
+            self.app.logger.error(f"Failed to start Handy upload: {e}")
 
     def _render_native_sync_tab(self):
         """Render streamer tab content."""
