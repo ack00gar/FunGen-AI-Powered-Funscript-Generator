@@ -166,6 +166,93 @@ class VideoProcessor:
         self.ml_detector = None
         self.ml_model_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'vr_detector_model_rf.pkl')
 
+        # Event callbacks (for optional features like streamer, device_control)
+        self._seek_callbacks = []  # List of callbacks: func(frame_index: int) -> None
+        self._playback_state_callbacks = []  # List of callbacks: func(is_playing: bool, current_time_ms: float) -> None
+
+    def register_seek_callback(self, callback):
+        """
+        Register a callback to be notified when video seeks.
+
+        Callback signature: func(frame_index: int) -> None
+
+        This allows optional features (like streamer) to observe seek events
+        without VideoProcessor knowing about them.
+
+        Args:
+            callback: Callable that takes frame_index as parameter
+        """
+        if callback not in self._seek_callbacks:
+            self._seek_callbacks.append(callback)
+            self.logger.info(f"✅ Registered seek callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'} (total callbacks: {len(self._seek_callbacks)})")
+
+    def unregister_seek_callback(self, callback):
+        """
+        Unregister a seek callback.
+
+        Args:
+            callback: Previously registered callback to remove
+        """
+        if callback in self._seek_callbacks:
+            self._seek_callbacks.remove(callback)
+            self.logger.debug(f"Unregistered seek callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}")
+
+    def _notify_seek_callbacks(self, frame_index: int):
+        """
+        Notify all registered callbacks that a seek occurred.
+
+        Args:
+            frame_index: Frame that was seeked to
+        """
+        if self._seek_callbacks:
+            self.logger.debug(f"🔔 Notifying {len(self._seek_callbacks)} seek callbacks for frame {frame_index}")
+        for callback in self._seek_callbacks:
+            try:
+                callback(frame_index)
+            except Exception as e:
+                self.logger.error(f"Error in seek callback {callback}: {e}")
+
+    def register_playback_state_callback(self, callback):
+        """
+        Register a callback to be notified of playback state changes.
+
+        Callback signature: func(is_playing: bool, current_time_ms: float) -> None
+
+        This allows optional features (like device_control) to observe playback
+        state without VideoProcessor knowing about them.
+
+        Args:
+            callback: Callable that takes is_playing and current_time_ms as parameters
+        """
+        if callback not in self._playback_state_callbacks:
+            self._playback_state_callbacks.append(callback)
+            self.logger.info(f"✅ Registered playback state callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'} (total callbacks: {len(self._playback_state_callbacks)})")
+
+    def unregister_playback_state_callback(self, callback):
+        """
+        Unregister a playback state callback.
+
+        Args:
+            callback: Previously registered callback to remove
+        """
+        if callback in self._playback_state_callbacks:
+            self._playback_state_callbacks.remove(callback)
+            self.logger.debug(f"Unregistered playback state callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}")
+
+    def _notify_playback_state_callbacks(self, is_playing: bool, current_time_ms: float):
+        """
+        Notify all registered callbacks of playback state change.
+
+        Args:
+            is_playing: Whether video is currently playing
+            current_time_ms: Current time in milliseconds
+        """
+        for callback in self._playback_state_callbacks:
+            try:
+                callback(is_playing, current_time_ms)
+            except Exception as e:
+                self.logger.error(f"Error in playback state callback {callback}: {e}")
+
     def _update_timing_metrics(self):
         """Update display timing metrics from accumulated samples (once per second)."""
         current_time = time.time()
@@ -1837,6 +1924,9 @@ class VideoProcessor:
 
         target_frame = max(0, min(frame_index, self.total_frames - 1))
 
+        # Notify registered observers (e.g., streamer) of seek event
+        self._notify_seek_callbacks(target_frame)
+
         # If a seek is already in progress, wait for it to finish (or cancel it)
         if self.seek_in_progress and self.seek_thread and self.seek_thread.is_alive():
             self.logger.debug(f"Seek already in progress, new seek to frame {target_frame} will wait")
@@ -2133,6 +2223,12 @@ class VideoProcessor:
 
                 self.current_frame_index = self.current_stream_start_frame_abs + self.frames_read_from_current_stream
                 self.frames_read_from_current_stream += 1
+
+                # Notify playback state observers (e.g., device_control)
+                if self._playback_state_callbacks:
+                    is_currently_playing = self.is_processing and not self.pause_event.is_set()
+                    current_time_ms = (self.current_frame_index / self.fps) * 1000.0 if self.fps > 0 else 0.0
+                    self._notify_playback_state_callbacks(is_currently_playing, current_time_ms)
 
                 if self.cli_progress_callback:
                     # Throttle updates to avoid slowing down processing (e.g., update every 10 frames)
