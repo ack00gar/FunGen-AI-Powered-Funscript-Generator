@@ -710,7 +710,7 @@ class FunGenUniversalInstaller:
     
     def _setup_conda_environment(self) -> bool:
         """Setup conda environment"""
-        conda_exe = self.miniconda_path / ("Scripts/conda.exe" if self.platform == "Windows" else "bin/conda")
+        conda_exe = self.miniconda_path / ("condabin/conda.bat" if self.platform == "Windows" else "bin/conda")
 
         # Accept conda Terms of Service if not already accepted
         print("  Accepting conda Terms of Service...")
