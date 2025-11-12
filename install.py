@@ -992,33 +992,40 @@ class FunGenUniversalInstaller:
                     ], check=False)
                     
                     if ret != 0:
-                        # Try with precompiled wheels for GPU requirements too
-                        error_text = stderr + stdout  # Check both stderr and stdout
-                        compilation_errors = [
-                            "Microsoft Visual C++",
-                            "failed-wheel-build", 
-                            "error: Microsoft Visual C++",
-                            "Building wheel",
-                            "Failed building wheel",
-                            "build dependencies",
-                            "error: subprocess-exited-with-error"
-                        ]
-                        
-                        if any(error in error_text for error in compilation_errors):
-                            self.print_warning("Compilation error in GPU requirements. Trying precompiled wheels...")
-                            ret2, stdout2, stderr2 = self.run_command([
-                                str(python_exe), "-m", "pip", "install", "-r", req_file,
-                                "--only-binary=all", "--prefer-binary"
-                            ], check=False)
-                            
-                            if ret2 != 0:
-                                self.print_warning(f"Failed to install {gpu_type} requirements even with precompiled wheels")
-                                self.print_warning("GPU acceleration may not work properly. Consider installing Visual C++ Build Tools.")
-                            else:
-                                print(f"    {gpu_type.upper()} requirements installed successfully (precompiled)")
+                        # Special handling for ROCm on Windows
+                        if gpu_type == "rocm" and self.platform == "Windows":
+                            if not self._handle_rocm_fallback(python_exe, stderr):
+                                return False
+                            # Successfully fell back to CPU
+                            gpu_type = "cpu"  # Update gpu_type for later steps
                         else:
-                            self.print_warning(f"Failed to install {gpu_type} requirements: {stderr}")
-                            # Don't fail installation for GPU requirements
+                            # Try with precompiled wheels for GPU requirements too
+                            error_text = stderr + stdout  # Check both stderr and stdout
+                            compilation_errors = [
+                                "Microsoft Visual C++",
+                                "failed-wheel-build", 
+                                "error: Microsoft Visual C++",
+                                "Building wheel",
+                                "Failed building wheel",
+                                "build dependencies",
+                                "error: subprocess-exited-with-error"
+                            ]
+                            
+                            if any(error in error_text for error in compilation_errors):
+                                self.print_warning("Compilation error in GPU requirements. Trying precompiled wheels...")
+                                ret2, stdout2, stderr2 = self.run_command([
+                                    str(python_exe), "-m", "pip", "install", "-r", req_file,
+                                    "--only-binary=all", "--prefer-binary"
+                                ], check=False)
+                                
+                                if ret2 != 0:
+                                    self.print_warning(f"Failed to install {gpu_type} requirements even with precompiled wheels")
+                                    self.print_warning("GPU acceleration may not work properly. Consider installing Visual C++ Build Tools.")
+                                else:
+                                    print(f"    {gpu_type.upper()} requirements installed successfully (precompiled)")
+                            else:
+                                self.print_warning(f"Failed to install {gpu_type} requirements: {stderr}")
+                                # Don't fail installation for GPU requirements
                     else:
                         print(f"    {gpu_type.upper()} requirements installed successfully")
                 else:
@@ -1134,10 +1141,24 @@ class FunGenUniversalInstaller:
             return "cuda"
         
         # AMD ROCm detection
-        ret, _, _ = self.run_command(["rocm-smi"], check=False)
-        if ret == 0:
-            self.print_success("AMD GPU with ROCm detected")
-            return "rocm"
+        # Windows uses hipinfo, Linux uses rocm-smi
+        if self.platform == "Windows":
+            ret, stdout, _ = self.run_command(["hipinfo"], capture=True, check=False)
+                # Check if we actually have AMD GPU info in output
+            if "amd" in stdout.lower() or "hip" in stdout.lower():
+                # Try to extract GPU name for better user feedback
+                gpu_name = "AMD GPU"
+                for line in stdout.split('\n'):
+                    if 'name' in line.lower() or 'device' in line.lower():
+                        gpu_name = line.strip()
+                        break
+                self.print_success(f"AMD GPU with ROCm detected: {gpu_name}")
+                return "rocm"
+        else:
+            ret, _, _ = self.run_command(["rocm-smi"], check=False)
+            if ret == 0:
+                self.print_success("AMD GPU with ROCm detected")
+                return "rocm"
         
         # Apple Silicon detection
         if self.platform == "Darwin" and self.arch == "arm64":
@@ -1146,6 +1167,53 @@ class FunGenUniversalInstaller:
         
         self.print_success("Using CPU configuration")
         return "cpu"
+    
+    def _handle_rocm_fallback(self, python_exe: Path, error_msg: str) -> bool:
+        """Handle ROCm installation failure with user acknowledgement"""
+        print()
+        self.print_warning("=" * 70)
+        self.print_warning("ROCm PyTorch installation failed on Windows")
+        self.print_warning("=" * 70)
+        self.print_warning("Error details:")
+        print(f"  {error_msg}")
+        print()
+        self.print_warning("This can happen because:")
+        self.print_warning("  • ROCm 6 Windows support is still experimental")
+        self.print_warning("  • PyTorch ROCm wheels may not be available for your Python version")
+        self.print_warning("  • ROCm drivers may need updating")
+        print()
+        self.print_warning("Falling back to CPU-only installation will:")
+        self.print_warning("  ✓ Allow FunGen to run (slower performance)")
+        self.print_warning("  ✗ No GPU acceleration")
+        print()
+        
+        # Wait for user acknowledgement
+        try:
+            input(f"{Colors.YELLOW}Press ENTER to continue with CPU-only installation...{Colors.ENDC}")
+        except KeyboardInterrupt:
+            print()
+            self.print_error("Installation cancelled by user")
+            return False
+        
+        print()
+        print("  Falling back to CPU-only installation...")
+        
+        # Install CPU requirements instead
+        cpu_req_path = self.project_path / CONFIG["requirements_files"]["cpu"]
+        if cpu_req_path.exists():
+            ret, stdout, stderr = self.run_command([
+                str(python_exe), "-m", "pip", "install", "-r", str(cpu_req_path)
+            ], check=False)
+            
+            if ret != 0:
+                self.print_error(f"CPU fallback installation also failed: {stderr}")
+                return False
+            else:
+                self.print_success("CPU-only requirements installed successfully")
+                return True
+        else:
+            self.print_error(f"CPU requirements file not found: {cpu_req_path}")
+            return False
     
     def create_launchers(self) -> bool:
         """Create platform-specific launcher scripts"""
@@ -1433,6 +1501,7 @@ def main():
         description="FunGen Universal Installer - Complete setup from scratch",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+    
 This installer assumes Python is available but installs everything else:
 - Git (if not available)
 - FFmpeg/FFprobe
