@@ -581,6 +581,10 @@ class VideoNavigationUI:
             self.context_selected_chapters.clear()
 
         # Enhanced UX: Click in gap between chapters to fill it
+        # Click behavior:
+        # - If no chapters exist: do nothing (require drag to create first chapter)
+        # - If click is in a gap between chapters: fill the gap automatically
+        # - Otherwise: require drag to create chapter (don't create on simple click)
         if is_mouse_over_bar and not action_on_segment_this_frame and imgui.is_mouse_clicked(0):
             clicked_x_on_bar = mouse_pos[0] - bar_start_x
             norm_click_pos = clicked_x_on_bar / bar_width
@@ -618,12 +622,13 @@ class VideoNavigationUI:
                             self.app.logger.info(f"Created chapter to fill gap ({gap_end - gap_start + 1} frames)", extra={'status_message': True})
                         break
 
-            # If no gap detected, start normal drag to create chapter
+            # Only start drag mode if gap was not filled
+            # This allows creating chapters via drag-and-drop in any empty space
             if not gap_detected:
-                # Start dragging
+                # Start dragging for manual chapter creation
                 self.drag_start_frame = clicked_frame
+                self.drag_current_frame = clicked_frame  # Initialize to start position
                 self.is_dragging_chapter_range = True
-                self.app.logger.info("Drag started - creating chapter range", extra={'status_message': True})
 
         # Handle ongoing drag (separate check)
         if is_mouse_over_bar and not action_on_segment_this_frame:
@@ -654,21 +659,21 @@ class VideoNavigationUI:
                 start_frame = min(self.drag_start_frame, self.drag_current_frame)
                 end_frame = max(self.drag_start_frame, self.drag_current_frame)
                 
-                if end_frame - start_frame >= 1:  # Minimum 1 frame difference
+                if end_frame - start_frame >= 1:  # Minimum 1 frame difference (prevents click-only creation)
                     default_pos_key = self.position_short_name_keys[0] if self.position_short_name_keys else "N/A"
                     chapter_data = {
                         "start_frame_str": str(start_frame),
                         "end_frame_str": str(end_frame),
-                        "segment_type": "SexAct", 
+                        "segment_type": "SexAct",
                         "position_short_name_key": default_pos_key,
                         "source": "drag_create"
                     }
-                    
+
                     if self.app.funscript_processor:
                         # Chapter creation will auto-adjust for overlaps
                         self.app.funscript_processor.create_new_chapter_from_data(chapter_data)
-                else:
-                    self.app.logger.info("Drag too small - chapter not created", extra={'status_message': True})
+                        self.app.logger.info(f"Created chapter via drag ({end_frame - start_frame + 1} frames)", extra={'status_message': True})
+                # If drag was too small (< 1 frame), silently ignore - no chapter created
                 
                 self.is_dragging_chapter_range = False
 
