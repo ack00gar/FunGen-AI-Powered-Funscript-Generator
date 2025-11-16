@@ -2311,18 +2311,25 @@ class GUI:
             # Keep frame in BGR format - update_texture will handle BGR→RGB conversion
             
             # Apply VR panel selection if enabled (user override controls)
+            # Note: ThumbnailExtractor already crops VR to one panel (left for SBS, top for TB)
+            # This section allows user to override and select right panel for SBS content
             if hasattr(self.app, 'app_settings') and self.app.app_settings:
                 vr_enabled = self.app.app_settings.get('vr_mode_enabled', False)
                 vr_panel = self.app.app_settings.get('vr_panel_selection', 'full')  # 'left', 'right', 'full'
-                
-                if vr_enabled and vr_panel != 'full':
+
+                # Only apply panel selection for SBS content (not TB)
+                # TB content is already cropped to top panel by ThumbnailExtractor
+                vr_format = getattr(self.app.processor, 'vr_input_format', '') if self.app.processor else ''
+                is_sbs = '_sbs' in vr_format.lower() or '_lr' in vr_format.lower() or '_rl' in vr_format.lower()
+
+                if vr_enabled and vr_panel != 'full' and is_sbs:
                     height, width = frame.shape[:2]
-                    
+
                     if vr_panel == 'left':
                         # Take left half for preview
                         frame = frame[:, :width//2]
                     elif vr_panel == 'right':
-                        # Take right half for preview  
+                        # Take right half for preview
                         frame = frame[:, width//2:]
             
             # Resize for preview (keep aspect ratio)
