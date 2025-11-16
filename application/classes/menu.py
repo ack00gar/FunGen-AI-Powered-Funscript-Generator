@@ -442,6 +442,7 @@ class MainMenu:
         pm = app.project_manager
         settings = app.app_settings
         fm = app.file_manager
+        fs_proc = app.funscript_processor
 
         if imgui.begin_menu("File", True):
             # New/Project/Video/Open
