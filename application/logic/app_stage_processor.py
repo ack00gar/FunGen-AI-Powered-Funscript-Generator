@@ -24,6 +24,7 @@ import detection.cd.stage_3_of_processor as stage3_module
 import detection.cd.stage_3_mixed_processor as stage3_mixed_module
 
 from config import constants
+from config.constants import ChapterSource, ChapterSegmentType
 # TrackerMode removed - using dynamic discovery
 from application.utils.stage_output_validator import can_skip_stage2_for_stage3
 from application.utils import VideoSegment
@@ -1190,9 +1191,10 @@ class AppStageProcessor:
                                         end_frame_id=_seg.end_frame_id,
                                         class_id=getattr(_seg, 'class_id', None),
                                         class_name=getattr(_seg, 'class_name', 'unknown'),
-                                        segment_type="SexAct",
+                                        segment_type=ChapterSegmentType.POSITION.value,
                                         position_short_name=_seg.position_short_name,
                                         position_long_name=_seg.position_long_name,
+                                        source=ChapterSource.STAGE2.value
                                     )
                                     loaded_data["video_segments"].append(segment)
                                     loaded_data["segments_objects"].append(segment)
@@ -1280,11 +1282,11 @@ class AppStageProcessor:
                                     end_frame_id=segment_dict['end_frame_id'],
                                     class_id=1,  # Default class ID
                                     class_name=segment_dict['class_name'],
-                                    segment_type="SexAct",  # Standard segment type for Stage 3
+                                    segment_type=ChapterSegmentType.POSITION.value,
                                     position_short_name=segment_dict['position_short_name'],
                                     position_long_name=segment_dict['position_long_name'],
                                     duration=segment_dict['duration'],
-                                    source="reconstructed"  # Mark as reconstructed from overlay
+                                    source=ChapterSource.STAGE3.value
                                 )
                                 loaded_data["video_segments"].append(video_segment)
                                 loaded_data["segments_objects"].append(segment)

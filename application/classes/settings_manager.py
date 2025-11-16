@@ -161,6 +161,12 @@ class AppSettings:
             "retain_stage2_database": True,  # Keep SQLite database after processing (default: True for GUI, False for CLI)
             "auto_processing_use_chapter_profiles": True,
 
+            # Chapter Management
+            "chapter_auto_save_standalone": False,  # Auto-save chapters to standalone JSON files
+            "chapter_backup_on_regenerate": True,  # Create backup before overwriting chapter files
+            "chapter_skip_if_exists": False,  # Skip chapter creation if standalone file exists
+            "skip_nr_chapters_on_tracking": True,  # Auto-skip NR chapters when starting live tracking
+
             # VR Streaming / Streamer
             "xbvr_host": "localhost",  # XBVR server host/IP
             "xbvr_port": 9999,  # XBVR server port

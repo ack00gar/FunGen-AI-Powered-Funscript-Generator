@@ -725,26 +725,33 @@ class VideoNavigationUI:
             num_selected = len(self.context_selected_chapters)
             can_select_one = num_selected == 1
 
-            if imgui.menu_item("Seek to Beginning of Chapter", enabled=can_select_one)[0]:
+            # === QUICK ACTIONS (Most Common) ===
+            if imgui.menu_item("Seek to Beginning", enabled=can_select_one)[0]:
                 if can_select_one:
                     selected_chapter = self.context_selected_chapters[0]
                     if self.app.processor:
                         self.app.processor.seek_video(selected_chapter.start_frame_id)
-                        # Ensure timeline synchronization after seeking
                         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
 
-            if imgui.menu_item("Seek to End of Chapter", enabled=can_select_one)[0]:
-                if can_select_one:
+            if imgui.menu_item("Start Tracker in Chapter", enabled=can_select_one)[0]:
+                if can_select_one and len(self.context_selected_chapters) == 1:
                     selected_chapter = self.context_selected_chapters[0]
-                    if self.app.processor:
-                        self.app.processor.seek_video(selected_chapter.end_frame_id)
-                        # Ensure timeline synchronization after seeking
-                        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+                    if hasattr(fs_proc, 'set_scripting_range_from_chapter'):
+                        fs_proc.set_scripting_range_from_chapter(selected_chapter)
+                        self._start_live_tracking(
+                            success_info=f"Tracker started for chapter: {selected_chapter.position_short_name}"
+                        )
 
             imgui.separator()
 
+            # === QUICK CHANGE TYPE (No Dialog) ===
+            if imgui.begin_menu("Change Type", enabled=can_select_one):
+                if can_select_one and self.context_selected_chapters:
+                    self._render_quick_type_change_menu()
+                imgui.end_menu()
+
             can_edit = num_selected == 1
-            if imgui.menu_item("Edit Chapter", enabled=can_edit)[0]:
+            if imgui.menu_item("Edit Details...", enabled=can_edit)[0]:
                 if can_edit and self.context_selected_chapters:
                     chapter_obj_to_edit = self.context_selected_chapters[0]
                     self.chapter_to_edit_id = chapter_obj_to_edit.unique_id
@@ -762,24 +769,28 @@ class VideoNavigationUI:
                         self.selected_position_idx_in_dialog = 0
                     self.show_edit_chapter_dialog = True
 
-            # --- Menu item for setting chapter-specific ROI ---
-            if imgui.menu_item("Set ROI & Point for this Chapter", enabled=can_edit)[0]:
-                if can_edit:
-                    selected_chapter = self.context_selected_chapters[0]
-                    # Tell AppLogic which chapter we're setting the ROI for
-                    self.app.chapter_id_for_roi_setting = selected_chapter.unique_id
-                    # Enter the global ROI selection mode, which will now use the chapter_id
-                    self.app.enter_set_user_roi_mode()
-                    # Seek to the start of the chapter to make it easy for the user
-                    if self.app.processor:
-                        self.app.processor.seek_video(selected_chapter.start_frame_id)
-                        # Ensure timeline synchronization after seeking
-                        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+            imgui.separator()
+
+            # === SELECTION & POINTS ===
+            can_select_points = num_selected > 0
+            select_points_label = f"Select Points ({num_selected})" if num_selected > 1 else "Select Points"
+            if imgui.begin_menu(select_points_label, enabled=can_select_points):
+                if imgui.menu_item("On Timeline 1")[0]:
+                    if hasattr(fs_proc, 'select_points_in_chapters'):
+                        fs_proc.select_points_in_chapters(self.context_selected_chapters, target_timeline='primary')
+                timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
+                if imgui.menu_item("On Timeline 2", enabled=timeline2_visible)[0]:
+                    if hasattr(fs_proc, 'select_points_in_chapters'):
+                        fs_proc.select_points_in_chapters(self.context_selected_chapters, target_timeline='secondary')
+                if imgui.menu_item("On Both Timelines")[0]:
+                    if hasattr(fs_proc, 'select_points_in_chapters'):
+                        fs_proc.select_points_in_chapters(self.context_selected_chapters, target_timeline='both')
+                imgui.end_menu()
 
             can_delete = num_selected > 0
-            delete_label = f"Delete Selected Chapter(s) ({num_selected})" if num_selected > 0 else "Delete Selected Chapter(s)"
             shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
             delete_shortcut = shortcuts.get("delete_selected_chapter", "Delete")
+            delete_label = f"Delete Chapter{'s' if num_selected != 1 else ''} ({num_selected})" if num_selected > 1 else "Delete Chapter"
             if imgui.menu_item(delete_label, shortcut=delete_shortcut, enabled=can_delete)[0]:
                 if can_delete and self.context_selected_chapters:
                     ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
@@ -787,190 +798,29 @@ class VideoNavigationUI:
                     self.context_selected_chapters.clear()
 
             can_delete_points = num_selected > 0
-            delete_points_label = f"Delete Points in Chapter(s) ({num_selected})" if num_selected > 0 else "Delete Points in Chapter(s)"
+            delete_points_label = f"Delete Points ({num_selected})" if num_selected > 1 else "Delete Points"
             if imgui.menu_item(delete_points_label, enabled=can_delete_points)[0]:
                 if can_delete_points and self.context_selected_chapters:
                     fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
 
             imgui.separator()
 
-            can_select_points = num_selected > 0
-            select_points_label = f"Select Points in {num_selected} Chapter{'s' if num_selected != 1 else ''}" if num_selected > 0 else "Select Points in Chapter(s)"
-            if imgui.begin_menu(select_points_label, enabled=can_select_points):
-                if imgui.menu_item("On Timeline 1")[0]:
-                    if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
-                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='primary')
-                # Disable Timeline 2 option if it's not visible
-                timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
-                if imgui.menu_item("On Timeline 2", enabled=timeline2_visible)[0]:
-                    if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
-                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='secondary')
-
-                if imgui.menu_item("On Both Timelines")[0]:
-                    if hasattr(self.app.funscript_processor, 'select_points_in_chapters'):
-                        self.app.funscript_processor.select_points_in_chapters(self.context_selected_chapters, target_timeline='both')
-                imgui.end_menu()
-
-            # --- Apply Plugin to Chapter submenu ---
-            can_apply_plugin = num_selected > 0  
-            plugin_label = f"Apply Plugin to {num_selected} Chapter{'s' if num_selected != 1 else ''}" if num_selected > 0 else "Apply Plugin to Chapter(s)"
-            if imgui.begin_menu(plugin_label, enabled=can_apply_plugin):
-                if can_apply_plugin and self.context_selected_chapters:
-                    # Timeline selection submenus with plugin lists
-                    if imgui.begin_menu("Timeline 1 (Primary)"):
-                        self._render_chapter_plugin_menu('primary')
-                        imgui.end_menu()
-                    
-                    # Only show Timeline 2 if it's visible
-                    timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
-                    if imgui.begin_menu("Timeline 2 (Secondary)", enabled=timeline2_visible):
-                        self._render_chapter_plugin_menu('secondary')
-                        imgui.end_menu()
-                imgui.end_menu()
-
-            # --- Analysis submenu ---
-            can_analyze = num_selected == 1
-            if imgui.begin_menu("Chapter Analysis", enabled=can_analyze):
-                if can_analyze and self.context_selected_chapters:
-                    self._render_dynamic_chapter_analysis_menu()
-                imgui.end_menu()
-
-            imgui.separator()
-
+            # === MERGE & SPLIT ===
             can_standard_merge = num_selected == 2
-            if imgui.menu_item("Merge Selected Chapters", enabled=can_standard_merge)[0]:
+            if imgui.menu_item("Merge Chapters (2)", enabled=can_standard_merge)[0]:
                 if can_standard_merge and len(self.context_selected_chapters) == 2:
                     chaps_to_merge = sorted(self.context_selected_chapters, key=lambda c: c.start_frame_id)
                     if hasattr(fs_proc, 'merge_selected_chapters'):
                         fs_proc.merge_selected_chapters(chaps_to_merge[0], chaps_to_merge[1])
                         self.context_selected_chapters.clear()
-                    else:
-                        self.app.logger.warning("FunscriptProcessor needs 'merge_selected_chapters' method.")
 
-            can_fill_gap_merge = False
-            gap_fill_c1, gap_fill_c2 = None, None
-            if len(self.context_selected_chapters) == 2:
-                temp_chaps_fill_gap = sorted(self.context_selected_chapters, key=lambda c: c.start_frame_id)
-                c1_fg_check, c2_fg_check = temp_chaps_fill_gap[0], temp_chaps_fill_gap[1]
-                if c1_fg_check.end_frame_id < c2_fg_check.start_frame_id - 1:
-                    can_fill_gap_merge = True
-                    gap_fill_c1, gap_fill_c2 = c1_fg_check, c2_fg_check
-
-            if imgui.menu_item("Track Gap & Merge Chapters", enabled=can_fill_gap_merge)[0]:  # Renamed
-                if gap_fill_c1 and gap_fill_c2:  # gap_fill_c1 and c2 are sorted chapters defining the gap
-                    self.app.logger.info(
-                        f"UI Action: Initiating track gap then merge between {gap_fill_c1.unique_id} and {gap_fill_c2.unique_id}")
-
-                    gap_start_frame = gap_fill_c1.end_frame_id + 1
-                    gap_end_frame = gap_fill_c2.start_frame_id - 1
-
-                    if gap_end_frame < gap_start_frame:
-                        self.app.logger.warning("No actual gap to track. Merging directly (if possible).")
-                        if hasattr(fs_proc, 'merge_selected_chapters'):  # Standard merge
-                            merged_chapter = fs_proc.merge_selected_chapters(gap_fill_c1, gap_fill_c2, return_chapter_object=True)
-                            if merged_chapter:
-                                self.context_selected_chapters = [merged_chapter]
-                            else:
-                                self.context_selected_chapters.clear()
-                        imgui.close_current_popup()  # Close context menu
-                        # No further action needed if no gap
-                        return  # Exit this handler early
-
-                    # Record current funscript state for potential UNDO of the whole operation (tracking + merge)
-                    fs_proc._record_timeline_action(1, f"Prepare for Gap Track & Merge: {gap_fill_c1.unique_id[:4]}+{gap_fill_c2.unique_id[:4]}")
-                    # If secondary axis is also involved, record for it too.
-
-                    # Set up AppLogic state for post-tracking action
-                    self.app.set_pending_action_after_tracking(
-                        action_type='finalize_gap_merge_after_tracking',
-                        chapter1_id=gap_fill_c1.unique_id,
-                        chapter2_id=gap_fill_c2.unique_id
-                        # gap_start_frame and gap_end_frame are implicitly handled by the script range now
-                    )
-
-                    # Set scripting range to ONLY THE GAP
-                    fs_proc.scripting_start_frame = gap_start_frame
-                    fs_proc.scripting_end_frame = gap_end_frame
-                    fs_proc.scripting_range_active = True
-                    fs_proc.selected_chapter_for_scripting = None  # It's not an existing chapter being scripted
-                    self.app.project_manager.project_dirty = True
-
-                    # Start the tracker for the gap
-                    self._start_live_tracking(
-                        success_info=(
-                            f"Tracker started for gap between {gap_fill_c1.position_short_name} and {gap_fill_c2.position_short_name} "
-                            f"(Frames: {gap_start_frame}-{gap_end_frame})"
-                        ),
-                        on_error_clear_pending_action=True
-                    )
-
-                    self.context_selected_chapters.clear()  # Clear selection as process is underway
-                    imgui.close_current_popup()
-
-            can_bridge_gap_and_track = False
-            bridge_ch1, bridge_ch2 = None, None
-            actual_gap_start, actual_gap_end = 0, 0
-            if len(self.context_selected_chapters) == 2:
-                temp_chaps_bridge_gap = sorted(self.context_selected_chapters, key=lambda c: c.start_frame_id)
-                c1_bg_check, c2_bg_check = temp_chaps_bridge_gap[0], temp_chaps_bridge_gap[1]
-                if c1_bg_check.end_frame_id < c2_bg_check.start_frame_id - 1:
-                    current_actual_gap_start = c1_bg_check.end_frame_id + 1
-                    current_actual_gap_end = c2_bg_check.start_frame_id - 1
-                    if current_actual_gap_end >= current_actual_gap_start:
-                        can_bridge_gap_and_track = True
-                        bridge_ch1, bridge_ch2 = c1_bg_check, c2_bg_check
-                        actual_gap_start, actual_gap_end = current_actual_gap_start, current_actual_gap_end
-
-            if imgui.menu_item("Create Chapter in Gap & Track", enabled=can_bridge_gap_and_track)[0]:
-                if bridge_ch1 and bridge_ch2:
-                    self.app.logger.info(
-                        f"UI Action: Creating new chapter in gap between {bridge_ch1.unique_id} and {bridge_ch2.unique_id}")
-                    gap_chapter_data = {
-                        "start_frame_str": str(actual_gap_start),
-                        "end_frame_str": str(actual_gap_end),
-                        "segment_type": bridge_ch1.segment_type,
-                        "position_short_name_key": bridge_ch1.position_short_name,
-                        "source": "manual_gap_fill_track"
-                    }
-                    new_gap_chapter = fs_proc.create_new_chapter_from_data(gap_chapter_data, return_chapter_object=True)
-                    if new_gap_chapter:
-                        self.context_selected_chapters = [new_gap_chapter]
-                        if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
-                            self.app.funscript_processor.set_scripting_range_from_chapter(new_gap_chapter)
-                            self._start_live_tracking(
-                                success_info=f"Tracker started for new gap chapter: {new_gap_chapter.unique_id}"
-                            )
-                        else:
-                            self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
-                    else:
-                        self.app.logger.error(
-                            "Failed to create new chapter in gap, or it was not returned by create_new_chapter_from_data.")
-                        self.context_selected_chapters.clear()
-            imgui.separator()
-
-            can_start_tracker = num_selected == 1
-            if imgui.menu_item("Start Tracker in Chapter", enabled=can_start_tracker)[0]:
-                if can_start_tracker and len(self.context_selected_chapters) == 1:
-                    selected_chapter = self.context_selected_chapters[0]
-                    self.app.logger.info(
-                        f"UI Action: Setting range and starting tracker for chapter {selected_chapter.unique_id}")
-                    if hasattr(self.app.funscript_processor, 'set_scripting_range_from_chapter'):
-                        self.app.funscript_processor.set_scripting_range_from_chapter(selected_chapter)
-                        self._start_live_tracking(
-                            success_info=f"Tracker started for chapter: {selected_chapter.position_short_name}"
-                        )
-                    else:
-                        self.app.logger.error("set_scripting_range_from_chapter not found in funscript_processor.")
-            # --- Split Chapter ---
+            # Split Chapter
             can_split = False
-            # Use the frame position when the context menu was opened, not the current frame
-            # This ensures the split happens where the user right-clicked, even if they seek afterwards
             split_frame = self.context_menu_opened_at_frame
             split_pos_key = None
             if num_selected == 1 and self.context_selected_chapters:
                 chapter = self.context_selected_chapters[0]
                 if split_frame is not None and chapter.start_frame_id < split_frame < chapter.end_frame_id:
-                    # Find the key in POSITION_INFO_MAPPING whose short_name matches the chapter's position_short_name
                     from config.constants import POSITION_INFO_MAPPING
                     for key, info in POSITION_INFO_MAPPING.items():
                         if info.get("short_name") == chapter.position_short_name:
@@ -979,7 +829,7 @@ class VideoNavigationUI:
                     else:
                         split_pos_key = chapter.position_short_name
                     can_split = True
-            if imgui.menu_item("Split Chapter", enabled=can_split)[0]:
+            if imgui.menu_item("Split Chapter at Cursor", enabled=can_split)[0]:
                 if can_split and split_frame is not None and split_pos_key is not None:
                     original_end_frame = chapter.end_frame_id
                     fs_proc.update_chapter_from_data(
@@ -1003,7 +853,244 @@ class VideoNavigationUI:
                     imgui.close_current_popup()
                     imgui.end_popup()
                     return
+
+            imgui.separator()
+
+            # === ADVANCED OPERATIONS (Submenu) ===
+            if imgui.begin_menu("Advanced"):
+                # Seek to End
+                if imgui.menu_item("Seek to End", enabled=can_select_one)[0]:
+                    if can_select_one:
+                        selected_chapter = self.context_selected_chapters[0]
+                        if self.app.processor:
+                            self.app.processor.seek_video(selected_chapter.end_frame_id)
+                            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+
+                # Set ROI
+                if imgui.menu_item("Set ROI & Point", enabled=can_edit)[0]:
+                    if can_edit:
+                        selected_chapter = self.context_selected_chapters[0]
+                        self.app.chapter_id_for_roi_setting = selected_chapter.unique_id
+                        self.app.enter_set_user_roi_mode()
+                        if self.app.processor:
+                            self.app.processor.seek_video(selected_chapter.start_frame_id)
+                            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+
+                # Apply Plugin
+                can_apply_plugin = num_selected > 0
+                plugin_label = f"Apply Plugin ({num_selected})" if num_selected > 1 else "Apply Plugin"
+                if imgui.begin_menu(plugin_label, enabled=can_apply_plugin):
+                    if can_apply_plugin and self.context_selected_chapters:
+                        if imgui.begin_menu("Timeline 1 (Primary)"):
+                            self._render_chapter_plugin_menu('primary')
+                            imgui.end_menu()
+                        timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
+                        if imgui.begin_menu("Timeline 2 (Secondary)", enabled=timeline2_visible):
+                            self._render_chapter_plugin_menu('secondary')
+                            imgui.end_menu()
+                    imgui.end_menu()
+
+                # Chapter Analysis
+                can_analyze = num_selected == 1
+                if imgui.begin_menu("Chapter Analysis", enabled=can_analyze):
+                    if can_analyze and self.context_selected_chapters:
+                        self._render_dynamic_chapter_analysis_menu()
+                    imgui.end_menu()
+
+                imgui.separator()
+
+                # Gap Operations
+                can_fill_gap_merge = False
+                gap_fill_c1, gap_fill_c2 = None, None
+                if len(self.context_selected_chapters) == 2:
+                    temp_chaps_fill_gap = sorted(self.context_selected_chapters, key=lambda c: c.start_frame_id)
+                    c1_fg_check, c2_fg_check = temp_chaps_fill_gap[0], temp_chaps_fill_gap[1]
+                    if c1_fg_check.end_frame_id < c2_fg_check.start_frame_id - 1:
+                        can_fill_gap_merge = True
+                        gap_fill_c1, gap_fill_c2 = c1_fg_check, c2_fg_check
+
+                if imgui.menu_item("Track Gap & Merge", enabled=can_fill_gap_merge)[0]:
+                    if gap_fill_c1 and gap_fill_c2:
+                        self.app.logger.info(
+                            f"UI Action: Initiating track gap then merge between {gap_fill_c1.unique_id} and {gap_fill_c2.unique_id}")
+
+                        gap_start_frame = gap_fill_c1.end_frame_id + 1
+                        gap_end_frame = gap_fill_c2.start_frame_id - 1
+
+                        if gap_end_frame < gap_start_frame:
+                            self.app.logger.warning("No actual gap to track. Merging directly (if possible).")
+                            if hasattr(fs_proc, 'merge_selected_chapters'):
+                                merged_chapter = fs_proc.merge_selected_chapters(gap_fill_c1, gap_fill_c2, return_chapter_object=True)
+                                if merged_chapter:
+                                    self.context_selected_chapters = [merged_chapter]
+                                else:
+                                    self.context_selected_chapters.clear()
+                            imgui.close_current_popup()
+                            return
+
+                        fs_proc._record_timeline_action(1, f"Prepare for Gap Track & Merge: {gap_fill_c1.unique_id[:4]}+{gap_fill_c2.unique_id[:4]}")
+                        self.app.set_pending_action_after_tracking(
+                            action_type='finalize_gap_merge_after_tracking',
+                            chapter1_id=gap_fill_c1.unique_id,
+                            chapter2_id=gap_fill_c2.unique_id
+                        )
+
+                        fs_proc.scripting_start_frame = gap_start_frame
+                        fs_proc.scripting_end_frame = gap_end_frame
+                        fs_proc.scripting_range_active = True
+                        fs_proc.selected_chapter_for_scripting = None
+                        self.app.project_manager.project_dirty = True
+
+                        self._start_live_tracking(
+                            success_info=(
+                                f"Tracker started for gap between {gap_fill_c1.position_short_name} and {gap_fill_c2.position_short_name} "
+                                f"(Frames: {gap_start_frame}-{gap_end_frame})"
+                            ),
+                            on_error_clear_pending_action=True
+                        )
+
+                        self.context_selected_chapters.clear()
+                        imgui.close_current_popup()
+
+                can_bridge_gap_and_track = False
+                bridge_ch1, bridge_ch2 = None, None
+                actual_gap_start, actual_gap_end = 0, 0
+                if len(self.context_selected_chapters) == 2:
+                    temp_chaps_bridge_gap = sorted(self.context_selected_chapters, key=lambda c: c.start_frame_id)
+                    c1_bg_check, c2_bg_check = temp_chaps_bridge_gap[0], temp_chaps_bridge_gap[1]
+                    if c1_bg_check.end_frame_id < c2_bg_check.start_frame_id - 1:
+                        current_actual_gap_start = c1_bg_check.end_frame_id + 1
+                        current_actual_gap_end = c2_bg_check.start_frame_id - 1
+                        if current_actual_gap_end >= current_actual_gap_start:
+                            can_bridge_gap_and_track = True
+                            bridge_ch1, bridge_ch2 = c1_bg_check, c2_bg_check
+                            actual_gap_start, actual_gap_end = current_actual_gap_start, current_actual_gap_end
+
+                if imgui.menu_item("Create Chapter in Gap & Track", enabled=can_bridge_gap_and_track)[0]:
+                    if bridge_ch1 and bridge_ch2:
+                        from config.constants import ChapterSource
+                        self.app.logger.info(
+                            f"UI Action: Creating new chapter in gap between {bridge_ch1.unique_id} and {bridge_ch2.unique_id}")
+                        gap_chapter_data = {
+                            "start_frame_str": str(actual_gap_start),
+                            "end_frame_str": str(actual_gap_end),
+                            "segment_type": bridge_ch1.segment_type,
+                            "position_short_name_key": bridge_ch1.position_short_name,
+                            "source": ChapterSource.MANUAL_GAP_FILL.value
+                        }
+                        new_gap_chapter = fs_proc.create_new_chapter_from_data(gap_chapter_data, return_chapter_object=True)
+                        if new_gap_chapter:
+                            self.context_selected_chapters = [new_gap_chapter]
+                            if hasattr(fs_proc, 'set_scripting_range_from_chapter'):
+                                fs_proc.set_scripting_range_from_chapter(new_gap_chapter)
+                                self._start_live_tracking(
+                                    success_info=f"Tracker started for new gap chapter: {new_gap_chapter.unique_id}"
+                                )
+                        else:
+                            self.app.logger.error(
+                                "Failed to create new chapter in gap.")
+                            self.context_selected_chapters.clear()
+
+                imgui.end_menu()  # End Advanced
+
             imgui.end_popup()
+
+    def _render_quick_type_change_menu(self):
+        """Render quick chapter type change menu without opening full edit dialog."""
+        if not self.context_selected_chapters:
+            return
+
+        selected_chapter = self.context_selected_chapters[0]
+        fs_proc = self.app.funscript_processor
+
+        # Get chapter type manager for custom types
+        from application.classes.chapter_type_manager import get_chapter_type_manager
+        type_mgr = get_chapter_type_manager()
+
+        # Get all available types (built-in + custom)
+        from config.constants import POSITION_INFO_MAPPING
+
+        # Organize by category
+        position_types = []
+        transition_types = []
+        other_types = []
+
+        for key, info in POSITION_INFO_MAPPING.items():
+            short_name = info.get("short_name", key)
+            category = info.get("category", "Position")
+
+            if category == "Position":
+                position_types.append((short_name, info.get("long_name", short_name)))
+            elif category in ["Transition", "Trans"]:
+                transition_types.append((short_name, info.get("long_name", short_name)))
+            else:
+                other_types.append((short_name, info.get("long_name", short_name)))
+
+        # Add custom types if available
+        if type_mgr:
+            custom_types = [(t["short_name"], t["long_name"]) for t in type_mgr.get_all_types() if t.get("category") == "Custom"]
+        else:
+            custom_types = []
+
+        # Render organized menu
+        current_type = selected_chapter.position_short_name
+
+        if position_types:
+            if imgui.begin_menu("Positions"):
+                for short_name, long_name in sorted(position_types, key=lambda x: x[1]):
+                    is_current = short_name == current_type
+                    if imgui.menu_item(long_name, selected=is_current)[0] and not is_current:
+                        self._change_chapter_type(selected_chapter, short_name)
+                imgui.end_menu()
+
+        if transition_types:
+            if imgui.begin_menu("Transitions"):
+                for short_name, long_name in sorted(transition_types, key=lambda x: x[1]):
+                    is_current = short_name == current_type
+                    if imgui.menu_item(long_name, selected=is_current)[0] and not is_current:
+                        self._change_chapter_type(selected_chapter, short_name)
+                imgui.end_menu()
+
+        if other_types:
+            if imgui.begin_menu("Other"):
+                for short_name, long_name in sorted(other_types, key=lambda x: x[1]):
+                    is_current = short_name == current_type
+                    if imgui.menu_item(long_name, selected=is_current)[0] and not is_current:
+                        self._change_chapter_type(selected_chapter, short_name)
+                imgui.end_menu()
+
+        if custom_types:
+            imgui.separator()
+            if imgui.begin_menu("Custom Types"):
+                for short_name, long_name in sorted(custom_types, key=lambda x: x[1]):
+                    is_current = short_name == current_type
+                    if imgui.menu_item(long_name, selected=is_current)[0] and not is_current:
+                        self._change_chapter_type(selected_chapter, short_name)
+                imgui.end_menu()
+
+    def _change_chapter_type(self, chapter, new_type_short_name):
+        """Change a chapter's type without opening edit dialog."""
+        fs_proc = self.app.funscript_processor
+        if not fs_proc:
+            return
+
+        fs_proc.update_chapter_from_data(
+            chapter.unique_id,
+            {
+                "start_frame_str": str(chapter.start_frame_id),
+                "end_frame_str": str(chapter.end_frame_id),
+                "position_short_name_key": new_type_short_name
+            }
+        )
+
+        # Track usage in chapter type manager
+        from application.classes.chapter_type_manager import get_chapter_type_manager
+        type_mgr = get_chapter_type_manager()
+        if type_mgr:
+            type_mgr.increment_usage(new_type_short_name)
+
+        self.app.logger.info(f"Changed chapter type to {new_type_short_name}", extra={'status_message': True})
+        self.app.project_manager.project_dirty = True
 
     def _render_create_chapter_window(self):
         if not self.show_create_chapter_dialog:

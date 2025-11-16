@@ -9,6 +9,7 @@ from scipy.signal import correlate, find_peaks
 from application.utils import VideoSegment, _format_time
 from funscript import DualAxisFunscript
 from config import constants
+from config.constants import ChapterSource
 
 
 class AppFunscriptProcessor:
@@ -461,7 +462,7 @@ class AppFunscriptProcessor:
                 segment_type=data.get("segment_type", "default"),
                 position_short_name=pos_short_name,
                 position_long_name=pos_long_name,
-                source=data.get("source", "manual"),
+                source=data.get("source", ChapterSource.MANUAL.value),
                 color=None
             )
             self.video_chapters.append(new_chapter)
@@ -1179,7 +1180,7 @@ class AppFunscriptProcessor:
             segment_type=chapter1.segment_type,
             position_short_name=merged_pos_short_name,
             position_long_name=merged_pos_long_name,
-            source="manual_merge", # The source indicates the merge action
+            source=ChapterSource.MANUAL_MERGE.value,
             color=chapter1.color
         )
 
@@ -1281,7 +1282,7 @@ class AppFunscriptProcessor:
             segment_type=chapter1.segment_type,
             position_short_name=merged_pos_short_name,
             position_long_name=merged_pos_long_name,
-            source="manual_gap_track_merge" # The source indicates the merge action
+            source=ChapterSource.MANUAL_GAP_TRACK_MERGE.value
             # Color will be auto-assigned by VideoSegment, or could be chapter1.color
         )
 
@@ -1352,7 +1353,7 @@ class AppFunscriptProcessor:
             segment_type=chapter1.segment_type,
             position_short_name=merged_pos_short_name,
             position_long_name=merged_pos_long_name,
-            source="manual_merge_gap_fill",
+            source=ChapterSource.MANUAL_MERGE_GAP_FILL.value,
             color=chapter1.color # Inherit color
         )
         merged_chapter.duration = new_end_frame - new_start_frame
