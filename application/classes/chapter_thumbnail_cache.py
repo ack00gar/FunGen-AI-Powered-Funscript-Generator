@@ -119,13 +119,26 @@ class ChapterThumbnailCache:
                 self.logger.debug(f"Could not read frame {start_frame} for chapter thumbnail (total frames: {total_frames})")
                 return None
 
-            # For VR videos, crop to show only left panel (left eye view)
+            # For VR videos, crop to show only one panel (left/right/top eye view)
             if (hasattr(self.app, 'processor') and self.app.processor and
                 hasattr(self.app.processor, 'is_vr_active_or_potential') and
                 self.app.processor.is_vr_active_or_potential()):
-                # Crop left half of the frame (left eye panel)
+                # Determine VR format to know which panel to crop
+                vr_format = getattr(self.app.processor, 'vr_input_format', '').lower()
+                is_tb = '_tb' in vr_format
+                is_rl = '_rl' in vr_format  # Right-left format (crop right panel)
+
                 orig_height, orig_width = frame.shape[:2]
-                frame = frame[:, :orig_width // 2]
+
+                if is_tb:
+                    # Top-bottom format: crop to top half (top eye panel)
+                    frame = frame[:orig_height // 2, :]
+                elif is_rl:
+                    # Right-left format (RL): crop to right half (right eye panel)
+                    frame = frame[:, orig_width // 2:]
+                else:
+                    # Side-by-side format (SBS/LR): crop to left half (left eye panel)
+                    frame = frame[:, :orig_width // 2]
 
             # Resize thumbnail to target height while preserving aspect ratio
             orig_height, orig_width = frame.shape[:2]

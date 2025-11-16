@@ -55,8 +55,13 @@ class ThumbnailExtractor:
         self.height = 0
 
         # VR format detection
-        self.is_sbs = '_sbs' in (vr_input_format or '')
-        self.is_tb = '_tb' in (vr_input_format or '')
+        # SBS-left includes: _sbs, _lr (left-right) - crop to left panel
+        # SBS-right includes: _rl (right-left) - crop to right panel
+        # TB includes: _tb (top-bottom) - crop to top panel
+        vr_fmt = (vr_input_format or '').lower()
+        self.is_sbs_left = '_sbs' in vr_fmt or '_lr' in vr_fmt
+        self.is_sbs_right = '_rl' in vr_fmt
+        self.is_tb = '_tb' in vr_fmt
 
         # 2D video handling (if vr_input_format is None, treat as 2D)
         self.is_2d = vr_input_format is None
@@ -126,12 +131,17 @@ class ThumbnailExtractor:
                     self.logger.warning(f"ThumbnailExtractor: Failed to read frame {frame_index}")
                     return None
 
-            # Crop VR panel if needed (left for SBS, top for TB)
-            if self.is_sbs and frame.shape[1] > 0:
-                # Side-by-side: crop to left half
+            # Crop VR panel if needed (left/right for SBS, top for TB)
+            if self.is_sbs_left and frame.shape[1] > 0:
+                # Side-by-side (SBS/LR): crop to left half
                 half_width = frame.shape[1] // 2
                 frame = frame[:, :half_width]
-                self.logger.debug(f"Cropped SBS to left panel: {frame.shape}")
+                self.logger.debug(f"Cropped SBS/LR to left panel: {frame.shape}")
+            elif self.is_sbs_right and frame.shape[1] > 0:
+                # Right-left (RL): crop to right half
+                half_width = frame.shape[1] // 2
+                frame = frame[:, half_width:]
+                self.logger.debug(f"Cropped RL to right panel: {frame.shape}")
             elif self.is_tb and frame.shape[0] > 0:
                 # Top-bottom: crop to top half
                 half_height = frame.shape[0] // 2
