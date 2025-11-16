@@ -668,35 +668,8 @@ class MainMenu:
             # Layout submenu
             self._render_layout_submenu(app_state)
 
-            imgui.separator()
-
-            # Panels submenu (floating mode only)
+            # Panels submenu (floating mode only) - right after Layout
             self._render_panels_submenu(app_state)
-
-            imgui.separator()
-
-            # Navigation submenu
-            self._render_navigation_submenu(app_state)
-
-            imgui.separator()
-
-            # Timelines submenu
-            self._render_timelines_submenu(app_state)
-
-            imgui.separator()
-
-            # Gauges submenu (renamed from Windows)
-            self._render_gauges_submenu(app_state)
-
-            # Chapters submenu (new)
-            self._render_chapters_submenu(app_state)
-
-            imgui.separator()
-
-            # Video Overlays submenu
-            self._render_video_overlays_submenu(app_state, stage_proc)
-
-            imgui.separator()
 
             # Show Toolbar
             if not hasattr(app_state, 'show_toolbar'):
@@ -708,6 +681,27 @@ class MainMenu:
             if clicked:
                 app_state.show_toolbar = val
                 self.app.project_manager.project_dirty = True
+
+            imgui.separator()
+
+            # Gauges submenu
+            self._render_gauges_submenu(app_state)
+
+            # Navigation submenu
+            self._render_navigation_submenu(app_state)
+
+            # Timelines submenu
+            self._render_timelines_submenu(app_state)
+
+            imgui.separator()
+
+            # Chapters submenu
+            self._render_chapters_submenu(app_state)
+
+            imgui.separator()
+
+            # Video Overlays submenu
+            self._render_video_overlays_submenu(app_state, stage_proc)
 
             imgui.separator()
 

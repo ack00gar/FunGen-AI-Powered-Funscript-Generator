@@ -62,10 +62,12 @@ class ChapterTypeManagerUI:
         # Set window size on first open
         imgui.set_next_window_size(700, 500, imgui.FIRST_USE_EVER)
 
-        opened, _ = imgui.begin("Chapter Type Manager", closable=True, flags=window_flags)
+        expanded, opened = imgui.begin("Chapter Type Manager", closable=True, flags=window_flags)
 
         if not opened:
             app_state.show_chapter_type_manager = False
+
+        if not expanded:
             imgui.end()
             return
 
