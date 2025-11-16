@@ -1028,7 +1028,10 @@ class VideoNavigationUI:
 
         # Add custom types if available
         if type_mgr:
-            custom_types = [(t["short_name"], t["long_name"]) for t in type_mgr.get_all_types() if t.get("category") == "Custom"]
+            all_types = type_mgr.get_all_chapter_types()
+            custom_types = [(info["short_name"], info["long_name"])
+                           for short_name, info in all_types.items()
+                           if info.get("category") == "Custom"]
         else:
             custom_types = []
 
