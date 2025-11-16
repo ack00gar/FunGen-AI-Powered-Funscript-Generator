@@ -685,8 +685,11 @@ class MainMenu:
 
             imgui.separator()
 
-            # Windows submenu
-            self._render_windows_submenu(app_state)
+            # Gauges submenu (renamed from Windows)
+            self._render_gauges_submenu(app_state)
+
+            # Chapters submenu (new)
+            self._render_chapters_submenu(app_state)
 
             imgui.separator()
 
@@ -831,7 +834,7 @@ class MainMenu:
         settings = app.app_settings
 
         if imgui.begin_menu("Timelines"):
-            # Interactive editors only
+            # Interactive editors
             for label, attr in (
                 ("Interactive Timeline 1", "show_funscript_interactive_timeline"),
                 ("Interactive Timeline 2", "show_funscript_interactive_timeline2"),
@@ -841,6 +844,16 @@ class MainMenu:
                 if clicked:
                     setattr(app_state, attr, val)
                     pm.project_dirty = True
+
+            imgui.separator()
+
+            # Audio waveform (moved from Windows submenu)
+            clicked, _ = imgui.menu_item(
+                "Audio Waveform", selected=app_state.show_audio_waveform
+            )
+            if clicked:
+                self.app.toggle_waveform_visibility()
+                pm.project_dirty = True
 
             imgui.separator()
 
@@ -856,10 +869,11 @@ class MainMenu:
 
             imgui.end_menu()
 
-    def _render_windows_submenu(self, app_state):
+    def _render_gauges_submenu(self, app_state):
+        """Renamed from _render_windows_submenu - displays gauges and visualizations."""
         pm = self.app.project_manager
-        if imgui.begin_menu("Windows"):
-            # Gauge windows
+        if imgui.begin_menu("Gauges"):
+            # Script gauges
             for label, attr in (
                 ("Script Gauge (Timeline 1)", "show_gauge_window_timeline1"),
                 ("Script Gauge (Timeline 2)", "show_gauge_window_timeline2"),
@@ -869,6 +883,8 @@ class MainMenu:
                 if clicked:
                     setattr(app_state, attr, val)
                     pm.project_dirty = True
+
+            imgui.separator()
 
             # Movement bar
             clicked, val = imgui.menu_item(
@@ -886,7 +902,13 @@ class MainMenu:
                 app_state.show_simulator_3d = val
                 pm.project_dirty = True
 
-            # Chapter list
+            imgui.end_menu()
+
+    def _render_chapters_submenu(self, app_state):
+        """Chapter-related windows and tools."""
+        pm = self.app.project_manager
+        if imgui.begin_menu("Chapters"):
+            # Chapter List window
             if not hasattr(app_state, "show_chapter_list_window"):
                 app_state.show_chapter_list_window = False
 
@@ -897,12 +919,15 @@ class MainMenu:
                 app_state.show_chapter_list_window = val
                 pm.project_dirty = True
 
-            # Audio waveform
-            clicked, _ = imgui.menu_item(
-                "Audio Waveform", selected=app_state.show_audio_waveform
+            # Chapter Type Manager window
+            if not hasattr(app_state, "show_chapter_type_manager"):
+                app_state.show_chapter_type_manager = False
+
+            clicked, val = imgui.menu_item(
+                "Chapter Type Manager", selected=app_state.show_chapter_type_manager
             )
             if clicked:
-                self.app.toggle_waveform_visibility()
+                app_state.show_chapter_type_manager = val
                 pm.project_dirty = True
 
             imgui.end_menu()
