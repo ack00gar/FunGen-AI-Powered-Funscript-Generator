@@ -53,6 +53,10 @@ class VideoNavigationUI:
         self.resize_original_start = 0
         self.resize_original_end = 0
 
+        # Chapter edge drag preview state (similar to hover navigation preview)
+        self.resize_preview_frame = None
+        self.resize_preview_data = None
+
         # Store frame position when context menu opens for chapter split
         self.context_menu_opened_at_frame = None
 
@@ -434,12 +438,40 @@ class VideoNavigationUI:
                     
                     # Update chapter
                     resize_chapter.end_frame_id = new_end
-        
+
+                # Show preview tooltip with video frame at new boundary position
+                # Update preview frame if it changed
+                if self.resize_preview_frame != new_frame:
+                    self.resize_preview_frame = new_frame
+                    self.resize_preview_data = None  # Clear old data, will be fetched immediately
+
+                    # Async fetch frame for preview (instant loading)
+                    import threading
+                    def fetch_resize_preview():
+                        try:
+                            if self.app.processor:
+                                frame_data = self.app.processor.get_thumbnail_frame(new_frame, use_gpu_unwarp=False)
+                                if frame_data is not None:
+                                    self.resize_preview_data = {
+                                        'frame': new_frame,
+                                        'frame_data': frame_data,
+                                        'edge': self.resize_edge
+                                    }
+                        except Exception as e:
+                            self.app.logger.warning(f"Failed to fetch resize preview frame: {e}")
+
+                    threading.Thread(target=fetch_resize_preview, daemon=True).start()
+
+                # Render preview tooltip (always show during resize drag)
+                self._render_resize_preview_tooltip(new_frame, self.resize_edge)
+
         # End resize on mouse release
         elif self.is_resizing_chapter and imgui.is_mouse_released(0):
             self.is_resizing_chapter = False
             self.resize_chapter_id = None
             self.resize_edge = None
+            self.resize_preview_frame = None
+            self.resize_preview_data = None
             action_on_segment_this_frame = True  # Prevent other interactions
             self.app.logger.info("Chapter resized", extra={'status_message': True})
         
@@ -1679,6 +1711,54 @@ class VideoNavigationUI:
                 
         except Exception as e:
             self.app.logger.error(f"Error applying tracker {tracker.internal_name} to chapter: {e}")
+
+    def _render_resize_preview_tooltip(self, frame_num: int, edge: str):
+        """Render preview tooltip when dragging chapter boundaries."""
+        imgui.begin_tooltip()
+
+        try:
+            # Show edge being adjusted and frame number
+            edge_name = "Start" if edge == 'left' else "End"
+            imgui.text(f"Chapter {edge_name}: Frame {frame_num}")
+
+            # Show timestamp if processor available
+            if self.app.processor and self.app.processor.fps > 0:
+                time_s = frame_num / self.app.processor.fps
+                imgui.text(f"Time: {_format_time(self.app, time_s)}")
+
+            imgui.separator()
+
+            # Show video frame preview if available
+            if self.resize_preview_data and self.resize_preview_data.get('frame') == frame_num:
+                frame_data = self.resize_preview_data.get('frame_data')
+                if frame_data is not None and frame_data.size > 0:
+                    # Use GUI instance's enhanced preview texture
+                    if hasattr(self.gui_instance, 'enhanced_preview_texture_id') and self.gui_instance.enhanced_preview_texture_id:
+                        # Update texture with frame data
+                        self.gui_instance.update_texture(self.gui_instance.enhanced_preview_texture_id, frame_data)
+
+                        # Calculate display dimensions
+                        frame_height, frame_width = frame_data.shape[:2]
+                        max_width = 300
+                        if frame_width > max_width:
+                            scale = max_width / frame_width
+                            display_width = max_width
+                            display_height = int(frame_height * scale)
+                        else:
+                            display_width = frame_width
+                            display_height = frame_height
+
+                        # Display frame
+                        imgui.image(self.gui_instance.enhanced_preview_texture_id, display_width, display_height)
+                else:
+                    imgui.text("Loading frame...")
+            else:
+                imgui.text("Loading frame...")
+
+        except Exception as e:
+            imgui.text(f"Preview error: {e}")
+
+        imgui.end_tooltip()
 
 
 class ChapterListWindow:
