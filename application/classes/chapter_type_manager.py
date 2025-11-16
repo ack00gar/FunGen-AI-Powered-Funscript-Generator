@@ -62,6 +62,9 @@ class ChapterTypeManager:
         # Built-in types from constants (immutable)
         self.builtin_types = constants.POSITION_INFO_MAPPING.copy()
 
+        # Enrich built-in types with colors from VideoSegment color mapping
+        self._enrich_builtin_types_with_colors()
+
         # Custom types (user-defined, mutable)
         self.custom_types: Dict[str, Dict[str, Any]] = {}
 
@@ -73,6 +76,20 @@ class ChapterTypeManager:
 
         # Load custom types from file
         self.load_custom_types()
+
+    def _enrich_builtin_types_with_colors(self):
+        """Add color information to built-in types from VideoSegment color mapping."""
+        # Import here to avoid circular dependency
+        from application.utils.video_segment import VideoSegment
+        from config.element_group_colors import SegmentColors
+
+        for short_name in self.builtin_types:
+            # Get color from VideoSegment's color map, fallback to default
+            color = VideoSegment._POSITION_COLOR_MAP.get(short_name, SegmentColors.DEFAULT)
+            # Convert to list for JSON serialization compatibility
+            self.builtin_types[short_name]["color"] = list(color)
+            self.builtin_types[short_name]["category"] = "Position"  # All built-in types are positions
+            self.builtin_types[short_name]["usage_count"] = 0
 
     # ==================== CORE TYPE ACCESS ====================
 
