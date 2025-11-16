@@ -547,8 +547,9 @@ class MainMenu:
             # Chapters submenu
             has_video = fm.video_path is not None
             has_chapters = has_video and len(fs_proc.video_chapters) > 0
-            if imgui.begin_menu("Chapters"):
-                if _menu_item_simple("Save Chapters to File...", enabled=has_chapters):
+            if imgui.begin_menu("Chapters..."):
+                # Save Chapters (default location next to video)
+                if _menu_item_simple("Save Chapters...", enabled=has_chapters):
                     if self.app.gui_instance and self.app.gui_instance.file_dialog and has_chapters:
                         chapter_mgr = self.app.chapter_manager
                         default_path = chapter_mgr.get_default_chapter_filepath(fm.video_path)
@@ -557,20 +558,36 @@ class MainMenu:
 
                         self.app.gui_instance.file_dialog.show(
                             is_save=True,
-                            title="Save Chapters to File",
+                            title="Save Chapters",
                             extension_filter="Chapter Files (*.json),*.json",
                             callback=lambda filepath: self._save_chapters_callback(filepath),
                             initial_path=initial_dir,
                             initial_filename=initial_filename
                         )
 
-                if _menu_item_simple("Load Chapters from File...", enabled=has_video):
+                # Save Chapters As (custom location)
+                if _menu_item_simple("Save Chapters As...", enabled=has_chapters):
+                    if self.app.gui_instance and self.app.gui_instance.file_dialog and has_chapters:
+                        initial_dir = os.path.dirname(fm.video_path) if fm.video_path else os.getcwd()
+                        initial_filename = "chapters.json"
+
+                        self.app.gui_instance.file_dialog.show(
+                            is_save=True,
+                            title="Save Chapters As",
+                            extension_filter="Chapter Files (*.json),*.json",
+                            callback=lambda filepath: self._save_chapters_callback(filepath),
+                            initial_path=initial_dir,
+                            initial_filename=initial_filename
+                        )
+
+                # Load Chapters
+                if _menu_item_simple("Load Chapters...", enabled=has_video):
                     if self.app.gui_instance and self.app.gui_instance.file_dialog and has_video:
                         initial_dir = os.path.dirname(fm.video_path) if fm.video_path else os.getcwd()
 
                         self.app.gui_instance.file_dialog.show(
                             is_save=False,
-                            title="Load Chapters from File",
+                            title="Load Chapters",
                             extension_filter="Chapter Files (*.json),*.json",
                             callback=lambda filepath: self._load_chapters_callback(filepath),
                             initial_path=initial_dir
@@ -578,40 +595,14 @@ class MainMenu:
 
                 imgui.separator()
 
-                if _menu_item_simple("Export Chapters...", enabled=has_chapters):
-                    if self.app.gui_instance and self.app.gui_instance.file_dialog and has_chapters:
-                        initial_dir = os.path.dirname(fm.video_path) if fm.video_path else os.getcwd()
-                        initial_filename = "chapters_export.json"
-
-                        self.app.gui_instance.file_dialog.show(
-                            is_save=True,
-                            title="Export Chapters",
-                            extension_filter="Chapter Files (*.json),*.json",
-                            callback=lambda filepath: self._export_chapters_callback(filepath),
-                            initial_path=initial_dir,
-                            initial_filename=initial_filename
-                        )
-
-                if _menu_item_simple("Import Chapters...", enabled=has_video):
-                    if self.app.gui_instance and self.app.gui_instance.file_dialog and has_video:
-                        initial_dir = os.getcwd()
-
-                        self.app.gui_instance.file_dialog.show(
-                            is_save=False,
-                            title="Import Chapters",
-                            extension_filter="Chapter Files (*.json),*.json",
-                            callback=lambda filepath: self._import_chapters_callback(filepath),
-                            initial_path=initial_dir
-                        )
-
-                imgui.separator()
-
-                if _menu_item_simple("Backup Chapters Now...", enabled=has_chapters):
+                # Backup Chapters Now
+                if _menu_item_simple("Backup Chapters Now", enabled=has_chapters):
                     chapter_mgr = self.app.chapter_manager
                     success = chapter_mgr.backup_chapters_manually(fs_proc.video_chapters, fm.video_path)
                     if not success:
                         self.app.logger.error("Failed to create chapter backup", extra={'status_message': True})
 
+                # Clear All Chapters
                 if _menu_item_simple("Clear All Chapters", enabled=has_chapters):
                     # Confirm before clearing
                     if hasattr(self.app, 'confirmation_needed'):
@@ -1392,34 +1383,3 @@ class MainMenu:
         else:
             self.app.logger.error("Failed to load chapters", extra={'status_message': True})
 
-    def _export_chapters_callback(self, filepath):
-        """Callback for Export Chapters operation."""
-        chapter_mgr = self.app.chapter_manager
-        fs_proc = self.app.funscript_processor
-        fm = self.app.file_manager
-
-        video_info = {
-            "path": fm.video_path,
-            "fps": self.app.processor.fps if self.app.processor else 30.0,
-            "total_frames": self.app.processor.total_frames if self.app.processor else 0
-        }
-
-        success = chapter_mgr.export_chapters(filepath, fs_proc.video_chapters, include_metadata=True)
-        if not success:
-            self.app.logger.error("Failed to export chapters", extra={'status_message': True})
-
-    def _import_chapters_callback(self, filepath):
-        """Callback for Import Chapters operation."""
-        chapter_mgr = self.app.chapter_manager
-        fs_proc = self.app.funscript_processor
-
-        # Use replace mode by default
-        imported_chapters, success = chapter_mgr.import_chapters(filepath, merge_mode="replace")
-        if success and imported_chapters:
-            fs_proc.video_chapters = imported_chapters
-
-            # Mark project as dirty
-            if hasattr(self.app, 'project_manager'):
-                self.app.project_manager.project_dirty = True
-        elif not success:
-            self.app.logger.error("Failed to import chapters", extra={'status_message': True})
