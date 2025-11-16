@@ -13,7 +13,7 @@ from collections import deque
 
 from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
-from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI
+from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
 
 
@@ -101,6 +101,7 @@ class GUI:
         self.video_navigation_ui = VideoNavigationUI(app, self)  # Pass self for texture methods
         self.info_graphs_ui = InfoGraphsUI(app)
         self.chapter_list_window_ui = ChapterListWindow(app, nav_ui=self.video_navigation_ui)
+        self.chapter_type_manager_ui = ChapterTypeManagerUI(app)
         self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
         self.autotuner_window_ui = AutotunerWindow(app)
         self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
@@ -1993,6 +1994,8 @@ class GUI:
 
         if hasattr(app_state, 'show_chapter_list_window') and app_state.show_chapter_list_window:
             self._time_render("ChapterListWindow", self.chapter_list_window_ui.render)
+        if hasattr(app_state, 'show_chapter_type_manager') and app_state.show_chapter_type_manager:
+            self._time_render("ChapterTypeManager", self.chapter_type_manager_ui.render)
         self._time_render("Popups", self._render_all_popups)
         self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
 
