@@ -308,6 +308,11 @@ class ApplicationLogic:
         self.chapter_type_manager = ChapterTypeManager(self)
         set_chapter_type_manager(self.chapter_type_manager)  # Set global instance
 
+        # Initialize chapter manager for standalone chapter file operations
+        from application.classes.chapter_manager import ChapterManager, set_chapter_manager
+        self.chapter_manager = ChapterManager(self)
+        set_chapter_manager(self.chapter_manager)  # Set global instance
+
         self.project_data_on_load: Optional[Dict] = None
         self.s2_frame_objects_map_for_s3: Optional[Dict[int, Any]] = None
         self.s2_sqlite_db_path: Optional[str] = None
