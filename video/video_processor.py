@@ -1501,6 +1501,8 @@ class VideoProcessor:
         vr_filters = []
         is_sbs_format = '_sbs' in self.vr_input_format
         is_tb_format = '_tb' in self.vr_input_format
+        is_lr_format = '_lr' in self.vr_input_format
+        is_rl_format = '_rl' in self.vr_input_format
 
         if is_sbs_format and original_width > 0 and original_height > 0:
             crop_w = original_width / 2
@@ -1512,11 +1514,24 @@ class VideoProcessor:
             crop_h = original_height / 2
             vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
             self.logger.info(f"Applying TB pre-crop: w={int(crop_w)} h={int(crop_h)} x=0 y=0")
+        elif is_lr_format and original_width > 0 and original_height > 0:
+            # LR format: left and right panels side-by-side, select left panel
+            crop_w = original_width / 2
+            crop_h = original_height
+            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:0:0")
+            self.logger.info(f"Applying LR pre-crop (left panel): w={int(crop_w)} h={int(crop_h)} x=0 y=0")
+        elif is_rl_format and original_width > 0 and original_height > 0:
+            # RL format: right and left panels side-by-side, select right panel
+            crop_w = original_width / 2
+            crop_h = original_height
+            crop_x = int(original_width / 2)
+            vr_filters.append(f"crop={int(crop_w)}:{int(crop_h)}:{crop_x}:0")
+            self.logger.info(f"Applying RL pre-crop (right panel): w={int(crop_w)} h={int(crop_h)} x={crop_x} y=0")
 
         # Check unwarp method override to decide between GPU unwarp and CPU v360
         if self.vr_unwarp_method_override == 'v360':
             # User selected CPU v360 - use FFmpeg v360 filter for unwrapping
-            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
+            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
             v360_filter_core = (
                 f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
                 f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
@@ -1534,7 +1549,7 @@ class VideoProcessor:
             self.logger.info(f"GPU unwarp enabled (method={self.vr_unwarp_method_override}) - using crop+scale (v360 skipped)")
         else:
             # Fallback: GPU unwarp disabled globally
-            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '')
+            base_v360_input_format = self.vr_input_format.replace('_sbs', '').replace('_tb', '').replace('_lr', '').replace('_rl', '')
             v360_filter_core = (
                 f"v360={base_v360_input_format}:in_stereo=0:output=sg:"
                 f"iv_fov={self.vr_fov}:ih_fov={self.vr_fov}:"
