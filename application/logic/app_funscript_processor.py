@@ -435,9 +435,17 @@ class AppFunscriptProcessor:
                 # Auto-adjust the chapter range to avoid overlap
                 original_start, original_end = start_frame, end_frame
                 start_frame, end_frame = self._auto_adjust_chapter_range(start_frame, end_frame)
-                self.logger.info(f"Auto-adjusted chapter range to avoid overlap: [{original_start}-{original_end}] → [{start_frame}-{end_frame}]", 
+
+                # Verify adjustment was successful - check again for overlap
+                if self._check_chapter_overlap(start_frame, end_frame):
+                    self.logger.error(f"Cannot create chapter - no valid position found to avoid overlap. "
+                                    f"Attempted range: [{original_start}-{original_end}]",
+                                    extra={'status_message': True, 'duration': 4.0})
+                    return None if return_chapter_object else None
+
+                self.logger.info(f"Auto-adjusted chapter range to avoid overlap: [{original_start}-{original_end}] → [{start_frame}-{end_frame}]",
                                extra={'status_message': True})
-            
+
             # Check for duplicate chapters (same frame range and position)
             pos_short_key = data.get("position_short_name_key")
             pos_info = constants.POSITION_INFO_MAPPING.get(pos_short_key, {})
