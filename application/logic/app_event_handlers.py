@@ -213,6 +213,37 @@ class AppEventHandlers:
         self.app.tracker.start_tracking()
         self.app.processor.set_tracker_processing_enabled(True)
 
+        # Auto-skip NR chapters and unchaptered sections if enabled in settings
+        skip_nr_enabled = self.app.app_settings.get("skip_nr_chapters_on_tracking", True)
+        if skip_nr_enabled and self.app.processor and self.app.funscript_processor:
+            from config.constants import ChapterSegmentType
+            current_frame = self.app.processor.current_frame_index
+            chapter_at_cursor = self.app.funscript_processor.get_chapter_at_frame(current_frame)
+
+            should_skip = False
+            skip_reason = ""
+
+            if not chapter_at_cursor:
+                # No chapter at current position - skip to next chapter
+                should_skip = True
+                skip_reason = "No chapter at current position"
+            elif chapter_at_cursor.segment_type == ChapterSegmentType.NOT_RELEVANT.value:
+                # NR chapter - skip to next non-NR chapter
+                should_skip = True
+                skip_reason = f"Skipping NR chapter '{chapter_at_cursor.position_short_name}'"
+
+            if should_skip:
+                # Find next relevant chapter
+                next_chapter = self._find_next_relevant_chapter(current_frame)
+                if next_chapter:
+                    self.logger.info(f"{skip_reason}, seeking to: {next_chapter.position_short_name}",
+                                   extra={'status_message': True})
+                    self.app.processor.seek_video(next_chapter.start_frame_id)
+                    self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+                else:
+                    self.logger.warning(f"{skip_reason}, but no relevant chapters found ahead",
+                                      extra={'status_message': True})
+
         fs_proc = self.app.funscript_processor
         start_frame = self.app.processor.current_frame_index
         end_frame = -1
@@ -413,4 +444,37 @@ class AppEventHandlers:
 
             # Start the backend analysis to update the funscript
             self.app.stage_processor.start_interactive_refinement_analysis(chapter, track_id)
+
+    def _find_next_relevant_chapter(self, current_frame: int):
+        """
+        Find the next chapter that is NOT 'Not Relevant' and exists (is chaptered).
+
+        Args:
+            current_frame: Current frame position
+
+        Returns:
+            Next relevant VideoSegment or None if none found
+        """
+        from config.constants import ChapterSegmentType
+
+        if not self.app.funscript_processor:
+            return None
+
+        chapters = self.app.funscript_processor.video_chapters
+        if not chapters:
+            return None
+
+        # Sort chapters by start frame
+        sorted_chapters = sorted(chapters, key=lambda c: c.start_frame_id)
+
+        # Find chapters that start after current frame and are relevant
+        for chapter in sorted_chapters:
+            if chapter.start_frame_id > current_frame:
+                # Skip NR chapters
+                if chapter.segment_type == ChapterSegmentType.NOT_RELEVANT.value:
+                    continue
+                # This is a relevant chapter
+                return chapter
+
+        return None
 
