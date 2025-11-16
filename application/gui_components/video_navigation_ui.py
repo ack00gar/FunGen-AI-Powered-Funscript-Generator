@@ -20,13 +20,8 @@ class VideoNavigationUI:
         self.show_create_chapter_dialog = False
         self.show_edit_chapter_dialog = False
 
-        # Prepare data for dialogs
-        self.position_short_name_keys = list(POSITION_INFO_MAPPING.keys())
-        # IMPROVEMENT: Make display names more user-friendly by removing the internal key.
-        self.position_display_names = [
-            f"{POSITION_INFO_MAPPING[key]['short_name']} ({POSITION_INFO_MAPPING[key]['long_name']})"
-            for key in self.position_short_name_keys
-        ] if self.position_short_name_keys else ["N/A"]
+        # Prepare data for dialogs - dynamically from ChapterTypeManager
+        self._update_chapter_type_lists()
 
         default_pos_key = self.position_short_name_keys[0] if self.position_short_name_keys else "N/A"
 
@@ -94,6 +89,23 @@ class VideoNavigationUI:
             elif hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:
                 fps = self.app.processor.fps
         return fps
+
+    def _update_chapter_type_lists(self):
+        """Update chapter type lists from ChapterTypeManager (includes custom types)."""
+        from application.classes.chapter_type_manager import get_chapter_type_manager
+
+        type_manager = get_chapter_type_manager()
+        if type_manager:
+            all_types = type_manager.get_all_chapter_types()
+        else:
+            # Fallback to built-in types if manager not initialized yet
+            all_types = POSITION_INFO_MAPPING
+
+        self.position_short_name_keys = list(all_types.keys())
+        self.position_display_names = [
+            f"{all_types[key]['short_name']} ({all_types[key]['long_name']})"
+            for key in self.position_short_name_keys
+        ] if self.position_short_name_keys else ["N/A"]
 
     def render(self, nav_content_width=None):
         app_state = self.app.app_state_ui
