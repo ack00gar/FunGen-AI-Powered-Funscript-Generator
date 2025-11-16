@@ -51,6 +51,16 @@ class VideoSegment:
     @classmethod
     def _get_segment_color(cls, position_short_name: str) -> Tuple[float, float, float, float]:
         """Get the appropriate color for a segment based on position_short_name."""
+        # Try to get color from ChapterTypeManager first (supports custom types)
+        from application.classes.chapter_type_manager import get_chapter_type_manager
+
+        type_manager = get_chapter_type_manager()
+        if type_manager:
+            color = type_manager.get_type_color(position_short_name)
+            if color != (0.5, 0.5, 0.5, 0.7):  # Not the default fallback color
+                return color
+
+        # Fallback to built-in color mapping
         return cls._POSITION_COLOR_MAP.get(position_short_name, SegmentColors.DEFAULT)
 
     # ==================== TIMING CONVERSION METHODS ====================
