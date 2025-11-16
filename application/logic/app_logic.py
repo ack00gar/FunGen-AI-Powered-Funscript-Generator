@@ -303,6 +303,11 @@ class ApplicationLogic:
         self.project_manager = ProjectManager(self)
         self.shortcut_manager = ShortcutManager(self)
 
+        # Initialize chapter type manager for custom chapter types
+        from application.classes.chapter_type_manager import ChapterTypeManager, set_chapter_type_manager
+        self.chapter_type_manager = ChapterTypeManager(self)
+        set_chapter_type_manager(self.chapter_type_manager)  # Set global instance
+
         self.project_data_on_load: Optional[Dict] = None
         self.s2_frame_objects_map_for_s3: Optional[Dict[int, Any]] = None
         self.s2_sqlite_db_path: Optional[str] = None
