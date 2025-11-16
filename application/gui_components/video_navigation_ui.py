@@ -25,14 +25,21 @@ class VideoNavigationUI:
 
         default_pos_key = self.position_short_name_keys[0] if self.position_short_name_keys else "N/A"
 
+        # Import enums for segment type and source
+        from config.constants import ChapterSegmentType, ChapterSource
+
         self.chapter_edit_data = {
             "start_frame_str": "0",
             "end_frame_str": "0",
-            "segment_type": "SexAct",
+            "segment_type": ChapterSegmentType.get_default().value,
             "position_short_name_key": default_pos_key,
-            "source": "manual"
+            "source": ChapterSource.get_default().value
         }
         self.chapter_to_edit_id: Optional[str] = None
+
+        # Dropdown indices for segment type and source
+        self.selected_segment_type_idx = 0
+        self.selected_source_idx = 0
         
         # Chapter creation drag state
         self.is_dragging_chapter_range = False
@@ -1021,7 +1028,25 @@ class VideoNavigationUI:
             imgui.push_item_width(200)
             _, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##CreateWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
             _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##CreateWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
-            _, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##CreateWin", self.chapter_edit_data.get("segment_type", "SexAct"), 128)
+
+            # Segment Type dropdown (instead of free text)
+            from config.constants import ChapterSegmentType
+            segment_type_values = ChapterSegmentType.get_all_values()
+            current_segment_type = self.chapter_edit_data.get("segment_type", ChapterSegmentType.get_default().value)
+            try:
+                self.selected_segment_type_idx = segment_type_values.index(current_segment_type)
+            except ValueError:
+                self.selected_segment_type_idx = 0
+
+            clicked_segment_type, self.selected_segment_type_idx = imgui.combo(
+                "Category##CreateWin",
+                self.selected_segment_type_idx,
+                segment_type_values
+            )
+            if clicked_segment_type:
+                self.chapter_edit_data["segment_type"] = segment_type_values[self.selected_segment_type_idx]
+
+            # Position dropdown
             clicked_pos, self.selected_position_idx_in_dialog = imgui.combo("Position##CreateWin", self.selected_position_idx_in_dialog, self.position_display_names)
             if clicked_pos and self.position_short_name_keys and 0 <= self.selected_position_idx_in_dialog < len(
                     self.position_short_name_keys):
@@ -1030,7 +1055,10 @@ class VideoNavigationUI:
             current_selected_key = self.chapter_edit_data.get("position_short_name_key")
             long_name_display = POSITION_INFO_MAPPING.get(current_selected_key, {}).get("long_name", "N/A") if current_selected_key else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display}")
-            _, self.chapter_edit_data["source"] = imgui.input_text("Source##CreateWin", self.chapter_edit_data.get("source", "manual"), 64)
+
+            # Source is auto-set based on creation method, so we show it as read-only info
+            current_source = self.chapter_edit_data.get("source", "manual")
+            imgui.text_disabled(f"Source: {current_source}")
 
             if imgui.button("Set Range##ChapterCreateSetRangeWinBtn"):
                 self._set_chapter_range_by_selection()
@@ -1112,8 +1140,26 @@ class VideoNavigationUI:
             imgui.separator()
             imgui.push_item_width(200)
             _, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
-            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
-            _, self.chapter_edit_data["segment_type"] = imgui.input_text("Segment Type##EditWin", self.chapter_edit_data.get("segment_type", ""), 128)
+            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
+
+            # Segment Type dropdown (instead of free text)
+            from config.constants import ChapterSegmentType
+            segment_type_values = ChapterSegmentType.get_all_values()
+            current_segment_type = self.chapter_edit_data.get("segment_type", ChapterSegmentType.get_default().value)
+            try:
+                self.selected_segment_type_idx = segment_type_values.index(current_segment_type)
+            except ValueError:
+                self.selected_segment_type_idx = 0
+
+            clicked_segment_type, self.selected_segment_type_idx = imgui.combo(
+                "Category##EditWin",
+                self.selected_segment_type_idx,
+                segment_type_values
+            )
+            if clicked_segment_type:
+                self.chapter_edit_data["segment_type"] = segment_type_values[self.selected_segment_type_idx]
+
+            # Position dropdown
             current_pos_key_for_edit = self.chapter_edit_data.get("position_short_name_key")
             try:
                 if self.position_short_name_keys and current_pos_key_for_edit in self.position_short_name_keys:
@@ -1135,7 +1181,53 @@ class VideoNavigationUI:
             pos_key_edit_display = self.chapter_edit_data.get("position_short_name_key")
             long_name_display_edit = POSITION_INFO_MAPPING.get(pos_key_edit_display, {}).get("long_name", "N/A") if pos_key_edit_display else "N/A"
             imgui.text_disabled(f"Long Name (auto): {long_name_display_edit}")
-            _, self.chapter_edit_data["source"] = imgui.input_text("Source##EditWin", self.chapter_edit_data.get("source", ""), 64)
+
+            # Source dropdown (instead of free text)
+            from config.constants import ChapterSource
+            source_values = ChapterSource.get_all_values()
+            current_source = self.chapter_edit_data.get("source", ChapterSource.get_default().value)
+            try:
+                self.selected_source_idx = source_values.index(current_source)
+            except ValueError:
+                self.selected_source_idx = 0
+
+            clicked_source, self.selected_source_idx = imgui.combo(
+                "Source##EditWin",
+                self.selected_source_idx,
+                source_values
+            )
+            if clicked_source:
+                self.chapter_edit_data["source"] = source_values[self.selected_source_idx]
+
+            # Show source type indicator with icon
+            icon_mgr = self.app.icon_manager if hasattr(self.app, 'icon_manager') else None
+            if icon_mgr:
+                if ChapterSource.is_ai_generated(current_source):
+                    robot_tex = icon_mgr.get_texture('robot.png')
+                    if robot_tex:
+                        imgui.image(robot_tex, 16, 16)
+                        imgui.same_line()
+                    imgui.text_disabled("AI Generated")
+                elif ChapterSource.is_user_created(current_source):
+                    user_tex = icon_mgr.get_texture('user.png')
+                    if user_tex:
+                        imgui.image(user_tex, 16, 16)
+                        imgui.same_line()
+                    imgui.text_disabled("User Created")
+                else:
+                    download_tex = icon_mgr.get_texture('download.png')
+                    if download_tex:
+                        imgui.image(download_tex, 16, 16)
+                        imgui.same_line()
+                    imgui.text_disabled("Imported/Other")
+            else:
+                # Fallback to text only
+                if ChapterSource.is_ai_generated(current_source):
+                    imgui.text_disabled("AI Generated")
+                elif ChapterSource.is_user_created(current_source):
+                    imgui.text_disabled("User Created")
+                else:
+                    imgui.text_disabled("Imported/Other")
 
             if imgui.button("Set Range##ChapterUpdateSetRangeWinBtn"):
                 self._set_chapter_range_by_selection()

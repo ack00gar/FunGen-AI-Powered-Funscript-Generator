@@ -256,6 +256,78 @@ POSITION_INFO_MAPPING = {
     "BoobJ": {"long_name": "Boobjob", "short_name": "BoobJ"},
 }
 
+# Chapter/Segment metadata enums
+class ChapterSegmentType(Enum):
+    """
+    Defines the type/category of a chapter segment.
+    Used to classify what kind of content the chapter contains.
+    """
+    POSITION = "Position"           # Sex position/act (most common)
+    TRANSITION = "Transition"       # Scene transition/movement
+    INTRO = "Intro"                 # Video intro/setup
+    OUTRO = "Outro"                 # Video outro/ending
+    NOT_RELEVANT = "Not Relevant"   # Non-relevant content
+    UNKNOWN = "Unknown"             # Unclassified
+
+    @classmethod
+    def get_default(cls):
+        """Get the default segment type."""
+        return cls.POSITION
+
+    @classmethod
+    def get_all_values(cls):
+        """Get list of all segment type values."""
+        return [member.value for member in cls]
+
+    @classmethod
+    def get_all_names(cls):
+        """Get list of all segment type names (for dropdowns)."""
+        return [member.name for member in cls]
+
+
+class ChapterSource(Enum):
+    """
+    Tracks how a chapter was created/generated.
+    Used for auditing and understanding chapter provenance.
+    """
+    MANUAL = "manual"                           # User created manually
+    MANUAL_DRAG = "manual_drag"                 # User drag-created on timeline
+    MANUAL_MERGE = "manual_merge"               # User merged chapters
+    MANUAL_SPLIT = "manual_split"               # User split chapter
+    STAGE2 = "stage2"                           # AI Stage 2 detection
+    STAGE3 = "stage3"                           # AI Stage 3 mixed processing
+    STAGE2_FUNSCRIPT = "stage2_funscript"       # From Stage 2 funscript metadata
+    STAGE3_FUNSCRIPT = "stage3_funscript"       # From Stage 3 funscript metadata
+    IMPORTED = "imported"                       # Imported from external file
+    KEYBOARD_SHORTCUT = "keyboard_shortcut"     # Created via keyboard shortcut
+    GAP_FILL = "gap_fill"                       # Auto-created to fill gap
+    TRACK_AND_MERGE = "track_and_merge"         # Created from track gap & merge operation
+
+    @classmethod
+    def get_default(cls):
+        """Get the default source."""
+        return cls.MANUAL
+
+    @classmethod
+    def get_all_values(cls):
+        """Get list of all source values."""
+        return [member.value for member in cls]
+
+    @classmethod
+    def is_ai_generated(cls, source: str) -> bool:
+        """Check if source indicates AI generation."""
+        ai_sources = {cls.STAGE2.value, cls.STAGE3.value,
+                     cls.STAGE2_FUNSCRIPT.value, cls.STAGE3_FUNSCRIPT.value}
+        return source in ai_sources
+
+    @classmethod
+    def is_user_created(cls, source: str) -> bool:
+        """Check if source indicates user creation."""
+        user_sources = {cls.MANUAL.value, cls.MANUAL_DRAG.value,
+                       cls.MANUAL_MERGE.value, cls.MANUAL_SPLIT.value,
+                       cls.KEYBOARD_SHORTCUT.value}
+        return source in user_sources
+
 
 ####################################################################################################
 # TRACKING & OPTICAL FLOW DEFAULTS
@@ -466,6 +538,11 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/energy-leaf.png': 'https://em-content.zobj.net/source/apple/391/leaf-fluttering-in-wind_1f343.png',  # 🍃 leaf for energy saver
     'ui/icons/red-circle.png': 'https://em-content.zobj.net/source/apple/391/large-red-circle_1f534.png',  # 🔴 red circle for real-time (fixed: original was 403)
     'ui/icons/wrench.png': 'https://em-content.zobj.net/source/apple/391/wrench_1f527.png',  # 🔧 wrench for tools/devices
+
+    # Chapter source indicators
+    'ui/icons/robot.png': 'https://em-content.zobj.net/source/apple/391/robot_1f916.png',  # 🤖 AI generated
+    'ui/icons/user.png': 'https://em-content.zobj.net/source/apple/391/person_1f9d1.png',  # 👤 User created
+    'ui/icons/download.png': 'https://em-content.zobj.net/source/apple/391/down-arrow_2b07-fe0f.png',  # ⬇️ Imported
 
     # Timeline/number indicators (for toolbar) - using keycap digits
     'ui/icons/keycap-1.png': 'https://em-content.zobj.net/source/apple/391/keycap-digit-one_31-fe0f-20e3.png',  # 1️⃣ keycap digit one
