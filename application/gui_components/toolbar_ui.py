@@ -45,6 +45,38 @@ class ToolbarUI:
         """
         return self._label_height + self._label_spacing + self._icon_size + (self._button_padding * 2) + 10
 
+    def _apply_button_color_green(self):
+        """Apply green color scheme (for running states like Play/Tracking)."""
+        import config.constants as config
+        imgui.pop_style_color(3)
+        imgui.push_style_color(imgui.COLOR_BUTTON, *config.TOOLBAR_BUTTON_GREEN_ACTIVE)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *config.TOOLBAR_BUTTON_GREEN_HOVERED)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *config.TOOLBAR_BUTTON_GREEN_PRESSED)
+
+    def _apply_button_color_blue(self):
+        """Apply blue color scheme (for toggle features)."""
+        import config.constants as config
+        imgui.pop_style_color(3)
+        imgui.push_style_color(imgui.COLOR_BUTTON, *config.TOOLBAR_BUTTON_BLUE_ACTIVE)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *config.TOOLBAR_BUTTON_BLUE_HOVERED)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *config.TOOLBAR_BUTTON_BLUE_PRESSED)
+
+    def _apply_button_color_red(self):
+        """Apply red color scheme (for stop/inactive important states)."""
+        import config.constants as config
+        imgui.pop_style_color(3)
+        imgui.push_style_color(imgui.COLOR_BUTTON, *config.TOOLBAR_BUTTON_RED_ACTIVE)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *config.TOOLBAR_BUTTON_RED_HOVERED)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *config.TOOLBAR_BUTTON_RED_PRESSED)
+
+    def _apply_button_color_default(self):
+        """Restore default button colors."""
+        import config.constants as config
+        imgui.pop_style_color(3)
+        imgui.push_style_color(imgui.COLOR_BUTTON, *config.TOOLBAR_BUTTON_DEFAULT)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *config.TOOLBAR_BUTTON_DEFAULT_HOVERED)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *config.TOOLBAR_BUTTON_DEFAULT_PRESSED)
+
     def render(self):
         """Render the toolbar below the menu bar."""
         app = self.app
@@ -120,6 +152,15 @@ class ToolbarUI:
         self._render_separator()
         imgui.same_line(spacing=12)
 
+        # --- TRACKING CONTROLS SECTION (before Playback for visibility) ---
+        self._begin_toolbar_section("AI Tracking")
+        self._render_tracking_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
+
+        imgui.same_line(spacing=12)
+        self._render_separator()
+        imgui.same_line(spacing=12)
+
         # --- PLAYBACK CONTROLS SECTION ---
         self._begin_toolbar_section("Playback")
         self._render_playback_section(icon_mgr, btn_size)
@@ -141,15 +182,6 @@ class ToolbarUI:
         # --- VIEW TOGGLES SECTION ---
         self._begin_toolbar_section("View")
         self._render_view_section(icon_mgr, btn_size)
-        self._end_toolbar_section()
-
-        imgui.same_line(spacing=12)
-        self._render_separator()
-        imgui.same_line(spacing=12)
-
-        # --- TRACKING CONTROLS SECTION ---
-        self._begin_toolbar_section("AI Tracking")
-        self._render_tracking_section(icon_mgr, btn_size)
         self._end_toolbar_section()
 
         # --- OPTIONAL TOOLS SECTION (Buyer features - conditional) ---
@@ -266,13 +298,9 @@ class ToolbarUI:
         else:
             tooltip = "Simple Mode (Click to switch to Expert Mode)"
 
-        # Apply blue background when Expert mode is active (same as other toggle buttons)
+        # Apply blue background when Expert mode is active
         if is_expert:
-            imgui.pop_style_color(3)  # Pop default colors
-            # Blue tint for active state (matches Timeline toggles)
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.3, 0.5, 0.7, 0.8)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.4, 0.6, 0.8, 0.9)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.2, 0.4, 0.6, 1.0)
+            self._apply_button_color_blue()
 
         # Nerd face emoji button
         if self._toolbar_button(icon_mgr, 'nerd-face.png', btn_size, tooltip):
@@ -283,10 +311,7 @@ class ToolbarUI:
 
         # Restore default colors if we changed them
         if is_expert:
-            imgui.pop_style_color(3)
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.3, 0.3, 0.7)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.15, 0.15, 0.9)
+            self._apply_button_color_default()
 
     def _render_file_section(self, icon_mgr, btn_size):
         """Render file operation buttons."""
@@ -482,12 +507,18 @@ class ToolbarUI:
 
         imgui.same_line()
 
-        # Play/Pause button
+        # Play/Pause button (green when playing)
         if has_video:
+            if is_playing:
+                self._apply_button_color_green()
+
             icon_name = 'pause.png' if is_playing else 'play.png'
             tooltip = "Pause (SPACE)" if is_playing else "Play (SPACE)"
             if self._toolbar_button(icon_mgr, icon_name, btn_size, tooltip):
                 app.event_handlers.handle_playback_control("play_pause")
+
+            if is_playing:
+                self._apply_button_color_default()
         else:
             imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
             self._toolbar_button(icon_mgr, 'play.png', btn_size, "Play (No video loaded)")
@@ -528,9 +559,12 @@ class ToolbarUI:
 
         imgui.same_line()
 
-        # Show/Hide Video button
+        # Show/Hide Video button (blue when visible)
         app_state = app.app_state_ui
         show_video = app_state.show_video_feed if hasattr(app_state, 'show_video_feed') else True
+
+        if show_video:
+            self._apply_button_color_blue()
 
         tooltip = "Hide Video (F)" if show_video else "Show Video (F)"
         if self._toolbar_button(icon_mgr, 'video-camera.png', btn_size, tooltip):
@@ -538,39 +572,48 @@ class ToolbarUI:
                 app_state.show_video_feed = not app_state.show_video_feed
                 app.app_settings.set("show_video_feed", app_state.show_video_feed)
 
+        if show_video:
+            self._apply_button_color_default()
+
         imgui.same_line()
 
-        # Playback Speed Mode buttons
+        # Playback Speed Mode buttons (blue when active)
         from config.constants import ProcessingSpeedMode
         current_speed_mode = app_state.selected_processing_speed_mode
 
         # Real Time button
         if current_speed_mode == ProcessingSpeedMode.REALTIME:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)  # Green tint when active
+            self._apply_button_color_blue()
+
         if self._toolbar_button(icon_mgr, 'speed-realtime.png', btn_size, "Real Time Speed (matches video FPS)"):
             app_state.selected_processing_speed_mode = ProcessingSpeedMode.REALTIME
+
         if current_speed_mode == ProcessingSpeedMode.REALTIME:
-            imgui.pop_style_color()
+            self._apply_button_color_default()
 
         imgui.same_line()
 
         # Slow-mo button
         if current_speed_mode == ProcessingSpeedMode.SLOW_MOTION:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)  # Green tint when active
+            self._apply_button_color_blue()
+
         if self._toolbar_button(icon_mgr, 'speed-slowmo.png', btn_size, "Slow Motion (10 FPS)"):
             app_state.selected_processing_speed_mode = ProcessingSpeedMode.SLOW_MOTION
+
         if current_speed_mode == ProcessingSpeedMode.SLOW_MOTION:
-            imgui.pop_style_color()
+            self._apply_button_color_default()
 
         imgui.same_line()
 
         # Max Speed button
         if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)  # Green tint when active
+            self._apply_button_color_blue()
+
         if self._toolbar_button(icon_mgr, 'speed-max.png', btn_size, "Max Speed (no frame delay)"):
             app_state.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
+
         if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
-            imgui.pop_style_color()
+            self._apply_button_color_default()
 
     def _render_navigation_section(self, icon_mgr, btn_size):
         """Render navigation buttons (points and chapters)."""
@@ -615,26 +658,19 @@ class ToolbarUI:
                       hasattr(processor, 'enable_tracker_processing') and
                       processor.enable_tracker_processing)
 
-        # Start/Stop Tracking button
-        if not is_tracking:
-            # Start button - no special background, just normal state
-            if self._toolbar_button(icon_mgr, 'robot.png', btn_size, "Start Tracking"):
-                app.event_handlers.handle_start_live_tracker_click()
-        else:
-            # Tracking active - show with RED background to indicate "click to stop"
-            imgui.pop_style_color(3)  # Remove default button colors
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.7, 0.0, 0.0, 0.7)  # Red background
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.0, 0.0, 0.85)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.6, 0.0, 0.0, 0.9)
+        # Start/Stop Tracking button (green when tracking)
+        if is_tracking:
+            self._apply_button_color_green()
 
-            if self._toolbar_button(icon_mgr, 'robot.png', btn_size, "Stop Tracking (Active)"):
+        tooltip = "Stop Tracking (Active)" if is_tracking else "Start Tracking"
+        if self._toolbar_button(icon_mgr, 'robot.png', btn_size, tooltip):
+            if is_tracking:
                 app.event_handlers.handle_reset_live_tracker_click()
+            else:
+                app.event_handlers.handle_start_live_tracker_click()
 
-            imgui.pop_style_color(3)
-            # Restore default toolbar button colors
-            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
-            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.3, 0.3, 0.7)
-            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.15, 0.15, 0.9)
+        if is_tracking:
+            self._apply_button_color_default()
 
         imgui.same_line()
 
