@@ -213,7 +213,7 @@ class AppEventHandlers:
         self.app.tracker.start_tracking()
         self.app.processor.set_tracker_processing_enabled(True)
 
-        # Auto-skip "Not Relevant" category chapters and unchaptered sections
+        # Auto-skip "Not Relevant" category chapters when starting tracking
         if self.app.processor and self.app.funscript_processor:
             from config.constants import ChapterSegmentType
             current_frame = self.app.processor.current_frame_index
@@ -222,17 +222,13 @@ class AppEventHandlers:
             should_skip = False
             skip_reason = ""
 
-            if not chapter_at_cursor:
-                # No chapter at current position - skip to next chapter
+            # Only skip if we're starting in a "Not Relevant" category chapter
+            if chapter_at_cursor and chapter_at_cursor.segment_type == ChapterSegmentType.NOT_RELEVANT.value:
                 should_skip = True
-                skip_reason = "No chapter at current position"
-            elif chapter_at_cursor.segment_type == ChapterSegmentType.NOT_RELEVANT.value:
-                # NR chapter - skip to next non-NR chapter
-                should_skip = True
-                skip_reason = f"Skipping NR chapter '{chapter_at_cursor.position_short_name}'"
+                skip_reason = f"Skipping 'Not Relevant' chapter '{chapter_at_cursor.position_short_name}'"
 
             if should_skip:
-                # Find next relevant chapter
+                # Find next Position category chapter
                 next_chapter = self._find_next_relevant_chapter(current_frame)
                 if next_chapter:
                     self.logger.info(f"{skip_reason}, seeking to: {next_chapter.position_short_name}",
@@ -240,7 +236,7 @@ class AppEventHandlers:
                     self.app.processor.seek_video(next_chapter.start_frame_id)
                     self.app.app_state_ui.force_timeline_pan_to_current_frame = True
                 else:
-                    self.logger.warning(f"{skip_reason}, but no relevant chapters found ahead",
+                    self.logger.warning(f"{skip_reason}, but no Position chapters found ahead",
                                       extra={'status_message': True})
 
         fs_proc = self.app.funscript_processor
