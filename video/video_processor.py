@@ -2169,14 +2169,33 @@ class VideoProcessor:
 
                 if current_chapter_id != self.last_processed_chapter_id:
                     if self.tracker:
-                        if current_chapter and current_chapter.user_roi_fixed:
-                            self.tracker.reconfigure_for_chapter(current_chapter)
-                            if not self.tracker.tracking_active:
-                                self.tracker.start_tracking()
-                        elif current_chapter is None and self.tracker.tracking_active:
-                            # Legacy USER_FIXED_ROI check removed - all trackers can be stopped in chapter gaps
+                        # Check if we should track in this chapter based on category
+                        from config.constants import POSITION_INFO_MAPPING
+                        should_track = True
+
+                        if current_chapter:
+                            # Check chapter category
+                            position_info = POSITION_INFO_MAPPING.get(current_chapter.position_short_name, {})
+                            category = position_info.get('category', 'Position')
+                            should_track = (category == "Position")  # Only track Position category
+
+                            # Reconfigure if chapter has user ROI
+                            if should_track and current_chapter.user_roi_fixed:
+                                self.tracker.reconfigure_for_chapter(current_chapter)
+                        # No chapter (unchaptered) = should track (default behavior)
+
+                        # Start/stop tracker based on category
+                        if should_track and not self.tracker.tracking_active:
+                            self.tracker.start_tracking()
+                            if current_chapter:
+                                self.logger.info(f"Tracker resumed for Position chapter: {current_chapter.position_short_name}")
+                            else:
+                                self.logger.info("Tracker active in unchaptered section")
+                        elif not should_track and self.tracker.tracking_active:
                             self.tracker.stop_tracking()
-                            self.logger.info("Tracker stopped due to entering a gap between chapters.")
+                            if current_chapter:
+                                self.logger.info(f"Tracker paused for Not Relevant chapter: {current_chapter.position_short_name}")
+
                     self.last_processed_chapter_id = current_chapter_id
 
                 if current_chapter and self.tracker and not self.tracker.tracking_active and current_chapter.user_roi_fixed:
