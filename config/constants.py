@@ -556,6 +556,8 @@ UI_CONTROL_ICON_URLS = {
 
     # Video display control
     'ui/icons/video-camera.png': 'https://em-content.zobj.net/source/apple/391/movie-camera_1f3a5.png',
+    'ui/icons/video-show.png': 'https://em-content.zobj.net/source/apple/391/movie-camera_1f3a5.png',  # 🎥 movie camera for show video
+    'ui/icons/video-hide.png': 'https://em-content.zobj.net/source/apple/391/no-one-under-eighteen_1f51e.png',  # 🔞 no one under 18 for hide video
 
     # General UI controls
     'ui/icons/settings.png': 'https://em-content.zobj.net/source/apple/391/gear_2699-fe0f.png',
