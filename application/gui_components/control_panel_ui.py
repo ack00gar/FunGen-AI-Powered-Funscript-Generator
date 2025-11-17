@@ -511,15 +511,6 @@ class ControlPanelUI:
             imgui.text_wrapped(self._get_simple_tracker_description(discovered_trackers[cur_idx]))
             imgui.pop_style_color()
 
-        # Skip NR Chapters toggle
-        imgui.spacing()
-        skip_nr = app.app_settings.get("skip_nr_chapters_on_tracking", True)
-        clicked, skip_nr = imgui.checkbox("Auto-skip NR chapters when tracking starts", skip_nr)
-        if clicked:
-            app.app_settings.set("skip_nr_chapters_on_tracking", skip_nr)
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Automatically skip 'Not Relevant' chapters and unchaptered sections\nwhen starting live tracking")
-
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
@@ -710,16 +701,6 @@ class ControlPanelUI:
                 if tr:
                     tr.set_tracking_mode(new_mode)
 
-            # Skip NR Chapters toggle (for live trackers)
-            if self._is_live_tracker(app_state.selected_tracker_name):
-                imgui.spacing()
-                skip_nr = app.app_settings.get("skip_nr_chapters_on_tracking", True)
-                clicked_skip, skip_nr = imgui.checkbox("Auto-skip NR chapters when tracking starts", skip_nr)
-                if clicked_skip:
-                    app.app_settings.set("skip_nr_chapters_on_tracking", skip_nr)
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Automatically skip 'Not Relevant' chapters and unchaptered sections\nwhen starting live tracking")
-                imgui.spacing()
 
             proc = app.processor
             video_loaded = proc and proc.is_video_open()

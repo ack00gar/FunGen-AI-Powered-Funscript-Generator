@@ -1303,22 +1303,31 @@ class VideoNavigationUI:
             _, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
             _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
 
-            # Segment Type dropdown (instead of free text)
+            # Category dropdown (Position or Not Relevant only)
             from config.constants import ChapterSegmentType
-            segment_type_values = ChapterSegmentType.get_all_values()
+            category_options = ChapterSegmentType.get_user_category_options()
             current_segment_type = self.chapter_edit_data.get("segment_type", ChapterSegmentType.get_default().value)
+
+            # Map old segment types to new categories if needed
+            if current_segment_type not in category_options:
+                # Map specific types to their category
+                if current_segment_type in ["Transition", "Intro", "Outro", "Not Relevant", "Unknown"]:
+                    current_segment_type = "Not Relevant"
+                else:
+                    current_segment_type = "Position"
+
             try:
-                self.selected_segment_type_idx = segment_type_values.index(current_segment_type)
+                self.selected_segment_type_idx = category_options.index(current_segment_type)
             except ValueError:
                 self.selected_segment_type_idx = 0
 
             clicked_segment_type, self.selected_segment_type_idx = imgui.combo(
                 "Category##EditWin",
                 self.selected_segment_type_idx,
-                segment_type_values
+                category_options
             )
             if clicked_segment_type:
-                self.chapter_edit_data["segment_type"] = segment_type_values[self.selected_segment_type_idx]
+                self.chapter_edit_data["segment_type"] = category_options[self.selected_segment_type_idx]
 
             # Position dropdown
             current_pos_key_for_edit = self.chapter_edit_data.get("position_short_name_key")
