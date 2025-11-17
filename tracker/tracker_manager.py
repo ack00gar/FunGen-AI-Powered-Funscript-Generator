@@ -662,7 +662,7 @@ class TrackerManager:
         # Check if we're in a "Not Relevant" category chapter - if so, skip scripting
         if hasattr(self, 'app') and self.app:
             try:
-                from config.constants import ChapterSegmentType
+                from config.constants import POSITION_INFO_MAPPING
                 fs_proc = getattr(self.app, 'funscript_processor', None)
                 processor = getattr(self.app, 'processor', None)
 
@@ -670,9 +670,14 @@ class TrackerManager:
                     current_frame = processor.current_frame_index
                     chapter_at_frame = fs_proc.get_chapter_at_frame(current_frame)
 
-                    # Only skip if we're IN a "Not Relevant" category chapter
-                    if chapter_at_frame and chapter_at_frame.segment_type == ChapterSegmentType.NOT_RELEVANT.value:
-                        return  # Not Relevant category = don't script
+                    # Determine category based on position_short_name (reliable for old and new chapters)
+                    if chapter_at_frame:
+                        position_short_name = chapter_at_frame.position_short_name
+                        position_info = POSITION_INFO_MAPPING.get(position_short_name, {})
+                        category = position_info.get('category', 'Position')  # Default to Position if not in mapping
+
+                        if category == "Not Relevant":
+                            return  # Not Relevant category = don't script
                     # Otherwise (no chapter or Position category) = continue scripting
             except Exception as e:
                 self.logger.debug(f"Could not check chapter type for scripting: {e}")

@@ -1078,65 +1078,52 @@ class VideoNavigationUI:
         from application.classes.chapter_type_manager import get_chapter_type_manager
         type_mgr = get_chapter_type_manager()
 
-        # Get all available types (built-in + custom)
+        # Get all available types (built-in + custom) organized by category
         from config.constants import POSITION_INFO_MAPPING
 
-        # Organize by category
+        # Organize by simplified categories: Position and Not Relevant
         position_types = []
-        transition_types = []
-        other_types = []
+        not_relevant_types = []
 
+        # Built-in types from POSITION_INFO_MAPPING
         for key, info in POSITION_INFO_MAPPING.items():
             short_name = info.get("short_name", key)
+            long_name = info.get("long_name", short_name)
             category = info.get("category", "Position")
 
             if category == "Position":
-                position_types.append((short_name, info.get("long_name", short_name)))
-            elif category in ["Transition", "Trans"]:
-                transition_types.append((short_name, info.get("long_name", short_name)))
-            else:
-                other_types.append((short_name, info.get("long_name", short_name)))
+                position_types.append((short_name, long_name))
+            else:  # Not Relevant category
+                not_relevant_types.append((short_name, long_name))
 
-        # Add custom types if available
+        # Add custom types if available (organized by their category)
         if type_mgr:
-            all_types = type_mgr.get_all_chapter_types()
-            custom_types = [(info["short_name"], info["long_name"])
-                           for short_name, info in all_types.items()
-                           if info.get("category") == "Custom"]
-        else:
-            custom_types = []
+            all_custom_types = type_mgr.custom_types  # Only custom, not built-in
+            for short_name, info in all_custom_types.items():
+                long_name = info.get("long_name", short_name)
+                category = info.get("category", "Position")
+
+                if category == "Position":
+                    position_types.append((short_name, long_name))
+                else:  # Not Relevant
+                    not_relevant_types.append((short_name, long_name))
 
         # Render organized menu
         current_type = selected_chapter.position_short_name
 
+        # Position category (scripted content)
         if position_types:
-            if imgui.begin_menu("Positions"):
+            if imgui.begin_menu("Position (Scripted)"):
                 for short_name, long_name in sorted(position_types, key=lambda x: x[1]):
                     is_current = short_name == current_type
                     if imgui.menu_item(long_name, selected=is_current)[0] and not is_current:
                         self._change_chapter_type(selected_chapter, short_name)
                 imgui.end_menu()
 
-        if transition_types:
-            if imgui.begin_menu("Transitions"):
-                for short_name, long_name in sorted(transition_types, key=lambda x: x[1]):
-                    is_current = short_name == current_type
-                    if imgui.menu_item(long_name, selected=is_current)[0] and not is_current:
-                        self._change_chapter_type(selected_chapter, short_name)
-                imgui.end_menu()
-
-        if other_types:
-            if imgui.begin_menu("Other"):
-                for short_name, long_name in sorted(other_types, key=lambda x: x[1]):
-                    is_current = short_name == current_type
-                    if imgui.menu_item(long_name, selected=is_current)[0] and not is_current:
-                        self._change_chapter_type(selected_chapter, short_name)
-                imgui.end_menu()
-
-        if custom_types:
-            imgui.separator()
-            if imgui.begin_menu("Custom Types"):
-                for short_name, long_name in sorted(custom_types, key=lambda x: x[1]):
+        # Not Relevant category (non-scripted content)
+        if not_relevant_types:
+            if imgui.begin_menu("Not Relevant (Non-scripted)"):
+                for short_name, long_name in sorted(not_relevant_types, key=lambda x: x[1]):
                     is_current = short_name == current_type
                     if imgui.menu_item(long_name, selected=is_current)[0] and not is_current:
                         self._change_chapter_type(selected_chapter, short_name)
@@ -1301,23 +1288,20 @@ class VideoNavigationUI:
             imgui.separator()
             imgui.push_item_width(200)
             _, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
-            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
 
             # Category dropdown (Position or Not Relevant only)
-            from config.constants import ChapterSegmentType
+            # Determine category from position_short_name in POSITION_INFO_MAPPING
+            from config.constants import ChapterSegmentType, POSITION_INFO_MAPPING
             category_options = ChapterSegmentType.get_user_category_options()
-            current_segment_type = self.chapter_edit_data.get("segment_type", ChapterSegmentType.get_default().value)
 
-            # Map old segment types to new categories if needed
-            if current_segment_type not in category_options:
-                # Map specific types to their category
-                if current_segment_type in ["Transition", "Intro", "Outro", "Not Relevant", "Unknown"]:
-                    current_segment_type = "Not Relevant"
-                else:
-                    current_segment_type = "Position"
+            # Get category from position_short_name (reliable)
+            current_pos_short_name = self.chapter_edit_data.get("position_short_name_key", "")
+            position_info = POSITION_INFO_MAPPING.get(current_pos_short_name, {})
+            current_category = position_info.get('category', 'Position')  # Default to Position
 
             try:
-                self.selected_segment_type_idx = category_options.index(current_segment_type)
+                self.selected_segment_type_idx = category_options.index(current_category)
             except ValueError:
                 self.selected_segment_type_idx = 0
 
