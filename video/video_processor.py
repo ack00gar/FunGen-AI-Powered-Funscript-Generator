@@ -2168,7 +2168,9 @@ class VideoProcessor:
                 current_chapter_id = current_chapter.unique_id if current_chapter else None
 
                 if current_chapter_id != self.last_processed_chapter_id:
-                    if self.tracker:
+                    # Only auto-start/stop tracker if enable_tracker_processing is True
+                    # This prevents the play button from triggering live tracking after offline analysis
+                    if self.tracker and self.enable_tracker_processing:
                         # Check if we should track in this chapter based on category
                         from config.constants import POSITION_INFO_MAPPING
                         should_track = True
@@ -2198,7 +2200,8 @@ class VideoProcessor:
 
                     self.last_processed_chapter_id = current_chapter_id
 
-                if current_chapter and self.tracker and not self.tracker.tracking_active and current_chapter.user_roi_fixed:
+                # Only auto-start tracker for user ROI if enable_tracker_processing is True
+                if current_chapter and self.tracker and self.enable_tracker_processing and not self.tracker.tracking_active and current_chapter.user_roi_fixed:
                     self.tracker.start_tracking()
 
                 if self.ffmpeg_pipe1_process and self.ffmpeg_pipe1_process.poll() is not None:

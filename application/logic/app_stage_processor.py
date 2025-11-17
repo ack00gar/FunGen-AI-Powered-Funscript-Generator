@@ -971,6 +971,15 @@ class AppStageProcessor:
             if self.stage_completion_event:
                 self.stage_completion_event.set()
 
+            # CRITICAL FIX: Ensure tracker is stopped and disabled after offline analysis
+            # This prevents the play button from triggering live tracking that overrides the offline signal
+            if self.app.tracker:
+                self.logger.info("Stopping tracker after offline analysis completion")
+                self.app.tracker.stop_tracking()
+            if self.app.processor:
+                self.logger.info("Disabling tracker processing after offline analysis completion")
+                self.app.processor.enable_tracker_processing = False
+
             # Clean up checkpoints on successful completion
             if stage1_success and stage2_success and (self._is_stage2_tracker(selected_mode) or stage3_success):
                 self._cleanup_checkpoints_on_completion()
