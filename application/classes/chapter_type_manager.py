@@ -83,13 +83,15 @@ class ChapterTypeManager:
         from application.utils.video_segment import VideoSegment
         from config.element_group_colors import SegmentColors
 
-        for short_name in self.builtin_types:
+        for short_name, type_info in self.builtin_types.items():
             # Get color from VideoSegment's color map, fallback to default
             color = VideoSegment._POSITION_COLOR_MAP.get(short_name, SegmentColors.DEFAULT)
             # Convert to list for JSON serialization compatibility
-            self.builtin_types[short_name]["color"] = list(color)
-            self.builtin_types[short_name]["category"] = "Position"  # All built-in types are positions
-            self.builtin_types[short_name]["usage_count"] = 0
+            type_info["color"] = list(color)
+            # Category should already be defined in POSITION_INFO_MAPPING, but provide fallback
+            if "category" not in type_info:
+                type_info["category"] = "Position"
+            type_info["usage_count"] = 0
 
     # ==================== CORE TYPE ACCESS ====================
 

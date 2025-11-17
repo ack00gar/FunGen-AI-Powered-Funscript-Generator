@@ -717,39 +717,70 @@ class VideoNavigationUI:
         if len(self.context_selected_chapters) > 0:
             shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
             io = imgui.get_io()
-            
-            # Delete Selected Chapter
-            del_sc_str = shortcuts.get("delete_selected_chapter", "DELETE")
-            del_alt_sc_str = shortcuts.get("delete_selected_chapter_alt", "BACKSPACE")
-            del_key_tuple = self.app._map_shortcut_to_glfw_key(del_sc_str)
-            bck_key_tuple = self.app._map_shortcut_to_glfw_key(del_alt_sc_str)
-            delete_pressed = False
 
-            if del_key_tuple and (
-                imgui.is_key_pressed(del_key_tuple[0]) and
-                all(m == io_m for m, io_m in
-                    zip(del_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))
+            # Check Delete Points in Chapter FIRST (SHIFT+DELETE or SHIFT+BACKSPACE) - must come before regular delete
+            del_points_sc_str = shortcuts.get("delete_points_in_chapter", "SHIFT+DELETE")
+            del_points_alt_sc_str = shortcuts.get("delete_points_in_chapter_alt", "SHIFT+BACKSPACE")
+            del_points_key_tuple = self.app._map_shortcut_to_glfw_key(del_points_sc_str)
+            del_points_alt_key_tuple = self.app._map_shortcut_to_glfw_key(del_points_alt_sc_str)
+            delete_points_pressed = False
+
+            if del_points_key_tuple and (
+                imgui.is_key_pressed(del_points_key_tuple[0]) and
+                del_points_key_tuple[1]['ctrl'] == io.key_ctrl and
+                del_points_key_tuple[1]['alt'] == io.key_alt and
+                del_points_key_tuple[1]['shift'] == io.key_shift and
+                del_points_key_tuple[1]['super'] == io.key_super
             ):
-                delete_pressed = True
+                delete_points_pressed = True
 
-            if (not delete_pressed and bck_key_tuple and (
-                imgui.is_key_pressed(bck_key_tuple[0]) and
-                all(m == io_m for m, io_m in
-                    zip(bck_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))
+            if (not delete_points_pressed and del_points_alt_key_tuple and (
+                imgui.is_key_pressed(del_points_alt_key_tuple[0]) and
+                del_points_alt_key_tuple[1]['ctrl'] == io.key_ctrl and
+                del_points_alt_key_tuple[1]['alt'] == io.key_alt and
+                del_points_alt_key_tuple[1]['shift'] == io.key_shift and
+                del_points_alt_key_tuple[1]['super'] == io.key_super
             )):
-                delete_pressed = True
+                delete_points_pressed = True
 
-            if delete_pressed and self.context_selected_chapters:
-                # Record undo action before deletion
-                chapter_names = [ch.position_short_name for ch in self.context_selected_chapters]
-                op_desc = f"Deleted {len(self.context_selected_chapters)} Selected Chapter(s) (Key): {', '.join(chapter_names)}"
-                
-                # Delete the chapters
-                ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
-                fs_proc.delete_video_chapters_by_ids(ch_ids)
-                self.context_selected_chapters.clear()
-                
-                self.app.logger.info(f"Deleted {len(ch_ids)} chapters via keyboard shortcut", extra={'status_message': True})
+            if delete_points_pressed and self.context_selected_chapters:
+                # Delete points in the selected chapters
+                fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
+                self.app.logger.info(f"Deleted points in {len(self.context_selected_chapters)} chapter(s) via keyboard shortcut", extra={'status_message': True})
+            else:
+                # Only check regular delete if delete points wasn't pressed
+                # Delete Selected Chapter (DELETE or BACKSPACE without modifiers)
+                del_sc_str = shortcuts.get("delete_selected_chapter", "DELETE")
+                del_alt_sc_str = shortcuts.get("delete_selected_chapter_alt", "BACKSPACE")
+                del_key_tuple = self.app._map_shortcut_to_glfw_key(del_sc_str)
+                bck_key_tuple = self.app._map_shortcut_to_glfw_key(del_alt_sc_str)
+                delete_pressed = False
+
+                if del_key_tuple and (
+                    imgui.is_key_pressed(del_key_tuple[0]) and
+                    all(m == io_m for m, io_m in
+                        zip(del_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))
+                ):
+                    delete_pressed = True
+
+                if (not delete_pressed and bck_key_tuple and (
+                    imgui.is_key_pressed(bck_key_tuple[0]) and
+                    all(m == io_m for m, io_m in
+                        zip(bck_key_tuple[1].values(), [io.key_shift, io.key_ctrl, io.key_alt, io.key_super]))
+                )):
+                    delete_pressed = True
+
+                if delete_pressed and self.context_selected_chapters:
+                    # Record undo action before deletion
+                    chapter_names = [ch.position_short_name for ch in self.context_selected_chapters]
+                    op_desc = f"Deleted {len(self.context_selected_chapters)} Selected Chapter(s) (Key): {', '.join(chapter_names)}"
+
+                    # Delete the chapters
+                    ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
+                    fs_proc.delete_video_chapters_by_ids(ch_ids)
+                    self.context_selected_chapters.clear()
+
+                    self.app.logger.info(f"Deleted {len(ch_ids)} chapters via keyboard shortcut", extra={'status_message': True})
 
         imgui.set_cursor_screen_pos((bar_start_x, bar_start_y + bar_height))
         imgui.spacing()
@@ -762,7 +793,11 @@ class VideoNavigationUI:
             num_selected = len(self.context_selected_chapters)
             can_select_one = num_selected == 1
 
-            # === QUICK ACTIONS (Most Common) ===
+            # === CHAPTER OPERATIONS ===
+            imgui.text_disabled("Chapter Operations")
+            imgui.separator()
+
+            # Seek to Beginning
             if imgui.menu_item("Seek to Beginning", enabled=can_select_one)[0]:
                 if can_select_one:
                     selected_chapter = self.context_selected_chapters[0]
@@ -770,6 +805,55 @@ class VideoNavigationUI:
                         self.app.processor.seek_video(selected_chapter.start_frame_id)
                         self.app.app_state_ui.force_timeline_pan_to_current_frame = True
 
+            # Seek to End
+            if imgui.menu_item("Seek to End", enabled=can_select_one)[0]:
+                if can_select_one:
+                    selected_chapter = self.context_selected_chapters[0]
+                    if self.app.processor:
+                        self.app.processor.seek_video(selected_chapter.end_frame_id)
+                        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
+
+            imgui.separator()
+
+            # === CHANGE TYPE (with categories and user types) ===
+            if imgui.begin_menu("Change Type", enabled=can_select_one):
+                if can_select_one and self.context_selected_chapters:
+                    self._render_quick_type_change_menu()
+                imgui.end_menu()
+
+            imgui.separator()
+
+            # === DELETE OPERATIONS ===
+            can_delete = num_selected > 0
+            shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+            # Show the platform-appropriate shortcut (Backspace on Mac, Delete on others)
+            import platform
+            if platform.system() == "Darwin":
+                delete_shortcut = shortcuts.get("delete_selected_chapter_alt", "Backspace")
+            else:
+                delete_shortcut = shortcuts.get("delete_selected_chapter", "Delete")
+            delete_label = f"Delete Chapter{'s' if num_selected != 1 else ''} ({num_selected})" if num_selected > 1 else "Delete Chapter"
+            if imgui.menu_item(delete_label, shortcut=delete_shortcut, enabled=can_delete)[0]:
+                if can_delete and self.context_selected_chapters:
+                    ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
+                    fs_proc.delete_video_chapters_by_ids(ch_ids)
+                    self.context_selected_chapters.clear()
+
+            can_delete_points = num_selected > 0
+            # Show the platform-appropriate shortcut (Shift+Backspace on Mac, Shift+Delete on others)
+            import platform
+            if platform.system() == "Darwin":
+                delete_points_shortcut = shortcuts.get("delete_points_in_chapter_alt", "Shift+Backspace")
+            else:
+                delete_points_shortcut = shortcuts.get("delete_points_in_chapter", "Shift+Delete")
+            delete_points_label = f"Delete Points in Chapter{'s' if num_selected != 1 else ''} ({num_selected})" if num_selected > 1 else "Delete Points in Chapter"
+            if imgui.menu_item(delete_points_label, shortcut=delete_points_shortcut, enabled=can_delete_points)[0]:
+                if can_delete_points and self.context_selected_chapters:
+                    fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
+
+            imgui.separator()
+
+            # === OTHER OPERATIONS ===
             if imgui.menu_item("Start Tracker in Chapter", enabled=can_select_one)[0]:
                 if can_select_one and len(self.context_selected_chapters) == 1:
                     selected_chapter = self.context_selected_chapters[0]
@@ -778,14 +862,6 @@ class VideoNavigationUI:
                         self._start_live_tracking(
                             success_info=f"Tracker started for chapter: {selected_chapter.position_short_name}"
                         )
-
-            imgui.separator()
-
-            # === QUICK CHANGE TYPE (No Dialog) ===
-            if imgui.begin_menu("Change Type", enabled=can_select_one):
-                if can_select_one and self.context_selected_chapters:
-                    self._render_quick_type_change_menu()
-                imgui.end_menu()
 
             can_edit = num_selected == 1
             if imgui.menu_item("Edit Details...", enabled=can_edit)[0]:
@@ -805,40 +881,6 @@ class VideoNavigationUI:
                     except (ValueError, IndexError):
                         self.selected_position_idx_in_dialog = 0
                     self.show_edit_chapter_dialog = True
-
-            imgui.separator()
-
-            # === SELECTION & POINTS ===
-            can_select_points = num_selected > 0
-            select_points_label = f"Select Points ({num_selected})" if num_selected > 1 else "Select Points"
-            if imgui.begin_menu(select_points_label, enabled=can_select_points):
-                if imgui.menu_item("On Timeline 1")[0]:
-                    if hasattr(fs_proc, 'select_points_in_chapters'):
-                        fs_proc.select_points_in_chapters(self.context_selected_chapters, target_timeline='primary')
-                timeline2_visible = self.app.app_state_ui.show_funscript_interactive_timeline2
-                if imgui.menu_item("On Timeline 2", enabled=timeline2_visible)[0]:
-                    if hasattr(fs_proc, 'select_points_in_chapters'):
-                        fs_proc.select_points_in_chapters(self.context_selected_chapters, target_timeline='secondary')
-                if imgui.menu_item("On Both Timelines")[0]:
-                    if hasattr(fs_proc, 'select_points_in_chapters'):
-                        fs_proc.select_points_in_chapters(self.context_selected_chapters, target_timeline='both')
-                imgui.end_menu()
-
-            can_delete = num_selected > 0
-            shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
-            delete_shortcut = shortcuts.get("delete_selected_chapter", "Delete")
-            delete_label = f"Delete Chapter{'s' if num_selected != 1 else ''} ({num_selected})" if num_selected > 1 else "Delete Chapter"
-            if imgui.menu_item(delete_label, shortcut=delete_shortcut, enabled=can_delete)[0]:
-                if can_delete and self.context_selected_chapters:
-                    ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
-                    fs_proc.delete_video_chapters_by_ids(ch_ids)
-                    self.context_selected_chapters.clear()
-
-            can_delete_points = num_selected > 0
-            delete_points_label = f"Delete Points ({num_selected})" if num_selected > 1 else "Delete Points"
-            if imgui.menu_item(delete_points_label, enabled=can_delete_points)[0]:
-                if can_delete_points and self.context_selected_chapters:
-                    fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
 
             imgui.separator()
 
@@ -895,14 +937,6 @@ class VideoNavigationUI:
 
             # === ADVANCED OPERATIONS (Submenu) ===
             if imgui.begin_menu("Advanced"):
-                # Seek to End
-                if imgui.menu_item("Seek to End", enabled=can_select_one)[0]:
-                    if can_select_one:
-                        selected_chapter = self.context_selected_chapters[0]
-                        if self.app.processor:
-                            self.app.processor.seek_video(selected_chapter.end_frame_id)
-                            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-
                 # Set ROI
                 if imgui.menu_item("Set ROI & Point", enabled=can_edit)[0]:
                     if can_edit:

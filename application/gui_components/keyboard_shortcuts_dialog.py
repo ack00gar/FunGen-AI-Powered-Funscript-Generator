@@ -112,6 +112,8 @@ class KeyboardShortcutsDialog:
                 ("set_chapter_end", "Set Chapter End (Out-point)"),
                 ("delete_selected_chapter", "Delete Chapter"),
                 ("delete_selected_chapter_alt", "Delete Chapter (Alt)"),
+                ("delete_points_in_chapter", "Delete Points in Chapter"),
+                ("delete_points_in_chapter_alt", "Delete Points in Chapter (Alt)"),
             ],
             "Add Points": [
                 ("add_point_0", "Add Point at 0%"),
