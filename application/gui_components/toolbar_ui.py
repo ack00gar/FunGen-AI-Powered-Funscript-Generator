@@ -1,16 +1,17 @@
 """
 Toolbar UI Component
 
-Provides a horizontal toolbar with common actions organized in 7 sections:
+Provides a horizontal toolbar with common actions organized into labeled sections:
 
-1. File Operations: New, Open, Save, Export
-2. Edit Operations: Undo/Redo for Timeline 1 & 2
-3. Playback Controls: Play/Pause, Previous/Next Frame
-4. Navigation: Previous/Next Point (↑↓)
-5. Tracking Controls: Start/Stop Tracking (🤖 robot - red when active)
-6. Funscript Actions: Auto-Simplify (🔧), Auto Post-Processing (✨), Ultimate Autotune (🚀)
-7. Features: Streamer control (📡 satellite - only if module available)
-8. View Toggles: Timeline 1/2 (1️⃣2️⃣), Chapter List (📚), 3D Simulator (📈)
+Sections (each with a label above the icons):
+- MODE: Expert/Simple mode toggle (🤓 nerd face)
+- PROJECT: New, Open, Save, Export operations
+- PLAYBACK: Play/Pause, Previous/Next Frame, Speed modes (🚶🐢🐇)
+- TIMELINE EDIT: Undo/Redo for Timeline 1 & 2
+- VIEW: Timeline 1/2 (1️⃣2️⃣), Chapter List (📚), 3D Simulator (📈)
+- TRACKING: Start/Stop Tracking (🤖 robot - red when active)
+- TOOLS: Auto-Simplify (🔧), Auto Post-Processing (✨), Ultimate Autotune (🚀),
+         Streamer (📡 satellite - buyers only), Device Control (🎮 gamepad - buyers only)
 
 Toggle visibility via View menu > Show Toolbar.
 
@@ -33,6 +34,16 @@ class ToolbarUI:
         self.app = app
         self._icon_size = 24  # Base icon size
         self._button_padding = 4
+        self._label_height = 14  # Height for section labels
+        self._label_spacing = 2  # Space between label and buttons
+
+    def get_toolbar_height(self):
+        """Get the total height of the toolbar including labels.
+
+        Returns:
+            int: Total toolbar height in pixels
+        """
+        return self._label_height + self._label_spacing + self._icon_size + (self._button_padding * 2) + 10
 
     def render(self):
         """Render the toolbar below the menu bar."""
@@ -47,7 +58,8 @@ class ToolbarUI:
 
         # Get viewport for positioning
         viewport = imgui.get_main_viewport()
-        toolbar_height = self._icon_size + (self._button_padding * 2) + 8
+        # Get toolbar height (includes label space)
+        toolbar_height = self.get_toolbar_height()
 
         # Create an invisible full-width window for the toolbar
         imgui.set_next_window_position(viewport.pos.x, viewport.pos.y + imgui.get_frame_height())
@@ -91,53 +103,74 @@ class ToolbarUI:
         btn_size = self._icon_size
 
         # --- MODE TOGGLE SECTION ---
+        self._begin_toolbar_section("Mode")
         self._render_mode_toggle_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
 
         imgui.same_line(spacing=12)
         self._render_separator()
         imgui.same_line(spacing=12)
 
         # --- FILE OPERATIONS SECTION ---
+        self._begin_toolbar_section("Project")
         self._render_file_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
 
         imgui.same_line(spacing=12)
         self._render_separator()
         imgui.same_line(spacing=12)
 
         # --- PLAYBACK CONTROLS SECTION ---
+        self._begin_toolbar_section("Playback")
         self._render_playback_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
 
         imgui.same_line(spacing=12)
         self._render_separator()
         imgui.same_line(spacing=12)
 
         # --- EDIT OPERATIONS SECTION (Undo/Redo T1/T2) ---
+        self._begin_toolbar_section("Timeline Edit")
         self._render_edit_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
 
         imgui.same_line(spacing=12)
         self._render_separator()
         imgui.same_line(spacing=12)
 
         # --- VIEW TOGGLES SECTION ---
+        self._begin_toolbar_section("View")
         self._render_view_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
 
         imgui.same_line(spacing=12)
         self._render_separator()
         imgui.same_line(spacing=12)
 
         # --- TRACKING CONTROLS SECTION ---
+        self._begin_toolbar_section("AI Tracking")
         self._render_tracking_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
 
-        imgui.same_line(spacing=12)
-        self._render_separator()
-        imgui.same_line(spacing=12)
+        # --- OPTIONAL TOOLS SECTION (Buyer features - conditional) ---
+        # Check if any optional features exist by calling _check_features_available()
+        # This method is defined in _render_features_section and checks dynamically
+        # The actual rendering happens inside _render_features_section
+        from application.utils.feature_detection import is_feature_available
 
-        # --- FEATURES SECTION (Streamer, Device Control - conditional) ---
-        has_features = self._render_features_section(icon_mgr, btn_size)
-        if has_features:
+        # Quick check for any known optional features
+        # Each feature module handles its own availability check
+        has_any_optional_features = (is_feature_available("streamer") or
+                                     is_feature_available("device_control"))
+
+        if has_any_optional_features:
             imgui.same_line(spacing=12)
             self._render_separator()
             imgui.same_line(spacing=12)
+
+            self._begin_toolbar_section("Tools")
+            self._render_features_section(icon_mgr, btn_size)
+            self._end_toolbar_section()
 
         imgui.pop_style_color(3)
         imgui.pop_style_var(2)
@@ -148,7 +181,8 @@ class ToolbarUI:
         """Render a vertical separator line."""
         draw_list = imgui.get_window_draw_list()
         cursor_pos = imgui.get_cursor_screen_pos()
-        height = self._icon_size + (self._button_padding * 2)
+        # Separator should span full height including label area
+        height = self._label_height + self._label_spacing + self._icon_size + (self._button_padding * 2)
 
         # Draw vertical line
         color = imgui.get_color_u32_rgba(0.5, 0.5, 0.5, 0.5)
@@ -160,6 +194,63 @@ class ToolbarUI:
 
         # Advance cursor by 1 pixel for the line
         imgui.dummy(1, height)
+
+    def _begin_toolbar_section(self, label_text):
+        """Begin a toolbar section with a centered label above the buttons."""
+        # Start outer group for the entire section
+        imgui.begin_group()
+
+        # Store starting cursor position
+        self._section_start_x = imgui.get_cursor_pos_x()
+
+        # We'll draw the label after we know the section width
+        # For now, just reserve space for the label
+        imgui.dummy(0, self._label_height)  # Reserve vertical space for label
+
+        # Store this label text for later rendering
+        self._pending_section_label = label_text
+
+        # Start inner group for buttons (this will give us the section width)
+        imgui.begin_group()
+
+    def _end_toolbar_section(self):
+        """End a toolbar section and render the centered label."""
+        # End the button group
+        imgui.end_group()
+
+        # Get the width of the button group we just rendered
+        section_size = imgui.get_item_rect_size()
+        section_width = section_size[0]
+
+        # End outer group
+        imgui.end_group()
+
+        # Now render the label centered above the section
+        if hasattr(self, '_pending_section_label') and self._pending_section_label:
+            label_text = self._pending_section_label
+            text_size = imgui.calc_text_size(label_text)
+
+            # Calculate centered position
+            label_x = self._section_start_x + (section_width - text_size[0]) / 2
+
+            # Get current cursor position to restore later
+            current_pos = imgui.get_cursor_pos()
+
+            # Draw label at calculated centered position (above the buttons)
+            draw_list = imgui.get_window_draw_list()
+            # Position is relative to window, need screen coordinates
+            window_pos = imgui.get_window_position()
+            label_y = window_pos[1] + 4  # Small top padding
+
+            # Render centered label text
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.55, 0.55, 0.55, 1.0)
+            draw_list.add_text(window_pos[0] + label_x, label_y,
+                             imgui.get_color_u32_rgba(0.55, 0.55, 0.55, 1.0),
+                             label_text)
+            imgui.pop_style_color()
+
+            # Clear the pending label
+            self._pending_section_label = None
 
     def _render_mode_toggle_section(self, icon_mgr, btn_size):
         """Render Expert/Simple mode toggle button."""
