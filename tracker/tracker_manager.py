@@ -676,11 +676,15 @@ class TrackerManager:
                         position_info = POSITION_INFO_MAPPING.get(position_short_name, {})
                         category = position_info.get('category', 'Position')  # Default to Position if not in mapping
 
+                        self.logger.debug(f"Frame {current_frame}: Chapter '{position_short_name}', Category '{category}', Scripting: {category != 'Not Relevant'}")
+
                         if category == "Not Relevant":
                             return  # Not Relevant category = don't script
+                    else:
+                        self.logger.debug(f"Frame {current_frame}: No chapter, Scripting: YES")
                     # Otherwise (no chapter or Position category) = continue scripting
             except Exception as e:
-                self.logger.debug(f"Could not check chapter type for scripting: {e}")
+                self.logger.warning(f"Could not check chapter type for scripting: {e}")
                 # If we can't determine, continue adding actions (fail open)
 
         try:
