@@ -655,9 +655,28 @@ class TrackerManager:
         return processed_frame, action_log
 
     def _add_actions_to_funscript(self, action_log: Optional[List[Dict]]):
-        """Add action log entries to the funscript."""
+        """Add action log entries to the funscript, skipping 'Not Relevant' category chapters."""
         if not action_log or not self.funscript:
             return
+
+        # Check if we're in a "Not Relevant" category chapter - if so, skip scripting
+        if hasattr(self, 'app') and self.app:
+            try:
+                from config.constants import ChapterSegmentType
+                fs_proc = getattr(self.app, 'funscript_processor', None)
+                processor = getattr(self.app, 'processor', None)
+
+                if fs_proc and processor:
+                    current_frame = processor.current_frame_index
+                    chapter_at_frame = fs_proc.get_chapter_at_frame(current_frame)
+
+                    # Only skip if we're IN a "Not Relevant" category chapter
+                    if chapter_at_frame and chapter_at_frame.segment_type == ChapterSegmentType.NOT_RELEVANT.value:
+                        return  # Not Relevant category = don't script
+                    # Otherwise (no chapter or Position category) = continue scripting
+            except Exception as e:
+                self.logger.debug(f"Could not check chapter type for scripting: {e}")
+                # If we can't determine, continue adding actions (fail open)
 
         try:
             for action in action_log:
