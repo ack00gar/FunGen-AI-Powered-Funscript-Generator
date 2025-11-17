@@ -215,17 +215,22 @@ class AppEventHandlers:
 
         # Auto-skip "Not Relevant" category chapters when starting tracking
         if self.app.processor and self.app.funscript_processor:
-            from config.constants import ChapterSegmentType
+            from config.constants import POSITION_INFO_MAPPING
             current_frame = self.app.processor.current_frame_index
             chapter_at_cursor = self.app.funscript_processor.get_chapter_at_frame(current_frame)
 
             should_skip = False
             skip_reason = ""
 
-            # Only skip if we're starting in a "Not Relevant" category chapter
-            if chapter_at_cursor and chapter_at_cursor.segment_type == ChapterSegmentType.NOT_RELEVANT.value:
-                should_skip = True
-                skip_reason = f"Skipping 'Not Relevant' chapter '{chapter_at_cursor.position_short_name}'"
+            # Determine category based on position_short_name (reliable for old and new chapters)
+            if chapter_at_cursor:
+                position_short_name = chapter_at_cursor.position_short_name
+                position_info = POSITION_INFO_MAPPING.get(position_short_name, {})
+                category = position_info.get('category', 'Position')  # Default to Position if not in mapping
+
+                if category == "Not Relevant":
+                    should_skip = True
+                    skip_reason = f"Skipping 'Not Relevant' chapter '{chapter_at_cursor.position_short_name}'"
 
             if should_skip:
                 # Find next Position category chapter
@@ -450,8 +455,6 @@ class AppEventHandlers:
         Returns:
             Next relevant VideoSegment or None if none found
         """
-        from config.constants import ChapterSegmentType
-
         if not self.app.funscript_processor:
             return None
 
@@ -462,13 +465,18 @@ class AppEventHandlers:
         # Sort chapters by start frame
         sorted_chapters = sorted(chapters, key=lambda c: c.start_frame_id)
 
-        # Find chapters that start after current frame and are relevant
+        # Find chapters that start after current frame and are relevant (Position category)
+        from config.constants import POSITION_INFO_MAPPING
         for chapter in sorted_chapters:
             if chapter.start_frame_id > current_frame:
-                # Skip NR chapters
-                if chapter.segment_type == ChapterSegmentType.NOT_RELEVANT.value:
+                # Determine category based on position_short_name
+                position_info = POSITION_INFO_MAPPING.get(chapter.position_short_name, {})
+                category = position_info.get('category', 'Position')
+
+                # Skip "Not Relevant" category chapters
+                if category == "Not Relevant":
                     continue
-                # This is a relevant chapter
+                # This is a Position category chapter
                 return chapter
 
         return None
