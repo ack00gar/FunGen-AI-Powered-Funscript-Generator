@@ -815,11 +815,30 @@ class VideoNavigationUI:
 
             imgui.separator()
 
-            # === CHANGE TYPE (with categories and user types) ===
+            # === CHANGE TYPE & EDIT ===
             if imgui.begin_menu("Change Type", enabled=can_select_one):
                 if can_select_one and self.context_selected_chapters:
                     self._render_quick_type_change_menu()
                 imgui.end_menu()
+
+            can_edit = num_selected == 1
+            if imgui.menu_item("Edit Details...", enabled=can_edit)[0]:
+                if can_edit and self.context_selected_chapters:
+                    chapter_obj_to_edit = self.context_selected_chapters[0]
+                    self.chapter_to_edit_id = chapter_obj_to_edit.unique_id
+                    self.chapter_edit_data = {
+                        "start_frame_str": str(chapter_obj_to_edit.start_frame_id),
+                        "end_frame_str": str(chapter_obj_to_edit.end_frame_id),
+                        "segment_type": chapter_obj_to_edit.segment_type,
+                        "position_short_name_key": chapter_obj_to_edit.position_short_name,
+                        "source": chapter_obj_to_edit.source
+                    }
+                    try:
+                        self.selected_position_idx_in_dialog = self.position_short_name_keys.index(
+                            chapter_obj_to_edit.position_short_name)
+                    except (ValueError, IndexError):
+                        self.selected_position_idx_in_dialog = 0
+                    self.show_edit_chapter_dialog = True
 
             imgui.separator()
 
@@ -862,25 +881,6 @@ class VideoNavigationUI:
                         self._start_live_tracking(
                             success_info=f"Tracker started for chapter: {selected_chapter.position_short_name}"
                         )
-
-            can_edit = num_selected == 1
-            if imgui.menu_item("Edit Details...", enabled=can_edit)[0]:
-                if can_edit and self.context_selected_chapters:
-                    chapter_obj_to_edit = self.context_selected_chapters[0]
-                    self.chapter_to_edit_id = chapter_obj_to_edit.unique_id
-                    self.chapter_edit_data = {
-                        "start_frame_str": str(chapter_obj_to_edit.start_frame_id),
-                        "end_frame_str": str(chapter_obj_to_edit.end_frame_id),
-                        "segment_type": chapter_obj_to_edit.segment_type,
-                        "position_short_name_key": chapter_obj_to_edit.position_short_name,
-                        "source": chapter_obj_to_edit.source
-                    }
-                    try:
-                        self.selected_position_idx_in_dialog = self.position_short_name_keys.index(
-                            chapter_obj_to_edit.position_short_name)
-                    except (ValueError, IndexError):
-                        self.selected_position_idx_in_dialog = 0
-                    self.show_edit_chapter_dialog = True
 
             imgui.separator()
 
