@@ -28,11 +28,15 @@ class ChapterTypeManagerUI:
         self.edit_mode = False  # True when editing a type
 
         # Edit/Create form data
+        from config.constants import ChapterSegmentType
         self.form_short_name = ""
         self.form_long_name = ""
         self.form_color = [1.0, 1.0, 1.0, 1.0]  # RGBA
-        self.form_category = "Custom"
+        self.form_category = ChapterSegmentType.get_default_for_new_type()
         self.form_error = ""
+
+        # Category dropdown state
+        self.selected_category_idx = 0  # Default to first category
 
         # Filter/view options
         self.show_builtin = True
@@ -260,13 +264,29 @@ class ChapterTypeManagerUI:
 
         imgui.spacing()
 
-        # Category
+        # Category dropdown (using ChapterSegmentType)
+        from config.constants import ChapterSegmentType
+        category_options = ChapterSegmentType.get_user_category_options()
+
+        # Sync selected index with form_category
+        try:
+            self.selected_category_idx = category_options.index(self.form_category)
+        except ValueError:
+            self.selected_category_idx = 0
+            self.form_category = category_options[0]
+
         imgui.text("Category:")
         imgui.push_item_width(-1)
-        _, self.form_category = imgui.input_text("##category", self.form_category, 30)
+        clicked_category, self.selected_category_idx = imgui.combo(
+            "##category",
+            self.selected_category_idx,
+            category_options
+        )
+        if clicked_category:
+            self.form_category = category_options[self.selected_category_idx]
         imgui.pop_item_width()
         if imgui.is_item_hovered():
-            imgui.set_tooltip("e.g., Custom, Position, Transition")
+            imgui.set_tooltip("Position (scripted) or Not Relevant (non-scripted)")
 
         imgui.spacing()
 
@@ -303,17 +323,20 @@ class ChapterTypeManagerUI:
 
     def _start_create_new_type(self):
         """Start creating a new custom type."""
+        from config.constants import ChapterSegmentType
         self.selected_type = None
         self.edit_mode = True
         self.form_short_name = ""
         self.form_long_name = ""
         self.form_color = [0.5, 0.5, 1.0, 1.0]  # Default blue
-        self.form_category = "Custom"
+        self.form_category = ChapterSegmentType.get_default_for_new_type()
         self.form_error = ""
+        self.selected_category_idx = 0  # Reset to default
 
     def _start_edit_type(self):
         """Start editing the selected type."""
         from application.classes.chapter_type_manager import get_chapter_type_manager
+        from config.constants import ChapterSegmentType
         type_mgr = get_chapter_type_manager()
 
         if not type_mgr or not self.selected_type:
@@ -327,10 +350,17 @@ class ChapterTypeManagerUI:
 
         self.edit_mode = True
         self.form_long_name = info.get("long_name", "")
-        self.form_category = info.get("category", "Custom")
+        self.form_category = info.get("category", ChapterSegmentType.get_default_for_new_type())
         color = info.get("color", [1.0, 1.0, 1.0, 1.0])
         self.form_color = list(color)  # Copy
         self.form_error = ""
+
+        # Sync category dropdown index
+        category_options = ChapterSegmentType.get_user_category_options()
+        try:
+            self.selected_category_idx = category_options.index(self.form_category)
+        except ValueError:
+            self.selected_category_idx = 0
 
     def _save_type(self, type_mgr, is_new: bool):
         """Save the type (create or update)."""
