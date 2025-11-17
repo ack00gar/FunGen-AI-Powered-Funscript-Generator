@@ -710,9 +710,9 @@ class ControlPanelUI:
             with _DisabledScope(disable_after):
 
                 self._render_execution_progress_display()
-            
-        # Always show processing speed controls as they affect basic video playback
-        self._render_processing_speed_controls(app_state)
+
+        # Processing speed controls moved to toolbar for better accessibility
+        # self._render_processing_speed_controls(app_state)
 
         open_, _ = imgui.collapsing_header(
             "Tracking##SimpleTracking",

@@ -447,6 +447,40 @@ class ToolbarUI:
                 app_state.show_video_feed = not app_state.show_video_feed
                 app.app_settings.set("show_video_feed", app_state.show_video_feed)
 
+        imgui.same_line()
+
+        # Playback Speed Mode buttons
+        from config.constants import ProcessingSpeedMode
+        current_speed_mode = app_state.selected_processing_speed_mode
+
+        # Real Time button
+        if current_speed_mode == ProcessingSpeedMode.REALTIME:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)  # Green tint when active
+        if self._toolbar_button(icon_mgr, 'speed-realtime.png', btn_size, "Real Time Speed (matches video FPS)"):
+            app_state.selected_processing_speed_mode = ProcessingSpeedMode.REALTIME
+        if current_speed_mode == ProcessingSpeedMode.REALTIME:
+            imgui.pop_style_color()
+
+        imgui.same_line()
+
+        # Slow-mo button
+        if current_speed_mode == ProcessingSpeedMode.SLOW_MOTION:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)  # Green tint when active
+        if self._toolbar_button(icon_mgr, 'speed-slowmo.png', btn_size, "Slow Motion (10 FPS)"):
+            app_state.selected_processing_speed_mode = ProcessingSpeedMode.SLOW_MOTION
+        if current_speed_mode == ProcessingSpeedMode.SLOW_MOTION:
+            imgui.pop_style_color()
+
+        imgui.same_line()
+
+        # Max Speed button
+        if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.2, 1.0)  # Green tint when active
+        if self._toolbar_button(icon_mgr, 'speed-max.png', btn_size, "Max Speed (no frame delay)"):
+            app_state.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
+        if current_speed_mode == ProcessingSpeedMode.MAX_SPEED:
+            imgui.pop_style_color()
+
     def _render_navigation_section(self, icon_mgr, btn_size):
         """Render navigation buttons (points and chapters)."""
         app = self.app
