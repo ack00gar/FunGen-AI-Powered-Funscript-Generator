@@ -590,6 +590,11 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/eraser.png': 'https://em-content.zobj.net/source/apple/391/eraser_1f9fd.png',  # 🧽 eraser for clear chapters
     'ui/icons/nerd-face.png': 'https://em-content.zobj.net/source/apple/391/nerd-face_1f913.png',  # 🤓 nerd face for Expert/Simple mode toggle
 
+    # Playback speed mode indicators
+    'ui/icons/speed-realtime.png': 'https://em-content.zobj.net/source/apple/391/person-walking_1f6b6.png',  # 🚶 person walking for Real Time
+    'ui/icons/speed-slowmo.png': 'https://em-content.zobj.net/source/apple/391/turtle_1f422.png',  # 🐢 turtle for Slow-mo
+    'ui/icons/speed-max.png': 'https://em-content.zobj.net/source/apple/391/rabbit_1f407.png',  # 🐇 rabbit for Max Speed
+
     # Visualization/analysis indicators
     'ui/icons/chart-increasing.png': 'https://em-content.zobj.net/source/apple/391/chart-increasing_1f4c8.png',  # 📈 chart for 3D simulator
 }
