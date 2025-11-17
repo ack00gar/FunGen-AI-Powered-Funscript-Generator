@@ -213,9 +213,8 @@ class AppEventHandlers:
         self.app.tracker.start_tracking()
         self.app.processor.set_tracker_processing_enabled(True)
 
-        # Auto-skip NR chapters and unchaptered sections if enabled in settings
-        skip_nr_enabled = self.app.app_settings.get("skip_nr_chapters_on_tracking", True)
-        if skip_nr_enabled and self.app.processor and self.app.funscript_processor:
+        # Auto-skip "Not Relevant" category chapters and unchaptered sections
+        if self.app.processor and self.app.funscript_processor:
             from config.constants import ChapterSegmentType
             current_frame = self.app.processor.current_frame_index
             chapter_at_cursor = self.app.funscript_processor.get_chapter_at_frame(current_frame)
