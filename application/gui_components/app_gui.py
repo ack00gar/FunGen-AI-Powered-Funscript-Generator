@@ -1864,10 +1864,10 @@ class GUI:
         else:
             self.main_menu_bar_height = imgui.get_frame_height_with_spacing() if self.main_menu else 0
 
-        # Account for toolbar height (icon size + padding + spacing) - only if shown
+        # Account for toolbar height (includes section labels) - only if shown
         if not hasattr(app_state, 'show_toolbar'):
             app_state.show_toolbar = True
-        toolbar_height = (self.toolbar_ui._icon_size + (self.toolbar_ui._button_padding * 2) + 8) if app_state.show_toolbar else 0
+        toolbar_height = self.toolbar_ui.get_toolbar_height() if app_state.show_toolbar else 0
 
         if not app_state.gauge_pos_initialized and self.main_menu_bar_height > 0:
             app_state.initialize_gauge_default_y(self.main_menu_bar_height + toolbar_height)
