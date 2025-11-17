@@ -149,6 +149,8 @@ DEFAULT_SHORTCUTS = {
     "delete_selected_point_alt": "BACKSPACE",
     "delete_selected_chapter": "DELETE",
     "delete_selected_chapter_alt": "BACKSPACE",
+    "delete_points_in_chapter": "SHIFT+DELETE",
+    "delete_points_in_chapter_alt": "SHIFT+BACKSPACE",
     "select_all_points": f"{MOD_KEY}+A",
     "deselect_all_points": f"{MOD_KEY}+D",
     "undo_timeline1": f"{MOD_KEY}+Z",
@@ -246,14 +248,26 @@ POSE_STABILITY_THRESHOLD = 2.5
 
 DEFAULT_CHAPTER_FPS = 30.0
 POSITION_INFO_MAPPING = {
-    "NR": {"long_name": "Not Relevant", "short_name": "NR"},
-    "C-Up": {"long_name": "Close Up", "short_name": "C-Up"},
-    "CG/Miss.": {"long_name": "Cowgirl / Missionary", "short_name": "CG/Miss."},
-    "R.CG/Dog.": {"long_name": "Rev. Cowgirl / Doggy", "short_name": "R.CG/Dog."},
-    "BJ": {"long_name": "Blowjob", "short_name": "BJ"},
-    "HJ": {"long_name": "Handjob", "short_name": "HJ"},
-    "FootJ": {"long_name": "Footjob", "short_name": "FootJ"},
-    "BoobJ": {"long_name": "Boobjob", "short_name": "BoobJ"},
+    # Scripted positions (category: Position)
+    # Combined types (auto-detected by AI)
+    "CG/Miss.": {"long_name": "Cowgirl / Missionary", "short_name": "CG/Miss.", "category": "Position"},
+    "R.CG/Dog.": {"long_name": "Rev. Cowgirl / Doggy", "short_name": "R.CG/Dog.", "category": "Position"},
+    # Individual types (user can manually categorize)
+    "CG": {"long_name": "Cowgirl", "short_name": "CG", "category": "Position"},
+    "Miss.": {"long_name": "Missionary", "short_name": "Miss.", "category": "Position"},
+    "R.CG": {"long_name": "Reverse Cowgirl", "short_name": "R.CG", "category": "Position"},
+    "Dog.": {"long_name": "Doggy", "short_name": "Dog.", "category": "Position"},
+    # Other positions
+    "BJ": {"long_name": "Blowjob", "short_name": "BJ", "category": "Position"},
+    "HJ": {"long_name": "Handjob", "short_name": "HJ", "category": "Position"},
+    "FootJ": {"long_name": "Footjob", "short_name": "FootJ", "category": "Position"},
+    "BoobJ": {"long_name": "Boobjob", "short_name": "BoobJ", "category": "Position"},
+    # Non-scripted positions (category: Not Relevant)
+    "NR": {"long_name": "Not Relevant", "short_name": "NR", "category": "Not Relevant"},
+    "C-Up": {"long_name": "Close Up", "short_name": "C-Up", "category": "Not Relevant"},
+    "Intro": {"long_name": "Intro", "short_name": "Intro", "category": "Not Relevant"},
+    "Outro": {"long_name": "Outro", "short_name": "Outro", "category": "Not Relevant"},
+    "Trans": {"long_name": "Transition", "short_name": "Trans", "category": "Not Relevant"},
 }
 
 # Chapter/Segment metadata enums
@@ -283,6 +297,16 @@ class ChapterSegmentType(Enum):
     def get_all_names(cls):
         """Get list of all segment type names (for dropdowns)."""
         return [member.name for member in cls]
+
+    @classmethod
+    def get_user_category_options(cls):
+        """Get simplified category options for user-facing UI (Chapter Type Manager)."""
+        return [cls.POSITION.value, cls.NOT_RELEVANT.value]
+
+    @classmethod
+    def get_default_for_new_type(cls):
+        """Get the default category for creating new custom types."""
+        return cls.POSITION.value
 
 
 class ChapterSource(Enum):

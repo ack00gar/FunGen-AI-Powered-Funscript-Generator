@@ -169,9 +169,16 @@ class SegmentColors:
     NR = CurrentTheme.SEGMENT_NR
     CG_MISS = CurrentTheme.SEGMENT_CG_MISS
     REV_CG_DOG = CurrentTheme.SEGMENT_REV_CG_DOG
+    CG = CurrentTheme.SEGMENT_CG
+    MISS = CurrentTheme.SEGMENT_MISS
+    REV_CG = CurrentTheme.SEGMENT_REV_CG
+    DOG = CurrentTheme.SEGMENT_DOG
     FOOTJ = CurrentTheme.SEGMENT_FOOTJ
     BOOBJ = CurrentTheme.SEGMENT_BOOBJ
     CLOSEUP = CurrentTheme.SEGMENT_CLOSEUP
+    INTRO = CurrentTheme.SEGMENT_INTRO
+    OUTRO = CurrentTheme.SEGMENT_OUTRO
+    TRANSITION = CurrentTheme.SEGMENT_TRANSITION
     DEFAULT = CurrentTheme.SEGMENT_DEFAULT
 
 

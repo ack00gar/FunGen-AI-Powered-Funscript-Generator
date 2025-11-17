@@ -16,9 +16,16 @@ class VideoSegment:
         "NR": SegmentColors.NR,
         "CG/Miss.": SegmentColors.CG_MISS,
         "R.CG/Dog.": SegmentColors.REV_CG_DOG,
+        "CG": SegmentColors.CG,
+        "Miss.": SegmentColors.MISS,
+        "R.CG": SegmentColors.REV_CG,
+        "Dog.": SegmentColors.DOG,
         "FootJ": SegmentColors.FOOTJ,
         "BoobJ": SegmentColors.BOOBJ,
         "C-Up": SegmentColors.CLOSEUP,
+        "Intro": SegmentColors.INTRO,
+        "Outro": SegmentColors.OUTRO,
+        "Trans": SegmentColors.TRANSITION,
     }
     
     def __init__(self, start_frame_id: int, end_frame_id: int, class_id: Optional[int], 

@@ -156,9 +156,16 @@ class DarkTheme:
     SEGMENT_NR = (*GRAY[:3], 0.7)
     SEGMENT_CG_MISS = (0.4, 0.4, 0.9, 0.8) # blue
     SEGMENT_REV_CG_DOG = (*BROWN[:3], 0.8)
+    SEGMENT_CG = (0.3, 0.5, 0.9, 0.8)  # lighter blue for Cowgirl
+    SEGMENT_MISS = (0.5, 0.3, 0.9, 0.8)  # purple-blue for Missionary
+    SEGMENT_REV_CG = (0.7, 0.5, 0.3, 0.8)  # lighter brown for Reverse Cowgirl
+    SEGMENT_DOG = (0.5, 0.4, 0.2, 0.8)  # darker brown for Doggy
     SEGMENT_FOOTJ = (*YELLOW_LIGHT[:3], 0.8)
     SEGMENT_BOOBJ = (*PINK[:3], 0.8)
     SEGMENT_CLOSEUP = (*PURPLE[:3], 0.8)
+    SEGMENT_INTRO = (0.5, 0.6, 0.7, 0.7)  # light gray-blue
+    SEGMENT_OUTRO = (0.6, 0.5, 0.6, 0.7)  # light gray-purple
+    SEGMENT_TRANSITION = (0.6, 0.6, 0.5, 0.7)  # light gray-yellow
     SEGMENT_DEFAULT = TRANSPARENT
 
     # Control Panel Colors
