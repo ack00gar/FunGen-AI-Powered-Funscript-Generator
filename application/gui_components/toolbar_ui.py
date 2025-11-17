@@ -557,23 +557,31 @@ class ToolbarUI:
             self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Jump to End (No video)")
             imgui.pop_style_var()
 
-        imgui.same_line()
+        # Separator before video/speed controls (same style as between Timeline 1 and 2)
+        imgui.same_line(spacing=12)
+        self._render_separator()
+        imgui.same_line(spacing=12)
 
-        # Show/Hide Video button (blue when visible)
+        # Show/Hide Video button (green when showing, red when hidden)
         app_state = app.app_state_ui
         show_video = app_state.show_video_feed if hasattr(app_state, 'show_video_feed') else True
 
+        # Green when video is showing, red when hidden
         if show_video:
-            self._apply_button_color_blue()
+            self._apply_button_color_green()
+        else:
+            self._apply_button_color_red()
 
+        # Icon shows the action: 18+ icon to hide video, camera icon to show video
+        icon_name = 'video-hide.png' if show_video else 'video-show.png'
         tooltip = "Hide Video (F)" if show_video else "Show Video (F)"
-        if self._toolbar_button(icon_mgr, 'video-camera.png', btn_size, tooltip):
+        if self._toolbar_button(icon_mgr, icon_name, btn_size, tooltip):
             if hasattr(app_state, 'show_video_feed'):
                 app_state.show_video_feed = not app_state.show_video_feed
                 app.app_settings.set("show_video_feed", app_state.show_video_feed)
 
-        if show_video:
-            self._apply_button_color_default()
+        # Restore default colors
+        self._apply_button_color_default()
 
         imgui.same_line()
 
