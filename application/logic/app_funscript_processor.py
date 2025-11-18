@@ -6,7 +6,7 @@ from bisect import bisect_left, bisect_right
 import numpy as np
 from scipy.signal import correlate, find_peaks
 
-from application.utils import VideoSegment, _format_time
+from utils.video import VideoSegment, _format_time
 from funscript import DualAxisFunscript
 from config import constants
 from config.constants import ChapterSource

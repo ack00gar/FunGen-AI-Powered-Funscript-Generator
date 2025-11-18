@@ -1,7 +1,7 @@
 from typing import Tuple
 
 
-from application.utils import VideoSegment, _format_time
+from utils.video import VideoSegment, _format_time
 from config.constants import DEFAULT_CHAPTER_FPS
 
 

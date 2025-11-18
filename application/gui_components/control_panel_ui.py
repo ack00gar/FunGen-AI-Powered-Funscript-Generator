@@ -1,7 +1,7 @@
 import imgui
 import os
 import config
-from application.utils import get_icon_texture_manager, primary_button_style, destructive_button_style
+from utils.ui import get_icon_texture_manager, primary_button_style, destructive_button_style
 
 # Import dynamic tracker discovery
 try:

@@ -5,7 +5,8 @@ import msgpack
 import time
 from typing import List, Optional, Dict, Tuple, Any
 
-from application.utils import VideoSegment, check_write_access
+from utils.system import check_write_access
+from utils.video import VideoSegment
 from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, FUNSCRIPT_METADATA_VERSION
 
 class AppFileManager:

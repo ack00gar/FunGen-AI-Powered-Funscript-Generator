@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 import config.constants as constants
 from config.element_group_colors import VideoDisplayColors
-from application.utils import get_logo_texture_manager, get_icon_texture_manager
+from utils.ui import get_logo_texture_manager, get_icon_texture_manager
 
 
 class VideoDisplayUI:

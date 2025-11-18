@@ -2,7 +2,8 @@ import imgui
 import logging
 from typing import Optional
 
-from application.utils import _format_time, VideoSegment, get_icon_texture_manager, primary_button_style, destructive_button_style
+from utils.ui import get_icon_texture_manager, primary_button_style, destructive_button_style
+from utils.video import _format_time, VideoSegment
 from config.constants import POSITION_INFO_MAPPING, DEFAULT_CHAPTER_FPS
 from config.element_group_colors import VideoNavigationColors
 from config.constants_colors import CurrentTheme

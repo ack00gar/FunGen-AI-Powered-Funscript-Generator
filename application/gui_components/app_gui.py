@@ -14,7 +14,8 @@ from collections import deque
 from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
-from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
+from utils.processing import ProcessingThreadManager, TaskType, TaskPriority
+from utils.video import _format_time
 
 
 class GUI:

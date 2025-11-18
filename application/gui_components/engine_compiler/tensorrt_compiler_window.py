@@ -4,7 +4,7 @@ import os
 import time
 from application.gui_components.engine_compiler.tensorrt_validation_panel import ValidationPanel
 from application.logic.tensorrt_compiler_logic import TensorRTCompilerLogic
-from application.utils import primary_button_style, destructive_button_style
+from utils.ui import primary_button_style, destructive_button_style
 from config.constants import TENSORRT_OUTPUT_DISPLAY_HEIGHT
 from config.element_group_colors import CompilerToolColors
 

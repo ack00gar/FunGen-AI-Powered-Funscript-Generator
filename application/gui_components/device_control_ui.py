@@ -14,7 +14,7 @@ import time
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
-from application.utils import primary_button_style, destructive_button_style
+from utils.ui import primary_button_style, destructive_button_style
 
 # Device control imports (conditional)
 try:
