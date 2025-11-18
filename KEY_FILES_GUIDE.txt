@@ -1,0 +1,639 @@
+================================================================================
+FUNGEN - KEY FILES GUIDE
+================================================================================
+
+This document provides a detailed description of the most important files
+in the FunGen codebase and their purposes.
+
+================================================================================
+SECTION 1: ENTRY POINTS AND MAIN ORCHESTRATION
+================================================================================
+
+FILE: main.py (257 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/main.py
+PURPOSE: Application entry point and mode dispatcher
+RESPONSIBILITIES:
+  - Bootstrap logging initialization
+  - Dependency verification and installation
+  - Command-line argument parsing
+  - Route to GUI mode or CLI mode
+KEY FUNCTIONS:
+  - main() - Entry point that orchestrates startup
+  - run_gui() - Launches interactive GUI mode
+  - run_cli(args) - Runs batch processing in CLI mode
+  - _setup_bootstrap_logger() - Early logging setup
+DEPENDENCIES: All modules (via imports at runtime)
+
+FILE: application/logic/app_logic.py (2,334 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/logic/app_logic.py
+PURPOSE: Core application orchestration and state management
+RESPONSIBILITIES:
+  - Central state holder for the entire application
+  - Coordinates between GUI/CLI and processing modules
+  - Initializes tracker system, video processors, detection pipeline
+  - Manages settings, projects, and application lifecycle
+  - Provides both GUI and CLI interfaces
+KEY CLASSES:
+  - ApplicationLogic - Main orchestrator class
+KEY METHODS:
+  - __init__() - Initialize all subsystems
+  - run_cli() - Entry point for CLI processing
+  - Various property accessors for state
+DEPENDENCIES:
+  - tracker.tracker_manager
+  - video.video_processor
+  - detection.cd.* (all stages)
+  - application.classes.*
+  - application.logic.* (sub-modules)
+
+================================================================================
+SECTION 2: PROCESSING PIPELINE ORCHESTRATION
+================================================================================
+
+FILE: application/logic/app_stage_processor.py (2,357 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/logic/app_stage_processor.py
+PURPOSE: Coordinates the 3-stage detection and tracking pipeline
+RESPONSIBILITIES:
+  - Manages execution of Stage 1 (Contact Detection)
+  - Manages execution of Stage 2 (Contact Analysis)
+  - Manages execution of Stage 3 (Tracking/Fusion)
+  - Handles checkpointing and resume
+  - Provides progress callbacks to GUI/CLI
+  - Manages intermediate results
+KEY CLASSES:
+  - AppStageProcessor - Pipeline orchestrator
+KEY METHODS:
+  - process_video() - Main entry for video processing
+  - run_stage_1() - Execute contact detection
+  - run_stage_2() - Execute contact analysis
+  - run_stage_3() - Execute tracking fusion
+  - handle_callbacks() - Progress reporting
+DEPENDENCIES:
+  - detection.cd.stage_1_cd
+  - detection.cd.stage_2_cd
+  - detection.cd.stage_3_mixed_processor
+  - detection.cd.stage_3_of_processor
+  - tracker.tracker_manager
+
+FILE: detection/cd/stage_1_cd.py (1,061 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/detection/cd/stage_1_cd.py
+PURPOSE: Initial contact region detection from video frames
+RESPONSIBILITIES:
+  - Frame preprocessing and normalization
+  - Contour detection algorithms
+  - Motion region identification
+  - Region bounding box creation
+INPUT: Video frames
+OUTPUT: Contact region masks, bounding boxes
+KEY FUNCTIONS:
+  - detect_contact_regions() - Main detection function
+  - preprocess_frame() - Frame preparation
+  - find_contours() - OpenCV contour finding
+
+FILE: detection/cd/stage_2_cd.py (2,698 lines) **[LARGEST DETECTION FILE]**
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/detection/cd/stage_2_cd.py
+PURPOSE: Time-series analysis and signal processing of contact regions
+RESPONSIBILITIES:
+  - Process detected regions over time
+  - Signal smoothing and enhancement
+  - Peak detection and valley identification
+  - SQLite storage of intermediate results
+  - Statistical analysis of contact patterns
+INPUT: Contact region detections over time
+OUTPUT: Quantified contact strength/position signals
+KEY FUNCTIONS:
+  - analyze_contact_sequence() - Main analysis function
+  - smooth_signal() - Signal processing
+  - extract_peaks() - Peak detection
+
+FILE: detection/cd/stage_3_mixed_processor.py (1,097 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/detection/cd/stage_3_mixed_processor.py
+PURPOSE: Fusion of optical flow and detection data
+RESPONSIBILITIES:
+  - Combine optical flow results with detection
+  - Motion fusion algorithms
+  - Conflict resolution between modalities
+  - Final position mapping
+INPUT: Optical flow data, detection results
+OUTPUT: Consolidated position-time mappings
+
+FILE: detection/cd/stage_3_of_processor.py (596 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/detection/cd/stage_3_of_processor.py
+PURPOSE: Pure optical flow-based motion tracking
+RESPONSIBILITIES:
+  - Calculate optical flow between frames
+  - Estimate motion vectors
+  - Smooth motion trajectories
+  - Generate position signals
+
+================================================================================
+SECTION 3: TRACKER SYSTEM
+================================================================================
+
+FILE: tracker/tracker_manager.py (983 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/tracker/tracker_manager.py
+PURPOSE: Orchestration and lifecycle management of tracker implementations
+RESPONSIBILITIES:
+  - Discover available trackers
+  - Instantiate tracker objects
+  - Manage tracker execution
+  - Handle results collection
+  - Provide tracker metadata to UI
+KEY CLASSES:
+  - TrackerManager - Main orchestrator
+KEY METHODS:
+  - create_tracker() - Instantiate a tracker
+  - run_tracker() - Execute tracker on data
+  - get_available_trackers() - List available implementations
+DEPENDENCIES:
+  - tracker.tracker_modules.* (all tracker implementations)
+
+FILE: tracker/tracker_modules/__init__.py
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/tracker/tracker_modules/__init__.py
+PURPOSE: Auto-discovery registry for all tracker implementations
+RESPONSIBILITIES:
+  - Scan tracker_modules subdirectories
+  - Load and validate tracker classes
+  - Register trackers in global registry
+  - Provide metadata for discovery system
+KEY CLASSES:
+  - TrackerRegistry - Auto-discovery system
+FEATURES:
+  - Auto-scans: live/, offline/, experimental/, community/ directories
+  - Validates trackers with security sandbox
+  - Caches tracker metadata
+
+FILE: tracker/tracker_modules/core/base_tracker.py
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/tracker/tracker_modules/core/base_tracker.py
+PURPOSE: Abstract base class for all tracker implementations
+RESPONSIBILITIES:
+  - Define tracker interface
+  - Specify required methods
+  - Provide common functionality
+KEY CLASSES:
+  - BaseTracker - Abstract base
+  - TrackerMetadata - Capability description
+  - TrackerResult - Standardized output format
+
+FILE: tracker/tracker_modules/experimental/hybrid_intelligence.py (3,339 lines) **[MOST COMPLEX TRACKER]**
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/tracker/tracker_modules/experimental/hybrid_intelligence.py
+PURPOSE: Advanced multi-modal tracking fusion
+RESPONSIBILITIES:
+  - Combine multiple tracking approaches
+  - Intelligent mode selection
+  - Adaptive parameter tuning
+  - Complex signal fusion
+COMPLEXITY: High - multiple algorithms integrated
+
+FILE: tracker/tracker_modules/experimental/relative_distance.py (2,287 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/tracker/tracker_modules/experimental/relative_distance.py
+PURPOSE: Distance-based motion tracking
+RESPONSIBILITIES:
+  - Track relative distances between regions
+  - Temporal smoothing
+  - Velocity estimation
+
+FILE: tracker/tracker_modules/live/yolo_roi.py (1,505 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/tracker/tracker_modules/live/yolo_roi.py
+PURPOSE: Real-time YOLO-based region of interest tracking
+RESPONSIBILITIES:
+  - YOLO model execution
+  - Bounding box tracking
+  - Region confidence scoring
+
+================================================================================
+SECTION 4: FUNSCRIPT PROCESSING
+================================================================================
+
+FILE: funscript/dual_axis_funscript.py (1,352 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/funscript/dual_axis_funscript.py
+PURPOSE: Primary funscript data structure and serialization
+RESPONSIBILITIES:
+  - Represent funscript points and metadata
+  - Support single-axis and dual-axis (roll) funscripts
+  - Load/save funscript files
+  - Validate points and ranges
+  - Provide funscript manipulation API
+KEY CLASSES:
+  - DualAxisFunscript - Main data structure
+KEY METHODS:
+  - add_point() - Add time-position pair
+  - save() - Serialize to JSON
+  - load() - Deserialize from JSON
+  - validate() - Check consistency
+
+FILE: funscript/plugins/plugin_loader.py (368 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/funscript/plugins/plugin_loader.py
+PURPOSE: Dynamic discovery and loading of filter plugins
+RESPONSIBILITIES:
+  - Scan plugins directory
+  - Load plugin modules
+  - Instantiate plugin objects
+  - Maintain plugin registry
+KEY FUNCTIONS:
+  - load_all_plugins() - Discover all plugins
+  - get_plugin() - Get plugin by name
+  - list_available_plugins() - Enumerate plugins
+
+FILE: funscript/plugins/base_plugin.py (311 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/funscript/plugins/base_plugin.py
+PURPOSE: Abstract base class for all funscript filter plugins
+RESPONSIBILITIES:
+  - Define plugin interface
+  - Specify required methods
+  - Provide utility methods
+KEY CLASSES:
+  - BasePlugin - Abstract base
+
+FILTER PLUGINS (in funscript/plugins/):
+- autotune_plugin.py (314 lines) - Automatic timing adjustment
+- ultimate_autotune_plugin.py (336 lines) - Advanced autotune
+- amplify_plugin.py (260 lines) - Amplitude scaling
+- clamp_plugin.py (449 lines) - Value clamping
+- rdp_simplify_plugin.py (518 lines) - Curve simplification
+- speed_limiter_plugin.py (537 lines) - Motion speed limiting
+- savgol_filter_plugin.py (295 lines) - Savitzky-Golay smoothing
+- keyframe_plugin.py (464 lines) - Keyframe extraction
+- resample_plugin.py (354 lines) - Sample rate conversion
+- invert_plugin.py (214 lines) - Motion inversion
+- anti_jerk_plugin.py (194 lines) - Jerk removal
+
+FILE: application/logic/app_funscript_processor.py (1,635 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/logic/app_funscript_processor.py
+PURPOSE: Funscript manipulation and chapter management
+RESPONSIBILITIES:
+  - Create/modify funscripts
+  - Manage chapters and segments
+  - Apply filter chains
+  - Validate funscript integrity
+KEY CLASSES:
+  - AppFunscriptProcessor - Funscript handler
+KEY METHODS:
+  - apply_filter() - Apply a filter plugin
+  - create_from_stage_results() - Build from pipeline output
+  - add_chapter() - Add time segment
+
+================================================================================
+SECTION 5: VIDEO PROCESSING
+================================================================================
+
+FILE: video/video_processor.py (2,831 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/video/video_processor.py
+PURPOSE: Main video I/O and frame extraction pipeline
+RESPONSIBILITIES:
+  - Load and read video files
+  - Extract frames at specific timestamps
+  - Handle multiple video formats
+  - Manage frame buffering
+  - Detect VR format automatically
+  - Coordinate with GPU unwarp for VR videos
+KEY CLASSES:
+  - VideoProcessor - Main processor
+KEY METHODS:
+  - load_video() - Open video file
+  - get_frame() - Extract specific frame
+  - get_frame_range() - Extract multiple frames
+  - get_duration() - Get video length
+  - get_fps() - Get frame rate
+
+FILE: video/gpu_unwarp_worker.py (1,035 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/video/gpu_unwarp_worker.py
+PURPOSE: GPU-accelerated VR format unwarp/distortion correction
+RESPONSIBILITIES:
+  - Fisheye distortion correction
+  - Equirectangular unwarp
+  - Perspective correction
+  - GPU-accelerated processing for performance
+KEY FUNCTIONS:
+  - create_unwarp_mesh() - Generate distortion map
+  - unwarp_frame() - Apply correction to frame
+
+FILE: video/vr_format_detector_ml_real.py (498 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/video/vr_format_detector_ml_real.py
+PURPOSE: Machine learning-based VR format detection
+RESPONSIBILITIES:
+  - Analyze video frames
+  - Classify video format (monoscopic, stereo, etc.)
+  - Determine distortion type (fisheye, equirect, etc.)
+KEY FUNCTIONS:
+  - detect_format() - Identify video format
+
+FILE: video/dual_frame_processor.py (596 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/video/dual_frame_processor.py
+PURPOSE: Handle side-by-side stereo/dual-frame videos
+RESPONSIBILITIES:
+  - Split stereo frames
+  - Process per-eye frames
+  - Coordinate multi-frame processing
+
+================================================================================
+SECTION 6: GUI COMPONENTS (ImGui-based)
+================================================================================
+
+FILE: application/gui_components/app_gui.py (2,541 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/gui_components/app_gui.py
+PURPOSE: Main GUI window and component orchestration
+RESPONSIBILITIES:
+  - Initialize ImGui/OpenGL context
+  - Create main window
+  - Coordinate all UI components
+  - Manage frame rendering
+  - Route events to components
+KEY CLASSES:
+  - GUI - Main GUI manager
+KEY METHODS:
+  - __init__() - Initialize all components
+  - run() - Main event loop
+  - render() - Draw frame
+
+FILE: application/gui_components/control_panel_ui.py (5,841 lines) **[LARGEST FILE]**
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/gui_components/control_panel_ui.py
+PURPOSE: Main processing controls and settings panel
+RESPONSIBILITIES:
+  - All processing control buttons and knobs
+  - Filter selection and configuration
+  - Mode switching interface
+  - Settings UI
+  - Progress displays
+COMPLEXITY: Very high - needs refactoring into multiple components
+STATUS: This file is a refactoring candidate
+
+FILE: application/gui_components/video_display_ui.py (2,391 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/gui_components/video_display_ui.py
+PURPOSE: Video frame rendering and visualization
+RESPONSIBILITIES:
+  - Render video frames
+  - Overlay heatmaps
+  - Show tracking results
+  - Draw motion indicators
+  - Manage texture updates
+KEY CLASSES:
+  - VideoDisplayUI - Video renderer
+
+FILE: application/gui_components/video_navigation_ui.py (2,090 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/gui_components/video_navigation_ui.py
+PURPOSE: Timeline and video navigation controls
+RESPONSIBILITIES:
+  - Timeline display and scrubbing
+  - Frame navigation
+  - Playback controls
+  - Current time display
+  - Range selection
+KEY CLASSES:
+  - VideoNavigationUI - Navigation handler
+
+FILE: application/gui_components/splash_screen.py (1,944 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/gui_components/splash_screen.py
+PURPOSE: Startup splash screen and initialization display
+RESPONSIBILITIES:
+  - Show splash image during startup
+  - Display initialization progress
+  - Run setup tasks in background
+
+FILE: application/gui_components/info_graphs_ui.py (1,878 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/gui_components/info_graphs_ui.py
+PURPOSE: Statistics and analysis visualization
+RESPONSIBILITIES:
+  - Plot signal graphs
+  - Display statistics
+  - Show motion analysis
+  - Histogram rendering
+
+FILE: application/gui_components/toolbar_ui.py (988 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/gui_components/toolbar_ui.py
+PURPOSE: Top toolbar with common controls
+RESPONSIBILITIES:
+  - Playback speed controls
+  - Play/pause buttons
+  - Mode indicators
+  - Quick-access buttons
+
+FILE: application/gui_components/device_control_ui.py (941 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/gui_components/device_control_ui.py
+PURPOSE: Device simulator and interaction controls
+RESPONSIBILITIES:
+  - Device simulator display
+  - Manual script manipulation
+  - Device configuration
+
+FILE: application/classes/interactive_timeline.py (3,269 lines) **[2nd LARGEST FILE]**
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/classes/interactive_timeline.py
+PURPOSE: Interactive timeline for funscript editing
+RESPONSIBILITIES:
+  - Render timeline with points
+  - Handle mouse interaction for editing
+  - Show chapters and markers
+  - Manage point selection
+  - Update display based on state
+COMPLEXITY: Very high - rendering + interaction logic
+STATUS: This file is a refactoring candidate
+
+================================================================================
+SECTION 7: CONFIGURATION AND CONSTANTS
+================================================================================
+
+FILE: config/constants.py (657 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/config/constants.py
+PURPOSE: Application-wide constants and default values
+CONTAINS:
+  - Model URLs and paths
+  - Processing parameters
+  - File extensions
+  - Default settings
+  - Error/warning codes
+USAGE: Imported across all modules
+
+FILE: config/tracker_discovery.py (368 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/config/tracker_discovery.py
+PURPOSE: Dynamic tracker discovery and enumeration
+RESPONSIBILITIES:
+  - Query available trackers
+  - Get tracker metadata
+  - Enumerate CLI modes
+  - Filter by capability
+KEY FUNCTIONS:
+  - get_tracker_discovery() - Get discovery singleton
+  - get_supported_cli_modes() - List CLI modes
+  - get_batch_compatible_trackers() - List batch trackers
+
+FILE: config/constants_colors.py (265 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/config/constants_colors.py
+PURPOSE: Color definitions for UI
+CONTAINS: RGB/RGBA color values
+
+FILE: config/element_group_colors.py (259 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/config/element_group_colors.py
+PURPOSE: UI element color scheme definitions
+CONTAINS: Color mappings for different UI elements
+
+FILE: config/theme_manager.py (106 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/config/theme_manager.py
+PURPOSE: Theme switching and management
+RESPONSIBILITIES:
+  - Apply theme colors
+  - Switch themes at runtime
+
+================================================================================
+SECTION 8: APPLICATION CLASSES AND DATA STRUCTURES
+================================================================================
+
+FILE: application/classes/menu.py (1,404 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/classes/menu.py
+PURPOSE: Main menu system implementation
+RESPONSIBILITIES:
+  - Create menu bar structure
+  - Handle menu selections
+  - Manage menu state
+
+FILE: application/classes/simulator_3d.py (750 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/classes/simulator_3d.py
+PURPOSE: 3D device simulator visualization
+RESPONSIBILITIES:
+  - 3D model rendering
+  - Device simulation
+  - Motion visualization
+
+FILE: application/classes/chapter_manager.py (547 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/classes/chapter_manager.py
+PURPOSE: Video chapter/segment management
+RESPONSIBILITIES:
+  - Create/modify chapters
+  - Manage chapter metadata
+  - Handle chapter serialization
+
+FILE: application/classes/project_manager.py (410 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/classes/project_manager.py
+PURPOSE: Project file save/load management
+RESPONSIBILITIES:
+  - Save project state
+  - Load project files
+  - Handle project migrations
+
+FILE: application/classes/settings_manager.py (322 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/classes/settings_manager.py
+PURPOSE: User settings persistence
+RESPONSIBILITIES:
+  - Save settings to disk
+  - Load settings on startup
+  - Provide settings API
+
+================================================================================
+SECTION 9: UTILITY MODULES
+================================================================================
+
+FILE: application/utils/logger.py
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/utils/logger.py
+PURPOSE: Centralized logging configuration
+PROVIDES: AppLogger class for consistent logging
+
+FILE: application/utils/processing_thread_manager.py (633 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/utils/processing_thread_manager.py
+PURPOSE: Thread pool management for long-running tasks
+RESPONSIBILITIES:
+  - Manage worker threads
+  - Queue task execution
+  - Prevent UI blocking
+
+FILE: application/utils/dependency_checker.py (658 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/utils/dependency_checker.py
+PURPOSE: Verify and install dependencies
+RESPONSIBILITIES:
+  - Check installed packages
+  - Install missing dependencies
+  - Handle GPU-specific installations
+
+FILE: application/utils/updater.py (1,692 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/utils/updater.py
+PURPOSE: Auto-update system for FunGen
+RESPONSIBILITIES:
+  - Check for updates online
+  - Download and install updates
+  - Manage version information
+
+FILE: application/utils/tensorrt_compiler.py (619 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/application/utils/tensorrt_compiler.py
+PURPOSE: Model compilation for TensorRT optimization
+RESPONSIBILITIES:
+  - Compile ONNX models to TensorRT engines
+  - Optimize for inference
+  - Manage compiled model cache
+
+FILE: common/temp_manager.py (209 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/common/temp_manager.py
+PURPOSE: Temporary file and directory management
+RESPONSIBILITIES:
+  - Create temporary directories
+  - Clean up temporary files
+  - Manage temporary resources
+
+FILE: common/http_client_manager.py (124 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/common/http_client_manager.py
+PURPOSE: Singleton HTTP client for API calls
+RESPONSIBILITIES:
+  - Provide single HTTP client instance
+  - Handle HTTP operations
+
+================================================================================
+SECTION 10: DATA STRUCTURES
+================================================================================
+
+FILE: detection/cd/data_structures/segments.py (284 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/detection/cd/data_structures/segments.py
+PURPOSE: Time segment representation
+CONTAINS: Segment class for time ranges
+
+FILE: detection/cd/data_structures/box_records.py (194 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/detection/cd/data_structures/box_records.py
+PURPOSE: Bounding box tracking data
+CONTAINS: BoxRecord class for spatial regions
+
+FILE: detection/cd/data_structures/frame_objects.py (191 lines)
+LOCATION: /home/user/FunGen-AI-Powered-Funscript-Generator/detection/cd/data_structures/frame_objects.py
+PURPOSE: Per-frame detection results
+CONTAINS: Frame detection data structures
+
+================================================================================
+QUICK FILE REFERENCE BY FUNCTION
+================================================================================
+
+To understand a specific feature, look at these files:
+
+VIDEO LOADING:
+  - video/video_processor.py - Frame extraction
+  - video/vr_format_detector_ml_real.py - Format detection
+  - video/gpu_unwarp_worker.py - VR unwarp
+
+PROCESSING PIPELINE:
+  - application/logic/app_stage_processor.py - Orchestration
+  - detection/cd/stage_1_cd.py - Initial detection
+  - detection/cd/stage_2_cd.py - Analysis
+  - detection/cd/stage_3_mixed_processor.py - Fusion
+
+TRACKING:
+  - tracker/tracker_manager.py - Orchestration
+  - tracker/tracker_modules/__init__.py - Discovery
+  - tracker/tracker_modules/experimental/hybrid_intelligence.py - Advanced tracking
+
+FUNSCRIPT GENERATION:
+  - funscript/dual_axis_funscript.py - Data structure
+  - application/logic/app_funscript_processor.py - Generation
+  - funscript/plugins/plugin_loader.py - Plugin system
+
+FILTERING:
+  - funscript/plugins/* - Individual filter implementations
+
+GUI RENDERING:
+  - application/gui_components/app_gui.py - Main GUI
+  - application/gui_components/control_panel_ui.py - Controls
+  - application/gui_components/video_display_ui.py - Video display
+  - application/classes/interactive_timeline.py - Timeline
+
+UI STATE:
+  - application/logic/app_state_ui.py - UI state synchronization
+  - application/classes/settings_manager.py - Settings storage
+
+CONFIGURATION:
+  - config/constants.py - Central constants
+  - config/tracker_discovery.py - Dynamic discovery
+
+================================================================================

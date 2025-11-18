@@ -1,0 +1,284 @@
+================================================================================
+FUNGEN CODEBASE - QUICK REFERENCE GUIDE
+================================================================================
+
+PROJECT STATISTICS
+==================
+Total Lines of Code:    93,761 lines
+Total Python Files:     157 files
+Project Size:           4.14 MB (source)
+Main Language:          Python
+Architecture Type:      Modular, plugin-based
+Entry Point:            main.py (257 lines)
+
+EXECUTION MODES
+===============
+1. GUI MODE (Default)       → Interactive video processing with UI
+2. CLI MODE - Video         → Batch processing with CLI
+3. CLI MODE - Funscript     → Post-process existing funscripts
+
+CORE ARCHITECTURE
+=================
+
+    ┌─────────────────────────────────────────────────────────┐
+    │                     main.py (257 lines)                 │
+    │              (CLI/GUI dispatcher + bootstrap)           │
+    └──────────────────┬──────────────────────────────────────┘
+                       │
+         ┌─────────────┴──────────────┐
+         │                            │
+    ┌────▼──────┐          ┌──────────▼────────┐
+    │ run_gui() │          │  run_cli(args)    │
+    └────┬──────┘          └──────────┬────────┘
+         │                            │
+    ┌────▼────────────────────────────▼────────────┐
+    │    ApplicationLogic (app_logic.py, 2,334L)   │
+    │              (Core Orchestrator)              │
+    │  - State management                          │
+    │  - Pipeline coordination                     │
+    │  - Tracker instantiation                     │
+    └────┬────────────────────────────────────────┘
+         │
+    ┌────┴─────────────────────────────────────────────────────────────────┐
+    │                          PROCESSING PIPELINE                        │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │                                                                      │
+    │  Stage 1: Contact Detection (1,061 lines)                          │
+    │  ├─ Contour detection                                              │
+    │  └─ Frame preprocessing                                            │
+    │           ↓                                                         │
+    │  Stage 2: Contact Analysis (2,698 lines) [LARGEST]                │
+    │  ├─ Time-series analysis                                           │
+    │  ├─ Signal processing                                              │
+    │  └─ SQLite storage                                                 │
+    │           ↓                                                         │
+    │  Stage 3: Tracking & Fusion                                        │
+    │  ├─ stage3_mixed.py (823 lines) - Optical flow + detection        │
+    │  ├─ stage3_optical_flow.py (727 lines) - Pure optical flow        │
+    │  └─ Tracker selection (from 8+ implementations)                   │
+    │           ↓                                                         │
+    │  Stage 4: Funscript Filtering (11 plugins)                        │
+    │  ├─ Autotune, clamp, amplify, speed-limit...                     │
+    │  └─ RDP simplify, savgol filter, etc.                            │
+    │           ↓                                                         │
+    │  Output: Polished Funscript Files                                  │
+    │                                                                      │
+    └──────────────────────────────────────────────────────────────────────┘
+
+MODULE BREAKDOWN
+================
+
+1. APPLICATION (49,818 lines, 75 files) - 52% of codebase
+   ├─ GUI Components (14 files, 19,300+ lines)
+   │  ├─ control_panel_ui.py        5,841 lines [LARGEST FILE]
+   │  ├─ interactive_timeline.py    3,269 lines [2nd LARGEST]
+   │  ├─ app_gui.py                 2,541 lines
+   │  ├─ video_display_ui.py        2,391 lines
+   │  ├─ video_navigation_ui.py     2,090 lines
+   │  ├─ splash_screen.py           1,944 lines
+   │  ├─ info_graphs_ui.py          1,878 lines
+   │  └─ toolbar_ui.py, device_control_ui.py, etc.
+   │
+   ├─ Logic (11 files, 12,000+ lines)
+   │  ├─ app_stage_processor.py     2,357 lines [Orchestrates 3 stages]
+   │  ├─ app_logic.py               2,334 lines [Core state]
+   │  ├─ app_funscript_processor.py 1,635 lines [Funscript manipulation]
+   │  ├─ app_file_manager.py          893 lines
+   │  ├─ app_event_handlers.py        847 lines
+   │  └─ app_calibration.py, app_energy_saver.py, etc.
+   │
+   ├─ Classes (17 files, 9,700+ lines)
+   │  ├─ interactive_timeline.py    3,269 lines [Timeline rendering]
+   │  ├─ menu.py                    1,404 lines
+   │  ├─ simulator_3d.py              750 lines
+   │  ├─ chapter_manager.py           547 lines
+   │  ├─ file_dialog.py               525 lines
+   │  └─ plugin_ui_manager.py, settings_manager.py, etc.
+   │
+   └─ Utils (22 files, 6,476 lines)
+      ├─ updater.py                 1,692 lines [Auto-update system]
+      ├─ processing_thread_manager  633 lines
+      ├─ dependency_checker.py      658 lines
+      └─ logger.py, tensorrt_compiler.py, etc.
+
+2. TRACKER SYSTEM (20,101 lines, 30 files) - 21% of codebase
+   ├─ Live Trackers (4 implementations)
+   │  ├─ yolo_roi.py                1,505 lines
+   │  ├─ user_roi.py                  803 lines
+   │  └─ oscillation_legacy.py, oscillation_experimental_2.py
+   │
+   ├─ Offline Trackers (3 implementations)
+   │  ├─ stage3_mixed.py              823 lines
+   │  ├─ stage3_optical_flow.py       727 lines
+   │  └─ stage2_contact_analysis.py   603 lines
+   │
+   ├─ Experimental Trackers (4+ variants)
+   │  ├─ hybrid_intelligence.py      3,339 lines [MOST COMPLEX]
+   │  ├─ relative_distance.py        2,287 lines
+   │  ├─ axis_projection_enhanced.py   987 lines
+   │  └─ beat_marker.py, backups...
+   │
+   ├─ Helpers
+   │  ├─ visualization.py             735 lines
+   │  └─ signal_amplifier.py
+   │
+   ├─ Core Infrastructure
+   │  ├─ base_tracker.py [Abstract base]
+   │  ├─ base_offline_tracker.py [Offline base]
+   │  ├─ security.py [Sandbox validation]
+   │  └─ __init__.py [Auto-discovery registry]
+   │
+   └─ tracker_manager.py               983 lines [Orchestration]
+
+3. FUNSCRIPT (6,955 lines, 21 files) - 7% of codebase
+   ├─ Core
+   │  └─ dual_axis_funscript.py    1,352 lines [Primary impl]
+   │
+   ├─ Plugins (11 filter implementations)
+   │  ├─ autotune_plugin.py          314 lines
+   │  ├─ ultimate_autotune_plugin.py 336 lines
+   │  ├─ amplify_plugin.py           260 lines
+   │  ├─ clamp_plugin.py             449 lines
+   │  ├─ rdp_simplify_plugin.py      518 lines
+   │  ├─ speed_limiter_plugin.py     537 lines
+   │  ├─ savgol_filter_plugin.py     295 lines
+   │  ├─ keyframe_plugin.py          464 lines
+   │  ├─ resample_plugin.py          354 lines
+   │  ├─ invert_plugin.py            214 lines
+   │  └─ anti_jerk_plugin.py         194 lines
+   │
+   ├─ Infrastructure
+   │  ├─ plugin_loader.py            368 lines
+   │  └─ base_plugin.py              311 lines
+   │
+   └─ User Plugins
+      ├─ template_plugin.py          103 lines
+      └─ advanced_template_plugin.py 382 lines
+
+4. VIDEO PROCESSING (5,212 lines, 6 files) - 5% of codebase
+   ├─ video_processor.py            2,831 lines [Main pipeline]
+   ├─ gpu_unwarp_worker.py          1,035 lines [VR GPU unwarp]
+   ├─ dual_frame_processor.py         596 lines [Stereo processing]
+   ├─ vr_format_detector_ml_real.py  498 lines [ML detection]
+   └─ thumbnail_extractor.py         247 lines [Thumbnails]
+
+5. DETECTION (6,937 lines, 10 files) - 7% of codebase
+   └─ Contact Detection Pipeline
+      ├─ stage_1_cd.py              1,061 lines [Contour detection]
+      ├─ stage_2_cd.py              2,698 lines [LARGEST] [Analysis]
+      ├─ stage_3_mixed_processor.py 1,097 lines [Fusion]
+      ├─ stage_3_of_processor.py      596 lines [Optical flow]
+      ├─ stage_2_sqlite_storage.py    785 lines [Storage]
+      └─ data_structures/
+         ├─ segments.py               284 lines
+         ├─ box_records.py            194 lines
+         └─ frame_objects.py          191 lines
+
+6. CONFIG (1,664 lines, 6 files) - 2% of codebase
+   ├─ constants.py                  657 lines [Core constants]
+   ├─ tracker_discovery.py          368 lines [Dynamic discovery]
+   ├─ constants_colors.py           265 lines
+   ├─ element_group_colors.py       259 lines
+   └─ theme_manager.py              106 lines
+
+7. COMMON (487 lines, 5 files) - <1% of codebase
+   ├─ temp_manager.py               209 lines
+   ├─ http_client_manager.py        124 lines
+   ├─ result.py                     104 lines
+   └─ exceptions.py                  36 lines
+
+KEY PATTERNS & TECHNIQUES
+==========================
+
+✓ Plugin Architecture        - Extensible funscript filters
+✓ Registry Pattern           - Auto-discovery of trackers
+✓ Pipeline Pattern           - Multi-stage detection
+✓ Observer Pattern           - UI update callbacks
+✓ Factory Pattern            - Tracker instantiation
+✓ Thread Pool Pattern        - Worker management
+✓ Singleton Pattern          - Logger, HTTP client
+
+STRENGTHS
+=========
+✓ Clear module boundaries (tracker, funscript, video, detection)
+✓ Plugin system for extensibility
+✓ Auto-discovery system for trackers
+✓ Multi-platform support (Windows, macOS, Linux)
+✓ GPU acceleration support
+✓ Checkpoint/resume capability
+✓ Cross-cutting concern management (logging, config)
+
+AREAS FOR REFACTORING
+=====================
+⚠ control_panel_ui.py (5,841 lines) - Split into components
+⚠ interactive_timeline.py (3,269 lines) - Extract concerns
+⚠ app_stage_processor.py (2,357 lines) - Multiple responsibilities
+⚠ Utility functions scattered across /app/utils and /common
+⚠ Video module tightly coupled to YOLO models
+⚠ GUI-logic coupling could be reduced
+
+TECHNOLOGY STACK
+================
+Core:           Python 3.11+, ImGui, OpenGL
+Video:          OpenCV, imageio, FFmpeg (external)
+ML/AI:          YOLO, PyTorch/TensorRT (optional)
+Data:           NumPy, SciPy, scikit-learn
+Storage:        SQLite (via aiosqlite), msgpack, orjson
+UI:             ImGui-OpenGL, GLFW
+Utilities:      tqdm, colorama, Pillow, send2trash
+
+DEPENDENCY GRAPH (Simplified)
+=============================
+
+main.py
+  ├─ ApplicationLogic
+  │  ├─ app_stage_processor
+  │  │  ├─ stage_1_cd
+  │  │  ├─ stage_2_cd
+  │  │  └─ stage_3_mixed/of
+  │  ├─ tracker_manager
+  │  │  └─ tracker implementations (8+)
+  │  ├─ video_processor
+  │  │  ├─ gpu_unwarp_worker
+  │  │  └─ vr_format_detector
+  │  └─ funscript processing
+  │     └─ plugin_loader
+  │        └─ filter plugins (11)
+  │
+  └─ GUI (if not CLI mode)
+     ├─ control_panel_ui
+     ├─ video_display_ui
+     ├─ video_navigation_ui
+     ├─ interactive_timeline
+     └─ [other UI components]
+
+EXECUTION FLOWS
+===============
+
+GUI Mode:
+  main.py → run_gui() → ApplicationLogic → GUI → ImGui/OpenGL event loop
+
+CLI Mode (Video):
+  main.py → run_cli() → ApplicationLogic.run_cli()
+    → stage_1 → stage_2 → stage_3 → plugin filters → output
+
+CLI Mode (Funscript):
+  main.py → run_cli() → ApplicationLogic.run_cli()
+    → load funscript → apply filter → output
+
+METRICS SUMMARY
+===============
+Lines of Code:      93,761
+Python Files:       157
+Largest File:       control_panel_ui.py (5,841 lines)
+Most Complex:       hybrid_intelligence.py (3,339 lines)
+GUI Code:           19,300+ lines (41%)
+Processing:         12,000+ lines (25%)
+Tracker System:     20,101 lines (21%)
+Video Processing:   5,212 lines (11%)
+Total Modules:      14 major modules
+Tracker Variants:   8+ implementations
+Filter Plugins:     11 individual filters
+Processing Stages:  4 (3 detection + 1 filtering)
+
+================================================================================
