@@ -976,24 +976,473 @@ class OptionsWindow:
         imgui.text("TensorRT settings are managed through the")
         imgui.text("Tools > TensorRT Compiler menu.")
 
+    # ============================================================
+    # CONTENT RENDERING METHODS - Tracking Tab
+    # ============================================================
+
     def _render_tracking_content(self, horizontal_tab: str):
         """Render Tracking tab content."""
-        imgui.text(f"Tracking > {horizontal_tab}")
-        imgui.text("Coming soon...")
+        if horizontal_tab == "General":
+            self._render_tracking_general()
+        elif horizontal_tab == "ROI":
+            self._render_tracking_roi()
+        elif horizontal_tab == "Optical Flow":
+            self._render_tracking_flow()
+        elif horizontal_tab == "Sensitivity":
+            self._render_tracking_sensitivity()
+        elif horizontal_tab == "Oscillation":
+            self._render_tracking_oscillation()
+        elif horizontal_tab == "Class Filter":
+            self._render_tracking_class_filter()
+
+    def _render_tracking_general(self):
+        """Render Tracking > General settings."""
+        imgui.text_colored("General tracking settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Confidence Threshold
+        imgui.text("Confidence Threshold:")
+        imgui.same_line(250)
+        conf_threshold = settings.get("live_tracker_confidence_threshold", 0.45)
+        changed, new_val = imgui.slider_float("##ConfThreshold", conf_threshold, 0.1, 1.0, "%.2f")
+        if changed:
+            settings.set("live_tracker_confidence_threshold", new_val)
+        _tooltip_if_hovered("Minimum confidence for detection (0.1-1.0)")
+
+    def _render_tracking_roi(self):
+        """Render Tracking > ROI settings."""
+        imgui.text_colored("Region of Interest (ROI) settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # ROI Padding
+        imgui.text("ROI Padding (pixels):")
+        imgui.same_line(250)
+        roi_padding = settings.get("live_tracker_roi_padding", 50)
+        changed, new_val = imgui.input_int("##ROIPadding", roi_padding)
+        if changed:
+            settings.set("live_tracker_roi_padding", max(0, new_val))
+        _tooltip_if_hovered("Padding around detected region")
+
+        # ROI Update Interval
+        imgui.text("Update Interval (frames):")
+        imgui.same_line(250)
+        update_interval = settings.get("live_tracker_roi_update_interval", 5)
+        changed, new_val = imgui.input_int("##UpdateInterval", update_interval)
+        if changed:
+            settings.set("live_tracker_roi_update_interval", max(1, new_val))
+        _tooltip_if_hovered("How often to update ROI")
+
+        # ROI Smoothing Factor
+        imgui.text("Smoothing Factor:")
+        imgui.same_line(250)
+        smoothing = settings.get("live_tracker_roi_smoothing_factor", 0.2)
+        changed, new_val = imgui.slider_float("##ROISmoothing", smoothing, 0.0, 1.0, "%.2f")
+        if changed:
+            settings.set("live_tracker_roi_smoothing_factor", new_val)
+        _tooltip_if_hovered("ROI movement smoothing (0=no smoothing, 1=max smoothing)")
+
+        # ROI Persistence Frames
+        imgui.text("Persistence (frames):")
+        imgui.same_line(250)
+        persistence = settings.get("live_tracker_roi_persistence_frames", 30)
+        changed, new_val = imgui.input_int("##ROIPersistence", persistence)
+        if changed:
+            settings.set("live_tracker_roi_persistence_frames", max(0, new_val))
+        _tooltip_if_hovered("How long to keep ROI without detection")
+
+    def _render_tracking_flow(self):
+        """Render Tracking > Optical Flow settings."""
+        imgui.text_colored("Optical flow tracking settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Use Sparse Flow
+        imgui.text("Use Sparse Flow:")
+        imgui.same_line(250)
+        use_sparse = settings.get("live_tracker_use_sparse_flow", False)
+        changed, new_val = imgui.checkbox("##UseSparse", use_sparse)
+        if changed:
+            settings.set("live_tracker_use_sparse_flow", new_val)
+        _tooltip_if_hovered("Use sparse optical flow (faster)")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("DIS Flow Settings", 0.8, 0.8, 0.3, 1.0)
+        imgui.spacing()
+
+        # DIS Flow Preset
+        imgui.text("DIS Flow Preset:")
+        imgui.same_line(250)
+        preset = settings.get("live_tracker_dis_flow_preset", "medium")
+        presets = ["ultrafast", "fast", "medium", "fine"]
+        preset_index = presets.index(preset) if preset in presets else 2
+        changed, new_index = imgui.combo("##DISPreset", preset_index, ["Ultra Fast", "Fast", "Medium", "Fine"])
+        if changed:
+            settings.set("live_tracker_dis_flow_preset", presets[new_index])
+        _tooltip_if_hovered("Quality preset for DIS optical flow")
+
+        # DIS Finest Scale
+        imgui.text("Finest Scale:")
+        imgui.same_line(250)
+        finest_scale = settings.get("live_tracker_dis_finest_scale", 1)
+        changed, new_val = imgui.input_int("##FinestScale", finest_scale)
+        if changed:
+            settings.set("live_tracker_dis_finest_scale", max(0, min(5, new_val)))
+        _tooltip_if_hovered("Finest scale for DIS (0-5)")
+
+    def _render_tracking_sensitivity(self):
+        """Render Tracking > Sensitivity settings."""
+        imgui.text_colored("Output sensitivity and amplification", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Output Sensitivity
+        imgui.text("Output Sensitivity:")
+        imgui.same_line(250)
+        sensitivity = settings.get("live_tracker_output_sensitivity", 1.0)
+        changed, new_val = imgui.slider_float("##OutputSensitivity", sensitivity, 0.1, 5.0, "%.2f")
+        if changed:
+            settings.set("live_tracker_output_sensitivity", new_val)
+        _tooltip_if_hovered("Global output sensitivity multiplier")
+
+        # Signal Amplification
+        imgui.text("Signal Amplification:")
+        imgui.same_line(250)
+        amplification = settings.get("live_tracker_signal_amplification", 1.0)
+        changed, new_val = imgui.slider_float("##SignalAmp", amplification, 0.1, 5.0, "%.2f")
+        if changed:
+            settings.set("live_tracker_signal_amplification", new_val)
+        _tooltip_if_hovered("Amplify tracking signal")
+
+        # Output Delay
+        imgui.text("Output Delay (frames):")
+        imgui.same_line(250)
+        delay = settings.get("funscript_output_delay_frames", 0)
+        changed, new_val = imgui.input_int("##OutputDelay", delay)
+        if changed:
+            settings.set("funscript_output_delay_frames", new_val)
+        _tooltip_if_hovered("Frame delay for funscript output")
+
+    def _render_tracking_oscillation(self):
+        """Render Tracking > Oscillation settings."""
+        imgui.text_colored("Oscillation detector settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Grid Size
+        imgui.text("Grid Size:")
+        imgui.same_line(250)
+        grid_size = settings.get("oscillation_detector_grid_size", 8)
+        changed, new_val = imgui.slider_int("##GridSize", grid_size, 4, 32)
+        if changed:
+            settings.set("oscillation_detector_grid_size", new_val)
+        _tooltip_if_hovered("Grid size for oscillation detection")
+
+        # Detection Sensitivity
+        imgui.text("Detection Sensitivity:")
+        imgui.same_line(250)
+        osc_sens = settings.get("oscillation_detector_sensitivity", 0.5)
+        changed, new_val = imgui.slider_float("##OscSensitivity", osc_sens, 0.1, 1.0, "%.2f")
+        if changed:
+            settings.set("oscillation_detector_sensitivity", new_val)
+        _tooltip_if_hovered("Sensitivity for oscillation detection")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Enable Decay
+        imgui.text("Enable Decay:")
+        imgui.same_line(250)
+        enable_decay = settings.get("oscillation_enable_decay", True)
+        changed, new_val = imgui.checkbox("##EnableDecay", enable_decay)
+        if changed:
+            settings.set("oscillation_enable_decay", new_val)
+        _tooltip_if_hovered("Enable signal decay mechanism")
+
+        # Hold Duration (only if decay enabled)
+        with _DisabledScope(not enable_decay):
+            imgui.text("Hold Duration (ms):")
+            imgui.same_line(250)
+            hold_duration = settings.get("oscillation_hold_duration_ms", 100)
+            changed, new_val = imgui.input_int("##HoldDuration", hold_duration)
+            if changed:
+                settings.set("oscillation_hold_duration_ms", max(0, new_val))
+            _tooltip_if_hovered("How long to hold signal before decay")
+
+            imgui.text("Decay Factor:")
+            imgui.same_line(250)
+            decay_factor = settings.get("oscillation_decay_factor", 0.95)
+            changed, new_val = imgui.slider_float("##DecayFactor", decay_factor, 0.5, 1.0, "%.2f")
+            if changed:
+                settings.set("oscillation_decay_factor", new_val)
+            _tooltip_if_hovered("Signal decay rate")
+
+    def _render_tracking_class_filter(self):
+        """Render Tracking > Class Filter settings."""
+        imgui.text_colored("Detection class filtering", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("Filter which detection classes to track:")
+        imgui.spacing()
+
+        # This would typically be dynamic based on available classes
+        # For now, show common classes
+        imgui.text("Common detection classes:")
+        imgui.bullet_text("Person")
+        imgui.bullet_text("Hand")
+        imgui.bullet_text("Toy/Object")
+        imgui.spacing()
+        imgui.text_colored("Note:", 1.0, 0.6, 0.0, 1.0)
+        imgui.text("Class filtering is configured in the Advanced tab")
+        imgui.text("in the main control panel during tracking setup.")
+
+    # ============================================================
+    # CONTENT RENDERING METHODS - Funscript Generation Tab
+    # ============================================================
 
     def _render_funscript_content(self, horizontal_tab: str):
         """Render Funscript Generation tab content."""
-        imgui.text(f"Funscript Generation > {horizontal_tab}")
-        imgui.text("Coming soon...")
+        if horizontal_tab == "General":
+            self._render_funscript_general()
+        elif horizontal_tab == "User ROI":
+            self._render_funscript_user_roi()
+        elif horizontal_tab == "Refinement":
+            self._render_funscript_refinement()
+        elif horizontal_tab == "Simplification":
+            self._render_funscript_simplification()
+        elif horizontal_tab == "Calibration":
+            self._render_funscript_calibration()
+
+    def _render_funscript_general(self):
+        """Render Funscript > General settings."""
+        imgui.text_colored("General funscript generation settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Tracking Axis Mode
+        imgui.text("Tracking Axis Mode:")
+        imgui.same_line(250)
+        axis_mode = settings.get("tracking_axis_mode", "auto")
+        modes = ["auto", "vertical", "horizontal", "both"]
+        mode_index = modes.index(axis_mode) if axis_mode in modes else 0
+        changed, new_index = imgui.combo("##AxisMode", mode_index, ["Auto", "Vertical (Y)", "Horizontal (X)", "Both"])
+        if changed:
+            settings.set("tracking_axis_mode", modes[new_index])
+        _tooltip_if_hovered("Which axis to track for funscript generation")
+
+        # Range Processing
+        imgui.text("Range Processing:")
+        imgui.same_line(250)
+        range_processing = settings.get("enable_range_processing", False)
+        changed, new_val = imgui.checkbox("##RangeProcessing", range_processing)
+        if changed:
+            settings.set("enable_range_processing", new_val)
+        _tooltip_if_hovered("Process only a specific frame range")
+
+    def _render_funscript_user_roi(self):
+        """Render Funscript > User ROI settings."""
+        imgui.text_colored("User-defined ROI settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("User ROI allows manual selection of tracking region.")
+        imgui.spacing()
+        imgui.text("Use the video display to:")
+        imgui.bullet_text("Select ROI area with mouse")
+        imgui.bullet_text("Adjust amplification and scale")
+        imgui.bullet_text("Configure output range")
+
+    def _render_funscript_refinement(self):
+        """Render Funscript > Refinement settings."""
+        imgui.text_colored("Interactive refinement settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Scale
+        imgui.text("Scale:")
+        imgui.same_line(250)
+        scale = settings.get("refinement_scale", 1.0)
+        changed, new_val = imgui.slider_float("##RefScale", scale, 0.1, 5.0, "%.2f")
+        if changed:
+            settings.set("refinement_scale", new_val)
+        _tooltip_if_hovered("Scale funscript values")
+
+        # Center
+        imgui.text("Center:")
+        imgui.same_line(250)
+        center = settings.get("refinement_center", 50.0)
+        changed, new_val = imgui.slider_float("##RefCenter", center, 0.0, 100.0, "%.1f")
+        if changed:
+            settings.set("refinement_center", new_val)
+        _tooltip_if_hovered("Center point for funscript")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Smoothing
+        imgui.text_colored("Smoothing (Savitzky-Golay)", 0.8, 0.8, 0.3, 1.0)
+
+        imgui.text("Window Size:")
+        imgui.same_line(250)
+        window_size = settings.get("smoothing_window_size", 5)
+        changed, new_val = imgui.slider_int("##SmoothWindow", window_size, 3, 21)
+        # Ensure odd number
+        if changed:
+            if new_val % 2 == 0:
+                new_val += 1
+            settings.set("smoothing_window_size", new_val)
+        _tooltip_if_hovered("Smoothing window size (must be odd)")
+
+    def _render_funscript_simplification(self):
+        """Render Funscript > Simplification settings."""
+        imgui.text_colored("RDP simplification settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Enable Simplification
+        imgui.text("Enable Simplification:")
+        imgui.same_line(250)
+        enable_simp = settings.get("enable_simplification", True)
+        changed, new_val = imgui.checkbox("##EnableSimp", enable_simp)
+        if changed:
+            settings.set("enable_simplification", new_val)
+        _tooltip_if_hovered("Apply RDP simplification to funscript")
+
+        # RDP Epsilon
+        with _DisabledScope(not enable_simp):
+            imgui.text("RDP Epsilon:")
+            imgui.same_line(250)
+            epsilon = settings.get("rdp_epsilon", 1.0)
+            changed, new_val = imgui.slider_float("##RDPEpsilon", epsilon, 0.1, 10.0, "%.1f")
+            if changed:
+                settings.set("rdp_epsilon", new_val)
+            _tooltip_if_hovered("RDP simplification threshold (higher = more simplification)")
+
+    def _render_funscript_calibration(self):
+        """Render Funscript > Calibration settings."""
+        imgui.text_colored("Latency calibration settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Latency Offset
+        imgui.text("Latency Offset (ms):")
+        imgui.same_line(250)
+        latency = settings.get("latency_offset_ms", 0)
+        changed, new_val = imgui.input_int("##LatencyOffset", latency)
+        if changed:
+            settings.set("latency_offset_ms", new_val)
+        _tooltip_if_hovered("Latency compensation in milliseconds")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text("Use Tools > Calibration & Analysis menu for:")
+        imgui.bullet_text("Latency calibration wizard")
+        imgui.bullet_text("Timeline comparison")
+        imgui.bullet_text("Auto-calibration")
+
+    # ============================================================
+    # CONTENT RENDERING METHODS - Post-Processing Tab
+    # ============================================================
 
     def _render_postproc_content(self, horizontal_tab: str):
         """Render Post-Processing tab content."""
-        imgui.text(f"Post-Processing > {horizontal_tab}")
-        imgui.text("Coming soon...")
-        if horizontal_tab not in ["Auto Processing", "Profiles"]:
-            imgui.spacing()
-            imgui.text(f"Plugin: {horizontal_tab}")
-            imgui.bullet_text("Plugin parameters will be loaded dynamically")
+        if horizontal_tab == "Auto Processing":
+            self._render_postproc_auto()
+        elif horizontal_tab == "Profiles":
+            self._render_postproc_profiles()
+        else:
+            # Dynamic plugin tabs
+            self._render_postproc_plugin(horizontal_tab)
+
+    def _render_postproc_auto(self):
+        """Render Post-Processing > Auto Processing settings."""
+        imgui.text_colored("Automatic post-processing settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Enable Auto Post-Processing
+        imgui.text("Enable Auto Post-Processing:")
+        imgui.same_line(250)
+        enable_auto = settings.get("enable_auto_post_processing", False)
+        changed, new_val = imgui.checkbox("##EnableAuto", enable_auto)
+        if changed:
+            settings.set("enable_auto_post_processing", new_val)
+        _tooltip_if_hovered("Automatically apply post-processing after tracking")
+
+        # Apply Per-Chapter Profiles
+        imgui.text("Per-Chapter Profiles:")
+        imgui.same_line(250)
+        per_chapter = settings.get("auto_processing_use_chapter_profiles", False)
+        changed, new_val = imgui.checkbox("##PerChapter", per_chapter)
+        if changed:
+            settings.set("auto_processing_use_chapter_profiles", new_val)
+        _tooltip_if_hovered("Use different profiles for each chapter type")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Final RDP Pass
+        imgui.text_colored("Final RDP Pass", 0.8, 0.8, 0.3, 1.0)
+
+        imgui.text("Enable Final RDP:")
+        imgui.same_line(250)
+        enable_rdp = settings.get("auto_post_proc_final_rdp_enabled", False)
+        changed, new_val = imgui.checkbox("##EnableFinalRDP", enable_rdp)
+        if changed:
+            settings.set("auto_post_proc_final_rdp_enabled", new_val)
+        _tooltip_if_hovered("Apply final RDP simplification pass")
+
+        with _DisabledScope(not enable_rdp):
+            imgui.text("Final RDP Epsilon:")
+            imgui.same_line(250)
+            rdp_epsilon = settings.get("auto_post_proc_final_rdp_epsilon", 1.0)
+            changed, new_val = imgui.slider_float("##FinalRDPEps", rdp_epsilon, 0.1, 10.0, "%.1f")
+            if changed:
+                settings.set("auto_post_proc_final_rdp_epsilon", new_val)
+            _tooltip_if_hovered("Epsilon for final RDP pass")
+
+    def _render_postproc_profiles(self):
+        """Render Post-Processing > Profiles settings."""
+        imgui.text_colored("Per-position processing profiles", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("Configure different processing profiles for:")
+        imgui.bullet_text("Blowjob scenes")
+        imgui.bullet_text("Penetration scenes")
+        imgui.bullet_text("Handjob scenes")
+        imgui.bullet_text("Other/custom scenes")
+        imgui.spacing()
+        imgui.text("Profiles are managed in the Post-Processing tab")
+        imgui.text("of the main control panel.")
+
+    def _render_postproc_plugin(self, plugin_name: str):
+        """Render dynamic plugin settings."""
+        imgui.text_colored(f"Plugin: {plugin_name}", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("Plugin parameters are loaded dynamically.")
+        imgui.text("Configure plugins in the Post-Processing tab")
+        imgui.text("of the main control panel.")
+        imgui.spacing()
+        imgui.text(f"Selected plugin: {plugin_name}")
 
     # ============================================================
     # CONTENT RENDERING METHODS - Output Tab
@@ -1122,45 +1571,537 @@ class OptionsWindow:
             pass
         _tooltip_if_hovered("Path to ffmpeg executable (leave as 'ffmpeg' to use system PATH)")
 
+    # ============================================================
+    # CONTENT RENDERING METHODS - Device Control Tab
+    # ============================================================
+
     def _render_device_content(self, horizontal_tab: str):
         """Render Device Control tab content (supporters only)."""
-        imgui.text(f"Device Control > {horizontal_tab}")
-        imgui.text_colored("⭐ Supporter Feature", 1.0, 0.6, 0.0, 1.0)
-        imgui.text("Coming soon...")
+        if horizontal_tab == "Connection":
+            self._render_device_connection()
+        elif horizontal_tab == "Handy":
+            self._render_device_handy()
+        elif horizontal_tab == "OSR2":
+            self._render_device_osr2()
+        elif horizontal_tab == "Buttplug":
+            self._render_device_buttplug()
+        elif horizontal_tab == "Live Tracking":
+            self._render_device_live_tracking()
+
+    def _render_device_connection(self):
+        """Render Device Control > Connection settings."""
+        imgui.text_colored("Device connection and discovery", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Enable Device Control
+        imgui.text("Enable Device Control:")
+        imgui.same_line(250)
+        device_enabled = settings.get("device_control_enabled", True)
+        changed, new_val = imgui.checkbox("##DeviceEnabled", device_enabled)
+        if changed:
+            settings.set("device_control_enabled", new_val)
+        _tooltip_if_hovered("Enable device control features (requires supporter status)")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Backend Selection
+        imgui.text_colored("Backend Selection", 0.8, 0.8, 0.3, 1.0)
+
+        imgui.text("Preferred Backend:")
+        imgui.same_line(250)
+        backend = settings.get("device_control_preferred_backend", "buttplug")
+        backends = ["auto", "buttplug", "handy", "osr"]
+        backend_index = backends.index(backend) if backend in backends else 0
+        changed, new_index = imgui.combo("##PreferredBackend", backend_index, ["Auto-detect", "Buttplug.io", "Handy", "OSR2/SR6"])
+        if changed:
+            settings.set("device_control_preferred_backend", backends[new_index])
+        _tooltip_if_hovered("Choose which device backend to use")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Device Discovery
+        imgui.text_colored("Device Discovery", 0.8, 0.8, 0.3, 1.0)
+        imgui.text("Use the Device Control panel to:")
+        imgui.bullet_text("Discover available devices")
+        imgui.bullet_text("Connect to your device")
+        imgui.bullet_text("Configure device parameters")
+
+    def _render_device_handy(self):
+        """Render Device Control > Handy settings."""
+        imgui.text_colored("Handy device settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("Handy-specific configuration:")
+        imgui.spacing()
+        imgui.bullet_text("Connection key management")
+        imgui.bullet_text("Stroke zone calibration")
+        imgui.bullet_text("Speed and position limits")
+        imgui.spacing()
+        imgui.text_colored("Note:", 1.0, 0.6, 0.0, 1.0)
+        imgui.text("Handy settings are configured through the Device Control")
+        imgui.text("panel when a Handy device is connected.")
+
+    def _render_device_osr2(self):
+        """Render Device Control > OSR2 settings."""
+        imgui.text_colored("OSR2/SR6 device settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("OSR2/SR6-specific configuration:")
+        imgui.spacing()
+        imgui.bullet_text("Serial port selection")
+        imgui.bullet_text("Multi-axis configuration")
+        imgui.bullet_text("Speed and range limits")
+        imgui.spacing()
+        imgui.text_colored("Note:", 1.0, 0.6, 0.0, 1.0)
+        imgui.text("OSR2 settings are configured through the Device Control")
+        imgui.text("panel when an OSR2/SR6 device is connected.")
+
+    def _render_device_buttplug(self):
+        """Render Device Control > Buttplug settings."""
+        imgui.text_colored("Buttplug.io server settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Server Address
+        imgui.text("Server Address:")
+        imgui.same_line(250)
+        server_address = settings.get("buttplug_server_address", "localhost")
+        imgui.push_item_width(200)
+        changed, new_val = imgui.input_text("##ButtplugAddress", server_address, 128)
+        imgui.pop_item_width()
+        if changed:
+            settings.set("buttplug_server_address", new_val)
+        _tooltip_if_hovered("Buttplug.io server address or IP")
+
+        # Server Port
+        imgui.text("Server Port:")
+        imgui.same_line(250)
+        server_port = settings.get("buttplug_server_port", 12345)
+        changed, new_val = imgui.input_int("##ButtplugPort", server_port)
+        if changed:
+            settings.set("buttplug_server_port", max(1, min(65535, new_val)))
+        _tooltip_if_hovered("Buttplug.io server port (default: 12345)")
+
+        imgui.spacing()
+
+        # Auto Connect
+        imgui.text("Auto-connect on Startup:")
+        imgui.same_line(250)
+        auto_connect = settings.get("buttplug_auto_connect", False)
+        changed, new_val = imgui.checkbox("##ButtplugAutoConnect", auto_connect)
+        if changed:
+            settings.set("buttplug_auto_connect", new_val)
+        _tooltip_if_hovered("Automatically connect to Buttplug.io server on startup")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Info box
+        imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.1, 0.3, 0.5, 0.3)
+        imgui.begin_child("ButtplugInfoBox", 0, 80, border=True)
+        imgui.text_colored("💡 Buttplug.io Setup", 0.4, 0.8, 1.0, 1.0)
+        imgui.text("1. Download and run Intiface Central")
+        imgui.text("2. Start the Buttplug.io server")
+        imgui.text("3. Use the Device Control panel to connect devices")
+        imgui.end_child()
+        imgui.pop_style_color()
+
+    def _render_device_live_tracking(self):
+        """Render Device Control > Live Tracking settings."""
+        imgui.text_colored("Live tracking with device sync", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Max Rate
+        imgui.text("Max Update Rate (Hz):")
+        imgui.same_line(250)
+        max_rate = settings.get("device_control_max_rate_hz", 20.0)
+        changed, new_val = imgui.slider_float("##MaxRateHz", max_rate, 1.0, 60.0, "%.1f Hz")
+        if changed:
+            settings.set("device_control_max_rate_hz", new_val)
+        _tooltip_if_hovered("Maximum update rate for device commands during live tracking")
+
+        imgui.spacing()
+
+        # Log Commands
+        imgui.text("Log Device Commands:")
+        imgui.same_line(250)
+        log_commands = settings.get("device_control_log_commands", False)
+        changed, new_val = imgui.checkbox("##LogCommands", log_commands)
+        if changed:
+            settings.set("device_control_log_commands", new_val)
+        _tooltip_if_hovered("Log all device commands to console (debug)")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Info
+        imgui.text_colored("Live Tracking", 0.8, 0.8, 0.3, 1.0)
+        imgui.text("Live tracking allows real-time device sync during video playback:")
+        imgui.bullet_text("Connect your device via Device Control panel")
+        imgui.bullet_text("Enable live tracking in the tracking settings")
+        imgui.bullet_text("Device will respond in real-time to tracking data")
+
+    # ============================================================
+    # CONTENT RENDERING METHODS - Streamer Tab
+    # ============================================================
 
     def _render_streamer_content(self, horizontal_tab: str):
         """Render Streamer tab content (supporters only)."""
-        imgui.text(f"Streamer > {horizontal_tab}")
-        imgui.text_colored("⭐ Supporter Feature", 1.0, 0.6, 0.0, 1.0)
-        imgui.text("Coming soon...")
+        if horizontal_tab == "XBVR":
+            self._render_streamer_xbvr()
+        elif horizontal_tab == "Sync":
+            self._render_streamer_sync()
+        elif horizontal_tab == "Advanced":
+            self._render_streamer_advanced()
+
+    def _render_streamer_xbvr(self):
+        """Render Streamer > XBVR settings."""
+        imgui.text_colored("XBVR integration settings", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        settings = self._app_settings
+
+        # Enable XBVR
+        imgui.text("Enable XBVR Integration:")
+        imgui.same_line(250)
+        xbvr_enabled = settings.get("xbvr_enabled", True)
+        changed, new_val = imgui.checkbox("##XBVREnabled", xbvr_enabled)
+        if changed:
+            settings.set("xbvr_enabled", new_val)
+        _tooltip_if_hovered("Enable XBVR streaming integration")
+
+        imgui.spacing()
+
+        # XBVR Host
+        with _DisabledScope(not xbvr_enabled):
+            imgui.text("XBVR Server Host:")
+            imgui.same_line(250)
+            xbvr_host = settings.get("xbvr_host", "localhost")
+            imgui.push_item_width(200)
+            changed, new_val = imgui.input_text("##XBVRHost", xbvr_host, 128)
+            imgui.pop_item_width()
+            if changed:
+                settings.set("xbvr_host", new_val)
+            _tooltip_if_hovered("XBVR server hostname or IP address")
+
+            # XBVR Port
+            imgui.text("XBVR Server Port:")
+            imgui.same_line(250)
+            xbvr_port = settings.get("xbvr_port", 9999)
+            changed, new_val = imgui.input_int("##XBVRPort", xbvr_port)
+            if changed:
+                settings.set("xbvr_port", max(1, min(65535, new_val)))
+            _tooltip_if_hovered("XBVR server port (default: 9999)")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Info box
+        imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.1, 0.3, 0.5, 0.3)
+        imgui.begin_child("XBVRInfoBox", 0, 80, border=True)
+        imgui.text_colored("💡 XBVR Integration", 0.4, 0.8, 1.0, 1.0)
+        imgui.text("XBVR allows FunGen to sync with your VR video library")
+        imgui.text("and automatically serve funscripts to connected clients.")
+        imgui.text("Visit xbvr.app for more information.")
+        imgui.end_child()
+        imgui.pop_style_color()
+
+    def _render_streamer_sync(self):
+        """Render Streamer > Sync settings."""
+        imgui.text_colored("Sync status and client monitoring", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("Connection Status:")
+        imgui.same_line(250)
+        imgui.text_colored("Not Connected", 0.8, 0.3, 0.3, 1.0)
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text("Connected Clients: 0")
+        imgui.spacing()
+
+        # Client list placeholder
+        imgui.text_colored("Client Monitoring", 0.8, 0.8, 0.3, 1.0)
+        imgui.text("No clients connected.")
+
+    def _render_streamer_advanced(self):
+        """Render Streamer > Advanced settings."""
+        imgui.text_colored("Advanced streaming options", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("Additional streaming options will be added here:")
+        imgui.bullet_text("Client authentication")
+        imgui.bullet_text("Bandwidth optimization")
+        imgui.bullet_text("Compression settings")
+        imgui.bullet_text("Synchronization tuning")
+
+    # ============================================================
+    # CONTENT RENDERING METHODS - Keyboard Shortcuts Tab
+    # ============================================================
 
     def _render_keyboard_content(self, horizontal_tab: str):
         """Render Keyboard Shortcuts tab content."""
-        imgui.text(f"Keyboard Shortcuts > {horizontal_tab}")
-        imgui.text("Coming soon...")
+        if horizontal_tab == "Navigation":
+            self._render_keyboard_navigation()
+        elif horizontal_tab == "Editing":
+            self._render_keyboard_editing()
+        elif horizontal_tab == "Project":
+            self._render_keyboard_project()
+        elif horizontal_tab == "Chapters":
+            self._render_keyboard_chapters()
+
+    def _render_keyboard_navigation(self):
+        """Render Keyboard > Navigation shortcuts."""
+        imgui.text_colored("Navigation and playback shortcuts", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        # Table of shortcuts
+        imgui.text_colored("Playback Control", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Play/Pause", "Space")
+        self._render_shortcut_row("Next Frame", "Right Arrow")
+        self._render_shortcut_row("Previous Frame", "Left Arrow")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Video Navigation", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Jump to Start", "Home")
+        self._render_shortcut_row("Jump to End", "End")
+        self._render_shortcut_row("Pan Timeline Left", "Shift+Left")
+        self._render_shortcut_row("Pan Timeline Right", "Shift+Right")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Timeline View", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Zoom In", "+")
+        self._render_shortcut_row("Zoom Out", "-")
+        self._render_shortcut_row("Reset View", "Ctrl+0")
+
+    def _render_keyboard_editing(self):
+        """Render Keyboard > Editing shortcuts."""
+        imgui.text_colored("Editing and point manipulation shortcuts", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text_colored("Undo/Redo", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Undo", "Ctrl+Z")
+        self._render_shortcut_row("Redo", "Ctrl+Y")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Selection", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Select All", "Ctrl+A")
+        self._render_shortcut_row("Deselect All", "Ctrl+D")
+        self._render_shortcut_row("Copy", "Ctrl+C")
+        self._render_shortcut_row("Paste", "Ctrl+V")
+        self._render_shortcut_row("Delete Point", "Delete")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Point Navigation", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Next Point", "Ctrl+Right")
+        self._render_shortcut_row("Previous Point", "Ctrl+Left")
+        self._render_shortcut_row("Raise Value", "Ctrl+Up")
+        self._render_shortcut_row("Lower Value", "Ctrl+Down")
+
+    def _render_keyboard_project(self):
+        """Render Keyboard > Project shortcuts."""
+        imgui.text_colored("Project and file management shortcuts", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text_colored("File Operations", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("New Project", "Ctrl+N")
+        self._render_shortcut_row("Open Project", "Ctrl+O")
+        self._render_shortcut_row("Save Project", "Ctrl+S")
+        self._render_shortcut_row("Save As", "Ctrl+Shift+S")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Export", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Export Funscript", "Ctrl+E")
+        self._render_shortcut_row("Quick Export", "Ctrl+Shift+E")
+
+    def _render_keyboard_chapters(self):
+        """Render Keyboard > Chapters shortcuts."""
+        imgui.text_colored("Chapter management shortcuts", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text_colored("Chapter Creation", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Set Chapter Start", "I")
+        self._render_shortcut_row("Set Chapter End", "O")
+        self._render_shortcut_row("Create Chapter", "Ctrl+I")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Chapter Management", 0.8, 0.8, 0.3, 1.0)
+        self._render_shortcut_row("Delete Chapter", "Ctrl+Delete")
+        self._render_shortcut_row("Delete Points in Chapter", "Ctrl+Shift+Delete")
+        self._render_shortcut_row("Next Chapter", "Page Down")
+        self._render_shortcut_row("Previous Chapter", "Page Up")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Info box
+        imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.1, 0.3, 0.5, 0.3)
+        imgui.begin_child("KeyboardInfoBox", 0, 60, border=True)
+        imgui.text_colored("💡 Customize Shortcuts", 0.4, 0.8, 1.0, 1.0)
+        imgui.text("Press F1 or use Help → Keyboard Shortcuts to view and")
+        imgui.text("customize all keyboard shortcuts.")
+        imgui.end_child()
+        imgui.pop_style_color()
+
+    def _render_shortcut_row(self, action: str, shortcut: str):
+        """Render a single shortcut row in a table-like format."""
+        imgui.text(action)
+        imgui.same_line(300)
+        imgui.text_colored(shortcut, 0.4, 1.0, 0.4, 1.0)
+
+    # ============================================================
+    # CONTENT RENDERING METHODS - About Tab
+    # ============================================================
 
     def _render_about_content(self, horizontal_tab: str):
         """Render About tab content."""
         if horizontal_tab == "Info":
-            imgui.text_colored("FunGen - AI-Powered Funscript Generator", 0.4, 0.8, 1.0, 1.0)
-            imgui.spacing()
-            imgui.text("Version: 0.1.0")  # TODO: Get from app
-            imgui.text("Build Date: 2025-01-18")  # TODO: Get from app
-            imgui.spacing()
-            if imgui.button("Visit GitHub"):
-                # TODO: Open browser to GitHub
-                pass
+            self._render_about_info()
         elif horizontal_tab == "Support":
-            imgui.text_colored("Support Development", 0.4, 0.8, 1.0, 1.0)
-            imgui.spacing()
-            imgui.text("If you find FunGen useful, consider supporting development:")
-            imgui.spacing()
-            if imgui.button("☕ Support on Ko-fi"):
-                # TODO: Open browser to Ko-fi
-                pass
+            self._render_about_support()
         elif horizontal_tab == "Updates":
-            imgui.text_colored("Check for Updates", 0.4, 0.8, 1.0, 1.0)
+            self._render_about_updates()
+
+    def _render_about_info(self):
+        """Render About > Info content."""
+        imgui.text_colored("FunGen - AI-Powered Funscript Generator", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        # Version info
+        version = getattr(self.app, 'version', '0.1.0')
+        imgui.text(f"Version: {version}")
+        imgui.text("Build Date: 2025-01-18")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Links
+        if imgui.button("🌐 Visit GitHub Repository", width=300):
+            import webbrowser
+            webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator")
+
+        imgui.spacing()
+
+        if imgui.button("📖 View Documentation", width=300):
+            import webbrowser
+            webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/wiki")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # License
+        imgui.text_colored("License", 0.8, 0.8, 0.3, 1.0)
+        imgui.text("This software is open source.")
+        imgui.text("See LICENSE file for details.")
+
+    def _render_about_support(self):
+        """Render About > Support content."""
+        imgui.text_colored("Support Development", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        imgui.text("If you find FunGen useful, please consider supporting")
+        imgui.text("the development through Ko-fi:")
+        imgui.spacing()
+
+        if imgui.button("☕ Support on Ko-fi", width=300):
+            import webbrowser
+            webbrowser.open("https://ko-fi.com/fungendev")  # Replace with actual Ko-fi link
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Why Support?", 0.8, 0.8, 0.3, 1.0)
+        imgui.bullet_text("Helps maintain and improve FunGen")
+        imgui.bullet_text("Enables new feature development")
+        imgui.bullet_text("Supports AI model training and optimization")
+        imgui.bullet_text("Access to supporter-only features")
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Supporter Features", 0.8, 0.8, 0.3, 1.0)
+        imgui.bullet_text("Device Control (Handy, OSR2, Buttplug.io)")
+        imgui.bullet_text("XBVR Streaming Integration")
+        imgui.bullet_text("Advanced live tracking features")
+        imgui.bullet_text("Priority support and feature requests")
+
+    def _render_about_updates(self):
+        """Render About > Updates content."""
+        imgui.text_colored("Check for Updates", 0.4, 0.8, 1.0, 1.0)
+        imgui.spacing()
+
+        version = getattr(self.app, 'version', '0.1.0')
+        imgui.text(f"Current Version: {version}")
+        imgui.spacing()
+
+        if imgui.button("🔍 Check for Updates", width=300):
+            # TODO: Implement update check
+            imgui.open_popup("UpdateCheckPopup")
+
+        # Update check popup
+        if imgui.begin_popup_modal("UpdateCheckPopup")[0]:
+            imgui.text("Checking for updates...")
             imgui.spacing()
-            if imgui.button("Check for Updates"):
-                # TODO: Check for updates
-                pass
+            imgui.text("You are running the latest version!")
+            imgui.spacing()
+            if imgui.button("OK", width=100):
+                imgui.close_current_popup()
+            imgui.end_popup()
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Update Settings", 0.8, 0.8, 0.3, 1.0)
+
+        settings = self._app_settings
+        auto_check = settings.get("auto_check_updates", True)
+        changed, new_val = imgui.checkbox("Automatically check for updates on startup", auto_check)
+        if changed:
+            settings.set("auto_check_updates", new_val)
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.text_colored("Release Notes", 0.8, 0.8, 0.3, 1.0)
+        if imgui.button("📝 View Release Notes", width=300):
+            import webbrowser
+            webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/releases")

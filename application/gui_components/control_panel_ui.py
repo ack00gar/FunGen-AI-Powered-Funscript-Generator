@@ -378,36 +378,14 @@ class ControlPanelUI:
 
         tab_selected = None
         if imgui.begin_tab_bar("ControlPanelTabs"):
-            # Core tabs (always visible)
+            # Core tabs - Run and Post-Processing only
+            # (Advanced settings, Device Control, and Streamer moved to Options window)
             if imgui.begin_tab_item("Run")[0]:
                 tab_selected = "run"
                 imgui.end_tab_item()
             if imgui.begin_tab_item("Post-Processing")[0]:
                 tab_selected = "post_processing"
                 imgui.end_tab_item()
-            if imgui.begin_tab_item("Advanced")[0]:
-                tab_selected = "advanced"
-                imgui.end_tab_item()
-
-            # Device Control tab (supporter feature - conditional)
-            try:
-                from application.utils.feature_detection import is_feature_available
-                if is_feature_available("device_control"):
-                    if imgui.begin_tab_item("Device Control")[0]:
-                        tab_selected = "device_control"
-                        imgui.end_tab_item()
-            except ImportError:
-                pass
-
-            # Streamer tab (supporter feature - conditional)
-            try:
-                from application.utils.feature_detection import is_feature_available
-                if is_feature_available("streamer"):
-                    if imgui.begin_tab_item("Streamer")[0]:
-                        tab_selected = "native_sync"
-                        imgui.end_tab_item()
-            except ImportError:
-                pass
 
             imgui.end_tab_bar()
 
@@ -417,12 +395,6 @@ class ControlPanelUI:
             self._render_run_control_tab()
         elif tab_selected == "post_processing":
             self._render_post_processing_tab()
-        elif tab_selected == "advanced":
-            self._render_advanced_tab()
-        elif tab_selected == "device_control":
-            self._render_device_control_tab()
-        elif tab_selected == "native_sync":
-            self._render_native_sync_tab()
         imgui.end_child()
         imgui.end()
 
@@ -812,6 +784,16 @@ class ControlPanelUI:
         if disable_after and imgui.is_item_hovered():
             imgui.set_tooltip("Requires a video to be loaded and no other process to be active.")
 
+        # Options button to open full Options window
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        if imgui.button("⚙️ More Options...", width=-1):
+            if hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance, 'options_window'):
+                self.app.gui_instance.options_window.show()
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Open Options window for advanced settings")
+
     def _render_configuration_tab(self):
         app = self.app
         app_state = app.app_state_ui
@@ -971,6 +953,18 @@ class ControlPanelUI:
 
             # Render plugin section
             self._render_plugin_section(plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
+
+        # Options button to open full Options window (Post-Processing tab)
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        if imgui.button("⚙️ More Post-Processing Options...", width=-1):
+            if hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance, 'options_window'):
+                # Open Options window and navigate to Post-Processing tab
+                self.app.gui_instance.options_window.show()
+                self.app.gui_instance.options_window.selected_vertical_tab = "postproc"
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Open Options window for advanced post-processing settings")
 
     def _render_plugin_section(self, plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice):
         """Render a collapsible section for a plugin with its parameters and apply button."""
