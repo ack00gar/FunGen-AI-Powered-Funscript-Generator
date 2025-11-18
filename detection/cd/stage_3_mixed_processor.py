@@ -19,7 +19,7 @@ from multiprocessing import Event
 
 from funscript import DualAxisFunscript
 from detection.cd.data_structures import FrameObject
-from application.utils.video_segment import VideoSegment
+from utils.video.video_segment import VideoSegment
 from config import constants
 
 

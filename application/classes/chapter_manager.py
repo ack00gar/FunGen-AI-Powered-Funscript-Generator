@@ -19,7 +19,7 @@ import logging
 from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 
-from application.utils.video_segment import VideoSegment
+from utils.video.video_segment import VideoSegment
 
 
 class ChapterManager:

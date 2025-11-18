@@ -11,7 +11,7 @@ from bisect import bisect_left, bisect_right
 import multiprocessing
 import gc
 
-from application.utils.checkpoint_manager import (
+from utils.processing.checkpoint_manager import (
     CheckpointManager, ProcessingStage, CheckpointData,
     get_checkpoint_manager, initialize_checkpoint_manager
 )
@@ -1188,7 +1188,7 @@ class AppStageProcessor:
                         segment_tables = ['atr_segments', 'segments']
                         for table_name in segment_tables:
                             try:
-                                from application.utils.video_segment import VideoSegment
+                                from utils.video.video_segment import VideoSegment
 
                                 cursor.execute(f"SELECT * FROM {table_name}")
                                 for segment_row in cursor:
@@ -1280,7 +1280,7 @@ class AppStageProcessor:
                             segments = _aggregate_segments(frame_objects, fps, min_segment_duration_frames, self.logger)
                             
                             # Convert segments to video segments format
-                            from application.utils.video_segment import VideoSegment
+                            from utils.video.video_segment import VideoSegment
                             for segment in segments:
                                 # Get segment data from segment
                                 segment_dict = segment.to_dict()
@@ -1313,7 +1313,7 @@ class AppStageProcessor:
                         self.logger.warning(f"Failed to reconstruct segments from overlay: {e}")
                         # Fall back to single segment if reconstruction fails
                         self.logger.info("Falling back to single full-video segment")
-                        from application.utils.video_segment import VideoSegment
+                        from utils.video.video_segment import VideoSegment
                         estimated_frame_count = stage2_data_info.get('estimated_frame_count', 17982)
                         fallback_segment = VideoSegment(
                             start_frame_id=0, end_frame_id=estimated_frame_count - 1,
@@ -1446,7 +1446,7 @@ class AppStageProcessor:
                     end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
                     self.logger.info(f"Line 1380, end_frame: {end_frame}")
                     
-                    from application.utils.video_segment import VideoSegment
+                    from utils.video.video_segment import VideoSegment
                     video_segment = VideoSegment(
                         start_frame_id=start_frame,
                         end_frame_id=end_frame,

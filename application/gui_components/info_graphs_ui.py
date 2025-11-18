@@ -5,7 +5,7 @@ import numpy as np
 import time
 from collections import deque
 from application.utils import _format_time
-from application.utils.system_monitor import SystemMonitor
+from utils.system.system_monitor import SystemMonitor
 
 
 class ComponentPerformanceMonitor:

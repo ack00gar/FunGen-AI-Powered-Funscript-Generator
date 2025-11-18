@@ -166,7 +166,7 @@ def main():
     
     # Now try to import and run the dependency checker
     try:
-        from application.utils.dependency_checker import check_and_install_dependencies
+        from utils.system.dependency_checker import check_and_install_dependencies
         check_and_install_dependencies()
     except ImportError as e:
         logger.error(f"Failed to import dependency checker after bootstrap: {e}")

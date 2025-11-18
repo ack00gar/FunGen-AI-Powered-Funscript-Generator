@@ -1,0 +1,658 @@
+import subprocess
+import sys
+import os
+import shutil
+import platform
+import logging
+from importlib.metadata import version, PackageNotFoundError
+from packaging import version as pkg_version
+from packaging.specifiers import SpecifierSet
+
+logger = logging.getLogger(__name__)
+
+def _parse_package_spec(package_spec):
+    """
+    Parses a package specification and returns (name, version_spec).
+    Examples: 'torch~=2.5.1' -> ('torch', '~=2.5.1')
+              'numpy' -> ('numpy', None)
+    """
+    # Split on version operators
+    for op in ['~=', '>=', '<=', '==', '!=', '>', '<']:
+        if op in package_spec:
+            name, spec = package_spec.split(op, 1)
+            return name.strip(), f"{op}{spec.strip()}"
+    return package_spec.strip(), None
+
+def _check_version_compatibility(installed_version, required_spec):
+    """
+    Checks if installed version satisfies the required specification.
+    Returns: (is_compatible, needs_upgrade)
+    """
+    if not required_spec:
+        return True, False
+    
+    try:
+        spec_set = SpecifierSet(required_spec)
+        installed = pkg_version.parse(installed_version)
+        is_compatible = installed in spec_set
+        
+        # Check if we need to upgrade (installed version is too old)
+        needs_upgrade = not is_compatible
+        return is_compatible, needs_upgrade
+    except Exception:
+        # If we can't parse versions, assume compatible
+        return True, False
+
+def _ensure_packages(packages, pip_args=None, *, non_interactive: bool = True, auto_install: bool = True):
+    """
+    Ensures required packages are installed. Supports optional pip arguments (e.g., custom index URLs).
+    Returns: True if any packages were installed (requiring restart)
+    """
+    missing = []
+    for package_spec in packages:
+        package_name, _ = _parse_package_spec(package_spec)
+        try:
+            version(package_name)
+        except PackageNotFoundError:
+            missing.append(package_spec)
+
+    if not missing:
+        return False
+
+    logger.warning(f"The following required packages are missing: {', '.join(missing)}")
+    install_cmd = [sys.executable, "-m", "pip", "install"] + (pip_args or []) + missing
+    try:
+        if non_interactive and auto_install:
+            if pip_args:
+                logger.info(f"Auto-installing with custom args ({' '.join(pip_args)}): {', '.join(missing)}")
+            else:
+                logger.info(f"Auto-installing missing packages: {', '.join(missing)}")
+            subprocess.check_call(install_cmd)
+            return True
+        elif non_interactive and not auto_install:
+            logger.warning("Non-interactive mode: skipping auto-install. Application may not function correctly.")
+            return False
+        else:
+            prompt = "Would you like to install them now" + (" using custom arguments" if pip_args else "") + "? (y/n): "
+            response = input(prompt).lower()
+            if response == 'y':
+                if pip_args:
+                    logger.info(f"Installing missing packages with custom args ({' '.join(pip_args)}): {', '.join(missing)}")
+                else:
+                    logger.info(f"Installing missing packages: {', '.join(missing)}")
+                subprocess.check_call(install_cmd)
+                return True
+            else:
+                logger.warning("Installation skipped. The application may not function correctly.")
+                return False
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        logger.error(f"Failed to install required packages: {e}")
+        logger.error("Please install them manually and restart.")
+        sys.exit(1)
+
+# Note: _ensure_packages_with_args was merged into _ensure_packages via the optional pip_args parameter
+
+def get_bin_dir():
+    """Gets the directory where binaries like ffmpeg should be stored."""
+    # Place bin folder in the project root
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'bin')
+
+def is_tool(name):
+    """Check whether `name` is on PATH and marked as executable."""
+    return shutil.which(name) is not None
+
+def detect_gpu_environment():
+    """
+    Detects the GPU environment and returns the appropriate requirements file.
+    Returns: (requirements_file, environment_description)
+    """
+    system = platform.system()
+    
+    # macOS: Use core requirements (MPS/CPU PyTorch)
+    if system == "Darwin":
+        return "core.requirements.txt", "macOS (Metal/CPU)"
+    
+    # Windows/Linux: Detect GPU type
+    cuda_available = False
+    rocm_available = False
+    rtx_50_series = False
+    
+    # Check for NVIDIA CUDA
+    try:
+        import subprocess
+        result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            cuda_available = True
+            gpu_names = result.stdout.strip().split('\n')
+            for gpu_name in gpu_names:
+                # Check for RTX 50-series (5070, 5080, 5090)
+                if any(model in gpu_name.upper() for model in ['RTX 507', 'RTX 508', 'RTX 509']):
+                    rtx_50_series = True
+                    break
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        pass
+    
+    # Check for AMD ROCm (Linux and Windows)
+    if not cuda_available:
+        try:
+            result = subprocess.run(['rocm-smi', '--showproductname'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                rocm_available = True
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            pass
+    
+    # Return appropriate requirements file
+    if rtx_50_series:
+        return "cuda.50series.requirements.txt", "NVIDIA RTX 50-series (CUDA)"
+    elif cuda_available:
+        return "cuda.requirements.txt", "NVIDIA CUDA"
+    elif rocm_available:
+        return "rocm.requirements.txt", "AMD ROCm"
+    else:
+        return "core.requirements.txt", "CPU-only"
+
+def check_and_install_dependencies(*, non_interactive: bool = True, auto_install: bool = True):
+    """
+    Checks for and installs missing dependencies.
+    This function is designed to be run before the main application starts.
+    """
+    # 1. Self-bootstrap: Ensure the checker has its own dependencies
+    # Note: send2trash is included because it's imported by application.utils.__init__.py -> generated_file_manager.py
+    bootstrap_changed = _ensure_packages(['requests', 'tqdm', 'packaging', 'send2trash'], pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+
+    logger.info("=== Checking Application Dependencies ===")
+
+    # 2. Detect GPU environment and select appropriate requirements
+    requirements_file, env_description = detect_gpu_environment()
+    logger.debug(f"Detected environment: {env_description}")
+    logger.debug(f"Using requirements file: {requirements_file}")
+
+    # 3. Load and install core requirements first
+    try:
+        with open('core.requirements.txt', 'r') as f:
+            core_packages = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    except FileNotFoundError:
+        logger.error("core.requirements.txt not found.")
+        sys.exit(1)
+
+    core_changed = False
+    if core_packages:
+        logger.info("Checking core packages...")
+        core_changed = _ensure_packages(core_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+
+    # 3.5. macOS-specific: Check PyObjC for Metal GPU backend support
+    macos_changed = False
+    if platform.system() == "Darwin":
+        logger.info("Checking macOS Metal backend dependencies...")
+        macos_packages = ['pyobjc-framework-Metal>=10.0', 'pyobjc-framework-MetalKit>=10.0']
+        macos_changed = _ensure_packages(macos_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+        if macos_changed:
+            logger.info("✅ Metal backend support installed for GPU unwarp acceleration")
+
+    # 4. Load and install GPU-specific requirements if needed
+    gpu_changed = False
+    if requirements_file != "core.requirements.txt":
+        try:
+            with open(requirements_file, 'r') as f:
+                lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+                
+                # Handle pip index URLs (like -i https://download.pytorch.org/whl/cu128)
+                pip_extra_args = []
+                gpu_packages = []
+                
+                for line in lines:
+                    if line.startswith('-i ') or line.startswith('--index-url '):
+                        pip_extra_args.extend(line.split())
+                    else:
+                        gpu_packages.append(line)
+
+            # Handle pip index URLs (like -i https://download.pytorch.org/whl/cu128)
+            pip_extra_args = []
+            pytorch_packages = []
+            tensorrt_packages = []
+            
+            for line in lines:
+                if line.startswith('-i ') or line.startswith('--index-url '):
+                    pip_extra_args.extend(line.split())
+                elif line.startswith('torch==') or line.startswith('torchvision==') or line.startswith('torchaudio=='):
+                    pytorch_packages.append(line)
+                elif line.startswith('tensorrt-cu13') or line.startswith('tensorrt-cu129'): # Assuming these are the correct package names
+                    tensorrt_packages.append(line)
+                else:
+                    # Add other GPU-specific packages to pytorch_packages to be installed with custom index
+                    # This assumes other GPU packages also need the custom PyTorch index
+                    # If not, they should be handled separately or moved to core.requirements.txt
+                    pytorch_packages.append(line)
+
+            if pytorch_packages:
+                logger.info("Checking PyTorch-related GPU packages...")
+                if pip_extra_args:
+                    logger.info(f"Using custom index: {' '.join(pip_extra_args)}")
+                    gpu_changed_pytorch = _ensure_packages(pytorch_packages, pip_args=pip_extra_args, non_interactive=non_interactive, auto_install=auto_install)
+                else:
+                    gpu_changed_pytorch = _ensure_packages(pytorch_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+                if gpu_changed_pytorch:
+                    gpu_changed = True
+
+            if tensorrt_packages:
+                logger.info("Checking TensorRT packages from PyPI...")
+                # Install TensorRT packages from PyPI (no custom index)
+                tensorrt_changed = _ensure_packages(tensorrt_packages, pip_args=None, non_interactive=non_interactive, auto_install=auto_install)
+                if tensorrt_changed:
+                    gpu_changed = True
+                    
+        except FileNotFoundError:
+            logger.warning(f"{requirements_file} not found. Continuing with core packages only.")
+
+    # Install torch-tensorrt and tensorrt separately using the nightly index
+    if requirements_file == "cuda.requirements.txt" or requirements_file == "cuda.50series.requirements.txt":
+        cuda_version = None
+        if requirements_file == "cuda.requirements.txt":
+            cuda_version = "cu128"
+        elif requirements_file == "cuda.50series.requirements.txt":
+            cuda_version = "cu129"
+        
+        if cuda_version:
+            nightly_index_url = f"https://download.pytorch.org/whl/nightly/{cuda_version}"
+            logger.info(f"Checking torch-tensorrt and tensorrt for {cuda_version} from nightly index...")
+            
+            # Check if torch-tensorrt is already installed
+            try:
+                version('torch_tensorrt')
+                logger.info(f"torch-tensorrt for {cuda_version} already installed.")
+            except PackageNotFoundError:
+                logger.warning(f"torch-tensorrt for {cuda_version} is missing.")
+                install_cmd = [sys.executable, "-m", "pip", "install", 
+                               "torch-tensorrt", "tensorrt", 
+                               "--extra-index-url", nightly_index_url]
+                try:
+                    if auto_install: # Only install if auto_install is True
+                        logger.info(f"Auto-installing torch-tensorrt and tensorrt with custom args (--extra-index-url {nightly_index_url})...")
+                        subprocess.check_call(install_cmd)
+                        gpu_changed = True # Indicate that a package was installed
+                    else:
+                        logger.warning("Auto-install is disabled: skipping installation of torch-tensorrt. Application may not function correctly.")
+                except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                    logger.error(f"Failed to install torch-tensorrt and tensorrt: {e}")
+                    logger.error("Please install them manually and restart.")
+                    sys.exit(1)
+
+    # Check if we need to restart due to major package changes
+    major_changes = bootstrap_changed or core_changed or macos_changed or gpu_changed
+    
+    if major_changes:
+        logger.warning("\n=== Package Installation Complete ===")
+        logger.warning("IMPORTANT: Major packages were installed/upgraded.")
+        logger.warning("Please restart the application to ensure all changes take effect.")
+        logger.warning("=== Exiting for Restart ===")
+        sys.exit(0)  # Clean exit to allow restart
+    
+    logger.info("All required packages are installed and up to date.")
+
+    # 5. Verify PyTorch installation
+    try:
+        version('torch')
+        version('torchvision')
+        logger.info("PyTorch (torch and torchvision) is installed.")
+    except PackageNotFoundError:
+        logger.error("\n=== PyTorch Installation Failed ===")
+        logger.error("PyTorch installation may have failed. Please check the installation.")
+        logger.error("Installation guide: https://pytorch.org/get-started/locally/")
+        sys.exit(1)
+
+    # 6. Auto-discover and check feature module dependencies
+    feature_changed = _check_feature_dependencies(non_interactive=non_interactive, auto_install=auto_install)
+
+    # 7. Check for ffmpeg, ffprobe, and ffplay (auto-install if needed)
+    check_ffmpeg_ffprobe(non_interactive=non_interactive, auto_install=auto_install)
+
+    # 8. Download splash screen emojis (optional, non-blocking)
+    check_and_download_emojis(auto_download=auto_install)
+
+    # 9. Download UI control icons (optional, non-blocking)
+    check_and_download_ui_icons(auto_download=auto_install)
+
+    logger.info("=== Dependency Check Finished ===\n")
+
+
+def check_ffmpeg_ffprobe(*, non_interactive: bool = True, auto_install: bool = False):
+    """Checks for ffmpeg, ffprobe, and ffplay and offers to install them if missing."""
+    ffmpeg_missing = not is_tool('ffmpeg')
+    ffprobe_missing = not is_tool('ffprobe')
+    ffplay_missing = not is_tool('ffplay')
+
+    if ffmpeg_missing or ffprobe_missing or ffplay_missing:
+        missing_tools = []
+        if ffmpeg_missing:
+            missing_tools.append('ffmpeg')
+        if ffprobe_missing:
+            missing_tools.append('ffprobe')
+        if ffplay_missing:
+            missing_tools.append('ffplay')
+        
+        logger.warning(f"The following required tools are not found in your system's PATH: {', '.join(missing_tools)}.")
+        if 'ffplay' in missing_tools:
+            logger.warning("ffplay is required for fullscreen video functionality with audio support.")
+        
+        system = platform.system()
+        install_cmd = ""
+        if system == "Darwin":
+            install_cmd = "brew install ffmpeg"
+        elif system == "Linux":
+            install_cmd = "sudo apt-get update && sudo apt-get install ffmpeg"
+        elif system == "Windows":
+            # Safer: only suggest Chocolatey if available; otherwise guide manual install
+            if shutil.which('choco'):
+                install_cmd = "choco install ffmpeg"
+            else:
+                install_cmd = ""
+
+        if install_cmd:
+            try:
+                if non_interactive:
+                    if auto_install:
+                        logger.info(f"Attempting non-interactive install: {install_cmd}")
+                        subprocess.check_call(install_cmd, shell=True)
+                        if not is_tool('ffmpeg') or not is_tool('ffprobe') or not is_tool('ffplay'):
+                            logger.error("Installation may have failed. Please install ffmpeg suite manually.")
+                            sys.exit(1)
+                        else:
+                            logger.info("ffmpeg suite installed successfully.")
+                    else:
+                        logger.warning("Non-interactive mode: skipping ffmpeg auto-install. Please install manually.")
+                        sys.exit(1)
+                else:
+                    response = input(f"Would you like to attempt to install it now using '{install_cmd}'? (y/n): ").lower()
+                    if response == 'y':
+                        logger.info(f"Running installation command: {install_cmd}")
+                        subprocess.check_call(install_cmd, shell=True)
+                        # Re-check after installation
+                        if not is_tool('ffmpeg') or not is_tool('ffprobe') or not is_tool('ffplay'):
+                            logger.error("Installation may have failed. Please install ffmpeg suite manually.")
+                            sys.exit(1)
+                        else:
+                            logger.info("ffmpeg suite installed successfully.")
+                    else:
+                        logger.warning("Installation skipped. Please install ffmpeg manually to proceed.")
+                        sys.exit(1)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                logger.error(f"Error during installation: {e}")
+                logger.error("Please install ffmpeg manually.")
+                sys.exit(1)
+        else:
+            # Provide safer guidance for manual installation on Windows without Chocolatey
+            if system == "Windows":
+                logger.error("ffmpeg/ffprobe not found. Install manually or install Chocolatey (https://chocolatey.org/install) and run 'choco install ffmpeg'.")
+            else:
+                logger.error("Could not determine the installation command for your OS. Please install ffmpeg manually.")
+            sys.exit(1)
+    else:
+        logger.info("ffmpeg and ffprobe are available.")
+
+
+def check_and_download_emojis(*, auto_download: bool = True):
+    """
+    Checks for and downloads splash screen emoji assets if missing.
+    Emojis are optional decorative elements for the splash screen.
+    Uses URLs from config.constants.SPLASH_EMOJI_URLS.
+    """
+    try:
+        import requests
+        from tqdm import tqdm
+        from config.constants import SPLASH_EMOJI_URLS
+    except ImportError:
+        logger.debug("requests, tqdm, or config not available, skipping emoji download")
+        return
+
+    # Get assets directory
+    assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets')
+    os.makedirs(assets_dir, exist_ok=True)
+
+    # Check which emojis are missing
+    missing_emojis = []
+    for filename in SPLASH_EMOJI_URLS.keys():
+        filepath = os.path.join(assets_dir, filename)
+        if not os.path.exists(filepath):
+            missing_emojis.append(filename)
+
+    if not missing_emojis:
+        logger.debug(f"All {len(SPLASH_EMOJI_URLS)} splash screen emojis are present")
+        return
+
+    if not auto_download:
+        logger.info(f"💬 {len(missing_emojis)}/{len(SPLASH_EMOJI_URLS)} splash screen emojis missing (skipping auto-download)")
+        return
+
+    logger.info(f"💬 Downloading {len(missing_emojis)}/{len(SPLASH_EMOJI_URLS)} splash screen emojis...")
+
+    downloaded = 0
+    failed = []
+
+    for filename in missing_emojis:
+        url = SPLASH_EMOJI_URLS[filename]
+        filepath = os.path.join(assets_dir, filename)
+
+        try:
+            response = requests.get(url, stream=True, timeout=10)
+            response.raise_for_status()
+
+            # Get file size for progress bar
+            total_size = int(response.headers.get('content-length', 0))
+
+            # Download with progress bar
+            with open(filepath, 'wb') as f:
+                if total_size > 0:
+                    with tqdm(total=total_size, unit='B', unit_scale=True,
+                             desc=f"  {filename}", leave=False, ncols=80) as pbar:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                            pbar.update(len(chunk))
+                else:
+                    # No content-length header, just download
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+            # Verify the file is not empty
+            if os.path.getsize(filepath) < 1000:  # Emojis should be at least 1KB
+                os.remove(filepath)
+                failed.append(filename)
+                logger.debug(f"  ✗ {filename} (file too small, removed)")
+            else:
+                downloaded += 1
+                logger.debug(f"  ✓ {filename}")
+
+        except Exception as e:
+            failed.append(filename)
+            logger.debug(f"  ✗ {filename}: {str(e)}")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+
+    if downloaded > 0:
+        logger.info(f"✅ Downloaded {downloaded} splash screen emoji(s)")
+
+    if failed:
+        logger.debug(f"Failed to download {len(failed)} emoji(s): {', '.join(failed)}")
+        logger.debug("Splash screen will use available emojis only")
+
+
+def check_and_download_ui_icons(*, auto_download: bool = True):
+    """
+    Checks for and downloads UI control icon assets if missing.
+    Icons are used for playback controls, zoom, fullscreen, and other UI buttons.
+    Uses URLs from config.constants.UI_CONTROL_ICON_URLS.
+    """
+    try:
+        import requests
+        from tqdm import tqdm
+        from config.constants import UI_CONTROL_ICON_URLS
+    except ImportError:
+        logger.debug("requests, tqdm, or config not available, skipping UI icon download")
+        return
+
+    # Get assets directory
+    assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets')
+
+    # Check which icons are missing
+    missing_icons = []
+    for filename in UI_CONTROL_ICON_URLS.keys():
+        filepath = os.path.join(assets_dir, filename)
+        failed_marker = filepath + '.failed'
+
+        # Ensure parent directory exists
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+        # Skip if file exists or has a failed marker (CDN blocking, etc.)
+        if not os.path.exists(filepath) and not os.path.exists(failed_marker):
+            missing_icons.append(filename)
+
+    if not missing_icons:
+        logger.debug(f"All {len(UI_CONTROL_ICON_URLS)} UI control icons are present or marked as failed")
+        return
+
+    if not auto_download:
+        logger.info(f"🎨 {len(missing_icons)}/{len(UI_CONTROL_ICON_URLS)} UI control icons missing (skipping auto-download)")
+        return
+
+    logger.info(f"🎨 Downloading {len(missing_icons)}/{len(UI_CONTROL_ICON_URLS)} UI control icons...")
+
+    downloaded = 0
+    failed = []
+
+    for filename in missing_icons:
+        url = UI_CONTROL_ICON_URLS[filename]
+        filepath = os.path.join(assets_dir, filename)
+        failed_marker = filepath + '.failed'
+
+        try:
+            response = requests.get(url, stream=True, timeout=10)
+            response.raise_for_status()
+
+            # Get file size for progress bar
+            total_size = int(response.headers.get('content-length', 0))
+
+            # Download with progress bar
+            with open(filepath, 'wb') as f:
+                if total_size > 0:
+                    with tqdm(total=total_size, unit='B', unit_scale=True,
+                             desc=f"  {os.path.basename(filename)}", leave=False, ncols=80) as pbar:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                            pbar.update(len(chunk))
+                else:
+                    # No content-length header, just download
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+            # Verify the file is not empty
+            if os.path.getsize(filepath) < 1000:  # Icons should be at least 1KB
+                os.remove(filepath)
+                failed.append(filename)
+                logger.debug(f"  ✗ {filename} (file too small, removed)")
+                # Create failed marker to prevent repeated download attempts
+                try:
+                    with open(failed_marker, 'w') as f:
+                        f.write("Failed: Downloaded file was too small (CDN may be blocking)\n")
+                except:
+                    pass
+            else:
+                downloaded += 1
+                logger.debug(f"  ✓ {filename}")
+
+        except Exception as e:
+            failed.append(filename)
+            logger.debug(f"  ✗ {filename}: {str(e)}")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            # Create failed marker to prevent repeated download attempts
+            try:
+                with open(failed_marker, 'w') as f:
+                    f.write(f"Failed to download: {str(e)}\n")
+            except:
+                pass
+
+    if downloaded > 0:
+        logger.info(f"✅ Downloaded {downloaded} UI control icon(s)")
+
+    if failed:
+        logger.debug(f"Failed to download {len(failed)} icon(s) (marked to skip future attempts): {', '.join(failed)}")
+        logger.debug("UI will fall back to text labels for missing icons")
+
+
+def _check_feature_dependencies(*, non_interactive: bool = True, auto_install: bool = True):
+    """
+    Auto-discover and check dependencies for all feature modules.
+    Scans for directories with requirements.txt files and installs their dependencies.
+    This supports modular features like device_control, streamer, etc.
+    """
+    from pathlib import Path
+
+    # Define feature modules with their metadata
+    # Icons are optional but make logs nicer
+    feature_metadata = {
+        'device_control': {'icon': '🎮', 'description': 'device control'},
+        'streamer': {'icon': '📡', 'description': 'video streaming'},
+    }
+
+    any_changed = False
+
+    # Auto-discover all feature folders with requirements.txt
+    project_root = Path(".")
+    for feature_path in project_root.iterdir():
+        if not feature_path.is_dir():
+            continue
+
+        # Skip common non-feature directories
+        if feature_path.name.startswith('.') or feature_path.name in ['bin', '__pycache__', 'logs']:
+            continue
+
+        # Check if this folder has a requirements.txt
+        requirements_file = feature_path / "requirements.txt"
+        if not requirements_file.exists():
+            continue
+
+        feature_name = feature_path.name
+        metadata = feature_metadata.get(feature_name, {'icon': '📦', 'description': feature_name})
+
+        logger.info(f"{metadata['icon']} {feature_name} feature detected - checking dependencies...")
+
+        try:
+            with open(requirements_file, 'r') as f:
+                lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
+            if not lines:
+                logger.debug(f"No dependencies listed in {requirements_file}")
+                continue
+
+            logger.info(f"Found {len(lines)} {metadata['description']} dependencies to check...")
+            packages = []
+
+            for line in lines:
+                # Skip pip index URLs and comments
+                if not line.startswith('-') and not line.startswith('#'):
+                    # Strip inline comments from package specifications
+                    package = line.split('#')[0].strip()
+                    if package:  # Only add non-empty packages
+                        packages.append(package)
+
+            if packages:
+                logger.info(f"Checking {metadata['description']} dependencies...")
+                changed = _ensure_packages(packages, pip_args=None,
+                                         non_interactive=non_interactive, auto_install=auto_install)
+
+                if changed:
+                    logger.info(f"✅ {feature_name} dependencies installed successfully!")
+                    any_changed = True
+                else:
+                    logger.info(f"✅ {feature_name} dependencies already satisfied")
+            else:
+                logger.debug(f"No valid packages found in {requirements_file}")
+
+        except Exception as e:
+            logger.error(f"Error checking {feature_name} dependencies: {e}")
+            logger.error(f"{feature_name} features may not work properly")
+
+    return any_changed
+
+
+if __name__ == '__main__':
+    check_and_install_dependencies()

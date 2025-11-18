@@ -51,7 +51,7 @@ try:
 
     import detection.cd.stage_3_mixed_processor as stage3_mixed_module
     from detection.cd.data_structures import FrameObject
-    from application.utils.video_segment import VideoSegment
+    from utils.video.video_segment import VideoSegment
     STAGE3_MIXED_MODULE_AVAILABLE = True
 except ImportError as e:
     stage3_mixed_module = None

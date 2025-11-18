@@ -14,7 +14,10 @@ from video import VideoProcessor
 from tracker.tracker_manager import create_tracker_manager
 
 from application.classes import AppSettings, ProjectManager, ShortcutManager, UndoRedoManager
-from application.utils import AppLogger, check_write_access, AutoUpdater, VideoSegment
+from utils.core import AppLogger
+from utils.system import check_write_access
+from utils.app import AutoUpdater
+from utils.video import VideoSegment
 from config.constants import DEFAULT_MODELS_DIR, FUNSCRIPT_METADATA_VERSION, PROJECT_FILE_EXTENSION, MODEL_DOWNLOAD_URLS
 from config.tracker_discovery import get_tracker_discovery
 from pathlib import Path

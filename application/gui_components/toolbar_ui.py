@@ -24,7 +24,7 @@ Displays at the top of the application, below the menu bar.
 
 import imgui
 from application.utils import get_icon_texture_manager
-from application.utils.button_styles import primary_button_style, destructive_button_style
+from utils.ui.button_styles import primary_button_style, destructive_button_style
 
 
 class ToolbarUI:

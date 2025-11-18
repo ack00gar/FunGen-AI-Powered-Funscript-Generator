@@ -80,7 +80,7 @@ class ChapterTypeManager:
     def _enrich_builtin_types_with_colors(self):
         """Add color information to built-in types from VideoSegment color mapping."""
         # Import here to avoid circular dependency
-        from application.utils.video_segment import VideoSegment
+        from utils.video.video_segment import VideoSegment
         from config.element_group_colors import SegmentColors
 
         for short_name, type_info in self.builtin_types.items():
