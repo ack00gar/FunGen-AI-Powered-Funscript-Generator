@@ -1373,10 +1373,15 @@ class VideoProcessor:
             ]
 
     def _init_gpu_unwarp_worker(self):
-        """Initialize GPU unwarp worker for VR video processing."""
-        from config.constants import ENABLE_GPU_UNWARP, GPU_UNWARP_BACKEND
+        """
+        Initialize GPU unwarp worker for VR video processing.
 
-        # Check if user wants CPU v360 instead of GPU unwarp
+        Lazy-loaded optimization (Quick Win #3):
+        - Early returns for non-VR videos (avoid imports)
+        - Deferred constant imports until needed
+        - Reduced startup time for 2D videos
+        """
+        # Check if user wants CPU v360 instead of GPU unwarp (before any imports)
         if self.vr_unwarp_method_override == 'v360':
             self.logger.info("User selected CPU v360 unwarp method - GPU unwarp disabled")
             # Clean up existing GPU unwarp worker if switching from GPU to CPU v360
@@ -1387,8 +1392,24 @@ class VideoProcessor:
             self.gpu_unwarp_enabled = False
             return
 
-        # Only initialize for VR videos when GPU unwarp is enabled
-        if self.determined_video_type != 'VR' or not ENABLE_GPU_UNWARP:
+        # Early return for 2D videos (Quick Win #3: avoid unnecessary imports)
+        if self.determined_video_type != 'VR':
+            # Clean up GPU unwarp worker if it exists but shouldn't be used
+            if self.gpu_unwarp_worker:
+                self.logger.debug("Stopping GPU unwarp worker (not VR video)")
+                self.gpu_unwarp_worker.stop()
+                self.gpu_unwarp_worker = None
+            else:
+                # Quick Win #3: Skip GPU worker initialization for 2D videos (faster startup)
+                self.logger.debug("⚡ Skipping GPU unwarp worker (2D video detected)")
+            self.gpu_unwarp_enabled = False
+            return
+
+        # Import GPU constants only when needed (after VR check)
+        from config.constants import ENABLE_GPU_UNWARP, GPU_UNWARP_BACKEND
+
+        # Check if GPU unwarp is enabled
+        if not ENABLE_GPU_UNWARP:
             # Clean up GPU unwarp worker if it exists but shouldn't be used
             if self.gpu_unwarp_worker:
                 self.logger.info("Stopping GPU unwarp worker (not VR or GPU unwarp disabled)")
