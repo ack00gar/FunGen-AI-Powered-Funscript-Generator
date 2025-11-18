@@ -626,6 +626,19 @@ UI_CONTROL_ICON_URLS = {
 
     # Visualization/analysis indicators
     'ui/icons/chart-increasing.png': 'https://em-content.zobj.net/source/apple/391/chart-increasing_1f4c8.png',  # 📈 chart for 3D simulator
+
+    # Options window vertical tab icons
+    'ui/icons/artist-palette.png': 'https://em-content.zobj.net/source/apple/391/artist-palette_1f3a8.png',  # 🎨 General settings
+    'ui/icons/desktop-computer.png': 'https://em-content.zobj.net/source/apple/391/desktop-computer_1f5a5-fe0f.png',  # 🖥️ Display settings
+    # robot.png already defined above for AI/tracking
+    'ui/icons/bullseye.png': 'https://em-content.zobj.net/source/apple/391/direct-hit_1f3af.png',  # 🎯 Tracking settings
+    'ui/icons/bar-chart.png': 'https://em-content.zobj.net/source/apple/391/bar-chart_1f4ca.png',  # 📊 Funscript settings
+    # wrench.png already defined above for Post-Processing
+    # save.png (floppy disk) already defined above for Output
+    'ui/icons/joystick.png': 'https://em-content.zobj.net/source/apple/391/joystick_1f579-fe0f.png',  # 🕹️ Device Control
+    # satellite.png already defined above for Streamer
+    'ui/icons/keyboard.png': 'https://em-content.zobj.net/source/apple/391/keyboard_2328-fe0f.png',  # ⌨️ Keyboard shortcuts
+    'ui/icons/information.png': 'https://em-content.zobj.net/source/apple/391/information_2139-fe0f.png',  # ℹ️ About/Info
 }
 
 ####################################################################################################

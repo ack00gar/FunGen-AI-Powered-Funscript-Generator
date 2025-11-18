@@ -78,17 +78,17 @@ class OptionsWindow:
 
     # Vertical tab definitions
     VERTICAL_TABS = [
-        {"id": "general",  "name": "General", "count": 25},
-        {"id": "display",  "name": "Display", "count": 30},
-        {"id": "ai",  "name": "AI Models", "count": 15},
-        {"id": "tracking",  "name": "Tracking", "count": 50},
-        {"id": "funscript",  "name": "Funscript", "count": 35},
-        {"id": "postproc",  "name": "Post-Processing", "count": "20+"},
-        {"id": "output",  "name": "Output", "count": 15},
-        {"id": "device",  "name": "Device Control", "count": 25, "supporter": True},
-        {"id": "streamer",  "name": "Streamer", "count": 10, "supporter": True},
-        {"id": "keyboard",  "name": "Keyboard", "count": 30},
-        {"id": "about",  "name": "About", "count": None},
+        {"id": "general", "icon": "artist-palette.png", "name": "General", "count": 25},
+        {"id": "display", "icon": "desktop-computer.png", "name": "Display", "count": 30},
+        {"id": "ai", "icon": "robot.png", "name": "AI Models", "count": 15},
+        {"id": "tracking", "icon": "bullseye.png", "name": "Tracking", "count": 50},
+        {"id": "funscript", "icon": "bar-chart.png", "name": "Funscript", "count": 35},
+        {"id": "postproc", "icon": "wrench.png", "name": "Post-Processing", "count": "20+"},
+        {"id": "output", "icon": "save.png", "name": "Output", "count": 15},
+        {"id": "device", "icon": "joystick.png", "name": "Device Control", "count": 25, "supporter": True},
+        {"id": "streamer", "icon": "satellite.png", "name": "Streamer", "count": 10, "supporter": True},
+        {"id": "keyboard", "icon": "keyboard.png", "name": "Keyboard", "count": 30},
+        {"id": "about", "icon": "information.png", "name": "About", "count": None},
     ]
 
     # Horizontal tab definitions for each vertical tab
@@ -193,7 +193,10 @@ class OptionsWindow:
         self._render_footer()
 
     def _render_vertical_tabs(self):
-        """Render vertical tabs on the left side."""
+        """Render vertical tabs on the left side with icons."""
+        icon_mgr = get_icon_texture_manager()
+        icon_size = 20
+
         for tab in self.VERTICAL_TABS:
             # Check if tab should be visible (supporter feature gating)
             if tab.get("supporter", False) and not self._is_supporter():
@@ -208,12 +211,54 @@ class OptionsWindow:
                 imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.5, 0.9, 1.0)
                 imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.3, 0.7, 1.0)
 
-            # Render tab button
-            button_label = tab['name']
-            if tab.get("supporter", False):
-                button_label += " *"
+            # Get icon texture
+            icon_tex, _, _ = icon_mgr.get_icon_texture(tab.get("icon", "settings.png"))
 
-            if imgui.button(button_label, width=self._vertical_tab_width - 10):
+            # Render tab button with icon and text
+            button_width = self._vertical_tab_width - 10
+            cursor_pos = imgui.get_cursor_screen_pos()
+
+            # Render invisible button for click detection
+            button_label = f"##{tab['id']}_tab"
+            clicked = imgui.invisible_button(button_label, button_width, icon_size + 8)
+
+            # Draw icon and text on top of invisible button
+            draw_list = imgui.get_window_draw_list()
+
+            # Draw background for button
+            if is_selected:
+                bg_color = imgui.get_color_u32_rgba(0.0, 0.4, 0.8, 1.0)
+            elif imgui.is_item_hovered():
+                bg_color = imgui.get_color_u32_rgba(0.2, 0.2, 0.2, 0.5)
+            else:
+                bg_color = imgui.get_color_u32_rgba(0.1, 0.1, 0.1, 0.3)
+
+            draw_list.add_rect_filled(
+                cursor_pos[0], cursor_pos[1],
+                cursor_pos[0] + button_width, cursor_pos[1] + icon_size + 8,
+                bg_color, 3.0
+            )
+
+            # Draw icon
+            if icon_tex:
+                padding = 4
+                draw_list.add_image(
+                    icon_tex,
+                    cursor_pos[0] + padding, cursor_pos[1] + padding,
+                    cursor_pos[0] + padding + icon_size, cursor_pos[1] + padding + icon_size
+                )
+
+            # Draw text label
+            text_label = tab['name']
+            if tab.get("supporter", False):
+                text_label += " *"
+
+            text_pos_x = cursor_pos[0] + icon_size + 8
+            text_pos_y = cursor_pos[1] + 4
+            text_color = imgui.get_color_u32_rgba(1.0, 1.0, 1.0, 1.0)
+            draw_list.add_text(text_pos_x, text_pos_y, text_color, text_label)
+
+            if clicked:
                 self.selected_vertical_tab = tab["id"]
 
             if is_selected:
