@@ -603,26 +603,26 @@ class OptionsWindow:
         with _DisabledScope(not energy_enabled):
             imgui.text("Normal FPS:")
             imgui.same_line(250)
-            normal_fps = settings.get("energy_saver_normal_fps", 60)
+            normal_fps = settings.get("main_loop_normal_fps_target", 60)
             changed, new_val = imgui.input_int("##NormalFPS", normal_fps)
             if changed:
-                settings.set("energy_saver_normal_fps", max(30, min(144, new_val)))
+                settings.set("main_loop_normal_fps_target", max(30, min(144, new_val)))
             _tooltip_if_hovered("Target frame rate during active use")
 
             imgui.text("Idle Threshold (seconds):")
             imgui.same_line(250)
-            idle_threshold = settings.get("energy_saver_idle_threshold_seconds", 10)
-            changed, new_val = imgui.input_int("##IdleThreshold", idle_threshold)
+            idle_threshold = settings.get("energy_saver_threshold_seconds", 30.0)
+            changed, new_val = imgui.slider_float("##IdleThreshold", idle_threshold, 5.0, 120.0, "%.1f")
             if changed:
-                settings.set("energy_saver_idle_threshold_seconds", max(5, new_val))
+                settings.set("energy_saver_threshold_seconds", new_val)
             _tooltip_if_hovered("Time before considering application idle")
 
             imgui.text("Idle FPS:")
             imgui.same_line(250)
-            idle_fps = settings.get("energy_saver_idle_fps", 15)
+            idle_fps = settings.get("energy_saver_fps", 1)
             changed, new_val = imgui.input_int("##IdleFPS", idle_fps)
             if changed:
-                settings.set("energy_saver_idle_fps", max(5, min(60, new_val)))
+                settings.set("energy_saver_fps", max(1, min(60, new_val)))
             _tooltip_if_hovered("Target frame rate when idle")
 
     # ============================================================

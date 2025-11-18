@@ -46,6 +46,7 @@ class AppSettings:
             # UI & Layout
             "ui_view_mode": "simple",  # can be 'expert' or 'simple'
             "full_width_nav": True,
+            "show_toolbar": True,  # Show main toolbar
             "window_width": constants.DEFAULT_WINDOW_WIDTH,
             "window_height": constants.DEFAULT_WINDOW_HEIGHT,
             "ui_layout_mode": constants.DEFAULT_UI_LAYOUT,
@@ -96,6 +97,7 @@ class AppSettings:
             "num_workers_stage2_of": constants.DEFAULT_S2_OF_WORKERS,
             "hardware_acceleration_method": "none",  # Default to CPU to avoid CUDA errors on non-NVIDIA systems
             "ffmpeg_path": "ffmpeg",
+            "ffmpeg_hw_decode": "auto",  # Hardware video decoding: auto, cpu, nvdec, videotoolbox, qsv
             # VR Unwarp method: 'auto', 'metal', 'opengl', 'v360'
             # macOS: v360 is 26% faster than GPU unwarp due to optimized FFmpeg filter
             # Other platforms: auto selects best GPU backend
@@ -185,6 +187,7 @@ class AppSettings:
             "updater_check_on_startup": True,
             "updater_check_periodically": True,
             "updater_suppress_popup": False,
+            "auto_check_updates": True,  # Automatically check for updates on startup (alias for updater_check_on_startup)
             
             # Device Control Settings
             "device_control_enabled": True,
