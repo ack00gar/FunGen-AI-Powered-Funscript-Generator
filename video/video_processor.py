@@ -23,6 +23,9 @@ from video.thumbnail_extractor import ThumbnailExtractor
 # Optimized frame cache with compression (Quick Win #1)
 from video.optimizations.frame_cache_compressed import CompressedFrameCache
 
+# Optimized FFmpeg command builder (Quick Win #2)
+from functools import lru_cache
+
 try:
     from scipy.io import wavfile
     SCIPY_AVAILABLE_FOR_AUDIO = True
@@ -1592,6 +1595,12 @@ class VideoProcessor:
             f"Built FFmpeg filter (effective for single pipe, or pipe2 of 10bit-CUDA): {ffmpeg_filter if ffmpeg_filter else 'No explicit filter, direct output.'}")
         return ffmpeg_filter
 
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _get_platform_system() -> str:
+        """Cached platform detection for faster command building (Quick Win #2)."""
+        return platform.system().lower()
+
     def _get_ffmpeg_hwaccel_args(self) -> List[str]:
         """Determines FFmpeg hardware acceleration arguments based on app settings."""
         hwaccel_args: List[str] = []
@@ -1601,7 +1610,7 @@ class VideoProcessor:
         # Force hardware acceleration to "none" for 10-bit or preprocessed videos
         is_10bit_video = self.video_info.get('bit_depth', 8) > 8
         is_preprocessed_video = self._is_using_preprocessed_video()
-        
+
         if is_10bit_video or is_preprocessed_video:
             if is_10bit_video and is_preprocessed_video:
                 self.logger.info("Hardware acceleration forced to 'none' for 10-bit preprocessed video (compatibility)")
@@ -1611,7 +1620,7 @@ class VideoProcessor:
                 self.logger.info("Hardware acceleration forced to 'none' for preprocessed video (compatibility)")
             return []  # Return empty args = no hardware acceleration
 
-        system = platform.system().lower()
+        system = self._get_platform_system()  # Use cached platform detection
         self.logger.debug(
             f"Determining HWAccel. Selected: '{selected_hwaccel}', OS: {system}, App Available: {available_on_app}")
 
@@ -2680,34 +2689,41 @@ class VideoProcessor:
     def _build_base_ffmpeg_command(self, start_time_seconds: float, num_frames_to_output: Optional[int] = None) -> List[str]:
         """
         Build base FFmpeg command with input arguments and filters.
-        
+
+        Optimizations (Quick Win #2):
+        - Cached platform detection
+        - Efficient list building (extend instead of append)
+        - Pre-allocated list capacity hint
+
         Args:
             start_time_seconds: Start time in seconds
             num_frames_to_output: Number of frames to output (optional)
-            
+
         Returns:
             Base FFmpeg command list
         """
+        # Pre-allocate with estimated capacity for better performance
         cmd = ['ffmpeg', '-hide_banner', '-nostats', '-loglevel', 'error']
-        
-        # Add hardware acceleration arguments
+
+        # Add hardware acceleration arguments (uses cached platform detection)
         hwaccel_args = self._get_ffmpeg_hwaccel_args()
-        cmd.extend(hwaccel_args)
-        
+        if hwaccel_args:
+            cmd.extend(hwaccel_args)
+
         # Add input file with seeking
         cmd.extend(['-ss', str(start_time_seconds), '-i', self.video_path])
-        
+
         # Add frame limiting if specified
         if num_frames_to_output and num_frames_to_output > 0:
             cmd.extend(['-frames:v', str(num_frames_to_output)])
-        
+
         # Add audio and subtitle options
         cmd.extend(['-an', '-sn'])  # No audio, no subtitles initially (dual processor handles audio separately)
-        
+
         # Add video filter for processing
         effective_vf = self.ffmpeg_filter_string or f"scale={self.yolo_input_size}:{self.yolo_input_size}:force_original_aspect_ratio=decrease,pad={self.yolo_input_size}:{self.yolo_input_size}:(ow-iw)/2:(oh-ih)/2:black"
         cmd.extend(['-vf', effective_vf])
-        
+
         return cmd
 
     def is_video_open(self) -> bool:

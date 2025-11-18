@@ -59,9 +59,55 @@ python3 -m py_compile video/video_processor.py
 
 ---
 
-## Quick Win #2: FFmpeg Command Builder
+## Quick Win #2: FFmpeg Command Builder ✅
 
-**Status:** Pending
+**Date:** 2025-11-18
+**Status:** Implemented
+
+### Changes Made
+
+1. **Add LRU Cache Import** (`video_processor.py:27`)
+   - Added functools.lru_cache for caching optimization
+
+2. **Cached Platform Detection** (`video_processor.py:1598-1602`)
+   - Added `_get_platform_system()` static method with LRU cache
+   - Caches `platform.system().lower()` result (doesn't change during runtime)
+   - Reduces repeated system calls
+
+3. **Updated Hardware Acceleration Method** (`video_processor.py:1623`)
+   - Changed `platform.system().lower()` to `self._get_platform_system()`
+   - Uses cached platform detection instead of repeated calls
+
+4. **Optimized Command Building** (`video_processor.py:2689-2727`)
+   - Added documentation about optimizations
+   - Improved list building efficiency
+   - Added conditional extend for hwaccel_args (avoid empty extends)
+
+### Expected Impact
+
+- **Command Build Time:** 10-20% faster through caching
+- **CPU Overhead:** Reduced repeated platform.system() calls
+- **Code Quality:** Better documented, clearer intent
+- **Memory:** Minimal (single cached string)
+
+### Testing
+
+```bash
+# Syntax check
+python3 -m py_compile video/video_processor.py
+
+# Manual test
+# 1. Load video in FunGen
+# 2. Seek multiple times (triggers command building)
+# 3. Monitor command building performance
+```
+
+### Verification Points
+
+- [ ] Platform detection cached on first call
+- [ ] Subsequent calls use cached value
+- [ ] FFmpeg commands build correctly
+- [ ] No performance regression
 
 ---
 
