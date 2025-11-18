@@ -658,6 +658,15 @@ class MainMenu:
                 selected=False, enabled=can_redo2
             )[0]:
                 fs_proc.perform_undo_redo(2, "redo")
+
+            imgui.separator()
+
+            # Options menu item
+            if imgui.menu_item("Options...", "Ctrl+,")[0]:
+                # Open Options window
+                if self.gui and hasattr(self.gui, 'options_window'):
+                    self.gui.options_window.show()
+
             imgui.end_menu()
 
     def _render_view_menu(self, app_state, stage_proc):
@@ -1091,6 +1100,14 @@ class MainMenu:
             )
             if clicked:
                 app.toggle_file_manager_window()
+
+            imgui.separator()
+
+            # Options menu item
+            if imgui.menu_item("Options...", "Ctrl+,")[0]:
+                # Open Options window
+                if self.gui and hasattr(self.gui, 'options_window'):
+                    self.gui.options_window.show()
 
             imgui.end_menu()
 

@@ -204,6 +204,15 @@ class ToolbarUI:
             self._render_features_section(icon_mgr, btn_size)
             self._end_toolbar_section()
 
+        # --- OPTIONS SECTION (Always visible) ---
+        imgui.same_line(spacing=12)
+        self._render_separator()
+        imgui.same_line(spacing=12)
+
+        self._begin_toolbar_section("Options")
+        self._render_options_section(icon_mgr, btn_size)
+        self._end_toolbar_section()
+
         imgui.pop_style_color(3)
         imgui.pop_style_var(2)
 
@@ -906,6 +915,27 @@ class ToolbarUI:
         if self._toolbar_toggle_button(icon_mgr, 'chart-increasing.png', btn_size, "3D Simulator", active):
             app_state.show_simulator_3d = not active
             self.app.project_manager.project_dirty = True
+
+    def _render_options_section(self, icon_mgr, btn_size):
+        """Render Options button to open Options window."""
+        # Options button - Gear emoji (⚙️)
+        # Use a distinct green color for the Options button
+        imgui.pop_style_color(3)
+        imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.5, 0.2, 0.7)  # Green
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.2, 0.6, 0.2, 0.85)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.1, 0.4, 0.1, 0.9)
+
+        if self._toolbar_button(icon_mgr, 'gear.png', btn_size, "Options (Ctrl+,)"):
+            # Open Options window
+            if hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance, 'options_window'):
+                self.app.gui_instance.options_window.show()
+                self.app.logger.debug("Opening Options window from toolbar")
+
+        # Restore default colors
+        imgui.pop_style_color(3)
+        imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.3, 0.3, 0.7)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.15, 0.15, 0.9)
 
     def _toolbar_button(self, icon_mgr, icon_name, size, tooltip):
         """

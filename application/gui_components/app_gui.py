@@ -13,7 +13,7 @@ from collections import deque
 
 from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
-from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
+from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI, OptionsWindow
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
 
 
@@ -105,6 +105,7 @@ class GUI:
         self.generated_file_manager_ui = GeneratedFileManagerWindow(app)
         self.autotuner_window_ui = AutotunerWindow(app)
         self.keyboard_shortcuts_dialog = KeyboardShortcutsDialog(app)
+        self.options_window = OptionsWindow(app)
 
         # UI state for the dialog's radio buttons
         self.selected_batch_method_idx_ui = 0
@@ -2184,6 +2185,9 @@ class GUI:
 
         # Keyboard Shortcuts Dialog (accessible via F1 or Help menu)
         self.keyboard_shortcuts_dialog.render()
+
+        # Options Window (accessible via Ctrl+, or Tools menu)
+        self.options_window.render()
 
     def run(self):
         colors = self.colors
