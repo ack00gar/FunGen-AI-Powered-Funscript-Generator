@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FunGen UI Redesign - Interactive Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            overflow: hidden;
+        }
+
+        /* Main Application Layout */
+        .main-app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Menu Bar */
+        .menu-bar {
+            background: #2d2d2d;
+            padding: 4px 8px;
+            display: flex;
+            gap: 15px;
+            font-size: 13px;
+            border-bottom: 1px solid #444;
+        }
+
+        .menu-item {
+            padding: 4px 8px;
+            cursor: pointer;
+        }
+
+        .menu-item:hover {
+            background: #3d3d3d;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            background: #252525;
+            padding: 8px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            border-bottom: 1px solid #444;
+            flex-wrap: wrap;
+        }
+
+        .toolbar-section {
+            display: flex;
+            gap: 4px;
+            padding: 0 8px;
+            border-right: 1px solid #444;
+        }
+
+        .toolbar-section:last-child {
+            border-right: none;
+        }
+
+        .toolbar-section-label {
+            font-size: 10px;
+            color: #888;
+            align-self: center;
+            margin-right: 4px;
+        }
+
+        .toolbar-btn {
+            padding: 6px 12px;
+            background: #3a3a3a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #e0e0e0;
+        }
+
+        .toolbar-btn:hover {
+            background: #4a4a4a;
+        }
+
+        .toolbar-btn.active {
+            background: #0066cc;
+        }
+
+        .toolbar-btn.options {
+            background: #2d5a2d;
+        }
+
+        .toolbar-btn.options:hover {
+            background: #3d6a3d;
+        }
+
+        /* Main Content Area */
+        .content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Video Display Area */
+        .video-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #1a1a1a;
+            padding: 10px;
+        }
+
+        .video-display {
+            flex: 1;
+            background: #000;
+            border: 1px solid #444;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 18px;
+            position: relative;
+        }
+
+        .video-overlay {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .timeline-area {
+            height: 150px;
+            background: #252525;
+            border: 1px solid #444;
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+        }
+
+        /* Side Panel (Minimal) */
+        .side-panel {
+            width: 320px;
+            background: #2d2d2d;
+            border-left: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-tabs {
+            display: flex;
+            background: #252525;
+            border-bottom: 1px solid #444;
+        }
+
+        .panel-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            border-right: 1px solid #444;
+            font-size: 13px;
+        }
+
+        .panel-tab:last-child {
+            border-right: none;
+        }
+
+        .panel-tab.active {
+            background: #2d2d2d;
+            border-bottom: 2px solid #0066cc;
+        }
+
+        .panel-content {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+        }
+
+        .panel-section {
+            margin-bottom: 20px;
+        }
+
+        .panel-section-title {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .panel-input {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 3px;
+            color: #e0e0e0;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .panel-button {
+            width: 100%;
+            padding: 10px;
+            background: #0066cc;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .panel-button:hover {
+            background: #0077dd;
+        }
+
+        .panel-button.secondary {
+            background: #3a3a3a;
+        }
+
+        .panel-button.secondary:hover {
+            background: #4a4a4a;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0066cc, #0088ff);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        /* Options Window (Modal) */
+        .options-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .options-overlay.visible {
+            display: flex;
+        }
+
+        .options-window {
+            width: 90%;
+            height: 85%;
+            background: #2d2d2d;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .options-header {
+            padding: 15px 20px;
+            background: #252525;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .options-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .close-btn {
+            background: #d32f2f;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .close-btn:hover {
+            background: #e32f2f;
+        }
+
+        .options-body {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Vertical Tabs */
+        .vertical-tabs {
+            width: 180px;
+            background: #252525;
+            border-right: 1px solid #444;
+            overflow-y: auto;
+        }
+
+        .vertical-tab {
+            padding: 12px 15px;
+            cursor: pointer;
+            border-bottom: 1px solid #333;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .vertical-tab:hover {
+            background: #2d2d2d;
+        }
+
+        .vertical-tab.active {
+            background: #0066cc;
+            border-left: 3px solid #0088ff;
+        }
+
+        .vertical-tab.supporter {
+            color: #ffa500;
+        }
+
+        .tab-icon {
+            font-size: 16px;
+        }
+
+        /* Options Content */
+        .options-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Horizontal Tabs */
+        .horizontal-tabs {
+            display: flex;
+            background: #2a2a2a;
+            border-bottom: 1px solid #444;
+            overflow-x: auto;
+            padding: 0 10px;
+        }
+
+        .horizontal-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            white-space: nowrap;
+            font-size: 13px;
+        }
+
+        .horizontal-tab:hover {
+            background: #333;
+        }
+
+        .horizontal-tab.active {
+            border-bottom-color: #0066cc;
+        }
+
+        .tab-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .settings-group {
+            margin-bottom: 25px;
+        }
+
+        .settings-group-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #0088ff;
+        }
+
+        .setting-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .setting-label {
+            flex: 1;
+            font-size: 13px;
+        }
+
+        .setting-control {
+            flex: 1;
+        }
+
+        .setting-control input[type="text"],
+        .setting-control input[type="number"],
+        .setting-control select {
+            width: 100%;
+            padding: 6px 10px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 3px;
+            color: #e0e0e0;
+            font-size: 13px;
+        }
+
+        .setting-control input[type="range"] {
+            width: 100%;
+        }
+
+        .setting-control input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+        }
+
+        .slider-value {
+            display: inline-block;
+            margin-left: 10px;
+            min-width: 50px;
+            color: #0088ff;
+            font-size: 12px;
+        }
+
+        /* Search Bar */
+        .options-footer {
+            padding: 15px 20px;
+            background: #252525;
+            border-top: 1px solid #444;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 8px 12px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #e0e0e0;
+            font-size: 13px;
+        }
+
+        .footer-btn {
+            padding: 8px 16px;
+            background: #3a3a3a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #e0e0e0;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .footer-btn:hover {
+            background: #4a4a4a;
+        }
+
+        .footer-btn.primary {
+            background: #0066cc;
+            border: 1px solid #0066cc;
+        }
+
+        .footer-btn.primary:hover {
+            background: #0077dd;
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #666;
+        }
+
+        .info-box {
+            background: #1a3d5a;
+            border-left: 3px solid #0088ff;
+            padding: 12px;
+            margin-bottom: 15px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        .warning-box {
+            background: #5a3d1a;
+            border-left: 3px solid #ff8800;
+            padding: 12px;
+            margin-bottom: 15px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        .feature-count {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: #0066cc;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+
+        .tab-description {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #252525;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Main Application -->
+    <div class="main-app">
+        <!-- Menu Bar -->
+        <div class="menu-bar">
+            <div class="menu-item">File</div>
+            <div class="menu-item">Edit</div>
+            <div class="menu-item">View</div>
+            <div class="menu-item">Tools</div>
+            <div class="menu-item">Help</div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <div class="toolbar-section">
+                <span class="toolbar-section-label">MODE</span>
+                <button class="toolbar-btn active" id="modeToggle">🎓 Simple</button>
+            </div>
+            <div class="toolbar-section">
+                <span class="toolbar-section-label">PROJECT</span>
+                <button class="toolbar-btn">📄 New</button>
+                <button class="toolbar-btn">📂 Open</button>
+                <button class="toolbar-btn">💾 Save</button>
+                <button class="toolbar-btn">📤 Export</button>
+            </div>
+            <div class="toolbar-section">
+                <span class="toolbar-section-label">AI TRACKING</span>
+                <button class="toolbar-btn">▶️ Start</button>
+            </div>
+            <div class="toolbar-section">
+                <span class="toolbar-section-label">PLAYBACK</span>
+                <button class="toolbar-btn">⏮️</button>
+                <button class="toolbar-btn">◀️</button>
+                <button class="toolbar-btn">⏸️</button>
+                <button class="toolbar-btn">⏹️</button>
+                <button class="toolbar-btn">▶️</button>
+                <button class="toolbar-btn">⏭️</button>
+            </div>
+            <div class="toolbar-section">
+                <span class="toolbar-section-label">VIEW</span>
+                <button class="toolbar-btn">T1</button>
+                <button class="toolbar-btn">T2</button>
+                <button class="toolbar-btn">📋</button>
+                <button class="toolbar-btn">🎮</button>
+            </div>
+            <div class="toolbar-section">
+                <span class="toolbar-section-label">TOOLS</span>
+                <button class="toolbar-btn options" id="openOptionsBtn">⚙️ Options</button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Video Display Area -->
+            <div class="video-area">
+                <div class="video-display">
+                    VIDEO DISPLAY (with 3D Simulator Overlay)
+                    <div class="video-overlay">
+                        <div style="font-size: 12px;">3D Simulator Overlay</div>
+                        <div style="font-size: 10px; color: #888;">Position: 50 | Speed: 100</div>
+                    </div>
+                </div>
+                <div class="timeline-area">
+                    INTERACTIVE TIMELINE (T1 & T2) with Heatmap & Chapter Indicators
+                </div>
+            </div>
+
+            <!-- Side Panel (Minimal) -->
+            <div class="side-panel">
+                <div class="panel-tabs">
+                    <div class="panel-tab active" data-panel="run">⚡ Run</div>
+                    <div class="panel-tab" data-panel="postproc">🔧 Post-Proc</div>
+                </div>
+
+                <div class="panel-content" id="panelRun">
+                    <div class="panel-section">
+                        <div class="panel-section-title">Video Info</div>
+                        <div style="font-size: 12px; color: #888;">Duration: 10:32 | 1920x1080 | 60fps</div>
+                    </div>
+
+                    <div class="panel-section">
+                        <div class="panel-section-title">Tracker Mode</div>
+                        <select class="panel-input">
+                            <option>Auto (Recommended)</option>
+                            <option>Live Tracker</option>
+                            <option>Oscillation Detector</option>
+                            <option>Pose Tracker</option>
+                        </select>
+                    </div>
+
+                    <div class="panel-section">
+                        <div class="panel-section-title">Processing</div>
+                        <button class="panel-button">▶️ Start Tracking</button>
+                        <button class="panel-button secondary">⏸️ Pause</button>
+
+                        <div style="margin-top: 10px;">
+                            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Stage 1: Detection</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 0%"></div>
+                            </div>
+
+                            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Stage 2: Tracking</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 0%"></div>
+                            </div>
+
+                            <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Stage 3: Funscript</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <div class="panel-section-title">Quick Export</div>
+                        <button class="panel-button">📤 Export Timeline 1</button>
+                        <button class="panel-button secondary">📤 Export Timeline 2</button>
+                    </div>
+
+                    <div class="panel-section" style="margin-top: auto;">
+                        <button class="panel-button secondary" id="openOptionsBtn2">⚙️ More Options...</button>
+                    </div>
+                </div>
+
+                <div class="panel-content" id="panelPostProc" style="display: none;">
+                    <div class="panel-section">
+                        <div class="panel-section-title">Timeline</div>
+                        <select class="panel-input">
+                            <option>Timeline 1</option>
+                            <option>Timeline 2</option>
+                        </select>
+                    </div>
+
+                    <div class="panel-section">
+                        <div class="panel-section-title">Scope</div>
+                        <select class="panel-input">
+                            <option>All Points</option>
+                            <option>Selected Range</option>
+                            <option>Current Chapter</option>
+                        </select>
+                    </div>
+
+                    <div class="panel-section">
+                        <div class="panel-section-title">Quick Plugin</div>
+                        <select class="panel-input">
+                            <option>Smoother</option>
+                            <option>RDP Simplifier</option>
+                            <option>Limiter</option>
+                            <option>Half Speed</option>
+                            <option>Double Speed</option>
+                        </select>
+                        <button class="panel-button" style="margin-top: 8px;">✓ Apply Plugin</button>
+                    </div>
+
+                    <div class="panel-section">
+                        <div class="panel-section-title">Auto Post-Processing</div>
+                        <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 8px;">
+                            <input type="checkbox" style="margin-right: 8px;"> Enable Auto Post-Processing
+                        </label>
+                        <label style="display: flex; align-items: center; font-size: 13px;">
+                            <input type="checkbox" style="margin-right: 8px;"> Use Per-Chapter Profiles
+                        </label>
+                    </div>
+
+                    <div class="panel-section" style="margin-top: auto;">
+                        <button class="panel-button secondary" id="openOptionsBtn3">⚙️ Configure Plugins...</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Options Window (Modal Overlay) -->
+    <div class="options-overlay" id="optionsOverlay">
+        <div class="options-window">
+            <div class="options-header">
+                <div class="options-title">⚙️ Options</div>
+                <button class="close-btn" id="closeOptionsBtn">✕ Close</button>
+            </div>
+
+            <div class="options-body">
+                <!-- Vertical Tabs -->
+                <div class="vertical-tabs">
+                    <div class="vertical-tab active" data-category="general">
+                        <span class="tab-icon">🎨</span> General
+                        <span class="feature-count">25</span>
+                    </div>
+                    <div class="vertical-tab" data-category="display">
+                        <span class="tab-icon">🖥️</span> Display
+                        <span class="feature-count">30</span>
+                    </div>
+                    <div class="vertical-tab" data-category="ai">
+                        <span class="tab-icon">🤖</span> AI Models
+                        <span class="feature-count">15</span>
+                    </div>
+                    <div class="vertical-tab" data-category="tracking">
+                        <span class="tab-icon">🎯</span> Tracking
+                        <span class="feature-count">50</span>
+                    </div>
+                    <div class="vertical-tab" data-category="funscript">
+                        <span class="tab-icon">📊</span> Funscript
+                        <span class="feature-count">35</span>
+                    </div>
+                    <div class="vertical-tab" data-category="postproc">
+                        <span class="tab-icon">🔧</span> Post-Processing
+                        <span class="feature-count">20+</span>
+                    </div>
+                    <div class="vertical-tab" data-category="output">
+                        <span class="tab-icon">💾</span> Output
+                        <span class="feature-count">15</span>
+                    </div>
+                    <div class="vertical-tab supporter" data-category="device">
+                        <span class="tab-icon">🕹️</span> Device Control
+                        <span class="feature-count">25</span>
+                    </div>
+                    <div class="vertical-tab supporter" data-category="streamer">
+                        <span class="tab-icon">📡</span> Streamer
+                        <span class="feature-count">10</span>
+                    </div>
+                    <div class="vertical-tab" data-category="keyboard">
+                        <span class="tab-icon">⌨️</span> Keyboard
+                        <span class="feature-count">30</span>
+                    </div>
+                    <div class="vertical-tab" data-category="about">
+                        <span class="tab-icon">ℹ️</span> About
+                    </div>
+                </div>
+
+                <!-- Options Content -->
+                <div class="options-content">
+                    <!-- Horizontal Tabs (changes based on vertical tab) -->
+                    <div class="horizontal-tabs" id="horizontalTabs">
+                        <div class="horizontal-tab active" data-subtab="interface">Interface</div>
+                        <div class="horizontal-tab" data-subtab="performance">Performance</div>
+                        <div class="horizontal-tab" data-subtab="autosave">Autosave</div>
+                    </div>
+
+                    <!-- Tab Content Area -->
+                    <div class="tab-content" id="tabContent">
+                        <!-- Content changes based on selected category and subtab -->
+                        <div class="tab-description">
+                            General interface settings including UI mode, layout, font scale, and application behavior.
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title">User Interface</div>
+
+                            <div class="setting-row">
+                                <div class="setting-label">UI Mode</div>
+                                <div class="setting-control">
+                                    <select>
+                                        <option>Simple</option>
+                                        <option>Expert</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-label">Layout Mode</div>
+                                <div class="setting-control">
+                                    <select>
+                                        <option>Vertical (Stacked)</option>
+                                        <option>Horizontal (Split)</option>
+                                        <option>Floating Panels</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-label">Font Scale</div>
+                                <div class="setting-control">
+                                    <input type="range" min="0.5" max="2.0" step="0.1" value="1.0">
+                                    <span class="slider-value">1.0</span>
+                                </div>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-label">Auto System Scaling</div>
+                                <div class="setting-control">
+                                    <input type="checkbox" checked>
+                                </div>
+                            </div>
+
+                            <div class="setting-row">
+                                <div class="setting-label">Show Toolbar</div>
+                                <div class="setting-control">
+                                    <input type="checkbox" checked>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title">Navigation</div>
+
+                            <div class="setting-row">
+                                <div class="setting-label">Timeline Pan Speed</div>
+                                <div class="setting-control">
+                                    <input type="range" min="1" max="50" value="20">
+                                    <span class="slider-value">20</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="info-box">
+                            💡 Changes are auto-saved. No need to click Apply or OK.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer with Search -->
+            <div class="options-footer">
+                <input type="text" class="search-input" placeholder="🔍 Search all settings..." id="searchInput">
+                <button class="footer-btn">Clear</button>
+                <button class="footer-btn">Reset to Defaults</button>
+                <button class="footer-btn primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Panel Tab Switching
+        document.querySelectorAll('.panel-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                const panelName = tab.dataset.panel;
+                document.getElementById('panelRun').style.display = panelName === 'run' ? 'block' : 'none';
+                document.getElementById('panelPostProc').style.display = panelName === 'postproc' ? 'block' : 'none';
+            });
+        });
+
+        // Open Options Window
+        document.getElementById('openOptionsBtn').addEventListener('click', () => {
+            document.getElementById('optionsOverlay').classList.add('visible');
+        });
+        document.getElementById('openOptionsBtn2').addEventListener('click', () => {
+            document.getElementById('optionsOverlay').classList.add('visible');
+        });
+        document.getElementById('openOptionsBtn3').addEventListener('click', () => {
+            document.getElementById('optionsOverlay').classList.add('visible');
+            // Switch to Post-Processing tab
+            switchVerticalTab('postproc');
+        });
+
+        // Close Options Window
+        document.getElementById('closeOptionsBtn').addEventListener('click', () => {
+            document.getElementById('optionsOverlay').classList.remove('visible');
+        });
+
+        // Close on overlay click
+        document.getElementById('optionsOverlay').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('optionsOverlay')) {
+                document.getElementById('optionsOverlay').classList.remove('visible');
+            }
+        });
+
+        // Vertical Tab Switching
+        document.querySelectorAll('.vertical-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const category = tab.dataset.category;
+                switchVerticalTab(category);
+            });
+        });
+
+        function switchVerticalTab(category) {
+            document.querySelectorAll('.vertical-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.vertical-tab[data-category="${category}"]`).classList.add('active');
+
+            // Update horizontal tabs and content based on category
+            updateContentForCategory(category);
+        }
+
+        // Horizontal Tab Switching
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('horizontal-tab')) {
+                document.querySelectorAll('.horizontal-tab').forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+
+                const subtab = e.target.dataset.subtab;
+                updateContentForSubtab(subtab);
+            }
+        });
+
+        function updateContentForCategory(category) {
+            const horizontalTabs = document.getElementById('horizontalTabs');
+            const tabContent = document.getElementById('tabContent');
+
+            // Define tabs for each category
+            const categoryTabs = {
+                general: [
+                    {id: 'interface', name: 'Interface'},
+                    {id: 'performance', name: 'Performance'},
+                    {id: 'autosave', name: 'Autosave'}
+                ],
+                display: [
+                    {id: 'video', name: 'Video'},
+                    {id: 'gauges', name: 'Gauges'},
+                    {id: 'timelines', name: 'Timelines'},
+                    {id: 'panels', name: 'Panels'}
+                ],
+                ai: [
+                    {id: 'models', name: 'Models'},
+                    {id: 'inference', name: 'Inference'},
+                    {id: 'tensorrt', name: 'TensorRT'}
+                ],
+                tracking: [
+                    {id: 'general', name: 'General'},
+                    {id: 'roi', name: 'ROI'},
+                    {id: 'flow', name: 'Optical Flow'},
+                    {id: 'sensitivity', name: 'Sensitivity'},
+                    {id: 'oscillation', name: 'Oscillation'},
+                    {id: 'filtering', name: 'Class Filter'}
+                ],
+                funscript: [
+                    {id: 'general', name: 'General'},
+                    {id: 'userroi', name: 'User ROI'},
+                    {id: 'refinement', name: 'Refinement'},
+                    {id: 'simplification', name: 'Simplification'},
+                    {id: 'calibration', name: 'Calibration'}
+                ],
+                postproc: [
+                    {id: 'auto', name: 'Auto Processing'},
+                    {id: 'profiles', name: 'Profiles'},
+                    {id: 'smoother', name: 'Smoother Plugin'},
+                    {id: 'rdp', name: 'RDP Simplifier'},
+                    {id: 'limiter', name: 'Limiter'},
+                    {id: 'halfspeed', name: 'Half Speed'},
+                    {id: 'doublespeed', name: 'Double Speed'}
+                ],
+                output: [
+                    {id: 'general', name: 'General'},
+                    {id: 'batch', name: 'Batch Mode'},
+                    {id: 'advanced', name: 'Advanced'}
+                ],
+                device: [
+                    {id: 'connection', name: 'Connection'},
+                    {id: 'handy', name: 'Handy'},
+                    {id: 'osr2', name: 'OSR2'},
+                    {id: 'buttplug', name: 'Buttplug'},
+                    {id: 'live', name: 'Live Tracking'}
+                ],
+                streamer: [
+                    {id: 'xbvr', name: 'XBVR'},
+                    {id: 'sync', name: 'Sync'},
+                    {id: 'advanced', name: 'Advanced'}
+                ],
+                keyboard: [
+                    {id: 'navigation', name: 'Navigation'},
+                    {id: 'editing', name: 'Editing'},
+                    {id: 'project', name: 'Project'},
+                    {id: 'chapters', name: 'Chapters'}
+                ],
+                about: [
+                    {id: 'info', name: 'Info'},
+                    {id: 'support', name: 'Support'},
+                    {id: 'updates', name: 'Updates'}
+                ]
+            };
+
+            const tabs = categoryTabs[category] || [];
+
+            // Update horizontal tabs
+            horizontalTabs.innerHTML = tabs.map((tab, i) =>
+                `<div class="horizontal-tab ${i === 0 ? 'active' : ''}" data-subtab="${tab.id}">${tab.name}</div>`
+            ).join('');
+
+            // Update content
+            updateContentForSubtab(tabs[0]?.id || '', category);
+        }
+
+        function updateContentForSubtab(subtab, category) {
+            const tabContent = document.getElementById('tabContent');
+
+            // This would normally fetch the appropriate content
+            // For now, just show a placeholder
+            tabContent.innerHTML = `
+                <div class="tab-description">
+                    Settings for: ${category || 'General'} > ${subtab || 'Interface'}
+                </div>
+                <div class="info-box">
+                    💡 This is a mockup. Click different vertical and horizontal tabs to see the structure.
+                </div>
+                <div class="settings-group">
+                    <div class="settings-group-title">Example Settings</div>
+                    <div class="setting-row">
+                        <div class="setting-label">Example Setting 1</div>
+                        <div class="setting-control">
+                            <input type="text" value="Value">
+                        </div>
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">Example Slider</div>
+                        <div class="setting-control">
+                            <input type="range" min="0" max="100" value="50">
+                            <span class="slider-value">50</span>
+                        </div>
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label">Example Checkbox</div>
+                        <div class="setting-control">
+                            <input type="checkbox" checked>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Mode Toggle
+        document.getElementById('modeToggle').addEventListener('click', (e) => {
+            const btn = e.target;
+            if (btn.textContent.includes('Simple')) {
+                btn.textContent = '🎓 Expert';
+            } else {
+                btn.textContent = '🎓 Simple';
+            }
+            btn.classList.toggle('active');
+        });
+
+        // Slider value updates
+        document.addEventListener('input', (e) => {
+            if (e.target.type === 'range') {
+                const valueSpan = e.target.nextElementSibling;
+                if (valueSpan && valueSpan.classList.contains('slider-value')) {
+                    valueSpan.textContent = e.target.value;
+                }
+            }
+        });
+
+        // Search functionality
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            if (query.length > 2) {
+                console.log('Searching for:', query);
+                // Would filter settings and highlight matches
+            }
+        });
+    </script>
+</body>
+</html>
