@@ -2,6 +2,7 @@ import imgui
 import os
 import config
 from utils.ui import get_icon_texture_manager, primary_button_style, destructive_button_style
+from utils.ui.imgui_helpers import tooltip_if_hovered as _tooltip_if_hovered, DisabledScope as _DisabledScope, readonly_input as _readonly_input
 
 # Import dynamic tracker discovery
 try:
@@ -10,35 +11,6 @@ try:
 except ImportError:
     DynamicTrackerUI = None
     TrackerCategory = None
-
-def _tooltip_if_hovered(text):
-    if imgui.is_item_hovered():
-        imgui.set_tooltip(text)
-
-class _DisabledScope:
-    __slots__ = ("active",)
-
-    def __init__(self, active):
-        self.active = active
-        if active:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        if self.active:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
-
-
-def _readonly_input(label_id, value, width=-1):
-    if width is not None and width >= 0:
-        imgui.push_item_width(width)
-    imgui.input_text(label_id, value or "Not set", 256, flags=imgui.INPUT_TEXT_READ_ONLY)
-    if width is not None and width >= 0:
-        imgui.pop_item_width()
 
 
 class ControlPanelUI:
