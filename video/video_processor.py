@@ -20,6 +20,9 @@ from video.vr_format_detector_ml_real import RealMLVRFormatDetector
 # Thumbnail extractor for fast random frame access
 from video.thumbnail_extractor import ThumbnailExtractor
 
+# Optimized frame cache with compression (Quick Win #1)
+from video.optimizations.frame_cache_compressed import CompressedFrameCache
+
 try:
     from scipy.io import wavfile
     SCIPY_AVAILABLE_FOR_AUDIO = True
@@ -141,10 +144,15 @@ class VideoProcessor:
             self.logger.debug("Tracker is available, but processing is DISABLED by default. An explicit call is needed to enable it.")
 
         # Frame Caching with rolling backward buffer for arrow navigation
-        self.frame_cache = OrderedDict()
+        # Using CompressedFrameCache for 83% memory reduction (Quick Win #1)
+        self.frame_cache = CompressedFrameCache(
+            max_size=cache_size,
+            compression_quality=95  # High quality, minimal artifacts
+        )
         self.frame_cache_max_size = cache_size
-        self.frame_cache_lock = threading.Lock()
+        self.frame_cache_lock = threading.Lock()  # Keep for backward compatibility with arrow buffer
         self.batch_fetch_size = 600  # For explicit batch fetches only
+        self.logger.info(f"📦 Initialized compressed frame cache (max_size={cache_size}, quality=95)")
 
         # Rolling backward buffer for arrow key navigation (deque for efficient FIFO)
         from collections import deque
@@ -276,19 +284,29 @@ class VideoProcessor:
 
             self._last_timing_update = current_time
 
+    def get_cache_stats(self) -> dict:
+        """
+        Get frame cache statistics.
+
+        Returns:
+            Dictionary with cache statistics including compression ratio and memory saved
+        """
+        try:
+            return self.frame_cache.get_stats()
+        except Exception as e:
+            self.logger.error(f"Failed to get cache stats: {e}")
+            return {}
+
     def _clear_cache(self):
-        with self.frame_cache_lock:
-            if self.frame_cache is not None:
-                try:
-                    if self.frame_cache is not None:
-                        cache_len = len(self.frame_cache)
-                    else:
-                        cache_len = 0
-                except Exception:
-                    cache_len = 0
-                if cache_len > 0:
-                    self.logger.debug(f"Clearing frame cache (had {cache_len} items).")
-                    self.frame_cache.clear()
+        if self.frame_cache is not None:
+            try:
+                stats = self.frame_cache.get_stats()
+                cache_len = stats['size']
+            except Exception:
+                cache_len = 0
+            if cache_len > 0:
+                self.logger.debug(f"Clearing frame cache (had {cache_len} items, saved {stats.get('memory_saved_mb', 0):.1f}MB).")
+                self.frame_cache.clear()
 
     def set_active_video_type_setting(self, video_type: str):
         if video_type not in ['auto', '2D', 'VR']:
@@ -989,14 +1007,13 @@ class VideoProcessor:
                 self.current_frame_index = frame_index_abs
             return None
 
-        with self.frame_cache_lock:
-            if frame_index_abs in self.frame_cache:
-                self.logger.debug(f"Cache HIT for frame {frame_index_abs}")
-                frame = self.frame_cache[frame_index_abs]
-                self.frame_cache.move_to_end(frame_index_abs)
-                if update_current_index:
-                    self.current_frame_index = frame_index_abs
-                return frame
+        # Try to get frame from compressed cache
+        frame = self.frame_cache.get(frame_index_abs)
+        if frame is not None:
+            self.logger.debug(f"Cache HIT for frame {frame_index_abs}")
+            if update_current_index:
+                self.current_frame_index = frame_index_abs
+            return frame
 
         # For instant seek preview (batch_size=1), use fast thumbnail extractor
         # This provides immediate visual feedback (~20ms) while batch buffer loads in background
@@ -1005,15 +1022,8 @@ class VideoProcessor:
             frame = self.thumbnail_extractor.get_frame(frame_index_abs, use_gpu_unwarp=False)
 
             if frame is not None:
-                # Cache the thumbnail frame
-                with self.frame_cache_lock:
-                    if len(self.frame_cache) >= self.frame_cache_max_size:
-                        try:
-                            self.frame_cache.popitem(last=False)
-                        except KeyError:
-                            pass
-                    self.frame_cache[frame_index_abs] = frame
-                    self.frame_cache.move_to_end(frame_index_abs)
+                # Cache the thumbnail frame using compressed cache
+                self.frame_cache.add(frame_index_abs, frame)
 
                 if update_current_index:
                     self.current_frame_index = frame_index_abs
@@ -1046,19 +1056,11 @@ class VideoProcessor:
         fetched_batch = self.get_frames_batch(batch_start_frame, num_frames_to_fetch_actual, immediate_display_frame=immediate_frame)
 
         retrieved_frame: Optional[np.ndarray] = None
-        with self.frame_cache_lock:
-            for idx, frame_data in fetched_batch.items():
-                if len(self.frame_cache) >= self.frame_cache_max_size:
-                    try:
-                        self.frame_cache.popitem(last=False)
-                    except KeyError:
-                        pass
-                self.frame_cache[idx] = frame_data
-                if idx == frame_index_abs:
-                    retrieved_frame = frame_data
-
-            if retrieved_frame is not None and frame_index_abs in self.frame_cache:
-                self.frame_cache.move_to_end(frame_index_abs)
+        # Add fetched frames to compressed cache
+        for idx, frame_data in fetched_batch.items():
+            self.frame_cache.add(idx, frame_data)
+            if idx == frame_index_abs:
+                retrieved_frame = frame_data
 
         if update_current_index:
             self.current_frame_index = frame_index_abs
@@ -1068,10 +1070,11 @@ class VideoProcessor:
         else:
             self.logger.warning(
                 f"Failed to retrieve specific frame {frame_index_abs} after batch fetch. FFmpeg might have failed or frame out of bounds.")
-            with self.frame_cache_lock:
-                if frame_index_abs in self.frame_cache:
-                    self.logger.debug(f"Retrieved frame {frame_index_abs} from cache on fallback check.")
-                    return self.frame_cache[frame_index_abs]
+            # Try cache one more time as fallback
+            fallback_frame = self.frame_cache.get(frame_index_abs)
+            if fallback_frame is not None:
+                self.logger.debug(f"Retrieved frame {frame_index_abs} from cache on fallback check.")
+                return fallback_frame
             return None
 
     @staticmethod
