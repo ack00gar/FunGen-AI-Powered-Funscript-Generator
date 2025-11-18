@@ -117,6 +117,8 @@ class AppSettings:
             "discarded_tracking_classes": constants.CLASSES_TO_DISCARD_BY_DEFAULT,
             "tracking_axis_mode": "both",
             "single_axis_output_target": "primary",
+            "enable_range_processing": False,  # Process only a specific frame range
+            "save_preprocessed_video": False,  # Save preprocessed video for reuse
 
             # --- Live Tracker Settings ---
             "live_tracker_confidence_threshold": constants.DEFAULT_TRACKER_CONFIDENCE_THRESHOLD,
@@ -148,6 +150,14 @@ class AppSettings:
 
             # --- Funscript Generation Settings ---
             "funscript_point_simplification_enabled": True,  # Enable on-the-fly point simplification
+            "rdp_epsilon": 1.0,  # RDP simplification threshold
+            "enable_simplification": True,  # Enable RDP simplification
+            "smoothing_window_size": 5,  # Savitzky-Golay smoothing window (must be odd)
+            "refinement_scale": 1.0,  # Interactive refinement scale
+            "refinement_center": 50.0,  # Interactive refinement center point
+            "latency_offset_ms": 0,  # Latency compensation in milliseconds
+            "live_tracker_output_sensitivity": 1.0,  # Output sensitivity multiplier
+            "live_tracker_signal_amplification": 1.0,  # Signal amplification multiplier
 
             # --- Signal Enhancement Settings ---
             "enable_signal_enhancement": True,  # Enable frame difference based signal enhancement
