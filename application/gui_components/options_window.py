@@ -78,17 +78,17 @@ class OptionsWindow:
 
     # Vertical tab definitions
     VERTICAL_TABS = [
-        {"id": "general", "icon": "🎨", "name": "General", "count": 25},
-        {"id": "display", "icon": "🖥️", "name": "Display", "count": 30},
-        {"id": "ai", "icon": "🤖", "name": "AI Models", "count": 15},
-        {"id": "tracking", "icon": "🎯", "name": "Tracking", "count": 50},
-        {"id": "funscript", "icon": "📊", "name": "Funscript", "count": 35},
-        {"id": "postproc", "icon": "🔧", "name": "Post-Processing", "count": "20+"},
-        {"id": "output", "icon": "💾", "name": "Output", "count": 15},
-        {"id": "device", "icon": "🕹️", "name": "Device Control", "count": 25, "supporter": True},
-        {"id": "streamer", "icon": "📡", "name": "Streamer", "count": 10, "supporter": True},
-        {"id": "keyboard", "icon": "⌨️", "name": "Keyboard", "count": 30},
-        {"id": "about", "icon": "ℹ️", "name": "About", "count": None},
+        {"id": "general",  "name": "General", "count": 25},
+        {"id": "display",  "name": "Display", "count": 30},
+        {"id": "ai",  "name": "AI Models", "count": 15},
+        {"id": "tracking",  "name": "Tracking", "count": 50},
+        {"id": "funscript",  "name": "Funscript", "count": 35},
+        {"id": "postproc",  "name": "Post-Processing", "count": "20+"},
+        {"id": "output",  "name": "Output", "count": 15},
+        {"id": "device",  "name": "Device Control", "count": 25, "supporter": True},
+        {"id": "streamer",  "name": "Streamer", "count": 10, "supporter": True},
+        {"id": "keyboard",  "name": "Keyboard", "count": 30},
+        {"id": "about",  "name": "About", "count": None},
     ]
 
     # Horizontal tab definitions for each vertical tab
@@ -158,7 +158,7 @@ class OptionsWindow:
 
         # Begin Options window
         expanded, opened = imgui.begin(
-            "⚙️ Options",
+            "Options",
             closable=True,
             flags=imgui.WINDOW_NO_COLLAPSE
         )
@@ -209,9 +209,9 @@ class OptionsWindow:
                 imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.3, 0.7, 1.0)
 
             # Render tab button
-            button_label = f"{tab['icon']} {tab['name']}"
+            button_label = tab['name']
             if tab.get("supporter", False):
-                button_label += " ⭐"
+                button_label += " *"
 
             if imgui.button(button_label, width=self._vertical_tab_width - 10):
                 self.selected_vertical_tab = tab["id"]
@@ -277,7 +277,7 @@ class OptionsWindow:
         imgui.push_item_width(-200)
         _, self.search_query = imgui.input_text_with_hint(
             "##OptionsSearch",
-            "🔍 Search all settings...",
+            "Search all settings...",
             self.search_query,
             256
         )
@@ -421,7 +421,7 @@ class OptionsWindow:
         # Info box
         imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.1, 0.3, 0.5, 0.3)
         imgui.begin_child("InfoBox", 0, 60, border=True)
-        imgui.text_colored("💡 Auto-Save Enabled", 0.4, 0.8, 1.0, 1.0)
+        imgui.text_colored("Auto-Save Enabled", 0.4, 0.8, 1.0, 1.0)
         imgui.text("Changes are automatically saved to settings.json")
         imgui.text("No need to click Apply or OK")
         imgui.end_child()
@@ -1707,7 +1707,7 @@ class OptionsWindow:
         # Info box
         imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.1, 0.3, 0.5, 0.3)
         imgui.begin_child("ButtplugInfoBox", 0, 80, border=True)
-        imgui.text_colored("💡 Buttplug.io Setup", 0.4, 0.8, 1.0, 1.0)
+        imgui.text_colored("Buttplug.io Setup", 0.4, 0.8, 1.0, 1.0)
         imgui.text("1. Download and run Intiface Central")
         imgui.text("2. Start the Buttplug.io server")
         imgui.text("3. Use the Device Control panel to connect devices")
@@ -1811,7 +1811,7 @@ class OptionsWindow:
         # Info box
         imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.1, 0.3, 0.5, 0.3)
         imgui.begin_child("XBVRInfoBox", 0, 80, border=True)
-        imgui.text_colored("💡 XBVR Integration", 0.4, 0.8, 1.0, 1.0)
+        imgui.text_colored("XBVR Integration", 0.4, 0.8, 1.0, 1.0)
         imgui.text("XBVR allows FunGen to sync with your VR video library")
         imgui.text("and automatically serve funscripts to connected clients.")
         imgui.text("Visit xbvr.app for more information.")
@@ -1970,7 +1970,7 @@ class OptionsWindow:
         # Info box
         imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.1, 0.3, 0.5, 0.3)
         imgui.begin_child("KeyboardInfoBox", 0, 60, border=True)
-        imgui.text_colored("💡 Customize Shortcuts", 0.4, 0.8, 1.0, 1.0)
+        imgui.text_colored("Customize Shortcuts", 0.4, 0.8, 1.0, 1.0)
         imgui.text("Press F1 or use Help → Keyboard Shortcuts to view and")
         imgui.text("customize all keyboard shortcuts.")
         imgui.end_child()
@@ -2010,13 +2010,13 @@ class OptionsWindow:
         imgui.spacing()
 
         # Links
-        if imgui.button("🌐 Visit GitHub Repository", width=300):
+        if imgui.button("Visit GitHub Repository", width=300):
             import webbrowser
             webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator")
 
         imgui.spacing()
 
-        if imgui.button("📖 View Documentation", width=300):
+        if imgui.button("View Documentation", width=300):
             import webbrowser
             webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/wiki")
 
@@ -2038,7 +2038,7 @@ class OptionsWindow:
         imgui.text("the development through Ko-fi:")
         imgui.spacing()
 
-        if imgui.button("☕ Support on Ko-fi", width=300):
+        if imgui.button("Support on Ko-fi", width=300):
             import webbrowser
             webbrowser.open("https://ko-fi.com/fungendev")  # Replace with actual Ko-fi link
 
@@ -2071,7 +2071,7 @@ class OptionsWindow:
         imgui.text(f"Current Version: {version}")
         imgui.spacing()
 
-        if imgui.button("🔍 Check for Updates", width=300):
+        if imgui.button("Check for Updates", width=300):
             # TODO: Implement update check
             imgui.open_popup("UpdateCheckPopup")
 
@@ -2102,6 +2102,6 @@ class OptionsWindow:
         imgui.spacing()
 
         imgui.text_colored("Release Notes", 0.8, 0.8, 0.3, 1.0)
-        if imgui.button("📝 View Release Notes", width=300):
+        if imgui.button("View Release Notes", width=300):
             import webbrowser
             webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/releases")

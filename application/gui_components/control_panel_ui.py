@@ -788,7 +788,7 @@ class ControlPanelUI:
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
-        if imgui.button("⚙️ More Options...", width=-1):
+        if imgui.button("More Options...", width=-1):
             if hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance, 'options_window'):
                 self.app.gui_instance.options_window.show()
         if imgui.is_item_hovered():
@@ -958,7 +958,7 @@ class ControlPanelUI:
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
-        if imgui.button("⚙️ More Post-Processing Options...", width=-1):
+        if imgui.button("More Post-Processing Options...", width=-1):
             if hasattr(self.app, 'gui_instance') and hasattr(self.app.gui_instance, 'options_window'):
                 # Open Options window and navigate to Post-Processing tab
                 self.app.gui_instance.options_window.show()
