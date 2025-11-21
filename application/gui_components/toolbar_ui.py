@@ -420,12 +420,13 @@ class ToolbarUI:
 
             rendered_t1 = True
 
-        # Always continue on same line for T2 section
-        imgui.same_line(spacing=12)
-
-        # Show separator if T1 rendered action buttons
+        # Position T2 section - put on new line if T1 rendered buttons (to avoid overflow)
         if rendered_t1:
-            self._render_separator()
+            # T1 has buttons, put T2 on new line to ensure visibility
+            # (optional: could add imgui.spacing() here for vertical gap)
+            pass
+        else:
+            # T1 not active, T2 can be on same line as T1 toggle
             imgui.same_line(spacing=12)
 
         # === TIMELINE 2 SECTION ===
