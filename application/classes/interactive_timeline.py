@@ -745,11 +745,11 @@ class InteractiveFunscriptTimeline:
             label_text = str(val)
             text_size = imgui.calc_text_size(label_text)
 
-            if val == 100 or val == 75:
+            if val == 100:
                 # Place below the line
                 label_y = y + 2
-            elif val == 50:
-                # Center on the middle bar with background
+            elif val == 25 or val == 50 or val == 75:
+                # Center on the line with background for readability
                 label_y = y - text_size[1] / 2
                 # Draw background rectangle for readability
                 padding = 2
@@ -761,7 +761,7 @@ class InteractiveFunscriptTimeline:
                     imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND)
                 )
             else:
-                # 0 and 25: above the line
+                # 0: above the line
                 label_y = y - 12
 
             dl.add_text(tf.x_offset + 2, label_y, imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), label_text)
