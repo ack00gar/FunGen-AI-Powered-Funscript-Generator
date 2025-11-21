@@ -61,15 +61,29 @@ class PluginUIRenderer:
             
             # Render button
             if imgui.button(button_id):
+                self.logger.info(f"🔘 Plugin button clicked: {plugin_name} on Timeline {timeline_num}")
+
                 # Check if plugin should apply directly or open configuration window
                 if self._should_apply_directly(plugin_name, ui_data):
+                    self.logger.info(f"  → Applying {plugin_name} directly (no config needed)")
                     # Apply directly - this will be handled by the timeline's callback system
                     context = self.plugin_manager.plugin_contexts.get(plugin_name)
                     if context:
                         context.apply_requested = True
+                        self.logger.info(f"  ✅ Set apply_requested=True for {plugin_name}")
+
+                        # Auto-enable "apply to selection" if points are selected
+                        if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
+                            if self.timeline_reference.multi_selected_action_indices:
+                                context.apply_to_selection = True
+                                self.logger.info(f"  ✅ Auto-enabled 'apply to selection' for {plugin_name} ({len(self.timeline_reference.multi_selected_action_indices)} points selected)")
+                    else:
+                        self.logger.error(f"  ❌ No context found for {plugin_name}")
                 else:
+                    self.logger.info(f"  → Opening configuration window for {plugin_name}")
                     # Open configuration window
                     self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
+                    self.logger.info(f"  ✅ Set state to OPEN for {plugin_name}")
 
                     # Auto-tick "apply to selection" if points are selected
                     if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
@@ -77,6 +91,7 @@ class PluginUIRenderer:
                             context = self.plugin_manager.plugin_contexts.get(plugin_name)
                             if context:
                                 context.apply_to_selection = True
+                                self.logger.info(f"  ✅ Auto-enabled 'apply to selection' for {plugin_name}")
                 any_button_clicked = True
             
             # Add tooltip
