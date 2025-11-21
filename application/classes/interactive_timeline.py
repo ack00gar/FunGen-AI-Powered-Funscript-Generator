@@ -214,7 +214,10 @@ class InteractiveFunscriptTimeline:
         
         # 7. Render Plugin Windows (Popups)
         self.plugin_renderer.render_plugin_windows(self.timeline_num, f"TL{self.timeline_num}")
-        
+
+        # 7b. Check for and execute pending plugin apply requests
+        self._check_and_apply_pending_plugins()
+
         # 8. Handle Auto-Scroll/Sync
         self._handle_sync_logic(app_state, tf)
 
@@ -369,25 +372,39 @@ class InteractiveFunscriptTimeline:
     def _handle_keyboard_shortcuts(self, app_state, io):
         shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
         
-        # Helper to map shortcuts
+        # Helper to map shortcuts (for single-press actions)
         def check_shortcut(name, default):
             key_str = shortcuts.get(name, default)
             tuple_key = self.app._map_shortcut_to_glfw_key(key_str)
             if not tuple_key: return False
             key_code, mods = tuple_key
-            
+
             pressed = imgui.is_key_pressed(key_code)
             # Check modifiers
-            match = (mods["ctrl"] == io.key_ctrl and 
-                     mods["alt"] == io.key_alt and 
+            match = (mods["ctrl"] == io.key_ctrl and
+                     mods["alt"] == io.key_alt and
                      mods["shift"] == io.key_shift)
             return pressed and match
 
-        # 1. Pan Left/Right (Arrow keys)
+        # Helper for persistent/held key actions (like panning)
+        def check_key_held(name, default):
+            key_str = shortcuts.get(name, default)
+            tuple_key = self.app._map_shortcut_to_glfw_key(key_str)
+            if not tuple_key: return False
+            key_code, mods = tuple_key
+
+            held = imgui.is_key_down(key_code)
+            # Check modifiers
+            match = (mods["ctrl"] == io.key_ctrl and
+                     mods["alt"] == io.key_alt and
+                     mods["shift"] == io.key_shift)
+            return held and match
+
+        # 1. Pan Left/Right (Arrow keys) - persistent while held
         pan_speed = self.app.app_settings.get("timeline_pan_speed_multiplier", 5) * app_state.timeline_zoom_factor_ms_per_px
-        if check_shortcut("pan_timeline_left", "ALT+LEFT_ARROW"):
+        if check_key_held("pan_timeline_left", "ALT+LEFT_ARROW"):
             app_state.timeline_pan_offset_ms -= pan_speed
-        if check_shortcut("pan_timeline_right", "ALT+RIGHT_ARROW"):
+        if check_key_held("pan_timeline_right", "ALT+RIGHT_ARROW"):
             app_state.timeline_pan_offset_ms += pan_speed
 
         # 2. Select All (Ctrl+A)
@@ -498,25 +515,36 @@ class InteractiveFunscriptTimeline:
 
     def _finalize_marquee(self, tf, actions, append: bool):
         if not self.marquee_start or not self.marquee_end: return
-        
+
+        # Check if this was a simple click (not a drag)
+        dx = abs(self.marquee_end[0] - self.marquee_start[0])
+        dy = abs(self.marquee_end[1] - self.marquee_start[1])
+        is_simple_click = (dx < 5 and dy < 5)  # Threshold: less than 5 pixels = click
+
+        if is_simple_click:
+            # Single click on empty space -> seek video to clicked time
+            click_time = tf.x_to_time(self.marquee_start[0])
+            self._seek_video(click_time)
+            return
+
         # Get marquee rect
         x1, x2 = sorted([self.marquee_start[0], self.marquee_end[0]])
         y1, y2 = sorted([self.marquee_start[1], self.marquee_end[1]])
-        
+
         t_start = tf.x_to_time(x1)
         t_end = tf.x_to_time(x2)
-        
+
         # Optimize: Binary search time bounds
         s_idx = bisect_left([a['at'] for a in actions], t_start)
         e_idx = bisect_right([a['at'] for a in actions], t_end)
-        
+
         new_selection = set()
         for i in range(s_idx, e_idx):
             act = actions[i]
             py = tf.val_to_y(act['pos'])
             if y1 <= py <= y2:
                 new_selection.add(i)
-        
+
         if append:
             self.multi_selected_action_indices.update(new_selection)
         else:
@@ -712,7 +740,31 @@ class InteractiveFunscriptTimeline:
             col = TimelineColors.GRID_MAJOR_LINES if val == 50 else TimelineColors.GRID_LINES
             thick = 1.5 if val == 50 else 1.0
             dl.add_line(tf.x_offset, y, tf.x_offset + tf.width, y, imgui.get_color_u32_rgba(*col), thick)
-            dl.add_text(tf.x_offset + 2, y - 12, imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), str(val))
+
+            # Position labels
+            label_text = str(val)
+            text_size = imgui.calc_text_size(label_text)
+
+            if val == 100 or val == 75:
+                # Place below the line
+                label_y = y + 2
+            elif val == 50:
+                # Center on the middle bar with background
+                label_y = y - text_size[1] / 2
+                # Draw background rectangle for readability
+                padding = 2
+                dl.add_rect_filled(
+                    tf.x_offset + 2 - padding,
+                    label_y - padding,
+                    tf.x_offset + 2 + text_size[0] + padding,
+                    label_y + text_size[1] + padding,
+                    imgui.get_color_u32_rgba(*TimelineColors.CANVAS_BACKGROUND)
+                )
+            else:
+                # 0 and 25: above the line
+                label_y = y - 12
+
+            dl.add_text(tf.x_offset + 2, label_y, imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), label_text)
 
         # 3. Vertical Lines (Adaptive Time Steps)
         pixels_per_sec = 1000.0 / tf.zoom
@@ -732,7 +784,8 @@ class InteractiveFunscriptTimeline:
                 is_major = (curr_ms % (step_ms * 5) == 0)
                 col = TimelineColors.GRID_MAJOR_LINES if is_major else TimelineColors.GRID_LINES
                 dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height, imgui.get_color_u32_rgba(*col))
-                if is_major:
+                # Only show time labels for non-negative times
+                if is_major and curr_ms >= 0:
                      dl.add_text(x + 3, tf.y_offset + tf.height - 15, imgui.get_color_u32_rgba(*TimelineColors.GRID_LABELS), f"{curr_ms/1000:.1f}s")
             curr_ms += step_ms
 
@@ -900,10 +953,23 @@ class InteractiveFunscriptTimeline:
     def _render_toolbar(self, view_mode):
         if view_mode != 'expert': return
         
-        # Standard Buttons
-        if imgui.button(f"Clear##{self.timeline_num}"):
+        # Standard Buttons - Clear selected points
+        num_selected = len(self.multi_selected_action_indices) if self.multi_selected_action_indices else 0
+        clear_label = f"Clear ({num_selected})##{self.timeline_num}" if num_selected > 0 else f"Clear##{self.timeline_num}"
+
+        if imgui.button(clear_label):
             self._delete_selected()
-        if imgui.is_item_hovered(): imgui.set_tooltip("Delete selected points")
+
+        if imgui.is_item_hovered():
+            tooltip = f"Delete {num_selected} selected points" if num_selected > 0 else "Delete selected points (none selected)"
+            imgui.set_tooltip(tooltip)
+
+        imgui.same_line()
+
+        # Clear All button
+        if imgui.button(f"Clear All##{self.timeline_num}"):
+            self._clear_all_points()
+        if imgui.is_item_hovered(): imgui.set_tooltip("Delete ALL points on this timeline (Ctrl+Z to undo)")
         
         imgui.same_line()
         
@@ -940,6 +1006,13 @@ class InteractiveFunscriptTimeline:
         if changed:
             self.app.app_settings.set(f"timeline{self.timeline_num}_show_ultimate_preview", self.show_ultimate_autotune_preview)
             self.invalidate_ultimate_preview()
+
+        # Timeline Status Text
+        imgui.same_line()
+        imgui.text("|")
+        imgui.same_line()
+        status_text = self._get_timeline_status_text()
+        imgui.text(status_text)
 
     def _render_context_menu(self, tf):
         if imgui.begin_popup(f"TimelineContext{self.timeline_num}"):
@@ -1032,17 +1105,85 @@ class InteractiveFunscriptTimeline:
         self.invalidate_cache()
 
     def _delete_selected(self):
-        if not self.multi_selected_action_indices: return
-        
+        if not self.multi_selected_action_indices:
+            return
+
         fs, axis = self._get_target_funscript_details()
-        if not fs: return
-        
+        if not fs:
+            self.logger.error(f"Could not get funscript details for timeline {self.timeline_num}")
+            return
+
         self.app.funscript_processor._record_timeline_action(self.timeline_num, "Delete Points")
         fs.clear_points(axis=axis, selected_indices=list(self.multi_selected_action_indices))
         self.multi_selected_action_indices.clear()
         self.selected_action_idx = -1
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Delete Points")
         self.invalidate_cache()
+
+    def _clear_all_points(self):
+        """Delete all points on this timeline (undoable)."""
+        fs, axis = self._get_target_funscript_details()
+        if not fs:
+            return
+
+        # Get current point count
+        actions = self._get_actions()
+        num_points = len(actions) if actions else 0
+
+        if num_points == 0:
+            return
+
+        # Record for undo
+        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Clear All Points")
+
+        # Select all points then delete them
+        all_indices = list(range(num_points))
+        fs.clear_points(axis=axis, selected_indices=all_indices)
+
+        # Clear selection
+        self.multi_selected_action_indices.clear()
+        self.selected_action_idx = -1
+
+        # Finalize
+        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Clear All Points")
+        self.invalidate_cache()
+        self.invalidate_ultimate_preview()
+
+    def _get_timeline_status_text(self) -> str:
+        """Generate status text showing timeline info (filename, axis, status)."""
+        fs, axis = self._get_target_funscript_details()
+
+        # Timeline number
+        parts = [f"Timeline {self.timeline_num}"]
+
+        # Axis name
+        if axis:
+            axis_display = axis.capitalize()
+            parts.append(axis_display)
+
+        # Get filename if available
+        if self.app and hasattr(self.app, 'processor') and self.app.processor:
+            video_path = getattr(self.app.processor, 'video_path', None)
+            if video_path:
+                import os
+                filename = os.path.basename(video_path)
+                # Truncate if too long
+                if len(filename) > 30:
+                    filename = filename[:27] + "..."
+                parts.append(filename)
+
+        # Status indicators
+        if fs:
+            actions = self._get_actions()
+            num_points = len(actions) if actions else 0
+            parts.append(f"{num_points} pts")
+
+            # Check if generated or loaded
+            if hasattr(fs, 'metadata') and fs.metadata:
+                if fs.metadata.get('generated'):
+                    parts.append("Generated")
+
+        return " | ".join(parts)
 
     # ==================================================================================
     # MISC / UTILS
@@ -1069,6 +1210,87 @@ class InteractiveFunscriptTimeline:
                     self.ultimate_autotune_preview_actions = res.primary_actions if axis == 'primary' else res.secondary_actions
         
         self._ultimate_preview_dirty = False
+
+    def _check_and_apply_pending_plugins(self):
+        """Check for plugins with apply_requested flag and execute them."""
+        # Get list of plugins that have been requested to apply
+        apply_requests = self.plugin_renderer.plugin_manager.check_and_handle_apply_requests()
+
+        if not apply_requests:
+            return
+
+        # Execute each requested plugin
+        for plugin_name in apply_requests:
+            self.logger.info(f"Executing pending plugin apply request: {plugin_name} on timeline {self.timeline_num}")
+
+            # Get the plugin context to access parameters and settings
+            context = self.plugin_renderer.plugin_manager.plugin_contexts.get(plugin_name)
+            if not context:
+                self.logger.error(f"No context found for plugin {plugin_name}")
+                continue
+
+            # Get target funscript and axis
+            fs, axis = self._get_target_funscript_details()
+            if not fs:
+                self.logger.error(f"Could not get target funscript for {plugin_name}")
+                continue
+
+            # Get plugin instance from registry
+            from funscript.plugins.base_plugin import plugin_registry
+            plugin_instance = plugin_registry.get_plugin(plugin_name)
+            if not plugin_instance:
+                self.logger.error(f"Could not find plugin instance for {plugin_name}")
+                continue
+
+            # Prepare parameters - use context parameters
+            params = dict(context.parameters) if context.parameters else {}
+
+            # Handle selection if apply_to_selection is enabled
+            selected_indices = None
+            if context.apply_to_selection and self.multi_selected_action_indices:
+                selected_indices = list(self.multi_selected_action_indices)
+                params['selected_indices'] = selected_indices
+
+            # Record undo action
+            self.app.funscript_processor._record_timeline_action(
+                self.timeline_num,
+                f"Apply {plugin_name}"
+            )
+
+            # Apply the plugin transformation
+            try:
+                result = plugin_instance.transform(fs, axis, **params)
+
+                # Plugins may return the modified funscript or None (for in-place modifications)
+                # Both are valid - what matters is that the transformation was applied
+                self.logger.info(f"Successfully applied {plugin_name} to timeline {self.timeline_num}")
+
+                # Finalize and update UI
+                self.app.funscript_processor._finalize_action_and_update_ui(
+                    self.timeline_num,
+                    f"Apply {plugin_name}"
+                )
+
+                # Invalidate caches
+                self.invalidate_cache()
+                self.invalidate_ultimate_preview()
+
+                # Close the plugin window and clear its preview
+                self.plugin_renderer.plugin_manager.set_plugin_state(
+                    plugin_name,
+                    PluginUIState.CLOSED
+                )
+
+                # Clear the preview for this plugin
+                context.preview_actions = None
+
+                # If this was the active preview, clear it from the renderer
+                if self.plugin_renderer.plugin_manager.active_preview_plugin == plugin_name:
+                    self.plugin_renderer.plugin_manager.active_preview_plugin = None
+                    if self.plugin_preview_renderer:
+                        self.plugin_preview_renderer.clear_preview(plugin_name)
+            except Exception as e:
+                self.logger.error(f"Error applying plugin {plugin_name}: {e}", exc_info=True)
 
     def _handle_sync_logic(self, app_state, tf):
         """Auto-scrolls timeline during playback."""
