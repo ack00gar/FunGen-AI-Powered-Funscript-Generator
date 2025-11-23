@@ -1528,11 +1528,15 @@ class GUI:
     def _handle_toggle_video_display_shortcut(self):
         """Handle keyboard shortcut for toggling video display (V)"""
         app_state = self.app.app_state_ui
-        app_state.show_video_display_window = not app_state.show_video_display_window
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_video_display_window else "hidden"
-        self.app.logger.info(f"Video display {status}", extra={'status_message': True})
+        # Only allow toggle in floating mode - in fixed mode video display is always shown
+        if app_state.ui_layout_mode == "floating":
+            app_state.show_video_display_window = not app_state.show_video_display_window
+            if self.app.project_manager:
+                self.app.project_manager.project_dirty = True
+            status = "shown" if app_state.show_video_display_window else "hidden"
+            self.app.logger.info(f"Video display {status}", extra={'status_message': True})
+        else:
+            self.app.logger.info("Video display toggle only available in floating mode", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
 
     def _handle_toggle_timeline2_shortcut(self):
@@ -1889,7 +1893,8 @@ class GUI:
             if is_full_width_nav:
                 top_panels_h = max(50, available_height_for_main_panels - video_nav_bar_h)
                 nav_y_start = panel_y_start + top_panels_h
-                if app_state.show_video_display_window:
+                # In fixed mode, video display is always shown
+                if True:
                     video_panel_w = self.window_width - control_panel_w - graphs_panel_w
                     if video_panel_w < 100:
                         video_panel_w = 100
@@ -1925,7 +1930,8 @@ class GUI:
                 imgui.set_next_window_size(self.window_width, video_nav_bar_h)
                 self._time_render("VideoNavigationUI", self.video_navigation_ui.render, self.window_width)
             else:
-                if app_state.show_video_display_window:
+                # In fixed mode, video display is always shown
+                if True:
                     video_panel_w = self.window_width - control_panel_w - graphs_panel_w
                     if video_panel_w < 100:
                         video_panel_w = 100
