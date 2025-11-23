@@ -1878,6 +1878,10 @@ class VideoProcessor:
             self.app.on_processing_paused()
 
     def stop_processing(self, join_thread=True):
+        # Ensure dual output is disabled to kill any hanging pipe readers/processes
+        if hasattr(self, 'dual_output_processor'):
+            self.dual_output_processor.disable_dual_output_mode()
+
         is_currently_processing = self.is_processing
         is_thread_alive = self.processing_thread and self.processing_thread.is_alive()
 

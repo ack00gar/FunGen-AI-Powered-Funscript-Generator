@@ -352,6 +352,9 @@ class InteractiveFunscriptTimeline:
         # Also clear interaction flag when middle mouse is released (after panning)
         if imgui.is_mouse_released(glfw.MOUSE_BUTTON_MIDDLE):
             app_state.timeline_interaction_active = False
+            # Sync video to new timeline center on release
+            center_time = tf.x_to_time(tf.x_offset + tf.width / 2)
+            self._seek_video(center_time)
 
         # --- Context Menu ---
         if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
@@ -855,7 +858,14 @@ class InteractiveFunscriptTimeline:
         
         xs = tf.vec_time_to_x(ats)
         ys = tf.vec_val_to_y(poss)
-        
+
+        # CLAMP COORDINATES: Fix invisible lines when zoomed in on sparse data
+        # ImGui rendering can glitch if coordinates exceed +/- 32k (integer overflow in vertex buffer)
+        # We clamp x coordinates to a safe range slightly outside the viewport
+        safe_min_x = tf.x_offset - 5000
+        safe_max_x = tf.x_offset + tf.width + 5000
+        xs = np.clip(xs, safe_min_x, safe_max_x)
+
         # 3. LOD Decision
         points_on_screen = len(xs)
         pixels_per_point = tf.width / points_on_screen if points_on_screen > 0 else 0
@@ -1202,9 +1212,15 @@ class InteractiveFunscriptTimeline:
         if plugin:
             fs, axis = self._get_target_funscript_details()
             if fs:
-                # Create temp copy for non-destructive preview
+                # Create temp lightweight object for non-destructive preview
+                # copy.deepcopy fails on RLock objects in the full Funscript instance
+                from funscript.dual_axis_funscript import DualAxisFunscript
+                temp = DualAxisFunscript()
+                # Manually copy only the necessary data lists
                 import copy
-                temp = copy.deepcopy(fs)
+                temp.primary_actions = copy.deepcopy(fs.primary_actions)
+                temp.secondary_actions = copy.deepcopy(fs.secondary_actions)
+
                 res = plugin.transform(temp, axis)
                 if res:
                     self.ultimate_autotune_preview_actions = res.primary_actions if axis == 'primary' else res.secondary_actions
@@ -1317,9 +1333,16 @@ class InteractiveFunscriptTimeline:
 
         # Auto-scroll during playback (ignore interaction flag when playing)
         # Only respect interaction flag when forced sync (manual seeking while paused)
+
+        # CRITICAL: Do not consume the forced sync flag if a seek is still in progress.
+        # The processor frame index might be stale (pre-seek), causing us to sync to the WRONG time
+        # and then turn off the flag, effectively cancelling the jump visual.
+        seek_in_progress = getattr(processor, 'seek_in_progress', False)
+
         should_sync = is_playing or (forced and not app_state.timeline_interaction_active)
 
         if should_sync:
+            # If seeking, we might want to wait, but if we sync, we sync to current reported frame
             current_ms = (processor.current_frame_index / processor.fps) * 1000.0
 
             # Center the playhead
@@ -1328,4 +1351,6 @@ class InteractiveFunscriptTimeline:
 
             app_state.timeline_pan_offset_ms = target_pan
 
-            if forced: app_state.force_timeline_pan_to_current_frame = False
+            # Only clear the forced flag if we are NOT waiting for a seek to complete
+            if forced and not seek_in_progress:
+                app_state.force_timeline_pan_to_current_frame = False

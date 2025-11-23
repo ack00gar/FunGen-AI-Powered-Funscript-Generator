@@ -12,6 +12,8 @@ class AppStateUI:
 
         self.ui_layout_mode = self.app_settings.get("ui_layout_mode", defaults.get("ui_layout_mode", "fixed"))
         self.show_control_panel_window = self.app_settings.get("show_control_panel_window", True)
+        # Note: show_video_display_window only applies to floating mode
+        # In fixed mode, video display is always shown regardless of this setting
         self.show_video_display_window = self.app_settings.get("show_video_display_window", True)
         self.show_video_navigation_window = self.app_settings.get("show_video_navigation_window", True)
         self.show_info_graphs_window = self.app_settings.get("show_info_graphs_window", True)
@@ -30,9 +32,11 @@ class AppStateUI:
         self.status_message_time: float = 0.0
 
         # Load last used tracker using dynamic discovery
+        # Default to OD exp2 if no setting exists (Better default than legacy)
+        default_tracker = "OD exp2"
         self.selected_tracker_name: str = self.app_settings.get(
-            "selected_tracker_name", 
-            defaults.get("selected_tracker_name", DEFAULT_TRACKER_NAME)
+            "selected_tracker_name",
+            defaults.get("selected_tracker_name", default_tracker)
         )
         # Load saved processing speed mode, default to REALTIME
         saved_speed_mode = self.app_settings.get("selected_processing_speed_mode", "REALTIME")
@@ -459,6 +463,7 @@ class AppStateUI:
         self.app_settings.set("timeline_zoom_factor_ms_per_px", self.timeline_zoom_factor_ms_per_px)
         self.app_settings.set("timeline_pan_offset_ms", self.timeline_pan_offset_ms)
 
+        self.app_settings.set("ui_view_mode", self.ui_view_mode) # Persist Simple/Expert mode
         self.app_settings.set("ui_layout_mode", self.ui_layout_mode)
         self.app_settings.set("show_control_panel_window", self.show_control_panel_window)
         self.app_settings.set("show_video_display_window", self.show_video_display_window)
