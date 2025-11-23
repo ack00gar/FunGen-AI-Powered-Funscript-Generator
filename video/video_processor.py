@@ -1446,14 +1446,20 @@ class VideoProcessor:
             return
 
         try:
+            # Don't apply VR cropping if using preprocessed video (already cropped/unwrapped)
+            vr_format = None
+            if self.determined_video_type == 'VR' and not self._is_using_preprocessed_video():
+                vr_format = self.vr_input_format
+
             self.thumbnail_extractor = ThumbnailExtractor(
                 video_path=self._active_video_source_path,
                 logger=self.logger,
                 gpu_unwarp_worker=self.gpu_unwarp_worker,  # Optional: use GPU unwarp for VR thumbnails
                 output_size=self.yolo_input_size,
-                vr_input_format=self.vr_input_format if self.determined_video_type == 'VR' else None
+                vr_input_format=vr_format
             )
-            self.logger.info("Thumbnail extractor initialized (OpenCV-based)")
+            source_type = "preprocessed" if self._is_using_preprocessed_video() else "original"
+            self.logger.info(f"Thumbnail extractor initialized (OpenCV-based, {source_type} video)")
 
         except Exception as e:
             self.logger.warning(f"Failed to initialize thumbnail extractor: {e}")
