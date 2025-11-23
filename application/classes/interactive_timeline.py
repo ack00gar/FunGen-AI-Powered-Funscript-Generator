@@ -352,9 +352,8 @@ class InteractiveFunscriptTimeline:
         # Also clear interaction flag when middle mouse is released (after panning)
         if imgui.is_mouse_released(glfw.MOUSE_BUTTON_MIDDLE):
             app_state.timeline_interaction_active = False
-            # Sync video to new timeline center on release
-            center_time = tf.x_to_time(tf.x_offset + tf.width / 2)
-            self._seek_video(center_time)
+            # Don't seek video - just let user pan timeline independently
+            # (seeking here causes jitter as timeline auto-scrolls back)
 
         # --- Context Menu ---
         if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
