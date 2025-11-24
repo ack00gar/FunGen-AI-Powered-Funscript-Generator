@@ -245,13 +245,15 @@ class InteractiveFunscriptTimeline:
             # Wheel Zoom
             if io.mouse_wheel != 0:
                 scale = 0.85 if io.mouse_wheel > 0 else 1.15
-                center_ms = tf.x_to_time(mouse_pos[0]) # Zoom towards mouse cursor
-                
+                # Zoom centered on playhead (center of timeline) to keep funscript position stable
+                playhead_x = tf.x_offset + tf.width / 2
+                playhead_time_ms = tf.x_to_time(playhead_x)
+
                 new_zoom = max(0.01, min(2000.0, tf.zoom * scale))
-                # Adjust pan to keep mouse point stationary
-                mouse_offset_px = mouse_pos[0] - tf.x_offset
-                new_pan = center_ms - (mouse_offset_px * new_zoom)
-                
+                # Adjust pan to keep playhead centered on the same time point
+                center_offset_px = tf.width / 2
+                new_pan = playhead_time_ms - (center_offset_px * new_zoom)
+
                 app_state.timeline_zoom_factor_ms_per_px = new_zoom
                 app_state.timeline_pan_offset_ms = new_pan
                 app_state.timeline_interaction_active = True
@@ -352,8 +354,9 @@ class InteractiveFunscriptTimeline:
         # Also clear interaction flag when middle mouse is released (after panning)
         if imgui.is_mouse_released(glfw.MOUSE_BUTTON_MIDDLE):
             app_state.timeline_interaction_active = False
-            # Don't seek video - just let user pan timeline independently
-            # (seeking here causes jitter as timeline auto-scrolls back)
+            # Seek video to the current playhead position (center of timeline)
+            center_time_ms = tf.x_to_time(tf.x_offset + tf.width / 2)
+            self._seek_video(center_time_ms)
 
         # --- Context Menu ---
         if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_RIGHT):
@@ -1091,7 +1094,11 @@ class InteractiveFunscriptTimeline:
                  if imgui.menu_item(p_name)[0]:
                      # Trigger plugin context with selection
                      self.plugin_renderer.plugin_manager.set_plugin_state(p_name, PluginUIState.OPEN)
-                     # Set context to selection mode (implementation specific to your plugin manager)
+                     # Enable apply_to_selection since this was triggered from selection menu
+                     context = self.plugin_renderer.plugin_manager.plugin_contexts.get(p_name)
+                     if context:
+                         context.apply_to_selection = True
+                         self.logger.info(f"Auto-enabled 'apply to selection' for {p_name} (triggered from context menu)")
              imgui.end_menu()
 
     # ==================================================================================
