@@ -5719,7 +5719,13 @@ class ControlPanelUI:
                     if response.status_code == 200 or 'xbvr' in response.text.lower():
                         self.app.logger.info(f"✅ Found XBVR at {test_ip}:9999", extra={'status_message': True})
                         self.app.app_settings.set('xbvr_host', test_ip)
+                        self.app.app_settings.set('xbvr_port', 9999)  # Also save the port
                         self.app.app_settings.save_settings()
+
+                        # Notify integration_manager to update its XBVR client
+                        if hasattr(self.app, 'integration_manager') and self.app.integration_manager:
+                            self.app.integration_manager.update_xbvr_client(test_ip, 9999)
+
                         found = True
                 except:
                     pass  # Connection failed, continue
