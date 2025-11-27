@@ -1820,6 +1820,12 @@ class VideoProcessor:
         if self.is_processing and self.pause_event.is_set():
             self.logger.info("Resuming video processing...")
             self.pause_event.clear()
+
+            # Notify playback state observers (e.g., device_control) that playback resumed
+            if self._playback_state_callbacks:
+                current_time_ms = (self.current_frame_index / self.fps) * 1000.0 if self.fps > 0 else 0.0
+                self._notify_playback_state_callbacks(True, current_time_ms)
+
             # Optional: callback to notify the main app UI
             if self.app and hasattr(self.app, 'on_processing_resumed'):
                 self.app.on_processing_resumed()
@@ -1879,6 +1885,11 @@ class VideoProcessor:
         self.logger.info("Pausing video processing...")
         self.pause_event.set()
 
+        # Notify playback state observers (e.g., device_control) that playback stopped
+        if self._playback_state_callbacks:
+            current_time_ms = (self.current_frame_index / self.fps) * 1000.0 if self.fps > 0 else 0.0
+            self._notify_playback_state_callbacks(False, current_time_ms)
+
         # Optional callback to update UI elements, like a play/pause button icon.
         if self.app and hasattr(self.app, 'on_processing_paused'):
             self.app.on_processing_paused()
@@ -1898,6 +1909,11 @@ class VideoProcessor:
         self.logger.info("Stopping GUI processing...")
         was_scripting_session = self.tracker and self.tracker.tracking_active
         scripted_range = (self.processing_start_frame_limit, self.current_frame_index)
+
+        # Notify playback state observers (e.g., device_control) that playback stopped
+        if self._playback_state_callbacks:
+            current_time_ms = (self.current_frame_index / self.fps) * 1000.0 if self.fps > 0 else 0.0
+            self._notify_playback_state_callbacks(False, current_time_ms)
 
         self.is_processing = False
         self.pause_event.clear()
