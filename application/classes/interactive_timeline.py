@@ -1334,8 +1334,8 @@ class InteractiveFunscriptTimeline:
         forced = app_state.force_timeline_pan_to_current_frame
 
         # DEBUG: Uncomment to see sync state
-        if self.timeline_num == 1 and (is_playing or forced):
-            print(f"[TL Sync] is_playing={is_playing}, forced={forced}, interaction_active={app_state.timeline_interaction_active}, current_frame={processor.current_frame_index}")
+        # if self.timeline_num == 1 and (is_playing or forced):
+        #     print(f"[TL Sync] is_playing={is_playing}, forced={forced}, interaction_active={app_state.timeline_interaction_active}, current_frame={processor.current_frame_index}")
 
         # Auto-scroll during playback (ignore interaction flag when playing)
         # Only respect interaction flag when forced sync (manual seeking while paused)
