@@ -3496,19 +3496,18 @@ class ControlPanelUI:
             # Connected state
             self._status_indicator(f"Connected to {connected_device.name}", "ready", "Handy connected and ready")
 
-            # Upload Funscript button (PRIMARY action)
+            # Upload Funscript button (auto-uploads on play, but manual option if script changed)
             has_funscript = (hasattr(self.app, 'funscript_processor') and
                            self.app.funscript_processor and
                            self.app.funscript_processor.get_actions('primary'))
 
             if has_funscript:
-                with primary_button_style():
-                    if imgui.button("Upload Funscript to Handy##HandyUpload", width=-1):
-                        self._upload_funscript_to_handy()
-                _tooltip_if_hovered("Upload current funscript to Handy for HSSP streaming mode")
+                if imgui.button("Re-upload Funscript##HandyUpload", width=-1):
+                    self._upload_funscript_to_handy()
+                _tooltip_if_hovered("Re-upload funscript if you made changes (auto-uploads on first play)")
             else:
                 imgui.text_colored("No funscript loaded", 0.7, 0.5, 0.0)
-                _tooltip_if_hovered("Load a funscript first to enable Handy upload")
+                _tooltip_if_hovered("Load a funscript first")
 
             imgui.spacing()
 
@@ -3520,40 +3519,22 @@ class ControlPanelUI:
             imgui.spacing()
             imgui.separator()
             imgui.spacing()
-            
-            # Handy settings while connected
-            imgui.text("Performance Settings:")
+
+            # Sync settings
+            imgui.text("Sync Settings:")
             imgui.indent(10)
-            
-            # Minimum interval between commands
+
+            # Sync offset slider (-1000 to +1000 ms)
             changed, value = imgui.slider_int(
-                "Min Command Interval (ms)##HandyMinInterval",
-                self.app.app_settings.get("handy_min_interval", 60),
-                20, 200
+                "Sync Offset (ms)##HandySyncOffset",
+                self.app.app_settings.get("device_control_handy_sync_offset_ms", 0),
+                -1000, 1000
             )
             if changed:
-                self.app.app_settings.set("handy_min_interval", value)
-            _tooltip_if_hovered("Minimum time between position commands (60ms recommended)")
-            
-            # Lookahead for smooth movement
-            changed, value = imgui.slider_int(
-                "Lookahead Time (ms)##HandyLookahead",
-                self.app.app_settings.get("handy_lookahead_ms", 500),
-                100, 2000
-            )
-            if changed:
-                self.app.app_settings.set("handy_lookahead_ms", value)
-            _tooltip_if_hovered("How far ahead to look for next position")
-            
+                self.app.app_settings.set("device_control_handy_sync_offset_ms", value)
+            _tooltip_if_hovered("Fine-tune sync: + = Handy moves later, - = Handy moves earlier")
+
             imgui.unindent(10)
-            
-            # Test functions
-            if imgui.collapsing_header("Test Functions##HandyTest")[0]:
-                imgui.indent(10)
-                if imgui.button("Test Movement##HandyTestMove"):
-                    self._test_handy_movement()
-                _tooltip_if_hovered("Test Handy with movement sequence")
-                imgui.unindent(10)
                 
         else:
             # Disconnected state - show connection controls
