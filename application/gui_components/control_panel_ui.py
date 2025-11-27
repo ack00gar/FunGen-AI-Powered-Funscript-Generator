@@ -4861,94 +4861,33 @@ class ControlPanelUI:
     
     def _connect_handy(self, connection_key: str):
         """Connect to Handy device with given connection key."""
-        try:
-            import threading
-            def connect_handy_async():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    from device_control.backends.handy_hdsp_backend import HandyHDSPBackend, HandyHDSPConfig
-                    
-                    # Create configuration
-                    config = HandyHDSPConfig(
-                        connection_key=connection_key,
-                        use_time_based_control=True,
-                        immediate_response=False,
-                        stop_on_target=False
-                    )
-                    
-                    # Initialize backend
-                    backend = HandyHDSPBackend(config)
-                    
-                    # Discover and connect
-                    devices = loop.run_until_complete(backend.discover_devices())
-                    if devices:
-                        device = devices[0]
-                        success = loop.run_until_complete(backend.connect(device.device_id))
-                        if success:
-                            # Properly register with device manager
-                            self.device_manager.connected_devices[device.device_id] = backend
-                            
-                            # Import the proper state enum
-                            from device_control.device_manager import DeviceManagerState
-                            self.device_manager.state = DeviceManagerState.CONNECTED
-                            
-                            # Store backend reference for other components
-                            self.device_manager._handy_backend = backend
-                            
-                            self.app.logger.info(f"Connected to Handy: {device.name}")
-                        else:
-                            self.app.logger.error("Failed to connect to Handy")
-                    else:
-                        self.app.logger.error("No Handy device found with this connection key")
-                        
-                except Exception as e:
-                    self.app.logger.error(f"Handy connection failed: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=connect_handy_async, daemon=True)
-            thread.start()
-            
-        except Exception as e:
-            self.app.logger.error(f"Failed to start Handy connection: {e}")
-    
+        import threading
+        import asyncio
+
+        def connect_async():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.device_manager.connect_handy(connection_key))
+            finally:
+                loop.close()
+
+        threading.Thread(target=connect_async, daemon=True).start()
+
     def _disconnect_handy(self):
         """Disconnect from Handy device."""
-        try:
-            import threading
-            def disconnect_handy_async():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    if hasattr(self.device_manager, '_handy_backend') and self.device_manager._handy_backend:
-                        backend = self.device_manager._handy_backend
-                        loop.run_until_complete(backend.disconnect())
-                        
-                        # Properly clean up device manager state
-                        device_info = backend.get_device_info()
-                        if device_info and device_info.device_id in self.device_manager.connected_devices:
-                            del self.device_manager.connected_devices[device_info.device_id]
-                        
-                        # Import the proper state enum
-                        from device_control.device_manager import DeviceManagerState
-                        self.device_manager.state = DeviceManagerState.DISCONNECTED
-                        
-                        self.device_manager._handy_backend = None
-                        
-                        self.app.logger.info("Disconnected from Handy")
-                except Exception as e:
-                    self.app.logger.error(f"Handy disconnection failed: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=disconnect_handy_async, daemon=True)
-            thread.start()
-            
-        except Exception as e:
-            self.app.logger.error(f"Failed to disconnect Handy: {e}")
+        import threading
+        import asyncio
+
+        def disconnect_async():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.device_manager.disconnect_handy())
+            finally:
+                loop.close()
+
+        threading.Thread(target=disconnect_async, daemon=True).start()
     
     def _test_handy_movement(self):
         """Test Handy device movement."""
@@ -5024,77 +4963,30 @@ class ControlPanelUI:
 
     def _upload_funscript_to_handy(self):
         """Upload current funscript to Handy for HSSP streaming."""
-        try:
-            import threading
+        import threading
+        import asyncio
 
-            def upload_async():
-                import asyncio
+        # Get funscript actions
+        if not hasattr(self.app, 'funscript_processor') or not self.app.funscript_processor:
+            self.app.logger.error("No funscript loaded")
+            return
 
-                async def run_upload():
-                    try:
-                        # Check if Handy is connected
-                        if not hasattr(self.device_manager, '_handy_backend') or not self.device_manager._handy_backend:
-                            self.app.logger.error("No Handy connected")
-                            return
+        primary_actions = self.app.funscript_processor.get_actions('primary')
+        if not primary_actions:
+            self.app.logger.error("No funscript actions available")
+            return
 
-                        backend = self.device_manager._handy_backend
+        def upload_async():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    self.device_manager.prepare_handy_for_video_playback(primary_actions)
+                )
+            finally:
+                loop.close()
 
-                        # Get funscript from processor
-                        if not hasattr(self.app, 'funscript_processor') or not self.app.funscript_processor:
-                            self.app.logger.error("No funscript loaded")
-                            return
-
-                        primary_actions = self.app.funscript_processor.get_actions('primary')
-                        if not primary_actions:
-                            self.app.logger.error("No funscript actions available")
-                            return
-
-                        # Prepare funscript data
-                        funscript_data = {
-                            'version': '1.0',
-                            'inverted': False,
-                            'range': 100,
-                            'actions': [{'at': int(action['at']), 'pos': int(action['pos'])} for action in primary_actions]
-                        }
-
-                        self.app.logger.info(f"📤 Uploading funscript to Handy ({len(primary_actions)} actions)...")
-
-                        # Upload funscript
-                        script_url = await backend.upload_funscript(funscript_data, use_csv_format=True)
-
-                        if not script_url:
-                            self.app.logger.error("❌ Failed to upload funscript to Handy")
-                            return
-
-                        self.app.logger.info(f"✅ Funscript uploaded: {script_url}")
-
-                        # Setup HSSP streaming
-                        self.app.logger.info("⏳ Setting up HSSP streaming mode...")
-                        success = await backend.setup_hssp_streaming(script_url)
-
-                        if success:
-                            self.app.logger.info("✅ Handy HSSP streaming ready! Play video to start synchronized playback.")
-                        else:
-                            self.app.logger.error("❌ Failed to setup HSSP streaming")
-
-                    except Exception as e:
-                        self.app.logger.error(f"Error uploading funscript to Handy: {e}")
-                        import traceback
-                        self.app.logger.error(traceback.format_exc())
-
-                # Run in new event loop
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(run_upload())
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=upload_async, daemon=True)
-            thread.start()
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to start Handy upload: {e}")
+        threading.Thread(target=upload_async, daemon=True).start()
 
     def _render_native_sync_tab(self):
         """Render streamer tab content."""
