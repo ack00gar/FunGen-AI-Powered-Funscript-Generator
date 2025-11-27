@@ -866,15 +866,17 @@ class ToolbarUI:
                             thread = threading.Thread(target=run_disconnect, daemon=True)
                             thread.start()
                         else:
-                            # Open Device Control tab to let user connect
-                            self.app.logger.info("Toolbar: Opening Device Control to connect...")
-                            self.app.app_state_ui.active_control_panel_tab = 4
+                            # Auto-connect to Handy device
+                            self.app.logger.info("Toolbar: Auto-connecting to Handy device...")
+                            self._auto_connect_handy()
                     except Exception as e:
                         self.app.logger.error(f"Toolbar: Failed to toggle device connection: {e}")
                         import traceback
                         self.app.logger.error(traceback.format_exc())
                 else:
-                    self.app.logger.warning("Toolbar: Device Control available but DeviceManager not initialized")
+                    # DeviceManager not initialized - try to auto-connect Handy
+                    self.app.logger.info("Toolbar: DeviceManager not initialized, auto-connecting Handy...")
+                    self._auto_connect_handy()
 
             imgui.pop_style_color(3)
 
@@ -987,3 +989,102 @@ class ToolbarUI:
             initial_path=initial_path,
             initial_filename=initial_filename
         )
+
+    def _auto_connect_handy(self):
+        """Auto-connect to configured device (Handy, OSR, or Buttplug)."""
+        import asyncio
+        import threading
+
+        # Check what device type is configured
+        preferred_backend = self.app.app_settings.get('device_control_preferred_backend', 'handy')
+        handy_key = self.app.app_settings.get('device_control_handy_connection_key', '')
+
+        # For Handy, we need the connection key
+        if preferred_backend == 'handy' and not handy_key:
+            self.app.logger.warning("Toolbar: No Handy connection key configured. Opening Device Control settings...")
+            self.app.app_state_ui.active_control_panel_tab = 4
+            return
+
+        def run_connect():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(self._connect_device_async(preferred_backend, handy_key))
+                finally:
+                    loop.close()
+            except Exception as e:
+                self.app.logger.error(f"Toolbar: Failed to connect device: {e}")
+
+        # Run in background thread
+        thread = threading.Thread(target=run_connect, daemon=True)
+        thread.start()
+
+    async def _connect_device_async(self, preferred_backend: str, handy_key: str):
+        """Async helper to connect to configured device type."""
+        try:
+            from device_control import DeviceManager, DeviceControlConfig
+
+            # Get or create device manager
+            control_panel_ui = getattr(self.app.gui_instance, 'control_panel_ui', None) if hasattr(self.app, 'gui_instance') else None
+
+            if control_panel_ui and hasattr(control_panel_ui, 'device_manager') and control_panel_ui.device_manager:
+                device_manager = control_panel_ui.device_manager
+            else:
+                # Create new DeviceManager
+                config = DeviceControlConfig(
+                    handy_connection_key=handy_key,
+                    preferred_backend=preferred_backend
+                )
+                device_manager = DeviceManager(
+                    config=config,
+                    app_instance=self.app,
+                    app_settings=self.app.app_settings
+                )
+
+                # Store it in control_panel_ui if available
+                if control_panel_ui:
+                    control_panel_ui.device_manager = device_manager
+
+            # Connect based on backend type
+            if preferred_backend == 'handy':
+                success = await device_manager.connect_handy(handy_key)
+                device_name = "Handy"
+            elif preferred_backend == 'osr':
+                # OSR uses auto-discovery
+                devices = await device_manager.discover_devices_with_backend('osr')
+                if devices:
+                    device_id = list(devices.keys())[0]
+                    success = await device_manager.connect(device_id)
+                    device_name = "OSR"
+                else:
+                    self.app.logger.warning("Toolbar: No OSR devices found")
+                    return
+            elif preferred_backend == 'buttplug':
+                # Buttplug uses auto-discovery
+                devices = await device_manager.discover_devices_with_backend('buttplug')
+                if devices:
+                    device_id = list(devices.keys())[0]
+                    success = await device_manager.connect(device_id)
+                    device_name = "Buttplug device"
+                else:
+                    self.app.logger.warning("Toolbar: No Buttplug devices found")
+                    return
+            else:
+                # Auto discovery across all backends
+                devices = await device_manager.discover_devices()
+                if devices:
+                    device_id = list(devices.keys())[0]
+                    success = await device_manager.connect(device_id)
+                    device_name = devices[device_id].name
+                else:
+                    self.app.logger.warning("Toolbar: No devices found")
+                    return
+
+            if success:
+                self.app.logger.info(f"Toolbar: {device_name} connected successfully!")
+            else:
+                self.app.logger.error(f"Toolbar: Failed to connect to {device_name}")
+
+        except Exception as e:
+            self.app.logger.error(f"Toolbar: Error connecting to device: {e}")
