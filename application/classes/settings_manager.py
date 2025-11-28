@@ -192,6 +192,7 @@ class AppSettings:
             "buttplug_server_port": 12345,
             "buttplug_auto_connect": False,
             "device_control_preferred_backend": "buttplug",  # "buttplug", "osr", or "auto"
+            "device_control_last_connected_device_type": "",  # Last successfully connected device type
             "device_control_max_rate_hz": 20.0,
             "device_control_selected_devices": [],  # List of selected device IDs
             "device_control_log_commands": False,
