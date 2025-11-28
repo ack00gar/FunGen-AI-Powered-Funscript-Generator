@@ -3534,13 +3534,14 @@ class ControlPanelUI:
             imgui.pop_item_width()
             if changed:
                 self.app.app_settings.set("device_control_handy_sync_offset_ms", value)
-            _tooltip_if_hovered("Sync Offset (ms): + = Handy moves later, - = Handy moves earlier\nApplies on next play/seek/resume")
+                # Apply offset instantly via Handy's /hstp/offset API
+                self._apply_handy_hstp_offset(value)
+            _tooltip_if_hovered("Sync Offset (ms): + = Handy moves later, - = Handy moves earlier\nChanges apply instantly via Handy API")
 
-            # Apply button
+            # Apply button (now shows current offset value)
             imgui.same_line()
-            if imgui.button("Apply##HandyApplyOffset"):
-                self._apply_handy_sync_offset()
-            _tooltip_if_hovered("Confirm offset (applies on next play/seek/resume)")
+            current_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
+            imgui.text(f"{current_offset:+d}ms")
 
             imgui.unindent(10)
                 
@@ -4878,10 +4879,28 @@ class ControlPanelUI:
 
         threading.Thread(target=disconnect_async, daemon=True).start()
 
+    def _apply_handy_hstp_offset(self, offset_ms: int):
+        """Apply sync offset instantly via Handy's /hstp/offset API."""
+        import threading
+        import asyncio
+
+        if not self.device_manager or not self.device_manager.is_connected():
+            return
+
+        def set_offset_async():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.device_manager.set_handy_hstp_offset(offset_ms))
+            finally:
+                loop.close()
+
+        threading.Thread(target=set_offset_async, daemon=True).start()
+
     def _apply_handy_sync_offset(self):
-        """Apply sync offset - triggers device resync at current video position."""
+        """Apply sync offset via Handy's /hstp/offset API."""
         sync_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
-        self.app.logger.info(f"Sync offset set to {sync_offset}ms - applies on next play/seek/resume")
+        self._apply_handy_hstp_offset(sync_offset)
 
     def _test_handy_movement(self):
         """Test Handy device movement."""
