@@ -3524,21 +3524,23 @@ class ControlPanelUI:
             imgui.text("Sync Settings:")
             imgui.indent(10)
 
-            # Sync offset slider (-1000 to +1000 ms)
+            # Sync offset slider (-1000 to +1000 ms) with fixed width to fit Apply button
+            imgui.push_item_width(180)
             changed, value = imgui.slider_int(
-                "Sync Offset (ms)##HandySyncOffset",
+                "##HandySyncOffset",
                 self.app.app_settings.get("device_control_handy_sync_offset_ms", 0),
                 -1000, 1000
             )
+            imgui.pop_item_width()
             if changed:
                 self.app.app_settings.set("device_control_handy_sync_offset_ms", value)
-            _tooltip_if_hovered("Fine-tune sync: + = Handy moves later, - = Handy moves earlier\nChanges apply on next play/seek/resume")
+            _tooltip_if_hovered("Sync Offset (ms): + = Handy moves later, - = Handy moves earlier\nApplies on next play/seek/resume")
 
-            # Apply button to resync immediately
+            # Apply button
             imgui.same_line()
             if imgui.button("Apply##HandyApplyOffset"):
                 self._apply_handy_sync_offset()
-            _tooltip_if_hovered("Resync Handy now with new offset (brief pause/resume)")
+            _tooltip_if_hovered("Confirm offset (applies on next play/seek/resume)")
 
             imgui.unindent(10)
                 
@@ -4877,38 +4879,9 @@ class ControlPanelUI:
         threading.Thread(target=disconnect_async, daemon=True).start()
 
     def _apply_handy_sync_offset(self):
-        """Apply sync offset by resyncing HSSP at current position."""
-        import threading
-        import asyncio
-
-        # Check if video is playing and we have video_integration
-        if not hasattr(self.app, 'device_control_video_integration'):
-            self.app.logger.warning("Video integration not available")
-            return
-
-        video_integration = self.app.device_control_video_integration
-        if not video_integration or not video_integration._hssp_playing:
-            self.app.logger.info("HSSP not currently playing - offset will apply on next play")
-            return
-
-        def resync_async():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                # Get current video time
-                current_time_ms = video_integration._get_current_video_time_ms()
-                sync_offset = video_integration._get_handy_sync_offset()
-                self.app.logger.info(f"Resyncing HSSP at {current_time_ms}ms with offset {sync_offset}ms...")
-
-                # Start HSSP at current position (will use new offset)
-                loop.run_until_complete(
-                    self.device_manager.start_handy_video_sync(int(current_time_ms), sync_offset_ms=sync_offset)
-                )
-                self.app.logger.info("HSSP resync complete")
-            finally:
-                loop.close()
-
-        threading.Thread(target=resync_async, daemon=True).start()
+        """Apply sync offset - triggers device resync at current video position."""
+        sync_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
+        self.app.logger.info(f"Sync offset set to {sync_offset}ms - applies on next play/seek/resume")
 
     def _test_handy_movement(self):
         """Test Handy device movement."""

@@ -882,6 +882,31 @@ class ToolbarUI:
 
             rendered_any = True
 
+            # Script Loaded indicator - only show when device is connected
+            if is_connected and device_manager:
+                imgui.same_line()
+
+                # Check if script is loaded on device
+                script_loaded = device_manager.has_prepared_handy_devices() if hasattr(device_manager, 'has_prepared_handy_devices') else False
+
+                # Document emoji - gray when no script, green when loaded
+                if script_loaded:
+                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
+                    tooltip = "Script Loaded - Click to reload"
+                else:
+                    imgui.push_style_color(imgui.COLOR_BUTTON, 0.4, 0.4, 0.4, 0.7)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.5, 0.5, 0.5, 0.85)
+                    imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.3, 0.3, 0.3, 0.9)
+                    tooltip = "No Script Loaded - Click to upload"
+
+                if self._toolbar_button(icon_mgr, 'page-facing-up.png', btn_size, tooltip):
+                    # Trigger script upload via control panel
+                    self._upload_script_to_device(device_manager)
+
+                imgui.pop_style_color(3)
+
         # Restore default button colors if any features were rendered
         if rendered_any:
             imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
@@ -991,16 +1016,22 @@ class ToolbarUI:
         )
 
     def _auto_connect_handy(self):
-        """Auto-connect to configured device (Handy, OSR, or Buttplug)."""
+        """Auto-connect to last used device type, or fall back to configured preferred backend."""
         import asyncio
         import threading
 
-        # Check what device type is configured
+        # Use last connected device type if available, otherwise fall back to preferred backend
+        last_device_type = self.app.app_settings.get('device_control_last_connected_device_type', '')
         preferred_backend = self.app.app_settings.get('device_control_preferred_backend', 'handy')
+
+        # Use last connected device type if set, otherwise use preferred backend
+        device_type = last_device_type if last_device_type else preferred_backend
         handy_key = self.app.app_settings.get('device_control_handy_connection_key', '')
 
+        self.app.logger.info(f"Toolbar: Auto-connecting to {device_type} (last: {last_device_type}, preferred: {preferred_backend})")
+
         # For Handy, we need the connection key
-        if preferred_backend == 'handy' and not handy_key:
+        if device_type == 'handy' and not handy_key:
             self.app.logger.warning("Toolbar: No Handy connection key configured. Opening Device Control settings...")
             self.app.app_state_ui.active_control_panel_tab = 4
             return
@@ -1010,7 +1041,7 @@ class ToolbarUI:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    loop.run_until_complete(self._connect_device_async(preferred_backend, handy_key))
+                    loop.run_until_complete(self._connect_device_async(device_type, handy_key))
                 finally:
                     loop.close()
             except Exception as e:
@@ -1083,8 +1114,59 @@ class ToolbarUI:
 
             if success:
                 self.app.logger.info(f"Toolbar: {device_name} connected successfully!")
+                # Save last connected device type for future auto-connect
+                self.app.app_settings.set('device_control_last_connected_device_type', preferred_backend)
             else:
                 self.app.logger.error(f"Toolbar: Failed to connect to {device_name}")
 
         except Exception as e:
             self.app.logger.error(f"Toolbar: Error connecting to device: {e}")
+
+    def _upload_script_to_device(self, device_manager):
+        """Upload current funscript to connected device."""
+        import asyncio
+        import threading
+
+        def run_upload():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(self._upload_script_async(device_manager))
+                finally:
+                    loop.close()
+            except Exception as e:
+                self.app.logger.error(f"Toolbar: Failed to upload script: {e}")
+
+        # Run in background thread
+        thread = threading.Thread(target=run_upload, daemon=True)
+        thread.start()
+
+    async def _upload_script_async(self, device_manager):
+        """Async helper to upload script to device."""
+        try:
+            # Get funscript data from the app
+            if not hasattr(self.app, 'funscript_processor') or not self.app.funscript_processor:
+                self.app.logger.warning("Toolbar: No funscript processor available")
+                return
+
+            primary_actions = self.app.funscript_processor.get_actions('primary')
+            if not primary_actions:
+                self.app.logger.warning("Toolbar: No funscript actions to upload")
+                return
+
+            self.app.logger.info(f"Toolbar: Uploading script with {len(primary_actions)} actions...")
+
+            # Reset streaming state to force re-upload
+            device_manager.reset_handy_streaming_state()
+
+            # Prepare device for playback (upload + setup)
+            success = await device_manager.prepare_handy_for_video_playback(primary_actions)
+
+            if success:
+                self.app.logger.info("Toolbar: Script uploaded successfully!", extra={"status_message": True})
+            else:
+                self.app.logger.error("Toolbar: Failed to upload script", extra={"status_message": True})
+
+        except Exception as e:
+            self.app.logger.error(f"Toolbar: Error uploading script: {e}")
