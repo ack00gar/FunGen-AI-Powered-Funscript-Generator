@@ -3524,24 +3524,82 @@ class ControlPanelUI:
             imgui.text("Sync Settings:")
             imgui.indent(10)
 
-            # Sync offset slider (-1000 to +1000 ms) with fixed width to fit Apply button
-            imgui.push_item_width(180)
+            current_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
+
+            # Row 1: -50 / -10 / -1 buttons, then slider, then +1 / +10 / +50 buttons
+            # Fine adjustment buttons (left side)
+            if imgui.button("-50##SyncMinus50"):
+                new_offset = max(-1000, current_offset - 50)
+                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                self._apply_handy_hstp_offset(new_offset)
+            _tooltip_if_hovered("-50ms")
+            imgui.same_line()
+
+            if imgui.button("-10##SyncMinus10"):
+                new_offset = max(-1000, current_offset - 10)
+                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                self._apply_handy_hstp_offset(new_offset)
+            _tooltip_if_hovered("-10ms")
+            imgui.same_line()
+
+            if imgui.button("-1##SyncMinus1"):
+                new_offset = max(-1000, current_offset - 1)
+                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                self._apply_handy_hstp_offset(new_offset)
+            _tooltip_if_hovered("-1ms")
+            imgui.same_line()
+
+            # Sync offset slider
+            imgui.push_item_width(100)
             changed, value = imgui.slider_int(
                 "##HandySyncOffset",
-                self.app.app_settings.get("device_control_handy_sync_offset_ms", 0),
+                current_offset,
                 -1000, 1000
             )
             imgui.pop_item_width()
             if changed:
                 self.app.app_settings.set("device_control_handy_sync_offset_ms", value)
-                # Apply offset instantly via Handy's /hstp/offset API
                 self._apply_handy_hstp_offset(value)
             _tooltip_if_hovered("Sync Offset (ms): + = Handy moves later, - = Handy moves earlier\nChanges apply instantly via Handy API")
-
-            # Apply button (now shows current offset value)
             imgui.same_line()
-            current_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
-            imgui.text(f"{current_offset:+d}ms")
+
+            # Fine adjustment buttons (right side)
+            if imgui.button("+1##SyncPlus1"):
+                new_offset = min(1000, current_offset + 1)
+                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                self._apply_handy_hstp_offset(new_offset)
+            _tooltip_if_hovered("+1ms")
+            imgui.same_line()
+
+            if imgui.button("+10##SyncPlus10"):
+                new_offset = min(1000, current_offset + 10)
+                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                self._apply_handy_hstp_offset(new_offset)
+            _tooltip_if_hovered("+10ms")
+            imgui.same_line()
+
+            if imgui.button("+50##SyncPlus50"):
+                new_offset = min(1000, current_offset + 50)
+                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
+                self._apply_handy_hstp_offset(new_offset)
+            _tooltip_if_hovered("+50ms")
+
+            # Row 2: Direct numeric input + current value display
+            imgui.push_item_width(80)
+            changed, input_value = imgui.input_int("##SyncOffsetInput", current_offset, 0, 0)
+            imgui.pop_item_width()
+            if changed:
+                clamped_value = max(-1000, min(1000, input_value))
+                self.app.app_settings.set("device_control_handy_sync_offset_ms", clamped_value)
+                self._apply_handy_hstp_offset(clamped_value)
+            _tooltip_if_hovered("Enter offset directly (ms)\n-1000 to +1000")
+            imgui.same_line()
+            imgui.text("ms")
+            imgui.same_line()
+            if current_offset >= 0:
+                imgui.text_colored(f"(Handy +{current_offset}ms later)", 0.5, 0.8, 0.5, 1.0)
+            else:
+                imgui.text_colored(f"(Handy {current_offset}ms earlier)", 0.8, 0.5, 0.5, 1.0)
 
             imgui.unindent(10)
                 
