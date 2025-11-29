@@ -235,12 +235,13 @@ class InteractiveFunscriptTimeline:
         mouse_pos = imgui.get_mouse_pos()
         
         # Check bounds
-        is_hovered = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and 
+        is_hovered = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and
                       tf.y_offset <= mouse_pos[1] <= tf.y_offset + tf.height)
         is_focused = imgui.is_window_focused(imgui.FOCUS_ROOT_AND_CHILD_WINDOWS)
 
-        # Update active timeline when this one gains focus
-        if is_focused:
+        # Update active timeline ONLY on explicit user interaction (click)
+        # This prevents the last-rendered timeline from stealing focus on startup
+        if is_hovered and imgui.is_mouse_clicked(0):  # Left click
             app_state.active_timeline_num = self.timeline_num
 
         # --- Keyboard Shortcuts (Global / Focused) ---
@@ -432,9 +433,11 @@ class InteractiveFunscriptTimeline:
         if check_shortcut("copy_selection", "CTRL+C"):
             self._handle_copy_selection()
         if check_shortcut("paste_selection", "CTRL+V"):
-            # Paste at current mouse location or center if mouse not hovered
-            t = getattr(self, 'new_point_candidate', (app_state.timeline_pan_offset_ms, 50))[0]
-            self._handle_paste_actions(t)
+            # Paste at current playhead position (video time), not stale mouse position
+            paste_time_ms = 0
+            if self.app.processor and self.app.processor.fps > 0:
+                paste_time_ms = (self.app.processor.current_frame_index / self.app.processor.fps) * 1000.0
+            self._handle_paste_actions(paste_time_ms)
 
         # 5. Nudge Selection (Arrows)
         nudge_val = 0
