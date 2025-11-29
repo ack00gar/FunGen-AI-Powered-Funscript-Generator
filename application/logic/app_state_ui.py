@@ -176,6 +176,10 @@ class AppStateUI:
         self.last_synced_frame_index_timeline = -1  # Last video frame index timeline was auto-panned to
         self.force_timeline_pan_to_current_frame = False  # Flag to command timeline to pan to current video frame
         self.interactive_refinement_mode_enabled: bool = False
+
+        # Active timeline tracking for shortcuts (which timeline receives number key input)
+        # Default to 1 (primary). Updated when user clicks/focuses a timeline.
+        self.active_timeline_num: int = 1
         
         # Update Settings Dialog
         self.show_update_settings_dialog = False

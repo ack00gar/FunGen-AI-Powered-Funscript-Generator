@@ -221,6 +221,9 @@ class InteractiveFunscriptTimeline:
         # 8. Handle Auto-Scroll/Sync
         self._handle_sync_logic(app_state, tf)
 
+        # 9. Draw Active/Read-only State Border
+        self._draw_state_border(draw_list, canvas_pos, canvas_size, app_state)
+
         imgui.end()
 
     # ==================================================================================
@@ -235,6 +238,10 @@ class InteractiveFunscriptTimeline:
         is_hovered = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and 
                       tf.y_offset <= mouse_pos[1] <= tf.y_offset + tf.height)
         is_focused = imgui.is_window_focused(imgui.FOCUS_ROOT_AND_CHILD_WINDOWS)
+
+        # Update active timeline when this one gains focus
+        if is_focused:
+            app_state.active_timeline_num = self.timeline_num
 
         # --- Keyboard Shortcuts (Global / Focused) ---
         if is_focused:
@@ -957,6 +964,55 @@ class InteractiveFunscriptTimeline:
             dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.2))
             dl.add_line(x1, tf.y_offset, x1, tf.y_offset+tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.5))
             dl.add_line(x2, tf.y_offset, x2, tf.y_offset+tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.5))
+
+    def _draw_state_border(self, dl, canvas_pos, canvas_size, app_state):
+        """
+        Draw a colored border indicating timeline state:
+        - Green: Active and editable (shortcuts will work)
+        - Red: Active but read-only (during playback, text input, etc.)
+        - Gray: Inactive (another timeline is active)
+        """
+        is_active = app_state.active_timeline_num == self.timeline_num
+
+        if not is_active:
+            # Gray border for inactive timeline
+            border_color = imgui.get_color_u32_rgba(0.4, 0.4, 0.4, 0.6)
+        else:
+            # Check if editable or read-only
+            is_read_only = self._is_timeline_read_only(app_state)
+            if is_read_only:
+                # Red border for active but read-only
+                border_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 0.8)
+            else:
+                # Green border for active and editable
+                border_color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 0.8)
+
+        # Draw border around canvas area
+        x1, y1 = canvas_pos[0], canvas_pos[1]
+        x2, y2 = x1 + canvas_size[0], y1 + canvas_size[1]
+        border_thickness = 2.0 if is_active else 1.0
+        dl.add_rect(x1, y1, x2, y2, border_color, 0.0, 0, border_thickness)
+
+    def _is_timeline_read_only(self, app_state) -> bool:
+        """Check if timeline is in read-only mode (shortcuts blocked)."""
+        # Video is playing
+        if self.app.processor and getattr(self.app.processor, 'is_playing', False):
+            return True
+
+        # Text input is active
+        io = imgui.get_io()
+        if io.want_text_input:
+            return True
+
+        # Shortcut recording in progress
+        if self.app.shortcut_manager and self.app.shortcut_manager.is_recording_shortcut_for:
+            return True
+
+        # Live tracking is active
+        if self.app.processor and getattr(self.app.processor, 'is_processing', False):
+            return True
+
+        return False
 
     # ==================================================================================
     # TOOLBAR & MENUS
