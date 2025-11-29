@@ -1230,6 +1230,31 @@ class GUI:
         elif check_and_run_shortcut("set_chapter_end", self._handle_set_chapter_end_shortcut):
             pass
 
+        # Add Points at specific values (Number keys)
+        # These add a point at the current video time to the active timeline
+        elif video_loaded and check_and_run_shortcut("add_point_0", self._handle_add_point_at_value, 0):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_10", self._handle_add_point_at_value, 10):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_20", self._handle_add_point_at_value, 20):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_30", self._handle_add_point_at_value, 30):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_40", self._handle_add_point_at_value, 40):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_50", self._handle_add_point_at_value, 50):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_60", self._handle_add_point_at_value, 60):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_70", self._handle_add_point_at_value, 70):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_80", self._handle_add_point_at_value, 80):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_90", self._handle_add_point_at_value, 90):
+            pass
+        elif video_loaded and check_and_run_shortcut("add_point_100", self._handle_add_point_at_value, 100):
+            pass
+
         # Handle continuous arrow key navigation
         if video_loaded:
             self._handle_arrow_navigation()
@@ -1399,7 +1424,32 @@ class GUI:
                     self._auto_create_chapter_from_stored_frames()
                 else:
                     self.app.logger.info(f"Chapter end marked at frame {current_frame} (Press I to set start, then Shift+C to create)", extra={'status_message': True})
-    
+
+    def _handle_add_point_at_value(self, value: int):
+        """Add a point at the current video playhead position with the specified value (0-100).
+
+        The point is added to the active timeline (the one with the green border).
+        Uses the timeline's _add_point() method which handles snapping, undo, and cache invalidation.
+        """
+        if not self.app.processor or not self.app.processor.video_info:
+            return
+
+        # Get current video time
+        current_frame = self.app.processor.current_frame_index
+        fps = self.app.processor.fps
+        if fps <= 0:
+            return
+
+        current_time_ms = int((current_frame / fps) * 1000)
+
+        # Get the active timeline and add the point
+        app_state = self.app.app_state_ui
+        timeline_num = getattr(app_state, 'active_timeline_num', 1)
+        timeline = self.app.get_timeline(timeline_num)
+
+        if timeline:
+            timeline._add_point(current_time_ms, value)
+
     def _get_current_frame_for_chapter(self) -> int:
         """Get current video frame for chapter operations"""
         if self.app.processor and hasattr(self.app.processor, 'current_frame_index'):

@@ -907,6 +907,33 @@ class ToolbarUI:
 
                 imgui.pop_style_color(3)
 
+                # Sync toggle button for Handy - single icon, color indicates state
+                # Only show when script is loaded
+                if script_loaded:
+                    imgui.same_line()
+
+                    # Check if Handy is currently playing/synced
+                    is_handy_playing = device_manager.is_handy_playing() if hasattr(device_manager, 'is_handy_playing') else False
+
+                    if is_handy_playing:
+                        # Green when synced/playing - click to pause
+                        imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.7, 0.0, 0.7)
+                        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.85, 0.0, 0.85)
+                        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.6, 0.0, 0.9)
+                        tooltip = "Handy Synced - Click to Pause"
+                    else:
+                        # Orange when paused - click to resume
+                        imgui.push_style_color(imgui.COLOR_BUTTON, 0.9, 0.5, 0.0, 0.7)
+                        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 1.0, 0.6, 0.0, 0.85)
+                        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.8, 0.4, 0.0, 0.9)
+                        tooltip = "Handy Paused - Click to Resume"
+
+                    # Use sync icon (counterclockwise arrows) for both states
+                    if self._toolbar_button(icon_mgr, 'counterclockwise-arrows.png', btn_size, tooltip):
+                        self._toggle_handy_playback(device_manager)
+
+                    imgui.pop_style_color(3)
+
         # Restore default button colors if any features were rendered
         if rendered_any:
             imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.2, 0.2, 0.5)
@@ -1170,3 +1197,49 @@ class ToolbarUI:
 
         except Exception as e:
             self.app.logger.error(f"Toolbar: Error uploading script: {e}")
+
+    def _toggle_handy_playback(self, device_manager):
+        """Toggle Handy playback between paused and playing states."""
+        import asyncio
+        import threading
+
+        def run_toggle():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(self._toggle_handy_playback_async(device_manager))
+                finally:
+                    loop.close()
+            except Exception as e:
+                self.app.logger.error(f"Toolbar: Failed to toggle Handy playback: {e}")
+
+        thread = threading.Thread(target=run_toggle, daemon=True)
+        thread.start()
+
+    async def _toggle_handy_playback_async(self, device_manager):
+        """Async helper to toggle Handy playback."""
+        try:
+            # Get current video position
+            video_position_ms = 0
+            if self.app.processor and hasattr(self.app.processor, 'current_frame_index'):
+                fps = self.app.processor.fps
+                if fps > 0:
+                    video_position_ms = int((self.app.processor.current_frame_index / fps) * 1000)
+
+            # Get sync offset from settings
+            sync_offset_ms = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
+
+            is_playing = device_manager.is_handy_playing() if hasattr(device_manager, 'is_handy_playing') else False
+
+            if is_playing:
+                self.app.logger.info("Pausing Handy...", extra={"status_message": True})
+                await device_manager.pause_handy_playback()
+            else:
+                self.app.logger.info(f"Resuming Handy at {video_position_ms}ms...", extra={"status_message": True})
+                await device_manager.start_handy_video_sync(
+                    video_position_ms, allow_restart=True, sync_offset_ms=sync_offset_ms
+                )
+
+        except Exception as e:
+            self.app.logger.error(f"Toolbar: Error toggling Handy playback: {e}")

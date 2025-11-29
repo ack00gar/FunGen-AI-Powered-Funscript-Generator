@@ -606,7 +606,9 @@ UI_CONTROL_ICON_URLS = {
 
     # Network/streaming indicators
     'ui/icons/satellite.png': 'https://em-content.zobj.net/source/apple/391/satellite-antenna_1f4e1.png',
-    'ui/icons/flashlight.png': 'https://em-content.zobj.net/source/apple/391/flashlight_1f526.png',  # 📡 satellite antenna for streamer
+    'ui/icons/flashlight.png': 'https://em-content.zobj.net/source/apple/391/flashlight_1f526.png',  # 🔦 flashlight for device control
+    'ui/icons/page-facing-up.png': 'https://em-content.zobj.net/source/apple/391/page-facing-up_1f4c4.png',  # 📄 page for script loaded indicator
+    'ui/icons/counterclockwise-arrows.png': 'https://em-content.zobj.net/source/apple/391/counterclockwise-arrows-button_1f504.png',  # 🔄 sync toggle for Handy pause/resume
 
     # Enhancement/optimization indicators
     'ui/icons/rocket.png': 'https://em-content.zobj.net/source/apple/391/rocket_1f680.png',  # 🚀 rocket
