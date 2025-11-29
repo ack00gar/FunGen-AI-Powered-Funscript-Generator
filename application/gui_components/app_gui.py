@@ -1121,13 +1121,17 @@ class GUI:
 
             mapped_key, mapped_mods_from_string = map_result
 
-            if imgui.is_key_pressed(mapped_key):
-                if (mapped_mods_from_string['ctrl'] == io.key_ctrl
+            # Check key press state ONCE and reuse (calling is_key_pressed multiple times can consume the event)
+            key_pressed = imgui.is_key_pressed(mapped_key)
+
+            if key_pressed:
+                mods_match = (mapped_mods_from_string['ctrl'] == io.key_ctrl
                     and mapped_mods_from_string['alt'] == io.key_alt
                     and mapped_mods_from_string['shift'] == io.key_shift
-                    and mapped_mods_from_string['super'] == io.key_super):
-                        action_func(*action_args)
-                        return True
+                    and mapped_mods_from_string['super'] == io.key_super)
+                if mods_match:
+                    action_func(*action_args)
+                    return True
             return False
 
         def check_key_held(shortcut_name):
@@ -1230,9 +1234,9 @@ class GUI:
         elif check_and_run_shortcut("set_chapter_end", self._handle_set_chapter_end_shortcut):
             pass
 
-        # Add Points at specific values (Number keys)
+        # Add Points at specific values (Number keys 0-9 and = for 100%)
         # These add a point at the current video time to the active timeline
-        elif video_loaded and check_and_run_shortcut("add_point_0", self._handle_add_point_at_value, 0):
+        if video_loaded and check_and_run_shortcut("add_point_0", self._handle_add_point_at_value, 0):
             pass
         elif video_loaded and check_and_run_shortcut("add_point_10", self._handle_add_point_at_value, 10):
             pass
@@ -1445,10 +1449,20 @@ class GUI:
         # Get the active timeline and add the point
         app_state = self.app.app_state_ui
         timeline_num = getattr(app_state, 'active_timeline_num', 1)
-        timeline = self.app.get_timeline(timeline_num)
+
+        # Get timeline from GUI instance (timelines are stored as timeline_editor1/2 in AppGUI)
+        if timeline_num == 1:
+            timeline = self.timeline_editor1
+        elif timeline_num == 2:
+            timeline = self.timeline_editor2
+        else:
+            timeline = None
 
         if timeline:
             timeline._add_point(current_time_ms, value)
+            self.app.logger.info(f"Added point: {value}% at {current_time_ms}ms (Timeline {timeline_num})", extra={'status_message': True})
+        else:
+            self.app.logger.warning(f"Timeline {timeline_num} not found")
 
     def _get_current_frame_for_chapter(self) -> int:
         """Get current video frame for chapter operations"""
@@ -1885,13 +1899,8 @@ class GUI:
     def render_gui(self):
         self.component_render_times.clear()
 
-        # Separate timing to identify performance bottlenecks
+        # Energy detection can be done before new_frame
         self._time_render("EnergyDetection", self._handle_energy_saver_interaction_detection)
-        self._time_render("GlobalShortcuts", self._handle_global_shortcuts)
-
-        if self.app.shortcut_manager.is_recording_shortcut_for:
-            self._time_render("ShortcutRecordingInput", self.app.shortcut_manager.handle_shortcut_recording_input)
-            self.app.energy_saver.reset_activity_timer()
 
         self._time_render("StageProcessorEvents", self.app.stage_processor.process_gui_events)
 
@@ -1899,6 +1908,16 @@ class GUI:
         self._process_preview_results()
 
         imgui.new_frame()
+
+        # IMPORTANT: Global shortcuts must be called AFTER new_frame() because
+        # imgui.is_key_pressed() relies on KeysDownDuration which is updated by new_frame().
+        # Previously shortcuts were called before new_frame, causing is_key_pressed to always return False.
+        self._time_render("GlobalShortcuts", self._handle_global_shortcuts)
+
+        if self.app.shortcut_manager.is_recording_shortcut_for:
+            self._time_render("ShortcutRecordingInput", self.app.shortcut_manager.handle_shortcut_recording_input)
+            self.app.energy_saver.reset_activity_timer()
+
         main_viewport = imgui.get_main_viewport()
         self.window_width, self.window_height = main_viewport.size
         app_state = self.app.app_state_ui
