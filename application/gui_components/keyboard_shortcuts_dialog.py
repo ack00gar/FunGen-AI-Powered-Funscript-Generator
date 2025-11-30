@@ -257,6 +257,8 @@ class KeyboardShortcutsDialog:
                             # Clear this specific conflicting shortcut
                             shortcuts_settings[action] = ""
                             self.app.app_settings.set("funscript_editor_shortcuts", shortcuts_settings)
+                            if hasattr(self.app, 'invalidate_shortcut_cache'):
+                                self.app.invalidate_shortcut_cache()
                             self.app.logger.info(f"Cleared shortcut for: {display_name}", extra={'status_message': True})
                     imgui.unindent()
                     imgui.spacing()
@@ -456,6 +458,8 @@ class KeyboardShortcutsDialog:
             from config.constants import DEFAULT_SHORTCUTS
             adjusted_shortcuts = self.layout_detector.get_layout_adjusted_shortcuts(DEFAULT_SHORTCUTS)
             self.app.app_settings.set("funscript_editor_shortcuts", adjusted_shortcuts)
+            if hasattr(self.app, 'invalidate_shortcut_cache'):
+                self.app.invalidate_shortcut_cache()
             self.app.logger.info("Applied layout adjustments to shortcuts", extra={'status_message': True})
 
         if imgui.is_item_hovered():
@@ -547,6 +551,8 @@ class KeyboardShortcutsDialog:
             if imgui.button("Reset All##ConfirmResetBtn", width=120):
                 # Reset to defaults from constants.py
                 self.app.app_settings.set("funscript_editor_shortcuts", dict(DEFAULT_SHORTCUTS))
+                if hasattr(self.app, 'invalidate_shortcut_cache'):
+                    self.app.invalidate_shortcut_cache()
                 self.app.logger.info("All keyboard shortcuts reset to defaults", extra={'status_message': True})
                 imgui.close_current_popup()
 

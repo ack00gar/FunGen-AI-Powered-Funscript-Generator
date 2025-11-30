@@ -120,6 +120,9 @@ class ShortcutManager:
             current_shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
             current_shortcuts[self.is_recording_shortcut_for] = new_shortcut_str
             self.app.app_settings.set("funscript_editor_shortcuts", current_shortcuts)
+            # Invalidate shortcut cache since mapping changed
+            if hasattr(self.app, 'invalidate_shortcut_cache'):
+                self.app.invalidate_shortcut_cache()
             self.app.logger.info(
                 f"Shortcut for '{self.is_recording_shortcut_for.replace('_', ' ').title()}' set to '{new_shortcut_str}'. Save settings to persist.", extra={'status_message': True})
             if self.app.project_manager:
