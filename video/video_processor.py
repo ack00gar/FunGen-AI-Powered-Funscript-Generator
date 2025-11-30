@@ -2064,8 +2064,14 @@ class VideoProcessor:
         Adds frame to rolling backward buffer as we go.
         Returns the frame at target_frame.
         """
-        # For forward navigation, just get the frame (will be added to backward buffer by caller)
-        frame = self._get_specific_frame(target_frame, update_current_index=True)
+        # Use fast thumbnail path for instant response during arrow navigation
+        # This avoids the 600-frame batch fetch which is very slow for VR videos
+        original_batch_size = self.batch_fetch_size
+        self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+        try:
+            frame = self._get_specific_frame(target_frame, update_current_index=True)
+        finally:
+            self.batch_fetch_size = original_batch_size
         return frame
 
     def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
@@ -2091,9 +2097,15 @@ class VideoProcessor:
                 if frames_behind < self.arrow_nav_refill_threshold and not self.arrow_nav_refilling:
                     self._trigger_backward_buffer_refill(oldest_frame_index)
 
-        # Frame not in buffer, fetch it (this shouldn't happen often)
-        self.logger.debug(f"Frame {target_frame} not in backward buffer, fetching")
-        return self._get_specific_frame(target_frame, update_current_index=True)
+        # Frame not in buffer, fetch it using fast thumbnail path
+        # This shouldn't happen often but when it does, we need instant response
+        self.logger.debug(f"Frame {target_frame} not in backward buffer, fetching via fast path")
+        original_batch_size = self.batch_fetch_size
+        self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+        try:
+            return self._get_specific_frame(target_frame, update_current_index=True)
+        finally:
+            self.batch_fetch_size = original_batch_size
 
     def _trigger_backward_buffer_refill(self, oldest_frame_index: int):
         """Async refill backward buffer with 480 frames."""
