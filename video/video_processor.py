@@ -83,6 +83,7 @@ class VideoProcessor:
         self.seek_request_frame_index = None
         self.seek_in_progress = False  # Flag to track if seek operation is running
         self.seek_thread = None  # Thread for async seek operations
+        self.arrow_nav_in_progress = False  # Flag to prevent arrow nav overload
         self.frame_buffer_progress = 0.0  # Progress of frame buffer creation (0.0 to 1.0)
         self.frame_buffer_total = 0  # Total frames to buffer
         self.frame_buffer_current = 0  # Current frames buffered
@@ -2064,15 +2065,23 @@ class VideoProcessor:
         Adds frame to rolling backward buffer as we go.
         Returns the frame at target_frame.
         """
-        # Use fast thumbnail path for instant response during arrow navigation
-        # This avoids the 600-frame batch fetch which is very slow for VR videos
-        original_batch_size = self.batch_fetch_size
-        self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+        # Skip if already fetching a frame (prevents CPU overload when holding arrow keys)
+        if self.arrow_nav_in_progress:
+            return None
+
+        self.arrow_nav_in_progress = True
         try:
-            frame = self._get_specific_frame(target_frame, update_current_index=True)
+            # Use fast thumbnail path for instant response during arrow navigation
+            # This avoids the 600-frame batch fetch which is very slow for VR videos
+            original_batch_size = self.batch_fetch_size
+            self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+            try:
+                frame = self._get_specific_frame(target_frame, update_current_index=True)
+            finally:
+                self.batch_fetch_size = original_batch_size
+            return frame
         finally:
-            self.batch_fetch_size = original_batch_size
-        return frame
+            self.arrow_nav_in_progress = False
 
     def arrow_nav_backward(self, target_frame: int) -> Optional[np.ndarray]:
         """
@@ -2099,13 +2108,21 @@ class VideoProcessor:
 
         # Frame not in buffer, fetch it using fast thumbnail path
         # This shouldn't happen often but when it does, we need instant response
-        self.logger.debug(f"Frame {target_frame} not in backward buffer, fetching via fast path")
-        original_batch_size = self.batch_fetch_size
-        self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+        # Skip if already fetching (prevents CPU overload when holding arrow keys)
+        if self.arrow_nav_in_progress:
+            return None
+
+        self.arrow_nav_in_progress = True
         try:
-            return self._get_specific_frame(target_frame, update_current_index=True)
+            self.logger.debug(f"Frame {target_frame} not in backward buffer, fetching via fast path")
+            original_batch_size = self.batch_fetch_size
+            self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+            try:
+                return self._get_specific_frame(target_frame, update_current_index=True)
+            finally:
+                self.batch_fetch_size = original_batch_size
         finally:
-            self.batch_fetch_size = original_batch_size
+            self.arrow_nav_in_progress = False
 
     def _trigger_backward_buffer_refill(self, oldest_frame_index: int):
         """Async refill backward buffer with 480 frames."""

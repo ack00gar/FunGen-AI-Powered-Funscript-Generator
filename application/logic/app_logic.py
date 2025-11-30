@@ -302,6 +302,7 @@ class ApplicationLogic:
         # --- Other Managers ---
         self.project_manager = ProjectManager(self)
         self.shortcut_manager = ShortcutManager(self)
+        self._shortcut_mapping_cache = {}  # Cache parsed shortcut mappings to avoid string parsing every frame
 
         # Initialize chapter type manager for custom chapter types
         from application.classes.chapter_type_manager import ChapterTypeManager, set_chapter_type_manager
@@ -1831,14 +1832,17 @@ class ApplicationLogic:
     def _map_shortcut_to_glfw_key(self, shortcut_string_to_parse: str) -> Optional[Tuple[int, dict]]:
         """
         Parses a shortcut string (e.g., "CTRL+SHIFT+A") into a GLFW key code
-        and a dictionary of modifiers.
-        This method now correctly uses self.shortcut_manager.name_to_glfw_key
-        as indicated by the original code.
+        and a dictionary of modifiers. Results are cached to avoid string
+        parsing overhead on every frame.
         """
         if not shortcut_string_to_parse:
-            self.logger.warning("Received an empty string for shortcut mapping.")
             return None
 
+        # Check cache first (avoids string parsing every frame)
+        if shortcut_string_to_parse in self._shortcut_mapping_cache:
+            return self._shortcut_mapping_cache[shortcut_string_to_parse]
+
+        # Parse the shortcut string
         parts = shortcut_string_to_parse.upper().split('+')
         modifiers = {'ctrl': False, 'alt': False, 'shift': False, 'super': False}
         main_key_str = None
@@ -1855,22 +1859,29 @@ class ApplicationLogic:
                 modifiers['super'] = True
             else:
                 if main_key_str is not None:
-                    self.logger.warning(
-                        f"Invalid shortcut string '{shortcut_string_to_parse}'. Multiple main keys identified: '{main_key_str}' and '{part_cleaned}'.")
+                    self._shortcut_mapping_cache[shortcut_string_to_parse] = None
                     return None
                 main_key_str = part_cleaned
 
         if main_key_str is None:
-            self.logger.warning(f"Invalid shortcut string '{shortcut_string_to_parse}'. No main key found.")
+            self._shortcut_mapping_cache[shortcut_string_to_parse] = None
             return None
 
         if not self.shortcut_manager:
-            self.logger.warning("Shortcut manager not available for mapping key name.")
             return None
+
         glfw_key_code = self.shortcut_manager.name_to_glfw_key(main_key_str)
         if glfw_key_code is None:
+            self._shortcut_mapping_cache[shortcut_string_to_parse] = None
             return None
-        return glfw_key_code, modifiers
+
+        result = (glfw_key_code, modifiers)
+        self._shortcut_mapping_cache[shortcut_string_to_parse] = result
+        return result
+
+    def invalidate_shortcut_cache(self):
+        """Clear the shortcut mapping cache. Call this when shortcuts are modified."""
+        self._shortcut_mapping_cache.clear()
 
     def get_effective_video_duration_params(self) -> Tuple[float, int, float]:
         """
