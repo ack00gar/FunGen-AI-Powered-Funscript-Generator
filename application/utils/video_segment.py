@@ -182,7 +182,12 @@ class VideoSegment:
 
     # ==================== FUNSCRIPT CONVERSION METHODS ====================
     def to_funscript_chapter_dict(self, fps: float) -> Dict[str, str]:
-        """Converts the segment to the Funscript chapter metadata format."""
+        """Converts the segment to the Funscript chapter metadata format.
+
+        Note: Funscript chapters use exclusive endTime (first frame of next chapter).
+        Our internal representation uses inclusive end_frame_id (last frame of this chapter).
+        We add 1 to end_frame_id to convert from inclusive to exclusive boundary.
+        """
         if fps <= 0:
             return {
                 "name": self.position_long_name,
@@ -192,12 +197,17 @@ class VideoSegment:
         return {
             "name": self.position_long_name,
             "startTime": self._frames_to_timecode(self.start_frame_id, fps),
-            "endTime": self._frames_to_timecode(self.end_frame_id, fps)
+            "endTime": self._frames_to_timecode(self.end_frame_id + 1, fps)  # +1 for exclusive boundary
         }
 
     @classmethod
     def from_funscript_chapter_dict(cls, data: Dict[str, str], fps: float) -> 'VideoSegment':
-        """Create segment from Funscript chapter metadata format."""
+        """Create segment from Funscript chapter metadata format.
+
+        Note: Funscript chapters use exclusive endTime (first frame of next chapter).
+        Our internal representation uses inclusive end_frame_id (last frame of this chapter).
+        We subtract 1 from converted endTime to get the inclusive boundary.
+        """
         long_name = data.get("name", "Unnamed Chapter")
         startTime_str = data.get("startTime", "00:00:00.000")
         endTime_str = data.get("endTime", "00:00:00.000")
@@ -216,7 +226,8 @@ class VideoSegment:
         body_part = LONG_NAME_TO_KEY.get(long_name)
 
         start_frame = cls._timecode_to_frames(startTime_str, fps)
-        end_frame = cls._timecode_to_frames(endTime_str, fps)
+        # Subtract 1 from endTime to convert from exclusive to inclusive boundary
+        end_frame = cls._timecode_to_frames(endTime_str, fps) - 1
 
         return cls(
             start_frame_id=start_frame,

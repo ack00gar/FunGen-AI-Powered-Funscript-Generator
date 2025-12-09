@@ -347,7 +347,39 @@ class AppFunscriptProcessor:
                     f"Overlap detected: Proposed [{start_frame}-{end_frame}] with existing '{chapter.unique_id}' [{chapter.start_frame_id}-{chapter.end_frame_id}]")
                 return True
         return False
-    
+
+    def _repair_overlapping_chapters(self):
+        """Repair overlapping chapters from old projects before exclusive endTime fix.
+
+        Adjusts adjacent chapters to have proper boundaries:
+        - Chapter N end_frame_id should be < Chapter N+1 start_frame_id
+        - Or they should be adjacent (end + 1 = start)
+        """
+        if len(self.video_chapters) <= 1:
+            return  # Nothing to repair
+
+        # Sort chapters by start frame
+        self.video_chapters.sort(key=lambda ch: ch.start_frame_id)
+
+        repaired_count = 0
+        for i in range(len(self.video_chapters) - 1):
+            curr_chapter = self.video_chapters[i]
+            next_chapter = self.video_chapters[i + 1]
+
+            # Check if chapters overlap (share frames)
+            if curr_chapter.end_frame_id >= next_chapter.start_frame_id:
+                # Fix: Make them adjacent by adjusting current chapter's end
+                old_end = curr_chapter.end_frame_id
+                curr_chapter.end_frame_id = next_chapter.start_frame_id - 1
+                repaired_count += 1
+                self.logger.info(
+                    f"Repaired overlapping chapters: '{curr_chapter.position_short_name}' "
+                    f"end adjusted from {old_end} to {curr_chapter.end_frame_id}"
+                )
+
+        if repaired_count > 0:
+            self.logger.info(f"Repaired {repaired_count} overlapping chapter(s) from project load")
+
     def _auto_adjust_chapter_range(self, start_frame: int, end_frame: int) -> tuple[int, int]:
         """Auto-adjust chapter range to avoid overlaps, keeping as close as possible to original location."""
         if not self.video_chapters:
@@ -1017,6 +1049,9 @@ class AppFunscriptProcessor:
         """Called when a project is loaded to update relevant settings."""
         self.video_chapters = [VideoSegment.from_dict(data) for data in project_data.get("video_chapters", []) if
                                VideoSegment.is_valid_dict(data)]
+
+        # Repair any overlapping chapters from old projects (before exclusive endTime fix)
+        self._repair_overlapping_chapters()
 
         # Sync loaded chapters to funscript object
         self._sync_chapters_to_funscript()
