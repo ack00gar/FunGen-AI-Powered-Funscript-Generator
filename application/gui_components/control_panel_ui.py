@@ -5816,38 +5816,4 @@ class ControlPanelUI:
             app: Application instance
             timeline_num: Timeline number to export (1 for primary, 2 for secondary)
         """
-        import os
-
-        if not app.gui_instance or not app.gui_instance.file_dialog:
-            app.logger.warning("File dialog not available", extra={"status_message": True})
-            return
-
-        video_path = app.file_manager.video_path
-        output_folder_base = app.app_settings.get("output_folder_path", "output")
-        initial_path = output_folder_base
-
-        # Set initial filename based on timeline number
-        if timeline_num == 1:
-            initial_filename = "timeline1.funscript"
-        else:
-            initial_filename = "timeline2.funscript"
-
-        if video_path:
-            video_basename = os.path.splitext(os.path.basename(video_path))[0]
-            initial_path = os.path.join(output_folder_base, video_basename)
-            if timeline_num == 1:
-                initial_filename = f"{video_basename}.funscript"
-            else:
-                initial_filename = f"{video_basename}_t2.funscript"
-
-        if not os.path.isdir(initial_path):
-            os.makedirs(initial_path, exist_ok=True)
-
-        app.gui_instance.file_dialog.show(
-            is_save=True,
-            title=f"Export Funscript from Timeline {timeline_num}",
-            extension_filter="Funscript Files (*.funscript),*.funscript",
-            callback=lambda filepath: app.file_manager.save_funscript_from_timeline(filepath, timeline_num),
-            initial_path=initial_path,
-            initial_filename=initial_filename
-        )
+        app.file_manager.export_funscript_from_timeline(timeline_num)
