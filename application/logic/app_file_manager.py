@@ -354,6 +354,50 @@ class AppFileManager:
                 callback=lambda filepath: self.load_funscript_to_timeline(filepath, timeline_num)
             )
 
+    def export_funscript_from_timeline(self, timeline_num: int):
+        """Trigger file dialog to export funscript from specified timeline.
+
+        Mirrors import_funscript_to_timeline() for API consistency.
+        Centralizes all export file dialog logic in one place.
+
+        Args:
+            timeline_num: Timeline number to export (1 for primary, 2 for secondary)
+        """
+        import os
+
+        if not self.app.gui_instance or not self.app.gui_instance.file_dialog:
+            self.logger.warning("File dialog not available", extra={"status_message": True})
+            return
+
+        output_folder_base = self.app.app_settings.get("output_folder_path", "output")
+        initial_path = output_folder_base
+
+        # Set initial filename based on timeline number
+        if timeline_num == 1:
+            initial_filename = "timeline1.funscript"
+        else:
+            initial_filename = "timeline2.funscript"
+
+        if self.video_path:
+            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            initial_path = os.path.join(output_folder_base, video_basename)
+            if timeline_num == 1:
+                initial_filename = f"{video_basename}.funscript"
+            else:
+                initial_filename = f"{video_basename}_t2.funscript"
+
+        if not os.path.isdir(initial_path):
+            os.makedirs(initial_path, exist_ok=True)
+
+        self.app.gui_instance.file_dialog.show(
+            is_save=True,
+            title=f"Export Funscript from Timeline {timeline_num}",
+            extension_filter="Funscript Files (*.funscript),*.funscript",
+            callback=lambda filepath: self.save_funscript_from_timeline(filepath, timeline_num),
+            initial_path=initial_path,
+            initial_filename=initial_filename
+        )
+
     def import_stage2_overlay_data(self):
         """Trigger file dialog to import stage 2 overlay data."""
         if hasattr(self.app, 'gui_instance') and self.app.gui_instance and self.app.gui_instance.file_dialog:
