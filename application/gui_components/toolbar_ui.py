@@ -1007,40 +1007,7 @@ class ToolbarUI:
 
     def _export_timeline(self, timeline_num):
         """Export funscript from specified timeline."""
-        import os
-
-        if not self.app.gui_instance or not self.app.gui_instance.file_dialog:
-            self.app.logger.warning("File dialog not available", extra={"status_message": True})
-            return
-
-        video_path = self.app.file_manager.video_path
-        output_folder_base = self.app.app_settings.get("output_folder_path", "output")
-        initial_path = output_folder_base
-
-        if timeline_num == 1:
-            initial_filename = "timeline1.funscript"
-        else:
-            initial_filename = "timeline2.funscript"
-
-        if video_path:
-            video_basename = os.path.splitext(os.path.basename(video_path))[0]
-            initial_path = os.path.join(output_folder_base, video_basename)
-            if timeline_num == 1:
-                initial_filename = f"{video_basename}.funscript"
-            else:
-                initial_filename = f"{video_basename}_t2.funscript"
-
-        if not os.path.isdir(initial_path):
-            os.makedirs(initial_path, exist_ok=True)
-
-        self.app.gui_instance.file_dialog.show(
-            is_save=True,
-            title=f"Export Funscript from Timeline {timeline_num}",
-            extension_filter="Funscript Files (*.funscript),*.funscript",
-            callback=lambda filepath: self.app.file_manager.save_funscript_from_timeline(filepath, timeline_num),
-            initial_path=initial_path,
-            initial_filename=initial_filename
-        )
+        self.app.file_manager.export_funscript_from_timeline(timeline_num)
 
     def _auto_connect_handy(self):
         """Auto-connect to last used device type, or fall back to configured preferred backend."""
