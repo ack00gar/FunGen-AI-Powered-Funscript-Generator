@@ -592,21 +592,31 @@ class ControlPanelUI:
         imgui.text("Processing...")
         imgui.pop_style_color()
 
+        # Get progress based on current stage
+        current_stage = stage_proc.current_analysis_stage
+        if current_stage == 1:
+            progress = stage_proc.stage1_progress_value
+            elapsed_str = stage_proc.stage1_time_elapsed_str
+            eta_str = stage_proc.stage1_eta_str
+        elif current_stage == 2:
+            progress = stage_proc.stage2_main_progress_value
+            elapsed_str = stage_proc.stage2_sub_time_elapsed_str or "00:00:00"
+            eta_str = stage_proc.stage2_sub_eta_str or "N/A"
+        elif current_stage == 3:
+            progress = stage_proc.stage3_overall_progress_value
+            elapsed_str = stage_proc.stage3_time_elapsed_str
+            eta_str = stage_proc.stage3_eta_str
+        else:
+            progress = 0.0
+            elapsed_str = "00:00:00"
+            eta_str = "N/A"
+
         # Simple progress bar (no technical details like Stage 1/2, FPS, etc.)
-        progress = stage_proc.get_overall_progress()
         imgui.progress_bar(progress, (-1, 0))
 
-        # Simple time estimate
-        if progress > 0.01:
-            elapsed = stage_proc.get_elapsed_time()
-            estimated_total = elapsed / progress
-            remaining = estimated_total - elapsed
-            if remaining > 0:
-                mins = int(remaining // 60)
-                if mins > 0:
-                    imgui.text_wrapped("About %d minute%s remaining" % (mins, "s" if mins != 1 else ""))
-                else:
-                    imgui.text_wrapped("Less than 1 minute remaining")
+        # Simple time estimate from ETA string
+        if progress > 0.01 and eta_str != "N/A":
+            imgui.text_wrapped(f"Estimated time remaining: {eta_str}")
 
         imgui.spacing()
 
