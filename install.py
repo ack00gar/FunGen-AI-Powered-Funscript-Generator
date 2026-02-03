@@ -1335,7 +1335,11 @@ class FunGenUniversalInstaller:
 
         launcher_content = f'''@echo off
 {cd_command}
-{path_setup}echo Activating FunGen environment...
+{path_setup}
+REM Disable Ultralytics telemetry for privacy
+set YOLO_TELEMETRY=False
+
+echo Activating FunGen environment...
 {activate_cmd}
 echo Starting FunGen...
 python {CONFIG["main_script"]} %*
@@ -1371,7 +1375,11 @@ python {CONFIG["main_script"]} %*
         
         launcher_content = f'''#!/bin/bash
 cd "$(dirname "$0")"
-{path_setup}echo "Activating FunGen environment..."
+{path_setup}
+# Disable Ultralytics telemetry for privacy
+export YOLO_TELEMETRY=False
+
+echo "Activating FunGen environment..."
 {activate_cmd}
 echo "Starting FunGen..."
 python {CONFIG["main_script"]} "$@"
@@ -1445,7 +1453,45 @@ read -p "Press Enter to close..."
                 self.print_warning(f"Could not test Python environment: {e}")
         
         return all_passed
-    
+
+    def disable_ultralytics_telemetry(self) -> bool:
+        """Disable Ultralytics telemetry for privacy (especially important for adult content)."""
+        try:
+            from pathlib import Path
+            import os
+
+            print("  Disabling Ultralytics telemetry for privacy...")
+
+            # Method 1: Create settings file
+            if self.platform == "Windows":
+                settings_dir = Path(os.environ.get('APPDATA', Path.home())) / 'Ultralytics'
+            else:
+                settings_dir = Path.home() / '.config' / 'Ultralytics'
+
+            settings_dir.mkdir(parents=True, exist_ok=True)
+            settings_path = settings_dir / 'settings.yaml'
+
+            settings_content = """# Ultralytics Settings
+# Automatically configured by FunGen installer for privacy
+
+sync: false          # Disable auto-sync
+analytics: false     # Disable analytics/telemetry
+crashes: false       # Disable crash reporting
+"""
+
+            settings_path.write_text(settings_content)
+            self.print_success(f"Ultralytics telemetry disabled: {settings_path}")
+
+            # Method 2: Set environment variable hint for launchers
+            print("  Note: Launch scripts will also set YOLO_TELEMETRY=False")
+
+            return True
+
+        except Exception as e:
+            self.print_warning(f"Could not disable Ultralytics telemetry: {e}")
+            self.print_warning("You can manually disable it later in ~/.config/Ultralytics/settings.yaml")
+            return True  # Non-critical, continue installation
+
     def print_completion_message(self):
         """Print completion message"""
         print(f"\n{Colors.GREEN}{Colors.BOLD}=" * 60)
@@ -1515,6 +1561,7 @@ read -p "Press Enter to close..."
                 ("Installing FFmpeg", self.install_ffmpeg),
                 ("Setting up Python environment", self.setup_python_environment),
                 ("Installing Python dependencies", self.install_python_dependencies),
+                ("Disabling Ultralytics telemetry", self.disable_ultralytics_telemetry),
                 ("Creating launcher scripts", self.create_launchers),
                 ("Validating installation", self.validate_installation),
             ]
