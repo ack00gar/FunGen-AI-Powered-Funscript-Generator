@@ -19,7 +19,10 @@ class VideoNavigationUI:
         # State for dialogs/windows
         self.show_create_chapter_dialog = False
         self.show_edit_chapter_dialog = False
-        self.use_timecode_input_mode = False  # Toggle for timecode vs frame input
+
+        # Timecode display fields (synced with frame fields)
+        self.chapter_start_timecode = "00:00:00.000"
+        self.chapter_end_timecode = "00:00:00.000"
 
         # Prepare data for dialogs - dynamically from ChapterTypeManager
         self._update_chapter_type_lists()
@@ -610,6 +613,10 @@ class VideoNavigationUI:
             except (ValueError, IndexError):
                 self.selected_position_idx_in_dialog = 0
 
+            # Initialize timecode fields
+            self._update_timecode_from_frame("start")
+            self._update_timecode_from_frame("end")
+
             self.show_create_chapter_dialog = True
             self.context_selected_chapters.clear()
 
@@ -839,6 +846,11 @@ class VideoNavigationUI:
                             chapter_obj_to_edit.position_short_name)
                     except (ValueError, IndexError):
                         self.selected_position_idx_in_dialog = 0
+
+                    # Initialize timecode fields
+                    self._update_timecode_from_frame("start")
+                    self._update_timecode_from_frame("end")
+
                     self.show_edit_chapter_dialog = True
 
             imgui.separator()
@@ -1175,24 +1187,38 @@ class VideoNavigationUI:
             imgui.text("Create New Chapter Details")
             imgui.separator()
 
-            # Timecode input mode toggle
-            _, self.use_timecode_input_mode = imgui.checkbox("Use Timecode Input##CreateWinTimecodeMode", self.use_timecode_input_mode)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Toggle to enter times instead of frame numbers\nSupports: HH:MM:SS, MM:SS, SS, SS.mmm")
-
             imgui.push_item_width(200)
 
-            # Dynamic labels based on input mode
-            if self.use_timecode_input_mode:
-                start_label = "Start Time##CreateWin"
-                end_label = "End Time##CreateWin"
-                imgui.text_disabled("Format: HH:MM:SS or MM:SS or SS")
-            else:
-                start_label = "Start Frame##CreateWin"
-                end_label = "End Frame##CreateWin"
+            # Frame input fields
+            frame_changed_start, new_start_frame = imgui.input_text("Start Frame##CreateWinFrame", self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            if frame_changed_start:
+                self.chapter_edit_data["start_frame_str"] = new_start_frame
+                # Update timecode when frame changes
+                self._update_timecode_from_frame("start")
 
-            _, self.chapter_edit_data["start_frame_str"] = imgui.input_text(start_label, self.chapter_edit_data.get("start_frame_str", "0"), 64)
-            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text(end_label, self.chapter_edit_data.get("end_frame_str", "0"), 64)
+            # Timecode display (synced)
+            imgui.same_line()
+            timecode_changed_start, new_start_timecode = imgui.input_text("Start Time##CreateWinTime", self.chapter_start_timecode, 64)
+            if timecode_changed_start:
+                self.chapter_start_timecode = new_start_timecode
+                # Update frame when timecode changes
+                self._update_frame_from_timecode("start", new_start_timecode)
+
+            # End frame and timecode
+            frame_changed_end, new_end_frame = imgui.input_text("End Frame##CreateWinFrame", self.chapter_edit_data.get("end_frame_str", "0"), 64)
+            if frame_changed_end:
+                self.chapter_edit_data["end_frame_str"] = new_end_frame
+                # Update timecode when frame changes
+                self._update_timecode_from_frame("end")
+
+            imgui.same_line()
+            timecode_changed_end, new_end_timecode = imgui.input_text("End Time##CreateWinTime", self.chapter_end_timecode, 64)
+            if timecode_changed_end:
+                self.chapter_end_timecode = new_end_timecode
+                # Update frame when timecode changes
+                self._update_frame_from_timecode("end", new_end_timecode)
+
+            imgui.text_disabled("Timecode format: HH:MM:SS or MM:SS or SS")
 
             # Segment Type dropdown (instead of free text)
             from config.constants import ChapterSegmentType
@@ -1304,24 +1330,38 @@ class VideoNavigationUI:
             imgui.text(f"Editing Chapter ID: {self.chapter_to_edit_id}")
             imgui.separator()
 
-            # Timecode input mode toggle
-            _, self.use_timecode_input_mode = imgui.checkbox("Use Timecode Input##EditWinTimecodeMode", self.use_timecode_input_mode)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Toggle to enter times instead of frame numbers\nSupports: HH:MM:SS, MM:SS, SS, SS.mmm")
-
             imgui.push_item_width(200)
 
-            # Dynamic labels based on input mode
-            if self.use_timecode_input_mode:
-                start_label_edit = "Start Time##EditWin"
-                end_label_edit = "End Time##EditWin"
-                imgui.text_disabled("Format: HH:MM:SS or MM:SS or SS")
-            else:
-                start_label_edit = "Start Frame##EditWin"
-                end_label_edit = "End Frame##EditWin"
+            # Frame input fields
+            frame_changed_start, new_start_frame = imgui.input_text("Start Frame##EditWinFrame", self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            if frame_changed_start:
+                self.chapter_edit_data["start_frame_str"] = new_start_frame
+                # Update timecode when frame changes
+                self._update_timecode_from_frame("start")
 
-            _, self.chapter_edit_data["start_frame_str"] = imgui.input_text(start_label_edit, self.chapter_edit_data.get("start_frame_str", "0"), 64)
-            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text(end_label_edit, self.chapter_edit_data.get("end_frame_str", "0"), 64)
+            # Timecode display (synced)
+            imgui.same_line()
+            timecode_changed_start, new_start_timecode = imgui.input_text("Start Time##EditWinTime", self.chapter_start_timecode, 64)
+            if timecode_changed_start:
+                self.chapter_start_timecode = new_start_timecode
+                # Update frame when timecode changes
+                self._update_frame_from_timecode("start", new_start_timecode)
+
+            # End frame and timecode
+            frame_changed_end, new_end_frame = imgui.input_text("End Frame##EditWinFrame", self.chapter_edit_data.get("end_frame_str", "0"), 64)
+            if frame_changed_end:
+                self.chapter_edit_data["end_frame_str"] = new_end_frame
+                # Update timecode when frame changes
+                self._update_timecode_from_frame("end")
+
+            imgui.same_line()
+            timecode_changed_end, new_end_timecode = imgui.input_text("End Time##EditWinTime", self.chapter_end_timecode, 64)
+            if timecode_changed_end:
+                self.chapter_end_timecode = new_end_timecode
+                # Update frame when timecode changes
+                self._update_frame_from_timecode("end", new_end_timecode)
+
+            imgui.text_disabled("Timecode format: HH:MM:SS or MM:SS or SS")
 
             # Category dropdown (Position or Not Relevant only)
             # Determine category from position_short_name in POSITION_INFO_MAPPING
@@ -1501,6 +1541,8 @@ class VideoNavigationUI:
 
         self.chapter_edit_data["start_frame_str"] = str(start_frame)
         self.chapter_edit_data["end_frame_str"] = str(end_frame)
+        self._update_timecode_from_frame("start")
+        self._update_timecode_from_frame("end")
     
     def _get_current_frame(self) -> int:
         """Get the current video frame position."""
@@ -1512,13 +1554,49 @@ class VideoNavigationUI:
         """Set the chapter start frame to the current video frame."""
         current_frame = self._get_current_frame()
         self.chapter_edit_data["start_frame_str"] = str(current_frame)
+        self._update_timecode_from_frame("start")
         self.app.logger.info(f"Chapter start set to frame {current_frame}", extra={'status_message': True})
     
     def _set_chapter_end_to_current_frame(self):
         """Set the chapter end frame to the current video frame."""
         current_frame = self._get_current_frame()
         self.chapter_edit_data["end_frame_str"] = str(current_frame)
+        self._update_timecode_from_frame("end")
         self.app.logger.info(f"Chapter end set to frame {current_frame}", extra={'status_message': True})
+
+    def _update_timecode_from_frame(self, field: str):
+        """Update timecode display when frame number changes."""
+        from application.utils.video_segment import VideoSegment
+
+        fps = self.app.processor.fps if self.app.processor and self.app.processor.fps > 0 else 30.0
+
+        try:
+            if field == "start":
+                frame_str = self.chapter_edit_data.get("start_frame_str", "0")
+                frame = int(frame_str) if frame_str.isdigit() else 0
+                self.chapter_start_timecode = VideoSegment._frames_to_timecode(frame, fps)
+            elif field == "end":
+                frame_str = self.chapter_edit_data.get("end_frame_str", "0")
+                frame = int(frame_str) if frame_str.isdigit() else 0
+                self.chapter_end_timecode = VideoSegment._frames_to_timecode(frame, fps)
+        except (ValueError, AttributeError):
+            pass  # Ignore invalid input during typing
+
+    def _update_frame_from_timecode(self, field: str, timecode: str):
+        """Update frame number when timecode changes."""
+        from application.utils.video_segment import VideoSegment
+
+        fps = self.app.processor.fps if self.app.processor and self.app.processor.fps > 0 else 30.0
+
+        try:
+            frame = VideoSegment.parse_time_input_to_frames(timecode, fps)
+            if frame >= 0:
+                if field == "start":
+                    self.chapter_edit_data["start_frame_str"] = str(frame)
+                elif field == "end":
+                    self.chapter_edit_data["end_frame_str"] = str(frame)
+        except (ValueError, AttributeError):
+            pass  # Ignore invalid input during typing
 
     def _render_funscript_timeline_preview(self, total_duration_s: float, graph_height: int):
         self.gui_instance.render_funscript_timeline_preview(total_duration_s, graph_height)
@@ -2120,4 +2198,9 @@ class ChapterListWindow:
                 chapter.position_short_name)
         except (ValueError, IndexError):
             self.nav_ui.selected_position_idx_in_dialog = 0
+
+        # Initialize timecode fields
+        self.nav_ui._update_timecode_from_frame("start")
+        self.nav_ui._update_timecode_from_frame("end")
+
         self.nav_ui.show_edit_chapter_dialog = True
