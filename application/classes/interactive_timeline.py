@@ -104,6 +104,7 @@ class InteractiveFunscriptTimeline:
         self.show_ultimate_autotune_preview = self.app.app_settings.get(
             f"timeline{self.timeline_num}_show_ultimate_preview", True)
         self._ultimate_preview_dirty = True
+        self.nudge_chapter_only = False  # When True, << >> only affect points in selected chapter
 
     # ==================================================================================
     # CORE DATA HELPERS
@@ -644,6 +645,59 @@ class InteractiveFunscriptTimeline:
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge All Points")
         self.invalidate_cache()
 
+    def _nudge_chapter_time(self, frames: int):
+        """Nudge points within the selected chapter(s) by a number of frames"""
+        # Get selected chapters from video_navigation_ui
+        selected_chapters = []
+        if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_navigation_ui'):
+            nav_ui = self.app.gui_instance.video_navigation_ui
+            if nav_ui and hasattr(nav_ui, 'context_selected_chapters'):
+                selected_chapters = nav_ui.context_selected_chapters
+
+        if not selected_chapters:
+            if self.logger:
+                self.logger.info("No chapter selected for nudging", extra={'status_message': True})
+            return
+
+        actions = self._get_actions()
+        if not actions: return
+
+        processor = self.app.processor
+        if not processor or not processor.video_info: return
+
+        fps = processor.fps
+        if fps <= 0: return
+
+        # Convert frames to milliseconds
+        delta_ms = int((frames / fps) * 1000.0)
+
+        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Nudge Chapter Points")
+
+        # Process each selected chapter
+        total_nudged = 0
+        for chapter in selected_chapters:
+            # Get chapter time range
+            start_ms = int(round((chapter.start_frame_id / fps) * 1000.0))
+            end_ms = int(round((chapter.end_frame_id / fps) * 1000.0))
+
+            # Find points within chapter using binary search
+            action_timestamps = [a['at'] for a in actions]
+            start_idx = bisect_left(action_timestamps, start_ms)
+            end_idx = bisect_right(action_timestamps, end_ms)
+
+            # Nudge only points within the chapter
+            for i in range(start_idx, end_idx):
+                actions[i]['at'] = max(0, actions[i]['at'] + delta_ms)
+                total_nudged += 1
+
+        if total_nudged == 0:
+            if self.logger:
+                self.logger.info("No points found in selected chapter(s)", extra={'status_message': True})
+            return
+
+        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Chapter Points")
+        self.invalidate_cache()
+
     # --- Clipboard & Timeline Ops ---
     def _handle_copy_selection(self):
         actions = self._get_actions()
@@ -1053,13 +1107,29 @@ class InteractiveFunscriptTimeline:
         
         # Nudge All Buttons
         if imgui.button(f"<<##{self.timeline_num}"):
-            self._nudge_all_time(-1)
-        if imgui.is_item_hovered(): imgui.set_tooltip("Nudge all points left by 1 frame")
+            if self.nudge_chapter_only:
+                self._nudge_chapter_time(-1)
+            else:
+                self._nudge_all_time(-1)
+        if imgui.is_item_hovered():
+            tip = "Nudge points in selected chapter left by 1 frame" if self.nudge_chapter_only else "Nudge all points left by 1 frame"
+            imgui.set_tooltip(tip)
         imgui.same_line()
 
         if imgui.button(f">>##{self.timeline_num}"):
-            self._nudge_all_time(1)
-        if imgui.is_item_hovered(): imgui.set_tooltip("Nudge all points right by 1 frame")
+            if self.nudge_chapter_only:
+                self._nudge_chapter_time(1)
+            else:
+                self._nudge_all_time(1)
+        if imgui.is_item_hovered():
+            tip = "Nudge points in selected chapter right by 1 frame" if self.nudge_chapter_only else "Nudge all points right by 1 frame"
+            imgui.set_tooltip(tip)
+        imgui.same_line()
+
+        # Chapter-only nudge checkbox
+        _, self.nudge_chapter_only = imgui.checkbox(f"Ch.##{self.timeline_num}", self.nudge_chapter_only)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("When checked, << and >> only affect points in the selected chapter")
         imgui.same_line()
 
         imgui.text("|")
