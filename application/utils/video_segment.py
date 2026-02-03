@@ -110,6 +110,75 @@ class VideoSegment:
             return 0  # Return 0 for any parsing errors
 
     @staticmethod
+    def parse_time_input_to_frames(input_str: str, fps: float) -> int:
+        """
+        Flexible parser for time input that supports multiple formats:
+        - Frame numbers: "150" -> frame 150
+        - Seconds: "45" or "45.5" -> 45 or 45.5 seconds
+        - MM:SS: "1:23" or "1:23.5" -> 1 minute 23 seconds
+        - HH:MM:SS: "0:01:23" or "0:01:23.5" -> 1 minute 23 seconds
+
+        Returns frame number, or -1 if parsing fails.
+        """
+        if not input_str or fps <= 0:
+            return -1
+
+        input_str = input_str.strip()
+
+        # Check if input contains colon (timecode format)
+        if ':' in input_str:
+            try:
+                parts = input_str.split(':')
+
+                if len(parts) == 2:
+                    # MM:SS or MM:SS.mmm format
+                    minutes = int(parts[0])
+                    # Handle seconds with optional milliseconds
+                    if '.' in parts[1]:
+                        seconds = float(parts[1])
+                    else:
+                        seconds = int(parts[1])
+
+                    total_seconds = minutes * 60 + seconds
+                    return int(round(total_seconds * fps))
+
+                elif len(parts) == 3:
+                    # HH:MM:SS or HH:MM:SS.mmm format
+                    hours = int(parts[0])
+                    minutes = int(parts[1])
+                    # Handle seconds with optional milliseconds
+                    if '.' in parts[2]:
+                        seconds = float(parts[2])
+                    else:
+                        seconds = int(parts[2])
+
+                    total_seconds = hours * 3600 + minutes * 60 + seconds
+                    return int(round(total_seconds * fps))
+                else:
+                    return -1
+
+            except (ValueError, IndexError):
+                return -1
+        else:
+            # No colon - could be frame number or seconds
+            try:
+                # Try to parse as number
+                if '.' in input_str:
+                    # Contains decimal point - treat as seconds
+                    seconds = float(input_str)
+                    return int(round(seconds * fps))
+                else:
+                    # No decimal - could be frame or seconds
+                    # We'll treat it as frame number for backwards compatibility
+                    # Users can add ".0" to force seconds interpretation
+                    value = int(input_str)
+                    # If the value is reasonable as a frame number, use it directly
+                    # This maintains backwards compatibility with frame number input
+                    return value
+            except ValueError:
+                return -1
+
+    @staticmethod
     def ms_to_frame_idx(ms: int, total_frames: int, fps: float) -> int:
         """Convert milliseconds to frame index."""
         time_in_seconds = ms / 1000

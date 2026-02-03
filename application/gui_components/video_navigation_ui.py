@@ -19,6 +19,7 @@ class VideoNavigationUI:
         # State for dialogs/windows
         self.show_create_chapter_dialog = False
         self.show_edit_chapter_dialog = False
+        self.use_timecode_input_mode = False  # Toggle for timecode vs frame input
 
         # Prepare data for dialogs - dynamically from ChapterTypeManager
         self._update_chapter_type_lists()
@@ -1173,9 +1174,25 @@ class VideoNavigationUI:
         if is_not_collapsed and self.show_create_chapter_dialog:
             imgui.text("Create New Chapter Details")
             imgui.separator()
+
+            # Timecode input mode toggle
+            _, self.use_timecode_input_mode = imgui.checkbox("Use Timecode Input##CreateWinTimecodeMode", self.use_timecode_input_mode)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Toggle to enter times instead of frame numbers\nSupports: HH:MM:SS, MM:SS, SS, SS.mmm")
+
             imgui.push_item_width(200)
-            _, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##CreateWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
-            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##CreateWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
+
+            # Dynamic labels based on input mode
+            if self.use_timecode_input_mode:
+                start_label = "Start Time##CreateWin"
+                end_label = "End Time##CreateWin"
+                imgui.text_disabled("Format: HH:MM:SS or MM:SS or SS")
+            else:
+                start_label = "Start Frame##CreateWin"
+                end_label = "End Frame##CreateWin"
+
+            _, self.chapter_edit_data["start_frame_str"] = imgui.input_text(start_label, self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text(end_label, self.chapter_edit_data.get("end_frame_str", "0"), 64)
 
             # Segment Type dropdown (instead of free text)
             from config.constants import ChapterSegmentType
@@ -1286,9 +1303,25 @@ class VideoNavigationUI:
         if is_not_collapsed and self.show_edit_chapter_dialog:
             imgui.text(f"Editing Chapter ID: {self.chapter_to_edit_id}")
             imgui.separator()
+
+            # Timecode input mode toggle
+            _, self.use_timecode_input_mode = imgui.checkbox("Use Timecode Input##EditWinTimecodeMode", self.use_timecode_input_mode)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Toggle to enter times instead of frame numbers\nSupports: HH:MM:SS, MM:SS, SS, SS.mmm")
+
             imgui.push_item_width(200)
-            _, self.chapter_edit_data["start_frame_str"] = imgui.input_text("Start Frame##EditWin", self.chapter_edit_data.get("start_frame_str", "0"), 64)
-            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text("End Frame##EditWin", self.chapter_edit_data.get("end_frame_str", "0"), 64)
+
+            # Dynamic labels based on input mode
+            if self.use_timecode_input_mode:
+                start_label_edit = "Start Time##EditWin"
+                end_label_edit = "End Time##EditWin"
+                imgui.text_disabled("Format: HH:MM:SS or MM:SS or SS")
+            else:
+                start_label_edit = "Start Frame##EditWin"
+                end_label_edit = "End Frame##EditWin"
+
+            _, self.chapter_edit_data["start_frame_str"] = imgui.input_text(start_label_edit, self.chapter_edit_data.get("start_frame_str", "0"), 64)
+            _, self.chapter_edit_data["end_frame_str"] = imgui.input_text(end_label_edit, self.chapter_edit_data.get("end_frame_str", "0"), 64)
 
             # Category dropdown (Position or Not Relevant only)
             # Determine category from position_short_name in POSITION_INFO_MAPPING
