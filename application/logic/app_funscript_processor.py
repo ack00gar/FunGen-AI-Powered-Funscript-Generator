@@ -456,8 +456,25 @@ class AppFunscriptProcessor:
         self.logger.info(f"Attempting to create new chapter with data: {data}")
         new_chapter = None  # Initialize
         try:
-            start_frame = int(data.get("start_frame_str", "0"))
-            end_frame = int(data.get("end_frame_str", "0"))
+            from application.utils.video_segment import VideoSegment
+
+            # Use flexible parser to support both frame numbers and timecodes
+            fps = self.video_fps if hasattr(self, 'video_fps') and self.video_fps else 30.0
+            start_input = data.get("start_frame_str", "0")
+            end_input = data.get("end_frame_str", "0")
+
+            start_frame = VideoSegment.parse_time_input_to_frames(start_input, fps)
+            end_frame = VideoSegment.parse_time_input_to_frames(end_input, fps)
+
+            # Check for parsing errors
+            if start_frame < 0:
+                self.logger.error(f"Invalid start time/frame input: '{start_input}'",
+                                extra={'status_message': True, 'duration': 4.0})
+                return None if return_chapter_object else None
+            if end_frame < 0:
+                self.logger.error(f"Invalid end time/frame input: '{end_input}'",
+                                extra={'status_message': True, 'duration': 4.0})
+                return None if return_chapter_object else None
 
             if start_frame < 0 or end_frame < start_frame:
                 self.logger.error(f"Invalid frame range for new chapter: Start={start_frame}, End={end_frame}")
@@ -537,8 +554,25 @@ class AppFunscriptProcessor:
             return
 
         try:
-            start_frame = int(new_data.get("start_frame_str", str(chapter_to_update.start_frame_id)))
-            end_frame = int(new_data.get("end_frame_str", str(chapter_to_update.end_frame_id)))
+            from application.utils.video_segment import VideoSegment
+
+            # Use flexible parser to support both frame numbers and timecodes
+            fps = self.video_fps if hasattr(self, 'video_fps') and self.video_fps else 30.0
+            start_input = new_data.get("start_frame_str", str(chapter_to_update.start_frame_id))
+            end_input = new_data.get("end_frame_str", str(chapter_to_update.end_frame_id))
+
+            start_frame = VideoSegment.parse_time_input_to_frames(start_input, fps)
+            end_frame = VideoSegment.parse_time_input_to_frames(end_input, fps)
+
+            # Check for parsing errors
+            if start_frame < 0:
+                self.logger.error(f"Invalid start time/frame input: '{start_input}'",
+                                extra={'status_message': True, 'duration': 4.0})
+                return
+            if end_frame < 0:
+                self.logger.error(f"Invalid end time/frame input: '{end_input}'",
+                                extra={'status_message': True, 'duration': 4.0})
+                return
 
             if start_frame < 0 or end_frame < start_frame:
                 self.logger.error(f"Invalid frame range for chapter update: Start={start_frame}, End={end_frame}")
