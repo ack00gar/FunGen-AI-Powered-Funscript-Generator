@@ -1636,6 +1636,13 @@ class VideoNavigationUI:
         start_t_tt = segment.start_frame_id / fps_tt if fps_tt > 0 else 0
         end_t_tt = segment.end_frame_id / fps_tt if fps_tt > 0 else 0
         imgui.text(f"Time: {_format_time(self.app, start_t_tt)} - {_format_time(self.app, end_t_tt)}")
+
+        # Duration
+        duration_frames = segment.end_frame_id - segment.start_frame_id + 1
+        duration_s = duration_frames / fps_tt if fps_tt > 0 else 0
+        duration_timecode = _format_time(self.app, duration_s)
+        imgui.text(f"Duration: {duration_timecode} ({duration_frames} frames)")
+
         imgui.end_tooltip()
 
     def _render_chapter_plugin_menu(self, target_timeline: str):
@@ -2008,7 +2015,7 @@ class ChapterListWindow:
                            imgui.TABLE_RESIZABLE |
                            imgui.TABLE_SIZING_STRETCH_PROP)
 
-            if imgui.begin_table("ChapterListTable", 8, flags=table_flags):
+            if imgui.begin_table("ChapterListTable", 9, flags=table_flags):
                 imgui.table_setup_column("##Select", init_width_or_weight=0.15)
                 imgui.table_setup_column("#", init_width_or_weight=0.15)
                 imgui.table_setup_column("Preview", init_width_or_weight=0.8)
@@ -2016,6 +2023,7 @@ class ChapterListWindow:
                 imgui.table_setup_column("Position", init_width_or_weight=1.0)
                 imgui.table_setup_column("Start", init_width_or_weight=0.9)
                 imgui.table_setup_column("End", init_width_or_weight=0.9)
+                imgui.table_setup_column("Duration", init_width_or_weight=0.7)
                 imgui.table_setup_column("Actions", init_width_or_weight=0.6)
                 imgui.table_headers_row()
 
@@ -2084,6 +2092,13 @@ class ChapterListWindow:
                     imgui.table_next_column()
                     end_time_s = chapter.end_frame_id / fps
                     imgui.text(f"{_format_time(self.app, end_time_s)} ({chapter.end_frame_id})")
+
+                    # Duration
+                    imgui.table_next_column()
+                    duration_frames = chapter.end_frame_id - chapter.start_frame_id + 1
+                    duration_s = duration_frames / fps
+                    duration_str = f"{_format_time(self.app, duration_s)} ({duration_frames})"
+                    imgui.text(duration_str)
 
                     # Actions
                     imgui.table_next_column()
