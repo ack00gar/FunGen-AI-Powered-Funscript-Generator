@@ -202,8 +202,9 @@ if "%INSTALL_DIR:~-1%"=="\" (
 )
 
 REM Fix git safe.directory issue for network shares
-echo   Configuring git for network share access...
-git config --global --add safe.directory "*" >nul 2>&1
+REM Scoped to FunGen directory only for security
+echo   Configuring git for FunGen directory access...
+git config --global --add safe.directory "%INSTALL_DIR_CLEAN%" >nul 2>&1
 
 REM Check if install.py exists in current directory
 if exist "%INSTALL_DIR%install.py" (
