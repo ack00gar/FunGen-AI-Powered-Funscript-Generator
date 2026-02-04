@@ -165,6 +165,7 @@ class AppSettings:
             "chapter_auto_save_standalone": False,  # Auto-save chapters to standalone JSON files
             "chapter_backup_on_regenerate": True,  # Create backup before overwriting chapter files
             "chapter_skip_if_exists": False,  # Skip chapter creation if standalone file exists
+            "overwrite_chapters_on_analysis": False,  # Allow analysis to overwrite existing chapters (default: preserve)
 
             # VR Streaming / Streamer
             "xbvr_host": "localhost",  # XBVR server host/IP
