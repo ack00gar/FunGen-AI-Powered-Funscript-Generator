@@ -2017,6 +2017,17 @@ class ControlPanelUI:
             imgui.pop_style_var()
             imgui.internal.pop_item_flag()
 
+        # Chapter overwrite setting (only show for offline analysis)
+        if self._is_offline_tracker(selected_mode) and not is_any_process_active:
+            imgui.spacing()
+            overwrite_setting = self.app.app_settings.get("overwrite_chapters_on_analysis", False)
+            clicked, new_value = imgui.checkbox("Overwrite chapters during analysis", overwrite_setting)
+            if clicked:
+                self.app.app_settings.set("overwrite_chapters_on_analysis", new_value)
+                self.app.settings_manager.save_settings()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("When checked, analysis will replace all existing chapters.\nWhen unchecked (default), existing chapters are preserved.")
+
     def _render_stage_progress_ui(self, stage_proc):
         is_analysis_running = stage_proc.full_analysis_active
         selected_mode = self.app.app_state_ui.selected_tracker_name

@@ -1973,31 +1973,36 @@ class AppStageProcessor:
                         primary_actions = funscript_obj.primary_actions
                         secondary_actions = funscript_obj.secondary_actions
                         
-                    #if should_update_chapters:
-                        self.logger.info("Updating chapters with Stage 2 analysis results.")
-                        fs_proc.video_chapters.clear()
-                        
+                        # Check if user allows chapter overwriting (default: preserve existing chapters)
+                        overwrite_chapters = self.app.app_settings.get("overwrite_chapters_on_analysis", False)
+
                         # Extract chapters from the funscript object instead of separate video_segments_data
                         if hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
                             fps = self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0
-                            # Clear existing chapters and add new ones from Stage 3 funscript
-                            fs_proc.video_chapters.clear()
-                            for chapter in funscript_obj.chapters:
-                                start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
-                                end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
-                                
-                                video_segment = VideoSegment(
-                                    start_frame_id=start_frame,
-                                    end_frame_id=end_frame,
-                                    class_id=None,
-                                    class_name=chapter.get('name', 'Unknown'),
-                                    segment_type="SexAct",
-                                    position_short_name=chapter.get('name', ''),
-                                    position_long_name=chapter.get('description', chapter.get('name', 'Unknown')),
-                                    source="stage3_funscript"
-                                )
-                                fs_proc.video_chapters.append(video_segment)
-                            self.logger.info(f"Updated {len(funscript_obj.chapters)} chapters from Stage 2 funscript")
+
+                            if overwrite_chapters:
+                                # User explicitly enabled overwriting - clear and replace all chapters
+                                self.logger.info("Overwriting chapters with Stage 2 analysis results (user setting enabled).")
+                                fs_proc.video_chapters.clear()
+                                for chapter in funscript_obj.chapters:
+                                    start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
+                                    end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
+
+                                    video_segment = VideoSegment(
+                                        start_frame_id=start_frame,
+                                        end_frame_id=end_frame,
+                                        class_id=None,
+                                        class_name=chapter.get('name', 'Unknown'),
+                                        segment_type="SexAct",
+                                        position_short_name=chapter.get('name', ''),
+                                        position_long_name=chapter.get('description', chapter.get('name', 'Unknown')),
+                                        source="stage2_funscript"
+                                    )
+                                    fs_proc.video_chapters.append(video_segment)
+                                self.logger.info(f"Overwrote with {len(funscript_obj.chapters)} chapters from Stage 2 funscript")
+                            else:
+                                # Preserve existing chapters (default behavior)
+                                self.logger.info(f"Preserving existing {len(fs_proc.video_chapters)} chapters (Stage 2 analysis results not applied to chapters).")
                     else:
                         # No funscript object available - initialize with empty actions
                         primary_actions = []
@@ -2095,27 +2100,36 @@ class AppStageProcessor:
                         primary_actions = funscript_obj.primary_actions
                         secondary_actions = funscript_obj.secondary_actions
                         
+                        # Check if user allows chapter overwriting (default: preserve existing chapters)
+                        overwrite_chapters = self.app.app_settings.get("overwrite_chapters_on_analysis", False)
+
                         # Update chapters from funscript if available
                         if hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
                             fps = self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0
-                            # Clear existing chapters and add new ones from Stage 3 funscript
-                            fs_proc.video_chapters.clear()
-                            for chapter in funscript_obj.chapters:
-                                start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
-                                end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
-                                
-                                video_segment = VideoSegment(
-                                    start_frame_id=start_frame,
-                                    end_frame_id=end_frame,
-                                    class_id=None,
-                                    class_name=chapter.get('name', 'Unknown'),
-                                    segment_type="SexAct",
-                                    position_short_name=chapter.get('name', ''),
-                                    position_long_name=chapter.get('description', chapter.get('name', 'Unknown')),
-                                    source="stage3_funscript"
-                                )
-                                fs_proc.video_chapters.append(video_segment)
-                            self.logger.info(f"Updated {len(funscript_obj.chapters)} chapters from Stage 3 funscript")
+
+                            if overwrite_chapters:
+                                # User explicitly enabled overwriting - clear and replace all chapters
+                                self.logger.info("Overwriting chapters with Stage 3 analysis results (user setting enabled).")
+                                fs_proc.video_chapters.clear()
+                                for chapter in funscript_obj.chapters:
+                                    start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
+                                    end_frame = int((chapter.get('end', 0) / 1000.0) * fps)
+
+                                    video_segment = VideoSegment(
+                                        start_frame_id=start_frame,
+                                        end_frame_id=end_frame,
+                                        class_id=None,
+                                        class_name=chapter.get('name', 'Unknown'),
+                                        segment_type="SexAct",
+                                        position_short_name=chapter.get('name', ''),
+                                        position_long_name=chapter.get('description', chapter.get('name', 'Unknown')),
+                                        source="stage3_funscript"
+                                    )
+                                    fs_proc.video_chapters.append(video_segment)
+                                self.logger.info(f"Overwrote with {len(funscript_obj.chapters)} chapters from Stage 3 funscript")
+                            else:
+                                # Preserve existing chapters (default behavior)
+                                self.logger.info(f"Preserving existing {len(fs_proc.video_chapters)} chapters (Stage 3 analysis results not applied to chapters).")
                         
                         # Apply actions to timeline (Stage 3 typically writes to primary timeline)
                         axis_mode = self.app.tracking_axis_mode
