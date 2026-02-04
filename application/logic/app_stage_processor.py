@@ -1980,9 +1980,13 @@ class AppStageProcessor:
                         if hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
                             fps = self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0
 
-                            if overwrite_chapters:
-                                # User explicitly enabled overwriting - clear and replace all chapters
-                                self.logger.info("Overwriting chapters with Stage 2 analysis results (user setting enabled).")
+                            # Apply chapters if: user wants to overwrite OR no chapters exist yet (initial creation)
+                            if overwrite_chapters or len(fs_proc.video_chapters) == 0:
+                                if overwrite_chapters:
+                                    self.logger.info("Overwriting chapters with Stage 2 analysis results (user setting enabled).")
+                                else:
+                                    self.logger.info("Creating initial chapters from Stage 2 analysis results (no existing chapters).")
+
                                 fs_proc.video_chapters.clear()
                                 for chapter in funscript_obj.chapters:
                                     start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
@@ -1999,9 +2003,9 @@ class AppStageProcessor:
                                         source="stage2_funscript"
                                     )
                                     fs_proc.video_chapters.append(video_segment)
-                                self.logger.info(f"Overwrote with {len(funscript_obj.chapters)} chapters from Stage 2 funscript")
+                                self.logger.info(f"Applied {len(funscript_obj.chapters)} chapters from Stage 2 funscript")
                             else:
-                                # Preserve existing chapters (default behavior)
+                                # Preserve existing chapters (default behavior when chapters already exist)
                                 self.logger.info(f"Preserving existing {len(fs_proc.video_chapters)} chapters (Stage 2 analysis results not applied to chapters).")
                     else:
                         # No funscript object available - initialize with empty actions
@@ -2107,9 +2111,13 @@ class AppStageProcessor:
                         if hasattr(funscript_obj, 'chapters') and funscript_obj.chapters:
                             fps = self.app.processor.video_info.get('fps', 30.0) if self.app.processor and self.app.processor.video_info else 30.0
 
-                            if overwrite_chapters:
-                                # User explicitly enabled overwriting - clear and replace all chapters
-                                self.logger.info("Overwriting chapters with Stage 3 analysis results (user setting enabled).")
+                            # Apply chapters if: user wants to overwrite OR no chapters exist yet (initial creation)
+                            if overwrite_chapters or len(fs_proc.video_chapters) == 0:
+                                if overwrite_chapters:
+                                    self.logger.info("Overwriting chapters with Stage 3 analysis results (user setting enabled).")
+                                else:
+                                    self.logger.info("Creating initial chapters from Stage 3 analysis results (no existing chapters).")
+
                                 fs_proc.video_chapters.clear()
                                 for chapter in funscript_obj.chapters:
                                     start_frame = int((chapter.get('start', 0) / 1000.0) * fps)
@@ -2126,9 +2134,9 @@ class AppStageProcessor:
                                         source="stage3_funscript"
                                     )
                                     fs_proc.video_chapters.append(video_segment)
-                                self.logger.info(f"Overwrote with {len(funscript_obj.chapters)} chapters from Stage 3 funscript")
+                                self.logger.info(f"Applied {len(funscript_obj.chapters)} chapters from Stage 3 funscript")
                             else:
-                                # Preserve existing chapters (default behavior)
+                                # Preserve existing chapters (default behavior when chapters already exist)
                                 self.logger.info(f"Preserving existing {len(fs_proc.video_chapters)} chapters (Stage 3 analysis results not applied to chapters).")
                         
                         # Apply actions to timeline (Stage 3 typically writes to primary timeline)
