@@ -2435,7 +2435,6 @@ class VideoProcessor:
             self.logger.info(f"_processing_loop ending. is_processing: {self.is_processing}, stop_event: {self.stop_event.is_set()}")
             self._terminate_ffmpeg_processes()
             self.is_processing = False
-            self.pause_event.set()
             self.last_processed_chapter_id = None
 
     def _start_ffmpeg_for_segment_streaming(self, start_frame_abs_idx: int, num_frames_to_stream_hint: Optional[int] = None) -> bool:
