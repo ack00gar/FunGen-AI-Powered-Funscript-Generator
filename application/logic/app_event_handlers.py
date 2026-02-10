@@ -97,6 +97,12 @@ class AppEventHandlers:
 
         elif self.app.processor and self.app.processor.is_processing:
             self.app.processor.stop_processing()
+        elif self.app.tracker and self.app.tracker.tracking_active:
+            # Handle case where tracker is active but processor is not (edge case/stuck state)
+            self.logger.info("Stopping active tracker...")
+            self.app.tracker.stop_tracking()
+            if self.app.processor:
+                self.app.processor.enable_tracker_processing = False
         elif self.app.is_setting_user_roi_mode:  # Abort ROI selection
             self.app.exit_set_user_roi_mode()
             self.logger.info("User ROI selection aborted.", extra={'status_message': True})
