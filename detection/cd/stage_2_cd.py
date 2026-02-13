@@ -50,8 +50,8 @@ def _get_dis_flow_ultrafast():
         try:
             if hasattr(flow, 'setFinestScale'):
                 flow.setFinestScale(5)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Could not set DIS finest scale: {e}")
         _GLOBAL_DIS_FLOW_ULTRAFAST = flow
     return _GLOBAL_DIS_FLOW_ULTRAFAST
 
@@ -1032,13 +1032,16 @@ def pass_1_interpolate_boxes(app, frames: List, video_info: Dict, logger: Option
         logger.debug(f"Stage 2 Pass 1: Interpolated {total_interpolated} boxes.")
 
 
-def smooth_single_track_worker_numpy(track_data_tuple: Tuple[np.ndarray, int]) -> Optional[np.ndarray]:
+def smooth_single_track_worker_numpy(track_data_tuple: Tuple[np.ndarray, int, float]) -> Optional[np.ndarray]:
     """
     Enhanced NumPy-native worker with improved temporal size smoothing.
     It receives a NumPy array for a track, smoothes it with RTS and temporal size smoothing,
     and returns the smoothed data along with the original track ID.
+
+    Args:
+        track_data_tuple: (track_array, track_id, fps)
     """
-    track_array, track_id = track_data_tuple
+    track_array, track_id, fps = track_data_tuple
 
     try:
         # Run the high-performance RTS smoother using the new class
@@ -1048,13 +1051,14 @@ def smooth_single_track_worker_numpy(track_data_tuple: Tuple[np.ndarray, int]) -
         # Apply enhanced temporal size smoothing with frame-rate adaptation
         frame_ids = track_array[:, 0]
         final_coords = smoother.apply_temporal_size_smoothing(
-            smoothed_coords, frame_ids, fps=30.0  # TODO: Get FPS from state
+            smoothed_coords, frame_ids, fps=fps
         )
 
         # Return the final smoothed cx, cy, w, h and the track_id to map it back
         return final_coords, track_id
-    except Exception:
-        # If smoothing fails for any reason, return None
+    except Exception as e:
+        # If smoothing fails for any reason, log and return None
+        logging.getLogger(__name__).debug(f"Track {track_id} smoothing failed: {e}")
         return None
 
 # numpy
@@ -1082,6 +1086,7 @@ def pass_1b_smooth_all_tracks(app, frames: List, video_info: Dict, logger: Optio
 
     master_array = np.array(box_list_for_np, dtype=np.float32)
     unique_track_ids = np.unique(master_array[:, 1])
+    fps = video_info.get('fps', 30.0)
 
     # --- 2. Prepare arguments for parallel workers ---
     worker_args = []
@@ -1090,7 +1095,7 @@ def pass_1b_smooth_all_tracks(app, frames: List, video_info: Dict, logger: Optio
         # Ensure track is sorted by frame ID
         track_array = track_array[track_array[:, 0].argsort()]
         if len(track_array) < 5: continue
-        worker_args.append((track_array, int(track_id)))
+        worker_args.append((track_array, int(track_id), fps))
 
     # --- 3. Execute in parallel ---
     num_workers = psutil.cpu_count(logical=False)
@@ -2540,7 +2545,8 @@ def perform_contact_analysis(
 
         try:
             segments_for_overlay = [seg.to_dict() for seg in segments]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to convert segments for overlay: {e}")
             segments_for_overlay = []
         overlay_data_with_segments = {"frames": frame_data, "segments": segments_for_overlay, "metadata": {"schema": "v1.1"}}
 
