@@ -1036,6 +1036,12 @@ class ApplicationLogic:
                 
                 # --- OFFLINE MODES (Stage-based processing) ---
                 if selected_tracker.category == TrackerCategory.OFFLINE:
+                    # Set processing speed to MAX_SPEED for batch/CLI offline processing
+                    from config.constants import ProcessingSpeedMode
+                    original_speed_mode = self.app_state_ui.selected_processing_speed_mode
+                    self.app_state_ui.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
+                    self.logger.info("Set processing speed to MAX_SPEED for batch offline processing")
+
                     self.single_video_analysis_complete_event.clear()
                     self.save_and_reset_complete_event.clear()
                     self.stage_processor.start_full_analysis(processing_mode=selected_mode)
@@ -1063,6 +1069,10 @@ class ApplicationLogic:
                     self.logger.debug("Batch loop: Waiting for save/reset signal...")
                     self.save_and_reset_complete_event.wait(timeout=120)
                     self.logger.debug("Batch loop: Save/reset signal received. Proceeding.")
+
+                    # Restore original processing speed mode
+                    self.app_state_ui.selected_processing_speed_mode = original_speed_mode
+                    self.logger.info("Restored original processing speed mode")
 
                 # --- LIVE MODES (Real-time tracking) ---
                 elif selected_tracker.category == TrackerCategory.LIVE:
