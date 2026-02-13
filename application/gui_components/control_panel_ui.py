@@ -181,15 +181,6 @@ class ControlPanelUI:
         """Check if tracker is an offline tracker."""
         from config.tracker_discovery import TrackerCategory
         return self._is_tracker_category(tracker_name, TrackerCategory.OFFLINE)
-
-    def _is_specific_tracker(self, tracker_name: str, target_name: str) -> bool:
-        """Check if tracker matches a specific name."""
-        return tracker_name == target_name
-
-    def _tracker_in_list(self, tracker_name: str, target_list: list) -> bool:
-        """Check if tracker is in a list of specific tracker names."""
-        return tracker_name in target_list
-
     def _is_stage2_tracker(self, tracker_name: str) -> bool:
         """Check if tracker is a 2-stage offline tracker."""
         if not self.tracker_ui:
