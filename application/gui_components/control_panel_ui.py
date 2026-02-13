@@ -1,6 +1,7 @@
 import imgui
 import os
 import config
+from config.constants_colors import CurrentTheme
 from application.utils import get_icon_texture_manager, primary_button_style, destructive_button_style
 
 # Import dynamic tracker discovery
@@ -2049,13 +2050,13 @@ class ControlPanelUI:
             frame_q_size = stage_proc.stage1_frame_queue_size
             frame_q_max = self.constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
-            suggestion_message, bar_color = "", (0.2, 0.8, 0.2) # TODO: move to theme, green
+            suggestion_message, bar_color = "", CurrentTheme.GREEN[:3]
             if frame_q_fraction > 0.9:
-                bar_color, suggestion_message = (0.9, 0.3, 0.3), "Suggestion: Add consumer if resources allow" # TODO: move to theme, red
+                bar_color, suggestion_message = CurrentTheme.RED_LIGHT[:3], "Suggestion: Add consumer if resources allow"
             elif frame_q_fraction > 0.2:
-                bar_color, suggestion_message = (1.0, 0.5, 0.0), "Balanced" # TODO: move to theme, yellow
+                bar_color, suggestion_message = CurrentTheme.ORANGE[:3], "Balanced"
             else:
-                bar_color, suggestion_message = (0.2, 0.8, 0.2), "Suggestion: Lessen consumers or add producer" # TODO: move to theme, green
+                bar_color, suggestion_message = CurrentTheme.GREEN[:3], "Suggestion: Lessen consumers or add producer"
             imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *bar_color)
             imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
             imgui.pop_style_color()

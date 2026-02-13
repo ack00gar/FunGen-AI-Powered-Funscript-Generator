@@ -543,8 +543,8 @@ class MixedStageProcessor:
                         # Convert from (x1,y1,x2,y2) to (x,y,w,h) format
                         x1, y1, x2, y2 = [float(coord) for coord in box[:4]]
                         penis_box = (int(x1), int(y1), int(x2-x1), int(y2-y1))
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        logging.debug(f"Frame {frame_id}: Invalid penis box format: {box} - {e}")
             
             # Get contact boxes from detected contact objects
             for contact_obj in frame_obj.detected_contact_boxes:
@@ -563,7 +563,8 @@ class MixedStageProcessor:
                                 'class_name': class_name,
                                 'confidence': confidence
                             })
-                        except (ValueError, TypeError):
+                        except (ValueError, TypeError) as e:
+                            logging.debug(f"Frame {frame_id}: Invalid contact box format: {bbox} - {e}")
                             continue
             
             # Initialize ROI tracker if needed
@@ -754,23 +755,20 @@ def perform_mixed_stage_analysis(
         pose_model_path = common_app_config.get('yolo_pose_model_path')
         
         processor = MixedStageProcessor(tracker_model_path, pose_model_path)
-        
-        # Debug: Log segment information
-        logger.info(f"DEBUG: atr_segments_list has {len(atr_segments_list)} segments")
-        for i, segment in enumerate(atr_segments_list):
-            logger.info(f"DEBUG: Segment {i}: type={type(segment).__name__}, attributes={dir(segment) if hasattr(segment, '__dict__') else 'Not an object'}")
-            if hasattr(segment, 'start_frame_id'):
-                logger.info(f"DEBUG: Segment {i} frames: {segment.start_frame_id}-{segment.end_frame_id}")
-            if hasattr(segment, 'position_short_name'):
-                logger.info(f"DEBUG: Segment {i} position_short_name: {segment.position_short_name}")
-            if hasattr(segment, 'class_name'):
-                logger.info(f"DEBUG: Segment {i} class_name: {segment.class_name}")
-            if hasattr(segment, 'major_position'):
-                logger.info(f"DEBUG: Segment {i} major_position: {segment.major_position}")
-            if isinstance(segment, dict):
-                logger.info(f"DEBUG: Segment {i} dict keys: {list(segment.keys())}")
-                if 'class_name' in segment:
-                    logger.info(f"DEBUG: Segment {i} dict class_name: {segment['class_name']}")
+
+        # Debug: Log segment information (guarded to avoid expensive operations)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"atr_segments_list has {len(atr_segments_list)} segments")
+            for i, segment in enumerate(atr_segments_list[:5]):  # Limit to first 5 to avoid log spam
+                logger.debug(f"Segment {i}: type={type(segment).__name__}")
+                if hasattr(segment, 'start_frame_id'):
+                    logger.debug(f"Segment {i} frames: {segment.start_frame_id}-{segment.end_frame_id}")
+                if hasattr(segment, 'position_short_name'):
+                    logger.debug(f"Segment {i} position_short_name: {segment.position_short_name}")
+                if hasattr(segment, 'major_position'):
+                    logger.debug(f"Segment {i} major_position: {segment.major_position}")
+            if len(atr_segments_list) > 5:
+                logger.debug(f"... and {len(atr_segments_list) - 5} more segments")
         
         # Load frame objects from SQLite if not provided in memory (which is typical after Stage 2 memory optimization)
         import os
