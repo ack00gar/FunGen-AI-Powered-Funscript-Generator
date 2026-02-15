@@ -1013,6 +1013,10 @@ def perform_yolo_analysis(
             logger_p_thread.join()
 
         if stop_event_external.is_set():
+            # Clean up incomplete preprocessed video on abort to prevent reuse
+            if is_encoding_preprocessed_video and preprocessed_video_path_arg and os.path.exists(preprocessed_video_path_arg):
+                process_logger.warning(f"Abort detected - removing incomplete preprocessed video: {preprocessed_video_path_arg}")
+                _cleanup_incomplete_file(preprocessed_video_path_arg, process_logger)
             return None, 0.0
 
         final_max_fps = max_fps_container[0]
