@@ -277,15 +277,22 @@ class SmartModelPool:
                     raise
         else:
             # Standard models (.pt, .onnx, .engine)
+            # For TensorRT engines, check CUDA BEFORE loading to avoid crashes
+            if model_ext == 'engine':
+                target_device = self._get_target_device(model_path)
+                if target_device != 'cuda':
+                    raise RuntimeError(f"TensorRT .engine models require CUDA, but optimal device is {target_device}. "
+                                     f"Please use a .pt model instead or ensure CUDA is available.")
+                self.logger.info(f"Loading TensorRT engine (requires CUDA): {os.path.basename(model_path)}")
+
             model = YOLO(model_path, task=task)
-        
+
         # Device placement with multi-device support
         target_device = self._get_target_device(model_path)
-        
+
         if model_ext == 'engine':
-            # TensorRT engines are CUDA-specific and GPU-bound
-            if target_device != 'cuda':
-                raise RuntimeError(f"TensorRT .engine models require CUDA, but optimal device is {target_device}")
+            # TensorRT engine already validated above, just log
+            self.logger.debug(f"TensorRT engine loaded successfully: {model_path}")
             self.logger.debug(f"TensorRT engine loaded (CUDA-bound): {model_path}")
         elif target_device != 'cpu':
             # Move to optimal GPU device (cuda/mps/xpu)
