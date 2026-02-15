@@ -1689,14 +1689,31 @@ class AppStageProcessor:
             "oscillation_sensitivity": self.app_settings.get('oscillation_detector_sensitivity', 1.0)
         }
 
-        video_fps_s3 = 30.0
-        if self.app.processor and self.app.processor.video_info:
-            video_fps_s3 = self.app.processor.video_info.get('fps', 30.0)
-            if video_fps_s3 <= 0: video_fps_s3 = 30.0
+        # Get video FPS - critical for correct timestamp calculations (especially 60fps videos)
+        video_fps_s3 = 0.0
+        fps_source = "none"
+
+        # Priority 1: Direct processor.fps (most reliable, set when video is opened)
+        if self.app.processor and hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:
+            video_fps_s3 = self.app.processor.fps
+            fps_source = "processor.fps"
+        # Priority 2: processor.video_info
+        elif self.app.processor and self.app.processor.video_info:
+            video_fps_s3 = self.app.processor.video_info.get('fps', 0.0)
+            fps_source = "processor.video_info"
+        # Priority 3: project data (for loaded projects)
         elif self.app.project_manager.current_project_data and \
                 self.app.project_manager.current_project_data.get('video_info'):
-            video_fps_s3 = self.app.project_manager.current_project_data['video_info'].get('fps', 30.0)
-            if video_fps_s3 <= 0: video_fps_s3 = 30.0
+            video_fps_s3 = self.app.project_manager.current_project_data['video_info'].get('fps', 0.0)
+            fps_source = "project_data"
+
+        # Fallback with warning - 30fps assumption can cause 60fps videos to have halved duration!
+        if video_fps_s3 <= 0:
+            video_fps_s3 = 30.0
+            self.logger.warning(f"Video FPS not available (source: {fps_source}), using fallback 30.0 FPS. "
+                              "This may cause incorrect timestamps for 60fps videos!")
+        else:
+            self.logger.debug(f"Using video FPS: {video_fps_s3} (source: {fps_source})")
 
         common_app_config_s3 = {
             "yolo_det_model_path": self.app.yolo_det_model_path,  # Path to actual model file
