@@ -312,7 +312,52 @@ class FunGenUniversalInstaller:
             self.print_success(f"Disk space: {free_gb:.1f}GB available")
         except Exception as e:
             self.print_warning(f"Could not check disk space: {e}")
-        
+
+        # Check for spaces in paths (Windows-specific issue with conda)
+        if self.platform == "Windows" and ' ' in str(self.home):
+            self.print_warning("╔" + "="*68 + "╗")
+            self.print_warning("║  WARNING: Your user profile path contains spaces!                ║")
+            self.print_warning("║                                                                  ║")
+            truncated_path = str(self.home)[:62]
+            self.print_warning(f"║  Path: {truncated_path:<62}║")
+            self.print_warning("║                                                                  ║")
+            self.print_warning("║  Conda/Miniconda can have issues with spaces in paths.           ║")
+            self.print_warning("║  This may cause activation or package installation failures.     ║")
+            self.print_warning("╚" + "="*68 + "╝")
+
+            if not self.force:
+                print(f"\n{Colors.CYAN}Options:{Colors.ENDC}")
+                print("  1. Continue anyway (may work, but could have issues)")
+                print("  2. Specify alternative Miniconda install path (recommended)")
+                print("  3. Abort installation")
+
+                while True:
+                    response = input("\n  Enter choice [1/2/3]: ").strip()
+                    if response == '1':
+                        self.print_warning("Continuing with spaces in path - watch for issues")
+                        break
+                    elif response == '2':
+                        print(f"\n{Colors.CYAN}Enter alternative path for Miniconda (no spaces):{Colors.ENDC}")
+                        print("  Example: C:\\Miniconda3 or D:\\tools\\miniconda3")
+                        alt_path = input("  Path: ").strip().strip('"').strip("'")
+
+                        if ' ' in alt_path:
+                            self.print_error("Path still contains spaces! Please choose a path without spaces.")
+                            continue
+
+                        if alt_path:
+                            self.miniconda_path = Path(alt_path)
+                            self.print_success(f"Will use alternative Miniconda path: {self.miniconda_path}")
+                            break
+                        else:
+                            self.print_error("No path entered")
+                            continue
+                    elif response == '3':
+                        print("\n  Installation aborted.")
+                        return False
+                    else:
+                        print("  Invalid choice. Please enter 1, 2, or 3.")
+
         # Check if conda is available
         self.conda_available = (self.miniconda_path / "bin" / "conda").exists() or (self.miniconda_path / "Scripts" / "conda.exe").exists()
         if self.conda_available:
