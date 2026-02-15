@@ -67,6 +67,13 @@ def stage3_worker_proc(
     vp_app_proxy.logger = worker_logger.getChild("VideoProcessor")
     vp_app_proxy.hardware_acceleration_method = common_app_config.get("hardware_acceleration_method", "none")
     vp_app_proxy.available_ffmpeg_hwaccels = common_app_config.get("available_ffmpeg_hwaccels", [])
+
+    # Log the FPS being used for timestamp calculations (critical for 60fps videos)
+    worker_fps = common_app_config.get('video_fps', 30.0)
+    if worker_fps == 30.0:
+        worker_logger.warning(f"Using video FPS: {worker_fps} (may be default - check if video is actually 60fps)")
+    else:
+        worker_logger.info(f"Using video FPS: {worker_fps}")
     vp_app_proxy.file_manager = MockFileManager(preprocessed_video_path)
 
     # --- Use the preprocessed path if it exists and is valid for VideoProcessor initialization ---
