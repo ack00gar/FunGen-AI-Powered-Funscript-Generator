@@ -291,7 +291,18 @@ class FunGenUniversalInstaller:
         except Exception as e:
             self.print_error(f"Extraction failed: {e}")
             return False
-    
+
+    def safe_rmtree(self, path: Path) -> bool:
+        """Safely remove a directory tree with error handling."""
+        try:
+            if path.exists():
+                shutil.rmtree(path)
+                self.print_success(f"Removed directory: {path}")
+            return True
+        except Exception as e:
+            self.print_error(f"Failed to remove directory {path}: {e}")
+            return False
+
     def check_system_requirements(self) -> bool:
         """Check system requirements"""
         self.print_step("Checking system requirements")
