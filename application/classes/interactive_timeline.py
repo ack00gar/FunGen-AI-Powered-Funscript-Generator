@@ -1477,6 +1477,10 @@ class InteractiveFunscriptTimeline:
         should_sync = is_playing or (forced and not app_state.timeline_interaction_active)
 
         if should_sync:
+            # Guard against division by zero when fps not yet available (e.g., loading from Stash WebView)
+            if not processor.fps or processor.fps <= 0:
+                return
+
             # If seeking, we might want to wait, but if we sync, we sync to current reported frame
             current_ms = (processor.current_frame_index / processor.fps) * 1000.0
 
