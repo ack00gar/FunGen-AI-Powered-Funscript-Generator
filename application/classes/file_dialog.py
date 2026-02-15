@@ -329,10 +329,15 @@ class ImGuiFileDialog:
             is_selected = self.selected_file == d and self.is_folder_dialog
             if imgui.selectable(label, is_selected, flags=imgui.SELECTABLE_DONT_CLOSE_POPUPS | imgui.SELECTABLE_ALLOW_DOUBLE_CLICK):
                 if imgui.is_item_hovered() and imgui.is_mouse_clicked(0):
-                    self.selected_file = d
+                    # Only update selected_file for folder dialogs or open dialogs
+                    # Don't overwrite filename in save dialogs
+                    if self.is_folder_dialog or not self.is_save_dialog:
+                        self.selected_file = d
                 if imgui.is_item_hovered() and imgui.is_mouse_double_clicked(0):
                     self.current_dir = os.path.join(self.current_dir, d)
-                    self.selected_file = ""
+                    # Don't clear filename in save dialogs - user wants to keep their filename
+                    if not self.is_save_dialog:
+                        self.selected_file = ""
                     self.scroll_to_selected = True
                     self._invalidate_listing_cache()
             imgui.pop_id()
