@@ -331,9 +331,9 @@ class ControlPanelUI:
 
     def _update_artifacts_dir_path(self, path):
         app = self.app
-        if not path or path == app.pose_model_artifacts_dir_setting:
+        if not path or path == app.pose_model_artifacts_dir:
             return
-        app.pose_model_artifacts_dir_setting = path
+        app.pose_model_artifacts_dir = path
         app.app_settings.set("pose_model_artifacts_dir", path)
         app.project_manager.project_dirty = True
         app.logger.info("Pose Model Artifacts directory updated to: %s." % path)
