@@ -824,16 +824,8 @@ class FunGenUniversalInstaller:
             # Continue even if this fails - may already be accepted
 
         # Check if environment exists
-        print(f"  [DEBUG] Checking for existing environment '{CONFIG['env_name']}'...")
         ret, stdout, _ = self.run_command([str(conda_exe), "env", "list"], capture=True, check=False)
-
-        print(f"  [DEBUG] conda env list return code: {ret}")
-        print(f"  [DEBUG] conda env list output:\n{stdout}")
-    
         env_exists = CONFIG["env_name"] in stdout if ret == 0 else False
-    
-        print(f"  [DEBUG] Looking for: '{CONFIG['env_name']}'")
-        print(f"  [DEBUG] Environment exists: {env_exists}")
 
         if not env_exists:
             print(f"  Creating conda environment '{CONFIG['env_name']}'...")
