@@ -67,10 +67,13 @@ class AutotunerWindow:
 
                 imgui.separator()
 
+                # --- Get thread-safe snapshot of autotuner state ---
+                snapshot = self.app.get_autotuner_snapshot()
+
                 # --- Status & Progress ---
                 imgui.text("Status:")
                 imgui.same_line()
-                imgui.text_colored(self.app.autotuner_status_message, 0.2, 0.8, 1.0, 1.0) # TODO: move to theme, blue
+                imgui.text_colored(snapshot["status_message"], 0.2, 0.8, 1.0, 1.0) # TODO: move to theme, blue
 
                 if is_running:
                     stage_proc = self.app.stage_processor
@@ -91,11 +94,11 @@ class AutotunerWindow:
                     imgui.table_setup_column("Notes")
                     imgui.table_headers_row()
 
-                    sorted_results = sorted(self.app.autotuner_results.items(), key=lambda item: (item[0][2], item[0][0], item[0][1]))
+                    sorted_results = sorted(snapshot["results"].items(), key=lambda item: (item[0][2], item[0][0], item[0][1]))
 
                     for (p, c, accel), (fps, note) in sorted_results:
                         imgui.table_next_row()
-                        is_best = (p, c, accel) == self.app.autotuner_best_combination
+                        is_best = (p, c, accel) == snapshot["best_combination"]
 
                         # If this is the best row, push a new text color
                         if is_best:
@@ -122,9 +125,9 @@ class AutotunerWindow:
                 imgui.separator()
 
                 # --- Recommendation and Apply Button ---
-                if self.app.autotuner_best_combination:
-                    p_best, c_best, accel_best = self.app.autotuner_best_combination
-                    fps_best = self.app.autotuner_results.get((p_best, c_best, accel_best), (0.0, ""))[0]
+                if snapshot["best_combination"]:
+                    p_best, c_best, accel_best = snapshot["best_combination"]
+                    fps_best = snapshot["results"].get((p_best, c_best, accel_best), (0.0, ""))[0]
                     imgui.text(f"Recommendation: {p_best}P/{c_best}C with HW Accel '{accel_best}' ({fps_best:.2f} FPS)")
 
                     # Apply Recommended Settings button (PRIMARY - positive action)

@@ -859,9 +859,8 @@ class InteractiveFunscriptTimeline:
             curr_ms += step_ms
 
     def _draw_audio_waveform(self, dl, tf: TimelineTransformer):
-        if not self.app.app_state_ui.show_audio_waveform or self.app.audio_waveform_data is None: return
-        
-        data = self.app.audio_waveform_data
+        data = self.app.get_waveform_data()
+        if not self.app.app_state_ui.show_audio_waveform or data is None: return
         total_frames = self.app.processor.total_frames
         fps = self.app.processor.fps
         if total_frames <= 0 or fps <= 0: return
