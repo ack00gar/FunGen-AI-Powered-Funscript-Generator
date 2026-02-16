@@ -1392,6 +1392,9 @@ class FunGenUniversalInstaller:
         launcher_content = f'''@echo off
 {cd_command}
 {path_setup}
+REM Prevent pip/python from using user-site packages
+set PYTHONNOUSERSITE=1
+
 REM Disable Ultralytics telemetry for privacy
 set YOLO_TELEMETRY=False
 
@@ -1432,6 +1435,9 @@ python {CONFIG["main_script"]} %*
         launcher_content = f'''#!/bin/bash
 cd "$(dirname "$0")"
 {path_setup}
+# Prevent pip/python from using user-site packages
+export PYTHONNOUSERSITE=1
+
 # Disable Ultralytics telemetry for privacy
 export YOLO_TELEMETRY=False
 

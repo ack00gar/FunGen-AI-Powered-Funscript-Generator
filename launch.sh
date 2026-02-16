@@ -2,6 +2,9 @@
 cd "$(dirname "$0")"
 export PATH="/opt/homebrew/bin:$PATH"
 
+# Prevent pip/python from using user-site packages
+export PYTHONNOUSERSITE=1
+
 # Disable Ultralytics telemetry for privacy
 export YOLO_TELEMETRY=False
 
