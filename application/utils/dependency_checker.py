@@ -60,7 +60,7 @@ def _ensure_packages(packages, pip_args=None, *, non_interactive: bool = True, a
         return False
 
     logger.warning(f"The following required packages are missing: {', '.join(missing)}")
-    install_cmd = [sys.executable, "-m", "pip", "install"] + (pip_args or []) + missing
+    install_cmd = [sys.executable, "-m", "pip", "install", "--no-user"] + (pip_args or []) + missing
     try:
         if non_interactive and auto_install:
             if pip_args:
@@ -262,8 +262,8 @@ def check_and_install_dependencies(*, non_interactive: bool = True, auto_install
                 logger.info(f"torch-tensorrt for {cuda_version} already installed.")
             except PackageNotFoundError:
                 logger.warning(f"torch-tensorrt for {cuda_version} is missing.")
-                install_cmd = [sys.executable, "-m", "pip", "install", 
-                               "torch-tensorrt", "tensorrt", 
+                install_cmd = [sys.executable, "-m", "pip", "install", "--no-user",
+                               "torch-tensorrt", "tensorrt",
                                "--extra-index-url", nightly_index_url]
                 try:
                     if auto_install: # Only install if auto_install is True
