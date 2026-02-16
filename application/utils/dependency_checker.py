@@ -552,7 +552,7 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
                 try:
                     with open(failed_marker, 'w') as f:
                         f.write("Failed: Downloaded file was too small (CDN may be blocking)\n")
-                except:
+                except Exception:
                     pass
             else:
                 downloaded += 1
@@ -567,7 +567,7 @@ def check_and_download_ui_icons(*, auto_download: bool = True):
             try:
                 with open(failed_marker, 'w') as f:
                     f.write(f"Failed to download: {str(e)}\n")
-            except:
+            except Exception:
                 pass
 
     if downloaded > 0:

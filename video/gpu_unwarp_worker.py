@@ -992,7 +992,7 @@ class GPUUnwarpWorker:
             from Metal import MTLCreateSystemDefaultDevice
             device = MTLCreateSystemDefaultDevice()
             return device is not None
-        except:
+        except Exception:
             return False
 
     @staticmethod
@@ -1003,7 +1003,7 @@ class GPUUnwarpWorker:
             ctx = moderngl.create_standalone_context(require=330)
             ctx.release()
             return True
-        except:
+        except Exception:
             return False
 
 

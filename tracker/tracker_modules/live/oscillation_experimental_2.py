@@ -565,7 +565,7 @@ class OscillationExperimental2Tracker(BaseTracker):
                 height = getattr(self.app.processor, 'frame_height', 1080)
                 aspect_ratio = width / height if height > 0 else 1.0
                 return aspect_ratio > 2.0  # Wider than 2:1 suggests VR
-            except:
+            except Exception:
                 pass
         return False
     

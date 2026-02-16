@@ -642,7 +642,7 @@ class AutoUpdater:
                         capture_output=True, text=True,
                         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                     )
-                except:
+                except Exception:
                     pass  # Continue even if stash fails
                 
                 # Fetch and update current branch

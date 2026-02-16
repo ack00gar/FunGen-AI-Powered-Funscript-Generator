@@ -1684,7 +1684,7 @@ class VideoDisplayUI:
                             timestamp_ms = self.app.processor.get_current_frame_timestamp_ms()
                             if timestamp_ms > 0:
                                 current_time_ms = timestamp_ms
-                        except:
+                        except Exception:
                             pass
                     
                     # Calculate from frame and FPS if timestamp method didn't work

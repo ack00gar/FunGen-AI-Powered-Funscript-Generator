@@ -583,6 +583,9 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
         consumer_logger.info(
             f"[S1 Consumer-{consumer_idx}] Models loaded. Detection on '{constants.DEVICE}', Pose on '{pose_device}'.")
 
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 10
+
         while not stop_event_local.is_set():
             try:
                 item = queue_monitor_local.frame_queue_get(frame_queue, block=True, timeout=0.5)
@@ -626,11 +629,17 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                     "poses": poses
                 }
                 queue_monitor_local.result_queue_put(result_queue, (frame_id, result_payload))
+                consecutive_errors = 0  # Reset on success
 
             except Empty:
                 continue
             except Exception as e:
-                consumer_logger.error(f"[S1 Consumer-{consumer_idx}] Error processing frame: {e}", exc_info=True)
+                consecutive_errors += 1
+                consumer_logger.error(f"[S1 Consumer-{consumer_idx}] Error processing frame ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}", exc_info=True)
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    consumer_logger.critical(f"[S1 Consumer-{consumer_idx}] {MAX_CONSECUTIVE_ERRORS} consecutive errors, stopping pipeline.")
+                    stop_event_local.set()
+                    break
 
     except Exception as e:
         consumer_logger.critical(f"[S1 Consumer-{consumer_idx}] Critical setup error: {e}", exc_info=True)
