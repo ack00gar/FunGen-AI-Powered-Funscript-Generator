@@ -206,6 +206,7 @@ class ApplicationLogic:
         self.autotuner_best_combination: Optional[Tuple[int, int, str]] = None
         self.autotuner_best_fps: float = 0.0
         self.autotuner_forced_hwaccel: Optional[str] = None
+        self._autotuner_lock = threading.Lock()  # Protects autotuner_results, _best_combination, _best_fps, _status_message
 
         # --- Hardware Acceleration
         # Query ffmpeg for available hardware accelerations
@@ -350,6 +351,7 @@ class ApplicationLogic:
 
         # --- Audio waveform data ---
         self.audio_waveform_data = None
+        self._waveform_lock = threading.Lock()  # Protects audio_waveform_data
 
         self.app_state_ui.show_timeline_selection_popup = False
         self.app_state_ui.show_timeline_comparison_results_popup = False
@@ -593,13 +595,15 @@ class ApplicationLogic:
     def _run_autotuner_thread(self):
         """The actual logic for the autotuning process."""
         self.logger.info("Starting Stage 1 performance autotuner thread.")
-        self.autotuner_results = {}
-        self.autotuner_best_combination = None
-        self.autotuner_best_fps = 0.0
+        with self._autotuner_lock:
+            self.autotuner_results = {}
+            self.autotuner_best_combination = None
+            self.autotuner_best_fps = 0.0
 
         def run_single_test(p: int, c: int, accel: str) -> Optional[float]:
             """Helper to run one analysis and return its FPS."""
-            self.autotuner_status_message = f"Running test: {p}P / {c}C (HW Accel: {accel})..."
+            with self._autotuner_lock:
+                self.autotuner_status_message = f"Running test: {p}P / {c}C (HW Accel: {accel})..."
             self.logger.info(self.autotuner_status_message)
 
             completion_event = threading.Event()
@@ -642,19 +646,21 @@ class ApplicationLogic:
                 return None
 
         def get_perf(p, c, accel):
-            if (p, c, accel) in self.autotuner_results:
-                return self.autotuner_results[(p, c, accel)][0]
+            with self._autotuner_lock:
+                if (p, c, accel) in self.autotuner_results:
+                    return self.autotuner_results[(p, c, accel)][0]
 
             fps = run_single_test(p, c, accel)
-            if fps is None:
-                self.autotuner_results[(p, c, accel)] = (0.0, "Failed")
-                return 0.0
+            with self._autotuner_lock:
+                if fps is None:
+                    self.autotuner_results[(p, c, accel)] = (0.0, "Failed")
+                    return 0.0
 
-            self.autotuner_results[(p, c, accel)] = (fps, "")
+                self.autotuner_results[(p, c, accel)] = (fps, "")
 
-            if fps > self.autotuner_best_fps:
-                self.autotuner_best_fps = fps
-                self.autotuner_best_combination = (p, c, accel)
+                if fps > self.autotuner_best_fps:
+                    self.autotuner_best_fps = fps
+                    self.autotuner_best_combination = (p, c, accel)
             return fps
 
         def find_best_consumer_for_producer(p, accel, max_cores):
@@ -712,23 +718,41 @@ class ApplicationLogic:
                         raise InterruptedError("Autotuner aborted by user.")
                     find_best_consumer_for_producer(p, accel, max_cores)
 
-            if self.autotuner_best_combination:
-                p_final, c_final, accel_final = self.autotuner_best_combination
-                self.autotuner_status_message = f"Finished! Best: {p_final}P/{c_final}C, Accel: {accel_final} at {self.autotuner_best_fps:.2f} FPS"
-                self.logger.info(f"Autotuner finished. Best combination: {self.autotuner_best_combination} with {self.autotuner_best_fps:.2f} FPS.")
-            else:
-                self.autotuner_status_message = "Finished, but no successful runs were completed."
-                self.logger.warning("Autotuner finished without any successful test runs.")
+            with self._autotuner_lock:
+                if self.autotuner_best_combination:
+                    p_final, c_final, accel_final = self.autotuner_best_combination
+                    self.autotuner_status_message = f"Finished! Best: {p_final}P/{c_final}C, Accel: {accel_final} at {self.autotuner_best_fps:.2f} FPS"
+                    self.logger.info(f"Autotuner finished. Best combination: {self.autotuner_best_combination} with {self.autotuner_best_fps:.2f} FPS.")
+                else:
+                    self.autotuner_status_message = "Finished, but no successful runs were completed."
+                    self.logger.warning("Autotuner finished without any successful test runs.")
 
         except InterruptedError as e:
-            self.autotuner_status_message = "Aborted by user."
+            with self._autotuner_lock:
+                self.autotuner_status_message = "Aborted by user."
             self.logger.info(str(e))
         except Exception as e:
-            self.autotuner_status_message = f"An error occurred: {e}"
+            with self._autotuner_lock:
+                self.autotuner_status_message = f"An error occurred: {e}"
             self.logger.error(f"Autotuner thread failed: {e}", exc_info=True)
         finally:
             self.is_autotuning_active = False
             self.stage_processor.force_rerun_stage1 = False
+
+    def get_waveform_data(self):
+        """Thread-safe access to audio waveform data."""
+        with self._waveform_lock:
+            return self.audio_waveform_data
+
+    def get_autotuner_snapshot(self) -> Dict:
+        """Thread-safe snapshot of autotuner state for GUI rendering."""
+        with self._autotuner_lock:
+            return {
+                "status_message": self.autotuner_status_message,
+                "results": dict(self.autotuner_results),
+                "best_combination": self.autotuner_best_combination,
+                "best_fps": self.autotuner_best_fps,
+            }
 
     def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
         """
@@ -813,9 +837,10 @@ class ApplicationLogic:
             self.logger.info("Generating audio waveform...", extra={'status_message': True})
             waveform_data = self.processor.get_audio_waveform(num_samples=2000)
 
-            self.audio_waveform_data = waveform_data
+            with self._waveform_lock:
+                self.audio_waveform_data = waveform_data
 
-            if self.audio_waveform_data is not None:
+            if waveform_data is not None:
                 self.logger.info("Audio waveform generated successfully.", extra={'status_message': True})
                 self.app_state_ui.show_audio_waveform = True
             else:
@@ -826,7 +851,7 @@ class ApplicationLogic:
         thread.start()
 
     def toggle_waveform_visibility(self):
-        if not self.app_state_ui.show_audio_waveform and self.audio_waveform_data is None:
+        if not self.app_state_ui.show_audio_waveform and self.get_waveform_data() is None:
             self.generate_waveform()
         else:
             self.app_state_ui.show_audio_waveform = not self.app_state_ui.show_audio_waveform
@@ -1790,7 +1815,8 @@ class ApplicationLogic:
         self.funscript_processor.update_funscript_stats_for_timeline(2, "Project Reset")
 
         # Reset waveform data
-        self.audio_waveform_data = None
+        with self._waveform_lock:
+            self.audio_waveform_data = None
         self.app_state_ui.show_audio_waveform = False
 
         # Reset UI states to defaults (or app settings defaults)
