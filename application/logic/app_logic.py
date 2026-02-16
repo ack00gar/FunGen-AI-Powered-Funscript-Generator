@@ -1911,7 +1911,7 @@ class ApplicationLogic:
         elif self.processor and self.processor.tracker and self.processor.tracker.funscript and self.processor.tracker.funscript.primary_actions:
             try:
                 duration_s = self.processor.tracker.funscript.primary_actions[-1]['at'] / 1000.0
-            except:
+            except Exception:
                 duration_s = 0.0
         return duration_s, total_frames, fps_val
 

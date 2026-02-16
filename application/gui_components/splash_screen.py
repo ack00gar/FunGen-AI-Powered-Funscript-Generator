@@ -1700,7 +1700,7 @@ class StandaloneSplashWindow:
             for texture_id in self.prerendered_textures:
                 try:
                     gl.glDeleteTextures([texture_id])
-                except:
+                except Exception:
                     pass
             self.prerendered_textures = []
 
@@ -1708,7 +1708,7 @@ class StandaloneSplashWindow:
         if self.logo_texture is not None:
             try:
                 gl.glDeleteTextures([self.logo_texture])
-            except:
+            except Exception:
                 pass
             self.logo_texture = None
 
@@ -1716,14 +1716,14 @@ class StandaloneSplashWindow:
         for emoji_texture in self.emoji_textures.values():
             try:
                 gl.glDeleteTextures([emoji_texture])
-            except:
+            except Exception:
                 pass
         self.emoji_textures.clear()
 
         if self.impl:
             try:
                 self.impl.shutdown()
-            except:
+            except Exception:
                 pass
             self.impl = None
 
@@ -1732,13 +1732,13 @@ class StandaloneSplashWindow:
             ctx = imgui.get_current_context()
             if ctx is not None:
                 imgui.destroy_context(ctx)
-        except:
+        except Exception:
             pass
 
         if self.window:
             try:
                 glfw.destroy_window(self.window)
-            except:
+            except Exception:
                 pass
             self.window = None
 
@@ -1747,7 +1747,7 @@ class StandaloneSplashWindow:
         # These hints persist and will affect the main window!
         try:
             glfw.default_window_hints()
-        except:
+        except Exception:
             pass
 
         # Don't call glfw.terminate() here - let the main window re-init GLFW

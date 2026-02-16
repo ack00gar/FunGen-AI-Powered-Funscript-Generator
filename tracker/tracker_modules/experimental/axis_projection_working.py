@@ -616,7 +616,7 @@ class WorkingAxisProjectionTracker(BaseTracker):
             if self.tracking_active:
                 cv2.putText(vis, "TRACKING", (10, 100), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        except:
+        except Exception:
             pass  # Don't let visualization errors crash the tracker
         
         return vis

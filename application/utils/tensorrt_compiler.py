@@ -552,7 +552,7 @@ class TensorRTCompiler:
                                 self._add_output_line(f"[ERR] {line_str}")
                             else:
                                 self._add_output_line(f"[OUT] {line_str}")
-            except:
+            except Exception:
                 pass  # Continue if reading fails
             
             time.sleep(0.1)  # Check more frequently for output

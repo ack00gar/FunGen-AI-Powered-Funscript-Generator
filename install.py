@@ -74,7 +74,7 @@ class Colors:
             import ctypes
             kernel32 = ctypes.windll.kernel32
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
-        except:
+        except Exception:
             pass
     
     HEADER = '\033[95m'
