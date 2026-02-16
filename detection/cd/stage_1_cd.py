@@ -684,6 +684,8 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
                 results_dict[frame_id] = payload
                 written_count += 1
                 frames_since_last_instant_update += 1
+                if max_fps_container is not None:
+                    max_fps_container[1] = time.time()  # Update last progress time
                 if first_result_received_time is None:
                     first_result_received_time = time.time()
                     last_instant_fps_update_time = first_result_received_time
@@ -941,7 +943,7 @@ def perform_yolo_analysis(
     yolo_result_queue = Queue()
     producers_list, consumers_list = [], []
     logger_p_thread = None
-    max_fps_container = [0.0]
+    max_fps_container = [0.0, time.time()]  # [max_fps, last_progress_time]
 
     try:
         # --- PROCESS CREATION ---
@@ -982,7 +984,8 @@ def perform_yolo_analysis(
         producers_finished = False
         all_procs = producers_list + consumers_list
         loop_start_time = time.time()
-        ANALYSIS_TIMEOUT_SECONDS = 60  # 1 minute
+        ANALYSIS_TIMEOUT_SECONDS = 60  # 1 minute (autotune only)
+        STALL_TIMEOUT_SECONDS = 300  # 5 minutes with no progress = stalled
 
         while any(p.is_alive() for p in all_procs):
             # Conditionally check for timeout ONLY if it's an autotuner run
@@ -994,6 +997,18 @@ def perform_yolo_analysis(
                 if not stop_event_internal.is_set():
                     stop_event_internal.set()
                 break  # Exit the monitoring loop to trigger cleanup
+
+            # Stall detection: if no results have been written for STALL_TIMEOUT_SECONDS, abort
+            if not is_autotune_run_arg:
+                last_progress = max_fps_container[1]
+                if time.time() - last_progress > STALL_TIMEOUT_SECONDS:
+                    process_logger.critical(
+                        f"[S1 Lib] Pipeline stalled — no progress for {STALL_TIMEOUT_SECONDS} seconds. "
+                        "Workers may be deadlocked. Aborting."
+                    )
+                    if not stop_event_internal.is_set():
+                        stop_event_internal.set()
+                    break
 
             # If an abort is requested, break the loop immediately to trigger cleanup.
             if stop_event_internal.is_set():
