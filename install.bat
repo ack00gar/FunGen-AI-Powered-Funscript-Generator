@@ -43,6 +43,9 @@ if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" (
 
 pause
 
+REM Prevent pip from using user-site packages (avoids "Requirement already satisfied" false positives)
+set PYTHONNOUSERSITE=1
+
 REM Set variables
 set "TEMP_DIR=%TEMP%\FunGen_Install"
 set "INSTALL_DIR=%~dp0"
