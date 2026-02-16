@@ -3195,7 +3195,7 @@ class ControlPanelUI:
             version = getattr(device_control, '__version__', 'legacy')
             imgui.text_colored(f"Device Control Module Version: {version}", 0.5, 0.5, 0.5)
             imgui.spacing()
-        except:
+        except Exception:
             pass
 
         # SIMPLIFIED: Compact connection status (always visible)
@@ -5144,7 +5144,7 @@ class ControlPanelUI:
                     version = getattr(streamer, '__version__', 'legacy')
                     imgui.text_colored(f"Streamer Module Version: {version}", 0.5, 0.5, 0.5)
                     imgui.spacing()
-                except:
+                except Exception:
                     pass
 
                 # Description
@@ -5749,7 +5749,7 @@ class ControlPanelUI:
             import pyperclip
             pyperclip.copy(text)
             self.app.logger.info(f"Copied to clipboard: {text}")
-        except:
+        except Exception:
             # Fallback - just log
             self.app.logger.info(f"URL to copy: {text}")
 
@@ -5789,7 +5789,7 @@ class ControlPanelUI:
                             self.app.integration_manager.update_xbvr_client(test_ip, 9999)
 
                         found = True
-                except:
+                except Exception:
                     pass  # Connection failed, continue
 
             if not found:
@@ -5819,7 +5819,7 @@ class ControlPanelUI:
                     return ip
 
             return "localhost"
-        except:
+        except Exception:
             return "localhost"
 
     def _export_funscript_timeline(self, app, timeline_num):
