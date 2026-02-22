@@ -52,7 +52,18 @@ set "INSTALL_DIR=%~dp0"
 set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe"
 set "MINICONDA_INSTALLER=%TEMP_DIR%\Miniconda3-latest.exe"
 set "MINICONDA_PATH=%USERPROFILE%\miniconda3"
-set "CONDA_EXE=%MINICONDA_PATH%\Scripts\conda.exe"
+
+REM Miniconda silent install /D= cannot handle spaces in path.
+REM If USERPROFILE contains spaces (e.g. "C:\Users\John Doe"), fall back to C:\miniconda3
+echo "!MINICONDA_PATH!" | findstr /C:" " >nul 2>&1
+if !errorlevel! equ 0 (
+    echo [NOTE] User profile path contains spaces: %USERPROFILE%
+    echo        Miniconda cannot install to paths with spaces.
+    echo        Installing to C:\miniconda3 instead.
+    set "MINICONDA_PATH=C:\miniconda3"
+)
+
+set "CONDA_EXE=!MINICONDA_PATH!\Scripts\conda.exe"
 set "ENV_NAME=FunGen"
 
 REM Note: ARM64 Windows should use x86_64 version via emulation
