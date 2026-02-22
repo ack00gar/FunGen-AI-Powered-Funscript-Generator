@@ -3,8 +3,59 @@ import os
 import logging
 import subprocess
 import platform
-from typing import Optional
+from datetime import datetime
+from typing import Optional, List, Dict
 from config import constants
+
+
+# Settings keys to include in profiles (processing-related, not UI layout)
+PROFILE_KEYS = [
+    # Tracking
+    "live_tracker_confidence_threshold",
+    "live_tracker_roi_padding",
+    "live_tracker_roi_update_interval",
+    "live_tracker_roi_smoothing_factor",
+    "live_tracker_roi_persistence_frames",
+    "live_tracker_use_sparse_flow",
+    "live_tracker_dis_flow_preset",
+    "live_tracker_dis_finest_scale",
+    "live_tracker_sensitivity",
+    "live_tracker_base_amplification",
+    "live_tracker_class_amp_multipliers",
+    "live_tracker_flow_smoothing_window",
+    "funscript_output_delay_frames",
+    "discarded_tracking_classes",
+    "tracking_axis_mode",
+    "single_axis_output_target",
+    # Oscillation Detector
+    "oscillation_detector_grid_size",
+    "oscillation_detector_sensitivity",
+    "stage3_oscillation_detector_mode",
+    "oscillation_enable_decay",
+    "oscillation_hold_duration_ms",
+    "oscillation_decay_factor",
+    "oscillation_use_simple_amplification",
+    "live_oscillation_dynamic_amp_enabled",
+    "live_oscillation_amp_window_ms",
+    # Post-Processing
+    "enable_auto_post_processing",
+    "auto_post_proc_final_rdp_enabled",
+    "auto_post_proc_final_rdp_epsilon",
+    "auto_post_processing_amplification_config",
+    "auto_processing_use_chapter_profiles",
+    # Signal Enhancement
+    "enable_signal_enhancement",
+    "signal_enhancement_motion_threshold_low",
+    "signal_enhancement_motion_threshold_high",
+    "signal_enhancement_signal_change_threshold",
+    "signal_enhancement_strength",
+    # Performance
+    "num_producers_stage1",
+    "num_consumers_stage1",
+    "num_workers_stage2_of",
+    "hardware_acceleration_method",
+    "funscript_point_simplification_enabled",
+]
 
 
 class AppSettings:
@@ -323,3 +374,91 @@ class AppSettings:
             self.logger.info(f"Setting hardware acceleration to: {detected_method}")
             self.data["hardware_acceleration_method"] = detected_method
             self.save_settings()
+
+    # ------- Settings Profiles -------
+
+    def get_profiles_dir(self) -> str:
+        """Get the profiles directory path, creating it if needed."""
+        settings_dir = os.path.dirname(self.settings_file)
+        profiles_dir = os.path.join(settings_dir, "profiles")
+        os.makedirs(profiles_dir, exist_ok=True)
+        return profiles_dir
+
+    def save_profile(self, name: str, keys: Optional[List[str]] = None) -> bool:
+        """Save current processing settings as a named profile."""
+        if not name or not name.strip():
+            return False
+        name = name.strip()
+        profile_keys = keys or PROFILE_KEYS
+        settings = {k: self.data[k] for k in profile_keys if k in self.data}
+        profile_data = {
+            "profile_name": name,
+            "created_at": datetime.now().isoformat(),
+            "version": 1,
+            "settings": settings,
+        }
+        safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in name)
+        file_path = os.path.join(self.get_profiles_dir(), "%s.json" % safe_name)
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(profile_data, f, indent=4)
+            self.logger.info("Profile saved: %s" % name)
+            return True
+        except Exception as e:
+            self.logger.error("Failed to save profile '%s': %s" % (name, e))
+            return False
+
+    def load_profile(self, name: str) -> bool:
+        """Load a profile by name, updating matching settings keys."""
+        safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in name)
+        file_path = os.path.join(self.get_profiles_dir(), "%s.json" % safe_name)
+        try:
+            with open(file_path, 'r') as f:
+                profile_data = json.load(f)
+            settings = profile_data.get("settings", {})
+            for k, v in settings.items():
+                if k in PROFILE_KEYS:
+                    self.data[k] = v
+            self.save_settings()
+            self.logger.info("Profile loaded: %s (%d settings)" % (name, len(settings)))
+            return True
+        except Exception as e:
+            self.logger.error("Failed to load profile '%s': %s" % (name, e))
+            return False
+
+    def list_profiles(self) -> List[Dict]:
+        """List all saved profiles."""
+        profiles = []
+        profiles_dir = self.get_profiles_dir()
+        try:
+            for filename in sorted(os.listdir(profiles_dir)):
+                if not filename.endswith(".json"):
+                    continue
+                file_path = os.path.join(profiles_dir, filename)
+                try:
+                    with open(file_path, 'r') as f:
+                        data = json.load(f)
+                    profiles.append({
+                        "name": data.get("profile_name", filename[:-5]),
+                        "file": filename,
+                        "created_at": data.get("created_at", ""),
+                    })
+                except Exception:
+                    profiles.append({"name": filename[:-5], "file": filename, "created_at": ""})
+        except Exception as e:
+            self.logger.error("Failed to list profiles: %s" % e)
+        return profiles
+
+    def delete_profile(self, name: str) -> bool:
+        """Delete a profile by name."""
+        safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in name)
+        file_path = os.path.join(self.get_profiles_dir(), "%s.json" % safe_name)
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                self.logger.info("Profile deleted: %s" % name)
+                return True
+            return False
+        except Exception as e:
+            self.logger.error("Failed to delete profile '%s': %s" % (name, e))
+            return False

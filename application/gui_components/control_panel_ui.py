@@ -87,6 +87,16 @@ class ControlPanelUI:
         # Post-Processing tab state
         "_pp_timeline_choice",
         "_pp_scope_choice",
+        # Tier 2/3 Simple Mode state
+        "_auto_recommended_tracker",
+        "_auto_recommendation_reason",
+        "_simple_mode_post_processing_applied",
+        "_user_manually_picked_tracker",
+        # Settings profiles state
+        "_profile_name_input",
+        "_profile_list_cache",
+        "_profile_list_cache_time",
+        "_selected_profile_idx",
     )
 
     def __init__(self, app):
@@ -142,6 +152,18 @@ class ControlPanelUI:
         # Post-Processing tab state
         self._pp_timeline_choice = 0
         self._pp_scope_choice = 0
+
+        # Tier 2/3 Simple Mode state
+        self._auto_recommended_tracker = None
+        self._auto_recommendation_reason = None
+        self._simple_mode_post_processing_applied = False
+        self._user_manually_picked_tracker = False
+
+        # Settings profiles state
+        self._profile_name_input = ""
+        self._profile_list_cache = None
+        self._profile_list_cache_time = 0
+        self._selected_profile_idx = 0
 
     # ------- Helpers -------
     
@@ -466,50 +488,20 @@ class ControlPanelUI:
         # STEP 2: Choose Analysis Method
         self._section_header("Step 2: Choose What to Track", "Select analysis method for your video")
 
-        # Use dynamic tracker discovery (simplified for simple mode)
-        modes_display, modes_enum, discovered_trackers = self._get_tracker_lists_for_ui(simple_mode=True)
+        # Auto-recommend tracker based on video properties
+        if processor and processor.video_info and self.tracker_ui:
+            rec_name, rec_reason = self.tracker_ui.recommend_tracker(processor.video_info)
+            self._auto_recommended_tracker = rec_name
+            self._auto_recommendation_reason = rec_reason
+            # Auto-select on first video load if user hasn't manually picked
+            if not self._user_manually_picked_tracker:
+                if app_state.selected_tracker_name != rec_name:
+                    app_state.selected_tracker_name = rec_name
+                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
+                        app.app_settings.set("selected_tracker_name", rec_name)
 
-        # Add "(Recommended)" suffix to OFFLINE_3_STAGE in the display list
-        recommended_tracker = "OFFLINE_3_STAGE"
-        modes_display_with_rec = list(modes_display)
-        for i, name in enumerate(modes_enum):
-            if name == recommended_tracker:
-                modes_display_with_rec[i] = modes_display[i] + " (Recommended)"
-                break
-
-        try:
-            cur_idx = modes_enum.index(app_state.selected_tracker_name)
-        except ValueError:
-            # Default to OFFLINE_3_STAGE for Simple Mode (recommended for beginners)
-            if recommended_tracker in modes_enum:
-                cur_idx = modes_enum.index(recommended_tracker)
-                default_tracker = recommended_tracker
-            else:
-                cur_idx = 0
-                from config.constants import DEFAULT_TRACKER_NAME
-                default_tracker = modes_enum[cur_idx] if modes_enum else DEFAULT_TRACKER_NAME
-            app_state.selected_tracker_name = default_tracker
-
-        imgui.push_item_width(-1)
-        clicked, new_idx = imgui.combo("##SimpleTrackerMode", cur_idx, modes_display_with_rec)
-        imgui.pop_item_width()
-
-        if clicked and new_idx != cur_idx:
-            new_mode = modes_enum[new_idx]
-            if app_state.selected_tracker_name != new_mode:
-                if hasattr(app, 'logger') and app.logger:
-                    app.logger.info(f"UI(Simple): Tracker changed to {new_mode}")
-                if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
-                    app.clear_all_overlays_and_ui_drawings()
-            app_state.selected_tracker_name = new_mode
-            if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                app.app_settings.set("selected_tracker_name", new_mode)
-
-        # Show brief description based on selected tracker
-        if discovered_trackers and cur_idx < len(discovered_trackers):
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
-            imgui.text_wrapped(self._get_simple_tracker_description(discovered_trackers[cur_idx]))
-            imgui.pop_style_color()
+        # Render card-based tracker selection
+        self._render_simple_mode_tracker_selection()
 
         imgui.spacing()
         imgui.separator()
@@ -520,7 +512,14 @@ class ControlPanelUI:
 
         # Show progress or start button
         if stage_proc.full_analysis_active:
+            self._simple_mode_post_processing_applied = False  # Reset for new analysis
             self._render_simple_progress_display()
+
+            # Stop button
+            imgui.spacing()
+            with destructive_button_style():
+                if imgui.button("Stop Analysis", width=-1):
+                    app.event_handlers.handle_abort_process_click()
         else:
             acts = fs_proc.get_actions("primary")
             if acts:
@@ -531,6 +530,9 @@ class ControlPanelUI:
                     "Generated %d motion points" % len(acts)
                 )
                 imgui.spacing()
+
+                # Post-processing prompt
+                self._render_simple_mode_post_processing_prompt()
 
                 imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
                 imgui.text_wrapped("What's next?")
@@ -574,40 +576,310 @@ class ControlPanelUI:
             return info.description
         return "Analyzes motion in your video"
 
-    def _render_simple_progress_display(self):
-        """Render simplified progress display for Simple Mode (no technical details)."""
-        app = self.app
-        stage_proc = app.stage_processor
+    def _get_category_accent_color(self, category):
+        """Return RGBA accent color for a tracker category."""
+        if category == TrackerCategory.OFFLINE:
+            return (0.3, 0.5, 0.9, 1.0)   # Blue
+        elif category == TrackerCategory.LIVE:
+            return (0.3, 0.8, 0.4, 1.0)   # Green
+        elif category == TrackerCategory.LIVE_INTERVENTION:
+            return (0.9, 0.6, 0.2, 1.0)   # Orange
+        return (0.5, 0.5, 0.5, 1.0)       # Gray fallback
 
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
-        imgui.text("Processing...")
+    def _render_simple_mode_tracker_selection(self):
+        """Render card-based tracker selection for Simple Mode."""
+        app = self.app
+        app_state = app.app_state_ui
+        stage_proc = app.stage_processor
+        fs_proc = app.funscript_processor
+
+        modes_display, modes_enum, _ = self._get_tracker_lists_for_ui(simple_mode=True)
+        if not modes_enum:
+            imgui.text_disabled("No trackers available")
+            return
+
+        # Ensure selected tracker is valid
+        if app_state.selected_tracker_name not in modes_enum:
+            if self._auto_recommended_tracker and self._auto_recommended_tracker in modes_enum:
+                app_state.selected_tracker_name = self._auto_recommended_tracker
+            else:
+                from config.constants import DEFAULT_TRACKER_NAME
+                app_state.selected_tracker_name = modes_enum[0] if modes_enum else DEFAULT_TRACKER_NAME
+
+        # When analysis is running or results exist, only show the selected card
+        is_busy = stage_proc.full_analysis_active
+        has_results = bool(fs_proc.get_actions("primary"))
+        if is_busy or has_results:
+            from config.tracker_discovery import get_tracker_discovery
+            discovery = get_tracker_discovery()
+            info = discovery.get_tracker_info(app_state.selected_tracker_name)
+            if info:
+                is_rec = (self._auto_recommended_tracker == info.internal_name)
+                self._render_tracker_card(info, True, is_rec)
+            return
+
+        # Group trackers: Offline first, then Live
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        offline_trackers = []
+        live_trackers = []
+        for internal_name in modes_enum:
+            info = discovery.get_tracker_info(internal_name)
+            if not info:
+                continue
+            if info.category == TrackerCategory.OFFLINE:
+                offline_trackers.append(info)
+            else:
+                live_trackers.append(info)
+
+        # Calculate scrollable region height (65px per card, max ~260px)
+        total_cards = len(offline_trackers) + len(live_trackers)
+        card_height = 65
+        region_height = min(total_cards * card_height + 40, 300)
+        imgui.begin_child("##TrackerCardRegion", width=0, height=region_height, border=False)
+
+        if offline_trackers:
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.6, 0.8, 1.0)
+            imgui.text("OFFLINE ANALYSIS")
+            imgui.pop_style_color()
+            imgui.spacing()
+            for info in offline_trackers:
+                is_selected = (app_state.selected_tracker_name == info.internal_name)
+                is_rec = (self._auto_recommended_tracker == info.internal_name)
+                if self._render_tracker_card(info, is_selected, is_rec):
+                    self._user_manually_picked_tracker = True
+                    if app_state.selected_tracker_name != info.internal_name:
+                        if hasattr(app, 'logger') and app.logger:
+                            app.logger.info(f"UI(Simple): Tracker changed to {info.internal_name}")
+                        if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
+                            app.clear_all_overlays_and_ui_drawings()
+                    app_state.selected_tracker_name = info.internal_name
+                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
+                        app.app_settings.set("selected_tracker_name", info.internal_name)
+
+        if live_trackers:
+            imgui.spacing()
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.7, 0.5, 1.0)
+            imgui.text("LIVE TRACKING")
+            imgui.pop_style_color()
+            imgui.spacing()
+            for info in live_trackers:
+                is_selected = (app_state.selected_tracker_name == info.internal_name)
+                is_rec = (self._auto_recommended_tracker == info.internal_name)
+                if self._render_tracker_card(info, is_selected, is_rec):
+                    self._user_manually_picked_tracker = True
+                    if app_state.selected_tracker_name != info.internal_name:
+                        if hasattr(app, 'logger') and app.logger:
+                            app.logger.info(f"UI(Simple): Tracker changed to {info.internal_name}")
+                        if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
+                            app.clear_all_overlays_and_ui_drawings()
+                    app_state.selected_tracker_name = info.internal_name
+                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
+                        app.app_settings.set("selected_tracker_name", info.internal_name)
+
+        imgui.end_child()
+
+    def _render_tracker_card(self, info, is_selected, is_recommended):
+        """Render a single tracker card. Returns True if clicked."""
+        card_height = 60
+        avail_w = imgui.get_content_region_available_width()
+        accent = self._get_category_accent_color(info.category)
+
+        # Background color for selected card
+        if is_selected:
+            imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.2, 0.3, 0.4, 0.6)
+        else:
+            imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.15, 0.15, 0.15, 0.4)
+
+        imgui.begin_child(
+            "##Card_%s" % info.internal_name,
+            width=avail_w, height=card_height,
+            border=True,
+        )
+
+        # Draw colored accent bar on the left
+        draw_list = imgui.get_window_draw_list()
+        pos = imgui.get_cursor_screen_position()
+        bar_width = 4
+        draw_list.add_rect_filled(
+            pos[0] - 4, pos[1] - 4,
+            pos[0] - 4 + bar_width, pos[1] + card_height - 8,
+            imgui.get_color_u32_rgba(*accent),
+        )
+
+        # Indent past the accent bar
+        imgui.indent(6)
+
+        # Category badge + display name on first line
+        badge_text = "[OFFLINE]" if info.category == TrackerCategory.OFFLINE else "[LIVE]"
+        imgui.push_style_color(imgui.COLOR_TEXT, *accent)
+        imgui.text(badge_text)
+        imgui.pop_style_color()
+        imgui.same_line()
+
+        # Display name (brighter when selected)
+        if is_selected:
+            imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 1.0, 1.0)
+        else:
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.85, 0.85, 0.85, 1.0)
+        imgui.text(info.display_name)
         imgui.pop_style_color()
 
-        # Get progress based on current stage
+        # Recommended badge
+        if is_recommended:
+            imgui.same_line()
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)
+            imgui.text("[Recommended]")
+            imgui.pop_style_color()
+
+        # Description (gray, second line)
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
+        imgui.text_wrapped(info.description if info.description else "")
+        imgui.pop_style_color()
+
+        imgui.unindent(6)
+
+        # Click detection
+        clicked = imgui.is_window_hovered() and imgui.is_mouse_clicked(0)
+
+        # Tooltip for recommended
+        if is_recommended and imgui.is_window_hovered() and self._auto_recommendation_reason:
+            imgui.set_tooltip("Recommended: %s" % self._auto_recommendation_reason)
+
+        imgui.end_child()
+        imgui.pop_style_color()  # CHILD_BACKGROUND
+
+        return clicked
+
+    def _render_simple_mode_post_processing_prompt(self):
+        """Render optional post-processing prompt after analysis completion."""
+        app = self.app
+        fs_proc = app.funscript_processor
+
+        imgui.spacing()
+        if self._simple_mode_post_processing_applied:
+            # Already applied - show status
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)
+            imgui.text("Results polished")
+            imgui.pop_style_color()
+        else:
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+            imgui.text_wrapped("Optional: Improve results with automatic smoothing and optimization")
+            imgui.pop_style_color()
+            imgui.spacing()
+            with primary_button_style():
+                if imgui.button("Polish Results", width=-1):
+                    # Temporarily enable auto post-processing, apply, then restore
+                    original_setting = app.app_settings.get("enable_auto_post_processing", False)
+                    app.app_settings.data["enable_auto_post_processing"] = True
+                    try:
+                        fs_proc.apply_automatic_post_processing()
+                        self._simple_mode_post_processing_applied = True
+                        app.logger.info("Simple Mode: Post-processing applied", extra={"status_message": True})
+                    except Exception as e:
+                        app.logger.error("Post-processing failed: %s" % e, extra={"status_message": True})
+                    finally:
+                        app.app_settings.data["enable_auto_post_processing"] = original_setting
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Applies smoothing, simplification, clamping, and amplitude\n"
+                    "optimization to improve the generated funscript quality."
+                )
+        imgui.spacing()
+
+    def _get_tracker_num_stages(self, tracker_name):
+        """Get the number of processing stages for a tracker."""
+        if not self.tracker_ui:
+            return 1
+        info = self.tracker_ui.discovery.get_tracker_info(tracker_name)
+        if info and info.properties:
+            n = info.properties.get("num_stages")
+            if n:
+                return n
+        if info and info.stages:
+            return len(info.stages)
+        return 1
+
+    def _get_friendly_stage_label(self, tracker_name, stage_number):
+        """Get a beginner-friendly label for a processing stage."""
+        if not self.tracker_ui:
+            return "Processing"
+        info = self.tracker_ui.discovery.get_tracker_info(tracker_name)
+        if info and info.stages:
+            for stage_def in info.stages:
+                if stage_def.stage_number == stage_number:
+                    name = stage_def.name.lower()
+                    if "detection" in name or "detect" in name:
+                        return "Scanning video"
+                    if "segmentation" in name or "contact" in name:
+                        return "Analyzing scenes"
+                    if "optical flow" in name or "funscript" in name or "motion" in name:
+                        return "Generating motion data"
+                    return stage_def.name
+        return "Processing"
+
+    def _render_simple_progress_display(self):
+        """Render consolidated progress display for Simple Mode."""
+        app = self.app
+        stage_proc = app.stage_processor
+        tracker_name = app.app_state_ui.selected_tracker_name
+
+        num_stages = self._get_tracker_num_stages(tracker_name)
         current_stage = stage_proc.current_analysis_stage
+
+        # Header
+        imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
+        imgui.text("Analyzing...")
+        imgui.pop_style_color()
+
+        # Get current stage progress, FPS, and ETA
         if current_stage == 1:
-            progress = stage_proc.stage1_progress_value
-            elapsed_str = stage_proc.stage1_time_elapsed_str
+            stage_progress = stage_proc.stage1_progress_value
+            fps_str = stage_proc.stage1_processing_fps_str
             eta_str = stage_proc.stage1_eta_str
         elif current_stage == 2:
-            progress = stage_proc.stage2_main_progress_value
-            elapsed_str = stage_proc.stage2_sub_time_elapsed_str or "00:00:00"
+            stage_progress = stage_proc.stage2_main_progress_value
+            fps_str = stage_proc.stage2_sub_processing_fps_str or ""
             eta_str = stage_proc.stage2_sub_eta_str or "N/A"
         elif current_stage == 3:
-            progress = stage_proc.stage3_overall_progress_value
-            elapsed_str = stage_proc.stage3_time_elapsed_str
+            stage_progress = stage_proc.stage3_overall_progress_value
+            fps_str = stage_proc.stage3_processing_fps_str
             eta_str = stage_proc.stage3_eta_str
         else:
-            progress = 0.0
-            elapsed_str = "00:00:00"
+            stage_progress = 0.0
+            fps_str = ""
             eta_str = "N/A"
 
-        # Simple progress bar (no technical details like Stage 1/2, FPS, etc.)
-        imgui.progress_bar(progress, (-1, 0))
+        # Friendly stage label + step counter
+        if num_stages > 1 and current_stage > 0:
+            label = self._get_friendly_stage_label(tracker_name, current_stage)
+            imgui.text("%s  (Step %d of %d)" % (label, current_stage, num_stages))
+        else:
+            imgui.text("Processing")
 
-        # Simple time estimate from ETA string
-        if progress > 0.01 and eta_str != "N/A":
-            imgui.text_wrapped(f"Estimated time remaining: {eta_str}")
+        # Compute overall progress: weight each stage equally
+        if num_stages > 1 and current_stage > 0:
+            completed_stages = max(0, current_stage - 1)
+            weight = 1.0 / num_stages
+            overall = completed_stages * weight + stage_progress * weight
+        else:
+            overall = stage_progress
+
+        overall = max(0.0, min(1.0, overall))
+
+        # Single progress bar with percentage overlay
+        imgui.progress_bar(overall, (-1, 0), "%.0f%%" % (overall * 100))
+
+        # FPS + ETA line
+        status_parts = []
+        if fps_str and fps_str != "0 FPS":
+            status_parts.append(fps_str)
+        if overall > 0.01 and eta_str and eta_str != "N/A":
+            status_parts.append("ETA: %s" % eta_str)
+        if status_parts:
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
+            imgui.text(" | ".join(status_parts))
+            imgui.pop_style_color()
 
         imgui.spacing()
 
@@ -839,7 +1111,7 @@ class ControlPanelUI:
         discovery = get_tracker_discovery()
         tracker_info = discovery.get_tracker_info(tmode)
         if tracker_info and 'oscillation' in tracker_info.display_name.lower():
-            if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+            if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector", flags=0)[0]:
                 self._render_oscillation_detector_settings()
 
         # Stage 3 specific settings (temporarily disabled - needs proper stage detection)
@@ -861,12 +1133,12 @@ class ControlPanelUI:
 
         if imgui.collapsing_header(
             "Interface & Performance##SettingsMenuPerfInterface",
-            flags=imgui.TREE_NODE_DEFAULT_OPEN,
+            flags=0,
         )[0]:
             self._render_settings_interface_perf()
 
         if imgui.collapsing_header(
-            "File & Output##SettingsMenuOutput", flags=imgui.TREE_NODE_DEFAULT_OPEN
+            "File & Output##SettingsMenuOutput", flags=0
         )[0]:
             self._render_settings_file_output()
 
@@ -1117,6 +1389,88 @@ class ControlPanelUI:
         except Exception as e:
             self.app.logger.error(f"Failed to apply plugin {plugin_name}: {e}", extra={"status_message": True})
 
+    def _render_settings_profiles_section(self):
+        """Render settings profiles UI in the Advanced tab."""
+        import time
+        app = self.app
+        settings = app.app_settings
+
+        if imgui.collapsing_header("Settings Profiles##AdvancedProfiles", flags=0)[0]:
+            # Cache profile list (refresh every 2 seconds)
+            now = time.time()
+            if self._profile_list_cache is None or (now - self._profile_list_cache_time) > 2.0:
+                self._profile_list_cache = settings.list_profiles()
+                self._profile_list_cache_time = now
+
+            profiles = self._profile_list_cache
+            profile_names = [p["name"] for p in profiles] if profiles else []
+
+            # Load / Delete existing profile
+            if profile_names:
+                imgui.text("Load Profile:")
+                imgui.push_item_width(imgui.get_content_region_available_width() - 140)
+                # Use a simple combo for profile selection
+                clicked, idx = imgui.combo("##ProfileCombo", self._selected_profile_idx, profile_names)
+                if clicked:
+                    self._selected_profile_idx = idx
+                imgui.pop_item_width()
+
+                imgui.same_line()
+                sel_idx = min(self._selected_profile_idx, len(profile_names) - 1) if profile_names else 0
+                sel_name = profile_names[sel_idx] if profile_names else ""
+                if imgui.button("Load##LoadProfile"):
+                    if sel_name and settings.load_profile(sel_name):
+                        app.logger.info("Profile loaded: %s" % sel_name, extra={"status_message": True})
+                        self._profile_list_cache = None  # Refresh cache
+                imgui.same_line()
+                with destructive_button_style():
+                    if imgui.button("Delete##DeleteProfile"):
+                        if sel_name:
+                            imgui.open_popup("Confirm Delete Profile##DeleteProfilePopup")
+
+                # Confirm delete popup
+                if imgui.begin_popup_modal("Confirm Delete Profile##DeleteProfilePopup", True, imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+                    imgui.text("Delete profile '%s'?" % sel_name)
+                    avail_w = imgui.get_content_region_available_width()
+                    pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
+                    with destructive_button_style():
+                        if imgui.button("Delete##ConfirmDeleteProfile", width=pw):
+                            if settings.delete_profile(sel_name):
+                                app.logger.info("Profile deleted: %s" % sel_name, extra={"status_message": True})
+                                self._profile_list_cache = None
+                                self._selected_profile_idx = 0
+                            imgui.close_current_popup()
+                    imgui.same_line()
+                    if imgui.button("Cancel##CancelDeleteProfile", width=pw):
+                        imgui.close_current_popup()
+                    imgui.end_popup()
+            else:
+                imgui.text_disabled("No saved profiles")
+
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
+
+            # Save new profile
+            imgui.text("Save Current Settings as Profile:")
+            imgui.push_item_width(imgui.get_content_region_available_width() - 70)
+            _, self._profile_name_input = imgui.input_text_with_hint(
+                "##ProfileNameInput",
+                "Profile name...",
+                self._profile_name_input,
+                128,
+            )
+            imgui.pop_item_width()
+            imgui.same_line()
+            if imgui.button("Save##SaveProfile"):
+                if self._profile_name_input.strip():
+                    if settings.save_profile(self._profile_name_input):
+                        app.logger.info("Profile saved: %s" % self._profile_name_input.strip(), extra={"status_message": True})
+                        self._profile_name_input = ""
+                        self._profile_list_cache = None  # Refresh cache
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Saves current processing settings as a reusable preset\n(tracking, post-processing, performance — not UI layout)")
+
     def _render_advanced_tab(self):
         """Render Advanced tab combining Configuration and Settings."""
         app = self.app
@@ -1124,6 +1478,10 @@ class ControlPanelUI:
         tmode = app_state.selected_tracker_name
 
         imgui.text("Advanced settings for AI models, tracking, and performance.")
+        imgui.spacing()
+
+        # Settings Profiles section
+        self._render_settings_profiles_section()
         imgui.spacing()
 
         # Search box for filtering settings

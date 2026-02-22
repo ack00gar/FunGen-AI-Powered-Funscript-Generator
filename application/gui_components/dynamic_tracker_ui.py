@@ -181,6 +181,32 @@ class DynamicTrackerUI:
         """Get the default tracker name."""
         from config.constants import DEFAULT_TRACKER_NAME
         return DEFAULT_TRACKER_NAME
+
+    def recommend_tracker(self, video_info: dict) -> Tuple[str, str]:
+        """Recommend a tracker based on video properties.
+
+        Returns (tracker_name, reason) tuple.
+        """
+        duration = video_info.get('duration', 0)
+        all_trackers = self.discovery.get_all_trackers()
+
+        # Very long videos (>90 min): prefer 2-stage for speed
+        if duration > 90 * 60:
+            if "OFFLINE_2_STAGE" in all_trackers:
+                return "OFFLINE_2_STAGE", "Fast processing for long videos"
+
+        # Short videos (<2 min): prefer mixed 3-stage for quality
+        if duration < 2 * 60 and duration > 0:
+            if "OFFLINE_3_STAGE_MIXED" in all_trackers:
+                return "OFFLINE_3_STAGE_MIXED", "Highest quality for short videos"
+
+        # Default: 3-stage balanced
+        if "OFFLINE_3_STAGE" in all_trackers:
+            return "OFFLINE_3_STAGE", "Best balance of quality and speed"
+
+        # Fallback to whatever is available
+        from config.constants import DEFAULT_TRACKER_NAME
+        return DEFAULT_TRACKER_NAME, "Default tracker"
     
     def generate_tooltip_for_tracker(self, tracker_name: str) -> str:
         """Generate tooltip text for a tracker."""
