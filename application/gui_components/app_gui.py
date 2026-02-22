@@ -1228,6 +1228,10 @@ class GUI:
         elif check_and_run_shortcut("reset_timeline_view", self._handle_reset_timeline_view_shortcut):
             pass
 
+        # Tracking Tools
+        elif check_and_run_shortcut("set_oscillation_area", self._handle_toggle_oscillation_area_mode):
+            pass
+
         # Chapters
         elif check_and_run_shortcut("set_chapter_start", self._handle_set_chapter_start_shortcut):
             pass
@@ -1714,6 +1718,25 @@ class GUI:
 
         self.app.logger.info("Timeline view reset to default", extra={'status_message': True})
         self.app.energy_saver.reset_activity_timer()
+
+    def _handle_toggle_oscillation_area_mode(self):
+        """Handle keyboard shortcut for toggling oscillation area drawing mode (X)"""
+        # Only available when an oscillation tracker is active
+        tracker = self.app.tracker
+        if not tracker:
+            return
+
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(self.app.app_state_ui.selected_tracker_name)
+        if not tracker_info or 'oscillation' not in tracker_info.display_name.lower():
+            self.app.logger.info("Oscillation area shortcut requires an oscillation tracker.", extra={'status_message': True})
+            return
+
+        if self.app.is_setting_oscillation_area_mode:
+            self.app.exit_set_oscillation_area_mode()
+        else:
+            self.app.enter_set_oscillation_area_mode()
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()

@@ -206,6 +206,9 @@ DEFAULT_SHORTCUTS = {
     # Chapter Creation (Video Editing Style - universal letters)
     "set_chapter_start": "I",        # In-point (start of chapter)
     "set_chapter_end": "O",          # Out-point (end of chapter)
+
+    # Tracking Tools
+    "set_oscillation_area": "X",     # Toggle oscillation area drawing mode
 }
 
 
