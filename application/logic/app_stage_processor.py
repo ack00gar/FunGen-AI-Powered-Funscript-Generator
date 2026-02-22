@@ -391,6 +391,10 @@ class AppStageProcessor:
             self.stage1_result_queue_size = 0
             self.stage1_final_elapsed_time_str = ""
             self.stage1_final_fps_str = ""
+            self.stage1_decode_ms = 0.0
+            self.stage1_unwarp_ms = 0.0
+            self.stage1_yolo_det_ms = 0.0
+            self.stage1_yolo_pose_ms = 0.0
             # self.app.file_manager.stage1_output_msgpack_path = None
         if "stage2" in stages:
             self.stage2_status_text = "Not run."
@@ -418,12 +422,14 @@ class AppStageProcessor:
 
 
 
-    def _stage1_progress_callback(self, current, total, message="Processing...", time_elapsed=0.0, avg_fps=0.0, instant_fps=0.0, eta_seconds=0.0):
+    def _stage1_progress_callback(self, current, total, message="Processing...", time_elapsed=0.0, avg_fps=0.0, instant_fps=0.0, eta_seconds=0.0, timing=None):
         progress = float(current) / total if total > 0 else -1.0
         progress_data = {
             "message": message, "current": current, "total": total,
             "time_elapsed": time_elapsed, "avg_fps": avg_fps, "instant_fps": instant_fps, "eta": eta_seconds
         }
+        if timing:
+            progress_data["timing"] = timing
         self.gui_event_queue.put(("stage1_progress_update", progress, progress_data))
         
         # Create checkpoint if needed
@@ -1910,6 +1916,12 @@ class AppStageProcessor:
                             self.stage1_eta_str = f"{int(eta // 3600):02d}:{int((eta % 3600) // 60):02d}:{int(eta % 60):02d}"
                         else:
                             self.stage1_eta_str = "Done"
+                        timing = prog_data.get("timing")
+                        if timing:
+                            self.stage1_decode_ms = timing.get('decode_ms', 0.0)
+                            self.stage1_unwarp_ms = timing.get('unwarp_ms', 0.0)
+                            self.stage1_yolo_det_ms = timing.get('yolo_det_ms', 0.0)
+                            self.stage1_yolo_pose_ms = timing.get('yolo_pose_ms', 0.0)
                 elif event_type == "stage1_status_update":
                     self.stage1_status_text = str(data1)
                     if data2 is not None: self.stage1_progress_label = str(data2)

@@ -474,7 +474,7 @@ def video_processor_producer_proc(
         producer_logger.info(
             f"[S1 VP Producer-{producer_idx}] Streaming segment: Video='{os.path.basename(vp_instance.video_path)}', StartFrameAbs={start_frame_abs_num}, NumFrames={num_frames_in_segment}, YOLOSize={vp_instance.yolo_input_size}")
 
-        for frame_id, frame in vp_instance.stream_frames_for_segment(start_frame_abs_num, num_frames_in_segment, stop_event=stop_event_local):
+        for frame_id, frame, producer_timing in vp_instance.stream_frames_for_segment(start_frame_abs_num, num_frames_in_segment, stop_event=stop_event_local):
             if stop_event_local.is_set():
                 producer_logger.info(
                     f"[S1 VP Producer-{producer_idx}] Stop event detected. Processed {frames_put_to_queue_this_producer} frames.")
@@ -485,7 +485,7 @@ def video_processor_producer_proc(
 
             try:
                 # Attempt to put the frame on the queue with a 0.5 second timeout
-                queue_monitor_local.frame_queue_put(frame_queue, (frame_id, np.copy(frame)), block=True, timeout=0.5)
+                queue_monitor_local.frame_queue_put(frame_queue, (frame_id, np.copy(frame), producer_timing), block=True, timeout=0.5)
             except Full:
                 # If the queue is full, check the stop event and continue the loop to check again.
                 if stop_event_local.is_set():
@@ -592,9 +592,11 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                 if item is None:
                     consumer_logger.info(f"[S1 Consumer-{consumer_idx}] Received sentinel. Exiting loop.")
                     break
-                frame_id, frame = item
+                frame_id, frame = item[0], item[1]
+                producer_timing = item[2] if len(item) > 2 else {}
 
                 # --- Step 1: Perform Detection (on every frame) ---
+                t_det_start = time.time()
                 det_results = det_model(frame, device=constants.DEVICE, verbose=False, imgsz=yolo_input_size_consumer,
                                         conf=confidence_threshold)
                 detections = []
@@ -608,11 +610,14 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                                 'class': int(box_data.cls[0]),
                                 'class_name': det_model.names[int(box_data.cls[0])]
                             })
+                yolo_det_ms = (time.time() - t_det_start) * 1000.0
 
                 # --- Step 2: Conditionally perform Pose Estimation ---
                 # Run roughly once per second; safe for low FPS values
                 poses = []  # Default to empty
+                yolo_pose_ms = 0.0
                 if frame_id % max(1, int(round(video_fps))) == 0:
+                    t_pose_start = time.time()
                     pose_results = pose_model(frame, device=pose_device, verbose=False, imgsz=yolo_input_size_consumer, conf=confidence_threshold)
                     for r in pose_results:
                         if r.keypoints and r.boxes:
@@ -621,12 +626,19 @@ def consumer_proc(frame_queue, result_queue, consumer_idx, yolo_det_model_path, 
                                     'bbox': r.boxes.xyxy[i].tolist(),
                                     'keypoints': r.keypoints.data[i].tolist()
                                 })
+                    yolo_pose_ms = (time.time() - t_pose_start) * 1000.0
 
                 # --- Step 3: Package results ---
                 # The 'poses' list will either have data or be empty.
                 result_payload = {
                     "detections": detections,
-                    "poses": poses
+                    "poses": poses,
+                    "timing": {
+                        'decode_ms': producer_timing.get('decode_ms', 0.0),
+                        'unwarp_ms': producer_timing.get('unwarp_ms', 0.0),
+                        'yolo_det_ms': yolo_det_ms,
+                        'yolo_pose_ms': yolo_pose_ms,
+                    }
                 }
                 queue_monitor_local.result_queue_put(result_queue, (frame_id, result_payload))
                 consecutive_errors = 0  # Reset on success
@@ -663,6 +675,10 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
     frames_since_last_instant_update = 0
     instant_fps = 0.0
     max_instant_fps = 0.0
+    # --- Per-stage timing averages (1-second rolling window) ---
+    timing_accum = {'decode_ms': 0.0, 'unwarp_ms': 0.0, 'yolo_det_ms': 0.0, 'yolo_pose_ms': 0.0}
+    timing_accum_count = 0
+    timing_avg = {'decode_ms': 0.0, 'unwarp_ms': 0.0, 'yolo_det_ms': 0.0, 'yolo_pose_ms': 0.0}
     parent_logger.info(f"[S1 Logger] Expecting {expected_frames} frames. Writing to {output_file_local}")
 
     if progress_callback_local:
@@ -684,6 +700,12 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
                 results_dict[frame_id] = payload
                 written_count += 1
                 frames_since_last_instant_update += 1
+                # Accumulate per-stage timing
+                frame_timing = payload.get("timing") if isinstance(payload, dict) else None
+                if frame_timing:
+                    for k in timing_accum:
+                        timing_accum[k] += frame_timing.get(k, 0.0)
+                    timing_accum_count += 1
                 if max_fps_container is not None:
                     max_fps_container[1] = time.time()  # Update last progress time
                 if first_result_received_time is None:
@@ -699,6 +721,12 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
                 max_instant_fps = max(max_instant_fps, instant_fps)
                 frames_since_last_instant_update = 0
                 last_instant_fps_update_time = current_time
+                # Update per-stage timing averages
+                if timing_accum_count > 0:
+                    for k in timing_avg:
+                        timing_avg[k] = timing_accum[k] / timing_accum_count
+                    timing_accum = {k: 0.0 for k in timing_accum}
+                    timing_accum_count = 0
 
             if progress_callback_local and (
                     current_time - last_progress_update_time > 0.2 or written_count == expected_frames):
@@ -723,7 +751,7 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
                         avg_fps = written_count / time_elapsed
 
                 eta = (expected_frames - written_count) / avg_fps if avg_fps > 0 else 0
-                progress_callback_local(written_count, expected_frames, "Detecting objects & poses...", time_elapsed, avg_fps, instant_fps, eta)
+                progress_callback_local(written_count, expected_frames, "Detecting objects & poses...", time_elapsed, avg_fps, instant_fps, eta, timing=timing_avg)
                 last_progress_update_time = current_time
         except Empty:
             continue
@@ -759,6 +787,11 @@ def logger_proc(frame_processing_queue, result_queue, output_file_local, expecte
         else:
             # If no, fill it with the last known poses from the cache
             frame_result["poses"] = last_known_poses
+
+    # Strip timing data before saving — it's only needed for live UI
+    for r in ordered_results:
+        if isinstance(r, dict):
+            r.pop("timing", None)
 
     try:
         with open(output_file_local, 'wb') as f:

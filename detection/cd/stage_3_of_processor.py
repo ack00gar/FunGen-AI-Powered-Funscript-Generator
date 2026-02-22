@@ -246,7 +246,7 @@ def stage3_worker_proc(
                 stop_event=stop_event
             )
 
-            for frame_id, frame_image in frame_stream:
+            for frame_id, frame_image, _timing in frame_stream:
                 if stop_event.is_set(): break
                 if frame_image is None: continue
 
