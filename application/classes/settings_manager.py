@@ -88,6 +88,7 @@ class AppSettings:
             # File Handling & Output
             "autosave_final_funscript_to_video_location": True,
             "generate_roll_file": True,
+            "export_raw_as_funscript": False,
             "batch_mode_overwrite_strategy": 0,  # 0=Process All, 1=Skip Existing
 
             # Performance & System
