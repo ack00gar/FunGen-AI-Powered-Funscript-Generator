@@ -2042,6 +2042,20 @@ class ControlPanelUI:
             imgui.progress_bar(stage_proc.stage1_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage1_progress_value * 100:.0f}% | {stage_proc.stage1_instant_fps_str}" if stage_proc.stage1_progress_value >= 0 else "")
             imgui.pop_style_color()
 
+            # Per-stage timing breakdown
+            decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
+            unwarp_ms = getattr(stage_proc, 'stage1_unwarp_ms', 0.0)
+            yolo_det_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
+            yolo_pose_ms = getattr(stage_proc, 'stage1_yolo_pose_ms', 0.0)
+            if decode_ms > 0 or yolo_det_ms > 0:
+                timing_parts = [f"Decode: {decode_ms:.1f}ms"]
+                if unwarp_ms > 0:
+                    timing_parts.append(f"Unwarp: {unwarp_ms:.1f}ms")
+                timing_parts.append(f"YOLO Det: {yolo_det_ms:.1f}ms")
+                if yolo_pose_ms > 0:
+                    timing_parts.append(f"Pose: {yolo_pose_ms:.1f}ms")
+                imgui.text(" | ".join(timing_parts))
+
             frame_q_size = stage_proc.stage1_frame_queue_size
             frame_q_max = self.constants.STAGE1_FRAME_QUEUE_MAXSIZE
             frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0

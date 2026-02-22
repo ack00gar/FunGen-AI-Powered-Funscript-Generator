@@ -2039,7 +2039,7 @@ def _recover_gap_worker(args: dict) -> Tuple[List[BoxRecord], int]:
         num_frames_in_gap = end_frame - start_frame + 1
         
         # Stream consecutive frames for the entire gap range
-        for actual_frame_id, current_frame_img in vp.stream_frames_for_segment(start_frame, num_frames_in_gap):
+        for actual_frame_id, current_frame_img, _timing in vp.stream_frames_for_segment(start_frame, num_frames_in_gap):
             frames_processed_in_worker += 1
             if current_frame_img is None: break
 

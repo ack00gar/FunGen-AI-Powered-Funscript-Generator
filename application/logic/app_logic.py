@@ -60,13 +60,23 @@ def _create_cli_progress_bar(percentage: float, width: int = 40) -> str:
     return f"|{bar}| {percentage * 100:6.2f}%"
 
 
-def cli_stage1_progress_callback(current, total, message, time_elapsed, avg_fps, instant_fps, eta_seconds):
+def cli_stage1_progress_callback(current, total, message, time_elapsed, avg_fps, instant_fps, eta_seconds, timing=None):
     if total <= 0: return
     progress = float(current) / total
     bar = _create_cli_progress_bar(progress)
     eta_str = f"{int(eta_seconds // 3600):02d}:{int((eta_seconds % 3600) // 60):02d}:{int(eta_seconds % 60):02d}" if eta_seconds > 0 else "..."
 
-    status_line = f"\rStage 1: {bar} | {int(avg_fps):>3} FPS | ETA: {eta_str}   "
+    timing_str = ""
+    if timing:
+        parts = [f"Dec:{timing.get('decode_ms', 0):.0f}ms"]
+        if timing.get('unwarp_ms', 0) > 0:
+            parts.append(f"Unw:{timing['unwarp_ms']:.0f}ms")
+        parts.append(f"Det:{timing.get('yolo_det_ms', 0):.0f}ms")
+        if timing.get('yolo_pose_ms', 0) > 0:
+            parts.append(f"Pose:{timing['yolo_pose_ms']:.0f}ms")
+        timing_str = f" | {' '.join(parts)}"
+
+    status_line = f"\rStage 1: {bar} | {int(avg_fps):>3} FPS | ETA: {eta_str}{timing_str}   "
     sys.stdout.write(status_line)
     sys.stdout.flush()
     if current == total:
