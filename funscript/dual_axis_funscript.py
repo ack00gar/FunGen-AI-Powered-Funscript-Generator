@@ -24,7 +24,7 @@ class DualAxisFunscript:
         self.primary_actions: List[Dict] = []
         self.secondary_actions: List[Dict] = []
         self.chapters: List[Dict] = []  # Funscript chapters/segments
-        self.min_interval_ms: int = 20
+        self.min_interval_ms: int = 10
         self.last_timestamp_primary: int = 0
         self.last_timestamp_secondary: int = 0
 
