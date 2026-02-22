@@ -147,39 +147,48 @@ class AppFileManager:
             self._save_funscript_file(secondary_path, secondary_actions, None)
 
     def save_raw_funscripts_next_to_video(self, video_path: str):
-        """Save raw funscripts next to the video file with .raw.funscript extension."""
+        """Save raw funscripts next to the video file.
+
+        Uses .raw.funscript extension by default, or .funscript if
+        the 'export_raw_as_funscript' setting is enabled.
+        """
         if not self.app.funscript_processor: return
         if not video_path: return
 
         primary_actions = self.app.funscript_processor.get_actions('primary')
         secondary_actions = self.app.funscript_processor.get_actions('secondary')
         chapters = self.app.funscript_processor.video_chapters
-        
+
         # Check if copy to video location is enabled
         save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
         if self.app.is_batch_processing_active:
             save_next_to_video = self.app.batch_copy_funscript_to_video_location
-        
+
         if not save_next_to_video:
             self.logger.info("Copy to video location is disabled. Raw funscripts saved only to output folder.")
             return
-        
-        self.logger.info("Saving raw funscripts next to video file with .raw.funscript extension...")
+
+        # Determine extension based on user preference
+        skip_raw_prefix = self.app.app_settings.get("export_raw_as_funscript", False)
+        primary_ext = ".funscript" if skip_raw_prefix else ".raw.funscript"
+        roll_ext = ".roll.funscript" if skip_raw_prefix else ".raw.roll.funscript"
+
+        self.logger.info(f"Saving raw funscripts next to video file with {primary_ext} extension...")
 
         if primary_actions:
             base, _ = os.path.splitext(video_path)
-            primary_path = f"{base}.raw.funscript"
+            primary_path = f"{base}{primary_ext}"
             self._save_funscript_file(primary_path, primary_actions, chapters)
             self.logger.info(f"Raw primary funscript saved: {os.path.basename(primary_path)}")
-        
+
         # Determine roll generation setting
         generate_roll = self.app.app_settings.get("generate_roll_file", True)
         if self.app.is_batch_processing_active:
             generate_roll = self.app.batch_generate_roll_file
-            
+
         if secondary_actions and generate_roll:
             base, _ = os.path.splitext(video_path)
-            secondary_path = f"{base}.raw.roll.funscript"
+            secondary_path = f"{base}{roll_ext}"
             self._save_funscript_file(secondary_path, secondary_actions, None)
             self.logger.info(f"Raw secondary funscript saved: {os.path.basename(secondary_path)}")
 

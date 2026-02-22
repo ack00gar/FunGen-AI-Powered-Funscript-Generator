@@ -1644,6 +1644,11 @@ class ControlPanelUI:
         if ch:
             settings.set("generate_roll_file", v)
 
+        ch, v = imgui.checkbox("Export as .funscript (skip .raw prefix)", settings.get("export_raw_as_funscript", False))
+        if ch:
+            settings.set("export_raw_as_funscript", v)
+        _tooltip_if_hovered("When no post-processing is applied, export directly as .funscript\ninstead of .raw.funscript next to the video file.")
+
         # Point simplification
         cur_simplify = settings.get("funscript_point_simplification_enabled", True)
         ch, nv_simplify = imgui.checkbox("On the fly funscript simplification##EnablePointSimplify", cur_simplify)
