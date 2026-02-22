@@ -128,7 +128,7 @@ class Stage3MixedTracker(BaseOfflineTracker):
         """Return metadata describing this tracker."""
         return TrackerMetadata(
             name="OFFLINE_3_STAGE_MIXED",
-            display_name="Mixed Processing (3-Stage)",
+            display_name="Offline - High Quality (3-Stage Mixed)",
             description="Hybrid approach: Stage 2 signals + selective live ROI tracking for BJ/HJ chapters",
             category="offline",
             version="1.0.0", 
