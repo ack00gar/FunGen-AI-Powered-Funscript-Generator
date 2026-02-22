@@ -2038,7 +2038,7 @@ class VideoProcessor:
             timestamp_ms = int(self.current_frame_index * (1000.0 / fps_for_timestamp))
             try:
                 if not self.is_processing:
-                    processed_frame_tuple = self.tracker.process_frame(raw_frame_to_process.copy(), timestamp_ms)
+                    processed_frame_tuple = self.tracker.process_frame(raw_frame_to_process.copy(), timestamp_ms, self.current_frame_index)
                     with self.frame_lock: self.current_frame = processed_frame_tuple[0]
             except Exception as e:
                 self.logger.error(f"Error processing frame with tracker in display_current_frame: {e}", exc_info=True)
@@ -2373,7 +2373,7 @@ class VideoProcessor:
 
                     try:
                         yolo_start = time.perf_counter()
-                        processed_frame_for_gui = self.tracker.process_frame(frame_np.copy(), timestamp_ms)[0]
+                        processed_frame_for_gui = self.tracker.process_frame(frame_np.copy(), timestamp_ms, self.current_frame_index)[0]
                         yolo_time = (time.perf_counter() - yolo_start) * 1000.0
                         self._yolo_samples.append(yolo_time)
                     except Exception as e:
