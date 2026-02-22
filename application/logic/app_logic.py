@@ -385,6 +385,16 @@ class ApplicationLogic:
         if self.app_settings.get("updater_check_on_startup", True):
             self.updater.check_for_updates_async()
 
+        # --- Auto-trigger first-run wizard if models are missing ---
+        if not self.is_cli_mode and self.app_settings.is_first_run:
+            models_missing = (
+                not self.yolo_det_model_path or not os.path.exists(self.yolo_det_model_path) or
+                not self.yolo_pose_model_path or not os.path.exists(self.yolo_pose_model_path)
+            )
+            if models_missing:
+                self.logger.info("First run detected with missing models - launching setup wizard")
+                self.trigger_first_run_setup()
+
         # --- Initialize tracker mode from persisted setting; default handled by AppStateUI ---
         if not self.is_cli_mode and self.tracker:
             # Use dynamic tracker discovery - selected_tracker_name is already the internal name

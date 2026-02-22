@@ -1033,39 +1033,66 @@ class GUI:
         imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
 
     def _render_first_run_setup_popup(self):
-        # Disabled automatic model downloading - now handled manually via AI menu
-        pass
-        # app = self.app
-        # if app.show_first_run_setup_popup:
-        #     imgui.open_popup("First-Time Setup")
-        #     main_viewport = imgui.get_main_viewport()
-        #     popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-        #                  main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-        #     imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
+        app = self.app
+        if not app.show_first_run_setup_popup:
+            return
 
-        #     # Make the popup non-closable by the user until setup is done or fails.
-        #     closable = "complete" in app.first_run_status_message or "failed" in app.first_run_status_message
-        #     popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE | (0 if not closable else imgui.WINDOW_CLOSABLE)
+        imgui.open_popup("First-Time Setup")
+        main_viewport = imgui.get_main_viewport()
+        popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
+                     main_viewport.pos[1] + main_viewport.size[1] * 0.5)
+        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
 
-        #     if imgui.begin_popup_modal("First-Time Setup", closable, flags=popup_flags)[0]:
-        #         imgui.text("Welcome to FunGen!")
-        #         imgui.text_wrapped("For the application to work, some default AI models need to be downloaded.")
-        #         imgui.separator()
+        status_msg = app.first_run_status_message.lower()
+        is_complete = "complete" in status_msg
+        is_failed = "failed" in status_msg
+        closable = is_complete or is_failed
+        popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE
 
-        #         imgui.text_wrapped(f"Status: {app.first_run_status_message}")
+        opened, visible = imgui.begin_popup_modal("First-Time Setup", closable, flags=popup_flags)
+        if opened:
+            imgui.text("Welcome to FunGen!")
+            imgui.spacing()
+            imgui.text_wrapped(
+                "FunGen generates funscripts from video using AI motion analysis. "
+                "Before you can start, the required AI models need to be downloaded."
+            )
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
 
-        #         # Progress Bar
-        #         progress_percent = app.first_run_progress / 100.0
-        #         imgui.progress_bar(progress_percent, size=(350, 0), overlay=f"{app.first_run_progress:.1f}%")
+            imgui.text_wrapped(f"Status: {app.first_run_status_message}")
 
-        #         imgui.separator()
+            # Progress bar
+            progress_percent = app.first_run_progress / 100.0
+            imgui.progress_bar(progress_percent, size=(400, 0), overlay=f"{app.first_run_progress:.1f}%")
 
-        #         if closable:
-        #             if imgui.button("Close", width=120):
-        #                 app.show_first_run_setup_popup = False
-        #                 imgui.close_current_popup()
+            imgui.spacing()
+            imgui.separator()
+            imgui.spacing()
 
-        #         imgui.end_popup()
+            if is_complete:
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.2, 0.9, 0.2, 1.0)
+                imgui.text("Setup complete! You're ready to go.")
+                imgui.pop_style_color()
+                imgui.spacing()
+                if imgui.button("Get Started", width=150):
+                    app.show_first_run_setup_popup = False
+                    imgui.close_current_popup()
+            elif is_failed:
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.3, 0.3, 1.0)
+                imgui.text_wrapped(
+                    "Setup failed. You can download models manually via AI menu > Download Models."
+                )
+                imgui.pop_style_color()
+                imgui.spacing()
+                if imgui.button("Close", width=150):
+                    app.show_first_run_setup_popup = False
+                    imgui.close_current_popup()
+            else:
+                imgui.text_wrapped("Please wait while models are being downloaded...")
+
+            imgui.end_popup()
 
 
     # TODO: Move this to a separate class/error management module
@@ -2282,6 +2309,9 @@ class GUI:
 
         # Keyboard Shortcuts Dialog (accessible via F1 or Help menu)
         self.keyboard_shortcuts_dialog.render()
+
+        # First-run setup wizard
+        self._render_first_run_setup_popup()
 
     def run(self):
         colors = self.colors
