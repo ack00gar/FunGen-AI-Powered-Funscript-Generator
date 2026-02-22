@@ -1724,7 +1724,8 @@ class ControlPanelUI:
         if self._is_live_tracker(mode):
             # Tracker Status block removed
 
-            if mode == "user_roi":
+            tracker_info = app.tracker.get_tracker_info() if app.tracker else None
+            if tracker_info and getattr(tracker_info, 'requires_roi', False):
                 self._render_user_roi_controls_for_run_tab()
             return
 
