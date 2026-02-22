@@ -468,14 +468,22 @@ class ControlPanelUI:
 
         # Use dynamic tracker discovery (simplified for simple mode)
         modes_display, modes_enum, discovered_trackers = self._get_tracker_lists_for_ui(simple_mode=True)
+
+        # Add "(Recommended)" suffix to OFFLINE_3_STAGE in the display list
+        recommended_tracker = "OFFLINE_3_STAGE"
+        modes_display_with_rec = list(modes_display)
+        for i, name in enumerate(modes_enum):
+            if name == recommended_tracker:
+                modes_display_with_rec[i] = modes_display[i] + " (Recommended)"
+                break
+
         try:
             cur_idx = modes_enum.index(app_state.selected_tracker_name)
         except ValueError:
-            # Default to oscillation_experimental_2 for Simple Mode
-            preferred_simple_default = "oscillation_experimental_2"
-            if preferred_simple_default in modes_enum:
-                cur_idx = modes_enum.index(preferred_simple_default)
-                default_tracker = preferred_simple_default
+            # Default to OFFLINE_3_STAGE for Simple Mode (recommended for beginners)
+            if recommended_tracker in modes_enum:
+                cur_idx = modes_enum.index(recommended_tracker)
+                default_tracker = recommended_tracker
             else:
                 cur_idx = 0
                 from config.constants import DEFAULT_TRACKER_NAME
@@ -483,7 +491,7 @@ class ControlPanelUI:
             app_state.selected_tracker_name = default_tracker
 
         imgui.push_item_width(-1)
-        clicked, new_idx = imgui.combo("##SimpleTrackerMode", cur_idx, modes_display)
+        clicked, new_idx = imgui.combo("##SimpleTrackerMode", cur_idx, modes_display_with_rec)
         imgui.pop_item_width()
 
         if clicked and new_idx != cur_idx:
@@ -560,19 +568,10 @@ class ControlPanelUI:
         imgui.end()
 
     def _get_simple_tracker_description(self, tracker_name):
-        """Get a simple, user-friendly description for a tracker."""
-        descriptions = {
-            "body_tracking_pov": "Tracks body movement from first-person perspective",
-            "object_tracking": "Follows a specific object in the video",
-            "hip_tracking": "Focuses on hip motion detection",
-            "hand_tracking": "Tracks hand movements",
-            "oscillation_experimental": "Detects rhythmic back-and-forth motion",
-        }
-        # Try to match tracker name to description
-        for key, desc in descriptions.items():
-            if key in tracker_name.lower():
-                return desc
-        # Default description
+        """Get a simple, user-friendly description for a tracker using discovery system."""
+        info = self.tracker_ui.discovery.get_tracker_info(tracker_name)
+        if info and info.description:
+            return info.description
         return "Analyzes motion in your video"
 
     def _render_simple_progress_display(self):
@@ -1725,7 +1724,7 @@ class ControlPanelUI:
             # Tracker Status block removed
 
             tracker_info = app.tracker.get_tracker_info() if app.tracker else None
-            if tracker_info and getattr(tracker_info, 'requires_roi', False):
+            if tracker_info and getattr(tracker_info, 'requires_intervention', False):
                 self._render_user_roi_controls_for_run_tab()
             return
 
