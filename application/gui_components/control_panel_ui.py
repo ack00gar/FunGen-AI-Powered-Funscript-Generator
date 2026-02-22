@@ -2016,7 +2016,6 @@ class ControlPanelUI:
             clicked, new_value = imgui.checkbox("Overwrite chapters during analysis", overwrite_setting)
             if clicked:
                 self.app.app_settings.set("overwrite_chapters_on_analysis", new_value)
-                self.app.settings_manager.save_settings()
             if imgui.is_item_hovered():
                 imgui.set_tooltip("When checked, analysis will replace all existing chapters.\nWhen unchecked (default), existing chapters are preserved.")
 
