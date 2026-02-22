@@ -2514,7 +2514,7 @@ class VideoProcessor:
                 self.ffmpeg_process = None
                 return False
 
-    def stream_frames_for_segment(self, start_frame_abs_idx: int, num_frames_to_read: int, stop_event: Optional[threading.Event] = None) -> Iterator[Tuple[int, np.ndarray]]:
+    def stream_frames_for_segment(self, start_frame_abs_idx: int, num_frames_to_read: int, stop_event: Optional[threading.Event] = None) -> Iterator[Tuple[int, np.ndarray, dict]]:
         if num_frames_to_read <= 0:
             self.logger.warning("num_frames_to_read is not positive, no frames to stream.")
             return
@@ -2541,7 +2541,9 @@ class VideoProcessor:
                         f"FFmpeg process (segment) terminated prematurely. Exit: {segment_ffmpeg_process.returncode}. Stderr: '{stderr_output.strip()}'")
                     break
 
+                t_decode_start = time.time()
                 raw_frame_bytes = segment_ffmpeg_process.stdout.read(self.frame_size_bytes)
+                decode_ms = (time.time() - t_decode_start) * 1000.0
                 if len(raw_frame_bytes) < self.frame_size_bytes:
                     stderr_on_short_read = segment_ffmpeg_process.stderr.read(4096).decode(errors='ignore') if segment_ffmpeg_process.stderr else ""
                     self.logger.info(
@@ -2561,7 +2563,9 @@ class VideoProcessor:
                 frame_np = np.frombuffer(raw_frame_bytes, dtype=np.uint8).reshape(self.yolo_input_size, self.yolo_input_size, 3)
 
                 # Apply GPU unwarp for VR frames if enabled
+                unwarp_ms = 0.0
                 if self.gpu_unwarp_enabled and self.gpu_unwarp_worker:
+                    t_unwarp_start = time.time()
                     current_frame_id = start_frame_abs_idx + frames_yielded
                     self.gpu_unwarp_worker.submit_frame(current_frame_id, frame_np,
                                                        timestamp_ms=current_frame_id * (1000.0 / self.fps) if self.fps > 0 else 0.0,
@@ -2571,9 +2575,10 @@ class VideoProcessor:
                         _, frame_np, _ = unwarp_result
                     else:
                         self.logger.warning(f"GPU unwarp timeout for segment frame {current_frame_id}")
+                    unwarp_ms = (time.time() - t_unwarp_start) * 1000.0
 
                 current_frame_id = start_frame_abs_idx + frames_yielded
-                yield current_frame_id, frame_np
+                yield current_frame_id, frame_np, {'decode_ms': decode_ms, 'unwarp_ms': unwarp_ms}
                 frames_yielded += 1
         finally:
             self._terminate_ffmpeg_processes()
