@@ -115,6 +115,9 @@ class KeyboardShortcutsDialog:
                 ("delete_points_in_chapter", "Delete Points in Chapter"),
                 ("delete_points_in_chapter_alt", "Delete Points in Chapter (Alt)"),
             ],
+            "Tracking Tools": [
+                ("set_oscillation_area", "Set Oscillation Area"),
+            ],
             "Add Points": [
                 ("add_point_0", "Add Point at 0%"),
                 ("add_point_10", "Add Point at 10%"),
