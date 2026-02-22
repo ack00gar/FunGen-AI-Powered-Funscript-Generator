@@ -34,6 +34,29 @@ if TYPE_CHECKING:
     from application.classes.interactive_timeline import InteractiveFunscriptTimeline
 
 
+class AdaptiveTuningState:
+    """Tracks progressive pipeline tuning state across batch videos."""
+    __slots__ = (
+        'current_producers', 'current_consumers',
+        'best_producers', 'best_consumers', 'best_fps',
+        'history', 'consumer_ceiling',
+        'consecutive_no_improvement', 'is_converged',
+        'status_message',
+    )
+
+    def __init__(self, producers: int, consumers: int):
+        self.current_producers = producers
+        self.current_consumers = consumers
+        self.best_producers = producers
+        self.best_consumers = consumers
+        self.best_fps = 0.0
+        self.history: List[Tuple[int, int, float, bool]] = []  # (p, c, avg_fps, success)
+        self.consumer_ceiling: Optional[int] = None  # hard cap set when a config stalls
+        self.consecutive_no_improvement = 0
+        self.is_converged = False
+        self.status_message = f"Starting with P={producers}/C={consumers}"
+
+
 def cli_live_video_progress_callback(current_frame, total_frames, start_time):
     """A simpler progress callback for frame-by-frame video processing."""
     if total_frames <= 0 or current_frame < 0:
@@ -358,6 +381,9 @@ class ApplicationLogic:
         self.batch_copy_funscript_to_video_location: bool = True
         self.batch_overwrite_mode: int = 0  # 0 for Process All, 1 for Skip Existing
         self.batch_generate_roll_file: bool = True
+        self.batch_adaptive_tuning_enabled: bool = False
+        self.adaptive_tuning_state: Optional[AdaptiveTuningState] = None
+        self.pause_batch_event = threading.Event()
 
         # --- Audio waveform data ---
         self.audio_waveform_data = None
@@ -947,7 +973,8 @@ class ApplicationLogic:
         self.batch_copy_funscript_to_video_location = gui.batch_copy_funscript_to_video_location_ui
         self.batch_overwrite_mode = gui.batch_overwrite_mode_ui
         self.batch_generate_roll_file = gui.batch_generate_roll_file_ui
-        
+        self.batch_adaptive_tuning_enabled = getattr(gui, 'batch_adaptive_tuning_ui', False)
+
         # Apply same mutual exclusion logic for GUI batch processing
         if gui.batch_apply_ultimate_autotune_ui:
             # When Ultimate Autotune is enabled, disable post-processing to avoid double simplification
@@ -987,15 +1014,126 @@ class ApplicationLogic:
 
         self.logger.info("Aborting batch processing...", extra={'status_message': True})
         self.stop_batch_event.set()
+        self.pause_batch_event.clear()  # Unblock any pause wait
         # Also signal the currently running stage analysis (if any) to stop
         self.stage_processor.abort_stage_processing()
         self.single_video_analysis_complete_event.set()  # Release the wait lock
 
+    def pause_batch_processing(self):
+        if self.is_batch_processing_active and not self.pause_batch_event.is_set():
+            self.pause_batch_event.set()
+            self.logger.info("Batch processing paused.", extra={'status_message': True})
+
+    def resume_batch_processing(self):
+        if self.is_batch_processing_active and self.pause_batch_event.is_set():
+            self.pause_batch_event.clear()
+            self.logger.info("Batch processing resumed.", extra={'status_message': True})
+
+    @property
+    def is_batch_paused(self) -> bool:
+        return self.is_batch_processing_active and self.pause_batch_event.is_set()
+
+    # --- Adaptive Batch Tuning Methods ---
+
+    def _init_adaptive_tuning(self) -> AdaptiveTuningState:
+        """Initialize adaptive tuning state from current settings."""
+        p = self.stage_processor.num_producers_stage1
+        c = self.stage_processor.num_consumers_stage1
+        self.logger.info(f"Adaptive tuning initialized: P={p}, C={c}")
+        return AdaptiveTuningState(producers=p, consumers=c)
+
+    def _adaptive_tuning_record_result(self, state: AdaptiveTuningState, avg_fps: float, success: bool):
+        """Record result from a video and hill-climb toward optimal settings."""
+        p, c = state.current_producers, state.current_consumers
+        state.history.append((p, c, avg_fps, success))
+
+        if not success:
+            # Config stalled/crashed — set ceiling and revert to best
+            state.consumer_ceiling = c - 1
+            state.current_producers = state.best_producers
+            state.current_consumers = state.best_consumers
+            state.status_message = f"Config P={p}/C={c} failed. Ceiling set to C={state.consumer_ceiling}. Reverted to P={state.best_producers}/C={state.best_consumers}"
+            self.logger.warning(state.status_message)
+            return
+
+        if state.best_fps <= 0 or avg_fps > state.best_fps * 1.02:
+            # Meaningful improvement (>2%)
+            state.best_producers = p
+            state.best_consumers = c
+            state.best_fps = avg_fps
+            state.consecutive_no_improvement = 0
+            state.status_message = f"New best: P={p}/C={c} @ {avg_fps:.1f} FPS"
+            self.logger.info(f"Adaptive tuning: {state.status_message}")
+        else:
+            state.consecutive_no_improvement += 1
+            state.status_message = f"No improvement at P={p}/C={c} ({avg_fps:.1f} FPS vs best {state.best_fps:.1f}). Streak: {state.consecutive_no_improvement}"
+            self.logger.info(f"Adaptive tuning: {state.status_message}")
+
+        # Check convergence
+        if state.consecutive_no_improvement >= 2:
+            state.is_converged = True
+            state.current_producers = state.best_producers
+            state.current_consumers = state.best_consumers
+            state.status_message = f"Converged at P={state.best_producers}/C={state.best_consumers} ({state.best_fps:.1f} FPS)"
+            self.logger.info(f"Adaptive tuning: {state.status_message}")
+            return
+
+        # Hill-climb: try consumers +2
+        next_c = c + 2
+        # Respect ceiling
+        if state.consumer_ceiling is not None and next_c > state.consumer_ceiling:
+            next_c = c - 2
+        # Bounds check
+        if next_c < 1:
+            next_c = 1
+        # Skip already-tested configs
+        tested_configs = {(h[0], h[1]) for h in state.history}
+        if (p, next_c) in tested_configs:
+            # Try the other direction
+            alt_c = c - 2 if next_c == c + 2 else c + 2
+            if state.consumer_ceiling is not None and alt_c > state.consumer_ceiling:
+                alt_c = c  # Can't go either way — stay put and converge
+            if alt_c < 1:
+                alt_c = 1
+            if (p, alt_c) in tested_configs or alt_c == c:
+                # Nowhere new to go — converge
+                state.is_converged = True
+                state.current_producers = state.best_producers
+                state.current_consumers = state.best_consumers
+                state.status_message = f"Converged (exhausted options) at P={state.best_producers}/C={state.best_consumers} ({state.best_fps:.1f} FPS)"
+                self.logger.info(f"Adaptive tuning: {state.status_message}")
+                return
+            next_c = alt_c
+
+        state.current_consumers = next_c
+        state.status_message = f"Next test: P={state.current_producers}/C={state.current_consumers}"
+        self.logger.info(f"Adaptive tuning: {state.status_message}")
+
+    def _adaptive_tuning_apply_best(self, state: AdaptiveTuningState):
+        """Persist best discovered P/C to settings and stage processor."""
+        if state is None or state.best_fps <= 0:
+            return
+        self.app_settings.set("num_producers_stage1", state.best_producers)
+        self.app_settings.set("num_consumers_stage1", state.best_consumers)
+        self.stage_processor.num_producers_stage1 = state.best_producers
+        self.stage_processor.num_consumers_stage1 = state.best_consumers
+        self.logger.info(f"Adaptive tuning: Persisted best settings P={state.best_producers}/C={state.best_consumers} ({state.best_fps:.1f} FPS)")
+
     def _run_batch_processing_thread(self):
+        # Initialize adaptive tuning if enabled
+        if self.batch_adaptive_tuning_enabled:
+            self.adaptive_tuning_state = self._init_adaptive_tuning()
+
         try:
             for i, video_data in enumerate(self.batch_video_paths):
                 if self.stop_batch_event.is_set():
                     self.logger.info("Batch processing was aborted by user."); break
+
+                # Pause checkpoint — wait between videos
+                while self.pause_batch_event.is_set() and not self.stop_batch_event.is_set():
+                    time.sleep(0.5)
+                if self.stop_batch_event.is_set():
+                    self.logger.info("Batch processing was aborted while paused."); break
 
                 self.current_batch_video_index = i
                 video_path = video_data["path"]
@@ -1087,12 +1225,37 @@ class ApplicationLogic:
                     self.app_state_ui.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
                     self.logger.info("Set processing speed to MAX_SPEED for batch offline processing")
 
+                    # Apply adaptive tuning P/C if active and not converged
+                    if self.adaptive_tuning_state and not self.adaptive_tuning_state.is_converged:
+                        self.stage_processor.num_producers_stage1 = self.adaptive_tuning_state.current_producers
+                        self.stage_processor.num_consumers_stage1 = self.adaptive_tuning_state.current_consumers
+                        self.logger.info(f"Adaptive tuning: Using P={self.adaptive_tuning_state.current_producers}/C={self.adaptive_tuning_state.current_consumers} for {video_basename}")
+
                     self.single_video_analysis_complete_event.clear()
                     self.save_and_reset_complete_event.clear()
                     self.stage_processor.start_full_analysis(processing_mode=selected_mode)
 
                     # Block until the analysis for this single video is done
                     self.single_video_analysis_complete_event.wait()
+                    if self.stop_batch_event.is_set(): break
+
+                    # Record adaptive tuning result from completed video
+                    if self.adaptive_tuning_state and not self.adaptive_tuning_state.is_converged:
+                        fps_val = 0.0
+                        success = True
+                        try:
+                            fps_str_raw = self.stage_processor.stage1_final_fps_str
+                            if fps_str_raw and "FPS" in fps_str_raw:
+                                fps_val = float(fps_str_raw.replace("FPS", "").strip())
+                            else:
+                                success = False
+                        except (ValueError, TypeError, AttributeError):
+                            success = False
+                        self._adaptive_tuning_record_result(self.adaptive_tuning_state, fps_val, success)
+
+                    # Pause checkpoint — wait after video analysis
+                    while self.pause_batch_event.is_set() and not self.stop_batch_event.is_set():
+                        time.sleep(0.5)
                     if self.stop_batch_event.is_set(): break
 
                     # --- LOAD RESULTS IN CLI ---
@@ -1174,10 +1337,15 @@ class ApplicationLogic:
         except Exception as e:
             self.logger.error(f"An error occurred during the batch process: {e}", exc_info=True)
         finally:
+            # Persist best adaptive tuning settings
+            if self.adaptive_tuning_state:
+                self._adaptive_tuning_apply_best(self.adaptive_tuning_state)
+                self.adaptive_tuning_state = None
             self.is_batch_processing_active = False
             self.current_batch_video_index = -1
             self.batch_video_paths = []
             self.stop_batch_event.clear()
+            self.pause_batch_event.clear()
             self.logger.info("Batch processing finished.", extra={'status_message': True})
 
     def enter_set_user_roi_mode(self):
