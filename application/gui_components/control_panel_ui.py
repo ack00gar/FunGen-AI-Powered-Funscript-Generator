@@ -2272,16 +2272,62 @@ class ControlPanelUI:
         is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi
 
         if is_batch_mode:
-            imgui.text_ansi_colored("--- BATCH PROCESSING ACTIVE ---", 1.0, 0.7, 0.3) # TODO: move to theme, orange
+            is_paused = self.app.is_batch_paused
+            # Header
+            if is_paused:
+                imgui.text_ansi_colored("--- BATCH PAUSED ---", 1.0, 1.0, 0.3)  # yellow
+            else:
+                imgui.text_ansi_colored("--- BATCH PROCESSING ---", 1.0, 0.7, 0.3)  # orange
+
             total_videos = len(self.app.batch_video_paths)
             current_idx = self.app.current_batch_video_index
+
+            # Overall batch progress bar
+            if total_videos > 0:
+                batch_frac = (current_idx + 1) / total_videos if current_idx >= 0 else 0.0
+                imgui.text(f"Video {current_idx + 1} of {total_videos}")
+                imgui.progress_bar(batch_frac, (-1, 0), f"{current_idx + 1}/{total_videos}")
+
+            # Current video name
             if 0 <= current_idx < total_videos:
                 current_video_name = os.path.basename(self.app.batch_video_paths[current_idx]["path"])
-                imgui.text_wrapped(f"Processing {current_idx + 1}/{total_videos}:")
-                imgui.text_wrapped(f"{current_video_name}")
-            # Abort button (DESTRUCTIVE - stops batch process)
+                imgui.text_wrapped(current_video_name)
+
+            imgui.spacing()
+
+            # Per-video progress (reuse simple progress display)
+            if stage_proc.full_analysis_active:
+                self._render_simple_progress_display()
+
+            # Adaptive tuning status
+            adaptive_state = self.app.adaptive_tuning_state
+            if adaptive_state is not None:
+                imgui.spacing()
+                if adaptive_state.is_converged:
+                    imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)  # green
+                    imgui.text(f"Tuning converged: P={adaptive_state.best_producers}/C={adaptive_state.best_consumers} ({adaptive_state.best_fps:.0f} FPS)")
+                    imgui.pop_style_color()
+                else:
+                    imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.8, 0.3, 1.0)  # green
+                    imgui.text(f"Tuning: P={adaptive_state.current_producers}/C={adaptive_state.current_consumers}")
+                    imgui.pop_style_color()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(adaptive_state.status_message)
+                imgui.spacing()
+
+            # Pause/Resume + Abort buttons side by side
+            avail_w = imgui.get_content_region_available()[0]
+            btn_w = (avail_w - imgui.get_style().item_spacing[0]) / 2
+            if is_paused:
+                with primary_button_style():
+                    if imgui.button("Resume", width=btn_w):
+                        self.app.resume_batch_processing()
+            else:
+                if imgui.button("Pause", width=btn_w):
+                    self.app.pause_batch_processing()
+            imgui.same_line()
             with destructive_button_style():
-                if imgui.button("Abort Batch Process", width=-1):
+                if imgui.button("Abort Batch", width=btn_w):
                     self.app.abort_batch_processing()
             return
 

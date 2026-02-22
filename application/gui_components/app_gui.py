@@ -113,6 +113,7 @@ class GUI:
         self.batch_copy_funscript_to_video_location_ui = True
         self.batch_generate_roll_file_ui = True
         self.batch_apply_ultimate_autotune_ui = True
+        self.batch_adaptive_tuning_ui: bool = True
 
         self.control_panel_ui.timeline_editor1 = self.timeline_editor1
         self.control_panel_ui.timeline_editor2 = self.timeline_editor2
@@ -140,6 +141,7 @@ class GUI:
         self.batch_copy_funscript_to_video_location_ui: bool = True
         self.batch_generate_roll_file_ui: bool = True
         self.batch_apply_ultimate_autotune_ui: bool = True
+        self.batch_adaptive_tuning_ui: bool = True
         self.last_overwrite_mode_ui: int = -1 # Used to trigger auto-selection logic
 
         # TODO: Move this to a separate class/error management module
@@ -1934,6 +1936,18 @@ class GUI:
             _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if has_3_stages else False)
             if not has_3_stages:
                 imgui.pop_style_var(); imgui.internal.pop_item_flag()
+
+            # Adaptive performance tuning checkbox
+            _, self.batch_adaptive_tuning_ui = imgui.checkbox("Adaptive performance tuning", self.batch_adaptive_tuning_ui)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Progressively optimizes pipeline thread settings during batch.\n"
+                                  "Starts conservative, tests small improvements after each video.\n"
+                                  "Best settings saved for future use.")
+            cur_p = app.stage_processor.num_producers_stage1
+            cur_c = app.stage_processor.num_consumers_stage1
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.5, 1.0)
+            imgui.text(f"  Current pipeline: {cur_p} producers / {cur_c} consumers")
+            imgui.pop_style_color()
 
             imgui.separator()
             if imgui.button("Start Batch", width=120):

@@ -55,6 +55,7 @@ PROFILE_KEYS = [
     "num_workers_stage2_of",
     "hardware_acceleration_method",
     "funscript_point_simplification_enabled",
+    "adaptive_batch_tuning_enabled",
 ]
 
 
@@ -146,6 +147,7 @@ class AppSettings:
             "num_producers_stage1": constants.DEFAULT_S1_NUM_PRODUCERS,
             "num_consumers_stage1": constants.DEFAULT_S1_NUM_CONSUMERS,
             "num_workers_stage2_of": constants.DEFAULT_S2_OF_WORKERS,
+            "adaptive_batch_tuning_enabled": True,  # Progressive pipeline thread optimization during batch processing
             "hardware_acceleration_method": "none",  # Default to CPU to avoid CUDA errors on non-NVIDIA systems
             "ffmpeg_path": "ffmpeg",
             # VR Unwarp method: 'auto', 'metal', 'opengl', 'v360'
