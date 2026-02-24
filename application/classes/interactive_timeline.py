@@ -234,11 +234,17 @@ class InteractiveFunscriptTimeline:
     def _handle_input(self, app_state, tf: TimelineTransformer):
         io = imgui.get_io()
         mouse_pos = imgui.get_mouse_pos()
-        
+
         # Check bounds
         is_hovered = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and
                       tf.y_offset <= mouse_pos[1] <= tf.y_offset + tf.height)
         is_focused = imgui.is_window_focused(imgui.FOCUS_ROOT_AND_CHILD_WINDOWS)
+
+        # When a popup (context menu) is active, suppress mouse interaction on the
+        # canvas underneath — otherwise clicking a menu item also registers as a
+        # timeline click, causing an unwanted seek/scroll.
+        if imgui.is_popup_open(f"TimelineContext{self.timeline_num}"):
+            is_hovered = False
 
         # Update active timeline ONLY on explicit user interaction (click)
         # This prevents the last-rendered timeline from stealing focus on startup
