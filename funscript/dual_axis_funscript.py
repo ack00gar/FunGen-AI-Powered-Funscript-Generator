@@ -305,34 +305,29 @@ class DualAxisFunscript:
 
     def get_value(self, time_ms: int, axis: str = 'primary') -> int:
         """
-        [MODIFIED] Now thread-safe. Creates a local copy of the actions list
-        to prevent race conditions during list clearing from other threads.
+        Returns the interpolated position value at a given timestamp.
+        Uses the cached timestamp list for O(1) amortised bisect lookups.
         """
-        # Create a local, thread-safe copy of the actions list.
-        actions_list_ref = self.primary_actions if axis == 'primary' else self.secondary_actions
-        actions_to_search = list(actions_list_ref) # A shallow copy is sufficient and fast.
+        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
 
-        if not actions_to_search:
-            return 50 # Default neutral position
+        if not actions_list:
+            return 50  # Default neutral position
 
-        # All subsequent logic operates on the consistent 'actions_to_search' copy.
-        # It's safer to derive timestamps directly from this copy rather than using the cache.
-        action_timestamps = [a["at"] for a in actions_to_search]
+        # Use the cached timestamp list — rebuilt only when dirty.
+        action_timestamps = self._get_timestamps_for_axis(axis)
         idx = bisect.bisect_left(action_timestamps, time_ms)
 
-        # The rest of the logic is safe because 'actions_to_search' will not change.
         if idx == 0:
-            return actions_to_search[0]["pos"]
-        if idx == len(actions_to_search):
-            return actions_to_search[-1]["pos"]
+            return actions_list[0]["pos"]
+        if idx >= len(actions_list):
+            return actions_list[-1]["pos"]
 
-        p1 = actions_to_search[idx - 1]
-        p2 = actions_to_search[idx]
+        p1 = actions_list[idx - 1]
+        p2 = actions_list[idx]
 
         if time_ms == p1["at"]:
             return p1["pos"]
 
-        # Denominator for interpolation
         time_diff = float(p2["at"] - p1["at"])
         if time_diff == 0:
             return p1["pos"]
@@ -496,15 +491,17 @@ class DualAxisFunscript:
         return actions_list[start_idx:end_idx + 1]
 
     def _get_action_indices_in_time_range(self, actions_list: List[dict],
-                                          start_time_ms: int, end_time_ms: int) -> Tuple[Optional[int], Optional[int]]:
+                                          start_time_ms: int, end_time_ms: int,
+                                          axis: str = 'primary') -> Tuple[Optional[int], Optional[int]]:
         if not actions_list: return None, None
-        action_timestamps = [a['at'] for a in actions_list]
+        # Use cached timestamps when the list matches our own actions
+        if actions_list is self.primary_actions or actions_list is self.secondary_actions:
+            ax = 'primary' if actions_list is self.primary_actions else 'secondary'
+            action_timestamps = self._get_timestamps_for_axis(ax)
+        else:
+            action_timestamps = [a['at'] for a in actions_list]
 
-        # Find the index of the first action >= start_time_ms
         s_idx = bisect.bisect_left(action_timestamps, start_time_ms)
-
-        # Find the index of the first action > end_time_ms
-        # The actions to include will be up to e_idx - 1
         e_idx = bisect.bisect_right(action_timestamps, end_time_ms)
         if s_idx >= e_idx: return None, None
         return s_idx, e_idx - 1

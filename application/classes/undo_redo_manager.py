@@ -1,5 +1,4 @@
 import collections
-import copy
 from typing import Optional, List, Tuple
 
 
@@ -26,7 +25,9 @@ class UndoRedoManager:
         if self._actions_list_reference is None:
             return
 
-        state_before_action = copy.deepcopy(self._actions_list_reference)
+        # Action dicts contain only immutable values (int), so shallow
+        # dict copies are safe and ~20x faster than deepcopy.
+        state_before_action = [d.copy() for d in self._actions_list_reference]
 
         # Avoid pushing identical states if the description is also the same (less likely but possible)
         if self.undo_stack and self.undo_stack[-1] == (action_description, state_before_action):
@@ -48,12 +49,12 @@ class UndoRedoManager:
         action_description_that_was_done, previous_state_to_restore = self.undo_stack.pop()
 
         # The current live state is the result of 'action_description_that_was_done'
-        current_live_state_for_redo = copy.deepcopy(self._actions_list_reference)
+        current_live_state_for_redo = [d.copy() for d in self._actions_list_reference]
         # When redoing, we re-apply 'action_description_that_was_done' to get 'current_live_state_for_redo'
         self.redo_stack.append((action_description_that_was_done, current_live_state_for_redo))
 
         self._actions_list_reference.clear()
-        self._actions_list_reference.extend(copy.deepcopy(previous_state_to_restore))
+        self._actions_list_reference.extend([d.copy() for d in previous_state_to_restore])
 
         return action_description_that_was_done  # This is the action that was just "undone"
 
@@ -70,13 +71,13 @@ class UndoRedoManager:
         action_to_reapply_desc, state_to_restore_via_redo = self.redo_stack.pop()
 
         # The current live state is the one *before* this redo operation.
-        current_live_state_for_undo = copy.deepcopy(self._actions_list_reference)
+        current_live_state_for_undo = [d.copy() for d in self._actions_list_reference]
         # If we undo this redo, we revert 'action_to_reapply_desc', going back to 'current_live_state_for_undo'.
         # So, on undo_stack, we store (action_to_reapply_desc, current_live_state_for_undo)
         self.undo_stack.append((action_to_reapply_desc, current_live_state_for_undo))
 
         self._actions_list_reference.clear()
-        self._actions_list_reference.extend(copy.deepcopy(state_to_restore_via_redo))
+        self._actions_list_reference.extend([d.copy() for d in state_to_restore_via_redo])
 
         return action_to_reapply_desc  # This is the action that was just "redone"
 
