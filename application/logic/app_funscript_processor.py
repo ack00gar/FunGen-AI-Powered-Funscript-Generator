@@ -747,6 +747,46 @@ class AppFunscriptProcessor:
         self._finalize_action_and_update_ui(timeline_num, loaded_from_description)
         self.app.energy_saver.reset_activity_timer()
 
+    def swap_timelines(self, timeline_a: int, timeline_b: int):
+        """Swap all actions between two timelines (e.g. T1 <-> T2)."""
+        fs_a, axis_a = self._get_target_funscript_object_and_axis(timeline_a)
+        fs_b, axis_b = self._get_target_funscript_object_and_axis(timeline_b)
+        if not fs_a or not axis_a or not fs_b or not axis_b:
+            self.logger.warning(f"Cannot swap T{timeline_a} <-> T{timeline_b}: funscript not available.")
+            return
+
+        self._record_timeline_action(timeline_a, f"Swap T{timeline_a} with T{timeline_b}")
+        self._record_timeline_action(timeline_b, f"Swap T{timeline_b} with T{timeline_a}")
+
+        actions_attr_a = f"{axis_a}_actions"
+        actions_attr_b = f"{axis_b}_actions"
+        list_a = getattr(fs_a, actions_attr_a)
+        list_b = getattr(fs_b, actions_attr_b)
+
+        # Snapshot both sides before mutating. Action dicts contain only
+        # immutable values (int/float), so shallow dict copies suffice and
+        # are ~20x faster than deepcopy on large scripts.
+        copy_a = [d.copy() for d in list_a]
+        copy_b = [d.copy() for d in list_b]
+
+        list_a.clear()
+        list_a.extend(copy_b)
+        list_b.clear()
+        list_b.extend(copy_a)
+
+        # Update last-timestamp bookkeeping
+        setattr(fs_a, f"last_timestamp_{axis_a}", list_a[-1]['at'] if list_a else 0)
+        setattr(fs_b, f"last_timestamp_{axis_b}", list_b[-1]['at'] if list_b else 0)
+
+        # Invalidate the funscript object's internal timestamp caches so
+        # binary-search lookups reflect the swapped data immediately.
+        if hasattr(fs_a, '_invalidate_cache'):
+            fs_a._invalidate_cache('both')
+
+        self._finalize_action_and_update_ui(timeline_a, f"Swap with T{timeline_b}")
+        self._finalize_action_and_update_ui(timeline_b, f"Swap with T{timeline_a}")
+        self.app.energy_saver.reset_activity_timer()
+
     def update_funscript_stats_for_timeline(self, timeline_num: int, source_type_description: str = "N/A"):
         stats_dict_to_update = self.funscript_stats_t1 if timeline_num == 1 else self.funscript_stats_t2
         default_app_stats = self._get_default_funscript_stats()
