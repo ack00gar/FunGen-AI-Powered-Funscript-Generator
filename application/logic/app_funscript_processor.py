@@ -783,6 +783,19 @@ class AppFunscriptProcessor:
         if hasattr(fs_a, '_invalidate_cache'):
             fs_a._invalidate_cache('both')
 
+        # Clear stale selection indices on both timeline editors — after the
+        # swap, the same indices point to different actions so highlights would
+        # appear to shift.
+        if self.app.gui_instance:
+            for tl_num in (timeline_a, timeline_b):
+                editor = None
+                if tl_num == 1:
+                    editor = getattr(self.app.gui_instance, 'timeline_editor1', None)
+                elif tl_num == 2:
+                    editor = getattr(self.app.gui_instance, 'timeline_editor2', None)
+                if editor and hasattr(editor, 'multi_selected_action_indices'):
+                    editor.multi_selected_action_indices.clear()
+
         self._finalize_action_and_update_ui(timeline_a, f"Swap with T{timeline_b}")
         self._finalize_action_and_update_ui(timeline_b, f"Swap with T{timeline_a}")
         self.app.energy_saver.reset_activity_timer()
