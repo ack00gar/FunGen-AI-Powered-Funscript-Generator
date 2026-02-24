@@ -122,6 +122,13 @@ class InteractiveFunscriptTimeline:
             return getattr(fs, f"{axis}_actions", [])
         return []
 
+    def _get_cached_timestamps(self) -> list:
+        """Return the funscript's cached timestamp list for this timeline's axis."""
+        fs, axis = self._get_target_funscript_details()
+        if fs and axis:
+            return fs._get_timestamps_for_axis(axis)
+        return []
+
     def invalidate_cache(self):
         """Forces updates on next frame"""
         self._ultimate_preview_dirty = True
@@ -235,16 +242,14 @@ class InteractiveFunscriptTimeline:
         io = imgui.get_io()
         mouse_pos = imgui.get_mouse_pos()
 
-        # Check bounds
-        is_hovered = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and
-                      tf.y_offset <= mouse_pos[1] <= tf.y_offset + tf.height)
+        # Check canvas bounds AND that no other window/popup/dialog is on top.
+        # imgui.is_window_hovered() returns False when a popup, floating window,
+        # or any other UI element is blocking this window — preventing clicks on
+        # overlapping UI from also registering as timeline canvas clicks.
+        in_canvas = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and
+                     tf.y_offset <= mouse_pos[1] <= tf.y_offset + tf.height)
+        is_hovered = in_canvas and imgui.is_window_hovered()
         is_focused = imgui.is_window_focused(imgui.FOCUS_ROOT_AND_CHILD_WINDOWS)
-
-        # When a popup (context menu) is active, suppress mouse interaction on the
-        # canvas underneath — otherwise clicking a menu item also registers as a
-        # timeline click, causing an unwanted seek/scroll.
-        if imgui.is_popup_open(f"TimelineContext{self.timeline_num}"):
-            is_hovered = False
 
         # Update active timeline ONLY on explicit user interaction (click)
         # This prevents the last-rendered timeline from stealing focus on startup
@@ -466,15 +471,16 @@ class InteractiveFunscriptTimeline:
     def _hit_test_point(self, mouse_pos, actions, tf: TimelineTransformer) -> int:
         """Optimized hit testing using binary search."""
         if not actions: return -1
-        
+
         tol_px = 8.0 # Pixel radius tolerance
         tol_ms = tol_px * tf.zoom
-        
+
         t_mouse = tf.x_to_time(mouse_pos[0])
-        
-        # Only search points near the mouse timestamp
-        start_idx = bisect_left([a['at'] for a in actions], t_mouse - tol_ms)
-        end_idx = bisect_right([a['at'] for a in actions], t_mouse + tol_ms)
+
+        # Use funscript's cached timestamp list instead of rebuilding per call
+        timestamps = self._get_cached_timestamps()
+        start_idx = bisect_left(timestamps, t_mouse - tol_ms)
+        end_idx = bisect_right(timestamps, t_mouse + tol_ms)
         
         best_dist = float('inf')
         best_idx = -1
@@ -556,9 +562,12 @@ class InteractiveFunscriptTimeline:
         t_start = tf.x_to_time(x1)
         t_end = tf.x_to_time(x2)
 
-        # Optimize: Binary search time bounds
-        s_idx = bisect_left([a['at'] for a in actions], t_start)
-        e_idx = bisect_right([a['at'] for a in actions], t_end)
+        # Optimize: Binary search time bounds using cached timestamps
+        timestamps = self._get_cached_timestamps()
+        if not timestamps or len(timestamps) != len(actions):
+            timestamps = [a['at'] for a in actions]
+        s_idx = bisect_left(timestamps, t_start)
+        e_idx = bisect_right(timestamps, t_end)
 
         new_selection = set()
         for i in range(s_idx, e_idx):
@@ -574,9 +583,12 @@ class InteractiveFunscriptTimeline:
 
     def _finalize_range_select(self, actions, append: bool):
         t1, t2 = sorted([self.range_start_time, self.range_end_time])
-        
-        s_idx = bisect_left([a['at'] for a in actions], t1)
-        e_idx = bisect_right([a['at'] for a in actions], t2)
+
+        timestamps = self._get_cached_timestamps()
+        if not timestamps or len(timestamps) != len(actions):
+            timestamps = [a['at'] for a in actions]
+        s_idx = bisect_left(timestamps, t1)
+        e_idx = bisect_right(timestamps, t2)
         
         new_set = set(range(s_idx, e_idx))
         if append:
@@ -686,8 +698,10 @@ class InteractiveFunscriptTimeline:
             start_ms = int(round((chapter.start_frame_id / fps) * 1000.0))
             end_ms = int(round((chapter.end_frame_id / fps) * 1000.0))
 
-            # Find points within chapter using binary search
-            action_timestamps = [a['at'] for a in actions]
+            # Find points within chapter using binary search on cached timestamps
+            action_timestamps = self._get_cached_timestamps()
+            if not action_timestamps or len(action_timestamps) != len(actions):
+                action_timestamps = [a['at'] for a in actions]
             start_idx = bisect_left(action_timestamps, start_ms)
             end_idx = bisect_right(action_timestamps, end_ms)
 
@@ -911,10 +925,16 @@ class InteractiveFunscriptTimeline:
                     is_preview=False, color_override=None, force_lines_only=False, alpha=1.0):
         if not actions or len(actions) < 2: return
 
-        # 1. Culling: Identify visible slice
-        margin_ms = tf.zoom * 100 
-        s_idx = bisect_left([a['at'] for a in actions], tf.visible_start_ms - margin_ms)
-        e_idx = bisect_right([a['at'] for a in actions], tf.visible_end_ms + margin_ms)
+        # 1. Culling: Identify visible slice using cached timestamps
+        margin_ms = tf.zoom * 100
+        timestamps = [a['at'] for a in actions]  # local list for non-main curves (preview, etc.)
+        # For main actions, use the funscript's cached timestamp list
+        if not is_preview and not color_override:
+            cached = self._get_cached_timestamps()
+            if cached and len(cached) == len(actions):
+                timestamps = cached
+        s_idx = bisect_left(timestamps, tf.visible_start_ms - margin_ms)
+        e_idx = bisect_right(timestamps, tf.visible_end_ms + margin_ms)
         
         s_idx = max(0, s_idx - 1)
         e_idx = min(len(actions), e_idx + 1)
