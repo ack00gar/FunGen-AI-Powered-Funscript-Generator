@@ -579,15 +579,23 @@ def perform_stage3_analysis(
     # Add actions to funscript object
     for action in all_primary_actions:
         funscript_obj.add_action(action['at'], action['pos'], None)
+
+    # Build a set of primary timestamps for O(1) lookups instead of O(N) per iteration
+    primary_timestamps = {a['at'] for a in funscript_obj.primary_actions}
+    secondary_timestamps_map = {a['at']: a for a in funscript_obj.secondary_actions}
     for action in all_secondary_actions:
-        if action['at'] in [a['at'] for a in funscript_obj.primary_actions]:
-            # Update existing action with secondary position
-            for existing_action in funscript_obj.secondary_actions:
-                if existing_action['at'] == action['at']:
-                    existing_action['pos'] = action['pos']
-                    break
+        if action['at'] in primary_timestamps:
+            # Update existing secondary action with this position
+            existing = secondary_timestamps_map.get(action['at'])
+            if existing:
+                existing['pos'] = action['pos']
         else:
             funscript_obj.add_action(action['at'], None, action['pos'])
+            # Keep the map in sync for subsequent iterations
+            if funscript_obj.secondary_actions:
+                last = funscript_obj.secondary_actions[-1]
+                if last['at'] == action['at']:
+                    secondary_timestamps_map[action['at']] = last
     
     # Set chapters from segments
     if atr_segments_list:
