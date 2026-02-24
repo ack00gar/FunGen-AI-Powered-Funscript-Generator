@@ -140,7 +140,9 @@ class PluginUIRenderer:
                 imgui.set_next_window_position(center_x, center_y, condition=imgui.APPEARING)
         
         imgui.set_next_window_size(480, 0, condition=imgui.APPEARING)
-        
+        # Keep plugin dialog on top of other windows until explicitly closed.
+        imgui.set_next_window_focus()
+
         window_expanded, window_open = imgui.begin(
             window_title, closable=True, flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)
         
