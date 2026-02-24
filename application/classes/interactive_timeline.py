@@ -149,7 +149,10 @@ class InteractiveFunscriptTimeline:
 
         # 1. Window Configuration
         is_floating = app_state.ui_layout_mode == "floating"
-        flags = (imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE)
+        # NO_BRING_TO_FRONT_ON_FOCUS prevents the timeline from stealing
+        # z-order when clicked — dialog/plugin windows stay on top.
+        flags = (imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE |
+                 imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
         
         if not is_floating:
             # Fixed Layout
@@ -186,15 +189,8 @@ class InteractiveFunscriptTimeline:
         pan = getattr(app_state, 'timeline_pan_offset_ms', 0.0)
         tf = TimelineTransformer(canvas_pos, canvas_size, pan, zoom)
 
-        # 5. Register an invisible interaction region for the canvas.
-        # This participates in imgui's focus/layering system: clicks on
-        # overlapping windows properly raise them instead of falling through,
-        # while clicks on the exposed canvas are detected via is_item_hovered().
-        imgui.invisible_button(f"##canvas_{self.timeline_num}", canvas_size[0], canvas_size[1])
-        canvas_hovered = imgui.is_item_hovered()
-
-        # 6. Handle User Input (Mouse & Keyboard)
-        self._handle_input(app_state, tf, canvas_hovered)
+        # 5. Handle User Input (Mouse & Keyboard)
+        self._handle_input(app_state, tf)
 
         # 6. Render Visual Layers
         self._draw_background_grid(draw_list, tf)
@@ -245,15 +241,16 @@ class InteractiveFunscriptTimeline:
     # INPUT HANDLING
     # ==================================================================================
 
-    def _handle_input(self, app_state, tf: TimelineTransformer, canvas_hovered: bool = False):
+    def _handle_input(self, app_state, tf: TimelineTransformer):
         io = imgui.get_io()
         mouse_pos = imgui.get_mouse_pos()
 
-        # canvas_hovered comes from imgui.is_item_hovered() on the invisible
-        # button covering the canvas — it correctly respects window layering,
-        # popups, and overlapping UI, so clicks on windows above the timeline
-        # go to those windows instead of registering as canvas interactions.
-        is_hovered = canvas_hovered
+        # Check canvas bounds AND that no other window/popup/dialog is on top.
+        # is_window_hovered() returns False when a popup, dialog, or overlapping
+        # window is above this one — preventing click-through to the canvas.
+        in_canvas = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and
+                     tf.y_offset <= mouse_pos[1] <= tf.y_offset + tf.height)
+        is_hovered = in_canvas and imgui.is_window_hovered()
         is_focused = imgui.is_window_focused(imgui.FOCUS_ROOT_AND_CHILD_WINDOWS)
 
         # Update active timeline ONLY on explicit user interaction (click)
