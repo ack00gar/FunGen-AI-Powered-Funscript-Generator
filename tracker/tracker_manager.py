@@ -7,7 +7,7 @@ import numpy as np
 from typing import List, Dict, Tuple, Optional, Any, Union
 
 from tracker.tracker_modules import tracker_registry
-from funscript.dual_axis_funscript import DualAxisFunscript
+from funscript.multi_axis_funscript import MultiAxisFunscript
 
 
 class TrackerManager:
@@ -34,7 +34,7 @@ class TrackerManager:
         self._discovery = get_tracker_discovery()
         
         # Create funscript instance for accumulating tracking data
-        self.funscript = DualAxisFunscript(logger=self.logger)
+        self.funscript = MultiAxisFunscript(logger=self.logger)
 
         # Apply point simplification setting from app settings
         if app_logic_instance and hasattr(app_logic_instance, 'app_settings'):
@@ -151,7 +151,13 @@ class TrackerManager:
             self._current_tracker = tracker_class()
             self._current_mode = mode_name
             self._tracker_info = tracker_info
-            
+
+            # Apply tracker's declared axis assignments to the funscript
+            if self.funscript and tracker_info:
+                self.funscript.assign_axis(1, tracker_info.primary_axis)
+                if tracker_info.supports_dual_axis:
+                    self.funscript.assign_axis(2, tracker_info.secondary_axis)
+
             # Set up tracker with app and model path
             self._setup_tracker_environment()
             
@@ -314,7 +320,7 @@ class TrackerManager:
     def cleanup(self):
         """Clean up current tracker and manager state."""
         self._cleanup_current_tracker()
-        self.funscript = DualAxisFunscript(logger=self.logger)
+        self.funscript = MultiAxisFunscript(logger=self.logger)
 
         # Reapply point simplification setting
         if self.app and hasattr(self.app, 'app_settings'):

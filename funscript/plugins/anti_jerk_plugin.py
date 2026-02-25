@@ -148,7 +148,7 @@ class AntiJerkPlugin(FunscriptTransformationPlugin):
         Apply anti-jerk filtering to the funscript.
         
         Args:
-            funscript: DualAxisFunscript object to transform
+            funscript: MultiAxisFunscript object to transform
             axis: Which axis to transform ('primary', 'secondary', or 'both')
             **kwargs: Plugin parameters
             

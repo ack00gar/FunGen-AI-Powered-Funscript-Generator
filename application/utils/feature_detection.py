@@ -142,6 +142,17 @@ class FeatureDetector:
             tier="supporter"
         )
         
+        # Patreon Features Package (Supporter)
+        features["patreon_features"] = FeatureInfo(
+            name="patreon_features",
+            display_name="Patreon Features",
+            description="Advanced batch, tracker early access, live capture",
+            folder_path="patreon_features",
+            required_files=["patreon_features/__init__.py"],
+            dependencies=[],
+            tier="supporter"
+        )
+
         # Developer Tools (Dev only)
         features["dev_tools"] = FeatureInfo(
             name="dev_tools",

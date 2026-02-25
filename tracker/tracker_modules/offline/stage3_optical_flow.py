@@ -18,7 +18,7 @@ from typing import Dict, Any, Optional, List, Tuple, Callable
 from multiprocessing import Event
 
 # Constants
-DEFAULT_LIVE_TRACKER = "oscillation_experimental_2"
+DEFAULT_LIVE_TRACKER = "oscillation"
 DEFAULT_CHUNK_OVERLAP_FRAMES = 30
 DEFAULT_MIN_SEGMENT_DURATION = 2.0
 DEFAULT_SEGMENT_PADDING_FRAMES = 15
@@ -117,6 +117,8 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
             tags=["offline", "optical-flow", "stage3", "batch", "live-tracker-integration"],
             requires_roi=False,
             supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
             stages=[
                 StageDefinition(
                     stage_number=1,
@@ -178,7 +180,7 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
             if hasattr(app_instance, 'app_settings'):
                 settings = app_instance.app_settings
                 
-                self.live_tracker_name = settings.get('stage3_live_tracker', 'oscillation_experimental_2')
+                self.live_tracker_name = settings.get('stage3_live_tracker', 'oscillation')
                 self.chunk_overlap_frames = settings.get('stage3_chunk_overlap', 30)
                 self.min_segment_duration_seconds = settings.get('stage3_min_segment_duration', 2.0)
                 self.segment_padding_frames = settings.get('stage3_segment_padding', 15)
@@ -214,7 +216,7 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
                 if not self.tracker_manager.set_tracking_mode(self.live_tracker_name):
                     self.logger.warning(f"Failed to set live tracker {self.live_tracker_name}, using default")
                     # Try fallback trackers
-                    fallback_trackers = ['oscillation_experimental', 'oscillation_legacy']
+                    fallback_trackers = ['oscillation_legacy']
                     tracker_set = False
                     for fallback in fallback_trackers:
                         if self.tracker_manager.set_tracking_mode(fallback):
@@ -633,7 +635,7 @@ class Stage3OpticalFlowTracker(BaseOfflineTracker):
         try:
             import json
 
-            # If funscript_data is already a DualAxisFunscript object with save method
+            # If funscript_data is already a MultiAxisFunscript object with save method
             if hasattr(funscript_data, 'save') and callable(funscript_data.save):
                 funscript_data.save(output_path)
             elif isinstance(funscript_data, dict):

@@ -307,7 +307,7 @@ class TemplatePlugin(FunscriptTransformationPlugin):
             }
         }
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Apply your custom transformation logic here."""
         # Validate parameters
         validated_params = self.validate_parameters(parameters)

@@ -1,5 +1,4 @@
 import os
-import copy
 import logging
 from typing import List, Dict, Optional, Tuple
 from bisect import bisect_left, bisect_right
@@ -7,7 +6,7 @@ import numpy as np
 from scipy.signal import correlate, find_peaks
 
 from application.utils import VideoSegment, _format_time
-from funscript import DualAxisFunscript
+from funscript import MultiAxisFunscript
 from config import constants
 from config.constants import ChapterSource
 
@@ -42,6 +41,9 @@ class AppFunscriptProcessor:
         self.rdp_epsilon_input: float = 8.0
         self.amplify_factor_input: float = 1.1
         self.amplify_center_input: int = 50
+
+        # Focused undo/redo: track the last-edited timeline (OFS-style)
+        self._last_edited_timeline: int = 1
 
         # Clipboard
         self.clipboard_actions_data: List[Dict] = []
@@ -175,7 +177,7 @@ class AppFunscriptProcessor:
                 return chapter
         return None
 
-    def get_funscript_obj(self) -> Optional[DualAxisFunscript]:
+    def get_funscript_obj(self) -> Optional[MultiAxisFunscript]:
         if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
             return self.app.processor.tracker.funscript
         self.logger.warning("Funscript object not available.")
@@ -268,10 +270,7 @@ class AppFunscriptProcessor:
     def get_actions(self, axis: str) -> List[dict]:
         funscript_obj = self.get_funscript_obj()
         if funscript_obj:
-            if axis == 'primary':
-                return funscript_obj.primary_actions
-            elif axis == 'secondary':
-                return funscript_obj.secondary_actions
+            return funscript_obj.get_axis_actions(axis)
         return []
 
     def _get_default_funscript_stats(self) -> Dict:
@@ -284,42 +283,63 @@ class AppFunscriptProcessor:
         }
 
     def _get_target_funscript_object_and_axis(self, timeline_num: int) -> Tuple[Optional[object], Optional[str]]:
-        """Returns the funscript object and axis name ('primary' or 'secondary')."""
+        """Returns the funscript object and axis name ('primary', 'secondary', or 'axis_N')."""
         if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
             funscript_obj = self.app.processor.tracker.funscript
             if timeline_num == 1:
                 return funscript_obj, 'primary'
             elif timeline_num == 2:
                 return funscript_obj, 'secondary'
+            elif timeline_num >= 3:
+                axis_name = f'axis_{timeline_num}'
+                funscript_obj.ensure_axis(axis_name)
+                return funscript_obj, axis_name
         return None, None
 
     def _ensure_undo_managers_linked(self):
         """Ensures undo managers are created and linked if they weren't at init."""
         if not (self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript):
-            # self.logger.warning("Cannot ensure undo manager linking: Funscript object not available.")
             return
 
         funscript_obj = self.app.processor.tracker.funscript
         if self.app.undo_manager_t1 is None:
-            from application.classes import UndoRedoManager  # Corrected import path
+            from application.classes import UndoRedoManager
             self.app.undo_manager_t1 = UndoRedoManager(max_history=50)
             self.logger.info("UndoManager T1 created dynamically.")
         if self.app.undo_manager_t1._actions_list_reference is not funscript_obj.primary_actions:
             self.app.undo_manager_t1.set_actions_reference(funscript_obj.primary_actions)
-            # self.logger.debug("UndoManager T1 re-linked to primary_actions.")
 
         if self.app.undo_manager_t2 is None:
-            from application.classes import UndoRedoManager  # Corrected import path
+            from application.classes import UndoRedoManager
             self.app.undo_manager_t2 = UndoRedoManager(max_history=50)
             self.logger.info("UndoManager T2 created dynamically.")
         if self.app.undo_manager_t2._actions_list_reference is not funscript_obj.secondary_actions:
             self.app.undo_manager_t2.set_actions_reference(funscript_obj.secondary_actions)
-            # self.logger.debug("UndoManager T2 re-linked to secondary_actions.")
+
+        # Link additional axis undo managers (timeline 3+)
+        for axis_name in funscript_obj.additional_axes:
+            # Extract timeline number from axis name (e.g. "axis_3" -> 3)
+            try:
+                t_num = int(axis_name.split('_')[1])
+            except (IndexError, ValueError):
+                continue
+            manager_attr = f'undo_manager_t{t_num}'
+            if not hasattr(self.app, manager_attr) or getattr(self.app, manager_attr) is None:
+                from application.classes import UndoRedoManager
+                setattr(self.app, manager_attr, UndoRedoManager(max_history=50))
+                self.logger.info(f"UndoManager T{t_num} created dynamically.")
+            manager = getattr(self.app, manager_attr)
+            actions_list = funscript_obj.additional_axes[axis_name]
+            if manager._actions_list_reference is not actions_list:
+                manager.set_actions_reference(actions_list)
 
     def _get_undo_manager(self, timeline_num: int) -> Optional[object]:  # Actually UndoRedoManager
         self._ensure_undo_managers_linked()
         if timeline_num == 1: return self.app.undo_manager_t1
         if timeline_num == 2: return self.app.undo_manager_t2
+        if timeline_num >= 3:
+            manager_attr = f'undo_manager_t{timeline_num}'
+            return getattr(self.app, manager_attr, None)
         self.logger.warning(f"Requested undo manager for invalid timeline_num: {timeline_num}")
         return None
 
@@ -331,6 +351,17 @@ class AppFunscriptProcessor:
         elif self.app.processor and hasattr(self.app.processor, 'fps') and self.app.processor.fps > 0:  # Fallback
             fps = self.app.processor.fps
         return fps
+
+    @staticmethod
+    def _update_last_timestamp(funscript_obj, axis_name: str, actions_list: list):
+        """Update the last-timestamp bookkeeping for any axis."""
+        last_ts = actions_list[-1]['at'] if actions_list else 0
+        if axis_name == 'primary':
+            funscript_obj.last_timestamp_primary = last_ts
+        elif axis_name == 'secondary':
+            funscript_obj.last_timestamp_secondary = last_ts
+        else:
+            funscript_obj._additional_last_timestamps[axis_name] = last_ts
 
     def _check_chapter_overlap(self, start_frame: int, end_frame: int,
                                existing_chapter_id: Optional[str] = None) -> bool:
@@ -634,6 +665,7 @@ class AppFunscriptProcessor:
             self.app.set_status_message("Error updating chapter.", level=logging.ERROR)
 
     def _record_timeline_action(self, timeline_num: int, action_description: str):
+        self._last_edited_timeline = timeline_num
         undo_manager = self._get_undo_manager(timeline_num)
         if undo_manager:
             try:
@@ -644,6 +676,10 @@ class AppFunscriptProcessor:
                 self.logger.error(f"Error recording undo for T{timeline_num} ('{action_description}'): {e}", exc_info=True)
         else:
             self.logger.warning(f"Could not record undo for T{timeline_num}: Undo manager not found.")
+
+    def perform_undo_redo_focused(self, direction: str):
+        """Undo/redo on the last-edited timeline (OFS-style)."""
+        self.perform_undo_redo(self._last_edited_timeline, direction)
 
     def perform_undo_redo(self, timeline_num: int, operation: str):  # operation is 'undo' or 'redo'
         undo_manager = self._get_undo_manager(timeline_num)
@@ -663,9 +699,11 @@ class AppFunscriptProcessor:
         if success:
             target_funscript, axis_name = self._get_target_funscript_object_and_axis(timeline_num)
             if target_funscript and axis_name:  # Update funscript object's internal state like last_timestamp
-                actions_list = getattr(target_funscript, f"{axis_name}_actions", [])
-                last_ts = actions_list[-1]['at'] if actions_list else 0
-                setattr(target_funscript, f"last_timestamp_{axis_name}", last_ts)
+                actions_list = target_funscript.get_axis_actions(axis_name)
+                self._update_last_timestamp(target_funscript, axis_name, actions_list)
+                # Undo/redo replaces the actions list contents via clear()+extend(),
+                # so the timestamp cache is now stale and must be rebuilt.
+                target_funscript._invalidate_cache(axis_name)
 
             self._finalize_action_and_update_ui(timeline_num, f"{operation.capitalize()}: {action_description}")
             self.logger.info(f"Performed {operation.capitalize()} on Timeline {timeline_num}: {action_description}",
@@ -687,6 +725,8 @@ class AppFunscriptProcessor:
                 timeline_instance = self.app.gui_instance.timeline_editor1
             elif timeline_num == 2:
                 timeline_instance = self.app.gui_instance.timeline_editor2
+            elif timeline_num >= 3:
+                timeline_instance = self.app.gui_instance._extra_timeline_editors.get(timeline_num)
 
         if timeline_instance:
             timeline_instance.invalidate_ultimate_preview()
@@ -722,17 +762,12 @@ class AppFunscriptProcessor:
 
         self._record_timeline_action(timeline_num, f"Replace T{timeline_num} with: {loaded_from_description}")
 
-        live_actions_list_attr_name = f"{axis_name}_actions"
-        live_actions_list = getattr(target_funscript, live_actions_list_attr_name, None)
-        if live_actions_list is None:  # Should not happen if target_funscript is valid
-            self.logger.error(f"Could not get actions list '{live_actions_list_attr_name}' for T{timeline_num}")
-            return
+        live_actions_list = target_funscript.get_axis_actions(axis_name)
 
         live_actions_list.clear()
-        live_actions_list.extend(copy.deepcopy(new_actions))
+        live_actions_list.extend([a.copy() for a in new_actions])
 
-        last_ts_attr_name = f"last_timestamp_{axis_name}"
-        setattr(target_funscript, last_ts_attr_name, new_actions[-1]['at'] if new_actions else 0)
+        self._update_last_timestamp(target_funscript, axis_name, live_actions_list)
 
         # Undo manager's redo stack is auto-cleared by record_state_before_action.
         # For major events, explicitly clear full history.
@@ -758,10 +793,8 @@ class AppFunscriptProcessor:
         self._record_timeline_action(timeline_a, f"Swap T{timeline_a} with T{timeline_b}")
         self._record_timeline_action(timeline_b, f"Swap T{timeline_b} with T{timeline_a}")
 
-        actions_attr_a = f"{axis_a}_actions"
-        actions_attr_b = f"{axis_b}_actions"
-        list_a = getattr(fs_a, actions_attr_a)
-        list_b = getattr(fs_b, actions_attr_b)
+        list_a = fs_a.get_axis_actions(axis_a)
+        list_b = fs_b.get_axis_actions(axis_b)
 
         # Snapshot both sides before mutating. Action dicts contain only
         # immutable values (int/float), so shallow dict copies suffice and
@@ -775,8 +808,8 @@ class AppFunscriptProcessor:
         list_b.extend(copy_a)
 
         # Update last-timestamp bookkeeping
-        setattr(fs_a, f"last_timestamp_{axis_a}", list_a[-1]['at'] if list_a else 0)
-        setattr(fs_b, f"last_timestamp_{axis_b}", list_b[-1]['at'] if list_b else 0)
+        self._update_last_timestamp(fs_a, axis_a, list_a)
+        self._update_last_timestamp(fs_b, axis_b, list_b)
 
         # Invalidate the funscript object's internal timestamp caches so
         # binary-search lookups reflect the swapped data immediately.
@@ -801,7 +834,16 @@ class AppFunscriptProcessor:
         self.app.energy_saver.reset_activity_timer()
 
     def update_funscript_stats_for_timeline(self, timeline_num: int, source_type_description: str = "N/A"):
-        stats_dict_to_update = self.funscript_stats_t1 if timeline_num == 1 else self.funscript_stats_t2
+        if timeline_num == 1:
+            stats_dict_to_update = self.funscript_stats_t1
+        elif timeline_num == 2:
+            stats_dict_to_update = self.funscript_stats_t2
+        else:
+            # For timelines 3+, dynamically get or create stats dict
+            stats_attr = f'funscript_stats_t{timeline_num}'
+            if not hasattr(self, stats_attr):
+                setattr(self, stats_attr, self._get_default_funscript_stats())
+            stats_dict_to_update = getattr(self, stats_attr)
         default_app_stats = self._get_default_funscript_stats()
 
         for key in default_app_stats:
@@ -834,7 +876,7 @@ class AppFunscriptProcessor:
         # self.app.project_manager.project_dirty = True # Already set by finalize or calling context
 
     def set_clipboard_actions(self, actions_data: List[Dict]):
-        self.clipboard_actions_data = copy.deepcopy(actions_data)
+        self.clipboard_actions_data = [a.copy() for a in actions_data]
         self.app.energy_saver.reset_activity_timer()
         if actions_data:
             self.logger.info(f"Copied {len(actions_data)} point(s) to clipboard.", extra={'status_message': True})
@@ -842,7 +884,7 @@ class AppFunscriptProcessor:
             self.logger.info("Clipboard cleared (no points selected to copy).", extra={'status_message': True})
 
     def get_clipboard_actions(self) -> List[Dict]:
-        return copy.deepcopy(self.clipboard_actions_data)
+        return [a.copy() for a in self.clipboard_actions_data]
 
     def clipboard_has_actions(self) -> bool:
         return bool(self.clipboard_actions_data)
@@ -886,18 +928,16 @@ class AppFunscriptProcessor:
 
         self._record_timeline_action(timeline_num, operation_description)  # Record state BEFORE modification
 
-        live_actions_list_attr_name = f"{axis_name}_actions"
         # Make a copy of current actions to work with for filtering and merging
-        original_actions_copy: List[Dict] = list(
-            copy.deepcopy(getattr(target_funscript, live_actions_list_attr_name, [])))
+        original_actions_copy: List[Dict] = [a.copy() for a in target_funscript.get_axis_actions(axis_name)]
 
         # 1. Preserve actions outside the specified range
         actions_before_range = [action for action in original_actions_copy if action['at'] < range_start_ms]
         actions_after_range = [action for action in original_actions_copy if action['at'] > range_end_ms]
 
-        # 2. Prepare new actions (ensure they are sorted and deepcopied)
+        # 2. Prepare new actions (ensure they are sorted and shallow-copied)
         # Stage 2 should provide actions with absolute timestamps already correct for the range.
-        processed_new_actions = sorted(copy.deepcopy(new_actions_for_range), key=lambda x: x['at'])
+        processed_new_actions = sorted([a.copy() for a in new_actions_for_range], key=lambda x: x['at'])
 
         # 3. Combine the three parts: before, new (for the range), after
         merged_actions = actions_before_range + processed_new_actions + actions_after_range
@@ -917,13 +957,11 @@ class AppFunscriptProcessor:
 
 
         # Update the actual live list in the funscript object
-        live_actions_list_ref = getattr(target_funscript, live_actions_list_attr_name)
+        live_actions_list_ref = target_funscript.get_axis_actions(axis_name)
         live_actions_list_ref.clear()
         live_actions_list_ref.extend(unique_final_actions)
 
-        last_ts_attr_name = f"last_timestamp_{axis_name}"
-        new_last_ts = unique_final_actions[-1]['at'] if unique_final_actions else 0
-        setattr(target_funscript, last_ts_attr_name, new_last_ts)
+        self._update_last_timestamp(target_funscript, axis_name, unique_final_actions)
 
         self._finalize_action_and_update_ui(timeline_num, operation_description)
         self.logger.info(
@@ -1565,10 +1603,19 @@ class AppFunscriptProcessor:
         default_params = base_defaults.copy()
         default_params.update(user_defaults)
 
-        # --- Record State for Undo ---
+        # --- Record State for Undo (all axes with actions) ---
         op_desc = "Auto Post-Process" + (f" on range" if frame_range else "")
-        if funscript_obj.primary_actions: self._record_timeline_action(1, f"{op_desc} (T1)")
-        if funscript_obj.secondary_actions: self._record_timeline_action(2, f"{op_desc} (T2)")
+        if funscript_obj.primary_actions:
+            self._record_timeline_action(1, f"{op_desc} (T1)")
+        if funscript_obj.secondary_actions:
+            self._record_timeline_action(2, f"{op_desc} (T2)")
+        for ax_key in list(funscript_obj.additional_axes):
+            if funscript_obj.additional_axes[ax_key]:
+                # Find the timeline number for this additional axis
+                for tl_n, ax_n in funscript_obj._axis_assignments.items():
+                    if ax_n == ax_key and tl_n >= 3:
+                        self._record_timeline_action(tl_n, f"{op_desc} (T{tl_n})")
+                        break
 
         # --- Determine Time Range ---
         range_start_ms, range_end_ms = None, None
@@ -1581,12 +1628,22 @@ class AppFunscriptProcessor:
                 self.logger.info(
                     f"Processing limited to range: Frames {start_frame}-{end_frame if end_frame != -1 else 'End'}")
 
-        # --- Process Each Timeline (Axis) ---
-        for axis in ['primary', 'secondary']:
-            if not getattr(funscript_obj, f"{axis}_actions", []):
-                continue
+        # --- Build axis list: primary (T1), secondary (T2), plus additional axes (T3+) ---
+        axes_to_process = []  # list of (axis_name, timeline_num)
+        if funscript_obj.get_axis_actions('primary'):
+            axes_to_process.append(('primary', 1))
+        if funscript_obj.get_axis_actions('secondary'):
+            axes_to_process.append(('secondary', 2))
+        for ax_key in list(funscript_obj.additional_axes):
+            if funscript_obj.additional_axes[ax_key]:
+                for tl_n, ax_n in funscript_obj._axis_assignments.items():
+                    if ax_n == ax_key and tl_n >= 3:
+                        axes_to_process.append((ax_key, tl_n))
+                        break
 
-            self.logger.info(f"Post-Processing: {axis.capitalize()} Axis...")
+        # --- Process Each Timeline (Axis) ---
+        for axis, timeline_num in axes_to_process:
+            self.logger.info(f"Post-Processing: {axis.capitalize()} Axis (T{timeline_num})...")
 
             if self.video_chapters:
                 self.logger.info(f"Applying chapter-based settings for {axis} axis...")
@@ -1604,8 +1661,6 @@ class AppFunscriptProcessor:
                     # Get chapter-specific params, falling back to the robust default_params
                     params = processing_config.get(chapter.position_long_name, default_params)
 
-                    # With the corrected default_params, these .get() calls are now safe.
-                    # If a key is missing from the chapter-specific `params`, it will be found in `default_params`.
                     sg_win = params.get("sg_window", default_params.get("sg_window"))
                     sg_poly = params.get("sg_polyorder", default_params.get("sg_polyorder"))
                     rdp_eps = params.get("rdp_epsilon", default_params.get("rdp_epsilon"))
@@ -1613,9 +1668,6 @@ class AppFunscriptProcessor:
                     amp_center = params.get("center_value", default_params.get("center_value"))
                     clamp_low = params.get("clamp_lower", default_params.get("clamp_lower"))
                     clamp_high = params.get("clamp_upper", default_params.get("clamp_upper"))
-                    # output_min = params.get("output_min", default_params.get("output_min"))
-                    # output_max = params.get("output_max", default_params.get("output_max"))
-
 
                     self.logger.debug(
                         f"Processing {axis} in '{chapter.position_long_name}' ({effective_start_ms}-{effective_end_ms}ms) with params: {params}")
@@ -1625,25 +1677,16 @@ class AppFunscriptProcessor:
                     if axis == 'primary':
                         funscript_obj.apply_plugin('Threshold Clamp', axis=axis, lower_threshold=clamp_low, upper_threshold=clamp_high, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
                     funscript_obj.apply_plugin('Amplify', axis=axis, scale_factor=amp_scale, center_value=amp_center, start_time_ms=effective_start_ms, end_time_ms=effective_end_ms)
-                    # if output_min != 0 or output_max != 100: # Only apply if it's not the default 0-100
-                    #     funscript_obj.scale_points_to_range(axis, output_min, output_max, effective_start_ms, effective_end_ms)
 
             else:
                 self.logger.info(f"No chapters found. Applying default settings to {axis} axis for the full range.")
-                params = default_params  # Use the robust defaults
-                # Direct access is now safe because we guaranteed the keys exist.
+                params = default_params
                 funscript_obj.apply_plugin('Savitzky-Golay Filter', axis=axis, window_length=params["sg_window"], polyorder=params["sg_polyorder"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 funscript_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=params["rdp_epsilon"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 if axis == 'primary':
                     funscript_obj.apply_plugin('Threshold Clamp', axis=axis, lower_threshold=params["clamp_lower"], upper_threshold=params["clamp_upper"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
                 funscript_obj.apply_plugin('Amplify', axis=axis, scale_factor=params["scale_factor"], center_value=params["center_value"], start_time_ms=range_start_ms, end_time_ms=range_end_ms)
-                # output_min = params.get("output_min", 0)
-                # output_max = params.get("output_max", 100)
-                # if output_min != 0 or output_max != 100:
-                #     funscript_obj.scale_points_to_range(axis, output_min, output_max, range_start_ms, range_end_ms)
 
-
-            timeline_num = 1 if axis == 'primary' else 2
             self._finalize_action_and_update_ui(timeline_num, op_desc)
 
         # --- Final RDP Pass to Seam Chapters ---
@@ -1653,13 +1696,9 @@ class AppFunscriptProcessor:
             self.logger.info(f"Applying final RDP pass with epsilon={final_rdp_epsilon} to seam chapter joints.")
 
             final_op_desc = op_desc + " + Final RDP"
-            for axis in ['primary', 'secondary']:
-                if getattr(funscript_obj, f"{axis}_actions", []):
-                    funscript_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=final_rdp_epsilon, start_time_ms=None, end_time_ms=None, selected_indices=None)
-            if funscript_obj.primary_actions:
-                self._finalize_action_and_update_ui(1, final_op_desc)
-            if funscript_obj.secondary_actions:
-                self._finalize_action_and_update_ui(2, final_op_desc)
+            for axis, timeline_num in axes_to_process:
+                funscript_obj.apply_plugin('Simplify (RDP)', axis=axis, epsilon=final_rdp_epsilon, start_time_ms=None, end_time_ms=None, selected_indices=None)
+                self._finalize_action_and_update_ui(timeline_num, final_op_desc)
 
         self.logger.info("--- Context-Aware Post-Processing Finished ---")
         self.app.set_status_message("Post-processing applied.", duration=5.0)
@@ -1694,9 +1733,12 @@ class AppFunscriptProcessor:
         # Create a list of timeline UI instances to process, ensuring they are visible
         timelines_to_process = []
         for timeline_num in timelines_to_process_nums:
-            is_visible_flag_name = f"show_funscript_interactive_timeline{'' if timeline_num == 1 else '2'}"
+            is_visible_flag_name = f"show_funscript_interactive_timeline{'' if timeline_num == 1 else str(timeline_num)}"
             is_visible = getattr(self.app.app_state_ui, is_visible_flag_name, False)
-            ui_instance = getattr(self.app.gui_instance, f"timeline_editor{timeline_num}", None)
+            if timeline_num <= 2:
+                ui_instance = getattr(self.app.gui_instance, f"timeline_editor{timeline_num}", None)
+            else:
+                ui_instance = self.app.gui_instance._extra_timeline_editors.get(timeline_num) if self.app.gui_instance else None
             if is_visible and ui_instance:
                 timelines_to_process.append({"num": timeline_num, "ui_instance": ui_instance})
 
@@ -1719,7 +1761,7 @@ class AppFunscriptProcessor:
             if not funscript_obj or not axis_name:
                 continue
 
-            actions_list = getattr(funscript_obj, f"{axis_name}_actions", [])
+            actions_list = funscript_obj.get_axis_actions(axis_name)
 
             # Clear previous selection on this timeline
             timeline_ui.multi_selected_action_indices.clear()

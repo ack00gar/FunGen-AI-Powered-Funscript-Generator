@@ -37,11 +37,13 @@ class TrackerMetadata:
                  tags: Optional[List[str]] = None,
                  requires_roi: bool = False,
                  supports_dual_axis: bool = True,
+                 primary_axis: str = "stroke",
+                 secondary_axis: str = "roll",
                  stages: Optional[List[StageDefinition]] = None,
                  properties: Optional[Dict[str, Any]] = None):
         """
         Initialize tracker metadata.
-        
+
         Args:
             name: Internal identifier (must be unique)
             display_name: Human-readable name for UI display
@@ -52,6 +54,8 @@ class TrackerMetadata:
             tags: Optional list of tags for filtering/search
             requires_roi: Whether tracker needs ROI selection
             supports_dual_axis: Whether tracker supports dual-axis output
+            primary_axis: Semantic axis name for timeline 1 output (e.g. "stroke")
+            secondary_axis: Semantic axis name for timeline 2 output (e.g. "roll")
             stages: List of processing stages this tracker uses
             properties: Dictionary of tracker-specific properties/capabilities
         """
@@ -64,6 +68,8 @@ class TrackerMetadata:
         self.tags = tags or []
         self.requires_roi = requires_roi
         self.supports_dual_axis = supports_dual_axis
+        self.primary_axis = primary_axis
+        self.secondary_axis = secondary_axis
         self.stages = stages or []
         self.properties = properties or {}
         

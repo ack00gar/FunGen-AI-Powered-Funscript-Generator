@@ -277,9 +277,13 @@ class ProjectManager:
         stage_proc_data = self.app.stage_processor.get_project_save_data()
 
         primary_actions, secondary_actions = [], []
+        funscript_data_dict = None
         if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
+            funscript_obj = self.app.processor.tracker.funscript
             primary_actions = self.app.funscript_processor.get_actions('primary')  # Get copies
             secondary_actions = self.app.funscript_processor.get_actions('secondary')
+            # New canonical format: serialize all axes including T3+ and axis assignments
+            funscript_data_dict = funscript_obj.to_dict()
 
         project_data = {
             # File Manager Data
@@ -290,7 +294,9 @@ class ProjectManager:
             "stage2_overlay_msgpack_path": stage_proc_data.get("stage2_overlay_msgpack_path"),
             "stage2_database_path": stage_proc_data.get("stage2_database_path"),
 
-            # Funscript Data
+            # Funscript Data — new canonical format (all axes + assignments)
+            "funscript_data": funscript_data_dict,
+            # Legacy keys kept for backward compat with older FunGen versions
             "funscript_actions_timeline1": primary_actions,
             "funscript_actions_timeline2": secondary_actions,
             "video_chapters": fs_proc_data.get("video_chapters", []),
@@ -363,10 +369,37 @@ class ProjectManager:
 
         # Data for FunscriptProcessor
         fs_proc = self.app.funscript_processor
-        t1_actions = project_data.get("funscript_actions_timeline1", [])
-        fs_proc.clear_timeline_history_and_set_new_baseline(1, t1_actions, "Project Loaded (T1)")
-        t2_actions = project_data.get("funscript_actions_timeline2", [])
-        fs_proc.clear_timeline_history_and_set_new_baseline(2, t2_actions, "Project Loaded (T2)")
+        funscript_data = project_data.get("funscript_data")
+
+        if funscript_data and isinstance(funscript_data, dict) and "axes" in funscript_data:
+            # New canonical format — restore all axes including T3+ and axis assignments
+            axes = funscript_data.get("axes", {})
+            t1_actions = axes.get("primary", [])
+            fs_proc.clear_timeline_history_and_set_new_baseline(1, t1_actions, "Project Loaded (T1)")
+            t2_actions = axes.get("secondary", [])
+            fs_proc.clear_timeline_history_and_set_new_baseline(2, t2_actions, "Project Loaded (T2)")
+
+            # Restore additional axes (T3+)
+            funscript_obj = None
+            if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
+                funscript_obj = self.app.processor.tracker.funscript
+            if funscript_obj:
+                for axis_name, actions in axes.items():
+                    if axis_name not in ("primary", "secondary"):
+                        funscript_obj.ensure_axis(axis_name)
+                        live_list = funscript_obj.get_axis_actions(axis_name)
+                        live_list.clear()
+                        live_list.extend([a.copy() for a in actions])
+                # Restore axis assignments
+                raw_assignments = funscript_data.get("axis_assignments", {})
+                if raw_assignments:
+                    funscript_obj._axis_assignments = {int(k): v for k, v in raw_assignments.items()}
+        else:
+            # Legacy format — only T1 and T2
+            t1_actions = project_data.get("funscript_actions_timeline1", [])
+            fs_proc.clear_timeline_history_and_set_new_baseline(1, t1_actions, "Project Loaded (T1)")
+            t2_actions = project_data.get("funscript_actions_timeline2", [])
+            fs_proc.clear_timeline_history_and_set_new_baseline(2, t2_actions, "Project Loaded (T2)")
 
         fs_proc.update_project_specific_settings(project_data)  # Handles chapters, scripting range
 

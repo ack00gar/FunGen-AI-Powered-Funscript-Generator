@@ -164,7 +164,9 @@ class HybridIntelligenceTracker(BaseTracker):
             author="VR Funscript AI Generator",
             tags=["hybrid", "intelligent", "multi-modal", "frame-diff", "optical-flow", "yolo", "oscillation"],
             requires_roi=False,
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:
@@ -185,8 +187,8 @@ class HybridIntelligenceTracker(BaseTracker):
             elif hasattr(self.app, 'funscript') and self.app.funscript:
                 self.funscript = self.app.funscript
             else:
-                from funscript.dual_axis_funscript import DualAxisFunscript
-                self.funscript = DualAxisFunscript(logger=self.logger)
+                from funscript.multi_axis_funscript import MultiAxisFunscript
+                self.funscript = MultiAxisFunscript(logger=self.logger)
                 self.logger.info("Created local funscript instance for Hybrid Intelligence")
             
             # Visual settings

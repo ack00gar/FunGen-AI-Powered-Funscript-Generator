@@ -1,0 +1,6 @@
+"""Shared constants for multi-timeline support."""
+
+EXTRA_TIMELINE_START = 3
+EXTRA_TIMELINE_END = 9  # exclusive
+EXTRA_TIMELINE_RANGE = range(EXTRA_TIMELINE_START, EXTRA_TIMELINE_END)
+MAX_TIMELINES = 8

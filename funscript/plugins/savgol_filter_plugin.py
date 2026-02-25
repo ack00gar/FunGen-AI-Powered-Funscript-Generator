@@ -98,7 +98,7 @@ class SavgolFilterPlugin(FunscriptTransformationPlugin):
         
         return start_idx, end_idx
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Apply Savitzky-Golay filter to the specified axis."""
         if not SCIPY_AVAILABLE:
             raise RuntimeError("scipy is required for Savitzky-Golay filter but is not available")
