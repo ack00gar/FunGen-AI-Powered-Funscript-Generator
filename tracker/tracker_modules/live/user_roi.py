@@ -114,7 +114,9 @@ class UserRoiTracker(BaseTracker):
             author="User ROI System",
             tags=["manual", "roi", "optical-flow", "fixed", "user-defined"],
             requires_roi=True,  # ROI must be manually set by user
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:

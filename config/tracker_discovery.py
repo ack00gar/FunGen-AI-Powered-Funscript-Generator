@@ -36,6 +36,8 @@ class TrackerDisplayInfo:
     supports_batch: bool = True
     supports_realtime: bool = False
     supports_dual_axis: bool = True
+    primary_axis: str = "stroke"
+    secondary_axis: str = "roll"
     stages: List = field(default_factory=list)  # List of StageDefinition objects
     properties: Dict[str, Any] = field(default_factory=dict)  # Tracker properties/capabilities
     folder_name: str = ""  # Source folder name for prefixing (live, offline, experimental, community)
@@ -124,6 +126,8 @@ class DynamicTrackerDiscovery:
             supports_batch=supports_batch,
             supports_realtime=supports_realtime,
             supports_dual_axis=metadata.supports_dual_axis,
+            primary_axis=getattr(metadata, 'primary_axis', 'stroke'),
+            secondary_axis=getattr(metadata, 'secondary_axis', 'roll'),
             stages=stages,
             properties=properties,
             folder_name=folder_name

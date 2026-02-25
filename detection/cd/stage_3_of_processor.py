@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from multiprocessing import Process, Queue, Event, Value
 from queue import Empty
 
-from funscript import DualAxisFunscript
+from funscript import MultiAxisFunscript
 from video import VideoProcessor
 from detection.cd.data_structures import Segment, FrameObject
 from config import constants
@@ -157,11 +157,10 @@ def stage3_worker_proc(
                 return  # Exit worker process
         else:
             # Try experimental modes first, fallback to legacy
-            if not roi_tracker_instance.set_tracking_mode("oscillation_experimental_2"):
-                if not roi_tracker_instance.set_tracking_mode("oscillation_experimental"):
-                    if not roi_tracker_instance.set_tracking_mode("oscillation_legacy"):
-                        worker_logger.error("Failed to set any oscillation detector mode")
-                        return  # Exit worker process
+            if not roi_tracker_instance.set_tracking_mode("oscillation"):
+                if not roi_tracker_instance.set_tracking_mode("oscillation_legacy"):
+                    worker_logger.error("Failed to set any oscillation detector mode")
+                    return  # Exit worker process
         roi_tracker_instance.oscillation_grid_size = tracker_config.get('oscillation_grid_size', 20)
         roi_tracker_instance.oscillation_sensitivity = tracker_config.get('oscillation_sensitivity', 1.0)
         
@@ -236,7 +235,7 @@ def stage3_worker_proc(
                 )
 
             # Initialize funscript for oscillation detector
-            roi_tracker_instance.funscript = DualAxisFunscript(logger=worker_logger)
+            roi_tracker_instance.funscript = MultiAxisFunscript(logger=worker_logger)
             roi_tracker_instance.start_tracking()
             roi_tracker_instance.main_interaction_class = getattr(segment_obj, 'position_short_name', None) or getattr(segment_obj, 'major_position', None) or getattr(segment_obj, 'position_long_name', 'Unknown')
 
@@ -369,7 +368,7 @@ def perform_stage3_analysis(
     if not use_sqlite and not s2_frame_objects_map:
         logger.error("No data source available: neither SQLite nor in-memory frame objects map")
         # Create empty funscript with chapters for consistency
-        empty_funscript = DualAxisFunscript()
+        empty_funscript = MultiAxisFunscript()
         video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
         empty_funscript.set_chapters_from_segments(atr_segments_list, video_fps)
         return {"success": False, "funscript": empty_funscript, "error": "No data source available", "video_segments": [seg.to_dict() if hasattr(seg, 'to_dict') else seg.__dict__ for seg in atr_segments_list]}
@@ -393,7 +392,7 @@ def perform_stage3_analysis(
     if not relevant_segments:
         logger.info("No relevant segments to process in Stage 3.")
         # Create empty funscript with chapters for consistency
-        empty_funscript = DualAxisFunscript()
+        empty_funscript = MultiAxisFunscript()
         video_fps = common_app_config.get('video_fps', 30.0) if common_app_config else 30.0
         empty_funscript.set_chapters_from_segments(atr_segments_list, video_fps)
         return {"success": True, "funscript": empty_funscript, "total_frames_processed": 0, "processing_method": "optical_flow", "video_segments": [seg.to_dict() if hasattr(seg, 'to_dict') else seg.__dict__ for seg in atr_segments_list]}
@@ -574,7 +573,7 @@ def perform_stage3_analysis(
             logger.warning(f"Failed to clean up SQLite database: {e}")
 
     # Create funscript object
-    funscript_obj = DualAxisFunscript(logger=logger)
+    funscript_obj = MultiAxisFunscript(logger=logger)
     
     # Add actions to funscript object
     for action in all_primary_actions:

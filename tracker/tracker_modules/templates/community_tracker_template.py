@@ -67,7 +67,9 @@ class CommunityExampleTracker(BaseTracker):
             author="Community Template",
             tags=["motion", "template", "example"],
             requires_roi=False,  # ROI is optional but supported
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:

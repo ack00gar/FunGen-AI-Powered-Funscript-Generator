@@ -205,6 +205,28 @@ class DarkTheme:
     # SECONDARY buttons (default/neutral actions: Browse, Edit, Cancel, etc.)
     # These use ImGui's default button colors (no custom styling needed)
 
+    # Card UI Colors
+    CARD_PRIMARY_BG = (0.16, 0.18, 0.22, 1.0)
+    CARD_SECONDARY_BG = (0.13, 0.14, 0.16, 0.6)
+    CARD_INLINE_BG = (0.14, 0.15, 0.18, 0.3)
+
+    # Workflow Breadcrumb Colors
+    BREADCRUMB_DONE = (0.2, 0.7, 0.3, 1.0)
+    BREADCRUMB_ACTIVE = (0.3, 0.5, 0.9, 1.0)
+    BREADCRUMB_FUTURE = (0.3, 0.3, 0.3, 0.6)
+    BREADCRUMB_CONNECTOR = (0.4, 0.4, 0.4, 0.5)
+
+    # Sidebar Navigation Colors
+    SIDEBAR_BG = (0.1, 0.1, 0.12, 1.0)
+    SIDEBAR_ACTIVE_ACCENT = (0.3, 0.5, 0.9, 1.0)
+    SIDEBAR_HOVER_BG = (0.2, 0.22, 0.26, 1.0)
+    SIDEBAR_LOCKED_ALPHA = 0.4
+
+    # Status Strip Colors
+    STATUS_STRIP_BG = (0.1, 0.1, 0.12, 1.0)
+    STATUS_STRIP_TEXT = (0.7, 0.7, 0.7, 1.0)
+    STATUS_STRIP_ACCENT = (0.3, 0.5, 0.9, 1.0)
+
 
 # Current theme (default to dark)
 CurrentTheme = DarkTheme

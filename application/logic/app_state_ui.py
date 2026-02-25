@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Tuple, Optional
 from config.constants import ProcessingSpeedMode, DEFAULT_TRACKER_NAME
+from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 
 
 class AppStateUI:
@@ -53,6 +54,10 @@ class AppStateUI:
         self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", False))
         self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline", defaults.get("show_funscript_interactive_timeline", True))
         self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2", defaults.get("show_funscript_interactive_timeline2", False))
+        # Extra timeline visibility (supporter feature, default False)
+        for _t_num in EXTRA_TIMELINE_RANGE:
+            _attr = f"show_funscript_interactive_timeline{_t_num}"
+            setattr(self, _attr, self.app_settings.get(_attr, defaults.get(_attr, False)))
         self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", defaults.get("show_stage2_overlay", True))
         self.show_timeline_editor_buttons = self.app_settings.get("show_timeline_editor_buttons", defaults.get("show_timeline_editor_buttons", False))
         self.show_advanced_options = self.app_settings.get("show_advanced_options", defaults.get("show_advanced_options", False))
@@ -373,6 +378,9 @@ class AppStateUI:
 
         self.show_funscript_interactive_timeline = self.app_settings.get("show_funscript_interactive_timeline", defaults.get("show_funscript_interactive_timeline", self.show_funscript_interactive_timeline))
         self.show_funscript_interactive_timeline2 = self.app_settings.get("show_funscript_interactive_timeline2", defaults.get("show_funscript_interactive_timeline2", self.show_funscript_interactive_timeline2))
+        for _t_num in EXTRA_TIMELINE_RANGE:
+            _attr = f"show_funscript_interactive_timeline{_t_num}"
+            setattr(self, _attr, self.app_settings.get(_attr, defaults.get(_attr, getattr(self, _attr, False))))
         self.show_funscript_timeline = self.app_settings.get("show_funscript_timeline", defaults.get("show_funscript_timeline", self.show_funscript_timeline))
         self.show_heatmap = self.app_settings.get("show_heatmap", defaults.get("show_heatmap", self.show_heatmap))
         self.show_stage2_overlay = self.app_settings.get("show_stage2_overlay", defaults.get("show_stage2_overlay", self.show_stage2_overlay))
@@ -449,6 +457,9 @@ class AppStateUI:
             self.timeline_zoom_factor_ms_per_px = project_data.get("timeline_zoom_factor_ms_per_px", self.timeline_zoom_factor_ms_per_px)
             self.show_funscript_interactive_timeline = project_data.get("show_funscript_interactive_timeline", self.show_funscript_interactive_timeline)
             self.show_funscript_interactive_timeline2 = project_data.get("show_funscript_interactive_timeline2", self.show_funscript_interactive_timeline2)
+            for _t_num in EXTRA_TIMELINE_RANGE:
+                _attr = f"show_funscript_interactive_timeline{_t_num}"
+                setattr(self, _attr, project_data.get(_attr, getattr(self, _attr, False)))
             self.show_lr_dial_graph = project_data.get("show_lr_dial_graph", self.show_lr_dial_graph)
             self.show_heatmap = project_data.get("show_heatmap", self.show_heatmap)
             self.show_gauge_window_timeline1 = project_data.get("show_gauge_window_timeline1",
@@ -477,6 +488,9 @@ class AppStateUI:
 
         self.app_settings.set("show_funscript_interactive_timeline", self.show_funscript_interactive_timeline)
         self.app_settings.set("show_funscript_interactive_timeline2", self.show_funscript_interactive_timeline2)
+        for _t_num in EXTRA_TIMELINE_RANGE:
+            _attr = f"show_funscript_interactive_timeline{_t_num}"
+            self.app_settings.set(_attr, getattr(self, _attr, False))
         self.app_settings.set("show_funscript_timeline", self.show_funscript_timeline)  # Legacy
         self.app_settings.set("show_heatmap", self.show_heatmap)
         self.app_settings.set("show_stage2_overlay", self.show_stage2_overlay)

@@ -84,7 +84,7 @@ class AutotunePlugin(FunscriptTransformationPlugin):
     def requires_scipy(self) -> bool:
         return True
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Apply auto-tuned SG filter to the specified axis."""
         if not SCIPY_AVAILABLE:
             raise RuntimeError("scipy is required for auto-tune but is not available")

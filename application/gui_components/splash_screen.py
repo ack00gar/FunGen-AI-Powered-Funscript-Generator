@@ -909,8 +909,9 @@ class StandaloneSplashWindow:
             if current_time > 0.3 and self.quality_level > 0.3:  # Start lasers after fade-in
                 self._render_enhanced_laser_eyes(logo_x, logo_y + float_offset, logo_size, current_time - 0.3)
 
-            # "Loading FunGen..." text below the logo
+            # "Loading FunGen..." text and version below the logo
             if current_time > 0.3:  # Show after fade-in
+                from config.constants import APP_VERSION
                 loading_text = "Loading FunGen..."
 
                 # Use draw list for manual positioning
@@ -949,8 +950,23 @@ class StandaloneSplashWindow:
                 text_color = imgui.get_color_u32_rgba(0.0, 0.95, 1.0, 0.95 * fade_alpha * text_pulse)
                 draw_list_text.add_text(text_x, text_y, text_color, loading_text)
 
+                # Version string (big, centered, below loading text)
+                version_text = f"v{APP_VERSION}"
+                ver_size = imgui.calc_text_size(version_text)
+                ver_x = (window_width - ver_size[0]) / 2
+                ver_y = text_y + text_size[1] + 8
+                # Subtle glow behind version
+                for i in range(3, 0, -1):
+                    g_off = i * 2
+                    g_alpha = (0.25 * fade_alpha) / i
+                    g_col = imgui.get_color_u32_rgba(0.0, 0.83, 1.0, g_alpha)
+                    draw_list_text.add_text(ver_x - g_off, ver_y, g_col, version_text)
+                    draw_list_text.add_text(ver_x + g_off, ver_y, g_col, version_text)
+                ver_col = imgui.get_color_u32_rgba(0.7, 0.85, 1.0, 0.85 * fade_alpha)
+                draw_list_text.add_text(ver_x, ver_y, ver_col, version_text)
+
                 # Add FunScript timeline visualization below the loading text
-                timeline_y = text_y + 40  # Position below the loading text
+                timeline_y = text_y + 55  # Position below the version text
                 self._render_funscript_timeline(draw_list_text, window_width, timeline_y, current_time, fade_alpha)
 
         imgui.end()

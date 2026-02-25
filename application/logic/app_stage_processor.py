@@ -1330,8 +1330,8 @@ class AppStageProcessor:
                 
                 # Create funscript object from loaded segments for consistency with unified architecture
                 try:
-                    from funscript.dual_axis_funscript import DualAxisFunscript
-                    funscript_obj = DualAxisFunscript()
+                    from funscript.multi_axis_funscript import MultiAxisFunscript
+                    funscript_obj = MultiAxisFunscript()
                     
                     # Get FPS from app processor
                     fps = 30.0  # Default fallback

@@ -7,8 +7,8 @@ Sections (each with a label above the icons):
 - MODE: Expert/Simple mode toggle (🤓 nerd face)
 - PROJECT: New, Open, Save, Export operations
 - PLAYBACK: Play/Pause, Previous/Next Frame, Speed modes (🚶🐢🐇)
-- TIMELINE EDIT: Undo/Redo for Timeline 1 & 2
-- VIEW: Timeline 1/2 (1️⃣2️⃣), Chapter List (📚), 3D Simulator (📈)
+- TIMELINE EDIT: Axis dropdown + contextual Undo/Redo/Autotune
+- VIEW: Chapter List (📚), 3D Simulator (📈)
 - TRACKING: Start/Stop Tracking (🤖 robot - red when active)
 - TOOLS: Auto-Simplify (🔧), Auto Post-Processing (✨), Ultimate Autotune (🚀),
          Streamer (📡 satellite - buyers only), Device Control (🎮 gamepad - buyers only)
@@ -25,6 +25,7 @@ Displays at the top of the application, below the menu bar.
 import imgui
 from application.utils import get_icon_texture_manager
 from application.utils.button_styles import primary_button_style, destructive_button_style
+from application.utils.feature_detection import is_feature_available as _is_feature_available
 
 
 class ToolbarUI:
@@ -36,6 +37,7 @@ class ToolbarUI:
         self._button_padding = 4
         self._label_height = 14  # Height for section labels
         self._label_spacing = 2  # Space between label and buttons
+        self._selected_edit_timeline = 1
 
     def get_toolbar_height(self):
         """Get the total height of the toolbar including labels.
@@ -81,6 +83,10 @@ class ToolbarUI:
         """Render the toolbar below the menu bar."""
         app = self.app
         app_state = app.app_state_ui
+
+        # Cache feature detection flags for this frame
+        self._feat_streamer = _is_feature_available("streamer")
+        self._feat_device = _is_feature_available("device_control")
 
         # Check if toolbar should be shown
         if not hasattr(app_state, 'show_toolbar'):
@@ -188,12 +194,8 @@ class ToolbarUI:
         # Check if any optional features exist by calling _check_features_available()
         # This method is defined in _render_features_section and checks dynamically
         # The actual rendering happens inside _render_features_section
-        from application.utils.feature_detection import is_feature_available
-
         # Quick check for any known optional features
-        # Each feature module handles its own availability check
-        has_any_optional_features = (is_feature_available("streamer") or
-                                     is_feature_available("device_control"))
+        has_any_optional_features = (self._feat_streamer or self._feat_device)
 
         if has_any_optional_features:
             imgui.same_line(spacing=12)
@@ -358,125 +360,80 @@ class ToolbarUI:
             imgui.end_popup()
 
     def _render_edit_section(self, icon_mgr, btn_size):
-        """Render timeline sections (toggle + undo/redo + ultimate autotune for each timeline)."""
+        """Render axis dropdown + contextual Undo/Redo/Autotune."""
         app = self.app
-        app_state = self.app.app_state_ui
         fs_proc = app.funscript_processor
         has_video = app.processor and app.processor.is_video_open() if app.processor else False
 
-        # Check if timelines are active
-        t1_active = app_state.show_funscript_interactive_timeline if hasattr(app_state, 'show_funscript_interactive_timeline') else True
-        t2_active = app_state.show_funscript_interactive_timeline2 if hasattr(app_state, 'show_funscript_interactive_timeline2') else False
+        # --- Axis dropdown ---
+        # Get axis assignments: {timeline_num: axis_name}
+        assignments = {}
+        if hasattr(app, 'tracker') and app.tracker and hasattr(app.tracker, 'funscript'):
+            try:
+                assignments = app.tracker.funscript.get_axis_assignments()
+            except Exception:
+                pass
+        if not assignments:
+            assignments = {1: "stroke"}
 
-        rendered_t1 = False
-        rendered_t2 = False
+        # Build sorted list of (timeline_num, label) pairs
+        axis_items = []
+        for tl_num in sorted(assignments):
+            axis_name = assignments[tl_num].capitalize()
+            axis_items.append((tl_num, f"{axis_name} (T{tl_num})"))
 
-        # === TIMELINE 1 SECTION ===
-        # Timeline 1 Toggle - Keycap 1 emoji
-        if self._toolbar_toggle_button(icon_mgr, 'keycap-1.png', btn_size, "Toggle Timeline 1", t1_active):
-            app_state.show_funscript_interactive_timeline = not t1_active
-            self.app.project_manager.project_dirty = True
-            t1_active = not t1_active  # Update for this render cycle
+        # Ensure selected timeline is valid
+        valid_tls = [item[0] for item in axis_items]
+        if self._selected_edit_timeline not in valid_tls:
+            self._selected_edit_timeline = valid_tls[0]
 
-        # Only show T1 action buttons if timeline is active
-        if t1_active:
-            imgui.same_line()
+        # Find current index
+        current_idx = valid_tls.index(self._selected_edit_timeline)
+        labels = [item[1] for item in axis_items]
 
-            # Undo Timeline 1
-            undo1 = fs_proc._get_undo_manager(1) if fs_proc else None
-            can_undo1 = undo1.can_undo() if undo1 else False
+        imgui.push_item_width(120)
+        changed, new_idx = imgui.combo("##EditAxisCombo", current_idx, labels)
+        imgui.pop_item_width()
+        if changed:
+            self._selected_edit_timeline = valid_tls[new_idx]
 
-            if can_undo1:
-                if self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T1"):
-                    fs_proc.perform_undo_redo(1, "undo")
-            else:
-                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-                self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T1 (Nothing to undo)")
-                imgui.pop_style_var()
+        selected_tl = self._selected_edit_timeline
 
-            imgui.same_line()
+        imgui.same_line(spacing=8)
 
-            # Redo Timeline 1
-            can_redo1 = undo1.can_redo() if undo1 else False
+        # --- Undo/Redo for selected timeline ---
+        undo_mgr = fs_proc._get_undo_manager(selected_tl) if fs_proc else None
+        can_undo = undo_mgr.can_undo() if undo_mgr else False
+        can_redo = undo_mgr.can_redo() if undo_mgr else False
 
-            if can_redo1:
-                if self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T1"):
-                    fs_proc.perform_undo_redo(1, "redo")
-            else:
-                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-                self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T1 (Nothing to redo)")
-                imgui.pop_style_var()
-
-            imgui.same_line()
-
-            # Ultimate Autotune Timeline 1 - Magic wand emoji (🪄)
-            if has_video:
-                if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (Timeline 1)"):
-                    app.trigger_ultimate_autotune_with_defaults(timeline_num=1)
-            else:
-                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-                self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune T1 (No video)")
-                imgui.pop_style_var()
-
-            rendered_t1 = True
-
-        # Position T2 section - put on new line if T1 rendered buttons (to avoid overflow)
-        if rendered_t1:
-            # T1 has buttons, put T2 on new line to ensure visibility
-            # (optional: could add imgui.spacing() here for vertical gap)
-            pass
+        if can_undo:
+            if self._toolbar_button(icon_mgr, 'undo.png', btn_size, f"Undo (T{selected_tl})"):
+                fs_proc.perform_undo_redo(selected_tl, "undo")
         else:
-            # T1 not active, T2 can be on same line as T1 toggle
-            imgui.same_line(spacing=12)
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+            self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo (Nothing to undo)")
+            imgui.pop_style_var()
 
-        # === TIMELINE 2 SECTION ===
-        # Timeline 2 Toggle - Keycap 2 emoji
-        if self._toolbar_toggle_button(icon_mgr, 'keycap-2.png', btn_size, "Toggle Timeline 2", t2_active):
-            app_state.show_funscript_interactive_timeline2 = not t2_active
-            self.app.project_manager.project_dirty = True
-            t2_active = not t2_active  # Update for this render cycle
+        imgui.same_line()
 
-        # Only show T2 action buttons if timeline is active
-        if t2_active:
-            imgui.same_line()
+        if can_redo:
+            if self._toolbar_button(icon_mgr, 'redo.png', btn_size, f"Redo (T{selected_tl})"):
+                fs_proc.perform_undo_redo(selected_tl, "redo")
+        else:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+            self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo (Nothing to redo)")
+            imgui.pop_style_var()
 
-            # Undo Timeline 2
-            undo2 = fs_proc._get_undo_manager(2) if fs_proc else None
-            can_undo2 = undo2.can_undo() if undo2 else False
+        imgui.same_line(spacing=8)
 
-            if can_undo2:
-                if self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T2"):
-                    fs_proc.perform_undo_redo(2, "undo")
-            else:
-                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-                self._toolbar_button(icon_mgr, 'undo.png', btn_size, "Undo T2 (Nothing to undo)")
-                imgui.pop_style_var()
-
-            imgui.same_line()
-
-            # Redo Timeline 2
-            can_redo2 = undo2.can_redo() if undo2 else False
-
-            if can_redo2:
-                if self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T2"):
-                    fs_proc.perform_undo_redo(2, "redo")
-            else:
-                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-                self._toolbar_button(icon_mgr, 'redo.png', btn_size, "Redo T2 (Nothing to redo)")
-                imgui.pop_style_var()
-
-            imgui.same_line()
-
-            # Ultimate Autotune Timeline 2 - Magic wand emoji (🪄)
-            if has_video:
-                if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (Timeline 2)"):
-                    app.trigger_ultimate_autotune_with_defaults(timeline_num=2)
-            else:
-                imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
-                self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune T2 (No video)")
-                imgui.pop_style_var()
-
-            rendered_t2 = True
+        # --- Autotune for selected timeline ---
+        if has_video:
+            if self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, f"Ultimate Autotune (T{selected_tl})"):
+                app.trigger_ultimate_autotune_with_defaults(timeline_num=selected_tl)
+        else:
+            imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
+            self._toolbar_button(icon_mgr, 'magic-wand.png', btn_size, "Ultimate Autotune (No video)")
+            imgui.pop_style_var()
 
     def _render_playback_section(self, icon_mgr, btn_size):
         """Render playback control buttons."""
@@ -713,10 +670,9 @@ class ToolbarUI:
         app = self.app
         rendered_any = False
 
-        # Check for Streamer module (supporter feature)
-        from application.utils.feature_detection import is_feature_available
-        has_streamer = is_feature_available("streamer")
-        has_device_control = is_feature_available("device_control")
+        # Check for optional feature modules (supporter features)
+        has_streamer = self._feat_streamer
+        has_device_control = self._feat_device
 
         if has_streamer:
             control_panel = self.app.gui_instance.control_panel_ui if hasattr(self.app, 'gui_instance') else None
@@ -943,7 +899,7 @@ class ToolbarUI:
         return rendered_any
 
     def _render_view_section(self, icon_mgr, btn_size):
-        """Render view toggle buttons."""
+        """Render view toggle buttons (chapter list, simulator)."""
         app_state = self.app.app_state_ui
 
         # Chapter List Toggle - Books emoji (📚)

@@ -8,6 +8,7 @@ from .app_event_handlers import AppEventHandlers
 from .app_file_manager import AppFileManager
 from .app_funscript_processor import AppFunscriptProcessor
 from .app_logic import ApplicationLogic
+from .app_roi_manager import AppROIManager
 from .app_stage_processor import AppStageProcessor
 from .app_state_ui import AppStateUI
 from .app_utility import AppUtility

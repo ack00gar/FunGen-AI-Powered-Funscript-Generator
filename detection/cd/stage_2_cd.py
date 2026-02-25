@@ -16,7 +16,7 @@ import tempfile
 
 from video import VideoProcessor
 from config import constants
-from funscript.dual_axis_funscript import DualAxisFunscript
+from funscript.multi_axis_funscript import MultiAxisFunscript
 from application.utils.rts_smoother import RTSSmoother
 from application.utils.stage2_signal_enhancer import Stage2SignalEnhancer
 
@@ -2635,8 +2635,8 @@ def perform_contact_analysis(
     if generate_funscript_actions_arg:
         current_video_fps = video_info_dict.get('fps', 0)
         if current_video_fps > 0 and final_funscript_frames:
-            # Create DualAxisFunscript object
-            funscript_obj = DualAxisFunscript(logger=logger)
+            # Create MultiAxisFunscript object
+            funscript_obj = MultiAxisFunscript(logger=logger)
             
             # Add actions to the funscript object
             for fid, pos_primary, pos_secondary in zip(final_funscript_frames, final_funscript_distances,

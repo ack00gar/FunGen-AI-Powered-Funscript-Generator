@@ -166,12 +166,12 @@ class FunscriptTransformationPlugin(ABC):
         return True
     
     @abstractmethod
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """
         Apply the transformation to the funscript.
         
         Args:
-            funscript: The DualAxisFunscript instance to transform
+            funscript: The MultiAxisFunscript instance to transform
             axis: Which axis to transform ('primary', 'secondary', 'both')
             **parameters: Plugin-specific parameters
         
@@ -188,7 +188,7 @@ class FunscriptTransformationPlugin(ABC):
         Generate a preview of what the transformation would do without applying it.
         
         Args:
-            funscript: The DualAxisFunscript instance
+            funscript: The MultiAxisFunscript instance
             axis: Which axis to preview ('primary', 'secondary', 'both')
             **parameters: Plugin-specific parameters
         

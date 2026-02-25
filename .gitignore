@@ -20,6 +20,10 @@ vr_streaming/
 # Supporter-only features (not included in public release)
 device_control/
 streamer/
+patreon_features/
+patreon_features.zip
+device_control.zip
+streamer.zip
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

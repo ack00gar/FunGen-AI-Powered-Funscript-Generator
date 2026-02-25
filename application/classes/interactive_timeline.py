@@ -13,7 +13,10 @@ from .plugin_ui_manager import PluginUIManager, PluginUIState
 from .plugin_ui_renderer import PluginUIRenderer
 from .plugin_preview_renderer import PluginPreviewRenderer
 from application.utils import _format_time
+from application.utils.feature_detection import is_feature_available as _is_feature_available
+from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 from config.element_group_colors import TimelineColors
+from funscript.axis_registry import FunscriptAxis, AXIS_TCODE
 
 class TimelineTransformer:
     """
@@ -105,6 +108,7 @@ class InteractiveFunscriptTimeline:
             f"timeline{self.timeline_num}_show_ultimate_preview", True)
         self._ultimate_preview_dirty = True
         self.nudge_chapter_only = False  # When True, << >> only affect points in selected chapter
+        self._container_mode = False  # Set by render() when inside scrollable container
 
     # ==================================================================================
     # CORE DATA HELPERS
@@ -119,7 +123,7 @@ class InteractiveFunscriptTimeline:
     def _get_actions(self) -> List[Dict]:
         fs, axis = self._get_target_funscript_details()
         if fs and axis:
-            return getattr(fs, f"{axis}_actions", [])
+            return fs.get_axis_actions(axis)
         return []
 
     def _get_cached_timestamps(self) -> list:
@@ -140,12 +144,15 @@ class InteractiveFunscriptTimeline:
     # MAIN RENDER LOOP
     # ==================================================================================
 
-    def render(self, y_pos: float = 0, height: float = 0, view_mode: str = 'expert'):
+    def render(self, y_pos: float = 0, height: float = 0, view_mode: str = 'expert',
+               container_mode: bool = False):
         app_state = self.app.app_state_ui
-        visibility_attr = f"show_funscript_interactive_timeline{'' if self.timeline_num == 1 else '2'}"
-        
+        visibility_attr = f"show_funscript_interactive_timeline{'' if self.timeline_num == 1 else str(self.timeline_num)}"
+
         if not getattr(app_state, visibility_attr, False):
             return
+
+        self._container_mode = container_mode
 
         # 1. Window Configuration
         is_floating = app_state.ui_layout_mode == "floating"
@@ -153,8 +160,15 @@ class InteractiveFunscriptTimeline:
         # z-order when clicked — dialog/plugin windows stay on top.
         flags = (imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE |
                  imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
-        
-        if not is_floating:
+
+        if container_mode:
+            # Render as a child region inside a scrollable container
+            if height <= 0: return
+            child_flags = imgui.WINDOW_NO_SCROLLBAR | imgui.WINDOW_NO_SCROLL_WITH_MOUSE
+            if not imgui.begin_child(f"##TimelineChild{self.timeline_num}", 0, height, border=True, flags=child_flags):
+                imgui.end_child()
+                return
+        elif not is_floating:
             # Fixed Layout
             if height <= 0: return
             imgui.set_next_window_position(0, y_pos)
@@ -166,7 +180,9 @@ class InteractiveFunscriptTimeline:
         else:
             # Floating Window
             imgui.set_next_window_size(app_state.window_width, 180, condition=imgui.APPEARING)
-            is_open, visible = imgui.begin(f"Interactive Timeline {self.timeline_num}", True, flags)
+            axis_label = self._get_axis_label()
+            window_title = f"T{self.timeline_num}: {axis_label}" if axis_label else f"Interactive Timeline {self.timeline_num}"
+            is_open, visible = imgui.begin(window_title, True, flags)
             setattr(app_state, visibility_attr, visible)
             if not is_open:
                 imgui.end()
@@ -181,7 +197,7 @@ class InteractiveFunscriptTimeline:
         canvas_size = imgui.get_content_region_available()
         
         if canvas_size[0] < 1 or canvas_size[1] < 1:
-            imgui.end()
+            imgui.end_child() if self._container_mode else imgui.end()
             return
 
         # 4. Setup Coordinate Transformer
@@ -235,7 +251,7 @@ class InteractiveFunscriptTimeline:
         # 9. Draw Active/Read-only State Border
         self._draw_state_border(draw_list, canvas_pos, canvas_size, app_state)
 
-        imgui.end()
+        imgui.end_child() if self._container_mode else imgui.end()
 
     # ==================================================================================
     # INPUT HANDLING
@@ -760,33 +776,40 @@ class InteractiveFunscriptTimeline:
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Paste")
         self.invalidate_cache()
 
-    def _handle_swap_timeline(self):
-        other_num = 2 if self.timeline_num == 1 else 1
-        self.app.funscript_processor.swap_timelines(self.timeline_num, other_num)
+    def _handle_swap_timeline(self, target_num=None):
+        if target_num is None:
+            target_num = 2 if self.timeline_num == 1 else 1
+        self.app.funscript_processor.swap_timelines(self.timeline_num, target_num)
 
-    def _handle_copy_to_other(self):
+    def _handle_copy_to_other(self, target_num=None):
         actions = self._get_actions()
         if not self.multi_selected_action_indices: return
-        
-        other_num = 2 if self.timeline_num == 1 else 1
+
+        other_num = target_num if target_num is not None else (2 if self.timeline_num == 1 else 1)
         fs_other, axis_other = self.app.funscript_processor._get_target_funscript_object_and_axis(other_num)
-        
+
         if not fs_other: return
-        
+
         indices = sorted(list(self.multi_selected_action_indices))
         points_to_copy = [actions[i] for i in indices]
-        
-        # Convert format
-        batch = []
-        for p in points_to_copy:
-            batch.append({
-                'timestamp_ms': p['at'],
-                'primary_pos': p['pos'] if axis_other == 'primary' else None,
-                'secondary_pos': p['pos'] if axis_other == 'secondary' else None
-            })
-            
+
         self.app.funscript_processor._record_timeline_action(other_num, f"Copy from T{self.timeline_num}")
-        fs_other.add_actions_batch(batch, is_from_live_tracker=False)
+
+        if axis_other in ('primary', 'secondary'):
+            # Use batch add for built-in axes
+            batch = []
+            for p in points_to_copy:
+                batch.append({
+                    'timestamp_ms': p['at'],
+                    'primary_pos': p['pos'] if axis_other == 'primary' else None,
+                    'secondary_pos': p['pos'] if axis_other == 'secondary' else None
+                })
+            fs_other.add_actions_batch(batch, is_from_live_tracker=False)
+        else:
+            # Use add_action_to_axis for additional axes
+            for p in points_to_copy:
+                fs_other.add_action_to_axis(axis_other, p['at'], p['pos'])
+
         self.app.funscript_processor._finalize_action_and_update_ui(other_num, f"Copy from T{self.timeline_num}")
 
     # --- Selection Filters ---
@@ -929,12 +952,13 @@ class InteractiveFunscriptTimeline:
 
         # 1. Culling: Identify visible slice using cached timestamps
         margin_ms = tf.zoom * 100
-        timestamps = [a['at'] for a in actions]  # local list for non-main curves (preview, etc.)
-        # For main actions, use the funscript's cached timestamp list
+        # For main curves, prefer the funscript's cached timestamp list (avoids O(n) rebuild)
         if not is_preview and not color_override:
-            cached = self._get_cached_timestamps()
-            if cached and len(cached) == len(actions):
-                timestamps = cached
+            timestamps = self._get_cached_timestamps()
+            if not timestamps or len(timestamps) != len(actions):
+                timestamps = [a['at'] for a in actions]
+        else:
+            timestamps = [a['at'] for a in actions]
         s_idx = bisect_left(timestamps, tf.visible_start_ms - margin_ms)
         e_idx = bisect_right(timestamps, tf.visible_end_ms + margin_ms)
         
@@ -1213,35 +1237,63 @@ class InteractiveFunscriptTimeline:
             # Timeline Ops
             imgui.separator()
             other_num = 2 if self.timeline_num == 1 else 1
-            
+
             if imgui.menu_item("Copy Selected to Clipboard")[0]:
                 self._handle_copy_selection()
                 imgui.close_current_popup()
-            
+
             if imgui.menu_item("Paste from Clipboard")[0]:
                 t, v = getattr(self, 'new_point_candidate', (0, 0))
                 self._handle_paste_actions(t)
                 imgui.close_current_popup()
-                
-            if imgui.menu_item(f"Copy Selection to T{other_num}")[0]:
-                self._handle_copy_to_other()
-                imgui.close_current_popup()
-                
-            if imgui.menu_item(f"Swap with T{other_num}")[0]:
-                self._handle_swap_timeline()
-                imgui.close_current_popup()
+
+            # Build list of visible target timelines
+            _copy_swap_targets = []
+            _copy_swap_targets.append(other_num)  # Always include the default other (T1<->T2)
+            app_state = self.app.app_state_ui
+            if _is_feature_available("patreon_features"):
+                for t_num in EXTRA_TIMELINE_RANGE:
+                    if t_num == self.timeline_num:
+                        continue
+                    vis_attr = f"show_funscript_interactive_timeline{t_num}"
+                    if getattr(app_state, vis_attr, False):
+                        _copy_swap_targets.append(t_num)
+
+            if imgui.begin_menu("Copy Selection to..."):
+                for t_num in _copy_swap_targets:
+                    if imgui.menu_item(self._tl_label(t_num))[0]:
+                        self._handle_copy_to_other(t_num)
+                        imgui.close_current_popup()
+                imgui.end_menu()
+            if imgui.begin_menu("Swap with..."):
+                for t_num in _copy_swap_targets:
+                    if imgui.menu_item(self._tl_label(t_num))[0]:
+                        self._handle_swap_timeline(t_num)
+                        imgui.close_current_popup()
+                imgui.end_menu()
                 
             imgui.separator()
-            
+
+            # Axis Assignment submenu
+            if imgui.begin_menu("Assign Axis"):
+                current_axis = self._get_axis_label()
+                for fa in FunscriptAxis:
+                    is_selected = (fa.value == current_axis)
+                    tcode = AXIS_TCODE.get(fa, "")
+                    label = f"{fa.value.capitalize()} ({tcode})" if tcode else fa.value.capitalize()
+                    if imgui.menu_item(label, selected=is_selected)[0]:
+                        self._set_axis_assignment(fa.value)
+                        imgui.close_current_popup()
+                imgui.end_menu()
+
             # Allow plugins to inject menu items via plugin_renderer
             self._render_plugin_selection_menu()
-            
+
             imgui.end_popup()
             
     def _render_plugin_selection_menu(self):
-        # Helper to render selection-specific plugin actions
-        if len(self.multi_selected_action_indices) < 2: return
-        if imgui.begin_menu("Plugins (Selection)"):
+        imgui.separator()
+        if imgui.begin_menu("Run Plugin"):
              fs, axis = self._get_target_funscript_details()
              self.app.funscript_processor # Pass context if needed
              # Render simplified plugin list from manager
@@ -1321,14 +1373,51 @@ class InteractiveFunscriptTimeline:
         self.invalidate_cache()
         self.invalidate_ultimate_preview()
 
+    def _set_axis_assignment(self, axis_name: str):
+        """Assign a semantic axis name to this timeline."""
+        funscript_obj = None
+        # TrackerManager.funscript is always available after app init
+        if self.app and self.app.tracker and hasattr(self.app.tracker, 'funscript'):
+            funscript_obj = self.app.tracker.funscript
+        if funscript_obj and hasattr(funscript_obj, 'assign_axis'):
+            funscript_obj.assign_axis(self.timeline_num, axis_name)
+            self.app.project_manager.project_dirty = True
+            self.app.logger.info(f"T{self.timeline_num} assigned to axis: {axis_name}")
+
+    def _get_axis_label(self) -> str:
+        """Return the semantic axis name for this timeline (e.g. 'stroke', 'roll', 'pitch')."""
+        funscript_obj = None
+        # TrackerManager.funscript is always available after app init
+        if self.app and self.app.tracker and hasattr(self.app.tracker, 'funscript'):
+            funscript_obj = self.app.tracker.funscript
+        if funscript_obj and hasattr(funscript_obj, 'get_axis_for_timeline'):
+            return funscript_obj.get_axis_for_timeline(self.timeline_num)
+        defaults = {1: "stroke", 2: "roll"}
+        return defaults.get(self.timeline_num, f"axis_{self.timeline_num}")
+
+    def _axis_label_for(self, t_num: int) -> str:
+        """Return axis label for any timeline number."""
+        if self.app and self.app.tracker and hasattr(self.app.tracker, 'funscript'):
+            funscript_obj = self.app.tracker.funscript
+            if hasattr(funscript_obj, 'get_axis_for_timeline'):
+                return funscript_obj.get_axis_for_timeline(t_num)
+        defaults = {1: "stroke", 2: "roll"}
+        return defaults.get(t_num, f"axis_{t_num}")
+
+    def _tl_label(self, t_num: int) -> str:
+        """Short timeline label with axis, e.g. 'T1 (stroke)'."""
+        axis = self._axis_label_for(t_num)
+        return f"T{t_num} ({axis})" if axis else f"T{t_num}"
+
     def _get_timeline_status_text(self) -> str:
         """Generate status text showing timeline info (filename, axis, status)."""
         fs, axis = self._get_target_funscript_details()
 
-        # Timeline number
-        parts = [f"Timeline {self.timeline_num}"]
+        # Timeline number with semantic axis name
+        axis_label = self._get_axis_label()
+        parts = [f"T{self.timeline_num}: {axis_label}"]
 
-        # Axis name
+        # Axis name (internal)
         if axis:
             axis_display = axis.capitalize()
             parts.append(axis_display)
@@ -1376,8 +1465,8 @@ class InteractiveFunscriptTimeline:
             if fs:
                 # Create temp lightweight object for non-destructive preview
                 # copy.deepcopy fails on RLock objects in the full Funscript instance
-                from funscript.dual_axis_funscript import DualAxisFunscript
-                temp = DualAxisFunscript()
+                from funscript.multi_axis_funscript import MultiAxisFunscript
+                temp = MultiAxisFunscript()
                 # Manually copy only the necessary data lists
                 import copy
                 temp.primary_actions = copy.deepcopy(fs.primary_actions)

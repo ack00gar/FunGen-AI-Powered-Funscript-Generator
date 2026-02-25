@@ -176,7 +176,9 @@ class YoloRoiTracker(BaseTracker):
             author="YOLO ROI System",
             tags=["yolo", "roi", "object-detection", "optical-flow", "automatic"],
             requires_roi=False,  # ROI is automatically detected
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:
