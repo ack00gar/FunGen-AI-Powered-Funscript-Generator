@@ -4,6 +4,8 @@ import platform
 import imgui
 from config.element_group_colors import MenuColors
 from application.utils import get_logo_texture_manager
+from application.utils.feature_detection import is_feature_available as _is_feature_available
+from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 
 def _center_popup(width, height):
     mv = imgui.get_main_viewport()
@@ -36,7 +38,8 @@ def _radio_line(label, is_selected):
 
 class MainMenu:
     __slots__ = ("app", "gui", "FRAME_OFFSET", "_last_menu_log_time", "_show_about_dialog",
-                 "_kofi_texture_id", "_kofi_width", "_kofi_height", "_is_macos")
+                 "_kofi_texture_id", "_kofi_width", "_kofi_height", "_is_macos",
+                 "_feat_supporter", "_feat_device", "_feat_streamer")
 
     def __init__(self, app_instance, gui_instance=None):
         self.app = app_instance
@@ -50,6 +53,17 @@ class MainMenu:
         self._is_macos = platform.system() == "Darwin"
 
     # ------------------------- HELPER METHODS -------------------------
+
+    def _axis_label_for(self, t_num):
+        """Get axis label for a timeline number."""
+        if self.app.tracker and hasattr(self.app.tracker, 'funscript'):
+            return self.app.tracker.funscript.get_axis_for_timeline(t_num)
+        return ""
+
+    def _tl_label(self, t_num):
+        """Short timeline label with axis, e.g. 'T1 (stroke)'."""
+        axis = self._axis_label_for(t_num)
+        return f"T{t_num} ({axis})" if axis else f"Timeline {t_num}"
 
     def _get_shortcut_display(self, action_name: str) -> str:
         """
@@ -172,9 +186,9 @@ class MainMenu:
 
             ref_num = app_state.timeline_comparison_reference_num
             # Fixed range (1..2)
-            if _radio_line("Timeline 1 is the Reference", ref_num == 1):
+            if _radio_line(f"{self._tl_label(1)} is the Reference", ref_num == 1):
                 app_state.timeline_comparison_reference_num = 1
-            if _radio_line("Timeline 2 is the Reference", ref_num == 2):
+            if _radio_line(f"{self._tl_label(2)} is the Reference", ref_num == 2):
                 app_state.timeline_comparison_reference_num = 2
             imgui.separator()
 
@@ -288,28 +302,6 @@ class MainMenu:
         )
 
         if opened:
-            # Load logo
-            logo_manager = get_logo_texture_manager()
-            logo_texture = logo_manager.get_texture_id()
-            logo_width, logo_height = logo_manager.get_dimensions()
-
-            # Center and display logo
-            if logo_texture and logo_width > 0 and logo_height > 0:
-                # Scale logo to reasonable size (max 150px)
-                max_size = 150
-                if logo_width > logo_height:
-                    display_w = min(logo_width, max_size)
-                    display_h = int(logo_height * (display_w / logo_width))
-                else:
-                    display_h = min(logo_height, max_size)
-                    display_w = int(logo_width * (display_h / logo_height))
-
-                # Center horizontally
-                avail_width = imgui.get_content_region_available_width()
-                imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_width - display_w) * 0.5)
-                imgui.image(logo_texture, display_w, display_h)
-                imgui.spacing()
-
             # App name and version
             app_name = constants.APP_NAME
             app_version = constants.APP_VERSION
@@ -320,7 +312,7 @@ class MainMenu:
             avail_width = imgui.get_content_region_available_width()
             imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_width - text_width) * 0.5)
 
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)  # Nice blue
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
             imgui.text(title_text)
             imgui.pop_style_color()
 
@@ -328,8 +320,10 @@ class MainMenu:
             imgui.separator()
             imgui.spacing()
 
-            # Description
             imgui.text_wrapped("AI-powered funscript generation using computer vision")
+            imgui.spacing()
+
+            imgui.text("Created by k00gar")
             imgui.spacing()
 
             # GitHub link button
@@ -342,57 +336,22 @@ class MainMenu:
 
             imgui.spacing()
 
-            # Ko-fi support section with image button
-            kofi_texture = self._load_kofi_texture()
-            if kofi_texture and self._kofi_width > 0 and self._kofi_height > 0:
-                # Scale to dialog width
-                avail_width = imgui.get_content_region_available_width()
-                scale = avail_width / self._kofi_width
-                display_w = avail_width
-                display_h = int(self._kofi_height * scale)
-
-                # Image button with no background/border for clean appearance
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.0, 0.0, 0.0, 0.0)
-                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.0, 0.0, 0.0, 0.1)
-                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.0, 0.0, 0.0, 0.2)
-
-                if imgui.image_button(kofi_texture, display_w, display_h):
-                    try:
-                        webbrowser.open("https://ko-fi.com/k00gar")
-                    except Exception as e:
-                        if hasattr(self.app, 'logger') and self.app.logger:
-                            self.app.logger.warning(f"Could not open Ko-fi link: {e}")
-
-                imgui.pop_style_color(3)
-
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Support development and unlock device control!\n"
-                        "• Hardware device integration (Handy, OSR2, etc.)\n"
-                        "• Live tracking with device control\n"
-                        "• Synchronized playback"
-                    )
-            else:
-                # Fallback to text button if image fails to load
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)
-                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
-                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.6, 0.15, 1.0)
-
-                if imgui.button("Support on Ko-fi", width=-1):
-                    try:
-                        webbrowser.open("https://ko-fi.com/k00gar")
-                    except Exception as e:
-                        if hasattr(self.app, 'logger') and self.app.logger:
-                            self.app.logger.warning(f"Could not open Ko-fi link: {e}")
-
-                imgui.pop_style_color(3)
+            # Donate button
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.7, 0.2, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.3, 0.8, 0.3, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.15, 0.6, 0.15, 1.0)
+            if imgui.button("Donate on Ko-fi", width=-1):
+                try:
+                    webbrowser.open("https://ko-fi.com/k00gar")
+                except Exception as e:
+                    if hasattr(self.app, 'logger') and self.app.logger:
+                        self.app.logger.warning(f"Could not open Ko-fi link: {e}")
+            imgui.pop_style_color(3)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Donate, become a supporter, unlock features!")
 
             imgui.spacing()
             imgui.separator()
-            imgui.spacing()
-
-            # Credits
-            imgui.text("Created by k00gar")
             imgui.spacing()
 
             # Close button
@@ -413,6 +372,11 @@ class MainMenu:
         file_mgr = app.file_manager
         stage_proc = app.stage_processor
 
+        # Cache feature detection flags for this frame
+        self._feat_supporter = _is_feature_available("patreon_features")
+        self._feat_device = _is_feature_available("device_control")
+        self._feat_streamer = _is_feature_available("streamer")
+
         if imgui.begin_main_menu_bar():
             # Render logo at the start of menu bar
             self._render_menu_bar_logo()
@@ -422,12 +386,16 @@ class MainMenu:
             self._render_view_menu(app_state, stage_proc)
             self._render_tools_menu(app_state, file_mgr)
             self._render_help_menu()
+            self._render_support_menu()
 
             # Render device control indicator after Support menu
             self._render_device_control_indicator()
 
             # Render Streamer indicator
             self._render_native_sync_indicator()
+
+            # Render Supporter badge
+            self._render_supporter_badge()
 
             imgui.end_main_menu_bar()
 
@@ -486,19 +454,31 @@ class MainMenu:
             imgui.separator()
 
             # Import/Export
+            has_video = fm.video_path is not None
             if imgui.begin_menu("Import..."):
-                if _menu_item_simple("Funscript to Timeline 1..."):
+                if _menu_item_simple("Multi-Axis Funscript (Single File)..."):
+                    fm.import_unified_funscript()
+                if _menu_item_simple("All Axis Files (OFS naming)...", enabled=has_video):
+                    fm.import_all_axes_ofs()
+                imgui.separator()
+                if _menu_item_simple(f"Funscript to {self._tl_label(1)}..."):
                     fm.import_funscript_to_timeline(1)
-                if _menu_item_simple("Funscript to Timeline 2..."):
+                if _menu_item_simple(f"Funscript to {self._tl_label(2)}..."):
                     fm.import_funscript_to_timeline(2)
+                imgui.separator()
                 if _menu_item_simple("Stage 2 Overlay Data..."):
                     fm.import_stage2_overlay_data()
                 imgui.end_menu()
 
             if imgui.begin_menu("Export..."):
-                if _menu_item_simple("Funscript from Timeline 1..."):
+                if _menu_item_simple("Multi-Axis Funscript (Single File)..."):
+                    fm.export_unified_funscript()
+                if _menu_item_simple("All Axis Files (OFS naming)", enabled=has_video):
+                    fm.export_all_axes_ofs()
+                imgui.separator()
+                if _menu_item_simple(f"Funscript from {self._tl_label(1)}..."):
                     fm.export_funscript_from_timeline(1)
-                if _menu_item_simple("Funscript from Timeline 2..."):
+                if _menu_item_simple(f"Funscript from {self._tl_label(2)}..."):
                     fm.export_funscript_from_timeline(2)
                 imgui.end_menu()
 
@@ -586,37 +566,51 @@ class MainMenu:
         fs_proc = app.funscript_processor
 
         if imgui.begin_menu("Edit", True):
-            # T1
-            undo1 = fs_proc._get_undo_manager(1)
-            can_undo1 = undo1.can_undo() if undo1 else False
-            can_redo1 = undo1.can_redo() if undo1 else False
+            # Focused undo/redo (OFS-style: last-edited timeline)
+            focused_tl = fs_proc._last_edited_timeline
+            focused_mgr = fs_proc._get_undo_manager(focused_tl)
+            can_undo_f = focused_mgr.can_undo() if focused_mgr else False
+            can_redo_f = focused_mgr.can_redo() if focused_mgr else False
+
             if imgui.menu_item(
-                "Undo T1 Change", self._get_shortcut_display("undo_timeline1"),
-                selected=False, enabled=can_undo1
+                f"Undo ({self._tl_label(focused_tl)})", self._get_shortcut_display("undo_timeline1"),
+                selected=False, enabled=can_undo_f
             )[0]:
-                fs_proc.perform_undo_redo(1, "undo")
+                fs_proc.perform_undo_redo_focused("undo")
             if imgui.menu_item(
-                "Redo T1 Change", self._get_shortcut_display("redo_timeline1"),
-                selected=False, enabled=can_redo1
+                f"Redo ({self._tl_label(focused_tl)})", self._get_shortcut_display("redo_timeline1"),
+                selected=False, enabled=can_redo_f
             )[0]:
-                fs_proc.perform_undo_redo(1, "redo")
+                fs_proc.perform_undo_redo_focused("redo")
+
             imgui.separator()
 
-            # T2
-            undo2 = fs_proc._get_undo_manager(2)
-            can_undo2 = undo2.can_undo() if undo2 else False
-            can_redo2 = undo2.can_redo() if undo2 else False
-            if imgui.menu_item(
-                "Undo T2 Change", self._get_shortcut_display("undo_timeline2"),
-                selected=False, enabled=can_undo2
-            )[0]:
-                fs_proc.perform_undo_redo(2, "undo")
-            if imgui.menu_item(
-                "Redo T2 Change", self._get_shortcut_display("redo_timeline2"),
-                selected=False, enabled=can_redo2
-            )[0]:
-                fs_proc.perform_undo_redo(2, "redo")
+            # Per-timeline undo submenu
+            if imgui.begin_menu("Per-Timeline Undo..."):
+                # T1 always visible
+                self._render_per_timeline_undo_items(fs_proc, 1)
+                # T2 if visible
+                if app_state.show_funscript_interactive_timeline2:
+                    imgui.separator()
+                    self._render_per_timeline_undo_items(fs_proc, 2)
+                # T3+ if visible (supporter feature)
+                for tl_num in EXTRA_TIMELINE_RANGE:
+                    vis_attr = f"show_funscript_interactive_timeline{tl_num}"
+                    if getattr(app_state, vis_attr, False):
+                        imgui.separator()
+                        self._render_per_timeline_undo_items(fs_proc, tl_num)
+                imgui.end_menu()
             imgui.end_menu()
+
+    def _render_per_timeline_undo_items(self, fs_proc, tl_num):
+        mgr = fs_proc._get_undo_manager(tl_num)
+        can_undo = mgr.can_undo() if mgr else False
+        can_redo = mgr.can_redo() if mgr else False
+        tl_lbl = self._tl_label(tl_num)
+        if imgui.menu_item(f"Undo {tl_lbl}", selected=False, enabled=can_undo)[0]:
+            fs_proc.perform_undo_redo(tl_num, "undo")
+        if imgui.menu_item(f"Redo {tl_lbl}", selected=False, enabled=can_redo)[0]:
+            fs_proc.perform_undo_redo(tl_num, "redo")
 
     def _render_view_menu(self, app_state, stage_proc):
         if imgui.begin_menu("View", True):
@@ -786,16 +780,36 @@ class MainMenu:
         settings = app.app_settings
 
         if imgui.begin_menu("Timelines"):
+            # Helper to get axis label from tracker's funscript
+            def _axis_label_for(t_num):
+                if app.tracker and hasattr(app.tracker, 'funscript'):
+                    return app.tracker.funscript.get_axis_for_timeline(t_num)
+                return ""
+
             # Interactive editors
-            for label, attr in (
-                ("Interactive Timeline 1", "show_funscript_interactive_timeline"),
-                ("Interactive Timeline 2", "show_funscript_interactive_timeline2"),
+            for t_num, attr in (
+                (1, "show_funscript_interactive_timeline"),
+                (2, "show_funscript_interactive_timeline2"),
             ):
+                axis_label = _axis_label_for(t_num)
+                label = f"Timeline {t_num} ({axis_label})" if axis_label else f"Interactive Timeline {t_num}"
                 cur = getattr(app_state, attr)
                 clicked, val = imgui.menu_item(label, selected=cur)
                 if clicked:
                     setattr(app_state, attr, val)
                     pm.project_dirty = True
+
+            # Extra timelines (T3+) — supporter only
+            if self._feat_supporter:
+                for t_num in EXTRA_TIMELINE_RANGE:
+                    vis_attr = f"show_funscript_interactive_timeline{t_num}"
+                    cur = getattr(app_state, vis_attr, False)
+                    axis_label = _axis_label_for(t_num)
+                    label = f"Timeline {t_num} ({axis_label})" if axis_label else f"Interactive Timeline {t_num}"
+                    clicked, val = imgui.menu_item(label, selected=cur)
+                    if clicked:
+                        setattr(app_state, vis_attr, val)
+                        pm.project_dirty = True
 
             imgui.separator()
 
@@ -827,8 +841,8 @@ class MainMenu:
         if imgui.begin_menu("Gauges"):
             # Script gauges
             for label, attr in (
-                ("Script Gauge (Timeline 1)", "show_gauge_window_timeline1"),
-                ("Script Gauge (Timeline 2)", "show_gauge_window_timeline2"),
+                (f"Script Gauge ({self._tl_label(1)})", "show_gauge_window_timeline1"),
+                (f"Script Gauge ({self._tl_label(2)})", "show_gauge_window_timeline2"),
             ):
                 cur = getattr(app_state, attr)
                 clicked, val = imgui.menu_item(label, selected=cur)
@@ -1105,53 +1119,53 @@ class MainMenu:
 
                 imgui.end_menu()
 
+            imgui.end_menu()
+
+    def _render_support_menu(self):
+        """Render top-level Support FunGen menu."""
+        app = self.app
+        if imgui.begin_menu("Support FunGen"):
+            if _menu_item_simple("Become a Supporter"):
+                try:
+                    webbrowser.open("https://ko-fi.com/k00gar")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open Ko-fi link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Unlock device control features and support development!\n"
+                    "Supporters get access to:\n"
+                    "\u2022 Hardware device integration (Handy, OSR2, etc.)\n"
+                    "\u2022 Live tracking with device control\n"
+                    "\u2022 Video + funscript synchronized playback\n"
+                    "\u2022 Advanced device parameterization\n\n"
+                    "After supporting, use !device_control command in Discord to get your folder!"
+                )
+
+            if _menu_item_simple("Join Discord Community"):
+                try:
+                    webbrowser.open("https://discord.com/invite/WYkjMbtCZA")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open Discord link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Join the FunGen Discord community\n"
+                    "Get help, share results, and discuss features!"
+                )
+
             imgui.separator()
 
-            # Support submenu
-            if imgui.begin_menu("Support"):
-                if _menu_item_simple("Become a Supporter"):
-                    try:
-                        webbrowser.open("https://ko-fi.com/k00gar")
-                    except Exception as e:
-                        if hasattr(app, 'logger') and app.logger:
-                            app.logger.warning(f"Could not open Ko-fi link: {e}")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Unlock device control features and support development!\n"
-                        "Supporters get access to:\n"
-                        "• Hardware device integration (Handy, OSR2, etc.)\n"
-                        "• Live tracking with device control\n"
-                        "• Video + funscript synchronized playback\n"
-                        "• Advanced device parameterization\n\n"
-                        "After supporting, use !device_control command in Discord to get your folder!"
-                    )
-
-                if _menu_item_simple("Join Discord Community"):
-                    try:
-                        webbrowser.open("https://discord.com/invite/WYkjMbtCZA")
-                    except Exception as e:
-                        if hasattr(app, 'logger') and app.logger:
-                            app.logger.warning(f"Could not open Discord link: {e}")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Join the FunGen Discord community\n"
-                        "Get help, share results, and discuss features!"
-                    )
-
-                imgui.separator()
-
-                if _menu_item_simple("Report Issue on GitHub"):
-                    try:
-                        webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/issues")
-                    except Exception as e:
-                        if hasattr(app, 'logger') and app.logger:
-                            app.logger.warning(f"Could not open GitHub issues link: {e}")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "Report bugs or request features on GitHub"
-                    )
-
-                imgui.end_menu()
+            if _menu_item_simple("Report Issue on GitHub"):
+                try:
+                    webbrowser.open("https://github.com/ack00gar/FunGen-AI-Powered-Funscript-Generator/issues")
+                except Exception as e:
+                    if hasattr(app, 'logger') and app.logger:
+                        app.logger.warning(f"Could not open GitHub issues link: {e}")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Report bugs or request features on GitHub"
+                )
 
             imgui.end_menu()
 
@@ -1176,6 +1190,21 @@ class MainMenu:
 
             # Add spacing after logo before menus
             imgui.same_line(spacing=8)
+
+    def _render_supporter_badge(self):
+        """Render gold Supporter badge in menu bar when patreon_features is available."""
+        if not self._feat_supporter:
+            return
+
+        # Gold-colored "(Supporter)" text
+        imgui.push_style_color(imgui.COLOR_BUTTON, 0.75, 0.6, 0.15, 1.0)
+        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.7, 0.25, 1.0)
+        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.65, 0.5, 0.1, 1.0)
+        imgui.small_button("Supporter")
+        imgui.pop_style_color(3)
+
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Thank you for supporting FunGen!")
 
     def _render_device_control_indicator(self):
         """Render simple device control status indicator button."""
@@ -1247,8 +1276,7 @@ class MainMenu:
                     imgui.set_tooltip("No device connected\nGo to Device Control tab to connect")
                 else:
                     # Check if device_control feature is available (folder exists)
-                    from application.utils.feature_detection import is_feature_available
-                    if is_feature_available("device_control"):
+                    if self._feat_device:
                         imgui.set_tooltip("Device control not initialized\nCheck Device Control tab in Control Panel")
                     else:
                         imgui.set_tooltip("Supporter only feature\nCheck the Support menu for details")
@@ -1315,8 +1343,7 @@ class MainMenu:
                     imgui.set_tooltip("Streamer not running\nGo to Streamer tab to start")
                 else:
                     # Check if sync_server feature is available (folder exists)
-                    from application.utils.feature_detection import is_feature_available
-                    if is_feature_available("streamer"):
+                    if self._feat_streamer:
                         imgui.set_tooltip("Streamer not initialized\nCheck Streamer tab in Control Panel")
                     else:
                         imgui.set_tooltip("Supporter only feature\nCheck the Support menu for details")

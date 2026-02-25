@@ -87,7 +87,9 @@ class OscillationLegacyTracker(BaseTracker):
             author="Legacy Codebase",
             tags=["oscillation", "optical-flow", "legacy", "amplification"],
             requires_roi=False,
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:

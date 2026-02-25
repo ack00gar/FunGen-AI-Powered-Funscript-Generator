@@ -6,7 +6,7 @@ resampling, smoothing, amplification, and keyframe simplification to create
 highly optimized funscripts.
 
 This plugin implements the "ultimate autotune" algorithm that was previously
-hardcoded in the DualAxisFunscript class.
+hardcoded in the MultiAxisFunscript class.
 """
 
 from typing import Dict, Any, List, Optional
@@ -132,17 +132,17 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
             }
         }
     
-    def transform(self, funscript_obj, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript_obj, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """
         Apply the ultimate autotune pipeline to the specified axis.
         
         Args:
-            funscript_obj: The DualAxisFunscript object to process
+            funscript_obj: The MultiAxisFunscript object to process
             axis: Which axis to process ('primary', 'secondary', or 'both')
             **parameters: Parameter overrides
             
         Returns:
-            Modified DualAxisFunscript object, or None if processing failed
+            Modified MultiAxisFunscript object, or None if processing failed
         """
         try:
             # Validate parameters

@@ -12,16 +12,15 @@ This project is still at the early stages of development. It is not intended for
 
 ---
 
-## New Feature: Automatic System Scaling Support
+## v0.6.0 Highlights
 
-FunGen now automatically detects your system's display scaling settings (DPI) and adjusts the UI accordingly. This feature works on Windows, macOS, and Linux, ensuring the application looks crisp and properly sized on high-DPI displays.
-
-- Automatically applies the correct font scaling based on your system settings
-- Supports Windows display scaling (125%, 150%, etc.)
-- Supports macOS Retina displays
-- Supports Linux high-DPI configurations
-- Can be enabled/disabled in the Settings menu
-- Manual detection button available for when you change display settings
+- **GUI Modernization** — Sidebar navigation, section cards, workflow breadcrumb, pinned action bar, status strip
+- **Multi-Axis Funscript Support** — OFS-compatible axis system (stroke, roll, pitch, surge, sway, twist); per-timeline axis assignment, `.roll.funscript` / `.pitch.funscript` export
+- **O(1) Funscript Performance** — Chronological-append fast-path eliminates O(n) bisect during live tracking; undo/redo cache fix, `_draw_curve` vectorization
+- **14+ Built-in Filter Plugins** — Ultimate Autotune, RDP Simplify, Savitzky-Golay, Speed Limiter, Anti-Jerk, Amplify, Dynamic Amplify, Clamp, Invert, Keyframe, Resample, Time Shift, and more
+- **Patreon Supporter Features** — Batch processing, live capture, experimental tracker early access (distributed via Discord bot)
+- **Device Control & VR Streaming Add-ons** — OSR/Buttplug hardware control, HereSphere/Quest 3 streaming (available on Ko-fi)
+- **Automatic DPI Scaling** — System display scaling detection for Windows, macOS, and Linux
 
 ---
 
@@ -486,5 +485,7 @@ If you encounter any issues or have questions, please open an issue on GitHub.
 
 Join the **Discord community** for discussions and support:
 [Discord Community](https://discord.gg/WYkjMbtCZA)
+
+Support the project on **Ko-fi** (one-time add-on purchases) or **Patreon** (monthly supporter features).
 
 ---

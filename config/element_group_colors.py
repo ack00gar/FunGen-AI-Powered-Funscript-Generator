@@ -244,6 +244,36 @@ class UpdateSettingsColors:
     DIALOG_GRAY_TEXT = CurrentTheme.UPDATE_DIALOG_GRAY_TEXT
 
 
+class CardColors:
+    """Color constants for section card containers."""
+    PRIMARY_BG = CurrentTheme.CARD_PRIMARY_BG
+    SECONDARY_BG = CurrentTheme.CARD_SECONDARY_BG
+    INLINE_BG = CurrentTheme.CARD_INLINE_BG
+
+
+class WorkflowColors:
+    """Color constants for workflow breadcrumb bar."""
+    DONE = CurrentTheme.BREADCRUMB_DONE
+    ACTIVE = CurrentTheme.BREADCRUMB_ACTIVE
+    FUTURE = CurrentTheme.BREADCRUMB_FUTURE
+    CONNECTOR = CurrentTheme.BREADCRUMB_CONNECTOR
+
+
+class SidebarColors:
+    """Color constants for vertical sidebar navigation."""
+    BG = CurrentTheme.SIDEBAR_BG
+    ACTIVE_ACCENT = CurrentTheme.SIDEBAR_ACTIVE_ACCENT
+    HOVER_BG = CurrentTheme.SIDEBAR_HOVER_BG
+    LOCKED_ALPHA = CurrentTheme.SIDEBAR_LOCKED_ALPHA
+
+
+class StatusStripColors:
+    """Color constants for the bottom status strip."""
+    BG = CurrentTheme.STATUS_STRIP_BG
+    TEXT = CurrentTheme.STATUS_STRIP_TEXT
+    ACCENT = CurrentTheme.STATUS_STRIP_ACCENT
+
+
 class ButtonColors:
     """Color constants for button styling palette (visual hierarchy)."""
     # PRIMARY buttons (positive/affirmative actions: Start, Create, Save, etc.)

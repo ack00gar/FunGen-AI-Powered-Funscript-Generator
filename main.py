@@ -236,11 +236,36 @@ def main():
     parser.add_argument('--no-copy', action='store_false', dest='copy', help='Do not save a copy of the final funscript next to the video file (will save to output folder only).')
     parser.add_argument('--generate-roll', action='store_true', help='Generate secondary axis (.roll.funscript) file for supported multi-axis devices.')
     parser.add_argument('--recursive', '-r', action='store_true', help='If input_path is a folder, process it recursively.')
+    parser.add_argument('--watch', metavar='FOLDER', help='Watch folder for new videos (requires patreon_features)')
 
     args = parser.parse_args()
 
     # Step 5: Validate arguments and start the appropriate interface
-    if args.input_path:
+    if args.watch:
+        # Headless watched-folder mode (supporter feature)
+        try:
+            from application.utils.feature_detection import is_feature_available
+            if not is_feature_available("patreon_features"):
+                logger.error("--watch requires the patreon_features add-on")
+                sys.exit(1)
+            from patreon_features.batch.watched_folder import WatchedFolderProcessor
+            from patreon_features.batch.batch_queue import BatchQueue
+        except ImportError as e:
+            logger.error(f"--watch requires patreon_features: {e}")
+            sys.exit(1)
+
+        queue = BatchQueue()
+        watcher = WatchedFolderProcessor(on_new_video=lambda p: queue.add(p))
+        watcher.start_watching(args.watch, recursive=True)
+        logger.info(f"Watching folder: {args.watch} (Ctrl-C to stop)")
+        try:
+            import time
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            watcher.stop_watching()
+            logger.info("Stopped watching")
+    elif args.input_path:
         # Validate funscript mode arguments
         if args.funscript_mode and not args.filter:
             logger.error("--funscript-mode requires --filter to be specified")
@@ -248,7 +273,7 @@ def main():
         if args.filter and not args.funscript_mode:
             logger.error("--filter can only be used with --funscript-mode")
             sys.exit(1)
-        
+
         run_cli(args)
     else:
         run_gui()

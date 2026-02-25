@@ -219,7 +219,12 @@ class DynamicTrackerUI:
             f"Category: {info.category.value.title()}",
             f"Description: {info.description}",
         ]
-        
+
+        if info.supports_dual_axis:
+            tooltip_lines.append(f"Outputs: {info.primary_axis} + {info.secondary_axis}")
+        else:
+            tooltip_lines.append(f"Output: {info.primary_axis}")
+
         if info.requires_intervention:
             tooltip_lines.append("! Requires user setup (ROI, etc.)")
 

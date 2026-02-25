@@ -82,7 +82,8 @@ class WorkingAxisProjectionTracker(BaseTracker):
             author="Working Motion Tracker",
             tags=["frame-diff", "projection", "simple", "reliable"],
             requires_roi=False,
-            supports_dual_axis=False
+            supports_dual_axis=False,
+            primary_axis="stroke",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:

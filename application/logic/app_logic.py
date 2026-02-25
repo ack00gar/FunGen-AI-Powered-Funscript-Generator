@@ -27,6 +27,18 @@ from .app_event_handlers import AppEventHandlers
 from .app_calibration import AppCalibration
 from .app_energy_saver import AppEnergySaver
 from .app_utility import AppUtility
+from .app_model_manager import AppModelManager
+from .app_autotuner import AppAutotuner
+from .app_roi_manager import AppROIManager
+from .app_batch_processor import AppBatchProcessor, AdaptiveTuningState
+from .app_cli_runner import (
+    AppCLIRunner,
+    cli_live_video_progress_callback,
+    _create_cli_progress_bar,
+    cli_stage1_progress_callback,
+    cli_stage2_progress_callback,
+    cli_stage3_progress_callback,
+)
 
 # Import InteractiveFunscriptTimeline for type hinting
 from typing import TYPE_CHECKING
@@ -34,113 +46,10 @@ if TYPE_CHECKING:
     from application.classes.interactive_timeline import InteractiveFunscriptTimeline
 
 
-class AdaptiveTuningState:
-    """Tracks progressive pipeline tuning state across batch videos."""
-    __slots__ = (
-        'current_producers', 'current_consumers',
-        'best_producers', 'best_consumers', 'best_fps',
-        'history', 'consumer_ceiling',
-        'consecutive_no_improvement', 'is_converged',
-        'status_message',
-    )
+# AdaptiveTuningState moved to app_batch_processor.py (imported above for backward compat)
 
-    def __init__(self, producers: int, consumers: int):
-        self.current_producers = producers
-        self.current_consumers = consumers
-        self.best_producers = producers
-        self.best_consumers = consumers
-        self.best_fps = 0.0
-        self.history: List[Tuple[int, int, float, bool]] = []  # (p, c, avg_fps, success)
-        self.consumer_ceiling: Optional[int] = None  # hard cap set when a config stalls
-        self.consecutive_no_improvement = 0
-        self.is_converged = False
-        self.status_message = f"Starting with P={producers}/C={consumers}"
-
-
-def cli_live_video_progress_callback(current_frame, total_frames, start_time):
-    """A simpler progress callback for frame-by-frame video processing."""
-    if total_frames <= 0 or current_frame < 0:
-        return
-
-    progress = float(current_frame + 1) / total_frames
-    bar = _create_cli_progress_bar(progress)
-
-    time_elapsed = time.time() - start_time
-    fps = (current_frame + 1) / time_elapsed if time_elapsed > 0 else 0
-    eta_seconds = ((total_frames - current_frame - 1) / fps) if fps > 0 else 0
-    eta_str = f"{int(eta_seconds // 60):02d}:{int(eta_seconds % 60):02d}" if eta_seconds > 0 else "..."
-
-    status_line = f"\rProcessing Video: {bar} | {int(fps):>3} FPS | ETA: {eta_str}  "
-    sys.stdout.write(status_line)
-    sys.stdout.flush()
-    if current_frame + 1 == total_frames:
-        sys.stdout.write("\n")
-
-def _create_cli_progress_bar(percentage: float, width: int = 40) -> str:
-    """Helper to create a text-based progress bar string."""
-    filled_width = int(percentage * width)
-    bar = '█' * filled_width + '-' * (width - filled_width)
-    return f"|{bar}| {percentage * 100:6.2f}%"
-
-
-def cli_stage1_progress_callback(current, total, message, time_elapsed, avg_fps, instant_fps, eta_seconds, timing=None):
-    if total <= 0: return
-    progress = float(current) / total
-    bar = _create_cli_progress_bar(progress)
-    eta_str = f"{int(eta_seconds // 3600):02d}:{int((eta_seconds % 3600) // 60):02d}:{int(eta_seconds % 60):02d}" if eta_seconds > 0 else "..."
-
-    timing_str = ""
-    if timing:
-        parts = [f"Dec:{timing.get('decode_ms', 0):.0f}ms"]
-        if timing.get('unwarp_ms', 0) > 0:
-            parts.append(f"Unw:{timing['unwarp_ms']:.0f}ms")
-        parts.append(f"Det:{timing.get('yolo_det_ms', 0):.0f}ms")
-        if timing.get('yolo_pose_ms', 0) > 0:
-            parts.append(f"Pose:{timing['yolo_pose_ms']:.0f}ms")
-        timing_str = f" | {' '.join(parts)}"
-
-    status_line = f"\rStage 1: {bar} | {int(avg_fps):>3} FPS | ETA: {eta_str}{timing_str}   "
-    sys.stdout.write(status_line)
-    sys.stdout.flush()
-    if current == total:
-        sys.stdout.write("\n")
-
-
-def cli_stage2_progress_callback(main_info, sub_info, force_update=False):
-    main_current, total_main, main_name = main_info
-    main_progress = float(main_current) / total_main if total_main > 0 else 0
-
-    sub_progress = 0.0
-    if isinstance(sub_info, dict):
-        sub_current = sub_info.get("current", 0)
-        sub_total = sub_info.get("total", 1)
-        sub_progress = float(sub_current) / sub_total if sub_total > 0 else 0
-    elif isinstance(sub_info, tuple) and len(sub_info) == 3:
-        sub_current, sub_total, _ = sub_info
-        sub_progress = float(sub_current) / sub_total if sub_total > 0 else 0
-
-    main_bar = _create_cli_progress_bar(main_progress)
-    status_line = f"\rStage 2: {main_name} ({main_current}/{total_main}) {main_bar} | Sub-task: {int(sub_progress * 100):>3}%  "
-    sys.stdout.write(status_line)
-    sys.stdout.flush()
-    if main_current == total_main:
-        sys.stdout.write("\n")
-
-def cli_stage3_progress_callback(current_chapter_idx, total_chapters, chapter_name, current_chunk_idx, total_chunks, total_frames_processed_overall, total_frames_to_process_overall, processing_fps, time_elapsed, eta_seconds):
-    if total_frames_to_process_overall <= 0: return
-    overall_progress = float(total_frames_processed_overall) / total_frames_to_process_overall
-    bar = _create_cli_progress_bar(overall_progress)
-
-    eta_str = "..."
-    if not (math.isnan(eta_seconds) or math.isinf(eta_seconds)):
-        if eta_seconds > 1:
-            eta_str = f"{int(eta_seconds // 3600):02d}:{int((eta_seconds % 3600) // 60):02d}:{int(eta_seconds % 60):02d}"
-
-    status_line = f"\rStage 3: {bar} | Chapter {current_chapter_idx}/{total_chapters} ({chapter_name}) | {int(processing_fps):>3} FPS | ETA: {eta_str}   "
-    sys.stdout.write(status_line)
-    sys.stdout.flush()
-    if total_frames_processed_overall >= total_frames_to_process_overall:
-        sys.stdout.write("\n")
+# Module-level CLI callback functions moved to app_cli_runner.py
+# They are re-imported at the top of this file for backward compatibility.
 
 
 class ApplicationLogic:
@@ -302,6 +211,7 @@ class ApplicationLogic:
         # --- Initialize Processor (after tracker and logger/app_state_ui are ready) ---
         # _check_model_paths can be called now before processor if it's critical for processor init
         time.sleep(0.001)  # Yield before model check
+        self.model_manager = AppModelManager(self)
         self._check_model_paths()
 
         time.sleep(0.001)  # Yield before processor creation
@@ -315,6 +225,10 @@ class ApplicationLogic:
         self.calibration = AppCalibration(self)
         self.energy_saver = AppEnergySaver(self)
         self.utility = AppUtility(self)
+        self.autotuner = AppAutotuner(self)
+        self.roi_manager = AppROIManager(self)
+        self.batch_processor = AppBatchProcessor(self)
+        self.cli_runner = AppCLIRunner(self)
 
         # --- System Scaling Detection ---
         if not self.is_cli_mode:
@@ -432,10 +346,11 @@ class ApplicationLogic:
         Retrieves the interactive timeline instance for the given timeline number.
         """
         if timeline_num == 1:
-            # Since this is a forward reference, we might need to get it from the GUI instance if not directly available
             return getattr(self, 'interactive_timeline1', None)
         elif timeline_num == 2:
             return getattr(self, 'interactive_timeline2', None)
+        elif timeline_num >= 3 and hasattr(self, 'gui_instance') and self.gui_instance:
+            return self.gui_instance._extra_timeline_editors.get(timeline_num)
         return None
 
     def _configure_third_party_logging(self):
@@ -626,164 +541,11 @@ class ApplicationLogic:
 
     def start_autotuner(self, force_hwaccel: Optional[str] = None):
         """Initiates the autotuning process in a background thread."""
-        if self.is_autotuning_active:
-            self.logger.warning("Autotuner is already running.")
-            return
-        if not self.processor or not self.processor.is_video_open():
-            self.logger.error("Cannot start autotuner: No video loaded.", extra={'status_message': True})
-            return
-
-        self.autotuner_forced_hwaccel = force_hwaccel
-        self.is_autotuning_active = True
-        self.autotuner_thread = threading.Thread(target=self._run_autotuner_thread, daemon=True, name="AutotunerThread")
-        self.autotuner_thread.start()
+        self.autotuner.start_autotuner(force_hwaccel)
 
     def _run_autotuner_thread(self):
         """The actual logic for the autotuning process."""
-        self.logger.info("Starting Stage 1 performance autotuner thread.")
-        with self._autotuner_lock:
-            self.autotuner_results = {}
-            self.autotuner_best_combination = None
-            self.autotuner_best_fps = 0.0
-
-        def run_single_test(p: int, c: int, accel: str) -> Optional[float]:
-            """Helper to run one analysis and return its FPS."""
-            with self._autotuner_lock:
-                self.autotuner_status_message = f"Running test: {p}P / {c}C (HW Accel: {accel})..."
-            self.logger.info(self.autotuner_status_message)
-
-            completion_event = threading.Event()
-            # Set the flag as an attribute on the stage processor instance
-            self.stage_processor.force_rerun_stage1 = True
-
-            original_hw_method = self.hardware_acceleration_method
-            try:
-                self.hardware_acceleration_method = accel
-
-                total_frames = self.processor.total_frames
-                start_frame = min(1000, total_frames // 4)
-                end_frame = min(start_frame + 1000, total_frames - 1)
-                autotune_frame_range = (start_frame, end_frame)
-
-                self.stage_processor.start_full_analysis(
-                    processing_mode="stage3_mixed",
-                    override_producers=p,
-                    override_consumers=c,
-                    completion_event=completion_event,
-                    frame_range_override=autotune_frame_range,
-                    is_autotune_run=True
-                )
-                completion_event.wait()
-
-            finally:
-                self.hardware_acceleration_method = original_hw_method
-
-            if self.stage_processor.stage1_final_fps_str and "FPS" in self.stage_processor.stage1_final_fps_str:
-                try:
-                    fps_str = self.stage_processor.stage1_final_fps_str.replace(" FPS", "").strip()
-                    fps = float(fps_str)
-                    self.logger.info(f"Test finished for {p}P / {c}C ({accel}). Result: {fps:.2f} FPS")
-                    return fps
-                except (ValueError, TypeError):
-                    self.logger.error(f"Could not parse FPS string: '{self.stage_processor.stage1_final_fps_str}'")
-                    return None
-            else:
-                self.logger.error(f"Test failed for {p}P / {c}C ({accel}). No final FPS reported.")
-                return None
-
-        def get_perf(p, c, accel):
-            with self._autotuner_lock:
-                if (p, c, accel) in self.autotuner_results:
-                    return self.autotuner_results[(p, c, accel)][0]
-
-            fps = run_single_test(p, c, accel)
-            with self._autotuner_lock:
-                if fps is None:
-                    self.autotuner_results[(p, c, accel)] = (0.0, "Failed")
-                    return 0.0
-
-                self.autotuner_results[(p, c, accel)] = (fps, "")
-
-                if fps > self.autotuner_best_fps:
-                    self.autotuner_best_fps = fps
-                    self.autotuner_best_combination = (p, c, accel)
-            return fps
-
-        def find_best_consumer_for_producer(p, accel, max_cores):
-            self.logger.info(f"Starting search for best consumer count for P={p}, Accel={accel}...")
-            low = 2
-            high = max(2, max_cores - p)
-
-            while high - low >= 3:
-                if self.stop_batch_event.is_set(): return
-                m1 = low + (high - low) // 3
-                m2 = high - (high - low) // 3
-
-                perf_m1 = get_perf(p, m1, accel)
-                if self.stop_batch_event.is_set(): return
-
-                perf_m2 = get_perf(p, m2, accel)
-                if self.stop_batch_event.is_set(): return
-
-                if perf_m1 < perf_m2:
-                    low = m1
-                else:
-                    high = m2
-
-            self.logger.info(f"Narrowed search for P={p}, Accel={accel} to range [{low}, {high}]. Finalizing...")
-            for c in range(low, high + 1):
-                if self.stop_batch_event.is_set(): return
-                get_perf(p, c, accel)
-
-        try:
-            accel_methods_to_test = []
-            if self.autotuner_forced_hwaccel:
-                self.logger.info(f"Autotuner forced to test only HW Accel: {self.autotuner_forced_hwaccel}")
-                accel_methods_to_test.append(self.autotuner_forced_hwaccel)
-            else:
-                self.logger.info("Autotuner running in default mode (testing CPU and best GPU).")
-                best_hw_accel = 'none'
-                available_hw = self.available_ffmpeg_hwaccels
-                if 'cuda' in available_hw or 'nvdec' in available_hw:
-                    best_hw_accel = 'cuda'
-                elif 'qsv' in available_hw:
-                    best_hw_accel = 'qsv'
-                elif 'videotoolbox' in available_hw:
-                    best_hw_accel = 'videotoolbox'
-
-                accel_methods_to_test.append('none')
-                if best_hw_accel != 'none':
-                    accel_methods_to_test.append(best_hw_accel)
-
-            max_cores = os.cpu_count() or 4
-            PRODUCER_RANGE = range(1, 3)
-
-            for accel in accel_methods_to_test:
-                for p in PRODUCER_RANGE:
-                    if self.stop_batch_event.is_set():
-                        raise InterruptedError("Autotuner aborted by user.")
-                    find_best_consumer_for_producer(p, accel, max_cores)
-
-            with self._autotuner_lock:
-                if self.autotuner_best_combination:
-                    p_final, c_final, accel_final = self.autotuner_best_combination
-                    self.autotuner_status_message = f"Finished! Best: {p_final}P/{c_final}C, Accel: {accel_final} at {self.autotuner_best_fps:.2f} FPS"
-                    self.logger.info(f"Autotuner finished. Best combination: {self.autotuner_best_combination} with {self.autotuner_best_fps:.2f} FPS.")
-                else:
-                    self.autotuner_status_message = "Finished, but no successful runs were completed."
-                    self.logger.warning("Autotuner finished without any successful test runs.")
-
-        except InterruptedError as e:
-            with self._autotuner_lock:
-                self.autotuner_status_message = "Aborted by user."
-            self.logger.info(str(e))
-        except Exception as e:
-            with self._autotuner_lock:
-                self.autotuner_status_message = f"An error occurred: {e}"
-            self.logger.error(f"Autotuner thread failed: {e}", exc_info=True)
-        finally:
-            self.is_autotuning_active = False
-            self.stage_processor.force_rerun_stage1 = False
+        self.autotuner._run_autotuner_thread()
 
     def get_waveform_data(self):
         """Thread-safe access to audio waveform data."""
@@ -792,57 +554,14 @@ class ApplicationLogic:
 
     def get_autotuner_snapshot(self) -> Dict:
         """Thread-safe snapshot of autotuner state for GUI rendering."""
-        with self._autotuner_lock:
-            return {
-                "status_message": self.autotuner_status_message,
-                "results": dict(self.autotuner_results),
-                "best_combination": self.autotuner_best_combination,
-                "best_fps": self.autotuner_best_fps,
-            }
+        return self.autotuner.get_autotuner_snapshot()
 
     def trigger_ultimate_autotune_with_defaults(self, timeline_num: int):
         """
         Non-interactively runs the Ultimate Autotune pipeline with default settings.
         This is called automatically in 'Simple Mode' after an analysis completes.
         """
-        self.logger.info(f"Triggering default Ultimate Autotune for Timeline {timeline_num}...")
-        fs_proc = self.funscript_processor
-        funscript_instance, axis_name = fs_proc._get_target_funscript_object_and_axis(timeline_num)
-
-        if not funscript_instance or not axis_name:
-            self.logger.error(f"Ultimate Autotune (auto): Could not find target funscript for T{timeline_num}.")
-            return
-
-        # Get default parameters from the funscript processor helper
-        params = fs_proc.get_default_ultimate_autotune_params()
-        op_desc = "Auto-Applied Ultimate Autotune (Simple Mode)"
-
-        # 1. Record state for Undo
-        fs_proc._record_timeline_action(timeline_num, op_desc)
-
-        # 2. Apply Ultimate Autotune using the plugin system
-        try:
-            from funscript.plugins.base_plugin import plugin_registry
-            # Import the plugin to ensure it's registered
-            from funscript.plugins import ultimate_autotune_plugin
-            ultimate_plugin = plugin_registry.get_plugin('Ultimate Autotune')
-            
-            if ultimate_plugin:
-                result = ultimate_plugin.transform(funscript_instance, axis_name, **params)
-                
-                if result:
-                    fs_proc._finalize_action_and_update_ui(timeline_num, op_desc)
-                    self.logger.info("Default Ultimate Autotune applied successfully.",
-                                     extra={'status_message': True, 'duration': 5.0})
-                else:
-                    self.logger.warning("Default Ultimate Autotune failed to produce a result.", 
-                                      extra={'status_message': True})
-            else:
-                self.logger.error("Ultimate Autotune plugin not available.", 
-                                extra={'status_message': True})
-        except Exception as e:
-            self.logger.error(f"Error applying Ultimate Autotune: {e}", 
-                            extra={'status_message': True})
+        self.autotuner.trigger_ultimate_autotune_with_defaults(timeline_num)
 
     def toggle_file_manager_window(self):
         """Toggles the visibility of the Generated File Manager window."""
@@ -850,29 +569,8 @@ class ApplicationLogic:
             self.app_state_ui.show_generated_file_manager = not self.app_state_ui.show_generated_file_manager
 
     def unload_model(self, model_type: str):
-        """
-        Clears the path for a given model type and releases it from the tracker.
-        """
-        # --- Invalidate cache when models change ---
-        self.cached_class_names = None
-
-        if model_type == 'detection':
-            self.yolo_detection_model_path_setting = ""
-            self.app_settings.set("yolo_det_model_path", "")
-            if self.tracker:
-                self.tracker.unload_detection_model()
-            self.logger.info("YOLO Detection Model unloaded.", extra={'status_message': True})
-        elif model_type == 'pose':
-            self.yolo_pose_model_path_setting = ""
-            self.app_settings.set("yolo_pose_model_path", "")
-            if self.tracker:
-                self.tracker.unload_pose_model()
-            self.logger.info("YOLO Pose Model unloaded.", extra={'status_message': True})
-        else:
-            self.logger.warning(f"Unknown model type '{model_type}' for unload.")
-
-        self.project_manager.project_dirty = True
-        self.energy_saver.reset_activity_timer()
+        """Clears the path for a given model type and releases it from the tracker."""
+        self.model_manager.unload_model(model_type)
 
     def generate_waveform(self):
         if not self.processor or not self.processor.is_video_open():
@@ -904,591 +602,55 @@ class ApplicationLogic:
             status = "enabled" if self.app_state_ui.show_audio_waveform else "disabled"
             self.logger.info(f"Audio waveform display {status}.", extra={'status_message': True})
 
+    # --- Batch Processing (delegated to AppBatchProcessor) ---
+
     def start_batch_processing(self, video_paths: List[str]):
-        """
-        Prepares for batch processing by creating a confirmation message and showing a dialog.
-        """
-        if not self._check_model_paths():
-            return
-        if self.is_batch_processing_active or self.stage_processor.full_analysis_active:
-            self.logger.warning("Cannot start batch processing: A process is already active.",
-                                extra={'status_message': True})
-            return
-
-        if not video_paths:
-            self.logger.info("No videos provided for batch processing.", extra={'status_message': True})
-            return
-
-        # --- Prepare the confirmation message ---
-        num_videos = len(video_paths)
-        message_lines = [
-            f"Found {num_videos} video{'s' if num_videos > 1 else ''} to script.",
-            "Do you want to run batch processing?",
-            ""  # Visual separator
-        ]
-
-        # Add conditional warnings
-        if self.calibration.funscript_output_delay_frames == 0:
-            message_lines.append("-> Warning: Optical flow delay is 0. Have you calibrated it?")
-
-        if not self.app_settings.get("enable_auto_post_processing", False):
-            message_lines.append("-> Warning: Automatic post-processing is currently disabled.")
-
-        # Set the state to trigger the GUI dialog
-        self.batch_confirmation_message = "\n".join(message_lines)
-        self.batch_confirmation_videos = video_paths
-        self.show_batch_confirmation_dialog = True
-        self.energy_saver.reset_activity_timer()  # Ensure UI is responsive
+        self.batch_processor.start_batch_processing(video_paths)
 
     def _initiate_batch_processing_from_confirmation(self):
-        """
-        [Private] Called from the GUI. Reads the configured list of videos and
-        settings from the GUI and starts the batch processing thread.
-        """
-        if not self._check_model_paths(): return
-        if self.is_batch_processing_active: return
-        gui = self.gui_instance
-        if not gui or not gui.batch_videos_data:
-            self.logger.error("Batch start requested, but GUI data is missing.")
-            self._cancel_batch_processing_from_confirmation()
-            return
-
-        videos_to_process = []
-        video_format_options = ["Auto (Heuristic)", "2D", "VR (he_sbs)", "VR (he_tb)", "VR (fisheye_sbs)", "VR (fisheye_tb)"]
-
-        for video_data in gui.batch_videos_data:
-            if video_data.get("selected", False):
-                override_idx = video_data.get("override_format_idx", 0)
-                override_format = video_format_options[override_idx] if 0 <= override_idx < len(video_format_options) else "Auto (Heuristic)"
-                videos_to_process.append({"path": video_data["path"], "override_format": override_format})
-
-        if not videos_to_process:
-            self.logger.info("No videos selected for batch processing.", extra={'status_message': True})
-            self._cancel_batch_processing_from_confirmation()
-            return
-
-        # Use the dynamically selected tracker name
-        self.batch_tracker_name = gui.selected_batch_tracker_name
-        self.batch_apply_ultimate_autotune = gui.batch_apply_ultimate_autotune_ui
-        self.batch_copy_funscript_to_video_location = gui.batch_copy_funscript_to_video_location_ui
-        self.batch_overwrite_mode = gui.batch_overwrite_mode_ui
-        self.batch_generate_roll_file = gui.batch_generate_roll_file_ui
-        self.batch_adaptive_tuning_enabled = getattr(gui, 'batch_adaptive_tuning_ui', False)
-
-        # Apply same mutual exclusion logic for GUI batch processing
-        if gui.batch_apply_ultimate_autotune_ui:
-            # When Ultimate Autotune is enabled, disable post-processing to avoid double simplification
-            self.batch_apply_post_processing = False
-            self.logger.info("GUI Batch: Ultimate Autotune enabled - auto post-processing disabled to prevent double simplification")
-        else:
-            # When Ultimate Autotune is disabled, allow post-processing based on settings
-            self.batch_apply_post_processing = self.app_settings.get("enable_auto_post_processing", False)
-            if self.batch_apply_post_processing:
-                self.logger.info("GUI Batch: Ultimate Autotune disabled - auto post-processing enabled from settings")
-            else:
-                self.logger.info("GUI Batch: Both Ultimate Autotune and auto post-processing disabled")
-
-        self.logger.info(f"User confirmed. Starting batch with {len(videos_to_process)} videos.")
-        self.batch_video_paths = videos_to_process # Now a list of dicts
-        self.is_batch_processing_active = True
-        self.current_batch_video_index = -1
-        self.stop_batch_event.clear()
-
-        self.batch_processing_thread = threading.Thread(target=self._run_batch_processing_thread, daemon=True, name="BatchProcessingThread")
-        self.batch_processing_thread.start()
-
-        self.show_batch_confirmation_dialog = False
-        gui.batch_videos_data.clear()
+        self.batch_processor._initiate_batch_processing_from_confirmation()
 
     def _cancel_batch_processing_from_confirmation(self):
-        """[Private] Called from the GUI when the user clicks 'Cancel'."""
-        self.logger.info("Batch processing cancelled by user.", extra={'status_message': True})
-        # Clear the confirmation dialog state
-        self.show_batch_confirmation_dialog = False
-        if self.gui_instance:
-            self.gui_instance.batch_videos_data.clear()
+        self.batch_processor._cancel_batch_processing_from_confirmation()
 
     def abort_batch_processing(self):
-        if not self.is_batch_processing_active:
-            return
-
-        self.logger.info("Aborting batch processing...", extra={'status_message': True})
-        self.stop_batch_event.set()
-        self.pause_batch_event.clear()  # Unblock any pause wait
-        # Also signal the currently running stage analysis (if any) to stop
-        self.stage_processor.abort_stage_processing()
-        self.single_video_analysis_complete_event.set()  # Release the wait lock
+        self.batch_processor.abort_batch_processing()
 
     def pause_batch_processing(self):
-        if self.is_batch_processing_active and not self.pause_batch_event.is_set():
-            self.pause_batch_event.set()
-            self.logger.info("Batch processing paused.", extra={'status_message': True})
+        self.batch_processor.pause_batch_processing()
 
     def resume_batch_processing(self):
-        if self.is_batch_processing_active and self.pause_batch_event.is_set():
-            self.pause_batch_event.clear()
-            self.logger.info("Batch processing resumed.", extra={'status_message': True})
+        self.batch_processor.resume_batch_processing()
 
     @property
     def is_batch_paused(self) -> bool:
-        return self.is_batch_processing_active and self.pause_batch_event.is_set()
-
-    # --- Adaptive Batch Tuning Methods ---
-
-    def _init_adaptive_tuning(self) -> AdaptiveTuningState:
-        """Initialize adaptive tuning state from current settings."""
-        p = self.stage_processor.num_producers_stage1
-        c = self.stage_processor.num_consumers_stage1
-        self.logger.info(f"Adaptive tuning initialized: P={p}, C={c}")
-        return AdaptiveTuningState(producers=p, consumers=c)
-
-    def _adaptive_tuning_record_result(self, state: AdaptiveTuningState, avg_fps: float, success: bool):
-        """Record result from a video and hill-climb toward optimal settings."""
-        p, c = state.current_producers, state.current_consumers
-        state.history.append((p, c, avg_fps, success))
-
-        if not success:
-            # Config stalled/crashed — set ceiling and revert to best
-            state.consumer_ceiling = c - 1
-            state.current_producers = state.best_producers
-            state.current_consumers = state.best_consumers
-            state.status_message = f"Config P={p}/C={c} failed. Ceiling set to C={state.consumer_ceiling}. Reverted to P={state.best_producers}/C={state.best_consumers}"
-            self.logger.warning(state.status_message)
-            return
-
-        if state.best_fps <= 0 or avg_fps > state.best_fps * 1.02:
-            # Meaningful improvement (>2%)
-            state.best_producers = p
-            state.best_consumers = c
-            state.best_fps = avg_fps
-            state.consecutive_no_improvement = 0
-            state.status_message = f"New best: P={p}/C={c} @ {avg_fps:.1f} FPS"
-            self.logger.info(f"Adaptive tuning: {state.status_message}")
-        else:
-            state.consecutive_no_improvement += 1
-            state.status_message = f"No improvement at P={p}/C={c} ({avg_fps:.1f} FPS vs best {state.best_fps:.1f}). Streak: {state.consecutive_no_improvement}"
-            self.logger.info(f"Adaptive tuning: {state.status_message}")
-
-        # Check convergence
-        if state.consecutive_no_improvement >= 2:
-            state.is_converged = True
-            state.current_producers = state.best_producers
-            state.current_consumers = state.best_consumers
-            state.status_message = f"Converged at P={state.best_producers}/C={state.best_consumers} ({state.best_fps:.1f} FPS)"
-            self.logger.info(f"Adaptive tuning: {state.status_message}")
-            return
-
-        # Hill-climb: try consumers +2
-        next_c = c + 2
-        # Respect ceiling
-        if state.consumer_ceiling is not None and next_c > state.consumer_ceiling:
-            next_c = c - 2
-        # Bounds check
-        if next_c < 1:
-            next_c = 1
-        # Skip already-tested configs
-        tested_configs = {(h[0], h[1]) for h in state.history}
-        if (p, next_c) in tested_configs:
-            # Try the other direction
-            alt_c = c - 2 if next_c == c + 2 else c + 2
-            if state.consumer_ceiling is not None and alt_c > state.consumer_ceiling:
-                alt_c = c  # Can't go either way — stay put and converge
-            if alt_c < 1:
-                alt_c = 1
-            if (p, alt_c) in tested_configs or alt_c == c:
-                # Nowhere new to go — converge
-                state.is_converged = True
-                state.current_producers = state.best_producers
-                state.current_consumers = state.best_consumers
-                state.status_message = f"Converged (exhausted options) at P={state.best_producers}/C={state.best_consumers} ({state.best_fps:.1f} FPS)"
-                self.logger.info(f"Adaptive tuning: {state.status_message}")
-                return
-            next_c = alt_c
-
-        state.current_consumers = next_c
-        state.status_message = f"Next test: P={state.current_producers}/C={state.current_consumers}"
-        self.logger.info(f"Adaptive tuning: {state.status_message}")
-
-    def _adaptive_tuning_apply_best(self, state: AdaptiveTuningState):
-        """Persist best discovered P/C to settings and stage processor."""
-        if state is None or state.best_fps <= 0:
-            return
-        self.app_settings.set("num_producers_stage1", state.best_producers)
-        self.app_settings.set("num_consumers_stage1", state.best_consumers)
-        self.stage_processor.num_producers_stage1 = state.best_producers
-        self.stage_processor.num_consumers_stage1 = state.best_consumers
-        self.logger.info(f"Adaptive tuning: Persisted best settings P={state.best_producers}/C={state.best_consumers} ({state.best_fps:.1f} FPS)")
+        return self.batch_processor.is_batch_paused()
 
     def _run_batch_processing_thread(self):
-        # Initialize adaptive tuning if enabled
-        if self.batch_adaptive_tuning_enabled:
-            self.adaptive_tuning_state = self._init_adaptive_tuning()
+        self.batch_processor._run_batch_processing_thread()
 
-        try:
-            for i, video_data in enumerate(self.batch_video_paths):
-                if self.stop_batch_event.is_set():
-                    self.logger.info("Batch processing was aborted by user."); break
-
-                # Pause checkpoint — wait between videos
-                while self.pause_batch_event.is_set() and not self.stop_batch_event.is_set():
-                    time.sleep(0.5)
-                if self.stop_batch_event.is_set():
-                    self.logger.info("Batch processing was aborted while paused."); break
-
-                self.current_batch_video_index = i
-                video_path = video_data["path"]
-                override_format = video_data["override_format"]
-                video_basename = os.path.basename(video_path)
-
-                # --- Temporarily Apply Format Override ---
-                original_video_type_setting = self.processor.video_type_setting
-                original_vr_format_setting = self.processor.vr_input_format
-                if override_format != "Auto (Heuristic)":
-                    self.logger.info(f"Applying format override: '{override_format}' for '{video_basename}'")
-                    if override_format == "2D":
-                        self.processor.set_active_video_type_setting("2D")
-                    elif override_format.startswith("VR"):
-                        try:
-                            vr_format = override_format.split('(')[1].split(')')[0]
-                            self.processor.set_active_vr_parameters(input_format=vr_format)
-                        except IndexError:
-                            self.logger.error(f"Could not parse VR format from override: '{override_format}'")
-
-                print(f"\n--- Processing Video {i + 1} of {len(self.batch_video_paths)}: {video_basename} ---")
-
-                self.logger.info(f"Batch processing video {i + 1}/{len(self.batch_video_paths)}: {video_basename}")
-
-                # --- Pre-flight checks for overwrite strategy ---
-                # This is now the very first step for each video in the loop.
-                path_next_to_video = os.path.splitext(video_path)[0] + ".funscript"
-
-                funscript_to_check = None
-                if os.path.exists(path_next_to_video):
-                    funscript_to_check = path_next_to_video
-
-                if funscript_to_check:
-                    if self.batch_overwrite_mode == 1:
-                        # Mode 1: Process only if funscript is missing (skip any existing funscript)
-                        self.logger.info(
-                            f"Skipping '{video_basename}': Funscript already exists at '{funscript_to_check}'. (Mode: Only if Missing)")
-                        continue
-
-                    if self.batch_overwrite_mode == 0:
-                        # Mode 0: Process all except own matching version (skip if up-to-date FunGen funscript exists)
-                        funscript_data = self.file_manager._get_funscript_data(funscript_to_check)
-                        if funscript_data:
-                            author = funscript_data.get('author', '')
-                            metadata = funscript_data.get('metadata', {})
-                            # Ensure metadata is a dict before calling .get() on it
-                            version = metadata.get('version', '') if isinstance(metadata, dict) else ''
-                            if author.startswith("FunGen") and version == FUNSCRIPT_METADATA_VERSION:
-                                self.logger.info(
-                                    f"Skipping '{video_basename}': Up-to-date funscript from this program version already exists. (Mode: All except own matching version)")
-                                continue
-
-                    if self.batch_overwrite_mode == 2:
-                        # Mode 2: Process ALL videos, including up-to-date FunGen funscript. Do not skip for any reason.
-                        self.logger.info(
-                            f"Processing '{video_basename}': Mode 2 selected, will process regardless of funscript existence or version.")
-                # --- End of pre-flight checks ---
-
-                open_success = self.file_manager.open_video_from_path(video_path)
-                if not open_success:
-                    self.logger.error(f"Failed to open video, skipping: {video_path}")
-                    continue
-
-                time.sleep(1.0)
-                if self.stop_batch_event.is_set(): break
-
-                # Use the dynamically selected tracker name
-                discovery = get_tracker_discovery()
-                
-                # Get the selected tracker using the name stored from GUI
-                if hasattr(self, 'batch_tracker_name') and self.batch_tracker_name:
-                    selected_tracker = discovery.get_tracker_info(self.batch_tracker_name)
-                    if not selected_tracker:
-                        self.logger.error(f"Invalid tracker name: {self.batch_tracker_name}. Skipping video.")
-                        continue
-                    selected_mode = selected_tracker.internal_name
-                else:
-                    self.logger.error("No tracker selected for batch processing. Skipping video.")
-                    continue
-
-                # Check tracker category to determine processing mode
-                from config.tracker_discovery import TrackerCategory
-                
-                # --- OFFLINE MODES (Stage-based processing) ---
-                if selected_tracker.category == TrackerCategory.OFFLINE:
-                    # Set processing speed to MAX_SPEED for batch/CLI offline processing
-                    from config.constants import ProcessingSpeedMode
-                    original_speed_mode = self.app_state_ui.selected_processing_speed_mode
-                    self.app_state_ui.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
-                    self.logger.info("Set processing speed to MAX_SPEED for batch offline processing")
-
-                    # Apply adaptive tuning P/C if active and not converged
-                    if self.adaptive_tuning_state and not self.adaptive_tuning_state.is_converged:
-                        self.stage_processor.num_producers_stage1 = self.adaptive_tuning_state.current_producers
-                        self.stage_processor.num_consumers_stage1 = self.adaptive_tuning_state.current_consumers
-                        self.logger.info(f"Adaptive tuning: Using P={self.adaptive_tuning_state.current_producers}/C={self.adaptive_tuning_state.current_consumers} for {video_basename}")
-
-                    self.single_video_analysis_complete_event.clear()
-                    self.save_and_reset_complete_event.clear()
-                    self.stage_processor.start_full_analysis(processing_mode=selected_mode)
-
-                    # Block until the analysis for this single video is done
-                    self.single_video_analysis_complete_event.wait()
-                    if self.stop_batch_event.is_set(): break
-
-                    # Record adaptive tuning result from completed video
-                    if self.adaptive_tuning_state and not self.adaptive_tuning_state.is_converged:
-                        fps_val = 0.0
-                        success = True
-                        try:
-                            fps_str_raw = self.stage_processor.stage1_final_fps_str
-                            if fps_str_raw and "FPS" in fps_str_raw:
-                                fps_val = float(fps_str_raw.replace("FPS", "").strip())
-                            else:
-                                success = False
-                        except (ValueError, TypeError, AttributeError):
-                            success = False
-                        self._adaptive_tuning_record_result(self.adaptive_tuning_state, fps_val, success)
-
-                    # Pause checkpoint — wait after video analysis
-                    while self.pause_batch_event.is_set() and not self.stop_batch_event.is_set():
-                        time.sleep(0.5)
-                    if self.stop_batch_event.is_set(): break
-
-                    # --- LOAD RESULTS IN CLI ---
-                    if not self.gui_instance:
-                        self.logger.info("CLI Mode: Loading analysis results into funscript processor.")
-                        results_package = self.stage_processor.last_analysis_result
-                        if results_package and "results_dict" in results_package:
-                            if result_script := results_package["results_dict"].get("funscript"):
-                                self.funscript_processor.clear_timeline_history_and_set_new_baseline(1, result_script.primary_actions, "Stage 2 (CLI)")
-                                self.funscript_processor.clear_timeline_history_and_set_new_baseline(2, result_script.secondary_actions, "Stage 2 (CLI)")
-                        else:
-                            self.logger.error("CLI Mode: Analysis finished but no results were found to load.")
-                    # --- END OF ADDED BLOCK ---
-
-                    if not self.gui_instance:
-                        self.on_offline_analysis_completed({"video_path": video_path})
-
-                    # Block until saving and resetting are confirmed complete
-                    self.logger.debug("Batch loop: Waiting for save/reset signal...")
-                    self.save_and_reset_complete_event.wait(timeout=120)
-                    self.logger.debug("Batch loop: Save/reset signal received. Proceeding.")
-
-                    # Restore original processing speed mode
-                    self.app_state_ui.selected_processing_speed_mode = original_speed_mode
-                    self.logger.info("Restored original processing speed mode")
-
-                # --- LIVE MODES (Real-time tracking) ---
-                elif selected_tracker.category == TrackerCategory.LIVE:
-                    self.logger.info(f"Running live mode: {selected_tracker.display_name} for {os.path.basename(video_path)}")
-                    
-                    # Set processing speed to MAX_SPEED for batch/CLI live tracking
-                    from config.constants import ProcessingSpeedMode
-                    original_speed_mode = self.app_state_ui.selected_processing_speed_mode
-                    self.app_state_ui.selected_processing_speed_mode = ProcessingSpeedMode.MAX_SPEED
-                    self.logger.info("Set processing speed to MAX_SPEED for batch live tracking")
-                    
-                    self.tracker.set_tracking_mode(selected_mode)
-                    
-                    # Auto-set axis for axis projection trackers in CLI/batch mode
-                    if "axis_projection" in selected_mode:
-                        current_tracker = self.tracker.get_current_tracker()
-                        if current_tracker and hasattr(current_tracker, 'set_axis'):
-                            # Set default horizontal axis across middle of frame for VR SBS videos
-                            margin = 50
-                            width, height = 640, 640  # Processing frame size
-                            axis_A = (margin, height // 2)  # Left side
-                            axis_B = (width - margin, height // 2)  # Right side
-                            result = current_tracker.set_axis(axis_A, axis_B)
-                            self.logger.info(f"Auto-set axis for {selected_mode}: A={axis_A}, B={axis_B}, result={result}")
-                    
-                    self.tracker.start_tracking()
-                    self.processor.set_tracker_processing_enabled(True)
-
-                    # Process the entire video from start to finish
-                    self.processor.start_processing(
-                        start_frame=0,
-                        end_frame=-1,
-                        cli_progress_callback=cli_live_video_progress_callback
-                    )
-
-                    # Block until the live processing thread finishes
-                    if self.processor.processing_thread and self.processor.processing_thread.is_alive():
-                        self.processor.processing_thread.join()
-
-                    # Restore original processing speed mode
-                    self.app_state_ui.selected_processing_speed_mode = original_speed_mode
-                    self.logger.info("Restored original processing speed mode")
-
-                    # This call now handles all post-processing AND saving/copying
-                    self.on_processing_stopped(was_scripting_session=True)
-
-                self.processor.video_type_setting = original_video_type_setting
-                self.processor.vr_input_format = original_vr_format_setting
-                self.logger.debug("Restored original video format settings for next iteration.")
-
-                if self.stop_batch_event.is_set():
-                    break
-
-        except Exception as e:
-            self.logger.error(f"An error occurred during the batch process: {e}", exc_info=True)
-        finally:
-            # Persist best adaptive tuning settings
-            if self.adaptive_tuning_state:
-                self._adaptive_tuning_apply_best(self.adaptive_tuning_state)
-                self.adaptive_tuning_state = None
-            self.is_batch_processing_active = False
-            self.current_batch_video_index = -1
-            self.batch_video_paths = []
-            self.stop_batch_event.clear()
-            self.pause_batch_event.clear()
-            self.logger.info("Batch processing finished.", extra={'status_message': True})
+    # --- ROI Manager delegation (see app_roi_manager.py) ---
 
     def enter_set_user_roi_mode(self):
-        if self.processor and self.processor.is_processing:
-            self.processor.pause_processing()  # Pause if playing/tracking
-            self.logger.info("Video paused to set User ROI.")
-
-        self.is_setting_user_roi_mode = True
-        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):  # Reset drawing state in UI
-            self.gui_instance.video_display_ui.is_drawing_user_roi = False
-            self.gui_instance.video_display_ui.drawn_user_roi_video_coords = None
-            self.gui_instance.video_display_ui.waiting_for_point_click = False
-
-        self.logger.info("Setting User Defined ROI: Draw rectangle on video, then click point inside.", extra={'status_message': True, 'duration': 5.0})
-        self.energy_saver.reset_activity_timer()
+        self.roi_manager.enter_set_user_roi_mode()
 
     def exit_set_user_roi_mode(self):
-        self.is_setting_user_roi_mode = False
-        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):
-            self.gui_instance.video_display_ui.is_drawing_user_roi = False
-            self.gui_instance.video_display_ui.drawn_user_roi_video_coords = None
-            self.gui_instance.video_display_ui.waiting_for_point_click = False
+        self.roi_manager.exit_set_user_roi_mode()
 
     def user_roi_and_point_set(self, roi_rect_video_coords: Tuple[int, int, int, int], point_video_coords: Tuple[int, int]):
-        if self.chapter_id_for_roi_setting:
-            # --- Logic for setting chapter-specific ROI ---
-            target_chapter = next((ch for ch in self.funscript_processor.video_chapters if ch.unique_id == self.chapter_id_for_roi_setting), None)
-            if target_chapter:
-                target_chapter.user_roi_fixed = roi_rect_video_coords
-
-                # Calculate the point's position relative to the new ROI
-                rx, ry, _, _ = roi_rect_video_coords
-                px_rel = float(point_video_coords[0] - rx)
-                py_rel = float(point_video_coords[1] - ry)
-                target_chapter.user_roi_initial_point_relative = (px_rel, py_rel)
-
-                self.logger.info(
-                    f"ROI and point set for chapter: {target_chapter.position_short_name} ({target_chapter.unique_id[:8]})", extra={'status_message': True})
-                self.project_manager.project_dirty = True
-            else:
-                self.logger.error(f"Could not find the target chapter ({self.chapter_id_for_roi_setting}) to set ROI.", extra={'status_message': True})
-
-            # Reset the state variable
-            self.chapter_id_for_roi_setting = None
-
-        else:
-            if self.tracker and self.processor:
-                current_display_frame = None
-                # We need the raw frame buffer that corresponds to the video_coords.
-                # processor.current_frame is usually the one passed to tracker (e.g. 640x640 BGR)
-                with self.processor.frame_lock:
-                    if self.processor.current_frame is not None:
-                        current_display_frame = self.processor.current_frame.copy()
-
-                if current_display_frame is not None:
-                    # Legacy USER_FIXED_ROI mode removed - ModularTrackerBridge doesn't use this mode
-                    if hasattr(self.tracker, 'set_user_defined_roi_and_point'):
-                        self.tracker.set_user_defined_roi_and_point(roi_rect_video_coords, point_video_coords, current_display_frame)
-                        self.logger.info("User defined ROI and point have been set in the tracker.", extra={'status_message': True})
-                    else:
-                        self.logger.info("Current tracker doesn't support user-defined ROI functionality.", extra={'status_message': True})
-                else:
-                    self.logger.error("Could not get current frame to set user ROI patch. ROI not set.", extra={'status_message': True})
-            else:
-                self.logger.error("Tracker or Processor not available to set user ROI.", extra={'status_message': True})
-
-        self.exit_set_user_roi_mode()
-        self.energy_saver.reset_activity_timer()
+        self.roi_manager.user_roi_and_point_set(roi_rect_video_coords, point_video_coords)
 
     def clear_all_overlays_and_ui_drawings(self) -> None:
-        """Clears all drawn visuals on the video regardless of current mode.
-        This includes: manual ROI & point, oscillation area & grid, YOLO ROI box,
-        and any in-progress UI drawing states.
-        """
-        # Clear tracker-side overlays/state
-        if self.tracker and hasattr(self.tracker, 'clear_all_drawn_overlays'):
-            self.tracker.clear_all_drawn_overlays()
-
-        # Clear any UI-side drawing state (ROI/oscillation drawing in progress)
-        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):
-            vdui = self.gui_instance.video_display_ui
-            # User ROI drawing state
-            vdui.is_drawing_user_roi = False
-            vdui.drawn_user_roi_video_coords = None
-            vdui.waiting_for_point_click = False
-            vdui.user_roi_draw_start_screen_pos = (0, 0)
-            vdui.user_roi_draw_current_screen_pos = (0, 0)
-
-            # Oscillation area drawing state
-            if hasattr(vdui, 'is_drawing_oscillation_area'):
-                vdui.is_drawing_oscillation_area = False
-            if hasattr(vdui, 'drawn_oscillation_area_video_coords'):
-                vdui.drawn_oscillation_area_video_coords = None
-            if hasattr(vdui, 'waiting_for_oscillation_point_click'):
-                vdui.waiting_for_oscillation_point_click = False
-            if hasattr(vdui, 'oscillation_area_draw_start_screen_pos'):
-                vdui.oscillation_area_draw_start_screen_pos = (0, 0)
-            if hasattr(vdui, 'oscillation_area_draw_current_screen_pos'):
-                vdui.oscillation_area_draw_current_screen_pos = (0, 0)
+        self.roi_manager.clear_all_overlays_and_ui_drawings()
 
     def enter_set_oscillation_area_mode(self):
-        if self.processor and self.processor.is_processing:
-            self.processor.pause_processing()  # Pause if playing/tracking
-            self.logger.info("Video paused to set oscillation area.")
-
-        self.is_setting_oscillation_area_mode = True
-        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):  # Reset drawing state in UI
-            self.gui_instance.video_display_ui.is_drawing_oscillation_area = False
-            self.gui_instance.video_display_ui.drawn_oscillation_area_video_coords = None
-            self.gui_instance.video_display_ui.waiting_for_oscillation_point_click = False
-
-        self.logger.info("Setting Oscillation Area: Draw rectangle on video to define detection region.", extra={'status_message': True, 'duration': 5.0})
-        self.energy_saver.reset_activity_timer()
+        self.roi_manager.enter_set_oscillation_area_mode()
 
     def exit_set_oscillation_area_mode(self):
-        self.is_setting_oscillation_area_mode = False
-        if self.gui_instance and hasattr(self.gui_instance, 'video_display_ui'):
-            self.gui_instance.video_display_ui.is_drawing_oscillation_area = False
-            self.gui_instance.video_display_ui.drawn_oscillation_area_video_coords = None
-            self.gui_instance.video_display_ui.waiting_for_oscillation_point_click = False
-            # Clear drawing position variables to prevent showing both rectangles
-            self.gui_instance.video_display_ui.oscillation_area_draw_start_screen_pos = (0, 0)
-            self.gui_instance.video_display_ui.oscillation_area_draw_current_screen_pos = (0, 0)
+        self.roi_manager.exit_set_oscillation_area_mode()
 
     def oscillation_area_and_point_set(self, area_rect_video_coords: Tuple[int, int, int, int], point_video_coords: Tuple[int, int]):
-        if self.tracker and self.processor:
-            current_display_frame = None
-            # We need the raw frame buffer that corresponds to the video_coords.
-            # processor.current_frame is usually the one passed to tracker (e.g. 640x640 BGR)
-            with self.processor.frame_lock:
-                if self.processor.current_frame is not None:
-                    current_display_frame = self.processor.current_frame.copy()
-
-            if current_display_frame is not None:
-                self.tracker.set_oscillation_area_and_point(area_rect_video_coords, point_video_coords, current_display_frame)
-                self.logger.info("Oscillation area and point have been set in the tracker.", extra={'status_message': True})
-            else:
-                self.logger.error("Could not get current frame to set oscillation area patch. Area not set.", extra={'status_message': True})
-        else:
-            self.logger.error("Tracker or Processor not available to set oscillation area.", extra={'status_message': True})
-
-        self.exit_set_oscillation_area_mode()
-        self.energy_saver.reset_activity_timer()
+        self.roi_manager.oscillation_area_and_point_set(area_rect_video_coords, point_video_coords)
 
     def set_pending_action_after_tracking(self, action_type: str, **kwargs):
         """Stores information about an action to be performed after tracking."""
@@ -1637,6 +799,12 @@ class ApplicationLogic:
                 if timeline2 and hasattr(timeline2, 'invalidate_cache'):
                     timeline2.invalidate_cache()
                     self.logger.debug("Timeline 2 cache invalidated after live session completion")
+                # Invalidate extra timeline caches (3+)
+                if hasattr(self, 'gui_instance') and self.gui_instance:
+                    for t_num, editor in getattr(self.gui_instance, '_extra_timeline_editors', {}).items():
+                        if hasattr(editor, 'invalidate_cache'):
+                            editor.invalidate_cache()
+                            self.logger.debug(f"Timeline {t_num} cache invalidated after live session completion")
 
                 # 2. PROCEED WITH POST-PROCESSING (if enabled)
                 post_processing_enabled = self.app_settings.get("enable_auto_post_processing", False)
@@ -1688,67 +856,12 @@ class ApplicationLogic:
                 self.logger.warning("Live session ended, but no video path is available to save the raw funscript.")
 
     def _cache_tracking_classes(self):
-        """
-        Temporarily loads the detection model to get class names, then unloads it.
-        This populates self.cached_class_names. It's a blocking operation.
-        It will first try to get names from an already-loaded tracker model to be efficient.
-        """
-        # If cache is already populated, do nothing.
-        if self.cached_class_names is not None:
-            return
-
-        # If a model is already loaded for active tracking, use its class names.
-        if self.tracker and hasattr(self.tracker, '_current_tracker') and self.tracker._current_tracker:
-            current_tracker = self.tracker._current_tracker
-            if hasattr(current_tracker, 'yolo_model') and current_tracker.yolo_model and hasattr(current_tracker.yolo_model, 'names'):
-                self.logger.info("Model already loaded for tracking, using its class names for cache.")
-                model_names = current_tracker.yolo_model.names
-                if isinstance(model_names, dict):
-                    self.cached_class_names = sorted(list(model_names.values()))
-                elif isinstance(model_names, list):
-                    self.cached_class_names = sorted(model_names)
-                else:
-                    self.logger.warning("Tracker model names format not recognized while caching.")
-                return
-
-        model_path = self.yolo_det_model_path
-        if not model_path or not os.path.exists(model_path):
-            self.logger.info("Cannot cache tracking classes: Detection model path not set or invalid.")
-            self.cached_class_names = []  # Cache as empty to prevent re-attempts.
-            return
-
-        try:
-            self.logger.info(f"Temporarily loading model to cache class names: {os.path.basename(model_path)}")
-            # This is the potentially slow operation that can freeze the UI.
-            temp_model = YOLO(model_path)
-            model_names = temp_model.names
-
-            if isinstance(model_names, dict):
-                self.cached_class_names = sorted(list(model_names.values()))
-            elif isinstance(model_names, list):
-                self.cached_class_names = sorted(model_names)
-            else:
-                self.logger.warning("Model loaded for caching, but names format not recognized.")
-                self.cached_class_names = []  # Cache as empty
-
-            self.logger.info("Class names cached successfully.")
-            del temp_model  # Explicitly release the model object
-
-        except Exception as e:
-            self.logger.error(f"Failed to temporarily load model '{model_path}' to cache class names: {e}", exc_info=True)
-            self.cached_class_names = []  # Cache as empty on failure to prevent retries.
+        """Temporarily loads the detection model to get class names, then unloads it."""
+        self.model_manager._cache_tracking_classes()
 
     def get_available_tracking_classes(self) -> List[str]:
-        """
-        Gets the list of class names from the model.
-        It uses a cache to avoid reloading the model repeatedly.
-        """
-        # If cache is not populated, do it now.
-        if self.cached_class_names is None:
-            self._cache_tracking_classes()
-
-        # The cache should be populated now (even if with an empty list on failure).
-        return self.cached_class_names if self.cached_class_names is not None else []
+        """Gets the list of class names from the model (cached)."""
+        return self.model_manager.get_available_tracking_classes()
 
     def set_status_message(self, message: str, duration: float = 3.0, level: int = logging.INFO):
         if hasattr(self, 'app_state_ui') and self.app_state_ui is not None:
@@ -1804,40 +917,7 @@ class ApplicationLogic:
 
     def _check_model_paths(self):
         """Checks essential model paths and auto-downloads if missing."""
-        models_missing = False
-        
-        # Detection model remains essential
-        if not self.yolo_det_model_path or not os.path.exists(self.yolo_det_model_path):
-            self.logger.warning(
-                f"YOLO Detection Model not found or path not set: '{self.yolo_det_model_path}'. Attempting auto-download...",
-                extra={'status_message': True, 'duration': 5.0})
-            models_missing = True
-
-        # Pose model is now optional but we'll try to download it too
-        if not self.yolo_pose_model_path or not os.path.exists(self.yolo_pose_model_path):
-            self.logger.warning(
-                f"YOLO Pose Model not found or path not set. Attempting auto-download...",
-                extra={'status_message': True, 'duration': 5.0})
-            models_missing = True
-        
-        # Auto-download missing models
-        if models_missing:
-            self.logger.info("Auto-downloading missing models...")
-            self.download_default_models()
-            
-            # Re-check after download
-            if not self.yolo_det_model_path or not os.path.exists(self.yolo_det_model_path):
-                self.logger.error(
-                    f"CRITICAL ERROR: Failed to auto-download or configure detection model.",
-                    extra={'status_message': True, 'duration': 15.0})
-                # GUI popup: Inform user auto-download failed
-                if getattr(self, "gui_instance", None):
-                    self.gui_instance.show_error_popup("Detection Model Missing", "Failed to auto-download detection model.\nPlease select a YOLO model file in the UI Configuration tab or check your internet connection.")
-                return False
-            else:
-                self.logger.info("Detection model successfully configured!", extra={'status_message': True, 'duration': 3.0})
-        
-        return True
+        return self.model_manager._check_model_paths()
 
     def set_application_logging_level(self, level_name: str):
         """Sets the application-wide logging level."""
@@ -2131,131 +1211,8 @@ class ApplicationLogic:
 
 
     def run_cli(self, args):
-        """
-        Handles the application's command-line interface logic.
-        """
-        console_handler = None
-        original_log_level = None
-        for handler in self.logger.handlers:
-            if isinstance(handler, logging.StreamHandler):
-                console_handler = handler
-                original_log_level = handler.level
-                break
-
-        if console_handler:
-            # Temporarily set the console to only show WARNINGs and above
-            console_handler.setLevel(logging.WARNING)
-
-        try:
-            self.logger.info("Running in Command-Line Interface (CLI) mode.")
-
-            # Check if we're in funscript processing mode
-            if hasattr(args, 'funscript_mode') and args.funscript_mode:
-                self._run_funscript_cli_mode(args)
-                return
-
-            # 1. Resolve input path and find video files
-            input_path = os.path.abspath(args.input_path)
-            if not os.path.exists(input_path):
-                self.logger.error(f"Input path does not exist: {input_path}")
-                return
-
-            video_paths = []
-            if os.path.isfile(input_path):
-                video_paths.append(input_path)
-            elif os.path.isdir(input_path):
-                self.logger.info(f"Scanning folder for videos: {input_path} (Recursive: {args.recursive})")
-                valid_extensions = {".mp4", ".mkv", ".mov", ".avi", ".webm"}
-                if args.recursive:
-                    for root, _, files in os.walk(input_path):
-                        for file in files:
-                            if os.path.splitext(file)[1].lower() in valid_extensions:
-                                video_paths.append(os.path.join(root, file))
-                else:
-                    for file in os.listdir(input_path):
-                        if os.path.splitext(file)[1].lower() in valid_extensions:
-                            video_paths.append(os.path.join(input_path, file))
-
-            if not video_paths:
-                self.logger.error("No video files found at the specified path.")
-                return
-
-            self.logger.info(f"Found {len(video_paths)} video(s) to process.")
-
-            self.logger.info("Redirecting progress callbacks to CLI output.")
-            self.stage_processor.on_stage1_progress = cli_stage1_progress_callback
-            self.stage_processor.on_stage2_progress = cli_stage2_progress_callback
-            self.stage_processor.on_stage3_progress = cli_stage3_progress_callback
-
-            # 2. Configure batch processing from CLI args using dynamic discovery
-            from config.tracker_discovery import get_tracker_discovery
-            discovery = get_tracker_discovery()
-            
-            # Resolve CLI mode to tracker info
-            tracker_info = discovery.get_tracker_info(args.mode)
-            if not tracker_info:
-                self.logger.error(f"Unknown processing mode: {args.mode}")
-                self.logger.error(f"Available modes: {discovery.get_supported_cli_modes()}")
-                return
-            
-            if not tracker_info.supports_batch:
-                self.logger.error(f"Mode '{args.mode}' does not support batch processing")
-                self.logger.error(f"Batch-compatible modes: {[info.cli_aliases[0] for info in discovery.get_batch_compatible_trackers() if info.cli_aliases]}")
-                return
-            
-            # Store the tracker name directly for batch processing
-            self.batch_tracker_name = tracker_info.internal_name
-            self.logger.info(f"Processing Mode: {args.mode} -> {tracker_info.display_name}")
-            
-            # Set oscillation detector mode for Stage 3 if provided
-            if hasattr(args, 'od_mode') and args.od_mode:
-                self.app_settings.set("stage3_oscillation_detector_mode", args.od_mode)
-                self.logger.info(f"Stage 3 Oscillation Detector Mode: {args.od_mode}")
-
-            # Overwrite mode: 2 for overwrite, 1 for skip if missing (default), 0 process all except own matching.
-            self.batch_overwrite_mode = 2 if args.overwrite else 1
-            self.batch_apply_ultimate_autotune = args.autotune
-            self.batch_copy_funscript_to_video_location = args.copy
-            
-            # Post-processing and Ultimate Autotune are mutually exclusive to avoid double simplification
-            # Priority: Ultimate Autotune > Auto Post-processing
-            if args.autotune:
-                # When Ultimate Autotune is enabled, disable post-processing to avoid double simplification
-                self.batch_apply_post_processing = False
-                self.logger.info("Ultimate Autotune enabled - auto post-processing disabled to prevent double simplification")
-            else:
-                # When Ultimate Autotune is disabled, allow post-processing based on settings
-                self.batch_apply_post_processing = self.app_settings.get("enable_auto_post_processing", False)
-                if self.batch_apply_post_processing:
-                    self.logger.info("Ultimate Autotune disabled - auto post-processing enabled from settings")
-                else:
-                    self.logger.info("Both Ultimate Autotune and auto post-processing disabled")
-            # Determine roll file generation based on CLI argument or tracker capabilities
-            if hasattr(args, 'generate_roll') and args.generate_roll:
-                self.batch_generate_roll_file = True
-            else:
-                # Default behavior: enable for 3-stage modes or dual-axis trackers
-                self.batch_generate_roll_file = (args.mode in ['3-stage', '3-stage-mixed']) or (tracker_info and tracker_info.supports_dual_axis)
-
-            self.logger.info(f"Settings -> Overwrite: {args.overwrite}, Autotune: {args.autotune}, Copy to video location: {args.copy}")
-
-            # 3. Set up and run the batch processing
-            self.batch_video_paths = [
-                {"path": path, "override_format": "Auto (Heuristic)"} for path in video_paths
-            ]
-            self.is_batch_processing_active = True
-            self.current_batch_video_index = -1
-            self.stop_batch_event.clear()
-
-            # For CLI, we run the batch process in the main thread.
-            self._run_batch_processing_thread()
-
-            self.logger.info("CLI processing has finished.")
-
-        finally:
-            if console_handler and original_log_level is not None:
-                # Restore the original logging level to the console
-                console_handler.setLevel(original_log_level)
+        """Handles the application's command-line interface logic. Delegated to AppCLIRunner."""
+        return self.cli_runner.run_cli(args)
 
     def shutdown_app(self):
         """Gracefully shuts down application components."""
@@ -2282,288 +1239,12 @@ class ApplicationLogic:
 
     def download_default_models(self):
         """Manually download default models if they don't exist."""
-        try:
-            # Create models directory
-            models_dir = DEFAULT_MODELS_DIR
-            os.makedirs(models_dir, exist_ok=True)
-            self.logger.info(f"Checking for default models in: {models_dir}")
-
-            # Determine OS for model format
-            is_mac_arm = platform.system() == "Darwin" and platform.machine() == 'arm64'
-            self.logger.info(f"Platform detection: system={platform.system()}, machine={platform.machine()}, is_mac_arm={is_mac_arm}")
-            downloaded_models = []
-
-            # Check and download detection model
-            det_url = MODEL_DOWNLOAD_URLS["detection_pt"]
-            det_filename_pt = os.path.basename(det_url)
-            det_model_path_pt = os.path.join(models_dir, det_filename_pt)
-            det_model_path_mlpackage = det_model_path_pt.replace('.pt', '.mlpackage')
-            
-            # Check if either .pt or .mlpackage version exists
-            if not os.path.exists(det_model_path_pt) and not os.path.exists(det_model_path_mlpackage):
-                self.logger.info(f"Downloading detection model: {det_filename_pt}")
-                success = self.utility.download_file_with_progress(det_url, det_model_path_pt, None)
-                if success:
-                    downloaded_models.append(f"Detection model: {det_filename_pt}")
-                    
-                    # Convert to CoreML if on macOS ARM
-                    if is_mac_arm:
-                        self.logger.info(f"Attempting to convert detection model to CoreML (is_mac_arm={is_mac_arm})...")
-                        try:
-                            model = YOLO(det_model_path_pt)
-                            self.logger.info(f"YOLO model loaded, starting export to CoreML format...")
-                            model.export(format="coreml")
-                            self.logger.info(f"Converted detection model to CoreML: {det_model_path_mlpackage}")
-                            # Set the CoreML model path in settings
-                            self.app_settings.set("yolo_det_model_path", det_model_path_mlpackage)
-                            self.yolo_detection_model_path_setting = det_model_path_mlpackage
-                            self.yolo_det_model_path = det_model_path_mlpackage
-                        except Exception as e:
-                            self.logger.error(f"Failed to convert detection model to CoreML: {e}")
-                            # Fall back to PT model if CoreML conversion fails
-                            self.app_settings.set("yolo_det_model_path", det_model_path_pt)
-                            self.yolo_detection_model_path_setting = det_model_path_pt
-                            self.yolo_det_model_path = det_model_path_pt
-                    else:
-                        # Set the PT model path in settings for non-macOS ARM
-                        self.app_settings.set("yolo_det_model_path", det_model_path_pt)
-                        self.yolo_detection_model_path_setting = det_model_path_pt
-                        self.yolo_det_model_path = det_model_path_pt
-                else:
-                    self.logger.error("Failed to download detection model")
-            else:
-                self.logger.info("Detection model already exists")
-                # Check if path is not set in settings and auto-configure
-                current_setting = self.app_settings.get("yolo_det_model_path", "")
-                if not current_setting or not os.path.exists(current_setting):
-                    # Prefer .mlpackage on macOS ARM if it exists
-                    if is_mac_arm and os.path.exists(det_model_path_mlpackage):
-                        self.app_settings.set("yolo_det_model_path", det_model_path_mlpackage)
-                        self.yolo_detection_model_path_setting = det_model_path_mlpackage
-                        self.yolo_det_model_path = det_model_path_mlpackage
-                        self.logger.info(f"Auto-configured detection model path to: {det_model_path_mlpackage}")
-                    elif os.path.exists(det_model_path_pt):
-                        self.app_settings.set("yolo_det_model_path", det_model_path_pt)
-                        self.yolo_detection_model_path_setting = det_model_path_pt
-                        self.yolo_det_model_path = det_model_path_pt
-                        self.logger.info(f"Auto-configured detection model path to: {det_model_path_pt}")
-
-            # Check and download pose model
-            pose_url = MODEL_DOWNLOAD_URLS["pose_pt"]
-            pose_filename_pt = os.path.basename(pose_url)
-            pose_model_path_pt = os.path.join(models_dir, pose_filename_pt)
-            pose_model_path_mlpackage = pose_model_path_pt.replace('.pt', '.mlpackage')
-            
-            # Check if either .pt or .mlpackage version exists
-            if not os.path.exists(pose_model_path_pt) and not os.path.exists(pose_model_path_mlpackage):
-                self.logger.info(f"Downloading pose model: {pose_filename_pt}")
-                success = self.utility.download_file_with_progress(pose_url, pose_model_path_pt, None)
-                if success:
-                    downloaded_models.append(f"Pose model: {pose_filename_pt}")
-                    
-                    # Convert to CoreML if on macOS ARM
-                    if is_mac_arm:
-                        self.logger.info(f"Attempting to convert pose model to CoreML (is_mac_arm={is_mac_arm})...")
-                        try:
-                            model = YOLO(pose_model_path_pt)
-                            self.logger.info(f"YOLO pose model loaded, starting export to CoreML format...")
-                            model.export(format="coreml")
-                            self.logger.info(f"Converted pose model to CoreML: {pose_model_path_mlpackage}")
-                            # Set the CoreML model path in settings
-                            self.app_settings.set("yolo_pose_model_path", pose_model_path_mlpackage)
-                            self.yolo_pose_model_path_setting = pose_model_path_mlpackage
-                            self.yolo_pose_model_path = pose_model_path_mlpackage
-                        except Exception as e:
-                            self.logger.error(f"Failed to convert pose model to CoreML: {e}")
-                            # Fall back to PT model if CoreML conversion fails
-                            self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
-                            self.yolo_pose_model_path_setting = pose_model_path_pt
-                            self.yolo_pose_model_path = pose_model_path_pt
-                    else:
-                        # Set the PT model path in settings for non-macOS ARM
-                        self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
-                        self.yolo_pose_model_path_setting = pose_model_path_pt
-                        self.yolo_pose_model_path = pose_model_path_pt
-                else:
-                    self.logger.error("Failed to download pose model")
-            else:
-                self.logger.info("Pose model already exists")
-                # Check if path is not set in settings and auto-configure existing model
-                current_setting = self.app_settings.get("yolo_pose_model_path", "")
-                if not current_setting or not os.path.exists(current_setting):
-                    if os.path.exists(pose_model_path_pt):
-                        self.logger.info("Auto-configuring existing pose model path in settings")
-                        self.app_settings.set("yolo_pose_model_path", pose_model_path_pt)
-                        self.yolo_pose_model_path_setting = pose_model_path_pt
-                        self.yolo_pose_model_path = pose_model_path_pt
-
-            # Report results
-            if downloaded_models:
-                message = f"Downloaded models: {', '.join(downloaded_models)}"
-                self.set_status_message(message, duration=5.0)
-                self.logger.info(message)
-            else:
-                message = "All default models already exist"
-                self.set_status_message(message, duration=3.0)
-                self.logger.info(message)
-
-        except Exception as e:
-            error_msg = f"Error downloading models: {e}"
-            self.set_status_message(error_msg, duration=5.0)
-            self.logger.error(error_msg, exc_info=True)
+        self.model_manager.download_default_models()
 
     def _run_funscript_cli_mode(self, args):
-        """
-        Handles CLI funscript processing mode - applies filters to existing funscripts.
-        """
-        self.logger.info("Running in funscript processing mode")
-        
-        # 1. Find funscript files
-        input_path = os.path.abspath(args.input_path)
-        if not os.path.exists(input_path):
-            self.logger.error(f"Input path does not exist: {input_path}")
-            return
-        
-        funscript_paths = []
-        if os.path.isfile(input_path):
-            if input_path.lower().endswith('.funscript'):
-                funscript_paths.append(input_path)
-            else:
-                self.logger.error(f"File is not a funscript: {input_path}")
-                return
-        elif os.path.isdir(input_path):
-            self.logger.info(f"Scanning folder for funscripts: {input_path} (Recursive: {args.recursive})")
-            if args.recursive:
-                for root, _, files in os.walk(input_path):
-                    for file in files:
-                        if file.lower().endswith('.funscript'):
-                            funscript_paths.append(os.path.join(root, file))
-            else:
-                for file in os.listdir(input_path):
-                    if file.lower().endswith('.funscript'):
-                        funscript_paths.append(os.path.join(input_path, file))
-        
-        if not funscript_paths:
-            self.logger.error("No funscript files found at the specified path.")
-            return
-        
-        self.logger.info(f"Found {len(funscript_paths)} funscript(s) to process with filter: {args.filter}")
-        
-        # 2. Load plugin system
-        try:
-            from funscript.plugins.base_plugin import plugin_registry
-            # Import all plugins to ensure they're registered
-            from funscript.plugins import (
-                ultimate_autotune_plugin, rdp_simplify_plugin, savgol_filter_plugin,
-                speed_limiter_plugin, anti_jerk_plugin, amplify_plugin, clamp_plugin,
-                invert_plugin, keyframe_plugin
-            )
-            
-            # Manually register plugins that don't auto-register
-            from funscript.plugins.rdp_simplify_plugin import RdpSimplifyPlugin
-            from funscript.plugins.amplify_plugin import AmplifyPlugin
-            from funscript.plugins.clamp_plugin import ValueClampPlugin
-            from funscript.plugins.invert_plugin import InvertPlugin
-            from funscript.plugins.savgol_filter_plugin import SavgolFilterPlugin
-            from funscript.plugins.speed_limiter_plugin import SpeedLimiterPlugin
-            from funscript.plugins.anti_jerk_plugin import AntiJerkPlugin
-            from funscript.plugins.keyframe_plugin import KeyframePlugin
-            
-            # Register plugins that aren't auto-registering
-            plugins_to_register = [
-                RdpSimplifyPlugin(), AmplifyPlugin(), ValueClampPlugin(), InvertPlugin(),
-                SavgolFilterPlugin(), SpeedLimiterPlugin(), AntiJerkPlugin(), KeyframePlugin()
-            ]
-            
-            for plugin in plugins_to_register:
-                try:
-                    plugin_registry.register(plugin)
-                except Exception:
-                    pass  # May already be registered
-                    
-        except ImportError as e:
-            self.logger.error(f"Failed to import plugin system: {e}")
-            return
-        
-        # 3. Get the specified plugin
-        plugin_map = {
-            'ultimate-autotune': 'Ultimate Autotune',
-            'rdp-simplify': 'Simplify (RDP)',
-            'savgol-filter': 'SavGol Filter',
-            'speed-limiter': 'Speed Limiter',
-            'anti-jerk': 'Anti-Jerk',
-            'amplify': 'Amplify',
-            'clamp': 'Clamp',
-            'invert': 'Invert',
-            'keyframe': 'Keyframe'
-        }
-        
-        plugin_name = plugin_map.get(args.filter)
-        if not plugin_name:
-            self.logger.error(f"Unknown filter: {args.filter}")
-            return
-        
-        plugin = plugin_registry.get_plugin(plugin_name)
-        if not plugin:
-            self.logger.error(f"Plugin not found: {plugin_name}")
-            return
-        
-        self.logger.info(f"Using plugin: {plugin_name}")
-        
-        # 4. Process each funscript
-        success_count = 0
-        for i, funscript_path in enumerate(funscript_paths):
-            try:
-                self.logger.info(f"Processing {i+1}/{len(funscript_paths)}: {os.path.basename(funscript_path)}")
-                
-                # Load the funscript using existing parsing logic
-                from funscript import DualAxisFunscript
-                actions, error_msg, _, _ = self.file_manager._parse_funscript_file(funscript_path)
-                
-                if error_msg:
-                    self.logger.error(f"Failed to parse funscript {funscript_path}: {error_msg}")
-                    continue
-                
-                if not actions:
-                    self.logger.warning(f"Skipping empty funscript: {funscript_path}")
-                    continue
-                
-                # Create funscript object and set actions
-                funscript = DualAxisFunscript()
-                funscript.primary_actions = actions
-                
-                # Get default parameters for the plugin
-                if hasattr(plugin, 'get_default_params'):
-                    params = plugin.get_default_params()
-                else:
-                    params = {}
-                
-                # Apply the filter
-                self.logger.info(f"Applying {plugin_name} filter...")
-                result = plugin.transform(funscript, 'primary', **params)
-                
-                # Some plugins return the funscript object, others modify in-place and return None
-                # We'll treat any non-exception result as success and use the original funscript
-                # which should now be modified by the plugin
-                output_path = self._generate_filtered_funscript_path(funscript_path, args.filter, args.overwrite)
-                
-                # Save the filtered funscript using existing file manager
-                # Use the modified funscript (plugins modify in-place)
-                self.file_manager._save_funscript_file(output_path, funscript.primary_actions)
-                self.logger.info(f"Saved filtered funscript: {output_path}")
-                success_count += 1
-                    
-            except Exception as e:
-                self.logger.error(f"Error processing {funscript_path}: {e}")
-                continue
-        
-        self.logger.info(f"Funscript processing complete. Successfully processed {success_count}/{len(funscript_paths)} files.")
-    
+        """Handles CLI funscript processing mode. Delegated to AppCLIRunner."""
+        return self.cli_runner._run_funscript_cli_mode(args)
+
     def _generate_filtered_funscript_path(self, original_path, filter_name, overwrite):
-        """Generate output path for filtered funscript."""
-        if overwrite:
-            return original_path
-        
-        # Insert filter name before .funscript extension
-        base, ext = os.path.splitext(original_path)
-        return f"{base}.{filter_name}{ext}"
+        """Generate output path for filtered funscript. Delegated to AppCLIRunner."""
+        return self.cli_runner._generate_filtered_funscript_path(original_path, filter_name, overwrite)

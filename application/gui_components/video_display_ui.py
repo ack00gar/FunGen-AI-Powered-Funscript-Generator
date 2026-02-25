@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 import config.constants as constants
 from config.element_group_colors import VideoDisplayColors
 from application.utils import get_logo_texture_manager, get_icon_texture_manager
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 
 # Module-level logger for Handy debug output (disabled by default)
 _handy_debug_logger = logging.getLogger(__name__ + '.handy')
@@ -180,91 +181,82 @@ class VideoDisplayUI:
         overlay_x = max(img_rect['min_x'] + style.item_spacing[1], overlay_x)
         imgui.set_cursor_screen_pos((overlay_x, overlay_y))
 
-        if controls_disabled:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
-
         imgui.begin_group()
 
-        # Jump Start button
-        jump_start_tex, _, _ = icon_mgr.get_icon_texture('jump-start.png')
-        if jump_start_tex and imgui.image_button(jump_start_tex, pb_icon_w, pb_icon_w):
-            event_handlers.handle_playback_control("jump_start")
-        elif not jump_start_tex and imgui.button("|<##VidOverStart", width=pb_icon_w):
-            event_handlers.handle_playback_control("jump_start")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Jump to Start (HOME)")
+        with _DisabledScope(controls_disabled):
+            # Jump Start button
+            jump_start_tex, _, _ = icon_mgr.get_icon_texture('jump-start.png')
+            if jump_start_tex and imgui.image_button(jump_start_tex, pb_icon_w, pb_icon_w):
+                event_handlers.handle_playback_control("jump_start")
+            elif not jump_start_tex and imgui.button("|<##VidOverStart", width=pb_icon_w):
+                event_handlers.handle_playback_control("jump_start")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Jump to Start (HOME)")
 
-        imgui.same_line(spacing=pb_btn_spacing)
+            imgui.same_line(spacing=pb_btn_spacing)
 
-        # Previous Frame button
-        prev_frame_tex, _, _ = icon_mgr.get_icon_texture('prev-frame.png')
-        if prev_frame_tex and imgui.image_button(prev_frame_tex, pb_icon_w, pb_icon_w):
-            event_handlers.handle_playback_control("prev_frame")
-        elif not prev_frame_tex and imgui.button("<<##VidOverPrev", width=pb_icon_w):
-            event_handlers.handle_playback_control("prev_frame")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Previous Frame (LEFT ARROW)")
+            # Previous Frame button
+            prev_frame_tex, _, _ = icon_mgr.get_icon_texture('prev-frame.png')
+            if prev_frame_tex and imgui.image_button(prev_frame_tex, pb_icon_w, pb_icon_w):
+                event_handlers.handle_playback_control("prev_frame")
+            elif not prev_frame_tex and imgui.button("<<##VidOverPrev", width=pb_icon_w):
+                event_handlers.handle_playback_control("prev_frame")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Previous Frame (LEFT ARROW)")
 
-        imgui.same_line(spacing=pb_btn_spacing)
+            imgui.same_line(spacing=pb_btn_spacing)
 
-        # Play/Pause button (dynamic based on state)
-        is_playing = self.app.processor and self.app.processor.is_processing and not self.app.processor.pause_event.is_set()
-        play_pause_icon_name = 'pause.png' if is_playing else 'play.png'
-        play_pause_fallback = "||" if is_playing else ">"
+            # Play/Pause button (dynamic based on state)
+            is_playing = self.app.processor and self.app.processor.is_processing and not self.app.processor.pause_event.is_set()
+            play_pause_icon_name = 'pause.png' if is_playing else 'play.png'
+            play_pause_fallback = "||" if is_playing else ">"
 
-        play_pause_tex, _, _ = icon_mgr.get_icon_texture(play_pause_icon_name)
-        if play_pause_tex and imgui.image_button(play_pause_tex, pb_play_w, pb_icon_w):
-            event_handlers.handle_playback_control("play_pause")
-        elif not play_pause_tex and imgui.button(f"{play_pause_fallback}##VidOverPlayPause", width=pb_play_w):
-            event_handlers.handle_playback_control("play_pause")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Toggle Play/Pause (SPACE)")
+            play_pause_tex, _, _ = icon_mgr.get_icon_texture(play_pause_icon_name)
+            if play_pause_tex and imgui.image_button(play_pause_tex, pb_play_w, pb_icon_w):
+                event_handlers.handle_playback_control("play_pause")
+            elif not play_pause_tex and imgui.button(f"{play_pause_fallback}##VidOverPlayPause", width=pb_play_w):
+                event_handlers.handle_playback_control("play_pause")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Toggle Play/Pause (SPACE)")
 
-        imgui.same_line(spacing=2)
+            imgui.same_line(spacing=2)
 
-        # Stop button
-        stop_tex, _, _ = icon_mgr.get_icon_texture('stop.png')
-        if stop_tex and imgui.image_button(stop_tex, pb_stop_w, pb_icon_w):
-            event_handlers.handle_playback_control("stop")
-        elif not stop_tex and imgui.button("[]##VidOverStop", width=pb_stop_w):
-            event_handlers.handle_playback_control("stop")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Stop Playback")
+            # Stop button
+            stop_tex, _, _ = icon_mgr.get_icon_texture('stop.png')
+            if stop_tex and imgui.image_button(stop_tex, pb_stop_w, pb_icon_w):
+                event_handlers.handle_playback_control("stop")
+            elif not stop_tex and imgui.button("[]##VidOverStop", width=pb_stop_w):
+                event_handlers.handle_playback_control("stop")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Stop Playback")
 
-        imgui.same_line(spacing=pb_btn_spacing)
+            imgui.same_line(spacing=pb_btn_spacing)
 
-        # Next Frame button
-        next_frame_tex, _, _ = icon_mgr.get_icon_texture('next-frame.png')
-        if next_frame_tex and imgui.image_button(next_frame_tex, pb_icon_w, pb_icon_w):
-            event_handlers.handle_playback_control("next_frame")
-        elif not next_frame_tex and imgui.button(">>##VidOverNext", width=pb_icon_w):
-            event_handlers.handle_playback_control("next_frame")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Next Frame (RIGHT ARROW)")
+            # Next Frame button
+            next_frame_tex, _, _ = icon_mgr.get_icon_texture('next-frame.png')
+            if next_frame_tex and imgui.image_button(next_frame_tex, pb_icon_w, pb_icon_w):
+                event_handlers.handle_playback_control("next_frame")
+            elif not next_frame_tex and imgui.button(">>##VidOverNext", width=pb_icon_w):
+                event_handlers.handle_playback_control("next_frame")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Next Frame (RIGHT ARROW)")
 
-        imgui.same_line(spacing=pb_btn_spacing)
+            imgui.same_line(spacing=pb_btn_spacing)
 
-        # Jump End button
-        jump_end_tex, _, _ = icon_mgr.get_icon_texture('jump-end.png')
-        if jump_end_tex and imgui.image_button(jump_end_tex, pb_icon_w, pb_icon_w):
-            event_handlers.handle_playback_control("jump_end")
-        elif not jump_end_tex and imgui.button(">|##VidOverEnd", width=pb_icon_w):
-            event_handlers.handle_playback_control("jump_end")
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Jump to End (END)")
+            # Jump End button
+            jump_end_tex, _, _ = icon_mgr.get_icon_texture('jump-end.png')
+            if jump_end_tex and imgui.image_button(jump_end_tex, pb_icon_w, pb_icon_w):
+                event_handlers.handle_playback_control("jump_end")
+            elif not jump_end_tex and imgui.button(">|##VidOverEnd", width=pb_icon_w):
+                event_handlers.handle_playback_control("jump_end")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Jump to End (END)")
 
-        # Add Handy control button inline with playback controls
+        # Handy and Fullscreen buttons manage their own disabled state
         self._render_handy_control_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
-        
-        # Add Fullscreen button inline with playback controls
         self._render_fullscreen_button_inline(pb_btn_spacing, button_h_ref, controls_disabled)
-        
-        imgui.end_group()
 
-        if controls_disabled:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
+        imgui.end_group()
 
     
 
@@ -1297,31 +1289,19 @@ class VideoDisplayUI:
             button_text = "No Funscript"  # No funscript available
             
         # Apply disabled styling if controls are disabled or button is disabled
-        if controls_disabled or not button_enabled:
-            if not controls_disabled:  # Only add if not already applied
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
-            
-        # Render the button
-        button_clicked = imgui.button(f"{button_text}##HandyControl", width=button_width)
-        
-        if button_clicked:
+        handy_disabled = controls_disabled or not button_enabled
+
+        with _DisabledScope(handy_disabled):
+            button_clicked = imgui.button(f"{button_text}##HandyControl", width=button_width)
+
+        if button_clicked and not handy_disabled:
             if _handy_debug_logger.isEnabledFor(logging.DEBUG): _handy_debug_logger.debug(f" Handy button clicked - enabled: {button_enabled}, controls_disabled: {controls_disabled}")
-            if button_enabled and not controls_disabled:
-                if _handy_debug_logger.isEnabledFor(logging.DEBUG): _handy_debug_logger.debug(f" Button action triggered - streaming_active: {self.handy_streaming_active}")
-                if self.handy_streaming_active:
-                    if _handy_debug_logger.isEnabledFor(logging.DEBUG): _handy_debug_logger.debug(" Stopping Handy streaming")
-                    self._stop_handy_streaming()
-                else:
-                    if _handy_debug_logger.isEnabledFor(logging.DEBUG): _handy_debug_logger.debug(" Starting Handy streaming")
-                    self._start_handy_streaming()
+            if self.handy_streaming_active:
+                if _handy_debug_logger.isEnabledFor(logging.DEBUG): _handy_debug_logger.debug(" Stopping Handy streaming")
+                self._stop_handy_streaming()
             else:
-                if _handy_debug_logger.isEnabledFor(logging.DEBUG): _handy_debug_logger.debug(" Button click ignored - button disabled or controls disabled")
-                
-        # Clean up disabled styling if we added it
-        if not controls_disabled and not button_enabled:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
+                if _handy_debug_logger.isEnabledFor(logging.DEBUG): _handy_debug_logger.debug(" Starting Handy streaming")
+                self._start_handy_streaming()
             
         imgui.pop_style_color()
         
@@ -1341,92 +1321,61 @@ class VideoDisplayUI:
     
     def _render_fullscreen_button_inline(self, spacing: float, button_height: float, controls_disabled: bool):
         """Render fullscreen button inline with playback controls."""
-        style = imgui.get_style()
         button_width = button_height  # Square button for consistency with other playback controls
-        
+
         # Add spacing and render inline with other controls
         imgui.same_line(spacing=spacing)
-        
+
         # Check if live tracking is active (when FS button should be enabled)
         is_live_tracking = (self.app.processor and
                            self.app.processor.is_processing and
                            self.app.processor.enable_tracker_processing)
-        
-        # If parent controls are disabled due to live tracking, temporarily enable just for FS button
-        parent_disabled_override = False
-        if controls_disabled and is_live_tracking:
-            # Pop the parent disabled state temporarily
-            imgui.internal.pop_item_flag()
-            imgui.pop_style_var()
-            parent_disabled_override = True
-        
+
         # Determine if video is loaded and ready for fullscreen
-        video_loaded = (hasattr(self.app, 'processor') and 
-                       self.app.processor and 
-                       hasattr(self.app.processor, 'video_path') and 
+        video_loaded = (hasattr(self.app, 'processor') and
+                       self.app.processor and
+                       hasattr(self.app.processor, 'video_path') and
                        self.app.processor.video_path)
-        
+
         # Check if fullscreen is currently active
-        has_fullscreen_process = (hasattr(self, '_fullscreen_process') and 
-                                 self._fullscreen_process and 
+        has_fullscreen_process = (hasattr(self, '_fullscreen_process') and
+                                 self._fullscreen_process and
                                  self._fullscreen_process.poll() is None)
-        
-        # live tracking status already checked above
-        
-        # Fullscreen button should be enabled during live tracking!
-        # That's exactly when users want to see fullscreen with audio
-        # Override the parent controls_disabled for fullscreen specifically
+
+        # Fullscreen button should be enabled during live tracking
         fullscreen_button_disabled = not video_loaded
-        
-        # Important: Ignore parent controls_disabled during live tracking
-        # The fullscreen feature is most useful during live tracking!
         if is_live_tracking and video_loaded:
             fullscreen_button_disabled = False
-        
+
         # Get icon texture manager
         icon_mgr = get_icon_texture_manager()
 
         # Determine button state, styling, and icon
         if has_fullscreen_process:
-            # Exit fullscreen mode
             imgui.push_style_color(imgui.COLOR_BUTTON, 0.8, 0.2, 0.2, 1.0)  # Red
             button_icon_name = 'fullscreen-exit.png'
             button_text_fallback = "Exit FS"
-            button_enabled = True
         else:
-            # Enter fullscreen mode - highlight during live tracking
             if is_live_tracking:
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2, 1.0)  # Green (live tracking)
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.8, 0.2, 1.0)  # Green
                 button_text_fallback = "FS Live"
             else:
-                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.8, 1.0)  # Blue (normal)
+                imgui.push_style_color(imgui.COLOR_BUTTON, 0.2, 0.6, 0.8, 1.0)  # Blue
                 button_text_fallback = "FS"
             button_icon_name = 'fullscreen.png'
-            button_enabled = video_loaded
 
-        # Apply disabled styling if needed (but NOT during live tracking)
-        if fullscreen_button_disabled:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
+        with _DisabledScope(fullscreen_button_disabled):
+            fs_tex, _, _ = icon_mgr.get_icon_texture(button_icon_name)
+            if fs_tex:
+                button_clicked = imgui.image_button(fs_tex, button_width, button_width)
+            else:
+                button_clicked = imgui.button(f"{button_text_fallback}##FullscreenControl", width=button_width)
 
-        # Render the button with icon or fallback text
-        fs_tex, _, _ = icon_mgr.get_icon_texture(button_icon_name)
-        if fs_tex:
-            button_clicked = imgui.image_button(fs_tex, button_width, button_width)
-        else:
-            button_clicked = imgui.button(f"{button_text_fallback}##FullscreenControl", width=button_width)
-        
-        # Use our fullscreen-specific logic, not parent controls_disabled
         if button_clicked and not fullscreen_button_disabled:
             self._handle_fullscreen_button_click()
-        
-        # Clean up disabled styling if we added it
-        if fullscreen_button_disabled:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
-        
+
         imgui.pop_style_color()
-        
+
         # Show tooltip
         if imgui.is_item_hovered():
             imgui.begin_tooltip()
@@ -1442,12 +1391,6 @@ class VideoDisplayUI:
                 imgui.text("Enter fullscreen mode")
                 imgui.text("High-quality display with audio")
             imgui.end_tooltip()
-        
-        # Restore parent disabled state if we overrode it
-        if parent_disabled_override:
-            # Re-apply parent disabled styling for subsequent buttons
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, style.alpha * 0.5)
     
     def _handle_fullscreen_button_click(self):
         """Handle fullscreen button click - use simple synchronized ffplay approach."""
@@ -1625,7 +1568,7 @@ class VideoDisplayUI:
                 
             fs_proc = self.app.funscript_processor
             
-            # Get the DualAxisFunscript object
+            # Get the MultiAxisFunscript object
             funscript_obj = fs_proc.get_funscript_obj()
             if not funscript_obj:
                 return False

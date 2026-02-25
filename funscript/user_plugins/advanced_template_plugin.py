@@ -83,7 +83,7 @@ class AdvancedTemplatePlugin(FunscriptTransformationPlugin):
             }
         }
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Apply the transformation based on selected type and parameters."""
         # Validate parameters
         validated_params = self.validate_parameters(parameters)
@@ -341,7 +341,7 @@ class SimpleScalePlugin(FunscriptTransformationPlugin):
             }
         }
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Scale positions around center point."""
         validated_params = self.validate_parameters(parameters)
         

@@ -1,5 +1,5 @@
 """
-Oscillation Detector Experimental 2 - Hybrid Approach
+Oscillation Detector - Hybrid Approach
 
 This tracker combines the best aspects of the legacy and experimental oscillation
 detectors, providing both timing precision and signal strength in a single
@@ -41,15 +41,17 @@ class OscillationExperimental2Tracker(BaseTracker):
     @property
     def metadata(self) -> TrackerMetadata:
         return TrackerMetadata(
-            name="oscillation_experimental_2",
-            display_name="Oscillation Detector (Experimental 2)",
+            name="oscillation",
+            display_name="Oscillation Detector",
             description="Hybrid approach combining experimental timing precision with legacy amplification and signal conditioning",
             category="live",
             version="1.0.0",
             author="VR Funscript AI Generator",
-            tags=["oscillation", "hybrid", "live", "experimental", "amplitude", "timing"],
+            tags=["oscillation", "hybrid", "live", "amplitude", "timing"],
             requires_roi=False,  # ROI is optional
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:
@@ -72,8 +74,8 @@ class OscillationExperimental2Tracker(BaseTracker):
                 self.funscript = self.app.funscript
             else:
                 # Create our own funscript instance if not provided
-                from funscript.dual_axis_funscript import DualAxisFunscript
-                self.funscript = DualAxisFunscript(logger=self.logger)
+                from funscript.multi_axis_funscript import MultiAxisFunscript
+                self.funscript = MultiAxisFunscript(logger=self.logger)
                 self.logger.info("Created local funscript instance for Oscillation Experimental 2")
             
             # Visual settings

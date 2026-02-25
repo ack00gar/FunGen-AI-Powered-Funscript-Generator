@@ -19,7 +19,7 @@ except ImportError:
     RDP_AVAILABLE = False
 
 
-class DualAxisFunscript:
+class MultiAxisFunscript:
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.primary_actions: List[Dict] = []
         self.secondary_actions: List[Dict] = []
@@ -34,6 +34,16 @@ class DualAxisFunscript:
         self._cache_dirty_primary: bool = True
         self._cache_dirty_secondary: bool = True
 
+        # Additional axes for multi-timeline (supporter feature)
+        self.additional_axes: Dict[str, List[Dict]] = {}
+        self._additional_timestamps_cache: Dict[str, List[int]] = {}
+        self._additional_cache_dirty: Dict[str, bool] = {}
+        self._additional_last_timestamps: Dict[str, int] = {}
+
+        # Timeline-to-axis assignment mapping (timeline_num -> axis_name string)
+        # Tells the file manager which suffix to use, and the device controller which TCode channel.
+        self._axis_assignments: Dict[int, str] = {1: "stroke", 2: "roll"}
+
         # Point simplification settings
         self.enable_point_simplification: bool = True  # Enable by default
 
@@ -46,7 +56,7 @@ class DualAxisFunscript:
         if logger:
             self.logger = logger
         else:
-            self.logger = logging.getLogger('DualAxisFunscript_fallback')
+            self.logger = logging.getLogger('MultiAxisFunscript_fallback')
             if not self.logger.handlers:
                 self.logger.addHandler(logging.NullHandler())
 
@@ -56,6 +66,37 @@ class DualAxisFunscript:
             self._cache_dirty_primary = True
         if axis == 'secondary' or axis == 'both':
             self._cache_dirty_secondary = True
+        if axis in self._additional_cache_dirty:
+            self._additional_cache_dirty[axis] = True
+        if axis == 'both':
+            for ax_name in self._additional_cache_dirty:
+                self._additional_cache_dirty[ax_name] = True
+
+    def _append_to_cache(self, axis_name: str, timestamp_ms: int):
+        """Append a single timestamp to the cache without rebuilding."""
+        if axis_name == 'primary':
+            if not self._cache_dirty_primary:
+                self._primary_timestamps_cache.append(timestamp_ms)
+        elif axis_name == 'secondary':
+            if not self._cache_dirty_secondary:
+                self._secondary_timestamps_cache.append(timestamp_ms)
+        elif axis_name in self._additional_timestamps_cache:
+            if not self._additional_cache_dirty.get(axis_name, True):
+                self._additional_timestamps_cache[axis_name].append(timestamp_ms)
+
+    def _pop_from_cache(self, axis_name: str, index: int):
+        """Remove an entry from the timestamp cache at the given index."""
+        if axis_name == 'primary' and not self._cache_dirty_primary:
+            if self._primary_timestamps_cache:
+                self._primary_timestamps_cache.pop(index)
+        elif axis_name == 'secondary' and not self._cache_dirty_secondary:
+            if self._secondary_timestamps_cache:
+                self._secondary_timestamps_cache.pop(index)
+        elif axis_name in self._additional_timestamps_cache:
+            if not self._additional_cache_dirty.get(axis_name, True):
+                cache = self._additional_timestamps_cache[axis_name]
+                if cache:
+                    cache.pop(index)
 
     def _maybe_log_simplification_stats(self):
         """
@@ -159,6 +200,7 @@ class DualAxisFunscript:
         # Fast check 1: All positions equal (most common redundant case)
         if pos1 == pos2 == pos3:
             actions_list.pop(-2)  # Remove middle point
+            self._pop_from_cache(axis, -2)
             stats['total_removed'] += 1
             self._maybe_log_simplification_stats()
             return
@@ -182,6 +224,7 @@ class DualAxisFunscript:
         # then points are collinear within tolerance
         if abs(cross) <= time_range:
             actions_list.pop(-2)  # Remove redundant middle point
+            self._pop_from_cache(axis, -2)
             stats['total_removed'] += 1
             self._maybe_log_simplification_stats()
 
@@ -195,11 +238,17 @@ class DualAxisFunscript:
                 self._primary_timestamps_cache = [a["at"] for a in self.primary_actions]
                 self._cache_dirty_primary = False
             return self._primary_timestamps_cache
-        else: # secondary
+        elif axis == 'secondary':
             if self._cache_dirty_secondary:
                 self._secondary_timestamps_cache = [a["at"] for a in self.secondary_actions]
                 self._cache_dirty_secondary = False
             return self._secondary_timestamps_cache
+        elif axis in self.additional_axes:
+            if self._additional_cache_dirty.get(axis, True):
+                self._additional_timestamps_cache[axis] = [a["at"] for a in self.additional_axes[axis]]
+                self._additional_cache_dirty[axis] = False
+            return self._additional_timestamps_cache.get(axis, [])
+        return []
 
     def _process_action_for_axis(self,
                                  actions_target_list: List[Dict],
@@ -210,13 +259,40 @@ class DualAxisFunscript:
                                  ) -> int:
         """
         Processes and adds/updates a single action in the target list (in-place).
-        Optimized with a timestamp cache.
+        Uses a fast O(1) path for chronological appends (the 99%+ tracker case)
+        and falls back to bisect for out-of-order insertions (manual editing).
         Returns the timestamp of the last action in the list.
         """
         clamped_pos = max(0, min(100, pos))
         new_action = {"at": timestamp_ms, "pos": clamped_pos}
 
-        # Use the cached timestamps for performance
+        # === FAST PATH: chronological append (covers 99%+ of tracker calls) ===
+        if actions_target_list:
+            last = actions_target_list[-1]
+            if timestamp_ms > last["at"]:
+                # New point is strictly after all existing points
+                if timestamp_ms - last["at"] >= min_interval_ms:
+                    actions_target_list.append(new_action)  # O(1)
+                    self._append_to_cache(axis_name, timestamp_ms)
+                    if self.enable_point_simplification:
+                        self._simplify_last_points(actions_target_list, axis=axis_name)
+                    return timestamp_ms
+                else:
+                    # Too close to last point — skip
+                    return last["at"]
+            elif timestamp_ms == last["at"]:
+                # Same timestamp as last — update in place
+                if last["pos"] != clamped_pos:
+                    last["pos"] = clamped_pos
+                return timestamp_ms
+        else:
+            # Empty list — just append
+            actions_target_list.append(new_action)
+            self._append_to_cache(axis_name, timestamp_ms)
+            return timestamp_ms
+
+        # === SLOW PATH: out-of-order insertion (manual editing) ===
+        # Use the cached timestamps for bisect lookup
         action_timestamps = self._get_timestamps_for_axis(axis_name)
         idx = bisect.bisect_left(action_timestamps, timestamp_ms)
 
@@ -260,7 +336,6 @@ class DualAxisFunscript:
             # If filtering removed points, invalidate the cache again
             if len(actions_target_list) != original_len:
                 self._invalidate_cache(axis_name)
-
 
         return actions_target_list[-1]["at"] if actions_target_list else 0
 
@@ -308,7 +383,12 @@ class DualAxisFunscript:
         Returns the interpolated position value at a given timestamp.
         Uses the cached timestamp list for O(1) amortised bisect lookups.
         """
-        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if axis == 'primary':
+            actions_list = self.primary_actions
+        elif axis == 'secondary':
+            actions_list = self.secondary_actions
+        else:
+            actions_list = self.additional_axes.get(axis, [])
 
         if not actions_list:
             return 50  # Default neutral position
@@ -337,7 +417,12 @@ class DualAxisFunscript:
         return int(round(np.clip(val, 0, 100)))
 
     def get_latest_value(self, axis: str = 'primary') -> int:
-        actions_list = self.primary_actions if axis == 'primary' else self.secondary_actions
+        if axis == 'primary':
+            actions_list = self.primary_actions
+        elif axis == 'secondary':
+            actions_list = self.secondary_actions
+        else:
+            actions_list = self.additional_axes.get(axis, [])
         if actions_list:
             return actions_list[-1]["pos"]
         return 50
@@ -347,8 +432,139 @@ class DualAxisFunscript:
         self.secondary_actions = []
         self.last_timestamp_primary = 0
         self.last_timestamp_secondary = 0
-        self._invalidate_cache('both') # Invalidate caches
-        self.logger.info("Cleared all actions from DualAxisFunscript.")
+        # Clear additional axes
+        for axis_name in self.additional_axes:
+            self.additional_axes[axis_name].clear()
+        self._additional_last_timestamps = {k: 0 for k in self._additional_last_timestamps}
+        self._invalidate_cache('both')
+        self.logger.info("Cleared all actions from MultiAxisFunscript.")
+
+    # ==================================================================================
+    # Multi-axis support (additional axes beyond primary/secondary)
+    # ==================================================================================
+
+    def ensure_axis(self, axis_name: str) -> None:
+        """Create storage for an additional axis if it doesn't already exist. Idempotent."""
+        if axis_name in ('primary', 'secondary'):
+            return  # Built-in axes always exist
+        if axis_name not in self.additional_axes:
+            self.additional_axes[axis_name] = []
+            self._additional_timestamps_cache[axis_name] = []
+            self._additional_cache_dirty[axis_name] = True
+            self._additional_last_timestamps[axis_name] = 0
+
+    def get_axis_actions(self, axis_name: str) -> List[Dict]:
+        """Unified accessor for any axis's action list."""
+        if axis_name == 'primary':
+            return self.primary_actions
+        elif axis_name == 'secondary':
+            return self.secondary_actions
+        elif axis_name in self.additional_axes:
+            return self.additional_axes[axis_name]
+        return []
+
+    def add_action_to_axis(self, axis_name: str, timestamp_ms: int, pos: int) -> None:
+        """Add an action to any axis (primary, secondary, or additional)."""
+        if axis_name == 'primary':
+            self.add_action(timestamp_ms=timestamp_ms, primary_pos=pos, secondary_pos=None)
+            return
+        elif axis_name == 'secondary':
+            self.add_action(timestamp_ms=timestamp_ms, primary_pos=None, secondary_pos=pos)
+            return
+
+        # Additional axis
+        self.ensure_axis(axis_name)
+        last_ts = self._additional_last_timestamps.get(axis_name, 0)
+        new_last_ts = self._process_action_for_axis(
+            actions_target_list=self.additional_axes[axis_name],
+            timestamp_ms=timestamp_ms,
+            pos=pos,
+            min_interval_ms=self.min_interval_ms,
+            axis_name=axis_name
+        )
+        self._additional_last_timestamps[axis_name] = new_last_ts if self.additional_axes[axis_name] else 0
+
+    def get_axis_count(self) -> int:
+        """Returns total number of axes (2 built-in + additional)."""
+        return 2 + len(self.additional_axes)
+
+    def get_all_axis_names(self) -> List[str]:
+        """Returns list of all axis names in order."""
+        return ['primary', 'secondary'] + sorted(self.additional_axes.keys())
+
+    def clear_axis(self, axis_name: str) -> None:
+        """Clear a specific additional axis."""
+        if axis_name in self.additional_axes:
+            self.additional_axes[axis_name].clear()
+            self._additional_last_timestamps[axis_name] = 0
+            self._invalidate_cache(axis_name)
+
+    # ==================================================================================
+    # Axis assignment mapping (timeline_num <-> semantic axis name)
+    # ==================================================================================
+
+    def assign_axis(self, timeline_num: int, axis_name: str) -> None:
+        """Set which semantic axis a timeline represents (e.g. timeline 3 -> 'pitch')."""
+        self._axis_assignments[timeline_num] = axis_name
+
+    def get_axis_for_timeline(self, timeline_num: int) -> str:
+        """Return the assigned axis name for a timeline, with sensible defaults."""
+        return self._axis_assignments.get(timeline_num, f"axis_{timeline_num}")
+
+    def get_timeline_for_axis(self, axis_name: str) -> Optional[int]:
+        """Reverse lookup: find which timeline is assigned to a given axis name."""
+        for tl_num, name in self._axis_assignments.items():
+            if name == axis_name:
+                return tl_num
+        return None
+
+    def get_axis_assignments(self) -> Dict[int, str]:
+        """Return a copy of the current timeline-to-axis assignments."""
+        return dict(self._axis_assignments)
+
+    # ==================================================================================
+    # Serialization (project save/load)
+    # ==================================================================================
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize all axes to a dict for project storage."""
+        axes_data = {
+            "primary": [a.copy() for a in self.primary_actions],
+            "secondary": [a.copy() for a in self.secondary_actions],
+        }
+        for name, actions in self.additional_axes.items():
+            axes_data[name] = [a.copy() for a in actions]
+
+        result: Dict[str, Any] = {
+            "axes": axes_data,
+            "axis_assignments": {str(k): v for k, v in self._axis_assignments.items()},
+        }
+        if self.chapters:
+            result["chapters"] = [
+                c.to_dict() if hasattr(c, 'to_dict') else dict(c)
+                for c in self.chapters
+            ]
+        return result
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], logger=None) -> "MultiAxisFunscript":
+        """Reconstruct from serialized dict."""
+        obj = cls(logger=logger)
+        axes = data.get("axes", {})
+        obj.primary_actions = axes.get("primary", [])
+        obj.secondary_actions = axes.get("secondary", [])
+        for name, actions in axes.items():
+            if name not in ("primary", "secondary"):
+                obj.additional_axes[name] = actions
+                obj._additional_timestamps_cache[name] = []
+                obj._additional_cache_dirty[name] = True
+                obj._additional_last_timestamps[name] = 0
+        # Restore axis assignments
+        raw_assignments = data.get("axis_assignments", {})
+        if raw_assignments:
+            obj._axis_assignments = {int(k): v for k, v in raw_assignments.items()}
+        obj._invalidate_cache('both')
+        return obj
 
     def find_next_jump_frame(self, current_frame: int, fps: float, axis: str = 'primary') -> Optional[int]:
         """
@@ -1007,7 +1223,7 @@ class DualAxisFunscript:
         self.logger.info(
             f"Scaled {len(indices_to_process)} points on {axis} axis to new range [{output_min}-{output_max}].")
 
-    # In dual_axis_funscript.py
+    # In multi_axis_funscript.py
 
     def apply_peak_preserving_resample(self, axis: str, resample_rate_ms: int = 50,
                                        selected_indices: Optional[List[int]] = None):

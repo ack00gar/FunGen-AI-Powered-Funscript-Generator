@@ -79,7 +79,7 @@ class SpeedLimiterPlugin(FunscriptTransformationPlugin):
             }
         }
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Apply speed limiting to the specified axis."""
         # Validate parameters
         validated_params = self.validate_parameters(parameters)

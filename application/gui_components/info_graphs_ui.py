@@ -6,6 +6,7 @@ import time
 from collections import deque
 from application.utils import _format_time
 from application.utils.system_monitor import SystemMonitor
+from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 
 
 class ComponentPerformanceMonitor:
@@ -269,24 +270,21 @@ class InfoGraphsUI:
 
             imgui.separator()
 
-            # Funscript Info Timeline 1 (collapsed by default)
-            if imgui.collapsing_header(
-                "Funscript Info (Timeline 1)##FSInfoT1Section",
-            )[0]:
-                self._render_content_funscript_info(1)
-
+            # Funscript Info — per visible timeline
+            self._render_funscript_info_section(1)
             imgui.separator()
 
-            # Funscript Info Timeline 2 (collapsed by default, if visible)
+            # T2 if visible
             if self.app.app_state_ui.show_funscript_interactive_timeline2:
-                if imgui.collapsing_header(
-                    "Funscript Info (Timeline 2)##FSInfoT2Section",
-                )[0]:
-                    self._render_content_funscript_info(2)
-            else:
-                imgui.text_disabled(
-                    "Enable Interactive Timeline 2 to see its stats."
-                )
+                self._render_funscript_info_section(2)
+                imgui.separator()
+
+            # T3+ if visible
+            for tl_num in EXTRA_TIMELINE_RANGE:
+                vis_attr = f"show_funscript_interactive_timeline{tl_num}"
+                if getattr(self.app.app_state_ui, vis_attr, False):
+                    self._render_funscript_info_section(tl_num)
+                    imgui.separator()
         elif tab_selected == "advanced":
             imgui.spacing()
             # Undo-Redo History section (collapsed by default)
@@ -714,6 +712,20 @@ class InfoGraphsUI:
 
         self.video_settings_perf.end_timing()
 
+    def _render_funscript_info_section(self, timeline_num):
+        """Render a collapsible funscript info section for a timeline, with axis name in header."""
+        fs_proc = self.app.funscript_processor
+        # Build header with axis name if available
+        axis_label = ""
+        funscript_obj = fs_proc.get_funscript_obj() if fs_proc else None
+        if funscript_obj and hasattr(funscript_obj, '_axis_assignments'):
+            ax = funscript_obj._axis_assignments.get(timeline_num)
+            if ax:
+                axis_label = f" ({ax})"
+        header = f"Funscript Info - Timeline {timeline_num}{axis_label}##FSInfoT{timeline_num}Section"
+        if imgui.collapsing_header(header)[0]:
+            self._render_content_funscript_info(timeline_num)
+
     def _render_content_funscript_info(self, timeline_num):
         self.funscript_info_perf.start_timing()
         fs_proc = self.app.funscript_processor
@@ -724,12 +736,14 @@ class InfoGraphsUI:
             # Get live stats directly from the funscript object
             stats = target_funscript.get_actions_statistics(axis=axis_name)
             # Get source info from cached stats (for display purposes only)
-            cached_stats = fs_proc.funscript_stats_t1 if timeline_num == 1 else fs_proc.funscript_stats_t2
+            stats_attr = f'funscript_stats_t{timeline_num}'
+            cached_stats = getattr(fs_proc, stats_attr, {})
             stats["source_type"] = cached_stats.get("source_type", "N/A")
             stats["path"] = cached_stats.get("path", "N/A")
         else:
             # Fallback to cached stats if funscript object not available
-            stats = fs_proc.funscript_stats_t1 if timeline_num == 1 else fs_proc.funscript_stats_t2
+            stats_attr = f'funscript_stats_t{timeline_num}'
+            stats = getattr(fs_proc, stats_attr, {})
 
         source_text = stats.get("source_type", "N/A")
 
@@ -815,15 +829,26 @@ class InfoGraphsUI:
                 imgui.text_disabled("  (empty)")
             imgui.next_column()
 
+        # T1 always
         imgui.columns(2, "UndoRedoColumnsT1")
         render_history_for_timeline(1)
         imgui.columns(1)
 
+        # T2 if visible
         if self.app.app_state_ui.show_funscript_interactive_timeline2:
             imgui.separator()
             imgui.columns(2, "UndoRedoColumnsT2")
             render_history_for_timeline(2)
             imgui.columns(1)
+
+        # T3+ if visible
+        for tl_num in EXTRA_TIMELINE_RANGE:
+            vis_attr = f"show_funscript_interactive_timeline{tl_num}"
+            if getattr(self.app.app_state_ui, vis_attr, False):
+                imgui.separator()
+                imgui.columns(2, f"UndoRedoColumnsT{tl_num}")
+                render_history_for_timeline(tl_num)
+                imgui.columns(1)
 
         imgui.end_child()
 

@@ -30,8 +30,12 @@ class UndoRedoManager:
         state_before_action = [d.copy() for d in self._actions_list_reference]
 
         # Avoid pushing identical states if the description is also the same (less likely but possible)
-        if self.undo_stack and self.undo_stack[-1] == (action_description, state_before_action):
-            return
+        # Short-circuit with length check to avoid O(n) list comparison in most cases
+        if self.undo_stack:
+            prev_desc, prev_state = self.undo_stack[-1]
+            if prev_desc == action_description and len(prev_state) == len(state_before_action):
+                if prev_state == state_before_action:
+                    return
 
         self.undo_stack.append((action_description, state_before_action))
         self.redo_stack.clear()  # A new action clears the redo stack

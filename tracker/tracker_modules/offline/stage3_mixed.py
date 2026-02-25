@@ -136,6 +136,8 @@ class Stage3MixedTracker(BaseOfflineTracker):
             tags=["offline", "mixed", "hybrid", "stage3", "selective-tracking", "intelligent"],
             requires_roi=False,
             supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
             stages=[
                 StageDefinition(
                     stage_number=1,
@@ -252,7 +254,7 @@ class Stage3MixedTracker(BaseOfflineTracker):
                     if not self.tracker_manager.set_tracking_mode(self.live_tracker_name):
                         self.logger.warning(f"Failed to set live tracker {self.live_tracker_name}, trying fallbacks")
                         # Try fallback trackers suitable for mixed mode
-                        fallback_trackers = ['oscillation_experimental_2', 'oscillation_experimental', 'user_roi']
+                        fallback_trackers = ['oscillation', 'oscillation_legacy', 'user_roi']
                         tracker_set = False
                         for fallback in fallback_trackers:
                             if self.tracker_manager.set_tracking_mode(fallback):

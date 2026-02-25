@@ -82,7 +82,7 @@ class ThresholdClampPlugin(FunscriptTransformationPlugin):
         
         return validated
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Apply threshold clamping to the specified axis."""
         # Validate parameters
         validated_params = self.validate_parameters(parameters)
@@ -306,7 +306,7 @@ class ValueClampPlugin(FunscriptTransformationPlugin):
             }
         }
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Apply value clamping to the specified axis."""
         # Validate parameters
         validated_params = self.validate_parameters(parameters)

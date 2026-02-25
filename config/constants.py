@@ -14,7 +14,7 @@ except ImportError:
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.5.7"
+APP_VERSION = "0.6.0"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION} - AI Computer Vision"
 FUNSCRIPT_AUTHOR = "FunGen"
 
@@ -117,7 +117,7 @@ TOOLBAR_BUTTON_DEFAULT_PRESSED = (0.15, 0.15, 0.15, 0.9)
 # See config/tracker_discovery.py for the new dynamic approach
 
 # Default tracker will be resolved dynamically from available trackers
-DEFAULT_TRACKER_NAME = "axis_projection_working"  # Internal name, resolved at runtime
+DEFAULT_TRACKER_NAME = "oscillation"  # Internal name, resolved at runtime
 
 ####################################################################################################
 # AI & MODELS
@@ -631,6 +631,14 @@ UI_CONTROL_ICON_URLS = {
 
     # Visualization/analysis indicators
     'ui/icons/chart-increasing.png': 'https://em-content.zobj.net/source/apple/391/chart-increasing_1f4c8.png',  # 📈 chart for 3D simulator
+
+    # Sidebar navigation icons (reuse existing emoji assets)
+    'ui/icons/sidebar-run.png': 'https://em-content.zobj.net/source/apple/391/rocket_1f680.png',  # 🚀 rocket (Run)
+    'ui/icons/sidebar-postproc.png': 'https://em-content.zobj.net/source/apple/391/magic-wand_1fa84.png',  # 🪄 magic wand (Post-Processing)
+    'ui/icons/sidebar-advanced.png': 'https://em-content.zobj.net/source/apple/391/gear_2699-fe0f.png',  # ⚙️ gear (Advanced)
+    'ui/icons/sidebar-device.png': 'https://em-content.zobj.net/source/apple/391/flashlight_1f526.png',  # 🔦 flashlight (Device Control)
+    'ui/icons/sidebar-stream.png': 'https://em-content.zobj.net/source/apple/391/satellite-antenna_1f4e1.png',  # 📡 satellite (Streamer)
+    'ui/icons/sidebar-batch.png': 'https://em-content.zobj.net/source/apple/391/crown_1f451.png',  # 👑 crown (Patreon Exclusive)
 }
 
 ####################################################################################################

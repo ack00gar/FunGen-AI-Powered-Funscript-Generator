@@ -15,9 +15,14 @@ from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
+from application.utils.feature_detection import is_feature_available as _is_feature_available
+from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
+from application.gui_components.gui_preview_manager import PreviewManagerMixin
+from application.gui_components.gui_shortcut_handler import ShortcutHandlerMixin
+from application.gui_components.gui_dialog_renderer import DialogRendererMixin
 
 
-class GUI:
+class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
     def __init__(self, app_logic):
         self.app = app = app_logic
         self.window = None
@@ -95,6 +100,9 @@ class GUI:
         self.timeline_editor1 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=1)
         self.timeline_editor2 = InteractiveFunscriptTimeline(app_instance=app, timeline_num=2)
 
+        # Extra timelines (supporter feature, created lazily)
+        self._extra_timeline_editors: Dict[int, InteractiveFunscriptTimeline] = {}
+
         # Modularized UI Panel Components
         self.control_panel_ui = ControlPanelUI(app)
         self.video_display_ui = VideoDisplayUI(app, self)  # Pass self for texture updates
@@ -151,68 +159,6 @@ class GUI:
         self.error_popup_action_label = None
         self.error_popup_action_callback = None
 
-    # --- Worker thread for generating preview images ---
-    def _preview_generation_worker(self):
-        """
-        Runs in a background thread. Waits for tasks and processes them.
-        """
-        while not self.shutdown_event.is_set():
-            try:
-                task = self.preview_task_queue.get(timeout=0.1)
-                task_type = task['type']
-
-                if task_type == 'timeline':
-                    image_data = self._generate_funscript_preview_data(
-                        task['target_width'],
-                        task['target_height'],
-                        task['total_duration_s'],
-                        task['actions']
-                    )
-                    self.preview_results_queue.put({'type': 'timeline', 'image_data': image_data})
-
-                elif task_type == 'heatmap':
-                    image_data = self._generate_heatmap_data(
-                        task['target_width'],
-                        task['target_height'],
-                        task['total_duration_s'],
-                        task['actions']
-                    )
-                    self.preview_results_queue.put({'type': 'heatmap', 'image_data': image_data})
-
-                self.preview_task_queue.task_done()
-
-            except queue.Empty:
-                continue
-            except Exception as e:
-                self.app.logger.error(f"Error in preview generation worker: {e}", exc_info=True)
-
-    # --- Method to handle completed preview data from the queue ---
-    def _process_preview_results(self):
-        """
-        Called in the main render loop to process any completed preview images.
-        """
-        try:
-            while not self.preview_results_queue.empty():
-                result = self.preview_results_queue.get_nowait()
-
-                result_type = result.get('type')
-                image_data = result.get('image_data')
-
-                if image_data is None:
-                    continue
-
-                if result_type == 'timeline':
-                    self.update_texture(self.funscript_preview_texture_id, image_data)
-                elif result_type == 'heatmap':
-                    self.update_texture(self.heatmap_texture_id, image_data)
-
-                self.preview_results_queue.task_done()
-
-        except queue.Empty:
-            pass  # No results to process
-        except Exception as e:
-            self.app.logger.error(f"Error processing preview results: {e}", exc_info=True)
-
     def _handle_threaded_progress(self, task_id: str, progress: float, message: str):
         """Handle progress updates from threaded operations."""
         if task_id in self.active_threaded_operations:
@@ -228,195 +174,12 @@ class GUI:
                 status_msg = f"{operation_info.get('name', 'Processing')}: {message} ({progress*100:.1f}%)"
                 self.app.set_status_message(status_msg, duration=1.0)
 
-    def submit_async_processing_task(
-        self,
-        task_id: str,
-        task_type: TaskType,
-        function,
-        args=(),
-        kwargs=None,
-        priority: TaskPriority = TaskPriority.NORMAL,
-        name: str = "Processing",
-        show_in_status: bool = True
-    ):
-        """
-        Submit a processing task to run asynchronously without blocking the UI.
-        
-        Args:
-            task_id: Unique identifier for the task
-            task_type: Type of processing task
-            function: Function to execute
-            args: Function arguments
-            kwargs: Function keyword arguments
-            priority: Task priority
-            name: Human-readable name for progress display
-            show_in_status: Whether to show progress in status bar
-        """
-        # Track the operation
-        self.active_threaded_operations[task_id] = {
-            'name': name,
-            'show_in_status': show_in_status,
-            'progress': 0.0,
-            'message': 'Starting...',
-            'started_time': time.time()
-        }
-        
-        # Submit to processing thread manager
-        def completion_callback(result):
-            # Clean up tracking
-            if task_id in self.active_threaded_operations:
-                del self.active_threaded_operations[task_id]
-            self.app.logger.info(f"Async task {task_id} completed successfully")
-        
-        def error_callback(error):
-            # Clean up tracking and show error
-            if task_id in self.active_threaded_operations:
-                del self.active_threaded_operations[task_id]
-            self.app.logger.error(f"Async task {task_id} failed: {error}")
-            self.app.set_status_message(f"Error in {name}: {str(error)}", duration=5.0)
-        
-        self.processing_thread_manager.submit_task(
-            task_id=task_id,
-            task_type=task_type,
-            function=function,
-            args=args,
-            kwargs=kwargs or {},
-            priority=priority,
-            completion_callback=completion_callback,
-            error_callback=error_callback
-        )
-        
-        self.app.logger.info(f"Submitted async task: {task_id} ({name})")
-
-    # --- Extracted CPU-intensive drawing logic for timeline ---
-    def _generate_funscript_preview_data(self, target_width, target_height, total_duration_s, actions):
-        """
-        Performs the numpy/cv2 operations to create the timeline image.
-        This is called by the worker thread.
-        """
-        use_simplified_preview = self.app.app_settings.get("use_simplified_funscript_preview", False)
-
-        # Create background
-        image_data = np.full((target_height, target_width, 4), (38, 31, 31, 255), dtype=np.uint8)
-        center_y_px = target_height // 2
-        cv2.line(image_data, (0, center_y_px), (target_width - 1, center_y_px), (77, 77, 77, 179), 1)
-
-        if not actions or total_duration_s <= 0.001:
-            return image_data
-
-        if use_simplified_preview:
-            if len(actions) < 2: return image_data
-
-            # --- Simplified Min/Max Envelope Drawing ---
-            min_vals = np.full(target_width, target_height, dtype=np.int32)
-            max_vals = np.full(target_width, -1, dtype=np.int32)
-
-            # Pre-calculate x coordinates and values
-            times_s = np.array([a['at'] for a in actions]) / 1000.0
-            positions = np.array([a['pos'] for a in actions])
-            x_coords = np.round((times_s / total_duration_s) * (target_width - 1)).astype(np.int32)
-            y_coords = np.round((1.0 - positions / 100.0) * (target_height - 1)).astype(np.int32)
-
-            # Find min/max y for each x
-            for i in range(len(actions) - 1):
-                x1, x2 = x_coords[i], x_coords[i+1]
-                y1, y2 = y_coords[i], y_coords[i+1]
-
-                if x1 == x2:
-                    min_vals[x1] = min(min_vals[x1], y1, y2)
-                    max_vals[x1] = max(max_vals[x1], y1, y2)
-                else:
-                    # Interpolate for line segments
-                    dx = x2 - x1
-                    dy = y2 - y1
-                    for x in range(x1, x2 + 1):
-                        y = y1 + dy * (x - x1) / dx
-                        y_int = int(round(y))
-                        min_vals[x] = min(min_vals[x], y_int)
-                        max_vals[x] = max(max_vals[x], y_int)
-
-            # Create polygon points
-            min_points = []
-            max_points_rev = []
-            for x in range(target_width):
-                if max_vals[x] != -1: # Only add points where there is data
-                    min_points.append([x, min_vals[x]])
-                    max_points_rev.append([x, max_vals[x]])
-
-            if not min_points: return image_data
-
-            # Combine to form a closed polygon
-            poly_points = np.array(min_points + max_points_rev[::-1], dtype=np.int32)
-
-            # Draw the semi-transparent polygon
-            overlay = image_data.copy()
-            envelope_color_rgba = self.app.utility.get_speed_color_from_map(500) # Use a mid-range speed color
-            envelope_color_bgra = (int(envelope_color_rgba[2] * 255), int(envelope_color_rgba[1] * 255), int(envelope_color_rgba[0] * 255), 100) # 100 for alpha
-            cv2.fillPoly(overlay, [poly_points], envelope_color_bgra)
-            cv2.addWeighted(overlay, 0.5, image_data, 0.5, 0, image_data) # Blend with background
-
-        else:
-            # --- Detailed, Speed-Colored Line Drawing (Original Logic) ---
-            if len(actions) > 1:
-                ats = np.array([a['at'] for a in actions], dtype=np.float64) / 1000.0
-                pos = np.array([a['pos'] for a in actions], dtype=np.float32) / 100.0
-                x = np.clip(((ats / total_duration_s) * (target_width - 1)).astype(np.int32), 0, target_width - 1)
-                y = np.clip(((1.0 - pos) * target_height).astype(np.int32), 0, target_height - 1)
-                dt = np.diff(ats)
-                dpos = np.abs(np.diff(pos * 100.0))  # back to 0..100 for speed calc
-                speeds = np.divide(dpos, dt, out=np.zeros_like(dpos), where=dt > 1e-6)
-                colors_u8 = self.app.utility.get_speed_colors_vectorized_u8(speeds)  # RGBA uint8
-                # Draw per segment; allow OpenCV to optimize internally
-                for i in range(len(speeds)):
-                    if x[i] == x[i+1] and y[i] == y[i+1]:
-                        continue
-                    c = colors_u8[i]
-                    cv2.line(image_data, (int(x[i]), int(y[i])), (int(x[i+1]), int(y[i+1])), (int(c[2]), int(c[1]), int(c[0]), int(c[3])), 1)
-
-        return image_data
-
-    # --- Extracted CPU-intensive drawing logic for heatmap ---
-    def _generate_heatmap_data(self, target_width, target_height, total_duration_s, actions):
-        """
-        Performs the numpy/cv2 operations to create the heatmap image.
-        This is called by the worker thread.
-        """
-
-        colors = self.colors
-        image_data = np.full((target_height, target_width, 4), (colors.HEATMAP_BACKGROUND), dtype=np.uint8)
-
-        if len(actions) > 1 and total_duration_s > 0.001:
-            ats = np.array([a['at'] for a in actions], dtype=np.float64) / 1000.0
-            poss = np.array([a['pos'] for a in actions], dtype=np.float32)
-            # Segment starts/ends in pixel space
-            x_coords = ((ats / total_duration_s) * (target_width - 1)).astype(np.int32)
-            x_coords = np.clip(x_coords, 0, target_width - 1)
-            # Compute speeds per segment
-            dt = np.diff(ats)
-            dpos = np.abs(np.diff(poss))
-            speeds = np.divide(dpos, dt, out=np.zeros_like(dpos), where=dt > 1e-6)
-            # Vectorized color mapping (prebuilt cache to uint8)
-            colors_u8 = self.app.utility.get_speed_colors_vectorized_u8(speeds)
-            # For each column, find its segment index via searchsorted
-            cols = np.arange(target_width, dtype=np.int32)
-            # Map columns to times then to segment indices
-            # In pixel domain we can use x_coords boundaries directly
-            seg_idx_for_col = np.searchsorted(x_coords, cols, side='right') - 1
-            # Columns before first segment are not-yet-fixed; set fully transparent (alpha=0)
-            valid_mask = seg_idx_for_col >= 0
-            seg_idx_for_col = np.clip(seg_idx_for_col, 0, len(speeds) - 1)
-            col_colors = np.zeros((target_width, 4), dtype=np.uint8)
-            if np.any(valid_mask):
-                col_colors[valid_mask] = colors_u8[seg_idx_for_col[valid_mask]]  # shape (W,4)
-                # Ensure fully opaque for fixed columns
-                col_colors[valid_mask, 3] = 255
-            # Ensure not-yet-fixed columns remain fully transparent
-            if np.any(~valid_mask):
-                col_colors[~valid_mask, 3] = 0
-            # Broadcast to image rows
-            image_data[:] = col_colors[np.newaxis, :, :]
-
-        return image_data
+    def _get_or_create_timeline_editor(self, timeline_num: int) -> InteractiveFunscriptTimeline:
+        """Get or lazily create a timeline editor for timeline 3+."""
+        if timeline_num not in self._extra_timeline_editors:
+            editor = InteractiveFunscriptTimeline(app_instance=self.app, timeline_num=timeline_num)
+            self._extra_timeline_editors[timeline_num] = editor
+        return self._extra_timeline_editors[timeline_num]
 
     def _time_render(self, component_name: str, render_func, *args, **kwargs):
         """Helper to time a render function and store its duration."""
@@ -1034,77 +797,6 @@ class GUI:
         # Render the existing texture
         imgui.image(self.heatmap_texture_id, bar_width_float, bar_height_float, uv0=(0, 0), uv1=(1, 1))
 
-    def _render_first_run_setup_popup(self):
-        app = self.app
-        if not app.show_first_run_setup_popup:
-            return
-
-        imgui.open_popup("First-Time Setup")
-        main_viewport = imgui.get_main_viewport()
-        popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                     main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-
-        status_msg = app.first_run_status_message.lower()
-        is_complete = "complete" in status_msg
-        is_failed = "failed" in status_msg
-        closable = is_complete or is_failed
-        popup_flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE
-
-        opened, visible = imgui.begin_popup_modal("First-Time Setup", closable, flags=popup_flags)
-        if opened:
-            imgui.text("Welcome to FunGen!")
-            imgui.spacing()
-            imgui.text_wrapped(
-                "FunGen generates funscripts from video using AI motion analysis. "
-                "Before you can start, the required AI models need to be downloaded."
-            )
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            imgui.text_wrapped(f"Status: {app.first_run_status_message}")
-
-            # Progress bar
-            progress_percent = app.first_run_progress / 100.0
-            imgui.progress_bar(progress_percent, size=(400, 0), overlay=f"{app.first_run_progress:.1f}%")
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            if is_complete:
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.2, 0.9, 0.2, 1.0)
-                imgui.text("Setup complete! You're ready to go.")
-                imgui.pop_style_color()
-                imgui.spacing()
-                if imgui.button("Get Started", width=150):
-                    app.show_first_run_setup_popup = False
-                    imgui.close_current_popup()
-            elif is_failed:
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.3, 0.3, 1.0)
-                imgui.text_wrapped(
-                    "Setup failed. You can download models manually via AI menu > Download Models."
-                )
-                imgui.pop_style_color()
-                imgui.spacing()
-                if imgui.button("Close", width=150):
-                    app.show_first_run_setup_popup = False
-                    imgui.close_current_popup()
-            else:
-                imgui.text_wrapped("Please wait while models are being downloaded...")
-
-            imgui.end_popup()
-
-
-    # TODO: Move this to a separate class/error management module
-    def show_error_popup(self, title, message, action_label=None, action_callback=None):
-        self.error_popup_active = True
-        self.error_popup_title = title
-        self.error_popup_message = message
-        self.error_popup_action_label = action_label
-        self.error_popup_action_callback = action_callback
-
     # All other methods from the original file from this point are included below without modification
     # for completeness, except for the `run` method's `finally` block which now handles thread shutdown.
 
@@ -1126,842 +818,84 @@ class GUI:
             color_u32 = imgui.get_color_u32_rgba(color_rgb[0] / 255, color_rgb[1] / 255, color_rgb[2] / 255, 1.0)
             draw_list.add_line(x_pos, slider_y - 6, x_pos, slider_y + 6, color_u32, thickness=1.5)
 
-    def _handle_global_shortcuts(self):
-        # CRITICAL: Check if shortcuts should be processed
-        # This prevents shortcuts from firing when user is typing in text inputs
-        if not self.app.shortcut_manager.should_handle_shortcuts():
-            return
+    # --- Shortcut handler methods moved to gui_shortcut_handler.py (ShortcutHandlerMixin) ---
+    # --- Methods: _handle_global_shortcuts, _handle_arrow_navigation, _perform_frame_seek,
+    #     _handle_set_chapter_start_shortcut, _handle_set_chapter_end_shortcut,
+    #     _handle_add_point_at_value, _get_current_frame_for_chapter,
+    #     _auto_create_chapter_from_stored_frames, _handle_save_project_shortcut,
+    #     _handle_open_project_shortcut, _handle_jump_to_start_shortcut,
+    #     _handle_jump_to_end_shortcut, _handle_zoom_in_timeline_shortcut,
+    #     _handle_zoom_out_timeline_shortcut, _handle_toggle_video_display_shortcut,
+    #     _handle_toggle_timeline2_shortcut, _handle_toggle_gauge_window_shortcut,
+    #     _handle_toggle_3d_simulator_shortcut, _handle_toggle_movement_bar_shortcut,
+    #     _handle_toggle_chapter_list_shortcut, _handle_toggle_heatmap_shortcut,
+    #     _handle_toggle_funscript_preview_shortcut, _handle_toggle_video_feed_shortcut,
+    #     _handle_toggle_waveform_shortcut, _handle_reset_timeline_view_shortcut,
+    #     _handle_toggle_oscillation_area_mode, _handle_energy_saver_interaction_detection ---
 
-        io = imgui.get_io()
-        app_state = self.app.app_state_ui
 
-        current_shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
-        fs_proc = self.app.funscript_processor
-        video_loaded = self.app.processor and self.app.processor.video_info and self.app.processor.total_frames > 0
+    def _render_status_strip(self, strip_h):
+        """Render a unified status strip at the very bottom of the window."""
+        from config.element_group_colors import StatusStripColors
 
-        def check_and_run_shortcut(shortcut_name, action_func, *action_args):
-            shortcut_str = current_shortcuts.get(shortcut_name)
-            if not shortcut_str:
-                return False
+        strip_y = self.window_height - strip_h
+        imgui.set_next_window_position(0, strip_y)
+        imgui.set_next_window_size(self.window_width, strip_h)
+        flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE |
+                 imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_SCROLLBAR |
+                 imgui.WINDOW_NO_SCROLL_WITH_MOUSE |
+                 imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS |
+                 imgui.WINDOW_NO_NAV | imgui.WINDOW_NO_FOCUS_ON_APPEARING)
 
-            map_result = self.app._map_shortcut_to_glfw_key(shortcut_str)
-            if not map_result:
-                return False
+        imgui.push_style_color(imgui.COLOR_WINDOW_BACKGROUND, *StatusStripColors.BG)
+        imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (8, 2))
 
-            mapped_key, mapped_mods_from_string = map_result
+        if imgui.begin("##StatusStrip", True, flags):
+            app_state = self.app.app_state_ui
+            stage_proc = self.app.stage_processor
+            text_color = StatusStripColors.TEXT
 
-            # Check key press state ONCE and reuse (calling is_key_pressed multiple times can consume the event)
-            key_pressed = imgui.is_key_pressed(mapped_key)
-
-            if key_pressed:
-                mods_match = (mapped_mods_from_string['ctrl'] == io.key_ctrl
-                    and mapped_mods_from_string['alt'] == io.key_alt
-                    and mapped_mods_from_string['shift'] == io.key_shift
-                    and mapped_mods_from_string['super'] == io.key_super)
-                if mods_match:
-                    action_func(*action_args)
-                    return True
-            return False
-
-        def check_key_held(shortcut_name):
-            """Check if a key is being held down (for continuous navigation)"""
-            shortcut_str = current_shortcuts.get(shortcut_name)
-            if not shortcut_str:
-                return False
-            map_result = self.app._map_shortcut_to_glfw_key(shortcut_str)
-            if not map_result:
-                return False
-            mapped_key, mapped_mods_from_string = map_result
-            return (imgui.is_key_down(mapped_key) and
-                   mapped_mods_from_string['ctrl'] == io.key_ctrl and
-                   mapped_mods_from_string['alt'] == io.key_alt and
-                   mapped_mods_from_string['shift'] == io.key_shift and
-                   mapped_mods_from_string['super'] == io.key_super)
-
-        # F1 key - Open Keyboard Shortcuts Dialog (no modifiers)
-        f1_map = self.app._map_shortcut_to_glfw_key("F1")
-        if f1_map:
-            f1_key, f1_mods = f1_map
-            if (imgui.is_key_pressed(f1_key) and
-                not io.key_ctrl and not io.key_alt and not io.key_shift and not io.key_super):
-                self.keyboard_shortcuts_dialog.toggle()
-                return
-
-        # Handle non-repeating shortcuts first
-
-        # File Operations
-        if check_and_run_shortcut("save_project", self._handle_save_project_shortcut):
-            pass
-        elif check_and_run_shortcut("open_project", self._handle_open_project_shortcut):
-            pass
-
-        # Editing
-        elif check_and_run_shortcut("undo_timeline1", fs_proc.perform_undo_redo, 1, 'undo'):
-            pass
-        elif check_and_run_shortcut("redo_timeline1", fs_proc.perform_undo_redo, 1, 'redo'):
-            pass
-        elif self.app.app_state_ui.show_funscript_interactive_timeline2 and (
-            check_and_run_shortcut("undo_timeline2", fs_proc.perform_undo_redo, 2, 'undo')
-            or check_and_run_shortcut("redo_timeline2", fs_proc.perform_undo_redo, 2, 'redo')
-        ): pass
-
-        # Playback & Navigation
-        elif check_and_run_shortcut("toggle_playback", self.app.event_handlers.handle_playback_control, "play_pause"):
-            pass
-        elif check_and_run_shortcut("jump_to_next_point", self.app.event_handlers.handle_jump_to_point, 'next'):
-            pass
-        elif check_and_run_shortcut("jump_to_next_point_alt", self.app.event_handlers.handle_jump_to_point, 'next'):
-            pass
-        elif check_and_run_shortcut("jump_to_prev_point", self.app.event_handlers.handle_jump_to_point, 'prev'):
-            pass
-        elif check_and_run_shortcut("jump_to_prev_point_alt", self.app.event_handlers.handle_jump_to_point, 'prev'):
-            pass
-        elif video_loaded and check_and_run_shortcut("jump_to_start", self._handle_jump_to_start_shortcut):
-            pass
-        elif video_loaded and check_and_run_shortcut("jump_to_end", self._handle_jump_to_end_shortcut):
-            pass
-
-        # Timeline View Controls
-        elif check_and_run_shortcut("zoom_in_timeline", self._handle_zoom_in_timeline_shortcut):
-            pass
-        elif check_and_run_shortcut("zoom_out_timeline", self._handle_zoom_out_timeline_shortcut):
-            pass
-
-        # Window Toggles
-        elif check_and_run_shortcut("toggle_video_display", self._handle_toggle_video_display_shortcut):
-            pass
-        elif check_and_run_shortcut("toggle_timeline2", self._handle_toggle_timeline2_shortcut):
-            pass
-        elif check_and_run_shortcut("toggle_gauge_window", self._handle_toggle_gauge_window_shortcut):
-            pass
-        elif check_and_run_shortcut("toggle_3d_simulator", self._handle_toggle_3d_simulator_shortcut):
-            pass
-        elif check_and_run_shortcut("toggle_movement_bar", self._handle_toggle_movement_bar_shortcut):
-            pass
-        elif check_and_run_shortcut("toggle_chapter_list", self._handle_toggle_chapter_list_shortcut):
-            pass
-
-        # Timeline Displays
-        elif check_and_run_shortcut("toggle_heatmap", self._handle_toggle_heatmap_shortcut):
-            pass
-        elif check_and_run_shortcut("toggle_funscript_preview", self._handle_toggle_funscript_preview_shortcut):
-            pass
-
-        # Video Overlays
-        elif check_and_run_shortcut("toggle_video_feed", self._handle_toggle_video_feed_shortcut):
-            pass
-        elif check_and_run_shortcut("toggle_waveform", self._handle_toggle_waveform_shortcut):
-            pass
-
-        # View Controls
-        elif check_and_run_shortcut("reset_timeline_view", self._handle_reset_timeline_view_shortcut):
-            pass
-
-        # Tracking Tools
-        elif check_and_run_shortcut("set_oscillation_area", self._handle_toggle_oscillation_area_mode):
-            pass
-
-        # Chapters
-        elif check_and_run_shortcut("set_chapter_start", self._handle_set_chapter_start_shortcut):
-            pass
-        elif check_and_run_shortcut("set_chapter_end", self._handle_set_chapter_end_shortcut):
-            pass
-
-        # Add Points at specific values (Number keys 0-9 and = for 100%)
-        # These add a point at the current video time to the active timeline
-        if video_loaded and check_and_run_shortcut("add_point_0", self._handle_add_point_at_value, 0):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_10", self._handle_add_point_at_value, 10):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_20", self._handle_add_point_at_value, 20):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_30", self._handle_add_point_at_value, 30):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_40", self._handle_add_point_at_value, 40):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_50", self._handle_add_point_at_value, 50):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_60", self._handle_add_point_at_value, 60):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_70", self._handle_add_point_at_value, 70):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_80", self._handle_add_point_at_value, 80):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_90", self._handle_add_point_at_value, 90):
-            pass
-        elif video_loaded and check_and_run_shortcut("add_point_100", self._handle_add_point_at_value, 100):
-            pass
-
-        # Handle continuous arrow key navigation
-        if video_loaded:
-            self._handle_arrow_navigation()
-
-    def _handle_arrow_navigation(self):
-        """Optimized arrow key navigation with continuous scrolling support"""
-        io = imgui.get_io()
-        current_shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
-        current_time = time.time()
-        
-        # Update seek interval based on video FPS for natural navigation speed
-        if self.app.processor and self.app.processor.fps > 0:
-            # Use video FPS but cap at reasonable limits for responsiveness
-            video_fps = self.app.processor.fps
-            # Allow faster navigation for high FPS videos, slower for low FPS
-            target_nav_fps = max(15, min(60, video_fps))  
-            self.arrow_key_state['seek_interval'] = 1.0 / target_nav_fps
-        
-        # Get arrow key mappings
-        left_shortcut = current_shortcuts.get("seek_prev_frame", "LEFT_ARROW")
-        right_shortcut = current_shortcuts.get("seek_next_frame", "RIGHT_ARROW")
-        
-        left_map = self.app._map_shortcut_to_glfw_key(left_shortcut)
-        right_map = self.app._map_shortcut_to_glfw_key(right_shortcut)
-        
-        if not left_map or not right_map:
-            return
-            
-        left_key, left_mods = left_map
-        right_key, right_mods = right_map
-        
-        # Check if keys are held down (no modifier keys for arrow navigation)
-        left_held = (imgui.is_key_down(left_key) and 
-                    left_mods['ctrl'] == io.key_ctrl and
-                    left_mods['alt'] == io.key_alt and
-                    left_mods['shift'] == io.key_shift and
-                    left_mods['super'] == io.key_super)
-        
-        right_held = (imgui.is_key_down(right_key) and 
-                     right_mods['ctrl'] == io.key_ctrl and
-                     right_mods['alt'] == io.key_alt and
-                     right_mods['shift'] == io.key_shift and
-                     right_mods['super'] == io.key_super)
-        
-        # Update key state
-        self.arrow_key_state['left_pressed'] = left_held
-        self.arrow_key_state['right_pressed'] = right_held
-        
-        # Determine seek direction and apply rate limiting
-        seek_direction = 0
-        if left_held and not right_held:
-            seek_direction = -1
-        elif right_held and not left_held:
-            seek_direction = 1
-
-        # Reset direction tracking when key is released
-        if seek_direction == 0:
-            self.arrow_key_state['last_direction'] = 0
-
-        # Apply navigation with proper frame-by-frame then continuous logic
-        if seek_direction != 0:
-            time_since_last = current_time - self.arrow_key_state['last_seek_time']
-            key_just_pressed = (left_held and imgui.is_key_pressed(left_key)) or (right_held and imgui.is_key_pressed(right_key))
-
-            should_navigate = False
-
-            if key_just_pressed:
-                # INITIAL KEY PRESS: Only navigate if this is a new direction
-                if self.arrow_key_state['last_direction'] != seek_direction:
-                    should_navigate = True
-                    self.arrow_key_state['initial_press_time'] = current_time
-                    self.arrow_key_state['last_direction'] = seek_direction
+            # Left: workflow state
+            proc = self.app.processor
+            if not proc or not proc.is_video_open():
+                state_text = "No video loaded"
+            elif stage_proc.full_analysis_active:
+                state_text = "Tracking..."
             else:
-                # KEY HELD DOWN: Only allow if already in an active key session
-                if self.arrow_key_state['last_direction'] == seek_direction:
-                    time_since_initial_press = current_time - self.arrow_key_state['initial_press_time']
-
-                    if time_since_initial_press >= self.arrow_key_state['continuous_delay']:
-                        # Continuous scrolling: only navigate after interval
-                        if time_since_last >= self.arrow_key_state['seek_interval']:
-                            should_navigate = True
-                    # else: Still in the delay period, don't navigate (allows precise frame-by-frame)
-
-            if should_navigate:
-                self._perform_frame_seek(seek_direction)
-                self.arrow_key_state['last_seek_time'] = current_time
-
-    def _perform_frame_seek(self, delta_frames):
-        """Arrow key navigation with rolling backward buffer"""
-        if not self.app.processor or not self.app.processor.video_info:
-            return
-
-        # Skip if already seeking to avoid frame jump issues
-        if self.app.processor.seek_in_progress:
-            return
-
-        new_frame = self.app.processor.current_frame_index + delta_frames
-        total_frames = self.app.processor.total_frames
-        new_frame = max(0, min(new_frame, total_frames - 1 if total_frames > 0 else 0))
-
-        if new_frame == self.app.processor.current_frame_index:
-            return  # No change needed
-
-        # Only use rolling buffer when NOT tracking/processing
-        if not self.app.processor.is_processing and not (self.app.tracker and self.app.tracker.tracking_active):
-            if delta_frames > 0:
-                # Forward: sequential read + add to backward buffer
-                frame = self.app.processor.arrow_nav_forward(new_frame)
-                if frame is not None:
-                    self.app.processor.current_frame = frame
-                    # Add to rolling backward buffer for future backward navigation
-                    self.app.processor.add_frame_to_backward_buffer(new_frame, frame)
-            else:
-                # Backward: use rolling buffer (with async refill if needed)
-                frame = self.app.processor.arrow_nav_backward(new_frame)
-                if frame is not None:
-                    self.app.processor.current_frame = frame
-        else:
-            # During tracking/processing: use standard cache-based seek
-            frame_from_cache = None
-            with self.app.processor.frame_cache_lock:
-                if new_frame in self.app.processor.frame_cache:
-                    frame_from_cache = self.app.processor.frame_cache[new_frame]
-                    self.app.processor.frame_cache.move_to_end(new_frame)
-
-            if frame_from_cache is not None:
-                self.app.processor.current_frame_index = new_frame
-                self.app.processor.current_frame = frame_from_cache
-            else:
-                self.app.processor.current_frame_index = new_frame
-                self.app.processor.seek_video(new_frame)
-
-        # Update UI
-        self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        self.app.energy_saver.reset_activity_timer()
-
-    # Removed complex predictive caching - it was blocking the UI
-    # Keep navigation simple: cache check first, then single frame fetch if needed
-
-    def _handle_set_chapter_start_shortcut(self):
-        """Handle keyboard shortcut for setting chapter start (I key)"""
-        current_frame = self._get_current_frame_for_chapter()
-        if hasattr(self, 'video_navigation_ui') and self.video_navigation_ui:
-            # If chapter dialog is open, update it
-            if self.video_navigation_ui.show_create_chapter_dialog or self.video_navigation_ui.show_edit_chapter_dialog:
-                self.video_navigation_ui.chapter_edit_data["start_frame_str"] = str(current_frame)
-                self.app.logger.info(f"Chapter start set to frame {current_frame}", extra={'status_message': True})
-            else:
-                # Store for future chapter creation
-                self._stored_chapter_start_frame = current_frame
-                self.app.logger.info(f"Chapter start marked at frame {current_frame} (Press O to set end, then Shift+C to create)", extra={'status_message': True})
-    
-    def _handle_set_chapter_end_shortcut(self):
-        """Handle keyboard shortcut for setting chapter end (O key)"""
-        current_frame = self._get_current_frame_for_chapter()
-        if hasattr(self, 'video_navigation_ui') and self.video_navigation_ui:
-            # If chapter dialog is open, update it
-            if self.video_navigation_ui.show_create_chapter_dialog or self.video_navigation_ui.show_edit_chapter_dialog:
-                self.video_navigation_ui.chapter_edit_data["end_frame_str"] = str(current_frame)
-                self.app.logger.info(f"Chapter end set to frame {current_frame}", extra={'status_message': True})
-            else:
-                # Store for future chapter creation and auto-create if start is set
-                self._stored_chapter_end_frame = current_frame
-                if hasattr(self, '_stored_chapter_start_frame'):
-                    self._auto_create_chapter_from_stored_frames()
-                else:
-                    self.app.logger.info(f"Chapter end marked at frame {current_frame} (Press I to set start, then Shift+C to create)", extra={'status_message': True})
-
-    def _handle_add_point_at_value(self, value: int):
-        """Add a point at the current video playhead position with the specified value (0-100).
-
-        The point is added to the active timeline (the one with the green border).
-        Uses the timeline's _add_point() method which handles snapping, undo, and cache invalidation.
-        """
-        if not self.app.processor or not self.app.processor.video_info:
-            return
-
-        # Get current video time
-        current_frame = self.app.processor.current_frame_index
-        fps = self.app.processor.fps
-        if fps <= 0:
-            return
-
-        current_time_ms = int((current_frame / fps) * 1000)
-
-        # Get the active timeline and add the point
-        app_state = self.app.app_state_ui
-        timeline_num = getattr(app_state, 'active_timeline_num', 1)
-
-        # Get timeline from GUI instance (timelines are stored as timeline_editor1/2 in AppGUI)
-        if timeline_num == 1:
-            timeline = self.timeline_editor1
-        elif timeline_num == 2:
-            timeline = self.timeline_editor2
-        else:
-            timeline = None
-
-        if timeline:
-            timeline._add_point(current_time_ms, value)
-            self.app.logger.info(f"Added point: {value}% at {current_time_ms}ms (Timeline {timeline_num})", extra={'status_message': True})
-        else:
-            self.app.logger.warning(f"Timeline {timeline_num} not found")
-
-    def _get_current_frame_for_chapter(self) -> int:
-        """Get current video frame for chapter operations"""
-        if self.app.processor and hasattr(self.app.processor, 'current_frame_index'):
-            return max(0, self.app.processor.current_frame_index)
-        return 0
-    
-    def _auto_create_chapter_from_stored_frames(self):
-        """Automatically create chapter when both start and end frames are marked"""
-        if not (hasattr(self, '_stored_chapter_start_frame') and hasattr(self, '_stored_chapter_end_frame')):
-            return
-        
-        start_frame = self._stored_chapter_start_frame
-        end_frame = self._stored_chapter_end_frame
-        
-        # Ensure start is before end
-        if start_frame > end_frame:
-            start_frame, end_frame = end_frame, start_frame
-        
-        # Create chapter data
-        if hasattr(self, 'video_navigation_ui') and self.video_navigation_ui and self.app.funscript_processor:
-            default_pos_key = self.video_navigation_ui.position_short_name_keys[0] if self.video_navigation_ui.position_short_name_keys else "N/A"
-            chapter_data = {
-                "start_frame_str": str(start_frame),
-                "end_frame_str": str(end_frame),
-                "segment_type": "SexAct",
-                "position_short_name_key": default_pos_key,
-                "source": "keyboard_shortcut"
-            }
-            
-            self.app.funscript_processor.create_new_chapter_from_data(chapter_data)
-            self.app.logger.info(f"Chapter created: frames {start_frame} to {end_frame}", extra={'status_message': True})
-            
-            # Clear stored frames
-            if hasattr(self, '_stored_chapter_start_frame'):
-                delattr(self, '_stored_chapter_start_frame')
-            if hasattr(self, '_stored_chapter_end_frame'):
-                delattr(self, '_stored_chapter_end_frame')
-
-    # --- New Shortcut Handlers ---
-
-    def _handle_save_project_shortcut(self):
-        """Handle keyboard shortcut for saving project (CMD+S / CTRL+S)"""
-        self.app.project_manager.save_project_dialog()
-
-    def _handle_open_project_shortcut(self):
-        """Handle keyboard shortcut for opening project (CMD+O / CTRL+O)"""
-        self.app.project_manager.open_project_dialog()
-
-    def _handle_jump_to_start_shortcut(self):
-        """Handle keyboard shortcut for jumping to video start (HOME)"""
-        if self.app.processor:
-            self.app.processor.seek_video(0)
-            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-            if self.app.project_manager:
-                self.app.project_manager.project_dirty = True
-            self.app.energy_saver.reset_activity_timer()
-
-    def _handle_jump_to_end_shortcut(self):
-        """Handle keyboard shortcut for jumping to video end (END)"""
-        if self.app.processor:
-            last_frame = max(0, self.app.processor.total_frames - 1) if self.app.processor.total_frames > 0 else 0
-            self.app.processor.seek_video(last_frame)
-            self.app.app_state_ui.force_timeline_pan_to_current_frame = True
-            if self.app.project_manager:
-                self.app.project_manager.project_dirty = True
-            self.app.energy_saver.reset_activity_timer()
-
-    def _handle_zoom_in_timeline_shortcut(self):
-        """Handle keyboard shortcut for zooming in timeline (CMD+= / CTRL+=)"""
-        # Apply zoom in with scale factor (0.85 = zoom in)
-        app_state = self.app.app_state_ui
-        scale_factor = 0.85
-
-        # Zoom around current time (center of view)
-        effective_total_duration_s, _, _ = self.app.get_effective_video_duration_params()
-        effective_total_duration_ms = effective_total_duration_s * 1000.0
-
-        # Get current center time
-        if self.timeline_editor1:
-            # Use timeline 1's center marker position
-            center_time_ms = app_state.timeline_pan_offset_ms
-        else:
-            center_time_ms = 0.0
-
-        # Apply zoom
-        min_ms_per_px, max_ms_per_px = 0.01, 2000.0
-        old_zoom = app_state.timeline_zoom_factor_ms_per_px
-        app_state.timeline_zoom_factor_ms_per_px = max(
-            min_ms_per_px,
-            min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, max_ms_per_px),
-        )
-
-        # Adjust pan offset to keep center time roughly in place
-        if old_zoom != app_state.timeline_zoom_factor_ms_per_px:
-            self.app.energy_saver.reset_activity_timer()
-
-    def _handle_zoom_out_timeline_shortcut(self):
-        """Handle keyboard shortcut for zooming out timeline (CMD+- / CTRL+-)"""
-        # Apply zoom out with scale factor (1.15 = zoom out)
-        app_state = self.app.app_state_ui
-        scale_factor = 1.15
-
-        # Zoom around current time (center of view)
-        effective_total_duration_s, _, _ = self.app.get_effective_video_duration_params()
-        effective_total_duration_ms = effective_total_duration_s * 1000.0
-
-        # Get current center time
-        if self.timeline_editor1:
-            # Use timeline 1's center marker position
-            center_time_ms = app_state.timeline_pan_offset_ms
-        else:
-            center_time_ms = 0.0
-
-        # Apply zoom
-        min_ms_per_px, max_ms_per_px = 0.01, 2000.0
-        old_zoom = app_state.timeline_zoom_factor_ms_per_px
-        app_state.timeline_zoom_factor_ms_per_px = max(
-            min_ms_per_px,
-            min(app_state.timeline_zoom_factor_ms_per_px * scale_factor, max_ms_per_px),
-        )
-
-        # Adjust pan offset to keep center time roughly in place
-        if old_zoom != app_state.timeline_zoom_factor_ms_per_px:
-            self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_video_display_shortcut(self):
-        """Handle keyboard shortcut for toggling video display (V)"""
-        app_state = self.app.app_state_ui
-        # Only allow toggle in floating mode - in fixed mode video display is always shown
-        if app_state.ui_layout_mode == "floating":
-            app_state.show_video_display_window = not app_state.show_video_display_window
-            if self.app.project_manager:
-                self.app.project_manager.project_dirty = True
-            status = "shown" if app_state.show_video_display_window else "hidden"
-            self.app.logger.info(f"Video display {status}", extra={'status_message': True})
-        else:
-            self.app.logger.info("Video display toggle only available in floating mode", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_timeline2_shortcut(self):
-        """Handle keyboard shortcut for toggling timeline 2 (T)"""
-        app_state = self.app.app_state_ui
-        app_state.show_funscript_interactive_timeline2 = not app_state.show_funscript_interactive_timeline2
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_funscript_interactive_timeline2 else "hidden"
-        self.app.logger.info(f"Timeline 2 {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_gauge_window_shortcut(self):
-        """Handle keyboard shortcut for toggling gauge window (G)"""
-        app_state = self.app.app_state_ui
-        # Toggle gauge window for timeline 1
-        if not hasattr(app_state, 'show_gauge_window_timeline1'):
-            app_state.show_gauge_window_timeline1 = False
-        app_state.show_gauge_window_timeline1 = not app_state.show_gauge_window_timeline1
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_gauge_window_timeline1 else "hidden"
-        self.app.logger.info(f"Gauge window {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_3d_simulator_shortcut(self):
-        """Handle keyboard shortcut for toggling 3D simulator (S)"""
-        app_state = self.app.app_state_ui
-        app_state.show_simulator_3d = not app_state.show_simulator_3d
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_simulator_3d else "hidden"
-        self.app.logger.info(f"3D Simulator {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_movement_bar_shortcut(self):
-        """Handle keyboard shortcut for toggling movement bar (M)"""
-        app_state = self.app.app_state_ui
-        app_state.show_lr_dial_graph = not app_state.show_lr_dial_graph
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_lr_dial_graph else "hidden"
-        self.app.logger.info(f"Movement Bar {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_chapter_list_shortcut(self):
-        """Handle keyboard shortcut for toggling chapter list (L)"""
-        app_state = self.app.app_state_ui
-        if not hasattr(app_state, 'show_chapter_list_window'):
-            app_state.show_chapter_list_window = False
-        app_state.show_chapter_list_window = not app_state.show_chapter_list_window
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_chapter_list_window else "hidden"
-        self.app.logger.info(f"Chapter List {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_heatmap_shortcut(self):
-        """Handle keyboard shortcut for toggling heatmap (H)"""
-        app_state = self.app.app_state_ui
-        app_state.show_heatmap = not app_state.show_heatmap
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_heatmap else "hidden"
-        self.app.logger.info(f"Heatmap {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_funscript_preview_shortcut(self):
-        """Handle keyboard shortcut for toggling funscript preview bar (P)"""
-        app_state = self.app.app_state_ui
-        app_state.show_funscript_timeline = not app_state.show_funscript_timeline
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_funscript_timeline else "hidden"
-        self.app.logger.info(f"Funscript Preview {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_video_feed_shortcut(self):
-        """Handle keyboard shortcut for toggling video feed overlay (F)"""
-        app_state = self.app.app_state_ui
-        app_state.show_video_feed = not app_state.show_video_feed
-        self.app.app_settings.set("show_video_feed", app_state.show_video_feed)
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_video_feed else "hidden"
-        self.app.logger.info(f"Video Feed {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_waveform_shortcut(self):
-        """Handle keyboard shortcut for toggling audio waveform (W)"""
-        app_state = self.app.app_state_ui
-        app_state.show_audio_waveform = not app_state.show_audio_waveform
-        if self.app.project_manager:
-            self.app.project_manager.project_dirty = True
-        status = "shown" if app_state.show_audio_waveform else "hidden"
-        self.app.logger.info(f"Audio Waveform {status}", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_reset_timeline_view_shortcut(self):
-        """Handle keyboard shortcut for resetting timeline zoom/pan (R)"""
-        app_state = self.app.app_state_ui
-
-        # Reset zoom to default (20.0 ms per pixel is a good default)
-        app_state.timeline_zoom_factor_ms_per_px = 20.0
-
-        # Reset pan to start
-        app_state.timeline_pan_offset_ms = 0.0
-
-        # Force timeline to pan to current frame
-        app_state.force_timeline_pan_to_current_frame = True
-
-        self.app.logger.info("Timeline view reset to default", extra={'status_message': True})
-        self.app.energy_saver.reset_activity_timer()
-
-    def _handle_toggle_oscillation_area_mode(self):
-        """Handle keyboard shortcut for toggling oscillation area drawing mode (X)"""
-        # Only available when an oscillation tracker is active
-        tracker = self.app.tracker
-        if not tracker:
-            return
-
-        from config.tracker_discovery import get_tracker_discovery
-        discovery = get_tracker_discovery()
-        tracker_info = discovery.get_tracker_info(self.app.app_state_ui.selected_tracker_name)
-        if not tracker_info or 'oscillation' not in tracker_info.display_name.lower():
-            self.app.logger.info("Oscillation area shortcut requires an oscillation tracker.", extra={'status_message': True})
-            return
-
-        if self.app.is_setting_oscillation_area_mode:
-            self.app.exit_set_oscillation_area_mode()
-        else:
-            self.app.enter_set_oscillation_area_mode()
-
-    def _handle_energy_saver_interaction_detection(self):
-        io = imgui.get_io()
-        interaction_detected_this_frame = False
-        current_mouse_pos = io.mouse_pos
-        if current_mouse_pos[0] != self.last_mouse_pos_for_energy_saver[0] or current_mouse_pos[1] != self.last_mouse_pos_for_energy_saver[1]:
-            interaction_detected_this_frame = True
-            self.last_mouse_pos_for_energy_saver = current_mouse_pos
-
-        # REFACTORED for readability and maintainability
-        buttons = (0, 1, 2)
-        if (any(imgui.is_mouse_clicked(b) or imgui.is_mouse_double_clicked(b) for b in buttons)
-            or io.mouse_wheel != 0.0
-            or io.want_text_input
-            or imgui.is_mouse_dragging(0)
-            or imgui.is_any_item_active()
-            or imgui.is_any_item_focused()):
-                interaction_detected_this_frame = True
-        if hasattr(io, 'keys_down'):
-            for i in range(len(io.keys_down)):
-                if imgui.is_key_pressed(i): interaction_detected_this_frame = True; break
-        if interaction_detected_this_frame:
-            self.app.energy_saver.reset_activity_timer()
-
-    def _render_batch_confirmation_dialog(self):
-        app = self.app
-        if not app.show_batch_confirmation_dialog:
-            return
-
-        colors = self.colors
-        imgui.open_popup("Batch Processing Setup")
-        main_viewport = imgui.get_main_viewport()
-        imgui.set_next_window_size(main_viewport.size[0] * 0.7, main_viewport.size[1] * 0.8, condition=imgui.APPEARING)
-        popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                     main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-        imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5, condition=imgui.APPEARING)
-
-        if imgui.begin_popup_modal("Batch Processing Setup", True)[0]:
-            imgui.text(f"Found {len(self.batch_videos_data)} videos for batch processing.")
-            imgui.separator()
-
-            imgui.text("Overwrite Strategy:")
-            imgui.same_line()
-            if imgui.radio_button("Skip existing FunGen scripts", self.batch_overwrite_mode_ui == 0): self.batch_overwrite_mode_ui = 0
-            imgui.same_line()
-            if imgui.radio_button("Skip if ANY script exists", self.batch_overwrite_mode_ui == 1): self.batch_overwrite_mode_ui = 1
-            imgui.same_line()
-            if imgui.radio_button("Overwrite all existing scripts", self.batch_overwrite_mode_ui == 2): self.batch_overwrite_mode_ui = 2
-
-            if self.batch_overwrite_mode_ui != self.last_overwrite_mode_ui:
-                for video in self.batch_videos_data:
-                    status = video["funscript_status"]
-                    if self.batch_overwrite_mode_ui == 0: video["selected"] = status != 'fungen'
-                    elif self.batch_overwrite_mode_ui == 1: video["selected"] = status is None
-                    elif self.batch_overwrite_mode_ui == 2: video["selected"] = True
-                self.last_overwrite_mode_ui = self.batch_overwrite_mode_ui
-
-            imgui.separator()
-
-            if imgui.begin_child("VideoList", height=-120):
-                table_flags = imgui.TABLE_BORDERS | imgui.TABLE_SIZING_STRETCH_PROP | imgui.TABLE_SCROLL_Y
-                if imgui.begin_table("BatchVideosTable", 4, flags=table_flags):
-                    imgui.table_setup_column("Process", init_width_or_weight=0.5)
-                    imgui.table_setup_column("Video File", init_width_or_weight=4.0)
-                    imgui.table_setup_column("Detected", init_width_or_weight=1.3)
-                    imgui.table_setup_column("Override", init_width_or_weight=1.5)
-
-                    imgui.table_headers_row()
-
-                    video_format_options = ["Auto (Heuristic)", "2D", "VR (he_sbs)", "VR (he_tb)", "VR (fisheye_sbs)", "VR (fisheye_tb)"]
-
-                    for i, video_data in enumerate(self.batch_videos_data):
-                        imgui.table_next_row()
-                        imgui.table_set_column_index(0); imgui.push_id(f"sel_{i}")
-                        _, video_data["selected"] = imgui.checkbox("##select", video_data["selected"])
-                        imgui.pop_id()
-
-                        imgui.table_set_column_index(1)
-                        status = video_data["funscript_status"]
-                        if status == 'fungen': imgui.text_colored(os.path.basename(video_data["path"]), *colors.VIDEO_STATUS_FUNGEN)
-                        elif status == 'other': imgui.text_colored(os.path.basename(video_data["path"]), *colors.VIDEO_STATUS_OTHER)
-                        else: imgui.text(os.path.basename(video_data["path"]))
-
-                        if imgui.is_item_hovered():
-                            if status == 'fungen':
-                                imgui.set_tooltip("Funscript created by this version of FunGen")
-                            elif status == 'other':
-                                imgui.set_tooltip("Funscript exists (unknown or older version)")
-                            else:
-                                imgui.set_tooltip("No Funscript exists for this video")
-
-                        imgui.table_set_column_index(2); imgui.text(video_data["detected_format"])
-
-                        imgui.table_set_column_index(3); imgui.push_id(f"ovr_{i}"); imgui.set_next_item_width(-1)
-                        _, video_data["override_format_idx"] = imgui.combo("##override", video_data["override_format_idx"], video_format_options)
-                        imgui.pop_id()
-
-                    imgui.end_table()
-                imgui.end_child()
-
-            imgui.separator()
-            imgui.text("Processing Method:")
-            
-            # Get available batch-compatible trackers dynamically
-            from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
-            from config.tracker_discovery import TrackerCategory
-            
-            tracker_ui = get_dynamic_tracker_ui()
-            discovery = tracker_ui.discovery
-            
-            # Get live (non-intervention) and offline trackers
-            batch_compatible_trackers = []
-            tracker_internal_names = []
-            
-            # Add offline trackers
-            offline_trackers = discovery.get_trackers_by_category(TrackerCategory.OFFLINE)
-            for tracker in offline_trackers:
-                if tracker.supports_batch:
-                    # Add prefix based on folder name
-                    if tracker.folder_name and tracker.folder_name.lower() == "experimental":
-                        display_name = f"Experimental: {tracker.display_name}"
-                    else:
-                        display_name = f"Offline: {tracker.display_name}"
-                    batch_compatible_trackers.append(display_name)
-                    tracker_internal_names.append(tracker.internal_name)
-            
-            # Add live trackers (non-intervention only)
-            live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
-            for tracker in live_trackers:
-                if tracker.supports_batch and not tracker.requires_intervention:
-                    # Add prefix based on folder name
-                    if tracker.folder_name and tracker.folder_name.lower() == "experimental":
-                        display_name = f"Experimental: {tracker.display_name}"
-                    else:
-                        display_name = f"Live: {tracker.display_name}"
-                    batch_compatible_trackers.append(display_name)
-                    tracker_internal_names.append(tracker.internal_name)
-            
-            # Create dropdown
-            imgui.set_next_item_width(300)
-            changed, self.selected_batch_method_idx_ui = imgui.combo(
-                "##batch_tracker", 
-                self.selected_batch_method_idx_ui,
-                batch_compatible_trackers
-            )
-            
-            # Store the selected tracker's internal name for later use
-            if 0 <= self.selected_batch_method_idx_ui < len(tracker_internal_names):
-                self.selected_batch_tracker_name = tracker_internal_names[self.selected_batch_method_idx_ui]
-            else:
-                self.selected_batch_tracker_name = None
-
-            imgui.text("Output Options:")
-            _, self.batch_apply_ultimate_autotune_ui = imgui.checkbox("Apply Ultimate Autotune", self.batch_apply_ultimate_autotune_ui)
-            imgui.same_line()
-            _, self.batch_copy_funscript_to_video_location_ui = imgui.checkbox("Save copy next to video", self.batch_copy_funscript_to_video_location_ui)
-            imgui.same_line()
-            
-            # Check if selected tracker supports roll file generation (3-stage trackers)
-            has_3_stages = False
-            if hasattr(self, 'selected_batch_tracker_name') and self.selected_batch_tracker_name:
-                tracker_info = discovery.get_tracker_info(self.selected_batch_tracker_name)
-                if tracker_info and tracker_info.properties:
-                    has_3_stages = tracker_info.properties.get("num_stages", 0) >= 3
-            
-            if not has_3_stages:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True); imgui.push_style_var(imgui.STYLE_ALPHA, 0.5)
-            _, self.batch_generate_roll_file_ui = imgui.checkbox("Generate .roll file", self.batch_generate_roll_file_ui if has_3_stages else False)
-            if not has_3_stages:
-                imgui.pop_style_var(); imgui.internal.pop_item_flag()
-
-            # Adaptive performance tuning checkbox
-            _, self.batch_adaptive_tuning_ui = imgui.checkbox("Adaptive performance tuning", self.batch_adaptive_tuning_ui)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Progressively optimizes pipeline thread settings during batch.\n"
-                                  "Starts conservative, tests small improvements after each video.\n"
-                                  "Best settings saved for future use.")
-            cur_p = app.stage_processor.num_producers_stage1
-            cur_c = app.stage_processor.num_consumers_stage1
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.5, 1.0)
-            imgui.text(f"  Current pipeline: {cur_p} producers / {cur_c} consumers")
+                state_text = "Ready"
+            imgui.push_style_color(imgui.COLOR_TEXT, *text_color)
+            imgui.text(state_text)
             imgui.pop_style_color()
 
-            imgui.separator()
-            if imgui.button("Start Batch", width=120):
-                app._initiate_batch_processing_from_confirmation()
-                imgui.close_current_popup()
-            imgui.same_line()
-            if imgui.button("Cancel", width=120):
-                app._cancel_batch_processing_from_confirmation()
-                imgui.close_current_popup()
+            # Center: operation + progress
+            if stage_proc.full_analysis_active:
+                progress = getattr(stage_proc, 'overall_progress', 0.0)
+                progress_text = f"{int(progress * 100)}%"
+                center_x = self.window_width * 0.5
+                text_w = imgui.calc_text_size(progress_text)[0]
+                imgui.same_line(position=center_x - text_w * 0.5)
+                imgui.push_style_color(imgui.COLOR_TEXT, *StatusStripColors.ACCENT)
+                imgui.text(progress_text)
+                imgui.pop_style_color()
 
-            imgui.end_popup()
+            # Right: FPS
+            io = imgui.get_io()
+            fps_text = f"{io.framerate:.0f} FPS"
+            fps_w = imgui.calc_text_size(fps_text)[0]
+            imgui.same_line(position=self.window_width - fps_w - 16)
+            imgui.push_style_color(imgui.COLOR_TEXT, *text_color)
+            imgui.text(fps_text)
+            imgui.pop_style_color()
+
+        imgui.end()
+        imgui.pop_style_var()
+        imgui.pop_style_color()
 
     def render_gui(self):
         self.component_render_times.clear()
+
+        # Cache feature detection flags for this frame
+        self._feat_supporter = _is_feature_available("patreon_features")
 
         # Energy detection can be done before new_frame
         self._time_render("EnergyDetection", self._handle_energy_saver_interaction_detection)
@@ -2011,12 +945,23 @@ class GUI:
 
         app_state.update_current_script_display_values()
 
+        status_strip_h = 22  # Bottom status strip height
+
         if app_state.ui_layout_mode == 'fixed':
             panel_y_start = self.main_menu_bar_height + toolbar_height
             timeline1_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline else 0
             timeline2_render_h = app_state.timeline_base_height if app_state.show_funscript_interactive_timeline2 else 0
-            interactive_timelines_total_height = timeline1_render_h + timeline2_render_h
-            available_height_for_main_panels = max(100, self.window_height - panel_y_start - interactive_timelines_total_height)
+            extra_timelines_total_height = 0
+            if self._feat_supporter:
+                for _t in EXTRA_TIMELINE_RANGE:
+                    if getattr(app_state, f"show_funscript_interactive_timeline{_t}", False):
+                        extra_timelines_total_height += app_state.timeline_base_height
+            interactive_timelines_total_height = timeline1_render_h + timeline2_render_h + extra_timelines_total_height
+            # Cap timeline area to prevent it from taking over the whole window
+            max_timeline_area_h = int(self.window_height * 0.45)
+            capped_timelines_h = min(interactive_timelines_total_height, max_timeline_area_h)
+            timelines_need_scroll = interactive_timelines_total_height > max_timeline_area_h
+            available_height_for_main_panels = max(100, self.window_height - panel_y_start - capped_timelines_h - status_strip_h)
             app_state.fixed_layout_geometry = {}
             is_full_width_nav = getattr(app_state, 'full_width_nav', False)
             control_panel_w = 450 * font_scale
@@ -2103,14 +1048,52 @@ class GUI:
                     imgui.set_next_window_size(graphs_panel_w_no_vid, available_height_for_main_panels)
                     self._time_render("InfoGraphsUI", self.info_graphs_ui.render)
 
-            timeline_current_y_start = panel_y_start + available_height_for_main_panels
-            if app_state.show_funscript_interactive_timeline:
-                app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
-                self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h, view_mode=app_state.ui_view_mode)
-                timeline_current_y_start += timeline1_render_h
-            if app_state.show_funscript_interactive_timeline2:
-                app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline2_render_h)}
-                self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h, view_mode=app_state.ui_view_mode)
+            timeline_area_y = panel_y_start + available_height_for_main_panels
+            per_tl_h = app_state.timeline_base_height
+
+            if timelines_need_scroll:
+                # Scrollable container for all timelines
+                imgui.set_next_window_position(0, timeline_area_y)
+                imgui.set_next_window_size(self.window_width, capped_timelines_h)
+                container_flags = (imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE |
+                                   imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS)
+                if imgui.begin("##TimelineScrollContainer", True, container_flags):
+                    if app_state.show_funscript_interactive_timeline:
+                        self._time_render("TimelineEditor1", self.timeline_editor1.render,
+                                          0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+                    if app_state.show_funscript_interactive_timeline2:
+                        self._time_render("TimelineEditor2", self.timeline_editor2.render,
+                                          0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+                    if self._feat_supporter:
+                        for t_num in EXTRA_TIMELINE_RANGE:
+                            vis_attr = f"show_funscript_interactive_timeline{t_num}"
+                            if getattr(app_state, vis_attr, False):
+                                editor = self._get_or_create_timeline_editor(t_num)
+                                self._time_render(f"TimelineEditor{t_num}", editor.render,
+                                                  0, per_tl_h, view_mode=app_state.ui_view_mode, container_mode=True)
+                imgui.end()
+                app_state.fixed_layout_geometry['TimelineContainer'] = {
+                    'pos': (0, timeline_area_y), 'size': (self.window_width, capped_timelines_h)}
+            else:
+                # No scrolling needed — render each timeline as its own window
+                timeline_current_y_start = timeline_area_y
+                if app_state.show_funscript_interactive_timeline:
+                    app_state.fixed_layout_geometry['Timeline1'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline1_render_h)}
+                    self._time_render("TimelineEditor1", self.timeline_editor1.render, timeline_current_y_start, timeline1_render_h, view_mode=app_state.ui_view_mode)
+                    timeline_current_y_start += timeline1_render_h
+                if app_state.show_funscript_interactive_timeline2:
+                    app_state.fixed_layout_geometry['Timeline2'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, timeline2_render_h)}
+                    self._time_render("TimelineEditor2", self.timeline_editor2.render, timeline_current_y_start, timeline2_render_h, view_mode=app_state.ui_view_mode)
+                    timeline_current_y_start += timeline2_render_h
+                if self._feat_supporter:
+                    for t_num in EXTRA_TIMELINE_RANGE:
+                        vis_attr = f"show_funscript_interactive_timeline{t_num}"
+                        if getattr(app_state, vis_attr, False):
+                            editor = self._get_or_create_timeline_editor(t_num)
+                            extra_h = per_tl_h
+                            app_state.fixed_layout_geometry[f'Timeline{t_num}'] = {'pos': (0, timeline_current_y_start), 'size': (self.window_width, extra_h)}
+                            self._time_render(f"TimelineEditor{t_num}", editor.render, timeline_current_y_start, extra_h, view_mode=app_state.ui_view_mode)
+                            timeline_current_y_start += extra_h
         else:
             if app_state.just_switched_to_floating:
                 if 'ControlPanel' in app_state.fixed_layout_geometry:
@@ -2128,6 +1111,15 @@ class GUI:
             self._time_render("VideoNavigationUI", self.video_navigation_ui.render)
             self._time_render("TimelineEditor1", self.timeline_editor1.render)
             self._time_render("TimelineEditor2", self.timeline_editor2.render)
+
+            # Render additional timelines in floating mode (supporter only)
+            if self._feat_supporter:
+                for t_num in EXTRA_TIMELINE_RANGE:
+                    vis_attr = f"show_funscript_interactive_timeline{t_num}"
+                    if getattr(app_state, vis_attr, False):
+                        editor = self._get_or_create_timeline_editor(t_num)
+                        self._time_render(f"TimelineEditor{t_num}", editor.render)
+
             if app_state.just_switched_to_floating:
                 app_state.just_switched_to_floating = False
 
@@ -2155,6 +1147,9 @@ class GUI:
         # --- Render AI Models Dialog ---
         if hasattr(app_state, 'show_ai_models_dialog') and app_state.show_ai_models_dialog:
             self._time_render("AIModelsDialog", self._render_ai_models_dialog)
+
+        # Render status strip at bottom of window
+        self._render_status_strip(status_strip_h)
 
         self.perf_frame_count += 1
         if time.time() - self.last_perf_log_time > self.perf_log_interval:
@@ -2189,143 +1184,6 @@ class GUI:
                 'timestamp': time.time()
             }
             self._frontend_perf_queue.append(current_perf_data)
-
-    def _render_ai_models_dialog(self):
-        """Render AI Models configuration dialog."""
-        app = self.app
-        app_state = app.app_state_ui
-
-        window_flags = imgui.WINDOW_NO_COLLAPSE
-        main_viewport = imgui.get_main_viewport()
-        center_x = main_viewport.pos[0] + main_viewport.size[0] * 0.5
-        center_y = main_viewport.pos[1] + main_viewport.size[1] * 0.5
-        imgui.set_next_window_position(center_x, center_y, imgui.ONCE, 0.5, 0.5)
-        imgui.set_next_window_size(700, 400, imgui.ONCE)
-
-        is_open, app_state.show_ai_models_dialog = imgui.begin(
-            "AI Models Configuration##AIModelsDialog",
-            closable=True,
-            flags=window_flags
-        )
-
-        if is_open:
-            imgui.text("Configure AI Model Paths and Inference Settings")
-            imgui.separator()
-            imgui.spacing()
-
-            # Use the same rendering as control panel
-            if hasattr(self, 'control_panel_ui') and self.control_panel_ui:
-                self.control_panel_ui._render_ai_model_settings()
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            # Close button
-            if imgui.button("Close", width=-1):
-                app_state.show_ai_models_dialog = False
-
-        imgui.end()
-
-    def _render_status_message(self, app_state):
-        if app_state.status_message and time.time() < app_state.status_message_time:
-            imgui.set_next_window_position(self.window_width - 310, self.window_height - 40)
-            imgui.begin("StatusMessage", flags=(
-                imgui.WINDOW_NO_DECORATION |
-                imgui.WINDOW_NO_MOVE |
-                imgui.WINDOW_ALWAYS_AUTO_RESIZE |
-                imgui.WINDOW_NO_INPUTS |
-                imgui.WINDOW_NO_FOCUS_ON_APPEARING |
-                imgui.WINDOW_NO_NAV))
-            imgui.text(app_state.status_message)
-            imgui.end()
-        elif app_state.status_message:
-            app_state.status_message = ""
-
-    def _render_error_popup(self):
-        """Render error popup with early return to avoid expensive operations when not needed."""
-        # Early return if no error popup is active - avoids expensive ImGui operations
-        if not self.error_popup_active and not imgui.is_popup_open("ErrorPopup"):
-            return
-            
-        if self.error_popup_active:
-            imgui.open_popup("ErrorPopup")
-            
-        # Center the popup and set a normal size (compatibility for imgui versions)
-        if hasattr(imgui, 'get_main_viewport'):
-            main_viewport = imgui.get_main_viewport()
-            popup_pos = (main_viewport.pos[0] + main_viewport.size[0] * 0.5,
-                         main_viewport.pos[1] + main_viewport.size[1] * 0.5)
-            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-        else:
-            # Fallback: center on window size if viewport not available
-            popup_pos = (self.window_width * 0.5, self.window_height * 0.5)
-            imgui.set_next_window_position(popup_pos[0], popup_pos[1], pivot_x=0.5, pivot_y=0.5)
-        popup_width = 600
-        imgui.set_next_window_size(popup_width, 0)  # Wider width, auto height
-        if imgui.begin_popup_modal("ErrorPopup")[0]:
-            # Center title
-            window_width = imgui.get_window_width()
-            title_width = imgui.calc_text_size(self.error_popup_title)[0]
-            imgui.set_cursor_pos_x((window_width - title_width) * 0.5)
-            imgui.text(self.error_popup_title)
-            imgui.separator()
-            # Center message
-            message_lines = self.error_popup_message.split('\n')
-            for line in message_lines:
-                line_width = imgui.calc_text_size(line)[0]
-                imgui.set_cursor_pos_x((window_width - line_width) * 0.5)
-                imgui.text(line)
-            imgui.spacing()
-            # Center button
-            button_width = 120
-            imgui.set_cursor_pos_x((window_width - button_width) * 0.5)
-            if imgui.button("Close", width=button_width):
-                self.error_popup_active = False
-                imgui.close_current_popup()
-                if self.error_popup_action_callback:
-                    self.error_popup_action_callback()
-            imgui.end_popup()
-
-    def _render_all_popups(self):
-        """Optimized popup rendering - only renders visible/active popups."""
-        app_state = self.app.app_state_ui
-        
-        # Only render gauge windows if they're shown AND not in overlay mode
-        if getattr(app_state, 'show_gauge_window_timeline1', False) and not self.app.app_settings.get('gauge_overlay_mode', False):
-            self.gauge_window_ui_t1.render()
-
-        if getattr(app_state, 'show_gauge_window_timeline2', False) and not self.app.app_settings.get('gauge_overlay_mode', False):
-            self.gauge_window_ui_t2.render()
-
-        # Only render Movement Bar if shown AND not in overlay mode
-        if getattr(app_state, 'show_lr_dial_graph', False) and not self.app.app_settings.get('movement_bar_overlay_mode', False):
-            self.movement_bar_ui.render()
-
-        if getattr(app_state, 'show_simulator_3d', False) and not self.app.app_settings.get('simulator_3d_overlay_mode', False):
-            self.simulator_3d_window_ui.render()
-
-        # Batch confirmation dialog (has internal visibility check)
-        self._render_batch_confirmation_dialog()
-        
-        # File dialog only if open
-        if self.file_dialog.open:
-            self.file_dialog.draw()
-        
-        # Status message (has internal visibility check)
-        self._render_status_message(app_state)
-        
-        # Updater dialogs (have early returns to avoid expensive ImGui calls when not visible)
-        self.app.updater.render_update_dialog()
-        self.app.updater.render_update_error_dialog()
-        self.app.updater.render_migration_warning_dialog()
-        self.app.updater.render_update_settings_dialog()
-
-        # Keyboard Shortcuts Dialog (accessible via F1 or Help menu)
-        self.keyboard_shortcuts_dialog.render()
-
-        # First-run setup wizard
-        self._render_first_run_setup_popup()
 
     def run(self):
         colors = self.colors
@@ -2394,259 +1252,6 @@ class GUI:
             self.shutdown_event.set()
             
             # Shutdown ProcessingThreadManager first
-    def _generate_instant_tooltip_data(self, hover_time_s: float, hover_frame: int, total_duration: float, normalized_pos: float, include_frame: bool = False):
-        """Generate cached tooltip data with instant funscript zoom and optional delayed video frame."""
-        tooltip_data = {
-            'hover_time_s': hover_time_s,
-            'hover_frame': hover_frame,
-            'total_duration': total_duration,
-            'zoom_actions': [],
-            'zoom_start_s': 0,
-            'zoom_end_s': 0,
-            'frame_data': None,
-            'frame_loading': include_frame,  # Set to True immediately if frame will be fetched
-            'actual_frame': None  # Track actual frame if different from requested
-        }
-        
-        # Funscript zoom preview (±2 seconds window around hover point) - INSTANT
-        zoom_window_s = 4.0  # Total window size in seconds
-        zoom_start_s = max(0, hover_time_s - zoom_window_s/2)
-        zoom_end_s = min(total_duration, hover_time_s + zoom_window_s/2)
-        tooltip_data['zoom_start_s'] = zoom_start_s
-        tooltip_data['zoom_end_s'] = zoom_end_s
-        
-        # Get funscript actions in zoom window - FAST operation
-        actions = self.app.funscript_processor.get_actions('primary')
-        if actions:
-            zoom_actions = []
-            for action in actions:
-                action_time_s = action['at'] / 1000.0
-                if zoom_start_s <= action_time_s <= zoom_end_s:
-                    zoom_actions.append(action)
-            tooltip_data['zoom_actions'] = zoom_actions
-
-        # Frame extraction is handled asynchronously by the caller to avoid blocking UI
-        # frame_loading is already set to True in dict initialization if include_frame is True
-
-        return tooltip_data
-    
-    def _get_frame_direct_cv2(self, frame_index: int):
-        """Fast direct frame extraction using video processor's existing infrastructure.
-        Returns: (frame_data, actual_frame_index) or (None, None) on error
-        """
-        if not self.app.processor or not self.app.processor.video_path:
-            return None, None
-
-        import numpy as np
-
-        try:
-            # Use OpenCV-based thumbnail extractor for fast seeking (no FFmpeg process spawning!)
-            # This is much faster than spawning FFmpeg for each tooltip hover
-            # Note: This still blocks briefly for OpenCV seek, but much faster than FFmpeg
-            frame = self.app.processor.get_thumbnail_frame(frame_index, use_gpu_unwarp=False)
-            
-            if frame is None:
-                return None, None
-            
-            # Frame is exact, no mismatch
-            actual_frame = frame_index
-            # Keep frame in BGR format - update_texture will handle BGR→RGB conversion
-            
-            # Apply VR panel selection if enabled (user override controls)
-            # Note: ThumbnailExtractor already crops VR to one panel (left for SBS, top for TB)
-            # This section allows user to override and select right panel for SBS content
-            if hasattr(self.app, 'app_settings') and self.app.app_settings:
-                vr_enabled = self.app.app_settings.get('vr_mode_enabled', False)
-                vr_panel = self.app.app_settings.get('vr_panel_selection', 'full')  # 'left', 'right', 'full'
-
-                # Only apply panel selection for SBS content (not TB)
-                # TB content is already cropped to top panel by ThumbnailExtractor
-                vr_format = getattr(self.app.processor, 'vr_input_format', '') if self.app.processor else ''
-                is_sbs = '_sbs' in vr_format.lower() or '_lr' in vr_format.lower() or '_rl' in vr_format.lower()
-
-                if vr_enabled and vr_panel != 'full' and is_sbs:
-                    height, width = frame.shape[:2]
-
-                    if vr_panel == 'left':
-                        # Take left half for preview
-                        frame = frame[:, :width//2]
-                    elif vr_panel == 'right':
-                        # Take right half for preview
-                        frame = frame[:, width//2:]
-            
-            # Resize for preview (keep aspect ratio)
-            height, width = frame.shape[:2]
-            aspect_ratio = width / height if height > 0 else 16/9
-            
-            # For VR content, make preview larger since it's typically wider
-            if aspect_ratio > 1.5:  # Likely VR content (wider than standard 16:9)
-                preview_width = 240  # Bigger for VR
-                preview_height = int(preview_width / aspect_ratio)
-            else:
-                preview_width = 200  # Standard content
-                preview_height = int(preview_width / aspect_ratio)
-            
-            # Resize frame for preview
-            frame_resized = cv2.resize(frame, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
-            
-            return frame_resized, actual_frame
-            
-        except Exception as e:
-            if hasattr(self.app, 'logger'):
-                self.app.logger.debug(f"Direct cv2 frame extraction failed: {e}")
-            return None, None
-    
-    def _render_instant_enhanced_tooltip(self, tooltip_data: dict, show_video_frame: bool = True):
-        """Render enhanced tooltip using cached data."""
-        imgui.begin_tooltip()
-        
-        try:
-            # Time information header
-            imgui.text(f"{_format_time(self.app, tooltip_data['hover_time_s'])} / {_format_time(self.app, tooltip_data['total_duration'])}")
-            
-            # Show frame number with visual indicator if video frame is available and matching
-            frame_text = f"Frame: {tooltip_data['hover_frame']}"
-            has_frame_data = tooltip_data.get('frame_data') is not None and tooltip_data.get('frame_data').size > 0
-            actual_frame = tooltip_data.get('actual_frame', tooltip_data['hover_frame'])
-            frames_match = actual_frame == tooltip_data['hover_frame']
-            
-            if show_video_frame and has_frame_data and frames_match:
-                imgui.text_colored(frame_text, 0.0, 1.0, 0.0, 1.0)  # Green = frame and video are synchronized
-            elif show_video_frame and has_frame_data and not frames_match:
-                imgui.text_colored(f"{frame_text} (video: {actual_frame})", 1.0, 1.0, 0.0, 1.0)  # Yellow = mismatch warning
-            else:
-                imgui.text(frame_text)  # Normal color = no video preview yet
-            
-            imgui.separator()
-            
-            # Funscript zoom preview
-            zoom_actions = tooltip_data.get('zoom_actions', [])
-            if zoom_actions:
-                # Get tooltip window width for centering
-                window_width = imgui.get_window_width()
-                zoom_width = min(300, window_width - 20)  # Match popup width with padding
-                zoom_height = 80
-                draw_list = imgui.get_window_draw_list()
-                graph_pos = imgui.get_cursor_screen_pos()
-                
-                # Background
-                draw_list.add_rect_filled(
-                    graph_pos[0], graph_pos[1],
-                    graph_pos[0] + zoom_width, graph_pos[1] + zoom_height,
-                    imgui.get_color_u32_rgba(0.1, 0.1, 0.1, 1.0)
-                )
-                
-                # Draw funscript curve
-                zoom_start_s = tooltip_data['zoom_start_s']
-                zoom_end_s = tooltip_data['zoom_end_s']
-                hover_time_s = tooltip_data['hover_time_s']
-                
-                if len(zoom_actions) > 1:
-                    for i in range(len(zoom_actions) - 1):
-                        # Calculate positions
-                        t1 = (zoom_actions[i]['at'] / 1000.0 - zoom_start_s) / (zoom_end_s - zoom_start_s)
-                        t2 = (zoom_actions[i+1]['at'] / 1000.0 - zoom_start_s) / (zoom_end_s - zoom_start_s)
-                        y1 = 1.0 - (zoom_actions[i]['pos'] / 100.0)
-                        y2 = 1.0 - (zoom_actions[i+1]['pos'] / 100.0)
-                        
-                        x1 = graph_pos[0] + t1 * zoom_width
-                        x2 = graph_pos[0] + t2 * zoom_width
-                        py1 = graph_pos[1] + y1 * zoom_height
-                        py2 = graph_pos[1] + y2 * zoom_height
-                        
-                        # Draw line segment
-                        draw_list.add_line(
-                            x1, py1, x2, py2,
-                            imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0),
-                            2.0
-                        )
-                    
-                    # Draw points
-                    for action in zoom_actions:
-                        t = (action['at'] / 1000.0 - zoom_start_s) / (zoom_end_s - zoom_start_s)
-                        y = 1.0 - (action['pos'] / 100.0)
-                        x = graph_pos[0] + t * zoom_width
-                        py = graph_pos[1] + y * zoom_height
-                        
-                        # Highlight if near hover position
-                        is_near_hover = abs(action['at'] / 1000.0 - hover_time_s) < 0.1
-                        color = imgui.get_color_u32_rgba(1.0, 1.0, 0.0, 1.0) if is_near_hover else imgui.get_color_u32_rgba(0.4, 1.0, 0.4, 1.0)
-                        radius = 4 if is_near_hover else 3
-                        
-                        draw_list.add_circle_filled(x, py, radius, color)
-                
-                # Draw vertical line at hover position
-                hover_x = graph_pos[0] + ((hover_time_s - zoom_start_s) / (zoom_end_s - zoom_start_s)) * zoom_width
-                draw_list.add_line(
-                    hover_x, graph_pos[1],
-                    hover_x, graph_pos[1] + zoom_height,
-                    imgui.get_color_u32_rgba(1.0, 0.5, 0.0, 0.8),
-                    1.0
-                )
-                
-                imgui.dummy(zoom_width, zoom_height)
-            
-            # Video frame preview (only show if requested after delay)
-            if show_video_frame:
-                imgui.separator()
-                
-                frame_data = tooltip_data.get('frame_data')
-                frame_loading = tooltip_data.get('frame_loading', False)
-                
-                if frame_data is not None:
-                    # Display cached frame using dedicated enhanced preview texture
-                    if hasattr(self, 'enhanced_preview_texture_id') and self.enhanced_preview_texture_id:
-                        # Only update texture once per cached tooltip data
-                        if not hasattr(tooltip_data, '_frame_texture_updated'):
-                            self.update_texture(self.enhanced_preview_texture_id, frame_data)
-                            tooltip_data['_frame_texture_updated'] = True
-                        
-                        # Calculate dimensions to fit popup width
-                        frame_height, frame_width = frame_data.shape[:2]
-                        window_width = imgui.get_window_width()
-                        max_width = min(300, window_width - 20)  # Match graph width
-                        
-                        # Scale frame to fit if needed
-                        if frame_width > max_width:
-                            scale = max_width / frame_width
-                            display_width = max_width
-                            display_height = int(frame_height * scale)
-                        else:
-                            display_width = frame_width
-                            display_height = frame_height
-                        
-                        # Center the image
-                        available_width = imgui.get_content_region_available()[0]
-                        if display_width < available_width:
-                            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (available_width - display_width) / 2)
-                        
-                        imgui.image(self.enhanced_preview_texture_id, display_width, display_height)
-                        
-                        # Show VR panel info only if relevant
-                        if hasattr(self.app, 'app_settings') and self.app.app_settings:
-                            vr_enabled = self.app.app_settings.get('vr_mode_enabled', False)
-                            vr_panel = self.app.app_settings.get('vr_panel_selection', 'full')
-                            if vr_enabled and vr_panel != 'full':
-                                imgui.text(f"[{vr_panel.upper()} panel]")
-                    else:
-                        imgui.text_disabled(f"[Frame {tooltip_data['hover_frame']} - no texture available]")
-                elif frame_loading:
-                    imgui.text_disabled(f"[Loading...]")
-                else:
-                    # More helpful error message
-                    if not self.app.processor:
-                        imgui.text_disabled("[No video processor available]")
-                    elif not self.app.processor.video_path:
-                        imgui.text_disabled("[No video loaded]")
-                    else:
-                        imgui.text_disabled(f"[Frame extraction failed]")
-            
-        except Exception as e:
-            imgui.text(f"Preview Error: {str(e)[:50]}")
-            if hasattr(self.app, 'logger'):
-                self.app.logger.error(f"Enhanced preview tooltip error: {e}")
-        
-        imgui.end_tooltip()
 
     def cleanup(self):
         try:

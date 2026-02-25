@@ -349,7 +349,9 @@ class AxisProjectionEnhancedTracker(BaseTracker):
             author="Advanced Motion Tracking System",
             tags=["optical-flow", "multi-scale", "temporal-coherence", "adaptive", "robust", "production"],
             requires_roi=False,
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:

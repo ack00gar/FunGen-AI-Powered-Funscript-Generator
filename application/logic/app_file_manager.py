@@ -1,4 +1,5 @@
 import os
+import glob as glob_module
 import json
 import orjson
 import msgpack
@@ -7,6 +8,10 @@ from typing import List, Optional, Dict, Tuple, Any
 
 from application.utils import VideoSegment, check_write_access
 from config.constants import PROJECT_FILE_EXTENSION, AUTOSAVE_FILE, DEFAULT_CHAPTER_FPS, APP_VERSION, FUNSCRIPT_METADATA_VERSION
+from funscript.axis_registry import (
+    file_suffix_for_axis, axis_from_file_suffix, axis_from_tcode, tcode_for_axis,
+    all_known_suffixes, AXIS_FILE_SUFFIX, FunscriptAxis
+)
 
 class AppFileManager:
     def __init__(self, app_logic_instance):
@@ -76,8 +81,78 @@ class AppFileManager:
         # Ensure the returned path is always absolute
         return os.path.abspath(os.path.join(video_specific_output_dir, final_filename))
 
+    def _resolve_axis_name_for_timeline(self, timeline_num: int) -> str:
+        """Get the semantic axis name for a timeline number from the funscript object."""
+        if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
+            return self.app.processor.tracker.funscript.get_axis_for_timeline(timeline_num)
+        # Fallback defaults
+        defaults = {1: "stroke", 2: "roll"}
+        return defaults.get(timeline_num, f"axis_{timeline_num}")
+
+    def _get_funscript_path_for_axis(self, video_path: str, axis_name: str) -> str:
+        """Return the OFS-convention path for a given axis next to the video file.
+
+        E.g. axis_name='stroke' -> '/path/to/video.funscript'
+             axis_name='roll'   -> '/path/to/video.roll.funscript'
+             axis_name='pitch'  -> '/path/to/video.pitch.funscript'
+        """
+        suffix = file_suffix_for_axis(axis_name)
+        base, _ = os.path.splitext(video_path)
+        return f"{base}{suffix}.funscript"
+
+    def discover_axis_funscripts(self, video_path: str) -> Dict[str, str]:
+        """Scan for funscript files associated with a video using OFS and legacy naming.
+
+        Returns a dict mapping axis_name -> filepath for discovered files.
+        Searches both OFS naming (video.roll.funscript) and legacy _tN naming.
+        """
+        if not video_path or not os.path.exists(video_path):
+            return {}
+
+        base, _ = os.path.splitext(video_path)
+        discovered: Dict[str, str] = {}
+
+        # 1. Check OFS-style naming: basename.{suffix}.funscript
+        for suffix in all_known_suffixes():
+            # suffix is like '.roll', '.pitch', etc.
+            candidate = f"{base}{suffix}.funscript"
+            if os.path.exists(candidate):
+                axis = axis_from_file_suffix(suffix)
+                if axis:
+                    discovered[axis.value] = candidate
+
+        # 2. Check primary (no suffix): basename.funscript
+        primary_path = f"{base}.funscript"
+        if os.path.exists(primary_path):
+            discovered.setdefault("stroke", primary_path)
+
+        # 3. Check legacy _tN naming: basename_t1.funscript, basename_t2.funscript, ...
+        legacy_axis_map = {1: "stroke", 2: "roll"}
+        for pattern_file in glob_module.glob(f"{base}_t*.funscript"):
+            fname = os.path.basename(pattern_file)
+            # Extract the N from _tN.funscript
+            prefix = os.path.basename(base) + "_t"
+            if fname.startswith(prefix) and fname.endswith(".funscript"):
+                num_str = fname[len(prefix):-len(".funscript")]
+                try:
+                    tl_num = int(num_str)
+                    axis_name = legacy_axis_map.get(tl_num, f"axis_{tl_num}")
+                    # Don't overwrite OFS-discovered files (OFS naming takes priority)
+                    discovered.setdefault(axis_name, pattern_file)
+                except ValueError:
+                    pass
+
+        return discovered
+
     def _parse_funscript_file(self, funscript_file_path: str) -> Tuple[Optional[List[Dict]], Optional[str], Optional[List[Dict]], Optional[float]]:
-        """ Parses a funscript file using the high-performance orjson library. """
+        """ Parses a funscript file using the high-performance orjson library.
+
+        Returns (actions, error_msg, chapters_list, chapters_fps).
+        Also parses embedded ``axes`` array (unified multi-axis format) and
+        stores the results on ``self._last_parsed_embedded_axes`` so callers
+        (e.g. load_funscript_to_timeline) can pick them up.
+        """
+        self._last_parsed_embedded_axes: List[Dict] = []  # Reset each parse
         try:
             with open(funscript_file_path, 'rb') as f:
                 data = orjson.loads(f.read())
@@ -120,6 +195,13 @@ class AppFileManager:
                         self.logger.info(
                             f"Found {len(chapters_list_of_dicts)} chapter entries in metadata of {os.path.basename(funscript_file_path)}.")
 
+            # Parse embedded axes (unified multi-axis format)
+            if 'axes' in data and isinstance(data['axes'], list):
+                self._last_parsed_embedded_axes = self._parse_embedded_axes(data['axes'])
+                if self._last_parsed_embedded_axes:
+                    self.logger.info(
+                        f"Found {len(self._last_parsed_embedded_axes)} embedded axes in {os.path.basename(funscript_file_path)}.")
+
             return parsed_actions, None, chapters_list_of_dicts, chapters_fps_from_file
         except FileNotFoundError:
             return None, f"File not found: {os.path.basename(funscript_file_path)}", None, None
@@ -129,6 +211,59 @@ class AppFileManager:
             self.logger.error(f"Unexpected error loading funscript '{funscript_file_path}': {e}", exc_info=True,
                               extra={'status_message': True})
             return None, f"Error loading funscript: {str(e)}", None, None
+
+    def _resolve_axis_name(self, axis_ids: List[str], name: Optional[str]) -> str:
+        """Resolve an axis identity from TCode IDs and/or a human name.
+
+        Tries TCode lookup first (e.g. 'R1' -> 'roll'), falls back to the
+        provided ``name``, and finally to the raw TCode ID.
+        """
+        for tcode_id in axis_ids:
+            fa = axis_from_tcode(tcode_id)
+            if fa is not None:
+                return fa.value
+        if name:
+            return name
+        return axis_ids[0] if axis_ids else "unknown"
+
+    @staticmethod
+    def _scale_axis_actions(actions: List[Dict]) -> List[Dict]:
+        """Detect 0-9999 range and scale to 0-100. Returns a new list."""
+        if not actions:
+            return []
+        max_pos = max(a.get("pos", 0) for a in actions)
+        needs_scale = max_pos > 100
+        scaled = []
+        for a in actions:
+            if not isinstance(a, dict) or "at" not in a or "pos" not in a:
+                continue
+            ts = int(a["at"])
+            pos = int(a["pos"])
+            if needs_scale:
+                pos = round(pos * 100 / 9999)
+            pos = min(max(pos, 0), 100)
+            scaled.append({"at": ts, "pos": pos})
+        return sorted(scaled, key=lambda x: x["at"])
+
+    def _parse_embedded_axes(self, axes_list: list) -> List[Dict]:
+        """Parse the ``axes`` array from a unified multi-axis funscript.
+
+        Returns a list of dicts: ``[{"name": str, "actions": list}, ...]``
+        """
+        result = []
+        for entry in axes_list:
+            if not isinstance(entry, dict):
+                continue
+            axis_ids = entry.get("axes", [])
+            axis_name_hint = entry.get("name")
+            raw_actions = entry.get("actions", [])
+            if not raw_actions:
+                continue
+            resolved_name = self._resolve_axis_name(axis_ids, axis_name_hint)
+            scaled_actions = self._scale_axis_actions(raw_actions)
+            if scaled_actions:
+                result.append({"name": resolved_name, "actions": scaled_actions})
+        return result
 
     def save_raw_funscripts_after_generation(self, video_path: str):
         if not self.app.funscript_processor: return
@@ -147,16 +282,15 @@ class AppFileManager:
             self._save_funscript_file(secondary_path, secondary_actions, None)
 
     def save_raw_funscripts_next_to_video(self, video_path: str):
-        """Save raw funscripts next to the video file.
+        """Save raw funscripts next to the video file using OFS naming conventions.
 
         Uses .raw.funscript extension by default, or .funscript if
         the 'export_raw_as_funscript' setting is enabled.
+        Saves all active axes (T1, T2, and any T3+ additional axes).
         """
         if not self.app.funscript_processor: return
         if not video_path: return
 
-        primary_actions = self.app.funscript_processor.get_actions('primary')
-        secondary_actions = self.app.funscript_processor.get_actions('secondary')
         chapters = self.app.funscript_processor.video_chapters
 
         # Check if copy to video location is enabled
@@ -168,29 +302,54 @@ class AppFileManager:
             self.logger.info("Copy to video location is disabled. Raw funscripts saved only to output folder.")
             return
 
-        # Determine extension based on user preference
         skip_raw_prefix = self.app.app_settings.get("export_raw_as_funscript", False)
-        primary_ext = ".funscript" if skip_raw_prefix else ".raw.funscript"
-        roll_ext = ".roll.funscript" if skip_raw_prefix else ".raw.roll.funscript"
+        raw_infix = "" if skip_raw_prefix else ".raw"
+        base, _ = os.path.splitext(video_path)
 
-        self.logger.info(f"Saving raw funscripts next to video file with {primary_ext} extension...")
-
-        if primary_actions:
-            base, _ = os.path.splitext(video_path)
-            primary_path = f"{base}{primary_ext}"
-            self._save_funscript_file(primary_path, primary_actions, chapters)
-            self.logger.info(f"Raw primary funscript saved: {os.path.basename(primary_path)}")
+        # Build list of (timeline_num, axis_internal_name, axis_semantic_name) to save
+        timelines_to_save = [(1, 'primary'), (2, 'secondary')]
+        funscript_obj = None
+        if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
+            funscript_obj = self.app.processor.tracker.funscript
+            for axis_name in funscript_obj.additional_axes:
+                # Find the timeline number for this additional axis
+                tl_num = None
+                for tn, an in funscript_obj._axis_assignments.items():
+                    if an == axis_name or f"axis_{tn}" == axis_name:
+                        tl_num = tn
+                        break
+                if tl_num is None:
+                    # Derive from axis name convention
+                    if axis_name.startswith("axis_"):
+                        try:
+                            tl_num = int(axis_name.split("_")[1])
+                        except (IndexError, ValueError):
+                            continue
+                    else:
+                        continue
+                timelines_to_save.append((tl_num, axis_name))
 
         # Determine roll generation setting
         generate_roll = self.app.app_settings.get("generate_roll_file", True)
         if self.app.is_batch_processing_active:
             generate_roll = self.app.batch_generate_roll_file
 
-        if secondary_actions and generate_roll:
-            base, _ = os.path.splitext(video_path)
-            secondary_path = f"{base}{roll_ext}"
-            self._save_funscript_file(secondary_path, secondary_actions, None)
-            self.logger.info(f"Raw secondary funscript saved: {os.path.basename(secondary_path)}")
+        self.logger.info(f"Saving raw funscripts next to video file ({len(timelines_to_save)} axes)...")
+
+        for tl_num, internal_axis in timelines_to_save:
+            actions = self.app.funscript_processor.get_actions(internal_axis)
+            if not actions:
+                continue
+            # Skip secondary axis if roll generation is disabled
+            if tl_num == 2 and not generate_roll:
+                continue
+
+            axis_name = self._resolve_axis_name_for_timeline(tl_num)
+            suffix = file_suffix_for_axis(axis_name)
+            path = f"{base}{raw_infix}{suffix}.funscript"
+            chaps = chapters if tl_num == 1 else None
+            self._save_funscript_file(path, actions, chaps)
+            self.logger.info(f"Raw funscript saved (T{tl_num}/{axis_name}): {os.path.basename(path)}")
 
     def load_funscript_to_timeline(self, funscript_file_path: str, timeline_num: int = 1):
         actions, error_msg, chapters_as_dicts, chapters_fps_from_file = self._parse_funscript_file(funscript_file_path)
@@ -254,6 +413,40 @@ class AppFileManager:
             self.logger.info(
                 f"Loaded {len(actions)} actions to Timeline 2 from {os.path.basename(funscript_file_path)}",
                 extra={'status_message': True})
+
+        # Load embedded axes from unified format into the funscript object
+        if timeline_num == 1 and self._last_parsed_embedded_axes:
+            funscript_obj = self.app.processor.tracker.funscript if (
+                self.app.processor and self.app.processor.tracker
+            ) else None
+            if not funscript_obj and hasattr(self.app, 'multi_axis_funscript'):
+                funscript_obj = self.app.multi_axis_funscript
+            if funscript_obj:
+                next_tl = 2  # Start assigning from T2 if not already used
+                for embedded in self._last_parsed_embedded_axes:
+                    axis_name = embedded["name"]
+                    axis_actions = embedded["actions"]
+                    # Skip stroke (already loaded as root actions)
+                    if axis_name == "stroke":
+                        continue
+                    # roll goes to T2
+                    if axis_name == "roll":
+                        funscript_processor.clear_timeline_history_and_set_new_baseline(
+                            2, axis_actions,
+                            f"Embedded axis: {axis_name}")
+                        funscript_obj.assign_axis(2, axis_name)
+                        self.logger.info(f"Loaded embedded axis '{axis_name}' to T2 ({len(axis_actions)} actions)")
+                        continue
+                    # T3+ for other axes
+                    next_tl = max(next_tl + 1, 3)
+                    internal_axis = f"axis_{next_tl}"
+                    funscript_obj.ensure_axis(internal_axis)
+                    funscript_obj.additional_axes[internal_axis] = axis_actions
+                    funscript_obj.assign_axis(next_tl, axis_name)
+                    funscript_obj._invalidate_cache(internal_axis)
+                    self.logger.info(
+                        f"Loaded embedded axis '{axis_name}' to T{next_tl} ({len(axis_actions)} actions)")
+                    next_tl += 1
 
         self.app.project_manager.project_dirty = True
         self.app.energy_saver.reset_activity_timer()
@@ -337,9 +530,81 @@ class AppFileManager:
             self.logger.error(f"Error saving funscript to '{filepath}': {e}",
                               extra={'status_message': True})
 
+    def _save_funscript_file_unified(self, filepath: str, funscript_obj, chapters: Optional[List] = None):
+        """Save all axes into a single .funscript file with embedded axes array.
+
+        The root ``actions`` key holds the primary/stroke axis. Additional axes
+        are stored in an ``axes`` array following the community multi-axis spec.
+        """
+        primary_actions = funscript_obj.get_axis_actions('primary')
+        if not primary_actions:
+            self.logger.info(f"No primary actions to save to {os.path.basename(filepath)}.",
+                             extra={'status_message': True})
+            return
+
+        sanitized_primary = [{'at': int(a['at']), 'pos': int(a['pos'])} for a in primary_actions]
+
+        metadata = {"version": f"{FUNSCRIPT_METADATA_VERSION}", "chapters": []}
+        if chapters:
+            current_fps = DEFAULT_CHAPTER_FPS
+            if self.app.processor and self.app.processor.video_info and self.app.processor.fps > 0:
+                current_fps = self.app.processor.fps
+            metadata["chapters_fps"] = current_fps
+            metadata["chapters"] = [ch.to_funscript_chapter_dict(current_fps) for ch in chapters]
+
+        funscript_data = {
+            "version": "1.0",
+            "author": f"FunGen beta {APP_VERSION}",
+            "inverted": False,
+            "range": 100,
+            "actions": sorted(sanitized_primary, key=lambda x: x["at"]),
+            "metadata": metadata,
+            "axes": []
+        }
+
+        # Build embedded axes from assignments (skip T1/primary)
+        assignments = funscript_obj.get_axis_assignments()
+        for tl_num in sorted(assignments.keys()):
+            if tl_num <= 1:
+                continue
+            axis_name = assignments[tl_num]
+            # Determine which internal key holds this axis's data
+            if tl_num == 2:
+                actions = funscript_obj.get_axis_actions('secondary')
+            else:
+                actions = funscript_obj.get_axis_actions(f'axis_{tl_num}')
+                if not actions:
+                    actions = funscript_obj.get_axis_actions(axis_name)
+            if not actions:
+                continue
+            tcode = tcode_for_axis(axis_name)
+            axis_entry = {
+                "axes": [tcode] if tcode else [axis_name],
+                "name": axis_name,
+                "actions": [{'at': int(a['at']), 'pos': int(a['pos'])} for a in actions]
+            }
+            funscript_data["axes"].append(axis_entry)
+
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(orjson.dumps(funscript_data))
+            axis_count = 1 + len(funscript_data["axes"])
+            self.logger.info(
+                f"Unified funscript saved ({axis_count} axes) to {os.path.basename(filepath)}",
+                extra={'status_message': True})
+        except Exception as e:
+            self.logger.error(f"Error saving unified funscript to '{filepath}': {e}",
+                              extra={'status_message': True})
+
     def save_funscript_from_timeline(self, filepath: str, timeline_num: int):
         funscript_processor = self.app.funscript_processor
-        actions = funscript_processor.get_actions('primary' if timeline_num == 1 else 'secondary')
+        if timeline_num == 1:
+            axis = 'primary'
+        elif timeline_num == 2:
+            axis = 'secondary'
+        else:
+            axis = f'axis_{timeline_num}'
+        actions = funscript_processor.get_actions(axis)
 
         # Chapters are only saved for timeline 1
         chapters = funscript_processor.video_chapters if timeline_num == 1 else None
@@ -381,19 +646,19 @@ class AppFileManager:
         output_folder_base = self.app.app_settings.get("output_folder_path", "output")
         initial_path = output_folder_base
 
-        # Set initial filename based on timeline number
+        # Resolve axis name for OFS-style filename
+        axis_name = self._resolve_axis_name_for_timeline(timeline_num)
+        suffix = file_suffix_for_axis(axis_name)
+
         if timeline_num == 1:
             initial_filename = "timeline1.funscript"
         else:
-            initial_filename = "timeline2.funscript"
+            initial_filename = f"timeline{timeline_num}{suffix}.funscript"
 
         if self.video_path:
             video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
             initial_path = os.path.join(output_folder_base, video_basename)
-            if timeline_num == 1:
-                initial_filename = f"{video_basename}.funscript"
-            else:
-                initial_filename = f"{video_basename}_t2.funscript"
+            initial_filename = f"{video_basename}{suffix}.funscript"
 
         if not os.path.isdir(initial_path):
             os.makedirs(initial_path, exist_ok=True)
@@ -406,6 +671,123 @@ class AppFileManager:
             initial_path=initial_path,
             initial_filename=initial_filename
         )
+
+    def export_unified_funscript(self):
+        """Export all axes as a single multi-axis funscript file."""
+        if not self.app.gui_instance or not self.app.gui_instance.file_dialog:
+            self.logger.warning("File dialog not available", extra={"status_message": True})
+            return
+
+        funscript_obj = None
+        if self.app.tracker and hasattr(self.app.tracker, 'funscript'):
+            funscript_obj = self.app.tracker.funscript
+        if not funscript_obj:
+            self.logger.warning("No funscript data available to export.", extra={"status_message": True})
+            return
+
+        output_folder = self.app.app_settings.get("output_folder_path", "output")
+        initial_path = output_folder
+        initial_filename = "unified.funscript"
+
+        if self.video_path:
+            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            initial_path = os.path.join(output_folder, video_basename)
+            initial_filename = f"{video_basename}.funscript"
+
+        if not os.path.isdir(initial_path):
+            os.makedirs(initial_path, exist_ok=True)
+
+        chapters = self.app.funscript_processor.video_chapters if self.app.funscript_processor else None
+
+        self.app.gui_instance.file_dialog.show(
+            is_save=True,
+            title="Export Multi-Axis Funscript (Single File)",
+            extension_filter="Funscript Files (*.funscript),*.funscript",
+            callback=lambda filepath: self._save_funscript_file_unified(filepath, funscript_obj, chapters),
+            initial_path=initial_path,
+            initial_filename=initial_filename
+        )
+
+    def export_all_axes_ofs(self):
+        """Export all axes as separate OFS-named funscript files (auto-save, no dialog)."""
+        funscript_obj = None
+        if self.app.tracker and hasattr(self.app.tracker, 'funscript'):
+            funscript_obj = self.app.tracker.funscript
+        if not funscript_obj:
+            self.logger.warning("No funscript data available to export.", extra={"status_message": True})
+            return
+
+        if not self.video_path:
+            self.logger.warning("No video loaded. Open a video first.", extra={"status_message": True})
+            return
+
+        chapters = self.app.funscript_processor.video_chapters if self.app.funscript_processor else None
+        assignments = funscript_obj.get_axis_assignments()
+        saved_count = 0
+
+        for tl_num in sorted(assignments.keys()):
+            axis_name = assignments[tl_num]
+            if tl_num == 1:
+                actions = funscript_obj.get_axis_actions('primary')
+            elif tl_num == 2:
+                actions = funscript_obj.get_axis_actions('secondary')
+            else:
+                actions = funscript_obj.get_axis_actions(f'axis_{tl_num}')
+                if not actions:
+                    actions = funscript_obj.get_axis_actions(axis_name)
+            if not actions:
+                continue
+
+            path = self._get_funscript_path_for_axis(self.video_path, axis_name)
+            chaps = chapters if tl_num == 1 else None
+            self._save_funscript_file(path, actions, chaps)
+            self.logger.info(f"Exported {axis_name} (T{tl_num}): {os.path.basename(path)}")
+            saved_count += 1
+
+        if saved_count:
+            self.logger.info(f"Exported {saved_count} funscript file(s) next to video.",
+                             extra={"status_message": True})
+        else:
+            self.logger.warning("No axes with data to export.", extra={"status_message": True})
+
+    def import_unified_funscript(self):
+        """Import a multi-axis funscript file (loads primary to T1, embedded axes to T2+)."""
+        if not self.app.gui_instance or not self.app.gui_instance.file_dialog:
+            return
+        self.app.gui_instance.file_dialog.show(
+            is_save=False,
+            title="Import Multi-Axis Funscript",
+            extension_filter="Funscript Files (*.funscript),*.funscript",
+            callback=lambda filepath: self.load_funscript_to_timeline(filepath, 1)
+        )
+
+    def import_all_axes_ofs(self):
+        """Discover and import all OFS-named funscript files for the current video."""
+        if not self.video_path:
+            self.logger.warning("No video loaded. Open a video first.", extra={"status_message": True})
+            return
+
+        discovered = self.discover_axis_funscripts(self.video_path)
+        if not discovered:
+            self.logger.warning("No funscript files found next to the video.", extra={"status_message": True})
+            return
+
+        # Determine axis→timeline mapping
+        axis_to_tl = {"stroke": 1, "roll": 2}
+        next_tl = 3
+        for axis_name in discovered:
+            if axis_name not in axis_to_tl:
+                axis_to_tl[axis_name] = next_tl
+                next_tl += 1
+
+        loaded_count = 0
+        for axis_name, filepath in discovered.items():
+            tl_num = axis_to_tl.get(axis_name, next_tl)
+            self.load_funscript_to_timeline(filepath, tl_num)
+            self.logger.info(f"Imported {axis_name} from {os.path.basename(filepath)} to T{tl_num}")
+            loaded_count += 1
+
+        self.logger.info(f"Imported {loaded_count} funscript file(s).", extra={"status_message": True})
 
     def import_stage2_overlay_data(self):
         """Trigger file dialog to import stage 2 overlay data."""
@@ -429,45 +811,53 @@ class AppFileManager:
 
     def save_funscripts_for_batch(self, video_path: str):
         """
-        Automatically saves funscripts next to the video file using the centralized saver.
-        This now correctly includes all metadata.
+        Automatically saves funscripts for all active axes using OFS naming.
         For remote videos (HTTP URLs), funscripts are always saved to the output directory.
         """
         if not self.app.funscript_processor:
             self.app.logger.error("Funscript processor not available for saving.")
             return
 
-        primary_actions = self.app.funscript_processor.get_actions('primary')
-        secondary_actions = self.app.funscript_processor.get_actions('secondary')
         chapters = self.app.funscript_processor.video_chapters
         save_next_to_video = self.app.app_settings.get("autosave_final_funscript_to_video_location", True)
-
-        # Check if video is remote (HTTP/HTTPS URL)
         is_remote = video_path and video_path.startswith(('http://', 'https://'))
 
-        if primary_actions:
+        # Collect all axes to save: (timeline_num, internal_axis_name)
+        axes_to_save = [(1, 'primary'), (2, 'secondary')]
+        funscript_obj = None
+        if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
+            funscript_obj = self.app.processor.tracker.funscript
+            for axis_name in funscript_obj.additional_axes:
+                tl_num = funscript_obj.get_timeline_for_axis(axis_name)
+                if tl_num is None and axis_name.startswith("axis_"):
+                    try:
+                        tl_num = int(axis_name.split("_")[1])
+                    except (IndexError, ValueError):
+                        continue
+                if tl_num is not None:
+                    axes_to_save.append((tl_num, axis_name))
+
+        saved_count = 0
+        for tl_num, internal_axis in axes_to_save:
+            actions = self.app.funscript_processor.get_actions(internal_axis)
+            if not actions:
+                continue
+
+            axis_name = self._resolve_axis_name_for_timeline(tl_num)
+            suffix = file_suffix_for_axis(axis_name)
+
             if save_next_to_video and not is_remote:
-                # Save next to video file (only for local files)
-                base, _ = os.path.splitext(video_path)
-                primary_path = f"{base}_t1.funscript"
+                path = self._get_funscript_path_for_axis(video_path, axis_name)
             else:
-                # Save to output directory (for remote videos or when configured)
-                primary_path = self.get_output_path_for_file(video_path, "_t1.funscript")
+                path = self.get_output_path_for_file(video_path, f"{suffix}.funscript")
 
-            self._save_funscript_file(primary_path, primary_actions, chapters)
-            self.logger.info(f"💾 Saved primary funscript to: {primary_path}")
+            chaps = chapters if tl_num == 1 else None
+            self._save_funscript_file(path, actions, chaps)
+            self.logger.info(f"Saved {axis_name} funscript (T{tl_num}): {os.path.basename(path)}")
+            saved_count += 1
 
-        if secondary_actions:
-            if save_next_to_video and not is_remote:
-                # Save next to video file (only for local files)
-                base, _ = os.path.splitext(video_path)
-                secondary_path = f"{base}_t2.funscript"
-            else:
-                # Save to output directory (for remote videos or when configured)
-                secondary_path = self.get_output_path_for_file(video_path, "_t2.funscript")
-
-            self._save_funscript_file(secondary_path, secondary_actions, None)
-            self.logger.info(f"💾 Saved secondary funscript to: {secondary_path}")
+        if saved_count:
+            self.logger.info(f"Batch save complete: {saved_count} funscript(s) saved.")
 
     def handle_video_file_load(self, file_path: str, is_project_load=False):
         # If this is a direct video load, first check if an associated project exists.
@@ -527,19 +917,38 @@ class AppFileManager:
         # This part runs for both project loads and new projects.
         if self.app.processor:
             if self.app.processor.open_video(file_path, from_project_load=is_project_load):
-                # If it was a new project, we can still try to auto-load an adjacent funscript.
+                # If it was a new project, auto-discover and load adjacent funscripts.
                 if not is_project_load:
+                    # Discover all axis funscripts next to the video
+                    discovered = self.discover_axis_funscripts(file_path)
+                    # Also check the output folder for the primary funscript
                     path_in_output = self.get_output_path_for_file(file_path, ".funscript")
-                    path_next_to_video = os.path.splitext(file_path)[0] + ".funscript"
-
-                    funscript_to_load = None
                     if os.path.exists(path_in_output):
-                        funscript_to_load = path_in_output
-                    elif os.path.exists(path_next_to_video):
-                        funscript_to_load = path_next_to_video
+                        discovered.setdefault("stroke", path_in_output)
 
-                    if funscript_to_load:
-                        self.load_funscript_to_timeline(funscript_to_load, timeline_num=1)
+                    if discovered:
+                        funscript_obj = None
+                        if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
+                            funscript_obj = self.app.processor.tracker.funscript
+
+                        # Map axis names to timeline numbers for loading
+                        axis_to_timeline = {"stroke": 1, "roll": 2}
+                        next_timeline = 3
+
+                        for axis_name, fpath in discovered.items():
+                            tl_num = axis_to_timeline.get(axis_name)
+                            if tl_num is None:
+                                tl_num = next_timeline
+                                next_timeline += 1
+                                # Ensure the axis exists on the funscript object
+                                if funscript_obj:
+                                    funscript_obj.ensure_axis(f"axis_{tl_num}")
+
+                            self.load_funscript_to_timeline(fpath, timeline_num=tl_num)
+                            # Update axis assignment on the funscript object
+                            if funscript_obj:
+                                funscript_obj.assign_axis(tl_num, axis_name)
+                        self.logger.info(f"Auto-discovered {len(discovered)} axis funscript(s) next to video.")
 
     def close_video_action(self, clear_funscript_unconditionally=False, skip_tracker_reset=False):
         if self.app.processor:
@@ -846,30 +1255,48 @@ class AppFileManager:
         if self.app.is_batch_processing_active:
             generate_roll = self.app.batch_generate_roll_file
 
-        # --- Main funscript saving ---
-        if primary_actions:
-            path_in_output = self.get_output_path_for_file(video_path, ".funscript")
-            self._save_funscript_file(path_in_output, primary_actions, chapters_to_save)
-            saved_paths.append(path_in_output)
+        export_format = self.app.app_settings.get("funscript_export_format", "separate")
 
-            if save_next_to_video:
-                self.logger.info("Also saving a copy of the final funscript next to the video file.")
-                base, _ = os.path.splitext(video_path)
-                path_next_to_vid = f"{base}.funscript"
-                self._save_funscript_file(path_next_to_vid, primary_actions, chapters_to_save)
-                # Do not add this to saved_paths to avoid double copying
+        # --- Separate files (OFS) mode ---
+        if export_format in ("separate", "both"):
+            if primary_actions:
+                path_in_output = self.get_output_path_for_file(video_path, ".funscript")
+                self._save_funscript_file(path_in_output, primary_actions, chapters_to_save)
+                saved_paths.append(path_in_output)
 
-        # --- Roll funscript saving ---
-        if secondary_actions and generate_roll:
-            path_in_output_t2 = self.get_output_path_for_file(video_path, ".roll.funscript")
-            self._save_funscript_file(path_in_output_t2, secondary_actions, None)
-            saved_paths.append(path_in_output_t2)
+                if save_next_to_video:
+                    self.logger.info("Also saving a copy of the final funscript next to the video file.")
+                    base, _ = os.path.splitext(video_path)
+                    path_next_to_vid = f"{base}.funscript"
+                    self._save_funscript_file(path_next_to_vid, primary_actions, chapters_to_save)
 
-            if save_next_to_video:
-                base, _ = os.path.splitext(video_path)
-                path_next_to_vid_t2 = f"{base}.roll.funscript"
-                self._save_funscript_file(path_next_to_vid_t2, secondary_actions, None)
-                # Do not add this to saved_paths to avoid double copying
+            if secondary_actions and generate_roll:
+                path_in_output_t2 = self.get_output_path_for_file(video_path, ".roll.funscript")
+                self._save_funscript_file(path_in_output_t2, secondary_actions, None)
+                saved_paths.append(path_in_output_t2)
+
+                if save_next_to_video:
+                    base, _ = os.path.splitext(video_path)
+                    path_next_to_vid_t2 = f"{base}.roll.funscript"
+                    self._save_funscript_file(path_next_to_vid_t2, secondary_actions, None)
+
+        # --- Unified (embedded axes) mode ---
+        if export_format in ("unified", "both"):
+            funscript_obj = None
+            if self.app.processor and self.app.processor.tracker:
+                funscript_obj = getattr(self.app.processor.tracker, 'funscript', None)
+            if not funscript_obj and hasattr(self.app, 'multi_axis_funscript'):
+                funscript_obj = self.app.multi_axis_funscript
+            if funscript_obj and primary_actions:
+                suffix = ".unified.funscript" if export_format == "both" else ".funscript"
+                path_unified = self.get_output_path_for_file(video_path, suffix)
+                self._save_funscript_file_unified(path_unified, funscript_obj, chapters_to_save)
+                saved_paths.append(path_unified)
+
+                if save_next_to_video:
+                    base, _ = os.path.splitext(video_path)
+                    path_unified_vid = f"{base}{suffix}"
+                    self._save_funscript_file_unified(path_unified_vid, funscript_obj, chapters_to_save)
 
         return saved_paths
 

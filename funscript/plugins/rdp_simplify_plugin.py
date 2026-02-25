@@ -319,7 +319,7 @@ class RdpSimplifyPlugin(FunscriptTransformationPlugin):
         
         return significance_scores
     
-    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['DualAxisFunscript']:
+    def transform(self, funscript, axis: str = 'both', **parameters) -> Optional['MultiAxisFunscript']:
         """Apply RDP simplification to the specified axis."""
         # Validate parameters
         validated_params = self.validate_parameters(parameters)

@@ -33,71 +33,55 @@ class PluginUIRenderer:
     
     def render_plugin_buttons(self, timeline_num: int, view_mode: str = 'expert') -> bool:
         """
-        Render plugin buttons dynamically on the same line.
-        
+        Render a single "Plugins" dropdown button that opens a popup menu
+        with all available plugins listed as selectable items.
+
         Returns:
-            True if any plugin button was clicked, False otherwise
+            True if any plugin was clicked, False otherwise
         """
         if not imgui:
             return False
-        
+
         any_button_clicked = False
         available_plugins = self.plugin_manager.get_available_plugins()
-        
-        # Sort plugins alphabetically for consistent order
         sorted_plugins = sorted(available_plugins)
-        
-        for i, plugin_name in enumerate(sorted_plugins):
-            ui_data = self.plugin_manager.get_plugin_ui_data(plugin_name)
-            if not ui_data or not ui_data['available']:
-                continue
-            
-            # Add same_line() for all buttons except the first one
-            if i > 0:
-                imgui.same_line()
-            
-            # Create unique button ID
-            button_id = f"{ui_data['display_name']}##Plugin{plugin_name}T{timeline_num}"
-            
-            # Render button
-            if imgui.button(button_id):
-                self.logger.info(f"🔘 Plugin button clicked: {plugin_name} on Timeline {timeline_num}")
 
-                # Check if plugin should apply directly or open configuration window
-                if self._should_apply_directly(plugin_name, ui_data):
-                    self.logger.info(f"  → Applying {plugin_name} directly (no config needed)")
-                    # Apply directly - this will be handled by the timeline's callback system
-                    context = self.plugin_manager.plugin_contexts.get(plugin_name)
-                    if context:
-                        context.apply_requested = True
-                        self.logger.info(f"  ✅ Set apply_requested=True for {plugin_name}")
+        popup_id = f"##PluginMenu_T{timeline_num}"
 
-                        # Auto-enable "apply to selection" if points are selected
+        # Single dropdown button
+        if imgui.button(f"Plugins{popup_id}"):
+            imgui.open_popup(popup_id)
+
+        if imgui.begin_popup(popup_id):
+            for plugin_name in sorted_plugins:
+                ui_data = self.plugin_manager.get_plugin_ui_data(plugin_name)
+                if not ui_data or not ui_data['available']:
+                    continue
+
+                if imgui.selectable(ui_data['display_name'])[0]:
+                    self.logger.info(f"Plugin selected: {plugin_name} on Timeline {timeline_num}")
+
+                    if self._should_apply_directly(plugin_name, ui_data):
+                        context = self.plugin_manager.plugin_contexts.get(plugin_name)
+                        if context:
+                            context.apply_requested = True
+                            if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
+                                if self.timeline_reference.multi_selected_action_indices:
+                                    context.apply_to_selection = True
+                    else:
+                        self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
                         if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
                             if self.timeline_reference.multi_selected_action_indices:
-                                context.apply_to_selection = True
-                                self.logger.info(f"  ✅ Auto-enabled 'apply to selection' for {plugin_name} ({len(self.timeline_reference.multi_selected_action_indices)} points selected)")
-                    else:
-                        self.logger.error(f"  ❌ No context found for {plugin_name}")
-                else:
-                    self.logger.info(f"  → Opening configuration window for {plugin_name}")
-                    # Open configuration window
-                    self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
-                    self.logger.info(f"  ✅ Set state to OPEN for {plugin_name}")
+                                context = self.plugin_manager.plugin_contexts.get(plugin_name)
+                                if context:
+                                    context.apply_to_selection = True
+                    any_button_clicked = True
 
-                    # Auto-tick "apply to selection" if points are selected
-                    if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
-                        if self.timeline_reference.multi_selected_action_indices:
-                            context = self.plugin_manager.plugin_contexts.get(plugin_name)
-                            if context:
-                                context.apply_to_selection = True
-                                self.logger.info(f"  ✅ Auto-enabled 'apply to selection' for {plugin_name}")
-                any_button_clicked = True
-            
-            # Add tooltip
-            if imgui.is_item_hovered() and ui_data['description']:
-                imgui.set_tooltip(ui_data['description'])
-        
+                if imgui.is_item_hovered() and ui_data.get('description'):
+                    imgui.set_tooltip(ui_data['description'])
+
+            imgui.end_popup()
+
         return any_button_clicked
     
     def render_plugin_windows(self, timeline_num: int, window_id_suffix: str) -> bool:

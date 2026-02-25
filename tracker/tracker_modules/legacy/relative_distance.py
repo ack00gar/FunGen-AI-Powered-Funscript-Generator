@@ -804,7 +804,9 @@ class RelativeDistanceTracker(BaseTracker):
             author="VR Funscript AI Generator",
             tags=["distance", "velocity-prediction", "scene-aware", "signal-fusion", "temporal-analysis", "advanced"],
             requires_roi=False,
-            supports_dual_axis=True
+            supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
         )
     
     def initialize(self, app_instance, **kwargs) -> bool:
@@ -825,8 +827,8 @@ class RelativeDistanceTracker(BaseTracker):
             elif hasattr(self.app, 'funscript') and self.app.funscript:
                 self.funscript = self.app.funscript
             else:
-                from funscript.dual_axis_funscript import DualAxisFunscript
-                self.funscript = DualAxisFunscript(logger=self.logger)
+                from funscript.multi_axis_funscript import MultiAxisFunscript
+                self.funscript = MultiAxisFunscript(logger=self.logger)
                 self.logger.info("Created local funscript instance for Relative Distance")
             
             # Visual settings

@@ -3,6 +3,9 @@ import os
 import config
 from config.constants_colors import CurrentTheme
 from application.utils import get_icon_texture_manager, primary_button_style, destructive_button_style
+from application.utils.feature_detection import is_feature_available as _is_feature_available
+from application.utils.imgui_helpers import DisabledScope as _DisabledScope
+from application.utils.section_card import section_card
 
 # Import dynamic tracker discovery
 try:
@@ -12,27 +15,18 @@ except ImportError:
     DynamicTrackerUI = None
     TrackerCategory = None
 
+# Import mixin sub-modules
+from .cp_simple_mode_ui import SimpleModeMixin
+from .cp_post_processing_ui import PostProcessingMixin
+from .cp_advanced_settings_ui import AdvancedSettingsMixin
+from .cp_execution_ui import ExecutionMixin
+from .cp_tracker_settings_ui import TrackerSettingsMixin
+from .cp_device_control_ui import DeviceControlMixin
+from .cp_streamer_ui import StreamerMixin
+
 def _tooltip_if_hovered(text):
     if imgui.is_item_hovered():
         imgui.set_tooltip(text)
-
-class _DisabledScope:
-    __slots__ = ("active",)
-
-    def __init__(self, active):
-        self.active = active
-        if active:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        if self.active:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
-
 
 def _readonly_input(label_id, value, width=-1):
     if width is not None and width >= 0:
@@ -42,70 +36,22 @@ def _readonly_input(label_id, value, width=-1):
         imgui.pop_item_width()
 
 
-class ControlPanelUI:
-    __slots__ = (
-        "app",
-        "timeline_editor1",
-        "timeline_editor2",
-        "ControlPanelColors",
-        "GeneralColors",
-        "constants",
-        "AI_modelExtensionsFilter",
-        "AI_modelTooltipExtensions",
-        "tracker_ui",
-        # Performance optimization attributes
-        "_last_tab_hash",
-        "_cached_tab_content",
-        "_widget_visibility_cache",
-        "_update_throttle_counter",
-        "_heavy_operation_frame_skip",
-        # Device Control attributes (supporter feature)
-        "device_manager",
-        "param_manager",
-        "_device_control_initialized",
-        "_first_frame_rendered",
-        "device_list",
-        "_available_osr_ports",
-        "_osr_scan_performed",
-        # Buttplug UI state attributes
-        "_discovered_buttplug_devices",
-        "_buttplug_discovery_performed",
-        # Bridge attributes for live control
-        "video_playback_bridge",
-        "live_tracker_bridge",
-        # Device video integration (observer pattern)
-        "device_video_integration",
-        "device_video_bridge",
-        "device_bridge_thread",
-        # Streamer attributes (supporter feature)
-        "_native_sync_manager",
-        "_prev_client_count",
-        "_native_sync_status_cache",
-        "_native_sync_status_time",
-        # Advanced tab search
-        "_advanced_search_query",
-        # Post-Processing tab state
-        "_pp_timeline_choice",
-        "_pp_scope_choice",
-        # Tier 2/3 Simple Mode state
-        "_auto_recommended_tracker",
-        "_auto_recommendation_reason",
-        "_simple_mode_post_processing_applied",
-        "_user_manually_picked_tracker",
-        # Settings profiles state
-        "_profile_name_input",
-        "_profile_list_cache",
-        "_profile_list_cache_time",
-        "_selected_profile_idx",
-    )
-
+class ControlPanelUI(
+    SimpleModeMixin,
+    PostProcessingMixin,
+    AdvancedSettingsMixin,
+    ExecutionMixin,
+    TrackerSettingsMixin,
+    DeviceControlMixin,
+    StreamerMixin,
+):
     def __init__(self, app):
         self.app = app
         self.timeline_editor1 = None
         self.timeline_editor2 = None
         self.ControlPanelColors = config.ControlPanelColors
         self.GeneralColors = config.GeneralColors
-        
+
         # PERFORMANCE OPTIMIZATIONS: Smart rendering and caching
         self._last_tab_hash = None  # Track tab changes
         self._cached_tab_content = {}  # Cache expensive tab rendering
@@ -115,11 +61,11 @@ class ControlPanelUI:
         self.constants = config.constants
         self.AI_modelExtensionsFilter = self.constants.AI_MODEL_EXTENSIONS_FILTER
         self.AI_modelTooltipExtensions = self.constants.AI_MODEL_TOOLTIP_EXTENSIONS
-        
+
         # Initialize dynamic tracker UI helper
         self.tracker_ui = None
         self._try_reinitialize_tracker_ui()
-        
+
         # Initialize device control attributes (supporter feature)
         self.device_manager = None
         self.param_manager = None
@@ -135,7 +81,7 @@ class ControlPanelUI:
         self.device_video_integration = None
         self.device_video_bridge = None
         self.device_bridge_thread = None
-        
+
         # Buttplug device discovery UI state
         self._discovered_buttplug_devices = []
         self._buttplug_discovery_performed = False
@@ -145,6 +91,9 @@ class ControlPanelUI:
         self._prev_client_count = 0
         self._native_sync_status_cache = None
         self._native_sync_status_time = 0
+
+        # Active sidebar section (replaces tab bar)
+        self._active_section = "run"
 
         # Advanced tab search
         self._advanced_search_query = ""
@@ -165,13 +114,16 @@ class ControlPanelUI:
         self._profile_list_cache_time = 0
         self._selected_profile_idx = 0
 
+        # Progressive disclosure toggle for Advanced tab (default True in expert mode)
+        self._show_all_advanced_settings = True
+
     # ------- Helpers -------
-    
+
     def _try_reinitialize_tracker_ui(self):
         """Try to initialize or reinitialize the dynamic tracker UI."""
         if self.tracker_ui is not None:
             return  # Already initialized
-        
+
         try:
             if DynamicTrackerUI:
                 self.tracker_ui = DynamicTrackerUI()
@@ -208,10 +160,10 @@ class ControlPanelUI:
         if not self.tracker_ui:
             # Try to reinitialize if it failed during __init__
             self._try_reinitialize_tracker_ui()
-        
+
         if self.tracker_ui:
             return self.tracker_ui.is_stage2_tracker(tracker_name)
-        
+
         # If still failing, log error but don't crash
         if hasattr(self.app, 'logger'):
             self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is stage2 tracker")
@@ -221,10 +173,10 @@ class ControlPanelUI:
         """Check if tracker is a 3-stage offline tracker."""
         if not self.tracker_ui:
             self._try_reinitialize_tracker_ui()
-        
+
         if self.tracker_ui:
             return self.tracker_ui.is_stage3_tracker(tracker_name)
-        
+
         if hasattr(self.app, 'logger'):
             self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is stage3 tracker")
         return False
@@ -233,10 +185,10 @@ class ControlPanelUI:
         """Check if tracker is a mixed 3-stage offline tracker."""
         if not self.tracker_ui:
             self._try_reinitialize_tracker_ui()
-        
+
         if self.tracker_ui:
             return self.tracker_ui.is_mixed_stage3_tracker(tracker_name)
-        
+
         if hasattr(self.app, 'logger'):
             self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is mixed stage3 tracker")
         return False
@@ -250,23 +202,23 @@ class ControlPanelUI:
             else:
                 # Full mode: all trackers
                 display_names, internal_names = self.tracker_ui.get_gui_display_list()
-            
+
             # Return display names, internal names, and internal names for tooltip generation
             return display_names, internal_names, internal_names
-            
+
         except Exception as e:
             if hasattr(self.app, 'logger'):
                 self.app.logger.warning(f"Dynamic tracker discovery failed: {e}")
-            
+
             # Return empty lists on failure
             return [], [], []
-    
-    
+
+
     def _generate_combined_tooltip(self, tracker_names):
         """Generate combined tooltip for discovered trackers."""
         if not tracker_names:
             return "No trackers available. Please check your tracker_modules installation."
-        
+
         return self.tracker_ui.get_combined_tooltip(tracker_names)
 
     def _help_tooltip(self, text):
@@ -319,46 +271,313 @@ class ControlPanelUI:
         if help_text:
             _tooltip_if_hovered(help_text)
 
-    # ------- Model path updates -------
+    # ------- Vertical Sidebar Navigation -------
 
-    def _update_detection_model_path(self, path):
-        app = self.app
-        tracker = app.tracker
-        if not path or (tracker and path == tracker.det_model_path):
-            return
-        app.cached_class_names = None
-        app.yolo_detection_model_path_setting = path
-        app.app_settings.set("yolo_det_model_path", path)
-        app.yolo_det_model_path = path
-        app.project_manager.project_dirty = True
-        app.logger.info("Detection model path updated to: %s. Reloading models." % path)
-        if tracker:
-            tracker.det_model_path = path
-            tracker._load_models()
+    _SIDEBAR_WIDTH = 40
+    _SIDEBAR_CORE_SECTIONS = [
+        ("run", "R", "Run"),
+        ("post_processing", "P", "Post-Processing"),
+        ("advanced", "A", "Advanced"),
+    ]
+    _SIDEBAR_SUPPORTER_SECTIONS = [
+        ("device_control", "D", "Device Control", "_feat_device"),
+        ("native_sync", "S", "Streamer", "_feat_streamer"),
+        ("supporter_batch", "B", "Patreon Exclusive", "_feat_supporter"),
+    ]
+    # Map section keys to icon asset filenames for sidebar PNG icons
+    _SIDEBAR_ICON_MAP = {
+        "run": "sidebar-run.png",
+        "post_processing": "sidebar-postproc.png",
+        "advanced": "sidebar-advanced.png",
+        "device_control": "sidebar-device.png",
+        "native_sync": "sidebar-stream.png",
+        "supporter_batch": "sidebar-batch.png",
+    }
 
-    def _update_pose_model_path(self, path):
-        app = self.app
-        tracker = app.tracker
-        if not path or (tracker and path == tracker.pose_model_path):
-            return
-        app.cached_class_names = None
-        app.yolo_pose_model_path_setting = path
-        app.app_settings.set("yolo_pose_model_path", path)
-        app.yolo_pose_model_path = path
-        app.project_manager.project_dirty = True
-        app.logger.info("Pose model path updated to: %s. Reloading models." % path)
-        if tracker:
-            tracker.pose_model_path = path
-            tracker._load_models()
+    def _render_sidebar(self, total_h):
+        """Render vertical icon sidebar for section navigation.
 
-    def _update_artifacts_dir_path(self, path):
+        Returns the active section key.
+        """
+        from config.element_group_colors import SidebarColors
+
+        sidebar_w = self._SIDEBAR_WIDTH
+        draw_list = imgui.get_window_draw_list()
+
+        imgui.begin_child("##Sidebar", width=sidebar_w, height=total_h, border=False)
+
+        # Draw sidebar background
+        pos = imgui.get_window_position()
+        size = (sidebar_w, total_h)
+        bg_u32 = imgui.get_color_u32_rgba(*SidebarColors.BG)
+        draw_list.add_rect_filled(pos[0], pos[1], pos[0] + size[0], pos[1] + size[1], bg_u32)
+
+        btn_size = 36
+        active_section = self._active_section
+
+        # Core sections
+        for key, icon, tooltip in self._SIDEBAR_CORE_SECTIONS:
+            is_active = (active_section == key)
+            self._render_sidebar_entry(draw_list, key, icon, tooltip, is_active,
+                                       available=True, btn_size=btn_size, sidebar_w=sidebar_w)
+
+        # Separator
+        imgui.spacing()
+        sep_pos = imgui.get_cursor_screen_pos()
+        sep_color = imgui.get_color_u32_rgba(0.3, 0.3, 0.3, 0.5)
+        draw_list.add_line(sep_pos[0] + 6, sep_pos[1],
+                           sep_pos[0] + sidebar_w - 6, sep_pos[1], sep_color)
+        imgui.spacing()
+
+        # Supporter sections
+        for key, icon, tooltip, feat_attr in self._SIDEBAR_SUPPORTER_SECTIONS:
+            available = getattr(self, feat_attr, False)
+            is_active = (active_section == key)
+            self._render_sidebar_entry(draw_list, key, icon, tooltip, is_active,
+                                       available=available, btn_size=btn_size, sidebar_w=sidebar_w)
+
+        imgui.end_child()
+        return self._active_section
+
+    def _render_sidebar_entry(self, draw_list, key, icon, tooltip, is_active,
+                               available, btn_size, sidebar_w):
+        """Render a single sidebar navigation entry."""
+        from config.element_group_colors import SidebarColors
+
+        cursor = imgui.get_cursor_screen_pos()
+        pad_x = (sidebar_w - btn_size) * 0.5
+
+        # Background highlight for active entry
+        if is_active:
+            active_bg = imgui.get_color_u32_rgba(
+                SidebarColors.ACTIVE_ACCENT[0],
+                SidebarColors.ACTIVE_ACCENT[1],
+                SidebarColors.ACTIVE_ACCENT[2], 0.2)
+            draw_list.add_rect_filled(
+                cursor[0], cursor[1],
+                cursor[0] + sidebar_w, cursor[1] + btn_size,
+                active_bg, 4.0)
+            # Left accent bar
+            accent_u32 = imgui.get_color_u32_rgba(*SidebarColors.ACTIVE_ACCENT)
+            draw_list.add_rect_filled(
+                cursor[0], cursor[1] + 4,
+                cursor[0] + 3, cursor[1] + btn_size - 4,
+                accent_u32, 2.0)
+
+        # Hover highlight
+        hover_region = (cursor[0], cursor[1], cursor[0] + sidebar_w, cursor[1] + btn_size)
+
+        # Alpha for locked features
+        alpha = 1.0 if available else SidebarColors.LOCKED_ALPHA
+        if alpha < 1.0:
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * alpha)
+
+        # Invisible button for click detection
+        imgui.set_cursor_screen_pos((cursor[0] + pad_x, cursor[1]))
+        if imgui.invisible_button(f"##SB_{key}", btn_size, btn_size):
+            self._active_section = key
+
+        # Check hover state BEFORE drawing so bg goes behind text
+        is_hovered = imgui.is_item_hovered()
+        if is_hovered:
+            if available:
+                imgui.set_tooltip(tooltip)
+            else:
+                imgui.set_tooltip(f"{tooltip}\n(Available for supporters)")
+            # Hover bg (drawn before text so text stays on top)
+            hover_bg = imgui.get_color_u32_rgba(*SidebarColors.HOVER_BG)
+            draw_list.add_rect_filled(
+                hover_region[0], hover_region[1],
+                hover_region[2], hover_region[3],
+                hover_bg, 4.0)
+
+        # Draw icon (on top of hover bg)
+        icon_tex = None
+        icon_path = self._SIDEBAR_ICON_MAP.get(key)
+        if icon_path:
+            icon_mgr = get_icon_texture_manager()
+            icon_tex, _, _ = icon_mgr.get_icon_texture(icon_path)
+
+        if icon_tex:
+            icon_sz = 16
+            ix = cursor[0] + (sidebar_w - icon_sz) * 0.5
+            iy = cursor[1] + (btn_size - icon_sz) * 0.5
+            draw_list.add_image(icon_tex, (ix, iy), (ix + icon_sz, iy + icon_sz))
+        else:
+            # Fallback: draw letter text centered
+            text_size = imgui.calc_text_size(icon)
+            text_x = cursor[0] + (sidebar_w - text_size[0]) * 0.5
+            text_y = cursor[1] + (btn_size - text_size[1]) * 0.5
+            text_color = imgui.get_color_u32_rgba(0.9, 0.9, 0.9, alpha)
+            draw_list.add_text(text_x, text_y, text_color, icon)
+
+        if alpha < 1.0:
+            imgui.pop_style_var()
+
+    # ------- Workflow Breadcrumb -------
+
+    def _get_workflow_stage(self):
+        """Derive current workflow stage from app state (1-5)."""
         app = self.app
-        if not path or path == app.pose_model_artifacts_dir:
-            return
-        app.pose_model_artifacts_dir = path
-        app.app_settings.set("pose_model_artifacts_dir", path)
-        app.project_manager.project_dirty = True
-        app.logger.info("Pose Model Artifacts directory updated to: %s." % path)
+        proc = app.processor
+        stage_proc = app.stage_processor
+
+        if not proc or not proc.is_video_open():
+            return 1  # Load
+        if stage_proc.full_analysis_active:
+            return 3  # Track
+        if app.funscript_processor and hasattr(app, 'multi_axis_funscript'):
+            fs = app.multi_axis_funscript
+            if fs and fs.get_axis_actions("primary"):
+                return 4  # Edit (has results)
+        return 2  # Configure (video loaded, no results)
+
+    def _render_workflow_breadcrumb(self):
+        """Render 5-stage horizontal workflow indicator at top of control panel."""
+        from config.element_group_colors import WorkflowColors
+
+        current_stage = self._get_workflow_stage()
+        stages = ["Load", "Configure", "Track", "Edit", "Export"]
+        draw_list = imgui.get_window_draw_list()
+        cursor = imgui.get_cursor_screen_pos()
+        avail_w = imgui.get_content_region_available_width()
+
+        bar_h = 24
+        stage_w = avail_w / len(stages)
+
+        for i, name in enumerate(stages):
+            stage_num = i + 1
+            x = cursor[0] + i * stage_w
+            y = cursor[1]
+
+            # Determine color
+            if stage_num < current_stage:
+                color = WorkflowColors.DONE
+            elif stage_num == current_stage:
+                color = WorkflowColors.ACTIVE
+            else:
+                color = WorkflowColors.FUTURE
+
+            color_u32 = imgui.get_color_u32_rgba(*color)
+
+            # Draw pill background for active stage
+            if stage_num == current_stage:
+                bg_u32 = imgui.get_color_u32_rgba(color[0], color[1], color[2], 0.15)
+                draw_list.add_rect_filled(x + 2, y + 2, x + stage_w - 2, y + bar_h - 2,
+                                          bg_u32, 4.0)
+
+            # Draw text centered in stage area
+            text_size = imgui.calc_text_size(name)
+            text_x = x + (stage_w - text_size[0]) * 0.5
+            text_y = y + (bar_h - text_size[1]) * 0.5
+            draw_list.add_text(text_x, text_y, color_u32, name)
+
+            # Draw connector triangle between stages
+            if i < len(stages) - 1:
+                conn_x = x + stage_w - 3
+                conn_y = y + bar_h * 0.5
+                tri_size = 4
+                conn_color = imgui.get_color_u32_rgba(*WorkflowColors.CONNECTOR)
+                draw_list.add_triangle_filled(
+                    conn_x, conn_y - tri_size,
+                    conn_x + tri_size, conn_y,
+                    conn_x, conn_y + tri_size,
+                    conn_color
+                )
+
+        # Advance cursor past the breadcrumb bar
+        imgui.dummy(avail_w, bar_h)
+        imgui.spacing()
+
+    # ------- Pinned Action Bar -------
+
+    def _render_pinned_action_bar(self):
+        """Render contextual primary action button pinned at bottom of control panel."""
+        app = self.app
+        proc = app.processor
+        stage_proc = app.stage_processor
+        events = app.event_handlers
+
+        bar_h = 50
+        avail = imgui.get_content_region_available()
+
+        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + max(0, avail[1] - bar_h))
+
+        imgui.separator()
+        imgui.spacing()
+
+        video_loaded = proc and proc.is_video_open()
+        is_offline_active = stage_proc.full_analysis_active
+        is_live_active = proc and getattr(proc, 'is_processing', False)
+
+        if not video_loaded:
+            # No video loaded — show Load Video
+            with primary_button_style():
+                if imgui.button("Load Video##PinnedAction", width=-1, height=32):
+                    if hasattr(events, 'trigger_open_video_dialog'):
+                        events.trigger_open_video_dialog()
+                    elif hasattr(app, 'file_manager') and hasattr(app.file_manager, 'open_video_dialog'):
+                        app.file_manager.open_video_dialog()
+        elif is_offline_active:
+            # Offline analysis active — show progress and Stop
+            progress = getattr(stage_proc, 'overall_progress', 0.0)
+            imgui.progress_bar(progress, (-1, 18),
+                               f"{int(progress * 100)}%")
+            with destructive_button_style():
+                if imgui.button("Stop Analysis##PinnedAction", width=-1, height=32):
+                    stage_proc.request_stop()
+        elif is_live_active:
+            # Live tracking active — show Pause/Resume and Stop
+            is_paused = proc.pause_event.is_set() if hasattr(proc, 'pause_event') else False
+            avail_w = imgui.get_content_region_available()[0]
+            btn_w = (avail_w - imgui.get_style().item_spacing[0]) / 2
+            if is_paused:
+                with primary_button_style():
+                    if imgui.button("Resume##PinnedAction", width=btn_w, height=32):
+                        proc.start_processing()
+                        if app.tracker and not app.tracker.tracking_active:
+                            app.tracker.start_tracking()
+            else:
+                if imgui.button("Pause##PinnedAction", width=btn_w, height=32):
+                    proc.pause_processing()
+            imgui.same_line()
+            with destructive_button_style():
+                if imgui.button("Stop Tracking##PinnedAction", width=btn_w, height=32):
+                    events.handle_abort_process_click()
+        else:
+            # Has results or ready to start
+            has_results = False
+            if hasattr(app, 'multi_axis_funscript'):
+                fs = app.multi_axis_funscript
+                if fs and fs.get_axis_actions("primary"):
+                    has_results = True
+
+            if has_results:
+                with primary_button_style():
+                    if imgui.button("Export Funscript##PinnedAction", width=-1, height=32):
+                        if hasattr(events, 'trigger_save_funscript_dialog'):
+                            events.trigger_save_funscript_dialog()
+                        elif hasattr(app, 'file_manager'):
+                            app.file_manager.save_funscript_dialog()
+            else:
+                selected_mode = app.app_state_ui.selected_tracker_name
+                fs_proc = app.funscript_processor
+                range_active = fs_proc.scripting_range_active if fs_proc else False
+                if self._is_live_tracker(selected_mode):
+                    label = ("Start Live AI Tracking (Range)##PinnedAction" if range_active
+                             else "Start Live AI Tracking##PinnedAction")
+                    with primary_button_style():
+                        if imgui.button(label, width=-1, height=32):
+                            self._start_live_tracking()
+                elif self._is_offline_tracker(selected_mode):
+                    label = ("Start AI Analysis (Range)##PinnedAction" if range_active
+                             else "Start Full AI Analysis##PinnedAction")
+                    with primary_button_style():
+                        if imgui.button(label, width=-1, height=32):
+                            events.handle_start_ai_cv_analysis()
+                else:
+                    with primary_button_style():
+                        imgui.button("Select a Tracker##PinnedAction", width=-1, height=32)
 
     # ------- Main render -------
 
@@ -366,6 +585,11 @@ class ControlPanelUI:
         app = self.app
         app_state = app.app_state_ui
         calibration_mgr = app.calibration
+
+        # Cache feature detection flags for this frame
+        self._feat_supporter = _is_feature_available("patreon_features")
+        self._feat_device = _is_feature_available("device_control")
+        self._feat_streamer = _is_feature_available("streamer")
 
         if calibration_mgr.is_calibration_mode_active:
             self._render_calibration_window(calibration_mgr, app_state)
@@ -390,43 +614,30 @@ class ControlPanelUI:
             flags = imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
             imgui.begin("Control Panel##MainControlPanel", flags=flags)
 
-        tab_selected = None
-        if imgui.begin_tab_bar("ControlPanelTabs"):
-            # Core tabs (always visible)
-            if imgui.begin_tab_item("Run")[0]:
-                tab_selected = "run"
-                imgui.end_tab_item()
-            if imgui.begin_tab_item("Post-Processing")[0]:
-                tab_selected = "post_processing"
-                imgui.end_tab_item()
-            if imgui.begin_tab_item("Advanced")[0]:
-                tab_selected = "advanced"
-                imgui.end_tab_item()
-
-            # Device Control tab (supporter feature - conditional)
-            try:
-                from application.utils.feature_detection import is_feature_available
-                if is_feature_available("device_control"):
-                    if imgui.begin_tab_item("Device Control")[0]:
-                        tab_selected = "device_control"
-                        imgui.end_tab_item()
-            except ImportError:
-                pass
-
-            # Streamer tab (supporter feature - conditional)
-            try:
-                from application.utils.feature_detection import is_feature_available
-                if is_feature_available("streamer"):
-                    if imgui.begin_tab_item("Streamer")[0]:
-                        tab_selected = "native_sync"
-                        imgui.end_tab_item()
-            except ImportError:
-                pass
-
-            imgui.end_tab_bar()
-
+        # --- Sidebar + Content layout ---
         avail = imgui.get_content_region_available()
-        imgui.begin_child("TabContentRegion", width=0, height=avail[1], border=False)
+        total_h = avail[1]
+        sidebar_w = self._SIDEBAR_WIDTH
+        content_w = max(50, avail[0] - sidebar_w - 4)
+
+        # Left: Vertical sidebar
+        self._render_sidebar(total_h)
+
+        imgui.same_line(spacing=4)
+
+        # Right: Breadcrumb + Content + Action bar
+        imgui.begin_child("##RightPanel", width=content_w, height=total_h, border=False)
+
+        # Workflow breadcrumb bar
+        self._render_workflow_breadcrumb()
+
+        # Split: scrollable content + pinned action bar
+        action_bar_h = 56
+        right_avail = imgui.get_content_region_available()
+        content_h = max(50, right_avail[1] - action_bar_h)
+
+        tab_selected = self._active_section
+        imgui.begin_child("TabContentRegion", width=0, height=content_h, border=False)
         if tab_selected == "run":
             self._render_run_control_tab()
         elif tab_selected == "post_processing":
@@ -434,484 +645,68 @@ class ControlPanelUI:
         elif tab_selected == "advanced":
             self._render_advanced_tab()
         elif tab_selected == "device_control":
-            self._render_device_control_tab()
+            if self._feat_device:
+                self._render_device_control_tab()
+            else:
+                self._render_locked_feature_placeholder(
+                    "Device Control",
+                    "Control hardware devices in real-time during playback. "
+                    "Supports OSR, Buttplug, and other haptic devices.")
         elif tab_selected == "native_sync":
-            self._render_native_sync_tab()
+            if self._feat_streamer:
+                self._render_native_sync_tab()
+            else:
+                self._render_locked_feature_placeholder(
+                    "Streamer",
+                    "Stream video with synchronized funscript to browsers and VR headsets. "
+                    "Built-in web server with HereSphere integration.")
+        elif tab_selected == "supporter_batch":
+            self._render_supporter_batch_tab()
         imgui.end_child()
+
+        # Pinned action bar at bottom
+        self._render_pinned_action_bar()
+
+        imgui.end_child()  # ##RightPanel
         imgui.end()
 
-    # ------- Tabs -------
-
-    def _render_simple_mode_ui(self):
-        """Render Simple Mode UI with step-by-step workflow."""
-        app = self.app
-        app_state = app.app_state_ui
-        processor = app.processor
-        stage_proc = app.stage_processor
-        fs_proc = app.funscript_processor
-
-        flags = imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE
-        imgui.begin("FunGen Simple##SimpleControlPanel", flags=flags)
-
-        # Title
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
-        imgui.text("Simple Mode")
-        imgui.pop_style_color()
-        imgui.text_wrapped("Easy 3-step workflow for beginners")
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # STEP 1: Load Video
-        self._section_header("Step 1: Load Video", "Open a video file to analyze")
-
-        if processor and processor.video_info:
-            self._status_indicator("Video loaded", "ready", "Video is ready for analysis")
-            imgui.text_wrapped("File: %s" % os.path.basename(processor.video_path or "Unknown"))
-            video_info = processor.video_info
-            if video_info:
-                duration_str = "%.0f:%02.0f" % divmod(video_info.get('duration', 0), 60)
-                imgui.text_wrapped("Duration: %s | %dx%d | %.0f fps" % (
-                    duration_str,
-                    video_info.get('width', 0),
-                    video_info.get('height', 0),
-                    video_info.get('fps', 0)
-                ))
-        else:
-            self._status_indicator("No video loaded", "info", "Drag and drop a video file onto the window")
-            imgui.text_wrapped("Supported formats: MP4, AVI, MOV, MKV")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # STEP 2: Choose Analysis Method
-        self._section_header("Step 2: Choose What to Track", "Select analysis method for your video")
-
-        # Auto-recommend tracker based on video properties
-        if processor and processor.video_info and self.tracker_ui:
-            rec_name, rec_reason = self.tracker_ui.recommend_tracker(processor.video_info)
-            self._auto_recommended_tracker = rec_name
-            self._auto_recommendation_reason = rec_reason
-            # Auto-select on first video load if user hasn't manually picked
-            if not self._user_manually_picked_tracker:
-                if app_state.selected_tracker_name != rec_name:
-                    app_state.selected_tracker_name = rec_name
-                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                        app.app_settings.set("selected_tracker_name", rec_name)
-
-        # Render card-based tracker selection
-        self._render_simple_mode_tracker_selection()
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # STEP 3: Generate Funscript
-        self._section_header("Step 3: Generate Funscript", "Start the analysis process")
-
-        # Show progress or start button
-        if stage_proc.full_analysis_active:
-            self._simple_mode_post_processing_applied = False  # Reset for new analysis
-            self._render_simple_progress_display()
-
-            # Stop button
+    def _render_locked_feature_placeholder(self, feature_name, description):
+        """Render a placeholder card for locked supporter features."""
+        with section_card(f"{feature_name}##Locked", tier="secondary", open_by_default=True) as _:
             imgui.spacing()
-            with destructive_button_style():
-                if imgui.button("Stop Analysis", width=-1):
-                    app.event_handlers.handle_abort_process_click()
-        else:
-            acts = fs_proc.get_actions("primary")
-            if acts:
-                # Analysis complete - show completion state
-                self._status_indicator(
-                    "Analysis Complete",
-                    "ready",
-                    "Generated %d motion points" % len(acts)
-                )
-                imgui.spacing()
-
-                # Post-processing prompt
-                self._render_simple_mode_post_processing_prompt()
-
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
-                imgui.text_wrapped("What's next?")
-                imgui.pop_style_color()
-                imgui.spacing()
-
-                # Export button (primary action)
-                from application.utils import primary_button_style
-                with primary_button_style():
-                    if imgui.button("Export Funscript", width=-1):
-                        # Trigger export for Timeline 1
-                        self._export_funscript_timeline(app, 1)
-
-                # Fine-tune button (secondary action)
-                imgui.spacing()
-                if imgui.button("Fine-Tune Results (Switch to Expert Mode)", width=-1):
-                    app_state.ui_view_mode = "expert"
-                    app.logger.info("Switched to Expert Mode", extra={"status_message": True})
-            else:
-                # Ready to start
-                self._render_start_stop_buttons(stage_proc, fs_proc, app.event_handlers)
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # Switch to Expert Mode link
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
-        imgui.text_wrapped("Need more control?")
-        imgui.pop_style_color()
-        if imgui.button("Switch to Expert Mode", width=-1):
-            app_state.ui_view_mode = "expert"
-            app.logger.info("Switched to Expert Mode", extra={"status_message": True})
-
-        imgui.end()
-
-    def _get_simple_tracker_description(self, tracker_name):
-        """Get a simple, user-friendly description for a tracker using discovery system."""
-        info = self.tracker_ui.discovery.get_tracker_info(tracker_name)
-        if info and info.description:
-            return info.description
-        return "Analyzes motion in your video"
-
-    def _get_category_accent_color(self, category):
-        """Return RGBA accent color for a tracker category."""
-        if category == TrackerCategory.OFFLINE:
-            return (0.3, 0.5, 0.9, 1.0)   # Blue
-        elif category == TrackerCategory.LIVE:
-            return (0.3, 0.8, 0.4, 1.0)   # Green
-        elif category == TrackerCategory.LIVE_INTERVENTION:
-            return (0.9, 0.6, 0.2, 1.0)   # Orange
-        return (0.5, 0.5, 0.5, 1.0)       # Gray fallback
-
-    def _render_simple_mode_tracker_selection(self):
-        """Render card-based tracker selection for Simple Mode."""
-        app = self.app
-        app_state = app.app_state_ui
-        stage_proc = app.stage_processor
-        fs_proc = app.funscript_processor
-
-        modes_display, modes_enum, _ = self._get_tracker_lists_for_ui(simple_mode=True)
-        if not modes_enum:
-            imgui.text_disabled("No trackers available")
-            return
-
-        # Ensure selected tracker is valid
-        if app_state.selected_tracker_name not in modes_enum:
-            if self._auto_recommended_tracker and self._auto_recommended_tracker in modes_enum:
-                app_state.selected_tracker_name = self._auto_recommended_tracker
-            else:
-                from config.constants import DEFAULT_TRACKER_NAME
-                app_state.selected_tracker_name = modes_enum[0] if modes_enum else DEFAULT_TRACKER_NAME
-
-        # When analysis is running or results exist, only show the selected card
-        is_busy = stage_proc.full_analysis_active
-        has_results = bool(fs_proc.get_actions("primary"))
-        if is_busy or has_results:
-            from config.tracker_discovery import get_tracker_discovery
-            discovery = get_tracker_discovery()
-            info = discovery.get_tracker_info(app_state.selected_tracker_name)
-            if info:
-                is_rec = (self._auto_recommended_tracker == info.internal_name)
-                self._render_tracker_card(info, True, is_rec)
-            return
-
-        # Group trackers: Offline first, then Live
-        from config.tracker_discovery import get_tracker_discovery
-        discovery = get_tracker_discovery()
-        offline_trackers = []
-        live_trackers = []
-        for internal_name in modes_enum:
-            info = discovery.get_tracker_info(internal_name)
-            if not info:
-                continue
-            if info.category == TrackerCategory.OFFLINE:
-                offline_trackers.append(info)
-            else:
-                live_trackers.append(info)
-
-        # Calculate scrollable region height (65px per card, max ~260px)
-        total_cards = len(offline_trackers) + len(live_trackers)
-        card_height = 65
-        region_height = min(total_cards * card_height + 40, 300)
-        imgui.begin_child("##TrackerCardRegion", width=0, height=region_height, border=False)
-
-        if offline_trackers:
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.6, 0.8, 1.0)
-            imgui.text("OFFLINE ANALYSIS")
-            imgui.pop_style_color()
-            imgui.spacing()
-            for info in offline_trackers:
-                is_selected = (app_state.selected_tracker_name == info.internal_name)
-                is_rec = (self._auto_recommended_tracker == info.internal_name)
-                if self._render_tracker_card(info, is_selected, is_rec):
-                    self._user_manually_picked_tracker = True
-                    if app_state.selected_tracker_name != info.internal_name:
-                        if hasattr(app, 'logger') and app.logger:
-                            app.logger.info(f"UI(Simple): Tracker changed to {info.internal_name}")
-                        if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
-                            app.clear_all_overlays_and_ui_drawings()
-                    app_state.selected_tracker_name = info.internal_name
-                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                        app.app_settings.set("selected_tracker_name", info.internal_name)
-
-        if live_trackers:
-            imgui.spacing()
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.7, 0.5, 1.0)
-            imgui.text("LIVE TRACKING")
-            imgui.pop_style_color()
-            imgui.spacing()
-            for info in live_trackers:
-                is_selected = (app_state.selected_tracker_name == info.internal_name)
-                is_rec = (self._auto_recommended_tracker == info.internal_name)
-                if self._render_tracker_card(info, is_selected, is_rec):
-                    self._user_manually_picked_tracker = True
-                    if app_state.selected_tracker_name != info.internal_name:
-                        if hasattr(app, 'logger') and app.logger:
-                            app.logger.info(f"UI(Simple): Tracker changed to {info.internal_name}")
-                        if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
-                            app.clear_all_overlays_and_ui_drawings()
-                    app_state.selected_tracker_name = info.internal_name
-                    if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                        app.app_settings.set("selected_tracker_name", info.internal_name)
-
-        imgui.end_child()
-
-    def _render_tracker_card(self, info, is_selected, is_recommended):
-        """Render a single tracker card. Returns True if clicked."""
-        card_height = 60
-        avail_w = imgui.get_content_region_available_width()
-        accent = self._get_category_accent_color(info.category)
-
-        # Background color for selected card
-        if is_selected:
-            imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.2, 0.3, 0.4, 0.6)
-        else:
-            imgui.push_style_color(imgui.COLOR_CHILD_BACKGROUND, 0.15, 0.15, 0.15, 0.4)
-
-        imgui.begin_child(
-            "##Card_%s" % info.internal_name,
-            width=avail_w, height=card_height,
-            border=True,
-        )
-
-        # Draw colored accent bar on the left
-        draw_list = imgui.get_window_draw_list()
-        pos = imgui.get_cursor_screen_position()
-        bar_width = 4
-        draw_list.add_rect_filled(
-            pos[0] - 4, pos[1] - 4,
-            pos[0] - 4 + bar_width, pos[1] + card_height - 8,
-            imgui.get_color_u32_rgba(*accent),
-        )
-
-        # Indent past the accent bar
-        imgui.indent(6)
-
-        # Category badge + display name on first line
-        badge_text = "[OFFLINE]" if info.category == TrackerCategory.OFFLINE else "[LIVE]"
-        imgui.push_style_color(imgui.COLOR_TEXT, *accent)
-        imgui.text(badge_text)
-        imgui.pop_style_color()
-        imgui.same_line()
-
-        # Display name (brighter when selected)
-        if is_selected:
-            imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 1.0, 1.0)
-        else:
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.85, 0.85, 0.85, 1.0)
-        imgui.text(info.display_name)
-        imgui.pop_style_color()
-
-        # Recommended badge
-        if is_recommended:
-            imgui.same_line()
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)
-            imgui.text("[Recommended]")
-            imgui.pop_style_color()
-
-        # Description (gray, second line)
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
-        imgui.text_wrapped(info.description if info.description else "")
-        imgui.pop_style_color()
-
-        imgui.unindent(6)
-
-        # Click detection
-        clicked = imgui.is_window_hovered() and imgui.is_mouse_clicked(0)
-
-        # Tooltip for recommended
-        if is_recommended and imgui.is_window_hovered() and self._auto_recommendation_reason:
-            imgui.set_tooltip("Recommended: %s" % self._auto_recommendation_reason)
-
-        imgui.end_child()
-        imgui.pop_style_color()  # CHILD_BACKGROUND
-
-        return clicked
-
-    def _render_simple_mode_post_processing_prompt(self):
-        """Render optional post-processing prompt after analysis completion."""
-        app = self.app
-        fs_proc = app.funscript_processor
-
-        imgui.spacing()
-        if self._simple_mode_post_processing_applied:
-            # Already applied - show status
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)
-            imgui.text("Results polished")
-            imgui.pop_style_color()
-        else:
             imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
-            imgui.text_wrapped("Optional: Improve results with automatic smoothing and optimization")
+            imgui.text_wrapped(description)
             imgui.pop_style_color()
             imgui.spacing()
-            with primary_button_style():
-                if imgui.button("Polish Results", width=-1):
-                    # Temporarily enable auto post-processing, apply, then restore
-                    original_setting = app.app_settings.get("enable_auto_post_processing", False)
-                    app.app_settings.data["enable_auto_post_processing"] = True
-                    try:
-                        fs_proc.apply_automatic_post_processing()
-                        self._simple_mode_post_processing_applied = True
-                        app.logger.info("Simple Mode: Post-processing applied", extra={"status_message": True})
-                    except Exception as e:
-                        app.logger.error("Post-processing failed: %s" % e, extra={"status_message": True})
-                    finally:
-                        app.app_settings.data["enable_auto_post_processing"] = original_setting
-            if imgui.is_item_hovered():
-                imgui.set_tooltip(
-                    "Applies smoothing, simplification, clamping, and amplitude\n"
-                    "optimization to improve the generated funscript quality."
-                )
-        imgui.spacing()
-
-    def _get_tracker_num_stages(self, tracker_name):
-        """Get the number of processing stages for a tracker."""
-        if not self.tracker_ui:
-            return 1
-        info = self.tracker_ui.discovery.get_tracker_info(tracker_name)
-        if info and info.properties:
-            n = info.properties.get("num_stages")
-            if n:
-                return n
-        if info and info.stages:
-            return len(info.stages)
-        return 1
-
-    def _get_friendly_stage_label(self, tracker_name, stage_number):
-        """Get a beginner-friendly label for a processing stage."""
-        if not self.tracker_ui:
-            return "Processing"
-        info = self.tracker_ui.discovery.get_tracker_info(tracker_name)
-        if info and info.stages:
-            for stage_def in info.stages:
-                if stage_def.stage_number == stage_number:
-                    name = stage_def.name.lower()
-                    if "detection" in name or "detect" in name:
-                        return "Scanning video"
-                    if "segmentation" in name or "contact" in name:
-                        return "Analyzing scenes"
-                    if "optical flow" in name or "funscript" in name or "motion" in name:
-                        return "Generating motion data"
-                    return stage_def.name
-        return "Processing"
-
-    def _render_simple_progress_display(self):
-        """Render consolidated progress display for Simple Mode."""
-        app = self.app
-        stage_proc = app.stage_processor
-        tracker_name = app.app_state_ui.selected_tracker_name
-
-        num_stages = self._get_tracker_num_stages(tracker_name)
-        current_stage = stage_proc.current_analysis_stage
-
-        # Header
-        imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
-        imgui.text("Analyzing...")
-        imgui.pop_style_color()
-
-        # Get current stage progress, FPS, and ETA
-        if current_stage == 1:
-            stage_progress = stage_proc.stage1_progress_value
-            fps_str = stage_proc.stage1_processing_fps_str
-            eta_str = stage_proc.stage1_eta_str
-        elif current_stage == 2:
-            stage_progress = stage_proc.stage2_main_progress_value
-            fps_str = stage_proc.stage2_sub_processing_fps_str or ""
-            eta_str = stage_proc.stage2_sub_eta_str or "N/A"
-        elif current_stage == 3:
-            stage_progress = stage_proc.stage3_overall_progress_value
-            fps_str = stage_proc.stage3_processing_fps_str
-            eta_str = stage_proc.stage3_eta_str
-        else:
-            stage_progress = 0.0
-            fps_str = ""
-            eta_str = "N/A"
-
-        # Friendly stage label + step counter
-        if num_stages > 1 and current_stage > 0:
-            label = self._get_friendly_stage_label(tracker_name, current_stage)
-            imgui.text("%s  (Step %d of %d)" % (label, current_stage, num_stages))
-        else:
-            imgui.text("Processing")
-
-        # Compute overall progress: weight each stage equally
-        if num_stages > 1 and current_stage > 0:
-            completed_stages = max(0, current_stage - 1)
-            weight = 1.0 / num_stages
-            overall = completed_stages * weight + stage_progress * weight
-        else:
-            overall = stage_progress
-
-        overall = max(0.0, min(1.0, overall))
-
-        # Single progress bar with percentage overlay
-        imgui.progress_bar(overall, (-1, 0), "%.0f%%" % (overall * 100))
-
-        # FPS + ETA line
-        status_parts = []
-        if fps_str and fps_str != "0 FPS":
-            status_parts.append(fps_str)
-        if overall > 0.01 and eta_str and eta_str != "N/A":
-            status_parts.append("ETA: %s" % eta_str)
-        if status_parts:
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.6, 0.6, 0.6, 1.0)
-            imgui.text(" | ".join(status_parts))
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.9, 0.75, 0.3, 1.0)
+            imgui.text("Available for supporters")
             imgui.pop_style_color()
+            imgui.spacing()
 
-        imgui.spacing()
+    def _render_supporter_batch_tab(self):
+        """Render the Patreon Exclusive tab (supporter feature)."""
+        if not self._feat_supporter:
+            self._render_locked_feature_placeholder(
+                "Patreon Exclusive (monthly ko-fi supporter)",
+                "Process multiple videos in sequence with a batch queue. "
+                "Set up watched folders for automatic processing.")
+            return
+        # Version info (top of tab, consistent with other supporter modules)
+        try:
+            import patreon_features
+            version = getattr(patreon_features, '__version__', 'unknown')
+            imgui.text_colored(f"Patreon Exclusive v{version}", 0.5, 0.5, 0.5, 1.0)
+            imgui.spacing()
+        except Exception:
+            pass
+        try:
+            from patreon_features.batch.batch_ui import render_batch_panel
+            render_batch_panel(self.app)
+        except Exception as e:
+            imgui.text_colored("Patreon module error", 0.9, 0.3, 0.3, 1.0)
+            imgui.text_wrapped(str(e))
 
-    def _render_processing_speed_controls(self, app_state):
-        app = self.app
-        processor = app.processor
-        selected_mode = app_state.selected_tracker_name
-        
-        # Always show processing speed controls as they affect basic video playback
-        # Check if current tracker is a live mode for tooltip information
-        from config.tracker_discovery import get_tracker_discovery, TrackerCategory
-        discovery = get_tracker_discovery()
-        tracker_info = discovery.get_tracker_info(selected_mode)
-        is_live_mode = tracker_info and tracker_info.category in [TrackerCategory.LIVE, TrackerCategory.LIVE_INTERVENTION]
-        
-        # Update tooltip based on context
-        if is_live_mode:
-            tooltip = "Control the processing speed for live analysis and video playback"
-        else:
-            tooltip = "Control the video playback speed"
-
-        # Processing Speed section header removed
-        current_speed_mode = app_state.selected_processing_speed_mode
- 
-        if imgui.radio_button("Real Time", current_speed_mode == config.ProcessingSpeedMode.REALTIME):
-            app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.REALTIME
-        imgui.same_line()
-        if imgui.radio_button("Slow-mo", current_speed_mode == config.ProcessingSpeedMode.SLOW_MOTION):
-            app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.SLOW_MOTION
-        imgui.same_line()
-        if imgui.radio_button("Max Speed", current_speed_mode == config.ProcessingSpeedMode.MAX_SPEED):
-            app_state.selected_processing_speed_mode = config.ProcessingSpeedMode.MAX_SPEED
+    # ------- Tab orchestrators (call into mixins) -------
 
     def _render_run_control_tab(self):
         app = self.app
@@ -932,117 +727,135 @@ class ControlPanelUI:
         # Use dynamic tracker discovery for full mode
         modes_display_full, modes_enum, discovered_trackers_full = self._get_tracker_lists_for_ui(simple_mode=False)
 
-        open_, _ = imgui.collapsing_header(
-            "Choose Analysis Method##SimpleAnalysisMethod",
-            flags=imgui.TREE_NODE_DEFAULT_OPEN,
-        )
-        if open_:
-            modes_display = modes_display_full
+        # Early access tracker gating — annotate gated trackers
+        _early_access_set = set()
+        _supporter_available = self._feat_supporter
+        try:
+            from patreon_features.tracker_gating.experimental_gate import is_tracker_early_access, get_early_access_message
+            _early_access_set = {name for name in modes_enum if is_tracker_early_access(name)}
+        except ImportError:
+            pass
 
-            processor = app.processor
-            disable_combo = (
-                stage_proc.full_analysis_active
-                or app.is_setting_user_roi_mode
-                or (processor and processor.is_processing and not processor.pause_event.is_set())
-            )
-            with _DisabledScope(disable_combo):
-                try:
-                    cur_idx = modes_enum.index(app_state.selected_tracker_name)
-                except ValueError:
-                    cur_idx = 0
-                    app_state.selected_tracker_name = modes_enum[cur_idx]
+        # Build display list with early access annotations
+        modes_display_gated = []
+        for i, (display, internal) in enumerate(zip(modes_display_full, modes_enum)):
+            if internal in _early_access_set and not _supporter_available:
+                modes_display_gated.append(f"[Early Access] {display}")
+            else:
+                modes_display_gated.append(display)
 
-                clicked, new_idx = imgui.combo("##TrackerModeCombo", cur_idx, modes_display)
-                self._help_tooltip(self._generate_combined_tooltip(discovered_trackers_full))
+        with section_card("Choose Analysis Method##SimpleAnalysisMethod", tier="primary",
+                          accent_color=self.ControlPanelColors.ACTIVE_PROGRESS) as open_:
+            if open_:
+                modes_display = modes_display_gated
 
-            if clicked and new_idx != cur_idx:
-                new_mode = modes_enum[new_idx]
-                # Clear all overlays when switching to a different mode
-                if app_state.selected_tracker_name != new_mode:
-                    if hasattr(app, 'logger') and app.logger:
-                        app.logger.info(f"UI(RunTab): Mode change requested {app_state.selected_tracker_name} -> {new_mode}. Clearing overlays.")
-                    if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
-                        app.clear_all_overlays_and_ui_drawings()
-                app_state.selected_tracker_name = new_mode
-                # Persist user choice (store tracker name directly)
-                if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
-                    app.app_settings.set("selected_tracker_name", new_mode)
-                
-                # Set tracker mode using dynamic discovery
-                tr = app.tracker
-                if tr:
-                    tr.set_tracking_mode(new_mode)
+                processor = app.processor
+                disable_combo = (
+                    stage_proc.full_analysis_active
+                    or app.is_setting_user_roi_mode
+                    or (processor and processor.is_processing and not processor.pause_event.is_set())
+                )
+                with _DisabledScope(disable_combo):
+                    try:
+                        cur_idx = modes_enum.index(app_state.selected_tracker_name)
+                    except ValueError:
+                        cur_idx = 0
+                        app_state.selected_tracker_name = modes_enum[cur_idx]
 
+                    clicked, new_idx = imgui.combo("##TrackerModeCombo", cur_idx, modes_display)
+                    self._help_tooltip(self._generate_combined_tooltip(discovered_trackers_full))
 
-            proc = app.processor
-            video_loaded = proc and proc.is_video_open()
-            processing_active = stage_proc.full_analysis_active
-            disable_after = (not video_loaded) or processing_active
+                if clicked and new_idx != cur_idx:
+                    new_mode = modes_enum[new_idx]
+                    # Block selection of early access trackers when patreon_features not available
+                    if new_mode in _early_access_set and not _supporter_available:
+                        pass  # Selection blocked — tracker is early access only
+                    else:
+                        # Clear all overlays when switching to a different mode
+                        if app_state.selected_tracker_name != new_mode:
+                            if hasattr(app, 'logger') and app.logger:
+                                app.logger.info(f"UI(RunTab): Mode change requested {app_state.selected_tracker_name} -> {new_mode}. Clearing overlays.")
+                            if hasattr(app, 'clear_all_overlays_and_ui_drawings'):
+                                app.clear_all_overlays_and_ui_drawings()
+                        app_state.selected_tracker_name = new_mode
+                        # Persist user choice (store tracker name directly)
+                        if hasattr(app, 'app_settings') and hasattr(app.app_settings, 'set'):
+                            app.app_settings.set("selected_tracker_name", new_mode)
 
-            with _DisabledScope(disable_after):
+                        # Set tracker mode using dynamic discovery
+                        tr = app.tracker
+                        if tr:
+                            tr.set_tracking_mode(new_mode)
 
-                self._render_execution_progress_display()
+                # Axis mode combo (merged from Tracking card)
+                imgui.spacing()
+                imgui.text("Tracking Axes:")
+                self._render_tracking_axes_mode(stage_proc)
 
-        # Processing speed controls moved to toolbar for better accessibility
-        # self._render_processing_speed_controls(app_state)
+                proc = app.processor
+                video_loaded = proc and proc.is_video_open()
+                processing_active = stage_proc.full_analysis_active
+                disable_after = (not video_loaded) or processing_active
 
-        open_, _ = imgui.collapsing_header(
-            "Tracking##SimpleTracking",
-            flags=imgui.TREE_NODE_DEFAULT_OPEN,
-        )
-        if open_:
-            self._render_tracking_axes_mode(stage_proc)
+                with _DisabledScope(disable_after):
+                    self._render_execution_progress_display()
 
         mode = app_state.selected_tracker_name
         if mode and (self._is_offline_tracker(mode) or self._is_live_tracker(mode)):
             if app_state.show_advanced_options:
-                open_, _ = imgui.collapsing_header(
-                    "Analysis Options##RunControlAnalysisOptions",
-                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
-                )
-                if open_:
-                    imgui.text("Analysis Range")
-                    self._render_range_selection(stage_proc, fs_proc, events)
+                with section_card("Analysis Options##RunControlAnalysisOptions",
+                                  tier="secondary") as open_:
+                    if open_:
+                        imgui.text("Analysis Range")
+                        self._render_range_selection(stage_proc, fs_proc, events)
 
-                    if self._is_offline_tracker(mode):
-                        imgui.text("Stage Reruns:")
-                        with _DisabledScope(disable_combo):
-                            _, stage_proc.force_rerun_stage1 = imgui.checkbox(
-                                "Force Re-run Stage 1##ForceRerunS1",
-                                stage_proc.force_rerun_stage1,
-                            )
-                            imgui.same_line()
-                            _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
-                                "Force Re-run Stage 2##ForceRerunS2",
-                                stage_proc.force_rerun_stage2_segmentation,
-                            )
-                            if not hasattr(stage_proc, "save_preprocessed_video"):
-                                stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
-                            changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
-                            if changed:
-                                stage_proc.save_preprocessed_video = new_val
-                                app.app_settings.set("save_preprocessed_video", new_val)
-                                if new_val:
-                                    stage_proc.num_producers_stage1 = 1
-                                    app.app_settings.set("num_producers_stage1", 1)
-                            _tooltip_if_hovered(
-                                "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
-                                "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
-                                "Forces the number of Producer threads to 1."
-                            )
-                        
-                        # Database Retention Option
-                        with _DisabledScope(disable_combo):
-                            retain_database = self.app.app_settings.get("retain_stage2_database", True)
-                            changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
-                            if changed_db:
-                                self.app.app_settings.set("retain_stage2_database", new_db_val)
-                        if imgui.is_item_hovered():
-                            imgui.set_tooltip(
-                                "Keep the Stage 2 database file after processing completes.\n"
-                                "Disable to save disk space (database is automatically deleted).\n" 
-                                "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
-                            )
+                        if self._is_offline_tracker(mode):
+                            imgui.text("Stage Reruns:")
+                            with _DisabledScope(disable_combo):
+                                _, stage_proc.force_rerun_stage1 = imgui.checkbox(
+                                    "Force Re-run Stage 1##ForceRerunS1",
+                                    stage_proc.force_rerun_stage1,
+                                )
+                                _tooltip_if_hovered(
+                                    "Re-run YOLO object detection even if cached results exist.\n"
+                                    "Use when the detection model has been updated."
+                                )
+                                imgui.same_line()
+                                _, stage_proc.force_rerun_stage2_segmentation = imgui.checkbox(
+                                    "Force Re-run Stage 2##ForceRerunS2",
+                                    stage_proc.force_rerun_stage2_segmentation,
+                                )
+                                _tooltip_if_hovered(
+                                    "Re-run contact analysis and segmentation even if cached results exist.\n"
+                                    "Use when you want to regenerate chapters and signals from scratch."
+                                )
+                                if not hasattr(stage_proc, "save_preprocessed_video"):
+                                    stage_proc.save_preprocessed_video = app.app_settings.get("save_preprocessed_video", False)
+                                changed, new_val = imgui.checkbox("Save/Reuse Preprocessed Video##SavePreprocessedVideo", stage_proc.save_preprocessed_video)
+                                if changed:
+                                    stage_proc.save_preprocessed_video = new_val
+                                    app.app_settings.set("save_preprocessed_video", new_val)
+                                    if new_val:
+                                        stage_proc.num_producers_stage1 = 1
+                                        app.app_settings.set("num_producers_stage1", 1)
+                                _tooltip_if_hovered(
+                                    "Saves a preprocessed (resized/unwarped) video for faster re-runs.\n"
+                                    "This enables Optical Flow recovery in Stage 2 and is RECOMMENDED for Stage 3 speed.\n"
+                                    "Forces the number of Producer threads to 1."
+                                )
+
+                            # Database Retention Option
+                            with _DisabledScope(disable_combo):
+                                retain_database = self.app.app_settings.get("retain_stage2_database", True)
+                                changed_db, new_db_val = imgui.checkbox("Keep Stage 2 Database##RetainStage2Database", retain_database)
+                                if changed_db:
+                                    self.app.app_settings.set("retain_stage2_database", new_db_val)
+                            if imgui.is_item_hovered():
+                                imgui.set_tooltip(
+                                    "Keep the Stage 2 database file after processing completes.\n"
+                                    "Disable to save disk space (database is automatically deleted).\n"
+                                    "Note: Database is always kept during 3-stage pipelines until Stage 3 completes."
+                                )
 
         proc = app.processor
         video_loaded = proc and proc.is_video_open()
@@ -1100,7 +913,7 @@ class ControlPanelUI:
 
         # TEMPORARILY DISABLE SECTIONS WITH HARDCODED TRACKERMODE REFERENCES
         # TODO: Replace with dynamic discovery logic
-        
+
         # Class filtering for advanced users
         if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
@@ -1175,5080 +988,3 @@ class ControlPanelUI:
             if imgui.button("Cancel", width=pw):
                 imgui.close_current_popup()
             imgui.end_popup()
-
-    def _render_post_processing_tab(self):
-        app = self.app
-        fs_proc = app.funscript_processor
-
-        # Get plugin manager from timeline
-        plugin_manager = None
-        if self.timeline_editor1 and hasattr(self.timeline_editor1, 'plugin_manager'):
-            plugin_manager = self.timeline_editor1.plugin_manager
-
-        if not plugin_manager:
-            imgui.text_disabled("Plugin system not initialized")
-            return
-
-        # Timeline and scope selection
-        imgui.text("Apply to:")
-        imgui.spacing()
-
-        # Timeline selection
-        timeline_choice = getattr(self, '_pp_timeline_choice', 0)
-        imgui.push_item_width(200)
-        _, timeline_choice = imgui.combo("Timeline##PostProcTimeline", timeline_choice, ["Timeline 1", "Timeline 2"])
-        self._pp_timeline_choice = timeline_choice
-        imgui.pop_item_width()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Select which timeline to apply processing to")
-
-        # Scope selection
-        scope_choice = getattr(self, '_pp_scope_choice', 0)
-        imgui.push_item_width(200)
-        _, scope_choice = imgui.combo("Scope##PostProcScope", scope_choice, ["Full Script", "Selection Only"])
-        self._pp_scope_choice = scope_choice
-        imgui.pop_item_width()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Apply to entire script or selected points only")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # Get all plugins
-        all_plugins = plugin_manager.get_available_plugins()
-        if not all_plugins:
-            imgui.text_disabled("No plugins available")
-            return
-
-        # Prioritize Ultimate Autotune plugin first
-        ultimate_autotune = None
-        other_plugins = []
-        for plugin_name in all_plugins:
-            if 'ultimate' in plugin_name.lower() and 'autotune' in plugin_name.lower():
-                ultimate_autotune = plugin_name
-            else:
-                other_plugins.append(plugin_name)
-
-        # Sort other plugins alphabetically
-        other_plugins.sort()
-
-        # Render plugins in order: Ultimate Autotune first, then others
-        plugins_to_render = ([ultimate_autotune] if ultimate_autotune else []) + other_plugins
-
-        for plugin_name in plugins_to_render:
-            ui_data = plugin_manager.get_plugin_ui_data(plugin_name)
-            if not ui_data or not ui_data['available']:
-                continue
-
-            # Render plugin section
-            self._render_plugin_section(plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
-
-    def _render_plugin_section(self, plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice):
-        """Render a collapsible section for a plugin with its parameters and apply button."""
-        display_name = ui_data.get('display_name', plugin_name)
-        description = ui_data.get('description', '')
-
-        # Collapsible header for this plugin (collapsed by default)
-        if imgui.collapsing_header(f"{display_name}##Plugin_{plugin_name}")[0]:
-            if description:
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
-                imgui.text_wrapped(description)
-                imgui.pop_style_color()
-                imgui.spacing()
-
-            # Get plugin context and parameters
-            context = plugin_manager.plugin_contexts.get(plugin_name)
-            if not context:
-                imgui.text_disabled("Plugin context not available")
-                return
-
-            plugin_instance = context.plugin_instance
-            if not plugin_instance or not hasattr(plugin_instance, 'parameters_schema'):
-                imgui.text_disabled("No parameters available")
-            else:
-                # Render parameters
-                schema = plugin_instance.parameters_schema
-                params = context.parameters
-
-                for param_name, param_info in schema.items():
-                    param_type = param_info.get('type')
-                    param_label = param_info.get('label', param_name)
-                    param_desc = param_info.get('description', '')
-
-                    # Get constraints from schema
-                    constraints = param_info.get('constraints', {})
-                    param_min = constraints.get('min', 0)
-                    param_max = constraints.get('max', 100)
-                    default_value = param_info.get('default')
-
-                    current_value = params.get(param_name, default_value)
-
-                    # Skip internal parameters that shouldn't be shown in UI
-                    if param_name in ['start_time_ms', 'end_time_ms', 'selected_indices']:
-                        continue
-
-                    # Render different UI elements based on parameter type
-                    # Compare against Python type objects, not strings
-                    if param_type == float or param_type == 'float':
-                        if current_value is None:
-                            current_value = default_value if default_value is not None else 0.0
-                        imgui.push_item_width(200)
-                        _, new_value = imgui.slider_float(
-                            f"{param_label}##PP_{plugin_name}_{param_name}",
-                            float(current_value),
-                            float(param_min),
-                            float(param_max),
-                            "%.2f"
-                        )
-                        imgui.pop_item_width()
-                        params[param_name] = new_value
-                    elif param_type == int or param_type == 'int':
-                        if current_value is None:
-                            current_value = default_value if default_value is not None else 0
-                        imgui.push_item_width(200)
-                        _, new_value = imgui.slider_int(
-                            f"{param_label}##PP_{plugin_name}_{param_name}",
-                            int(current_value),
-                            int(param_min),
-                            int(param_max)
-                        )
-                        imgui.pop_item_width()
-                        params[param_name] = new_value
-                    elif param_type == bool or param_type == 'bool':
-                        if current_value is None:
-                            current_value = default_value if default_value is not None else False
-                        _, new_value = imgui.checkbox(
-                            f"{param_label}##PP_{plugin_name}_{param_name}",
-                            bool(current_value)
-                        )
-                        params[param_name] = new_value
-                    elif param_type == str or param_type == 'str' or param_type == 'choice':
-                        choices = constraints.get('choices', [])
-                        if choices:
-                            try:
-                                current_idx = choices.index(current_value) if current_value in choices else 0
-                            except (ValueError, TypeError):
-                                current_idx = 0
-                            imgui.push_item_width(200)
-                            _, new_idx = imgui.combo(
-                                f"{param_label}##PP_{plugin_name}_{param_name}",
-                                current_idx,
-                                choices
-                            )
-                            imgui.pop_item_width()
-                            params[param_name] = choices[new_idx]
-
-                    if param_desc and imgui.is_item_hovered():
-                        imgui.set_tooltip(param_desc)
-
-            imgui.spacing()
-
-            # Reset to default button
-            if imgui.button(f"Reset to Default##PP_{plugin_name}_Reset"):
-                default_params = plugin_manager._get_default_parameters(plugin_instance)
-                context.parameters = default_params.copy()
-
-            # Apply button (PRIMARY styling)
-            imgui.same_line()
-            with primary_button_style():
-                if imgui.button(f"Apply##PP_{plugin_name}_Apply"):
-                    self._apply_plugin(plugin_name, context.parameters, timeline_choice, scope_choice, fs_proc)
-
-            imgui.spacing()
-
-    def _apply_plugin(self, plugin_name, parameters, timeline_choice, scope_choice, fs_proc):
-        """Apply a plugin with the given parameters."""
-        try:
-            # Determine which funscript object to use
-            axis = "primary" if timeline_choice == 0 else "secondary"
-
-            # Get the funscript object
-            funscript_obj = fs_proc.get_funscript_obj()
-            if not funscript_obj:
-                self.app.logger.warning("No funscript loaded", extra={"status_message": True})
-                return
-
-            # Determine selection scope
-            selected_indices = None
-            if scope_choice == 1:  # Selection Only
-                # Get selected indices from the appropriate timeline
-                timeline = self.timeline_editor1 if timeline_choice == 0 else self.timeline_editor2
-                if timeline and hasattr(timeline, 'multi_selected_action_indices'):
-                    selected_indices = timeline.multi_selected_action_indices.copy() if timeline.multi_selected_action_indices else None
-
-            # Apply the plugin
-            plugin_params = parameters.copy()
-            plugin_params['axis'] = axis
-            if selected_indices:
-                plugin_params['selected_indices'] = selected_indices
-
-            funscript_obj.apply_plugin(plugin_name, **plugin_params)
-            self.app.logger.info(f"Applied {plugin_name} to {axis}", extra={"status_message": True})
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to apply plugin {plugin_name}: {e}", extra={"status_message": True})
-
-    def _render_settings_profiles_section(self):
-        """Render settings profiles UI in the Advanced tab."""
-        import time
-        app = self.app
-        settings = app.app_settings
-
-        if imgui.collapsing_header("Settings Profiles##AdvancedProfiles", flags=0)[0]:
-            # Cache profile list (refresh every 2 seconds)
-            now = time.time()
-            if self._profile_list_cache is None or (now - self._profile_list_cache_time) > 2.0:
-                self._profile_list_cache = settings.list_profiles()
-                self._profile_list_cache_time = now
-
-            profiles = self._profile_list_cache
-            profile_names = [p["name"] for p in profiles] if profiles else []
-
-            # Load / Delete existing profile
-            if profile_names:
-                imgui.text("Load Profile:")
-                imgui.push_item_width(imgui.get_content_region_available_width() - 140)
-                # Use a simple combo for profile selection
-                clicked, idx = imgui.combo("##ProfileCombo", self._selected_profile_idx, profile_names)
-                if clicked:
-                    self._selected_profile_idx = idx
-                imgui.pop_item_width()
-
-                imgui.same_line()
-                sel_idx = min(self._selected_profile_idx, len(profile_names) - 1) if profile_names else 0
-                sel_name = profile_names[sel_idx] if profile_names else ""
-                if imgui.button("Load##LoadProfile"):
-                    if sel_name and settings.load_profile(sel_name):
-                        app.logger.info("Profile loaded: %s" % sel_name, extra={"status_message": True})
-                        self._profile_list_cache = None  # Refresh cache
-                imgui.same_line()
-                with destructive_button_style():
-                    if imgui.button("Delete##DeleteProfile"):
-                        if sel_name:
-                            imgui.open_popup("Confirm Delete Profile##DeleteProfilePopup")
-
-                # Confirm delete popup
-                if imgui.begin_popup_modal("Confirm Delete Profile##DeleteProfilePopup", True, imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
-                    imgui.text("Delete profile '%s'?" % sel_name)
-                    avail_w = imgui.get_content_region_available_width()
-                    pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
-                    with destructive_button_style():
-                        if imgui.button("Delete##ConfirmDeleteProfile", width=pw):
-                            if settings.delete_profile(sel_name):
-                                app.logger.info("Profile deleted: %s" % sel_name, extra={"status_message": True})
-                                self._profile_list_cache = None
-                                self._selected_profile_idx = 0
-                            imgui.close_current_popup()
-                    imgui.same_line()
-                    if imgui.button("Cancel##CancelDeleteProfile", width=pw):
-                        imgui.close_current_popup()
-                    imgui.end_popup()
-            else:
-                imgui.text_disabled("No saved profiles")
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            # Save new profile
-            imgui.text("Save Current Settings as Profile:")
-            imgui.push_item_width(imgui.get_content_region_available_width() - 70)
-            _, self._profile_name_input = imgui.input_text_with_hint(
-                "##ProfileNameInput",
-                "Profile name...",
-                self._profile_name_input,
-                128,
-            )
-            imgui.pop_item_width()
-            imgui.same_line()
-            if imgui.button("Save##SaveProfile"):
-                if self._profile_name_input.strip():
-                    if settings.save_profile(self._profile_name_input):
-                        app.logger.info("Profile saved: %s" % self._profile_name_input.strip(), extra={"status_message": True})
-                        self._profile_name_input = ""
-                        self._profile_list_cache = None  # Refresh cache
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Saves current processing settings as a reusable preset\n(tracking, post-processing, performance — not UI layout)")
-
-    def _render_advanced_tab(self):
-        """Render Advanced tab combining Configuration and Settings."""
-        app = self.app
-        app_state = app.app_state_ui
-        tmode = app_state.selected_tracker_name
-
-        imgui.text("Advanced settings for AI models, tracking, and performance.")
-        imgui.spacing()
-
-        # Settings Profiles section
-        self._render_settings_profiles_section()
-        imgui.spacing()
-
-        # Search box for filtering settings
-        imgui.push_item_width(-1)
-        _, self._advanced_search_query = imgui.input_text_with_hint(
-            "##AdvancedSearch",
-            "Search settings...",
-            self._advanced_search_query,
-            256
-        )
-        imgui.pop_item_width()
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Filter settings by keyword")
-        imgui.spacing()
-
-        search_query = self._advanced_search_query.lower()
-
-        # Define searchable keywords for each section (including sub-options)
-        section_keywords = {
-            # "ai_models" removed - moved to Tools > AI Models dialog
-            "live_tracker": "live tracker settings roi detection optical flow confidence padding interval smoothing persistence sparse dis preset scale sensitivity amplification delay face hand class",
-            "class_filter": "class filtering filter person face hand foot genitals body parts",
-            "oscillation": "oscillation detector frequency amplitude threshold smoothing window peak valley timing",
-            "interface": "interface performance gpu theme font scale dark light color vsync fps timeline rendering",
-            "file_output": "file output save export path format funscript metadata json",
-            "logging": "logging autosave log debug verbose checkpoint interval backup"
-        }
-
-        # Helper to check if search matches section
-        def matches_section(section_key):
-            if not search_query:
-                return True
-            keywords = section_keywords.get(section_key, "")
-            return any(term in keywords for term in search_query.split())
-
-        # AI Models & Inference moved to Tools > AI Models dialog
-
-        # Tracking Parameters section (from Configuration tab)
-        adv = app_state.show_advanced_options
-        if self._is_live_tracker(tmode) and adv:
-            if matches_section("live_tracker"):
-                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("live_tracker") else 0
-                if imgui.collapsing_header("Live Tracker Settings##AdvancedLiveTracker", flags=flags)[0]:
-                    self._render_live_tracker_settings()
-
-        # Class filtering (from Configuration tab)
-        if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
-            if matches_section("class_filter"):
-                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("class_filter") else 0
-                if imgui.collapsing_header("Class Filtering##AdvancedClassFilter", flags=flags)[0]:
-                    self._render_class_filtering_content()
-
-        # Oscillation detector settings (from Configuration tab)
-        from config.tracker_discovery import get_tracker_discovery
-        discovery = get_tracker_discovery()
-        tracker_info = discovery.get_tracker_info(tmode)
-        if tracker_info and 'oscillation' in tracker_info.display_name.lower():
-            if matches_section("oscillation"):
-                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("oscillation") else 0
-                if imgui.collapsing_header("Oscillation Detector Settings##AdvancedOscillation", flags=flags)[0]:
-                    self._render_oscillation_detector_settings()
-
-        # Interface & Performance settings (from Settings tab)
-        if matches_section("interface"):
-            flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("interface") else 0
-            if imgui.collapsing_header("Interface & Performance##AdvancedInterfacePerf", flags=flags)[0]:
-                self._render_settings_interface_perf()
-
-        # File & Output settings (from Settings tab)
-        if matches_section("file_output"):
-            flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("file_output") else 0
-            if imgui.collapsing_header("File & Output##AdvancedFileOutput", flags=flags)[0]:
-                self._render_settings_file_output()
-
-        # Logging & Autosave settings (from Settings tab)
-        if app_state.show_advanced_options:
-            if matches_section("logging"):
-                flags = imgui.TREE_NODE_DEFAULT_OPEN if search_query and matches_section("logging") else 0
-                if imgui.collapsing_header("Logging & Autosave##AdvancedLogging", flags=flags)[0]:
-                    self._render_settings_logging_autosave()
-
-        imgui.spacing()
-
-        # Reset All Settings button
-        with destructive_button_style():
-            if imgui.button("Reset All Settings to Default##ResetAllSettingsButton", width=-1):
-                imgui.open_popup("Confirm Reset##ResetSettingsPopup")
-
-        if imgui.begin_popup_modal(
-            "Confirm Reset##ResetSettingsPopup", True, imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        )[0]:
-            imgui.text(
-                "This will reset all application settings to their defaults.\n"
-                "Your projects will not be affected.\n"
-                "This action cannot be undone."
-            )
-
-            avail_w = imgui.get_content_region_available_width()
-            pw = (avail_w - imgui.get_style().item_spacing[0]) / 2.0
-
-            # Confirm Reset button
-            with destructive_button_style():
-                if imgui.button("Confirm Reset", width=pw):
-                    app.app_settings.reset_to_defaults()
-                    app.logger.info("All settings have been reset to default.", extra={"status_message": True})
-                    imgui.close_current_popup()
-
-            imgui.same_line()
-            if imgui.button("Cancel", width=pw):
-                imgui.close_current_popup()
-            imgui.end_popup()
-
-    # ------- AI model settings -------
-
-    def _render_ai_model_settings(self):
-        app = self.app
-        stage_proc = app.stage_processor
-        settings = app.app_settings
-        style = imgui.get_style()
-
-        is_batch_mode = app.is_batch_processing_active
-        is_analysis_running = stage_proc.full_analysis_active
-        is_live_tracking_running = (app.processor and
-                                    app.processor.is_processing and
-                                    app.processor.enable_tracker_processing)
-        is_setting_roi = app.is_setting_user_roi_mode
-        is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi
-
-        with _DisabledScope(is_any_process_active):
-            def show_model_file_dialog(title, current_path, callback):
-                gi = getattr(app, "gui_instance", None)
-                if not gi:
-                    return
-                init_dir = os.path.dirname(current_path) if current_path else None
-                gi.file_dialog.show(
-                    title=title,
-                    is_save=False,
-                    callback=callback,
-                    extension_filter=self.AI_modelExtensionsFilter,
-                    initial_path=init_dir,
-                )
-
-            # Precompute widths
-            tp = style.frame_padding.x * 2
-            browse_w = imgui.calc_text_size("Browse").x + tp
-            unload_w = imgui.calc_text_size("Unload").x + tp
-            total_btn_w = browse_w + unload_w + style.item_spacing.x
-            avail_w = imgui.get_content_region_available_width()
-            input_w = avail_w - total_btn_w - style.item_spacing.x
-
-            # Detection model
-            imgui.text("Detection Model")
-            _readonly_input("##S1YOLOPath", app.yolo_detection_model_path_setting, input_w)
-            imgui.same_line()
-            # Browse button with folder-open icon
-            icon_mgr = get_icon_texture_manager()
-            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-            btn_size = imgui.get_frame_height()
-            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
-                show_model_file_dialog(
-                    "Select YOLO Detection Model",
-                    app.yolo_detection_model_path_setting,
-                    self._update_detection_model_path,
-                )
-            elif not folder_open_tex and imgui.button("Browse##S1YOLOBrowse"):
-                show_model_file_dialog(
-                    "Select YOLO Detection Model",
-                    app.yolo_detection_model_path_setting,
-                    self._update_detection_model_path,
-                )
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Browse for detection model file")
-            imgui.same_line()
-            # Unload button (DESTRUCTIVE - unloads model from memory)
-            with destructive_button_style():
-                if imgui.button("Unload##S1YOLOUnload"):
-                    app.unload_model("detection")
-            _tooltip_if_hovered("Path to the YOLO object detection model file (%s)." % self.AI_modelTooltipExtensions)
-
-            # Pose model
-            imgui.text("Pose Model")
-            _readonly_input("##PoseYOLOPath", app.yolo_pose_model_path_setting, input_w)
-            imgui.same_line()
-            # Browse button with folder-open icon
-            imgui.push_id("PoseYOLOBrowse")
-            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
-                show_model_file_dialog(
-                    "Select YOLO Pose Model",
-                    app.yolo_pose_model_path_setting,
-                    self._update_pose_model_path,
-                )
-            elif not folder_open_tex and imgui.button("Browse"):
-                show_model_file_dialog(
-                    "Select YOLO Pose Model",
-                    app.yolo_pose_model_path_setting,
-                    self._update_pose_model_path,
-                )
-            imgui.pop_id()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Browse for pose model file")
-            imgui.same_line()
-            # Unload button (DESTRUCTIVE - unloads model from memory)
-            with destructive_button_style():
-                if imgui.button("Unload##PoseYOLOUnload"):
-                    app.unload_model("pose")
-            _tooltip_if_hovered("Path to the YOLO pose estimation model file (%s). This model is optional." % self.AI_modelTooltipExtensions)
-
-            imgui.text("Pose Model Artifacts Dir")
-            dir_input_w = avail_w - browse_w - style.item_spacing.x if avail_w > browse_w else -1
-            _readonly_input("##PoseArtifactsDirPath", app.pose_model_artifacts_dir, dir_input_w)
-            imgui.same_line()
-            # Browse button with folder-open icon
-            imgui.push_id("PoseArtifactsDirBrowse")
-            folder_open_tex, _, _ = icon_mgr.get_icon_texture('folder-open.png')
-            if folder_open_tex and imgui.image_button(folder_open_tex, btn_size, btn_size):
-                gi = getattr(app, "gui_instance", None)
-                if gi:
-                    gi.file_dialog.show(
-                        title="Select Pose Model Artifacts Directory",
-                        callback=self._update_artifacts_dir_path,
-                        is_folder_dialog=True,
-                        initial_path=app.pose_model_artifacts_dir,
-                    )
-            elif not folder_open_tex and imgui.button("Browse"):
-                gi = getattr(app, "gui_instance", None)
-                if gi:
-                    gi.file_dialog.show(
-                        title="Select Pose Model Artifacts Directory",
-                        callback=self._update_artifacts_dir_path,
-                        is_folder_dialog=True,
-                        initial_path=app.pose_model_artifacts_dir,
-                    )
-            imgui.pop_id()
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Browse for pose model artifacts directory")
-            _tooltip_if_hovered(
-                "Path to the folder containing your trained classifier,\n"
-                "imputer, and other .joblib model artifacts."
-            )
-
-            mode = app.app_state_ui.selected_tracker_name
-            if self._is_offline_tracker(mode):
-                imgui.text("Stage 1 Inference Workers:")
-                imgui.push_item_width(100)
-                is_save_pre = getattr(stage_proc, "save_preprocessed_video", False)
-                with _DisabledScope(is_save_pre):
-                    ch_p, n_p = imgui.input_int(
-                        "Producers##S1Producers", stage_proc.num_producers_stage1
-                    )
-                    if ch_p and not is_save_pre:
-                        v = max(1, n_p)
-                        if v != stage_proc.num_producers_stage1:
-                            stage_proc.num_producers_stage1 = v
-                            settings.set("num_producers_stage1", v)
-                if is_save_pre:
-                    _tooltip_if_hovered("Producers are forced to 1 when 'Save/Reuse Preprocessed Video' is enabled.")
-                else:
-                    _tooltip_if_hovered("Number of threads for video decoding & preprocessing.")
-
-                imgui.same_line()
-                ch_c, n_c = imgui.input_int("Consumers##S1Consumers", stage_proc.num_consumers_stage1)
-                if ch_c:
-                    v = max(1, n_c)
-                    if v != stage_proc.num_consumers_stage1:
-                        stage_proc.num_consumers_stage1 = v
-                        settings.set("num_consumers_stage1", v)
-                _tooltip_if_hovered("Number of threads for AI model inference. Match to available cores for best performance.")
-                imgui.pop_item_width()
-
-                imgui.text("Stage 2 OF Workers")
-                imgui.same_line()
-                imgui.push_item_width(120)
-                cur_s2 = settings.get("num_workers_stage2_of", self.constants.DEFAULT_S2_OF_WORKERS)
-                ch, new_s2 = imgui.input_int("##S2OFWorkers", cur_s2)
-                if ch:
-                    v = max(1, new_s2)
-                    if v != cur_s2:
-                        settings.set("num_workers_stage2_of", v)
-                imgui.pop_item_width()
-                _tooltip_if_hovered(
-                    "Number of processes for Stage 2 Optical Flow gap recovery.\n"
-                    "More may be faster on high-core CPUs."
-                )
-
-    # ------- Settings: interface/perf -------
-
-    def _render_settings_interface_perf(self):
-        app = self.app
-        energy = app.energy_saver
-        settings = app.app_settings
-
-        imgui.text("Font Scale")
-        imgui.same_line()
-        imgui.push_item_width(120)
-        labels = config.constants.FONT_SCALE_LABELS
-        values = config.constants.FONT_SCALE_VALUES
-        cur_val = settings.get("global_font_scale", config.constants.DEFAULT_FONT_SCALE)
-        try:
-            cur_idx = min(range(len(values)), key=lambda i: abs(values[i] - cur_val))
-        except (ValueError, IndexError):
-            cur_idx = 3
-        ch, new_idx = imgui.combo("##GlobalFontScale", cur_idx, labels)
-        if ch:
-            nv = values[new_idx]
-            if nv != cur_val:
-                settings.set("global_font_scale", nv)
-                # Disable auto system scaling when user manually changes font scale
-                settings.set("auto_system_scaling_enabled", False)
-                energy.reset_activity_timer()
-        imgui.pop_item_width()
-        _tooltip_if_hovered("Adjust the global UI font size. Applied instantly.")
-        
-        # Automatic system scaling option
-        imgui.same_line()
-        auto_scaling_enabled = settings.get("auto_system_scaling_enabled", True)
-        ch, auto_scaling_enabled = imgui.checkbox("Auto System Scaling", auto_scaling_enabled)
-        if ch:
-            settings.set("auto_system_scaling_enabled", auto_scaling_enabled)
-            if auto_scaling_enabled:
-                # Apply system scaling immediately when enabled
-                try:
-                    from application.utils.system_scaling import apply_system_scaling_to_settings
-                    scaling_applied = apply_system_scaling_to_settings(settings)
-                    if scaling_applied:
-                        app.logger.info("System scaling applied to application settings")
-                        energy.reset_activity_timer()
-                except Exception as e:
-                    app.logger.warning(f"Failed to apply system scaling: {e}")
-            else:
-                app.logger.info("Automatic system scaling disabled")
-        _tooltip_if_hovered("Automatically detect and apply system DPI/scaling settings at startup. "
-                           "When enabled, the application will adjust the UI font size based on your "
-                           "system's display scaling settings (e.g., 125%, 150%, etc.).")
-        
-        # Manual system scaling detection button
-        if imgui.button("Detect System Scaling Now"):
-            try:
-                from application.utils.system_scaling import get_system_scaling_info, get_recommended_font_scale
-                scaling_factor, dpi, platform_name = get_system_scaling_info()
-                recommended_scale = get_recommended_font_scale(scaling_factor)
-                current_scale = settings.get("global_font_scale", config.constants.DEFAULT_FONT_SCALE)
-                
-                app.logger.info(f"System scaling detected: {scaling_factor:.2f}x ({dpi:.0f} DPI on {platform_name})")
-                app.logger.info(f"Recommended font scale: {recommended_scale} (current: {current_scale})")
-                
-                if abs(recommended_scale - current_scale) > 0.05:  # Only update if significantly different
-                    settings.set("global_font_scale", recommended_scale)
-                    # Disable auto system scaling when user manually detects scaling
-                    settings.set("auto_system_scaling_enabled", False)
-                    energy.reset_activity_timer()
-                    app.logger.info(f"Font scale updated to {recommended_scale} based on system scaling")
-                else:
-                    app.logger.info("System scaling matches current font scale setting")
-            except Exception as e:
-                app.logger.warning(f"Failed to detect system scaling: {e}")
-        _tooltip_if_hovered("Manually detect and apply current system DPI/scaling settings.")
-
-        imgui.text("Timeline Pan Speed")
-        imgui.same_line()
-        imgui.push_item_width(120)
-        cur_speed = settings.get("timeline_pan_speed_multiplier", config.constants.DEFAULT_TIMELINE_PAN_SPEED)
-        ch, new_speed = imgui.slider_int("##TimelinePanSpeed", cur_speed, config.constants.TIMELINE_PAN_SPEED_MIN, config.constants.TIMELINE_PAN_SPEED_MAX)
-        if ch and new_speed != cur_speed:
-            settings.set("timeline_pan_speed_multiplier", new_speed)
-        imgui.pop_item_width()
-        _tooltip_if_hovered("Multiplier for keyboard-based timeline panning speed.")
-
-        # --- Timeline Performance & GPU Settings ---
-        imgui.text("Timeline Performance")
-        
-        # GPU Enable/Disable
-        gpu_enabled = settings.get("timeline_gpu_enabled", False)
-        changed, gpu_enabled = imgui.checkbox("Enable GPU Rendering##GPUTimeline", gpu_enabled)
-        if changed:
-            settings.set("timeline_gpu_enabled", gpu_enabled)
-            app.energy_saver.reset_activity_timer()
-            # Reinitialize GPU if being enabled
-            if gpu_enabled and hasattr(app, '_initialize_gpu_timeline'):
-                app._initialize_gpu_timeline()
-            app.logger.info(f"GPU timeline rendering {'enabled' if gpu_enabled else 'disabled'}", extra={"status_message": True})
-        _tooltip_if_hovered(
-            "Enable GPU-accelerated timeline rendering for massive performance improvements.\n"
-            "Best for datasets with 10,000+ points. Automatic fallback to CPU if GPU fails."
-        )
-        
-        if gpu_enabled:
-            imgui.text("GPU Threshold")
-            imgui.same_line()
-            imgui.push_item_width(120)
-            gpu_threshold = settings.get("timeline_gpu_threshold_points", 5000)
-            changed, gpu_threshold = imgui.input_int("##GPUThreshold", gpu_threshold)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Minimum points to use GPU rendering (higher = use CPU more often, lower = use GPU more often)")
-            if changed:
-                gpu_threshold = max(1000, min(100000, gpu_threshold))  # Clamp between 1k-100k
-                settings.set("timeline_gpu_threshold_points", gpu_threshold)
-            imgui.pop_item_width()
-            _tooltip_if_hovered("Use GPU rendering when timeline has more than this many points")
-        
-        # Performance indicators
-        show_perf = settings.get("show_timeline_optimization_indicator", False)
-        changed, show_perf = imgui.checkbox("Show Performance Info##PerfIndicator", show_perf)
-        if changed:
-            settings.set("show_timeline_optimization_indicator", show_perf)
-        _tooltip_if_hovered("Display performance indicators on timeline (render time, optimization modes)")
-        
-        # Performance stats (if GPU enabled and available)
-        if gpu_enabled and hasattr(app, 'gpu_integration') and app.gpu_integration:
-            try:
-                stats = app.gpu_integration.get_performance_summary()
-                imgui.text(f"GPU Backend: {stats.get('current_backend', 'Unknown')}")
-                
-                if 'gpu_details' in stats:
-                    gpu_stats = stats['gpu_details']
-                    render_time = gpu_stats.get('render_time_ms', 0)
-                    points_rendered = gpu_stats.get('points_rendered', 0)
-                    imgui.text(f"Last Render: {render_time:.2f}ms, {points_rendered:,} pts")
-                    
-                    # Show GPU performance color coding
-                    if render_time < 5.0:
-                        imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 1.0, 0.0, 1.0)  # Green
-                        imgui.text("Excellent Performance")
-                    elif render_time < 16.67:  # 60fps threshold
-                        imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 1.0, 0.0, 1.0)  # Yellow
-                        imgui.text("Good Performance")
-                    else:
-                        imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.5, 0.0, 1.0)  # Orange
-                        imgui.text("High Load")
-                    imgui.pop_style_color()
-            except Exception as e:
-                imgui.text_disabled(f"GPU stats unavailable: {str(e)[:30]}...")
-        elif gpu_enabled:
-            imgui.text_disabled("GPU not available - using CPU fallback")
-
-        imgui.text("Video Decoding")
-        imgui.same_line()
-        imgui.push_item_width(180)
-        opts = app.available_ffmpeg_hwaccels
-        disp = [o.replace("videotoolbox", "VideoToolbox (macOS)") for o in opts]
-        try:
-            hw_idx = opts.index(app.hardware_acceleration_method)
-        except ValueError:
-            hw_idx = 0
-        ch, nidx = imgui.combo("HW Acceleration##HWAccelMethod", hw_idx, disp)
-        if ch:
-            method = opts[nidx]
-            if method != app.hardware_acceleration_method:
-                app.hardware_acceleration_method = method
-                settings.set("hardware_acceleration_method", method)
-                app.logger.info("Hardware acceleration set to: %s. Reload video to apply." % method, extra={"status_message": True})
-        imgui.pop_item_width()
-        _tooltip_if_hovered("Select FFmpeg hardware acceleration. Requires video reload to apply.")
-
-        imgui.text("Energy Saver Mode:")
-        ch_es, v_es = imgui.checkbox("Enable##EnableES", energy.energy_saver_enabled)
-        if ch_es and v_es != energy.energy_saver_enabled:
-            energy.energy_saver_enabled = v_es
-            settings.set("energy_saver_enabled", v_es)
-
-        if energy.energy_saver_enabled:
-            imgui.push_item_width(100)
-            imgui.text("Normal FPS")
-            imgui.same_line()
-            nf = int(energy.main_loop_normal_fps_target)
-            ch, val = imgui.input_int("##NormalFPS", nf)
-            if ch:
-                v = max(config.constants.ENERGY_SAVER_NORMAL_FPS_MIN, val)
-                if v != nf:
-                    energy.main_loop_normal_fps_target = v
-                    settings.set("main_loop_normal_fps_target", v)
-
-            imgui.text("Idle After (s)")
-            imgui.same_line()
-            th = int(energy.energy_saver_threshold_seconds)
-            ch, val = imgui.input_int("##ESThreshold", th)
-            if ch:
-                v = float(max(config.constants.ENERGY_SAVER_THRESHOLD_MIN, val))
-                if v != energy.energy_saver_threshold_seconds:
-                    energy.energy_saver_threshold_seconds = v
-                    settings.set("energy_saver_threshold_seconds", v)
-
-            imgui.text("Idle FPS")
-            imgui.same_line()
-            ef = int(energy.energy_saver_fps)
-            ch, val = imgui.input_int("##ESFPS", ef)
-            if ch:
-                v = max(config.constants.ENERGY_SAVER_IDLE_FPS_MIN, val)
-                if v != ef:
-                    energy.energy_saver_fps = v
-                    settings.set("energy_saver_fps", v)
-            imgui.pop_item_width()
-
-    # ------- Settings: file/output -------
-
-    def _render_settings_file_output(self):
-        settings = self.app.app_settings
-
-        imgui.text("Output Folder:")
-        imgui.push_item_width(-1)
-        cur = settings.get("output_folder_path", "output")
-        ch, new_val = imgui.input_text("##OutputFolder", cur, 256)
-        if ch and new_val != cur:
-            settings.set("output_folder_path", new_val)
-        imgui.pop_item_width()
-        _tooltip_if_hovered("Root folder for all generated files (projects, analysis data, etc.).")
-
-        imgui.text("Funscript Output:")
-        ch, v = imgui.checkbox(
-            "Autosave final script next to video",
-            settings.get("autosave_final_funscript_to_video_location", True),
-        )
-        if ch:
-            settings.set("autosave_final_funscript_to_video_location", v)
-
-        ch, v = imgui.checkbox("Generate .roll file (from Timeline 2)", settings.get("generate_roll_file", True))
-        if ch:
-            settings.set("generate_roll_file", v)
-
-        ch, v = imgui.checkbox("Export as .funscript (skip .raw prefix)", settings.get("export_raw_as_funscript", False))
-        if ch:
-            settings.set("export_raw_as_funscript", v)
-        _tooltip_if_hovered("When no post-processing is applied, export directly as .funscript\ninstead of .raw.funscript next to the video file.")
-
-        # Point simplification
-        cur_simplify = settings.get("funscript_point_simplification_enabled", True)
-        ch, nv_simplify = imgui.checkbox("On the fly funscript simplification##EnablePointSimplify", cur_simplify)
-        if ch and nv_simplify != cur_simplify:
-            settings.set("funscript_point_simplification_enabled", nv_simplify)
-            # Apply to active funscript (used during live tracking)
-            if self.app.processor and self.app.processor.tracker and self.app.processor.tracker.funscript:
-                self.app.processor.tracker.funscript.enable_point_simplification = nv_simplify
-                self.app.logger.info(f"Point simplification {'enabled' if nv_simplify else 'disabled'} for active funscript")
-        _tooltip_if_hovered("Remove redundant points on-the-fly (collinear/flat sections)\nReduces file size by 50-80% with negligible CPU overhead")
-
-        imgui.text("Batch Processing Default:")
-        cur = settings.get("batch_mode_overwrite_strategy", 0)
-        if imgui.radio_button("Process All (skips own matching version)", cur == 0):
-            if cur != 0:
-                settings.set("batch_mode_overwrite_strategy", 0)
-        if imgui.radio_button("Skip if Funscript Exists", cur == 1):
-            if cur != 1:
-                settings.set("batch_mode_overwrite_strategy", 1)
-
-    # ------- Settings: logging/autosave -------
-
-    def _render_settings_logging_autosave(self):
-        app = self.app
-        settings = app.app_settings
-
-        imgui.text("Logging Level")
-        imgui.same_line()
-        imgui.push_item_width(150)
-        levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        try:
-            idx = levels.index(app.logging_level_setting.upper())
-        except ValueError:
-            idx = 1
-        ch, nidx = imgui.combo("##LogLevel", idx, levels)
-        if ch:
-            new_level = levels[nidx]
-            if new_level != app.logging_level_setting.upper():
-                app.set_application_logging_level(new_level)
-        imgui.pop_item_width()
-
-        imgui.text("Project Autosave:")
-        ch, v = imgui.checkbox(
-            "Enable##EnableAutosave", settings.get("autosave_enabled", True)
-        )
-        if ch:
-            settings.set("autosave_enabled", v)
-
-        if settings.get("autosave_enabled"):
-            imgui.push_item_width(100)
-            imgui.text("Interval (s)")
-            imgui.same_line()
-            interval = settings.get("autosave_interval_seconds", 300)
-            ch_int, new_interval = imgui.input_int("##AutosaveInterval", interval)
-            if ch_int:
-                nv = max(30, new_interval)
-                if nv != interval:
-                    settings.set("autosave_interval_seconds", nv)
-            imgui.pop_item_width()
-
-# ------- Execution/progress -------
-
-    def _render_execution_progress_display(self):
-        app = self.app
-        stage_proc = app.stage_processor
-        app_state = app.app_state_ui
-        mode = app_state.selected_tracker_name
-
-        if self._is_offline_tracker(mode):
-            self._render_stage_progress_ui(stage_proc)
-            return
-
-        if self._is_live_tracker(mode):
-            # Tracker Status block removed
-
-            tracker_info = app.tracker.get_tracker_info() if app.tracker else None
-            if tracker_info and getattr(tracker_info, 'requires_intervention', False):
-                self._render_user_roi_controls_for_run_tab()
-            return
-
-# ------- Live tracker settings -------
-
-    def _render_live_tracker_settings(self):
-        app = self.app
-        tr = app.tracker
-        if not tr:
-            imgui.text_disabled("Tracker not initialized.")
-            return
-
-        settings = app.app_settings
-
-        imgui.indent()
-        if imgui.collapsing_header("Detection & ROI Definition##ROIDetectionTrackerMenu")[0]:
-            cur_conf = settings.get("live_tracker_confidence_threshold")
-            ch, new_conf = imgui.slider_float("Obj. Confidence##ROIConfTrackerMenu", cur_conf, 0.1, 0.95, "%.2f")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Minimum confidence for object detection (higher = fewer false positives, lower = more detections)")
-            if ch and new_conf != cur_conf:
-                settings.set("live_tracker_confidence_threshold", new_conf)
-                tr.confidence_threshold = new_conf
-
-            cur_pad = settings.get("live_tracker_roi_padding")
-            ch, new_pad = imgui.input_int("ROI Padding##ROIPadTrackerMenu", cur_pad)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Pixels to expand the region of interest beyond detected object (larger = more context)")
-            if ch:
-                v = max(0, new_pad)
-                if v != cur_pad:
-                    settings.set("live_tracker_roi_padding", v)
-                    tr.roi_padding = v
-
-            cur_int = settings.get("live_tracker_roi_update_interval")
-            ch, new_int = imgui.input_int("ROI Update Interval (frames)##ROIIntervalTrackerMenu", cur_int)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("How often to run object detection (higher = better performance, lower = more responsive tracking)")
-            if ch:
-                v = max(1, new_int)
-                if v != cur_int:
-                    settings.set("live_tracker_roi_update_interval", v)
-                    tr.roi_update_interval = v
-
-            cur_sm = settings.get("live_tracker_roi_smoothing_factor")
-            ch, new_sm = imgui.slider_float("ROI Smoothing Factor##ROISmoothTrackerMenu", cur_sm, 0.0, 1.0, "%.2f")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Smooths ROI position changes between frames (0=instant changes, 1=maximum smoothing)")
-            if ch and new_sm != cur_sm:
-                settings.set("live_tracker_roi_smoothing_factor", new_sm)
-                tr.roi_smoothing_factor = new_sm
-
-            cur_persist = settings.get("live_tracker_roi_persistence_frames")
-            ch, new_pf = imgui.input_int("ROI Persistence (frames)##ROIPersistTrackerMenu", cur_persist)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("How many frames to keep tracking after losing detection (0=stop immediately, higher=keep tracking longer)")
-            if ch:
-                v = max(0, new_pf)
-                if v != cur_persist:
-                    settings.set("live_tracker_roi_persistence_frames", v)
-                    tr.max_frames_for_roi_persistence = v
-
-        if imgui.collapsing_header("Optical Flow##ROIFlowTrackerMenu")[0]:
-            cur_sparse = settings.get("live_tracker_use_sparse_flow")
-            ch, new_sparse = imgui.checkbox("Use Sparse Optical Flow##ROISparseFlowTrackerMenu", cur_sparse)
-            if ch:
-                settings.set("live_tracker_use_sparse_flow", new_sparse)
-                tr.use_sparse_flow = new_sparse
-
-            imgui.text("DIS Dense Flow Settings:")
-            if cur_sparse:
-                imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-                imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-            presets = ["ULTRAFAST", "FAST", "MEDIUM"]
-            cur_p = settings.get("live_tracker_dis_flow_preset").upper()
-            try:
-                p_idx = presets.index(cur_p)
-            except ValueError:
-                p_idx = 0
-            ch, nidx = imgui.combo("DIS Preset##ROIDISPresetTrackerMenu", p_idx, presets)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Optical flow quality preset (ULTRAFAST=best performance, MEDIUM=best quality)")
-            if ch:
-                nv = presets[nidx]
-                if nv != cur_p:
-                    settings.set("live_tracker_dis_flow_preset", nv)
-                    tr.update_dis_flow_config(preset=nv)
-
-            cur_scale = settings.get("live_tracker_dis_finest_scale")
-            ch, new_scale = imgui.input_int("DIS Finest Scale (0-10, 0=auto)##ROIDISFineScaleTrackerMenu", cur_scale)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Optical flow scale detail level (0=auto, lower=more detail but slower)")
-            if ch and new_scale != cur_scale:
-                settings.set("live_tracker_dis_finest_scale", new_scale)
-                tr.update_dis_flow_config(finest_scale=new_scale)
-
-            if cur_sparse:
-                imgui.pop_style_var()
-                imgui.internal.pop_item_flag()
-
-            if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu"):
-                cur_sens = settings.get("live_tracker_sensitivity")
-                ch, ns = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu", cur_sens, 0.0, 100.0, "%.1f")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("How responsive the output is to motion changes (higher = more sensitive to small movements)")
-                if ch and ns != cur_sens:
-                    settings.set("live_tracker_sensitivity", ns)
-                    tr.sensitivity = ns
-
-                cur_amp = settings.get("live_tracker_base_amplification")
-                ch, na = imgui.slider_float("Base Amplification##ROIBaseAmpTrackerMenu", cur_amp, 0.1, 5.0, "%.2f")
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("Multiplier for output range (higher = more movement, lower = gentler motion)")
-                if ch:
-                    v = max(0.1, na)
-                    if v != cur_amp:
-                        settings.set("live_tracker_base_amplification", v)
-                        tr.base_amplification_factor = v
-
-                imgui.text("Class-Specific Amplification Multipliers:")
-                cur = settings.get("live_tracker_class_amp_multipliers", {})
-                changed = False
-
-                face = cur.get("face", 1.0)
-                ch, nv = imgui.slider_float("Face Amp. Mult.##ROIFaceAmpTrackerMenu", face, 0.1, 5.0, "%.2f")
-                if ch:
-                    cur["face"] = max(0.1, nv)
-                    changed = True
-
-                hand = cur.get("hand", 1.0)
-                ch, nv = imgui.slider_float("Hand Amp. Mult.##ROIHandAmpTrackerMenu", hand, 0.1, 5.0, "%.2f")
-                if ch:
-                    cur["hand"] = max(0.1, nv)
-                    changed = True
-
-                if changed:
-                    settings.set("live_tracker_class_amp_multipliers", cur)
-                    tr.class_specific_amplification_multipliers = cur
-
-            cur_smooth = settings.get("live_tracker_flow_smoothing_window")
-            ch, nv = imgui.input_int("Flow Smoothing Window##ROIFlowSmoothWinTrackerMenu", cur_smooth)
-            if ch:
-                v = max(1, nv)
-                if v != cur_smooth:
-                    settings.set("live_tracker_flow_smoothing_window", v)
-                    tr.flow_history_window_smooth = v
-
-            imgui.text("Output Delay (frames):")
-            cur_delay = settings.get("funscript_output_delay_frames")
-            ch, nd = imgui.slider_int("##OutputDelayFrames", cur_delay, 0, 20)
-            if ch and nd != cur_delay:
-                settings.set("funscript_output_delay_frames", nd)
-                app.calibration.funscript_output_delay_frames = nd
-                app.calibration.update_tracker_delay_params()
-
-        imgui.unindent()
-
-# ------- Oscillation detector -------
-
-    def _render_calibration_window(self, calibration_mgr, app_state):
-        """Renders the dedicated latency calibration window."""
-        window_title = "Latency Calibration"
-        flags = imgui.WINDOW_ALWAYS_AUTO_RESIZE
-        # In fixed mode, embed it in the main panel area without a title bar
-        if app_state.ui_layout_mode == 'fixed':
-            imgui.begin("Modular Control Panel##LeftControlsModular", flags=imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE)
-            self._render_latency_calibration(calibration_mgr)
-            imgui.end()
-        else: # Floating mode
-            if imgui.begin(window_title, closable=False, flags=flags):
-                self._render_latency_calibration(calibration_mgr)
-                imgui.end()
-
-    def _render_start_stop_buttons(self, stage_proc, fs_proc, event_handlers):
-        is_batch_mode = self.app.is_batch_processing_active
-        is_analysis_running = stage_proc.full_analysis_active
-
-        # A "Live Tracking" session is only running if the processor is active
-        # AND tracker processing has been explicitly enabled, OR if the tracker itself is active
-        is_live_tracking_running = (self.app.processor and
-                                    self.app.processor.is_processing and
-                                    self.app.processor.enable_tracker_processing) or \
-                                   (self.app.tracker and self.app.tracker.tracking_active)
-
-        is_setting_roi = self.app.is_setting_user_roi_mode
-        is_any_process_active = is_batch_mode or is_analysis_running or is_live_tracking_running or is_setting_roi
-
-        if is_batch_mode:
-            is_paused = self.app.is_batch_paused
-            # Header
-            if is_paused:
-                imgui.text_ansi_colored("--- BATCH PAUSED ---", 1.0, 1.0, 0.3)  # yellow
-            else:
-                imgui.text_ansi_colored("--- BATCH PROCESSING ---", 1.0, 0.7, 0.3)  # orange
-
-            total_videos = len(self.app.batch_video_paths)
-            current_idx = self.app.current_batch_video_index
-
-            # Overall batch progress bar
-            if total_videos > 0:
-                batch_frac = (current_idx + 1) / total_videos if current_idx >= 0 else 0.0
-                imgui.text(f"Video {current_idx + 1} of {total_videos}")
-                imgui.progress_bar(batch_frac, (-1, 0), f"{current_idx + 1}/{total_videos}")
-
-            # Current video name
-            if 0 <= current_idx < total_videos:
-                current_video_name = os.path.basename(self.app.batch_video_paths[current_idx]["path"])
-                imgui.text_wrapped(current_video_name)
-
-            imgui.spacing()
-
-            # Per-video progress (reuse simple progress display)
-            if stage_proc.full_analysis_active:
-                self._render_simple_progress_display()
-
-            # Adaptive tuning status
-            adaptive_state = self.app.adaptive_tuning_state
-            if adaptive_state is not None:
-                imgui.spacing()
-                if adaptive_state.is_converged:
-                    imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.9, 0.3, 1.0)  # green
-                    imgui.text(f"Tuning converged: P={adaptive_state.best_producers}/C={adaptive_state.best_consumers} ({adaptive_state.best_fps:.0f} FPS)")
-                    imgui.pop_style_color()
-                else:
-                    imgui.push_style_color(imgui.COLOR_TEXT, 0.3, 0.8, 0.3, 1.0)  # green
-                    imgui.text(f"Tuning: P={adaptive_state.current_producers}/C={adaptive_state.current_consumers}")
-                    imgui.pop_style_color()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(adaptive_state.status_message)
-                imgui.spacing()
-
-            # Pause/Resume + Abort buttons side by side
-            avail_w = imgui.get_content_region_available()[0]
-            btn_w = (avail_w - imgui.get_style().item_spacing[0]) / 2
-            if is_paused:
-                with primary_button_style():
-                    if imgui.button("Resume", width=btn_w):
-                        self.app.resume_batch_processing()
-            else:
-                if imgui.button("Pause", width=btn_w):
-                    self.app.pause_batch_processing()
-            imgui.same_line()
-            with destructive_button_style():
-                if imgui.button("Abort Batch", width=btn_w):
-                    self.app.abort_batch_processing()
-            return
-
-        selected_mode = self.app.app_state_ui.selected_tracker_name
-        button_width = (imgui.get_content_region_available()[0] - imgui.get_style().item_spacing[0]) / 2
-
-        if is_any_process_active:
-            status_text = "Processing..."
-            if is_analysis_running:
-                status_text = "Aborting..." if stage_proc.current_analysis_stage == -1 else f"Stage {stage_proc.current_analysis_stage} Running..."
-            elif is_live_tracking_running:
-                # This logic is now correctly guarded by the new is_live_tracking_running flag
-                if self.app.processor.pause_event.is_set():
-                    if imgui.button("Resume Tracking", width=button_width):
-                        self.app.processor.start_processing()
-                        if not self.app.tracker.tracking_active:
-                            self.app.tracker.start_tracking()
-                else:
-                    if imgui.button("Pause Tracking", width=button_width):
-                        self.app.processor.pause_processing()
-
-                status_text = None
-            elif is_setting_roi:
-                status_text = "Setting ROI..."
-            if status_text: imgui.button(status_text, width=button_width)
-        else:
-            start_text = "Start"
-            handler = None
-            
-            # Check for resumable tasks
-            resumable_checkpoint = None
-            if self._is_offline_tracker(selected_mode) and self.app.file_manager.video_path:
-                resumable_checkpoint = stage_proc.can_resume_video(self.app.file_manager.video_path)
-            
-            if self._is_offline_tracker(selected_mode):
-                start_text = "Start AI Analysis (Range)" if fs_proc.scripting_range_active else "Start Full AI Analysis"
-                handler = event_handlers.handle_start_ai_cv_analysis
-            elif self._is_live_tracker(selected_mode):
-                imgui.new_line()
-                start_text = "Start Live Tracking (Range)" if fs_proc.scripting_range_active else "Start Live Tracking"
-                handler = event_handlers.handle_start_live_tracker_click
-            
-            # Show resume button if checkpoint exists
-            if resumable_checkpoint:
-                button_width_third = (imgui.get_content_region_available()[0] - 2 * imgui.get_style().item_spacing[0]) / 3
-
-                # Resume button (PRIMARY - positive action)
-                with primary_button_style():
-                    if imgui.button(f"Resume ({resumable_checkpoint.progress_percentage:.0f}%)", width=button_width_third):
-                        if stage_proc.start_resume_from_checkpoint(resumable_checkpoint):
-                            self.app.logger.info("Resumed processing from checkpoint", extra={'status_message': True})
-
-                imgui.same_line()
-
-                # Start fresh button (PRIMARY - positive action)
-                with primary_button_style():
-                    if imgui.button("Start Fresh", width=button_width_third):
-                        # Delete checkpoint and start fresh
-                        stage_proc.delete_checkpoint_for_video(self.app.file_manager.video_path)
-                        if handler: handler()
-
-                imgui.same_line()
-
-                # Delete checkpoint button (DESTRUCTIVE - deletes data)
-                with destructive_button_style():
-                    if imgui.button("Clear Resume", width=button_width_third):
-                        stage_proc.delete_checkpoint_for_video(self.app.file_manager.video_path)
-
-            else:
-                # Normal start button (PRIMARY - positive action)
-                with primary_button_style():
-                    if imgui.button(start_text, width=button_width):
-                        if self._is_live_tracker(selected_mode):
-                            self._start_live_tracking()
-                        elif handler: handler()
-
-        imgui.same_line()
-        if not is_any_process_active:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-        # Abort/Stop button (DESTRUCTIVE - stops process)
-        with destructive_button_style():
-            if imgui.button("Abort/Stop Process##AbortGeneral", width=button_width):
-                event_handlers.handle_abort_process_click()
-
-        if not is_any_process_active:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
-
-        # Chapter overwrite setting (only show for offline analysis)
-        if self._is_offline_tracker(selected_mode) and not is_any_process_active:
-            imgui.spacing()
-            overwrite_setting = self.app.app_settings.get("overwrite_chapters_on_analysis", False)
-            clicked, new_value = imgui.checkbox("Overwrite chapters during analysis", overwrite_setting)
-            if clicked:
-                self.app.app_settings.set("overwrite_chapters_on_analysis", new_value)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("When checked, analysis will replace all existing chapters.\nWhen unchecked (default), existing chapters are preserved.")
-
-    def _render_stage_progress_ui(self, stage_proc):
-        is_analysis_running = stage_proc.full_analysis_active
-        selected_mode = self.app.app_state_ui.selected_tracker_name
-
-        active_progress_color = self.ControlPanelColors.ACTIVE_PROGRESS # Vibrant blue for active
-        completed_progress_color = self.ControlPanelColors.COMPLETED_PROGRESS # Vibrant green for completed
-
-        # Stage 1
-        imgui.text("Stage 1: YOLO Object Detection")
-        if is_analysis_running and stage_proc.current_analysis_stage == 1:
-            imgui.text(f"Time: {stage_proc.stage1_time_elapsed_str} | ETA: {stage_proc.stage1_eta_str} | Avg Speed:  {stage_proc.stage1_processing_fps_str}")
-            imgui.text_wrapped(f"Progress: {stage_proc.stage1_progress_label}")
-
-            # Apply active color
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
-            imgui.progress_bar(stage_proc.stage1_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage1_progress_value * 100:.0f}% | {stage_proc.stage1_instant_fps_str}" if stage_proc.stage1_progress_value >= 0 else "")
-            imgui.pop_style_color()
-
-            # Per-stage timing breakdown
-            decode_ms = getattr(stage_proc, 'stage1_decode_ms', 0.0)
-            unwarp_ms = getattr(stage_proc, 'stage1_unwarp_ms', 0.0)
-            yolo_det_ms = getattr(stage_proc, 'stage1_yolo_det_ms', 0.0)
-            yolo_pose_ms = getattr(stage_proc, 'stage1_yolo_pose_ms', 0.0)
-            if decode_ms > 0 or yolo_det_ms > 0:
-                timing_parts = [f"Decode: {decode_ms:.1f}ms"]
-                if unwarp_ms > 0:
-                    timing_parts.append(f"Unwarp: {unwarp_ms:.1f}ms")
-                timing_parts.append(f"YOLO Det: {yolo_det_ms:.1f}ms")
-                if yolo_pose_ms > 0:
-                    timing_parts.append(f"Pose: {yolo_pose_ms:.1f}ms")
-                imgui.text(" | ".join(timing_parts))
-
-            frame_q_size = stage_proc.stage1_frame_queue_size
-            frame_q_max = self.constants.STAGE1_FRAME_QUEUE_MAXSIZE
-            frame_q_fraction = frame_q_size / frame_q_max if frame_q_max > 0 else 0.0
-            suggestion_message, bar_color = "", CurrentTheme.GREEN[:3]
-            if frame_q_fraction > 0.9:
-                bar_color, suggestion_message = CurrentTheme.RED_LIGHT[:3], "Suggestion: Add consumer if resources allow"
-            elif frame_q_fraction > 0.2:
-                bar_color, suggestion_message = CurrentTheme.ORANGE[:3], "Balanced"
-            else:
-                bar_color, suggestion_message = CurrentTheme.GREEN[:3], "Suggestion: Lessen consumers or add producer"
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *bar_color)
-            imgui.progress_bar(frame_q_fraction, size=(-1, 0), overlay=f"Frame Queue: {frame_q_size}/{frame_q_max}")
-            imgui.pop_style_color()
-            if suggestion_message: imgui.text(suggestion_message)
-
-            if getattr(stage_proc, 'save_preprocessed_video', False):
-                # The encoding queue (OS pipe buffer) isn't directly measurable.
-                # However, its fill rate is entirely dependent on the producer, which is
-                # throttled by the main frame queue. Therefore, the main frame queue's
-                # size is an excellent proxy for the encoding backpressure.
-                encoding_q_fraction = frame_q_fraction # Use the same fraction
-                encoding_bar_color = bar_color # Use the same color logic
-
-                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *encoding_bar_color)
-                imgui.progress_bar(encoding_q_fraction, size=(-1, 0), overlay=f"Encoding Queue: ~{frame_q_size}/{frame_q_max}")
-                imgui.pop_style_color()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        "This is an estimate of the video encoding buffer.\n"
-                        "It is based on the main analysis frame queue, which acts as a throttle for the encoder."
-                    )
-
-            imgui.text(f"Result Queue Size: ~{stage_proc.stage1_result_queue_size}")
-        elif stage_proc.stage1_final_elapsed_time_str:
-            imgui.text_wrapped(f"Last Run: {stage_proc.stage1_final_elapsed_time_str} | Avg Speed: {stage_proc.stage1_final_fps_str or 'N/A'}")
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
-            imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
-            imgui.pop_style_color()
-        else:
-            imgui.text_wrapped(f"Status: {stage_proc.stage1_status_text}")
-
-        # Stage 2
-        s2_title = "Stage 2: Contact Analysis & Funscript" if self._is_stage2_tracker(selected_mode) else "Stage 2: Segmentation"
-        imgui.text(s2_title)
-        if is_analysis_running and stage_proc.current_analysis_stage == 2:
-            imgui.text_wrapped(f"Main: {stage_proc.stage2_main_progress_label}")
-
-            # Apply active color
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
-            imgui.progress_bar(stage_proc.stage2_main_progress_value, size=(-1, 0), overlay=f"{stage_proc.stage2_main_progress_value * 100:.0f}%" if stage_proc.stage2_main_progress_value >= 0 else "")
-            imgui.pop_style_color()
-
-            # Show this bar only when a sub-task is actively reporting progress.
-            is_sub_task_active = stage_proc.stage2_sub_progress_value > 0.0 and stage_proc.stage2_sub_progress_value < 1.0
-            if is_sub_task_active:
-                # Add timing gauges if the data is available
-                if stage_proc.stage2_sub_time_elapsed_str:
-                    imgui.text(f"Time: {stage_proc.stage2_sub_time_elapsed_str} | ETA: {stage_proc.stage2_sub_eta_str} | Speed: {stage_proc.stage2_sub_processing_fps_str}")
-
-                sub_progress_color = self.ControlPanelColors.SUB_PROGRESS
-                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *sub_progress_color)
-
-                # Construct the overlay text with a percentage.
-                overlay_text = f"{stage_proc.stage2_sub_progress_value * 100:.0f}%"
-                imgui.progress_bar(stage_proc.stage2_sub_progress_value, size=(-1, 0), overlay=overlay_text)
-                imgui.pop_style_color()
-
-        elif stage_proc.stage2_final_elapsed_time_str:
-            imgui.text_wrapped(f"Status: Completed in {stage_proc.stage2_final_elapsed_time_str}")
-            imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
-            imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
-            imgui.pop_style_color()
-        else:
-            imgui.text_wrapped(f"Status: {stage_proc.stage2_status_text}")
-
-        # Stage 3
-        if self._is_stage3_tracker(selected_mode) or self._is_mixed_stage3_tracker(selected_mode):
-            if self._is_mixed_stage3_tracker(selected_mode):
-                imgui.text("Stage 3: Mixed Processing")
-            else:
-                imgui.text("Stage 3: Per-Segment Optical Flow")
-            if is_analysis_running and stage_proc.current_analysis_stage == 3:
-                imgui.text(f"Time: {stage_proc.stage3_time_elapsed_str} | ETA: {stage_proc.stage3_eta_str} | Speed: {stage_proc.stage3_processing_fps_str}")
-
-                # Display chapter and chunk progress on separate lines for clarity
-                imgui.text_wrapped(stage_proc.stage3_current_segment_label) # e.g., "Chapter: 1/5 (Cowgirl)"
-                imgui.text_wrapped(stage_proc.stage3_overall_progress_label) # e.g., "Overall Task: Chunk 12/240"
-
-                # Apply active color to both S3 progress bars
-                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *active_progress_color)
-
-                # Overall Progress bar remains tied to total frames processed
-                overlay_text = f"{stage_proc.stage3_overall_progress_value * 100:.0f}%"
-                imgui.progress_bar(stage_proc.stage3_overall_progress_value, size=(-1, 0), overlay=overlay_text)
-
-                imgui.pop_style_color()
-
-            elif stage_proc.stage3_final_elapsed_time_str:
-                imgui.text_wrapped(f"Last Run: {stage_proc.stage3_final_elapsed_time_str} | Avg Speed: {stage_proc.stage3_final_fps_str or 'N/A'}")
-                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *completed_progress_color)
-                imgui.progress_bar(1.0, size=(-1, 0), overlay="Completed")
-                imgui.pop_style_color()
-            else:
-                imgui.text_wrapped(f"Status: {stage_proc.stage3_status_text}")
-        imgui.spacing()
-
-    # ------- Common actions -------
-    def _start_live_tracking(self):
-        """Unified start flow for all live tracking modes."""
-        try:
-            self.app.event_handlers.handle_start_live_tracker_click()
-        except Exception as e:
-            if hasattr(self.app, 'logger'):
-                self.app.logger.error(f"Failed to start live tracking: {e}")
-
-    def _render_tracking_axes_mode(self, stage_proc):
-        """Renders UI elements for tracking axis mode."""
-        axis_modes = ["Both Axes (Up/Down + Left/Right)", "Up/Down Only (Vertical)", "Left/Right Only (Horizontal)"]
-        current_axis_mode_idx = 0
-        if self.app.tracking_axis_mode == "vertical":
-            current_axis_mode_idx = 1
-        elif self.app.tracking_axis_mode == "horizontal":
-            current_axis_mode_idx = 2
-
-        processor = self.app.processor
-        disable_axis_controls = (
-            stage_proc.full_analysis_active
-            or self.app.is_setting_user_roi_mode
-            or (processor and processor.is_processing and not processor.pause_event.is_set())
-        )
-        if disable_axis_controls:
-            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
-            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-
-        axis_mode_changed, new_axis_mode_idx = imgui.combo("##TrackingAxisModeComboGlobal", current_axis_mode_idx, axis_modes)
-        if axis_mode_changed:
-            old_mode = self.app.tracking_axis_mode
-            if new_axis_mode_idx == 0:
-                self.app.tracking_axis_mode = "both"
-            elif new_axis_mode_idx == 1:
-                self.app.tracking_axis_mode = "vertical"
-            else:
-                self.app.tracking_axis_mode = "horizontal"
-            if old_mode != self.app.tracking_axis_mode:
-                self.app.project_manager.project_dirty = True
-                self.app.logger.info(f"Tracking axis mode set to: {self.app.tracking_axis_mode}", extra={'status_message': True})
-                self.app.app_settings.set("tracking_axis_mode", self.app.tracking_axis_mode) # Auto-save
-                self.app.energy_saver.reset_activity_timer()
-
-        if self.app.tracking_axis_mode != "both":
-            imgui.text("Output Single Axis To:")
-            output_targets = ["Timeline 1 (Primary)", "Timeline 2 (Secondary)"]
-            current_output_target_idx = 1 if self.app.single_axis_output_target == "secondary" else 0
-
-            output_target_changed, new_output_target_idx = imgui.combo("##SingleAxisOutputComboGlobal", current_output_target_idx, output_targets)
-            if output_target_changed:
-                old_target = self.app.single_axis_output_target
-                self.app.single_axis_output_target = "secondary" if new_output_target_idx == 1 else "primary"
-                if old_target != self.app.single_axis_output_target:
-                    self.app.project_manager.project_dirty = True
-                    self.app.logger.info(f"Single axis output target set to: {self.app.single_axis_output_target}", extra={'status_message': True})
-                    self.app.app_settings.set("single_axis_output_target", self.app.single_axis_output_target) # Auto-save
-                    self.app.energy_saver.reset_activity_timer()
-        if disable_axis_controls:
-            imgui.pop_style_var()
-            imgui.internal.pop_item_flag()
-
-    def _render_oscillation_detector_settings(self):
-        app = self.app
-        settings = app.app_settings
-
-        imgui.text("Analysis Grid Size")
-        _tooltip_if_hovered(
-            "Finer grids (higher numbers) are more precise but use more CPU.\n"
-            "8=Very Coarse\n"
-            "20=Balanced\n"
-            "40=Fine\n"
-            "80=Very Fine"
-        )
-
-        cur_grid = settings.get("oscillation_detector_grid_size", 20)
-        imgui.push_item_width(200)
-        ch, nv = imgui.slider_int("##GridSize", cur_grid, 8, 80)
-        if ch:
-            valid = [8, 10, 16, 20, 32, 40, 64, 80]
-            closest = min(valid, key=lambda x: abs(x - nv))
-            if closest != cur_grid:
-                settings.set("oscillation_detector_grid_size", closest)
-                tr = app.tracker
-                if tr:
-                    tr.update_oscillation_grid_size()
-        imgui.same_line()
-        if imgui.button("Reset##ResetGridSize"):
-            default_grid = 20
-            if cur_grid != default_grid:
-                settings.set("oscillation_detector_grid_size", default_grid)
-                tr = app.tracker
-                if tr:
-                    tr.update_oscillation_grid_size()
-        imgui.pop_item_width()
-
-        imgui.text("Detection Sensitivity")
-        _tooltip_if_hovered(
-            "Adjusts how sensitive the oscillation detector is to motion.\n"
-            "Lower values = less sensitive, Higher values = more sensitive"
-        )
-
-        cur_sens = settings.get("oscillation_detector_sensitivity", 1.0)
-        imgui.push_item_width(200)
-        ch, nv = imgui.slider_float("##Sensitivity", cur_sens, 0.1, 3.0, "%.2f")
-        if ch and nv != cur_sens:
-            settings.set("oscillation_detector_sensitivity", nv)
-            tr = app.tracker
-            if tr:
-                tr.update_oscillation_sensitivity()
-        imgui.same_line()
-        if imgui.button("Reset##ResetSensitivity"):
-            default_sens = 1.0
-            if cur_sens != default_sens:
-                settings.set("oscillation_detector_sensitivity", default_sens)
-                tr = app.tracker
-                if tr:
-                    tr.update_oscillation_sensitivity()
-        imgui.pop_item_width()
-
-        imgui.text("Oscillation Area Selection")
-        _tooltip_if_hovered("Select a specific area for oscillation detection instead of the full frame.")
-
-        tr = app.tracker
-        has_area = tr and tr.oscillation_area_fixed
-        btn_count = 2 if has_area else 1
-        avail_w = imgui.get_content_region_available_width()
-        btn_w = (
-            (avail_w - imgui.get_style().item_spacing.x * (btn_count - 1)) / btn_count
-            if btn_count > 1
-            else -1
-        )
-
-        set_text = "Cancel Set Oscillation Area" if app.is_setting_oscillation_area_mode else "Set Oscillation Area"
-        # Set Oscillation Area button - PRIMARY when starting, DESTRUCTIVE when canceling
-        if app.is_setting_oscillation_area_mode:
-            with destructive_button_style():
-                if imgui.button("%s##SetOscillationArea" % set_text, width=btn_w):
-                    app.exit_set_oscillation_area_mode()
-        else:
-            with primary_button_style():
-                if imgui.button("%s##SetOscillationArea" % set_text, width=btn_w):
-                    app.enter_set_oscillation_area_mode()
-
-        if has_area:
-            imgui.same_line()
-            # Clear Oscillation Area button (DESTRUCTIVE - clears user data)
-            with destructive_button_style():
-                if imgui.button("Clear Oscillation Area##ClearOscillationArea", width=btn_w):
-                    tr.clear_oscillation_area_and_point()
-                if hasattr(app, "is_setting_oscillation_area_mode"):
-                    app.is_setting_oscillation_area_mode = False
-                gi = getattr(app, "gui_instance", None)
-                if gi and hasattr(gi, "video_display_ui"):
-                    v = gi.video_display_ui
-                    v.is_drawing_oscillation_area = False
-                    v.drawn_oscillation_area_video_coords = None
-                    v.waiting_for_oscillation_point_click = False
-                    v.oscillation_area_draw_start_screen_pos = (0, 0)
-                    v.oscillation_area_draw_current_screen_pos = (0, 0)
-                app.logger.info("Oscillation area cleared.", extra={"status_message": True})
-        # Overlays
-        imgui.text("Overlays")
-        _tooltip_if_hovered("Visualization layers for the Oscillation Detector.")
-        cur_overlay = settings.get("oscillation_show_overlay", getattr(tr, "show_masks", False))
-        ch, nv_overlay = imgui.checkbox("Show Oscillation Overlay##OscShowOverlay", cur_overlay)
-        if ch and nv_overlay != cur_overlay:
-            settings.set("oscillation_show_overlay", nv_overlay)
-            if hasattr(tr, "show_masks"):
-                tr.show_masks = nv_overlay
-        # Default ROI rectangle to enabled on first launch (True)
-        cur_roi_overlay = settings.get("oscillation_show_roi_overlay", True)
-        has_osc_area = bool(tr and getattr(tr, "oscillation_area_fixed", None))
-        with _DisabledScope(not has_osc_area):
-            ch, nv_roi_overlay = imgui.checkbox("Show ROI Rectangle##OscShowROIOverlay", cur_roi_overlay)
-        if has_osc_area and ch and nv_roi_overlay != cur_roi_overlay:
-            settings.set("oscillation_show_roi_overlay", nv_roi_overlay)
-            if hasattr(tr, "show_roi"):
-                tr.show_roi = nv_roi_overlay
-        # Static grid blocks toggle (processed-frame grid visualization)
-        cur_grid_blocks = settings.get("oscillation_show_grid_blocks", False)
-        ch, nv_grid_blocks = imgui.checkbox("Show Static Grid Blocks##OscShowGridBlocks", cur_grid_blocks)
-        if ch and nv_grid_blocks != cur_grid_blocks:
-            settings.set("oscillation_show_grid_blocks", nv_grid_blocks)
-            if hasattr(tr, "show_grid_blocks"):
-                tr.show_grid_blocks = nv_grid_blocks
-
-        imgui.text("Live Signal Amplification")
-        _tooltip_if_hovered("Stretches the live signal to use the full 0-100 range based on recent motion.")
-
-        en = settings.get("live_oscillation_dynamic_amp_enabled", True)
-        ch, nv = imgui.checkbox("Enable Dynamic Amplification##EnableLiveAmp", en)
-        if ch and nv != en:
-            settings.set("live_oscillation_dynamic_amp_enabled", nv)
-
-        # Legacy improvements settings
-        imgui.separator()
-        imgui.text("Signal Processing Improvements")
-        
-        # Simple amplification mode
-        cur_simple_amp = settings.get("oscillation_use_simple_amplification", False)
-        ch, nv_simple = imgui.checkbox("Use Simple Amplification##UseSimpleAmp", cur_simple_amp)
-        if ch and nv_simple != cur_simple_amp:
-            settings.set("oscillation_use_simple_amplification", nv_simple)
-        _tooltip_if_hovered("Use legacy-style fixed multipliers (dy*-10, dx*10) instead of dynamic scaling")
-        
-        # Decay mechanism
-        cur_decay = settings.get("oscillation_enable_decay", True)
-        ch, nv_decay = imgui.checkbox("Enable Decay Mechanism##EnableDecay", cur_decay)
-        if ch and nv_decay != cur_decay:
-            settings.set("oscillation_enable_decay", nv_decay)
-        _tooltip_if_hovered("Gradually return to center when no motion is detected")
-
-        if cur_decay:
-            # Hold duration
-            imgui.text("Hold Duration (ms)")
-            cur_hold = settings.get("oscillation_hold_duration_ms", 250)
-            imgui.push_item_width(150)
-            ch, nv_hold = imgui.slider_int("##HoldDuration", cur_hold, 50, 1000)
-            if ch and nv_hold != cur_hold:
-                settings.set("oscillation_hold_duration_ms", nv_hold)
-            imgui.pop_item_width()
-            _tooltip_if_hovered("How long to hold position before starting decay")
-            
-            # Decay factor
-            imgui.text("Decay Factor")
-            cur_decay_factor = settings.get("oscillation_decay_factor", 0.95)
-            imgui.push_item_width(150)
-            ch, nv_decay_factor = imgui.slider_float("##DecayFactor", cur_decay_factor, 0.85, 0.99, "%.3f")
-            if ch and nv_decay_factor != cur_decay_factor:
-                settings.set("oscillation_decay_factor", nv_decay_factor)
-            imgui.pop_item_width()
-            _tooltip_if_hovered("How quickly to decay towards center (0.95 = slow, 0.85 = fast)")
-
-        imgui.new_line()
-        imgui.text_ansi_colored("Note: Detection Sensitivity and Dynamic\nAmplification are currently not yet working.", 0.25, 0.88, 0.82)
-
-        # TODO: Move values to constants
-        if settings.get("live_oscillation_dynamic_amp_enabled", True):
-            imgui.text("Analysis Window (ms)")
-            cur_ms = settings.get("live_oscillation_amp_window_ms", 4000)
-            imgui.push_item_width(200)
-            ch, nv = imgui.slider_int("##LiveAmpWindow", cur_ms, 1000, 10000)
-            if ch and nv != cur_ms:
-                settings.set("live_oscillation_amp_window_ms", nv)
-            imgui.same_line()
-            if imgui.button("Reset##ResetAmpWindow"):
-                default_ms = 4000
-                if cur_ms != default_ms:
-                    settings.set("live_oscillation_amp_window_ms", default_ms)
-            imgui.pop_item_width()
-
-    def _render_stage3_oscillation_detector_mode_settings(self):
-        """Render UI for selecting oscillation detector mode in Stage 3"""
-        app = self.app
-        settings = app.app_settings
-        
-        imgui.text("Stage 3 Oscillation Detector Mode")
-        _tooltip_if_hovered(
-            "Choose which oscillation detector algorithm to use in Stage 3:\n\n"
-            "Current: Uses the experimental oscillation detector with\n"
-            "  adaptive motion detection and dynamic scaling\n\n"
-            "Legacy: Uses the legacy oscillation detector from commit f5ae40f\n"
-            "  with fixed amplification and explicit decay mechanisms\n\n"
-            "Hybrid: Combines benefits from both approaches (future feature)"
-        )
-        
-        current_mode = settings.get("stage3_oscillation_detector_mode", "current")
-        mode_options = ["current", "legacy", "hybrid"]
-        mode_display = ["Current (Experimental)", "Legacy (f5ae40f)", "Hybrid (Coming Soon)"]
-        
-        try:
-            current_idx = mode_options.index(current_mode)
-        except ValueError:
-            current_idx = 0
-            
-        imgui.push_item_width(200)
-        
-        # Disable hybrid for now
-        with _DisabledScope(current_idx == 2):  # hybrid not implemented yet
-            clicked, new_idx = imgui.combo("##Stage3ODMode", current_idx, mode_display)
-            
-        if clicked and new_idx != current_idx and new_idx != 2:  # Don't allow selecting hybrid
-            new_mode = mode_options[new_idx]
-            settings.set("stage3_oscillation_detector_mode", new_mode)
-            app.logger.info(f"Stage 3 Oscillation Detector mode set to: {new_mode}", extra={"status_message": True})
-            
-        imgui.pop_item_width()
-        
-        # Show current selection info
-        if current_mode == "current":
-            imgui.text_ansi_colored("Using experimental oscillation detector", 0.0, 0.8, 0.0)
-        elif current_mode == "legacy":
-            imgui.text_ansi_colored("Using legacy oscillation detector (f5ae40f)", 0.0, 0.6, 0.8)
-        else:
-            imgui.text_ansi_colored("Hybrid mode (not yet implemented)", 0.8, 0.6, 0.0)
-
-# ------- Class filtering -------
-
-    def _render_class_filtering_content(self):
-        app = self.app
-        classes = app.get_available_tracking_classes()
-        if not classes:
-            imgui.text_disabled("No classes available (model not loaded or no classes defined).")
-            return
-
-        imgui.text_wrapped("Select classes to DISCARD from tracking and analysis.")
-        discarded = set(app.discarded_tracking_classes)
-        changed_any = False
-        num_cols = 3
-        if imgui.begin_table("ClassFilterTable", num_cols, flags=imgui.TABLE_SIZING_STRETCH_SAME):
-            col = 0
-            for cls in classes:
-                if col == 0:
-                    imgui.table_next_row()
-                imgui.table_set_column_index(col)
-                is_discarded = (cls in discarded)
-                imgui.push_id("discard_cls_%s" % cls)
-                clicked, new_val = imgui.checkbox(" %s" % cls, is_discarded)
-                imgui.pop_id()
-                if clicked:
-                    changed_any = True
-                    if new_val:
-                        discarded.add(cls)
-                    else:
-                        discarded.discard(cls)
-                col = (col + 1) % num_cols
-            imgui.end_table()
-
-        if changed_any:
-            new_list = sorted(list(discarded))
-            if new_list != app.discarded_tracking_classes:
-                app.discarded_tracking_classes = new_list
-                app.app_settings.set("discarded_tracking_classes", new_list)
-                app.project_manager.project_dirty = True
-                app.logger.info("Discarded classes updated: %s" % new_list, extra={"status_message": True})
-                app.energy_saver.reset_activity_timer()
-
-        imgui.spacing()
-        if imgui.button(
-            "Clear All Discards##ClearDiscardFilters",
-            width=imgui.get_content_region_available_width(),
-        ):
-            if app.discarded_tracking_classes:
-                app.discarded_tracking_classes.clear()
-                app.app_settings.set("discarded_tracking_classes", [])
-                app.project_manager.project_dirty = True
-                app.logger.info("All class discard filters cleared.", extra={"status_message": True})
-                app.energy_saver.reset_activity_timer()
-        _tooltip_if_hovered("Unchecks all classes, enabling all classes for tracking/analysis.")
-
-# ------- ROI controls -------
-
-    def _render_user_roi_controls_for_run_tab(self):
-        app = self.app
-        sp = app.stage_processor
-        proc = app.processor
-
-        imgui.spacing()
-
-        set_disabled = sp.full_analysis_active or not (proc and proc.is_video_open())
-        with _DisabledScope(set_disabled):
-            tr = app.tracker
-            has_roi = tr and tr.user_roi_fixed
-            btn_count = 2 if has_roi else 1
-            avail_w = imgui.get_content_region_available_width()
-            btn_w = (
-                (avail_w - imgui.get_style().item_spacing.x * (btn_count - 1)) / btn_count
-                if btn_count > 1
-                else -1
-            )
-
-            set_text = "Cancel Set ROI" if app.is_setting_user_roi_mode else "Set ROI & Point"
-            # Set ROI button - PRIMARY when starting, DESTRUCTIVE when canceling
-            if app.is_setting_user_roi_mode:
-                with destructive_button_style():
-                    if imgui.button("%s##UserSetROI_RunTab" % set_text, width=btn_w):
-                        app.exit_set_user_roi_mode()
-            else:
-                with primary_button_style():
-                    if imgui.button("%s##UserSetROI_RunTab" % set_text, width=btn_w):
-                        app.enter_set_user_roi_mode()
-
-            if has_roi:
-                imgui.same_line()
-                # Clear ROI button (DESTRUCTIVE - clears user data)
-                with destructive_button_style():
-                    if imgui.button("Clear ROI##UserClearROI_RunTab", width=btn_w):
-                        if tr and hasattr(tr, "clear_user_defined_roi_and_point"):
-                            tr.stop_tracking()
-                            tr.clear_user_defined_roi_and_point()
-                        app.logger.info("User ROI cleared.", extra={"status_message": True})
-
-        if app.is_setting_user_roi_mode:
-            col = self.ControlPanelColors.STATUS_WARNING
-            imgui.text_ansi_colored("Selection Active: Draw ROI then click point on video.", *col)
-
-# ------- Interactive refinement -------
-
-    def _render_interactive_refinement_controls(self):
-        app = self.app
-        sp = app.stage_processor
-        if not sp.stage2_overlay_data_map:
-            return
-
-        imgui.text("Interactive Refinement")
-        disabled = sp.full_analysis_active or sp.refinement_analysis_active
-        is_enabled = app.app_state_ui.interactive_refinement_mode_enabled
-
-        with _DisabledScope(disabled):
-            if is_enabled:
-                g = self.GeneralColors
-                imgui.push_style_color(imgui.COLOR_BUTTON, *g.RED_DARK)
-                imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, *g.RED_LIGHT)
-                imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, *g.RED)
-                btn_text = "Disable Refinement Mode"
-            else:
-                btn_text = "Enable Refinement Mode"
-
-            if imgui.button("%s##ToggleInteractiveRefinement" % btn_text, width=-1):
-                app.app_state_ui.interactive_refinement_mode_enabled = not is_enabled
-
-            if is_enabled:
-                imgui.pop_style_color(3)
-
-            _tooltip_if_hovered("Enables clicking on object boxes in the video to refine the script for that chapter.")
-
-            if is_enabled:
-                col = (
-                    self.ControlPanelColors.STATUS_WARNING
-                    if sp.refinement_analysis_active
-                    else self.ControlPanelColors.STATUS_INFO
-                )
-                msg = "Refining chapter..." if sp.refinement_analysis_active else "Click a box in the video to start."
-                imgui.text_ansi_colored(msg, *col)
-
-        if disabled and imgui.is_item_hovered():
-            imgui.set_tooltip("Refinement is disabled while another process is active.")
-
-# ------- Post-processing helpers -------
-
-    def _render_post_processing_profile_row(self, long_name, profile_params, config_copy):
-        changed_cfg = False
-        imgui.push_id("profile_%s" % long_name)
-        is_open = imgui.tree_node(long_name)
-
-        if is_open:
-            imgui.columns(2, "profile_settings", border=False)
-
-            imgui.text("Amplification")
-
-            imgui.text("Scale")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            val = profile_params.get("scale_factor", 1.0)
-            ch, nv = imgui.slider_float("##scale", val, 0.1, 5.0, "%.2f")
-            if ch:
-                profile_params["scale_factor"] = nv
-                changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            imgui.text("Center")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            val = profile_params.get("center_value", 50)
-            ch, nv = imgui.slider_int("##amp_center", val, 0, 100)
-            if ch:
-                profile_params["center_value"] = nv
-                changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            clamp_low = profile_params.get("clamp_lower", 10)
-            clamp_high = profile_params.get("clamp_upper", 90)
-
-            imgui.text("Clamp Low")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            ch_l, nv_l = imgui.slider_int("##clamp_low", clamp_low, 0, 100)
-            if ch_l:
-                clamp_low = min(nv_l, clamp_high)
-                profile_params["clamp_lower"] = clamp_low
-                changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            imgui.text("Clamp High")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            ch_h, nv_h = imgui.slider_int("##clamp_high", clamp_high, 0, 100)
-            if ch_h:
-                clamp_high = max(nv_h, clamp_low)
-                profile_params["clamp_upper"] = clamp_high
-                changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            imgui.columns(1)
-            imgui.spacing()
-            imgui.columns(2, "profile_settings_2", border=False)
-
-            imgui.text("Smoothing (SG Filter)")
-
-            imgui.text("Window")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            sg_win = profile_params.get("sg_window", 7)
-            ch, nv = imgui.slider_int("##sg_win", sg_win, 3, 99)
-            if ch:
-                nv = max(3, nv + 1 if nv % 2 == 0 else nv)
-                if nv != sg_win:
-                    profile_params["sg_window"] = nv
-                    changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            imgui.text("Polyorder")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            sg_poly = profile_params.get("sg_polyorder", 3)
-            max_poly = max(1, profile_params.get("sg_window", 7) - 1)
-            cur_poly = min(sg_poly, max_poly)
-            ch, nv = imgui.slider_int("##sg_poly", cur_poly, 1, max_poly)
-            if ch and nv != sg_poly:
-                profile_params["sg_polyorder"] = nv
-                changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            imgui.text("Simplification (RDP)")
-
-            imgui.text("Epsilon")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            rdp_eps = profile_params.get("rdp_epsilon", 1.0)
-            ch, nv = imgui.slider_float("##rdp_eps", rdp_eps, 0.1, 20.0, "%.2f")
-            if ch and nv != rdp_eps:
-                profile_params["rdp_epsilon"] = nv
-                changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            out_min = profile_params.get("output_min", 0)
-            out_max = profile_params.get("output_max", 100)
-
-            imgui.text("Output Min")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            ch, nv = imgui.slider_int("##out_min", out_min, 0, 100)
-            if ch:
-                out_min = min(nv, out_max)
-                profile_params["output_min"] = out_min
-                changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            imgui.text("Output Max")
-            imgui.next_column()
-            imgui.push_item_width(-1)
-            ch, nv = imgui.slider_int("##out_max", out_max, 0, 100)
-            if ch:
-                out_max = max(nv, out_min)
-                profile_params["output_max"] = out_max
-                changed_cfg = True
-            imgui.pop_item_width()
-            imgui.next_column()
-
-            imgui.columns(1)
-            imgui.tree_pop()
-
-        if changed_cfg:
-            config_copy[long_name] = profile_params
-        imgui.pop_id()
-        return changed_cfg
-
-    def _render_automatic_post_processing_new(self, fs_proc):
-        app = self.app
-        sp = app.stage_processor
-        proc = app.processor
-
-        proc_tools_disabled = sp.full_analysis_active or (proc and proc.is_processing) or app.is_setting_user_roi_mode
-        with _DisabledScope(proc_tools_disabled):
-            enabled = app.app_settings.get("enable_auto_post_processing", False)
-            ch, nv = imgui.checkbox("Enable Automatic Post-Processing on Completion", enabled)
-            if ch and nv != enabled:
-                app.app_settings.set("enable_auto_post_processing", nv)
-                app.project_manager.project_dirty = True
-                app.logger.info("Automatic post-processing on completion %s." % ("enabled" if nv else "disabled"), extra={"status_message": True})
-            _tooltip_if_hovered("If checked, the profiles below will be applied automatically\nafter an offline analysis or live tracking session finishes.")
-
-            # Run post-processing button (PRIMARY - positive action)
-            with primary_button_style():
-                if imgui.button("Run Post-Processing Now##RunAutoPostProcessButton", width=-1):
-                    if hasattr(fs_proc, "apply_automatic_post_processing"):
-                        fs_proc.apply_automatic_post_processing()
-
-            use_chapter = app.app_settings.get("auto_processing_use_chapter_profiles", True)
-            ch, nv = imgui.checkbox("Apply Per-Chapter Settings (if available)", use_chapter)
-            if ch and nv != use_chapter:
-                app.app_settings.set("auto_processing_use_chapter_profiles", nv)
-            _tooltip_if_hovered("If checked, applies specific profiles below to each chapter.\nIf unchecked, applies only the 'Default' profile to the entire script.")
-
-            config = app.app_settings.get("auto_post_processing_amplification_config", {})
-            config_copy = config.copy()
-            master_changed = False
-
-            if app.app_settings.get("auto_processing_use_chapter_profiles", True):
-                imgui.text("Per-Position Processing Profiles")
-                all_pos = ["Default"] + sorted(
-                    list({info["long_name"] for info in self.constants.POSITION_INFO_MAPPING.values()})
-                )
-                default_profile = self.constants.DEFAULT_AUTO_POST_AMP_CONFIG.get("Default", {})
-                for name in all_pos:
-                    if not name:
-                        continue
-                    params = config_copy.get(name, default_profile).copy()
-                    if self._render_post_processing_profile_row(name, params, config_copy):
-                        master_changed = True
-            else:
-                imgui.text("Default Processing Profile (applies to all)")
-                name = "Default"
-                default_profile = self.constants.DEFAULT_AUTO_POST_AMP_CONFIG.get(name, {})
-                params = config_copy.get(name, default_profile).copy()
-                if self._render_post_processing_profile_row(name, params, config_copy):
-                    master_changed = True
-
-            if master_changed:
-                app.app_settings.set("auto_post_processing_amplification_config", config_copy)
-                app.project_manager.project_dirty = True
-
-            # Reset All Profiles button (DESTRUCTIVE - resets to defaults)
-            with destructive_button_style():
-                if imgui.button("Reset All Profiles to Defaults##ResetAutoPostProcessing", width=-1):
-                    app.app_settings.set(
-                        "auto_post_processing_amplification_config",
-                        self.constants.DEFAULT_AUTO_POST_AMP_CONFIG,
-                    )
-                    app.project_manager.project_dirty = True
-                    app.logger.info("All post-processing profiles reset to defaults.", extra={"status_message": True})
-
-            imgui.text("Final Smoothing Pass")
-            en = app.app_settings.get("auto_post_proc_final_rdp_enabled", False)
-            ch, nv = imgui.checkbox("Run Final RDP Pass to Seam Chapters", en)
-            if ch and nv != en:
-                app.app_settings.set("auto_post_proc_final_rdp_enabled", nv)
-                app.project_manager.project_dirty = True
-            _tooltip_if_hovered(
-                "After all other processing, run one final simplification pass\n"
-                "on the entire script. This can help smooth out the joints\n"
-                "between chapters that used different processing settings."
-            )
-
-            if app.app_settings.get("auto_post_proc_final_rdp_enabled", False):
-                imgui.same_line()
-                imgui.push_item_width(120)
-                cur_eps = app.app_settings.get("auto_post_proc_final_rdp_epsilon", 10.0)
-                ch, nv = imgui.slider_float("Epsilon##FinalRDPEpsilon", cur_eps, 0.1, 20.0, "%.2f")
-                if ch and nv != cur_eps:
-                    app.app_settings.set("auto_post_proc_final_rdp_epsilon", nv)
-                    app.project_manager.project_dirty = True
-                imgui.pop_item_width()
-
-        # Disabled tooltip
-        if proc_tools_disabled and imgui.is_item_hovered():
-            imgui.set_tooltip("Disabled while another process is active.")
-
-    # ------- Calibration -------
-
-    def _render_latency_calibration(self, calibration_mgr):
-        col = self.ControlPanelColors.STATUS_WARNING
-        imgui.text_ansi_colored("--- LATENCY CALIBRATION MODE ---", *col)
-        if not calibration_mgr.calibration_reference_point_selected:
-            imgui.text_wrapped("1. Start the live tracker for 10s of action then pause it.")
-            imgui.text_wrapped("   Select a clear action point on Timeline 1.")
-        else:
-            imgui.text_wrapped("1. Point at %.0fms selected." % calibration_mgr.calibration_timeline_point_ms)
-            imgui.text_wrapped("2. Now, use video controls (seek, frame step) to find the")
-            imgui.text_wrapped("   EXACT visual moment corresponding to the selected point.")
-            imgui.text_wrapped("3. Press 'Confirm Visual Match' below.")
-        # Confirm Visual Match button (PRIMARY - positive action)
-        with primary_button_style():
-            if imgui.button("Confirm Visual Match##ConfirmCalibration", width=-1):
-                if calibration_mgr.calibration_reference_point_selected:
-                    calibration_mgr.confirm_latency_calibration()
-                else:
-                    self.app.logger.info("Please select a reference point on Timeline 1 first.", extra={"status_message": True})
-        # Cancel Calibration button (DESTRUCTIVE - cancels process)
-        with destructive_button_style():
-            if imgui.button("Cancel Calibration##CancelCalibration", width=-1):
-                calibration_mgr.is_calibration_mode_active = False
-                calibration_mgr.calibration_reference_point_selected = False
-                self.app.logger.info("Latency calibration cancelled.", extra={"status_message": True})
-                self.app.energy_saver.reset_activity_timer()
-
-    # ------- Range selection -------
-
-    def _render_range_selection(self, stage_proc, fs_proc, event_handlers):
-        app = self.app
-        disabled = stage_proc.full_analysis_active or (app.processor and app.processor.is_processing) or app.is_setting_user_roi_mode
-
-        with _DisabledScope(disabled):
-            ch, new_active = imgui.checkbox("Enable Range Processing", fs_proc.scripting_range_active)
-            if ch:
-                event_handlers.handle_scripting_range_active_toggle(new_active)
-
-            if fs_proc.scripting_range_active:
-                imgui.text("Set Frames Range Manually (-1 = End):")
-                imgui.push_item_width(imgui.get_content_region_available()[0] * 0.4)
-                ch, nv = imgui.input_int(
-                    "Start##SR_InputStart",
-                    fs_proc.scripting_start_frame,
-                    flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
-                )
-                if ch:
-                    event_handlers.handle_scripting_start_frame_input(nv)
-                imgui.same_line()
-                imgui.text(" ")
-                imgui.same_line()
-                ch, nv = imgui.input_int(
-                    "End (-1)##SR_InputEnd",
-                    fs_proc.scripting_end_frame,
-                    flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
-                )
-                if ch:
-                    event_handlers.handle_scripting_end_frame_input(nv)
-                imgui.pop_item_width()
-
-                start_disp, end_disp = fs_proc.get_scripting_range_display_text()
-                imgui.text("Active Range: Frames: %s to %s" % (start_disp, end_disp))
-                sel_ch = fs_proc.selected_chapter_for_scripting
-                if sel_ch:
-                    imgui.text("Chapter: %s (%s)" % (sel_ch.class_name, sel_ch.segment_type))
-                if imgui.button("Clear Range Selection##ClearRangeButton"):
-                    event_handlers.clear_scripting_range_selection()
-            else:
-                imgui.text_disabled("Range processing not active. Enable checkbox or select a chapter.")
-
-        if disabled and imgui.is_item_hovered():
-            imgui.set_tooltip("Disabled while another process is active.")
-
-    
-
-    # ------- Post-processing manual tools -------
-
-    def _render_funscript_processing_tools(self, fs_proc, event_handlers):
-        app = self.app
-        sp = app.stage_processor
-        proc = app.processor
-        disabled = sp.full_analysis_active or (proc and proc.is_processing) or app.is_setting_user_roi_mode
-
-        with _DisabledScope(disabled):
-            axis_opts = ["Primary Axis", "Secondary Axis"]
-            cur_idx = 0 if fs_proc.selected_axis_for_processing == "primary" else 1
-            ch, nidx = imgui.combo("Target Axis##ProcAxis", cur_idx, axis_opts)
-            if ch and nidx != cur_idx:
-                event_handlers.set_selected_axis_for_processing("primary" if nidx == 0 else "secondary")
-            # imgui.separator()
-
-            imgui.text("Apply To:")
-            range_label = fs_proc.get_operation_target_range_label()
-            if imgui.radio_button(
-                "%s##OpTargetRange" % range_label,
-                fs_proc.operation_target_mode == "apply_to_scripting_range",
-            ):
-                fs_proc.operation_target_mode = "apply_to_scripting_range"
-            imgui.same_line()
-            if imgui.radio_button(
-                "Selected Points##OpTargetSelect",
-                fs_proc.operation_target_mode == "apply_to_selected_points",
-            ):
-                fs_proc.operation_target_mode = "apply_to_selected_points"
-
-            def prep_op():
-                if fs_proc.operation_target_mode == "apply_to_selected_points":
-                    editor = (
-                        self.timeline_editor1
-                        if fs_proc.selected_axis_for_processing == "primary"
-                        else self.timeline_editor2
-                    )
-                    fs_proc.current_selection_indices = list(
-                        editor.multi_selected_action_indices
-                    ) if editor else []
-                    if not fs_proc.current_selection_indices:
-                        app.logger.info("No points selected for operation.", extra={"status_message": True})
-
-            imgui.text("Points operations")
-            if imgui.button("Clamp to 0##Clamp0"):
-                prep_op()
-                fs_proc.handle_funscript_operation("clamp_0")
-            imgui.same_line()
-            if imgui.button("Clamp to 100##Clamp100"):
-                prep_op()
-                fs_proc.handle_funscript_operation("clamp_100")
-            imgui.same_line()
-            if imgui.button("Invert##InvertPoints"):
-                prep_op()
-                fs_proc.handle_funscript_operation("invert")
-            imgui.same_line()
-            # Clear button (DESTRUCTIVE - deletes all points)
-            with destructive_button_style():
-                if imgui.button("Clear##ClearPoints"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("clear")
-
-            imgui.text("Amplify Values")
-            ch, nv = imgui.slider_float("Factor##AmplifyFactor", fs_proc.amplify_factor_input, 0.1, 3.0, "%.2f")
-            if ch:
-                fs_proc.amplify_factor_input = nv
-            ch, nv = imgui.slider_int("Center##AmplifyCenter", fs_proc.amplify_center_input, 0, 100)
-            if ch:
-                fs_proc.amplify_center_input = nv
-            # Apply button (PRIMARY - positive action)
-            with primary_button_style():
-                if imgui.button("Apply Amplify##ApplyAmplify"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("amplify")
-
-            imgui.text("Savitzky-Golay Filter")
-            ch, nv = imgui.slider_int("Window Length##SGWin", fs_proc.sg_window_length_input, 3, 99)
-            if ch:
-                event_handlers.update_sg_window_length(nv)
-            max_po = max(1, fs_proc.sg_window_length_input - 1)
-            po_val = min(fs_proc.sg_polyorder_input, max_po)
-            ch, nv = imgui.slider_int("Polyorder##SGPoly", po_val, 1, max_po)
-            if ch:
-                fs_proc.sg_polyorder_input = nv
-            # Apply button (PRIMARY - positive action)
-            with primary_button_style():
-                if imgui.button("Apply Savitzky-Golay##ApplySG"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("apply_sg")
-
-            imgui.text("RDP Simplification")
-            ch, nv = imgui.slider_float("Epsilon##RDPEps", fs_proc.rdp_epsilon_input, 0.01, 20.0, "%.2f")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Curve simplification strength (lower = more detail, higher = smoother/fewer points)")
-            if ch:
-                fs_proc.rdp_epsilon_input = nv
-            # Apply button (PRIMARY - positive action)
-            with primary_button_style():
-                if imgui.button("Apply RDP##ApplyRDP"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("apply_rdp")
-
-            imgui.text("Dynamic Amplification")
-            if not hasattr(fs_proc, "dynamic_amp_window_ms_input"):
-                fs_proc.dynamic_amp_window_ms_input = 4000
-            ch, nv = imgui.slider_int("Window (ms)##DynAmpWin", fs_proc.dynamic_amp_window_ms_input, 500, 10000)
-            if ch:
-                fs_proc.dynamic_amp_window_ms_input = nv
-            _tooltip_if_hovered("The size of the 'before/after' window in milliseconds to consider for amplification.")
-
-            # Apply button (PRIMARY - positive action)
-            with primary_button_style():
-                if imgui.button("Apply Dynamic Amplify##ApplyDynAmp"):
-                    prep_op()
-                    fs_proc.handle_funscript_operation("apply_dynamic_amp")
-
-        # If disabled, show a tooltip on hover (outside the disabled scope)
-        if disabled and imgui.is_item_hovered():
-            imgui.set_tooltip("Disabled while another process is active.")
-
-    def _render_device_control_tab(self):
-        """Render device control tab content."""
-        try:
-            # Safety check: Don't initialize during first frame to avoid segfault
-            # The app needs to be fully initialized before creating device manager
-            if not hasattr(self, '_first_frame_rendered'):
-                self._first_frame_rendered = False
-            
-            if not self._first_frame_rendered:
-                imgui.text("Device Control initializing...")
-                imgui.text("Please wait for application to fully load.")
-                self._first_frame_rendered = True
-                return
-            
-            # Initialize device control system lazily
-            if not self._device_control_initialized:
-                self._initialize_device_control()
-                
-            # If device control is available, render the UI
-            if self.device_manager and self.param_manager:
-                self._render_device_control_content()
-            else:
-                imgui.text("Device Control system failed to initialize.")
-                imgui.text_colored("Check logs for details.", 1.0, 0.5, 0.0)
-                if imgui.button("Retry Initialization"):
-                    # Reset initialization flag to try again
-                    self._device_control_initialized = False
-                
-        except Exception as e:
-            imgui.text(f"Error in Device Control: {e}")
-            imgui.text_colored("See logs for full details.", 1.0, 0.0, 0.0)
-    
-    def _initialize_device_control(self):
-        """Initialize device control system for the control panel."""
-        try:
-            from device_control.device_manager import DeviceManager, DeviceControlConfig
-            from device_control.device_parameterization import DeviceParameterManager
-            
-            self.app.logger.info("Device Control: Starting initialization...")
-            
-            # Create device manager with default config
-            config = DeviceControlConfig(
-                enable_live_tracking=True,
-                enable_funscript_playback=True,
-                preferred_backend="auto",
-                log_device_commands=False  # Disable excessive logging in production
-            )
-            
-            self.app.logger.info("Device Control: Creating DeviceManager...")
-            self.device_manager = DeviceManager(config)
-            
-            # Share device manager with app for TrackerManager integration
-            self.app.device_manager = self.device_manager
-            self.app.logger.info("Device Control: DeviceManager created and shared with app")
-
-            # Initialize video integration (observer pattern for desktop video playback)
-            self.app.logger.info("Device Control: Setting up video playback integration...")
-            from device_control.video_integration import DeviceControlVideoIntegration
-            from device_control.bridges.video_playback_bridge import VideoPlaybackBridge
-
-            # Create integration (connects to video_processor via observer pattern)
-            self.device_video_integration = DeviceControlVideoIntegration(
-                self.app.processor,
-                self.device_manager,
-                app_instance=self.app,
-                logger=self.app.logger
-            )
-
-            # Create video playback bridge (polls integration at device update rate)
-            self.device_video_bridge = VideoPlaybackBridge(
-                self.device_manager,
-                video_integration=self.device_video_integration
-            )
-
-            # Start integration (registers callbacks with video_processor)
-            self.device_video_integration.start()
-
-            # Start bridge in background thread with its own event loop
-            import threading
-            import asyncio
-
-            def run_bridge_loop():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self.device_video_bridge.start())
-                try:
-                    loop.run_forever()
-                except KeyboardInterrupt:
-                    pass
-                finally:
-                    loop.close()
-
-            self.device_bridge_thread = threading.Thread(
-                target=run_bridge_loop,
-                daemon=True,
-                name="DeviceVideoBridge"
-            )
-            self.device_bridge_thread.start()
-
-            self.app.logger.info("Device Control: Video playback integration active")
-
-            # Update existing tracker managers to use the shared device manager
-            self._update_existing_tracker_managers()
-            
-            self.app.logger.info("Device Control: Creating DeviceParameterManager...")
-            self.param_manager = DeviceParameterManager()
-            self.app.logger.info("Device Control: DeviceParameterManager created successfully")
-
-            # Initialize OSR profiles if not already present
-            self._initialize_osr_profiles()
-
-            # UI state already initialized in __init__
-
-            self._device_control_initialized = True
-            self.app.logger.info("Device Control initialized in Control Panel successfully")
-            
-        except Exception as e:
-            self.app.logger.error(f"Failed to initialize Device Control: {e}")
-            import traceback
-            self.app.logger.error(f"Full traceback: {traceback.format_exc()}")
-            self._device_control_initialized = True  # Mark as attempted
-    
-    def _update_existing_tracker_managers(self):
-        """Update existing TrackerManagers to use the shared device manager."""
-        try:
-            # Check if app has tracker managers
-            found_any = False
-            for timeline_id in range(1, 3):  # Timeline 1 and 2
-                tracker_manager = getattr(self.app, f'tracker_manager_{timeline_id}', None)
-                if tracker_manager:
-                    found_any = True
-                    self.app.logger.info(f"Updating TrackerManager {timeline_id} with shared device manager")
-                    # Re-initialize the device bridge with shared device manager
-                    tracker_manager._init_device_bridge()
-                    
-                    # Also update live device control setting from current settings
-                    live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
-                    if live_tracking_enabled:
-                        tracker_manager.set_live_device_control_enabled(True)
-                        self.app.logger.info(f"TrackerManager {timeline_id} live control enabled from settings")
-            
-            if not found_any:
-                self.app.logger.info("No existing TrackerManagers found to update")
-                
-        except Exception as e:
-            self.app.logger.warning(f"Failed to update existing tracker managers: {e}")
-            import traceback
-            self.app.logger.warning(f"Traceback: {traceback.format_exc()}")
-
-    def _initialize_osr_profiles(self):
-        """Initialize OSR profiles in app settings if not present."""
-        try:
-            from device_control.axis_control import DEFAULT_PROFILES, save_profile_to_settings
-
-            # Check if profiles already exist
-            existing_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
-
-            if not existing_profiles:
-                self.app.logger.info("Initializing OSR profiles from defaults...")
-
-                # Convert DEFAULT_PROFILES to settings format
-                profiles_dict = {}
-                for profile_name, profile_obj in DEFAULT_PROFILES.items():
-                    profiles_dict[profile_name] = save_profile_to_settings(profile_obj)
-
-                # Save to settings
-                self.app.app_settings.set("device_control_osr_profiles", profiles_dict)
-
-                # Set default selected profile if not set
-                if not self.app.app_settings.get("device_control_selected_profile"):
-                    self.app.app_settings.set("device_control_selected_profile", "Balanced")
-
-                self.app.logger.info(f"Initialized {len(profiles_dict)} OSR profiles")
-            else:
-                self.app.logger.info(f"OSR profiles already initialized ({len(existing_profiles)} profiles)")
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to initialize OSR profiles: {e}")
-            import traceback
-            self.app.logger.error(f"Traceback: {traceback.format_exc()}")
-
-    def _render_device_control_content(self):
-        """Render the main device control interface with improved UX."""
-        # Version info
-        try:
-            import device_control
-            version = getattr(device_control, '__version__', 'legacy')
-            imgui.text_colored(f"Device Control Module Version: {version}", 0.5, 0.5, 0.5)
-            imgui.spacing()
-        except Exception:
-            pass
-
-        # SIMPLIFIED: Compact connection status (always visible)
-        self._render_compact_connection_status()
-
-        imgui.separator()
-
-        # SIMPLIFIED: Quick controls when connected (always visible)
-        if self.device_manager.is_connected():
-            self._render_quick_controls()
-            imgui.separator()
-
-        # Device Types (collapsible)
-        if not self.device_manager.is_connected():
-            imgui.text("Connect a Device:")
-            imgui.spacing()
-
-        # OSR2/OSR6 Devices
-        if imgui.collapsing_header("OSR2/OSR6 (USB)##OSRDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_osr_controls()
-
-        # Buttplug.io Universal Devices
-        if imgui.collapsing_header("Buttplug.io (Universal)##ButtplugDevices", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_buttplug_controls()
-
-        # Handy Direct Control
-        if imgui.collapsing_header("Handy (Direct)##HandyDirect", flags=0 if self.device_manager.is_connected() else imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-            self._render_handy_controls()
-
-        # SIMPLIFIED: All settings in one collapsible section
-        if self.device_manager.is_connected():
-            imgui.separator()
-            if imgui.collapsing_header("Advanced Settings##DeviceAdvancedAll")[0]:
-                self._render_all_advanced_settings()
-    
-    def _render_compact_connection_status(self):
-        """Render compact connection status (always visible)."""
-        if self.device_manager.is_connected():
-            device_name = self.device_manager.get_connected_device_name()
-            control_source = self.device_manager.get_active_control_source()
-
-            # Status line with color indicator
-            if control_source == 'streamer':
-                imgui.text_colored("[STREAMER]", 0.2, 0.5, 0.9)  # Blue
-                imgui.same_line()
-                imgui.text(f"{device_name}")
-            elif control_source == 'desktop':
-                imgui.text_colored("[DESKTOP]", 0.2, 0.7, 0.2)  # Green
-                imgui.same_line()
-                imgui.text(f"{device_name}")
-            else:
-                imgui.text_colored("[IDLE]", 0.7, 0.7, 0.2)  # Yellow
-                imgui.same_line()
-                imgui.text(f"{device_name}")
-
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Blue = Streamer Control | Green = Desktop Control | Yellow = Idle")
-
-            imgui.same_line()
-            if imgui.small_button("Disconnect"):
-                self._disconnect_current_device()
-        else:
-            imgui.text_colored("Device: Not Connected", 0.7, 0.3, 0.3)
-
-    def _render_quick_controls(self):
-        """Render quick controls for connected device (always visible when connected)."""
-        imgui.text("Quick Controls:")
-        imgui.spacing()
-
-        # Global stroke range for all active axes
-        imgui.text("Stroke Range (All Active Axes):")
-
-        # Get current profile settings
-        current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
-        osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
-
-        if current_profile_name in osr_profiles:
-            profile_data = osr_profiles[current_profile_name]
-
-            # Calculate global min/max from enabled axes
-            active_axes = []
-            for axis_key in ["up_down", "left_right", "front_back", "twist", "roll", "pitch"]:
-                if axis_key in profile_data and profile_data[axis_key].get("enabled", False):
-                    active_axes.append(axis_key)
-
-            if active_axes:
-                # Get average min/max from active axes
-                avg_min = int(sum(profile_data[axis].get("min_position", 0) for axis in active_axes) / len(active_axes))
-                avg_max = int(sum(profile_data[axis].get("max_position", 9999) for axis in active_axes) / len(active_axes))
-
-                # Global min slider
-                changed_min, new_min = imgui.slider_int("Min Extent##GlobalMin", avg_min, 0, 5000, "%d")
-                if changed_min:
-                    # Apply to all active axes
-                    for axis_key in active_axes:
-                        profile_data[axis_key]["min_position"] = new_min
-                    osr_profiles[current_profile_name] = profile_data
-                    self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
-                    self._preview_global_extent(new_min, "min")
-
-                # Global max slider
-                changed_max, new_max = imgui.slider_int("Max Extent##GlobalMax", avg_max, 5000, 9999, "%d")
-                if changed_max:
-                    # Apply to all active axes
-                    for axis_key in active_axes:
-                        profile_data[axis_key]["max_position"] = new_max
-                    osr_profiles[current_profile_name] = profile_data
-                    self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
-                    self._preview_global_extent(new_max, "max")
-
-                _tooltip_if_hovered("Adjust min/max for all active axes at once. Drag to feel the limits in real-time.")
-            else:
-                imgui.text_colored("No active axes configured", 0.7, 0.5, 0.0)
-
-        imgui.spacing()
-
-        # Quick position test
-        imgui.text("Test Position:")
-        current_pos = self.device_manager.current_position
-        changed, new_pos = imgui.slider_float("##QuickTestPos", current_pos, 0.0, 100.0, "%.1f%%")
-        if changed:
-            self.device_manager.update_position(new_pos, 50.0)
-        _tooltip_if_hovered("Drag to test device movement")
-
-    def _preview_global_extent(self, value, extent_type):
-        """Preview global min or max extent by moving device to that position."""
-        try:
-            # Convert T-code value (0-9999) to percentage (0-100)
-            percentage = (value / 9999.0) * 100.0
-            self.device_manager.update_position(percentage, 50.0)
-        except Exception as e:
-            self.app.logger.error(f"Error previewing global extent: {e}")
-
-    def _render_all_advanced_settings(self):
-        """Render all advanced settings in one section."""
-        imgui.indent(10)
-
-        # Performance Settings
-        imgui.text_colored("Performance:", 0.8, 0.8, 0.2)
-        config = self.device_manager.config
-
-        changed, new_rate = imgui.slider_float("Update Rate##DeviceRate", config.max_position_rate_hz, 1.0, 120.0, "%.1f Hz")
-        if changed:
-            config.max_position_rate_hz = new_rate
-        _tooltip_if_hovered("How often device position is updated per second")
-
-        changed, new_smoothing = imgui.slider_float("Smoothing##DeviceSmooth", config.position_smoothing, 0.0, 1.0, "%.2f")
-        if changed:
-            config.position_smoothing = new_smoothing
-        _tooltip_if_hovered("Smooths position changes (0=no smoothing, 1=maximum smoothing)")
-
-        changed, new_latency = imgui.slider_int("Latency Comp.##DeviceLatency", config.latency_compensation_ms, 0, 200, "%d ms")
-        if changed:
-            config.latency_compensation_ms = new_latency
-        _tooltip_if_hovered("Compensates for device response delay")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # Integration Settings
-        imgui.text_colored("Integration:", 0.8, 0.8, 0.2)
-
-        live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
-        changed, new_live_tracking = imgui.checkbox("Live Tracking Control##DeviceLiveTracking", live_tracking_enabled)
-        if changed:
-            self.app.app_settings.set("device_control_live_tracking", new_live_tracking)
-            self.app.app_settings.save_settings()
-            self._update_live_tracking_control(new_live_tracking)
-        _tooltip_if_hovered("Stream live tracker data directly to device in real-time")
-
-        video_playback_enabled = self.app.app_settings.get("device_control_video_playback", False)
-        changed, new_video_playback = imgui.checkbox("Video Playback Control##DeviceVideoPlayback", video_playback_enabled)
-        if changed:
-            self.app.app_settings.set("device_control_video_playback", new_video_playback)
-            self.app.app_settings.save_settings()
-            self._update_video_playback_control(new_video_playback)
-        _tooltip_if_hovered("Sync device with video timeline and funscript playback")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # Per-Axis Configuration (for OSR devices)
-        connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
-        if connected_device and "osr" in connected_device.device_id.lower():
-            if imgui.tree_node("Per-Axis Configuration##PerAxis"):
-                imgui.text_colored("Configure individual axes:", 0.7, 0.7, 0.7)
-                self._render_osr_axis_configuration()
-                imgui.tree_pop()
-
-        imgui.unindent(10)
-
-    def _render_connection_status_section(self):
-        """Render connection status section with consistent UX."""
-        imgui.indent(15)
-        
-        if self.device_manager.is_connected():
-            device_name = self.device_manager.get_connected_device_name()
-            self._status_indicator(f"Connected to {device_name}", "ready", "Device is connected and ready")
-            
-            # Connection info
-            device_info = self.device_manager.get_connected_device_info()
-            if device_info:
-                imgui.text(f"Device ID: {device_info.device_id}")
-                imgui.text(f"Type: {device_info.device_type.value.title()}")
-                
-                # Quick position test
-                imgui.separator()
-                imgui.text("Quick Test:")
-                current_pos = self.device_manager.current_position
-                changed, new_pos = imgui.slider_float("Position##QuickTest", current_pos, 0.0, 100.0, "%.1f")
-                if changed:
-                    self.device_manager.update_position(new_pos, 50.0)
-                
-                _tooltip_if_hovered("Drag to test device movement")
-            
-            imgui.separator()
-            if imgui.button("Disconnect Device"):
-                self._disconnect_current_device()
-        else:
-            self._status_indicator("No device connected", "warning", "Connect a device below")
-            imgui.text("Select and connect a device from the types below.")
-        
-        imgui.unindent(15)
-    
-    def _render_device_types_section(self):
-        """Render device types section with consistent UX."""
-        imgui.indent(15)
-        
-        # OSR2/OSR6 Devices
-        if imgui.collapsing_header("OSR2/OSR6 Devices (USB/Serial)##OSRDevices")[0]:
-            self._render_osr_controls()
-            
-        # Buttplug.io Universal Devices  
-        if imgui.collapsing_header("Buttplug.io Devices (Universal)##ButtplugDevices")[0]:
-            self._render_buttplug_controls()
-        
-        # Handy Direct Control
-        if imgui.collapsing_header("Handy (Direct API)##HandyDirect")[0]:
-            self._render_handy_controls()
-            
-        imgui.unindent(15)
-    
-    def _render_osr_controls(self):
-        """Render OSR device controls."""
-        imgui.indent(10)
-            
-        # Check OSR connection status
-        connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
-        is_osr_connected = connected_device and "osr" in connected_device.device_id.lower()
-        
-        if is_osr_connected:
-            self._status_indicator(f"Connected to {connected_device.device_id}", "ready", "OSR device connected and ready")
-            
-            # Advanced OSR Settings
-            if imgui.collapsing_header("OSR Performance Settings##OSRPerformance")[0]:
-                self._render_osr_performance_settings()
-                
-            if imgui.collapsing_header("OSR Axis Configuration##OSRAxis")[0]:
-                self._render_osr_axis_configuration()
-                
-            if imgui.collapsing_header("OSR Test Functions##OSRTest")[0]:
-                imgui.indent(10)
-                if imgui.button("Run Movement Test##OSR"):
-                    self._test_osr_movement()
-                _tooltip_if_hovered("Test OSR device with predefined movement sequence")
-                imgui.unindent(10)
-                
-        else:
-            imgui.text("Connect your OSR2/OSR6 device via USB cable.")
-            
-            imgui.separator()
-            if imgui.button("Scan for OSR Devices##OSRScan"):
-                self._scan_osr_devices()
-            _tooltip_if_hovered("Search for connected OSR devices on serial ports")
-            
-            # Show available ports
-            if self._available_osr_ports:
-                imgui.spacing()
-                imgui.text("Available devices:")
-                for port_info in self._available_osr_ports:
-                    port_name = port_info.get('device', 'Unknown')
-                    description = port_info.get('description', 'No description')
-                    
-                    if imgui.button(f"Connect##OSR_{port_name}"):
-                        self._connect_osr_device(port_name)
-                    imgui.same_line()
-                    imgui.text(f"{port_name} ({description})")
-                    
-            elif self._osr_scan_performed:
-                imgui.spacing()
-                self._status_indicator("No OSR devices found", "warning", "Try troubleshooting steps below")
-                imgui.text("Troubleshooting:")
-                imgui.bullet_text("Ensure OSR2/OSR6 is connected via USB")
-                imgui.bullet_text("Check device is powered on")
-                imgui.bullet_text("Try different USB cable or port")
-        
-        imgui.unindent(10)
-    
-    def _render_handy_controls(self):
-        """Render Handy direct API controls."""
-        imgui.indent(10)
-        
-        # Check Handy connection status
-        connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
-        is_handy_connected = connected_device and "handy" in connected_device.device_id.lower()
-        
-        if is_handy_connected:
-            # Connected state
-            self._status_indicator(f"Connected to {connected_device.name}", "ready", "Handy connected and ready")
-
-            # Upload Funscript button (auto-uploads on play, but manual option if script changed)
-            has_funscript = (hasattr(self.app, 'funscript_processor') and
-                           self.app.funscript_processor and
-                           self.app.funscript_processor.get_actions('primary'))
-
-            if has_funscript:
-                if imgui.button("Re-upload Funscript##HandyUpload", width=-1):
-                    self._upload_funscript_to_handy()
-                _tooltip_if_hovered("Re-upload funscript if you made changes (auto-uploads on first play)")
-            else:
-                imgui.text_colored("No funscript loaded", 0.7, 0.5, 0.0)
-                _tooltip_if_hovered("Load a funscript first")
-
-            imgui.spacing()
-
-            # Disconnect button
-            if imgui.button("Disconnect Handy##HandyDisconnect"):
-                self._disconnect_handy()
-            _tooltip_if_hovered("Disconnect from Handy device")
-
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            # Sync settings
-            imgui.text("Sync Settings:")
-            imgui.indent(10)
-
-            current_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
-
-            # Row 1: -50 / -10 / -1 buttons, then slider, then +1 / +10 / +50 buttons
-            # Fine adjustment buttons (left side)
-            if imgui.button("-50##SyncMinus50"):
-                new_offset = max(-1000, current_offset - 50)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("-50ms")
-            imgui.same_line()
-
-            if imgui.button("-10##SyncMinus10"):
-                new_offset = max(-1000, current_offset - 10)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("-10ms")
-            imgui.same_line()
-
-            if imgui.button("-1##SyncMinus1"):
-                new_offset = max(-1000, current_offset - 1)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("-1ms")
-            imgui.same_line()
-
-            # Sync offset slider
-            imgui.push_item_width(100)
-            changed, value = imgui.slider_int(
-                "##HandySyncOffset",
-                current_offset,
-                -1000, 1000
-            )
-            imgui.pop_item_width()
-            if changed:
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", value)
-                self._apply_handy_hstp_offset(value)
-            _tooltip_if_hovered("Sync Offset (ms): + = Handy moves later, - = Handy moves earlier\nChanges apply instantly via Handy API")
-            imgui.same_line()
-
-            # Fine adjustment buttons (right side)
-            if imgui.button("+1##SyncPlus1"):
-                new_offset = min(1000, current_offset + 1)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("+1ms")
-            imgui.same_line()
-
-            if imgui.button("+10##SyncPlus10"):
-                new_offset = min(1000, current_offset + 10)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("+10ms")
-            imgui.same_line()
-
-            if imgui.button("+50##SyncPlus50"):
-                new_offset = min(1000, current_offset + 50)
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", new_offset)
-                self._apply_handy_hstp_offset(new_offset)
-            _tooltip_if_hovered("+50ms")
-
-            # Row 2: Direct numeric input + current value display
-            imgui.push_item_width(80)
-            changed, input_value = imgui.input_int("##SyncOffsetInput", current_offset, 0, 0)
-            imgui.pop_item_width()
-            if changed:
-                clamped_value = max(-1000, min(1000, input_value))
-                self.app.app_settings.set("device_control_handy_sync_offset_ms", clamped_value)
-                self._apply_handy_hstp_offset(clamped_value)
-            _tooltip_if_hovered("Enter offset directly (ms)\n-1000 to +1000")
-            imgui.same_line()
-            imgui.text("ms")
-            imgui.same_line()
-            if current_offset >= 0:
-                imgui.text_colored(f"(Handy +{current_offset}ms later)", 0.5, 0.8, 0.5, 1.0)
-            else:
-                imgui.text_colored(f"(Handy {current_offset}ms earlier)", 0.8, 0.5, 0.5, 1.0)
-
-            imgui.unindent(10)
-                
-        else:
-            # Disconnected state - show connection controls
-            imgui.text("Enter your Handy connection key:")
-            
-            # Connection key input
-            connection_key = self.app.app_settings.get("handy_connection_key", "")
-            changed, new_key = imgui.input_text(
-                "##HandyConnectionKey",
-                connection_key,
-                256
-            )
-            if changed:
-                self.app.app_settings.set("handy_connection_key", new_key)
-            _tooltip_if_hovered("Your Handy connection key (e.g., 'DH7Hc')")
-            
-            imgui.spacing()
-
-            # Connect button (PRIMARY - positive action)
-            if connection_key and len(connection_key) > 0:
-                with primary_button_style():
-                    if imgui.button("Connect to Handy##HandyConnect"):
-                        self._connect_handy(connection_key)
-                _tooltip_if_hovered("Connect to your Handy device")
-            else:
-                imgui.text_disabled("Enter connection key to enable connect button")
-            
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-            
-            # Help text
-            imgui.text("How to get your connection key:")
-            imgui.indent(10)
-            imgui.bullet_text("Open the Handy app")
-            imgui.bullet_text("Go to Settings > Connection")
-            imgui.bullet_text("Copy the connection key")
-            imgui.unindent(10)
-            
-            imgui.spacing()
-            
-            # Advanced settings even when disconnected
-            if imgui.collapsing_header("Advanced Settings##HandyAdvanced")[0]:
-                imgui.indent(10)
-                
-                # Minimum interval setting
-                changed, value = imgui.slider_int(
-                    "Min Command Interval (ms)##HandyMinIntervalAdv",
-                    self.app.app_settings.get("handy_min_interval", 60),
-                    20, 200
-                )
-                if changed:
-                    self.app.app_settings.set("handy_min_interval", value)
-                _tooltip_if_hovered("Minimum time between position commands (60ms recommended)")
-                
-                imgui.unindent(10)
-        
-        imgui.unindent(10)
-    
-    def _render_buttplug_controls(self):
-        """Render Buttplug.io device controls."""
-        imgui.indent(10)
-        
-        # Check Buttplug connection status
-        connected_device = self.device_manager.get_connected_device_info() if self.device_manager.is_connected() else None
-        is_buttplug_connected = connected_device and "buttplug" in connected_device.device_id.lower()
-        
-        if is_buttplug_connected:
-            self._status_indicator(f"Connected to {connected_device.name}", "ready", "Buttplug device connected and ready")
-            
-            # Device capabilities
-            if hasattr(connected_device, 'capabilities') and connected_device.capabilities:
-                caps = connected_device.capabilities
-                imgui.text("Device capabilities:")
-                imgui.indent(10)
-                if caps.supports_linear:
-                    imgui.bullet_text(f"Linear motion: {caps.linear_channels} axis")
-                if caps.supports_vibration:
-                    imgui.bullet_text(f"Vibration: {caps.vibration_channels} motors")
-                if caps.supports_rotation:
-                    imgui.bullet_text(f"Rotation: {caps.rotation_channels} axis")
-                imgui.bullet_text(f"Update rate: {caps.max_position_rate_hz} Hz")
-                imgui.unindent(10)
-            
-            # Advanced Buttplug Settings
-            if imgui.collapsing_header("Buttplug Test Functions##ButtplugTest")[0]:
-                imgui.indent(10)
-                if imgui.button("Run Movement Test##Buttplug"):
-                    self._test_buttplug_movement()
-                _tooltip_if_hovered("Test device with predefined movement sequence")
-                imgui.unindent(10)
-                
-        else:
-            imgui.text("Connect devices via Intiface Central")
-            imgui.text("Supports 100+ devices: Handy, Lovense, Kiiroo, OSR2, and more")
-            
-            # Server configuration
-            if imgui.collapsing_header("Buttplug Server Configuration##ButtplugServer")[0]:
-                imgui.indent(10)
-                
-                # Server address
-                current_address = self.app.app_settings.get("buttplug_server_address", "localhost")
-                changed, new_address = imgui.input_text("Server Address##ButtplugAddr", current_address, 256)
-                if changed:
-                    self.app.app_settings.set("buttplug_server_address", new_address)
-                _tooltip_if_hovered("IP address or hostname of Intiface Central server")
-                
-                # Server port
-                current_port = self.app.app_settings.get("buttplug_server_port", 12345)
-                changed, new_port = imgui.input_int("Port##ButtplugPort", current_port)
-                if changed and 1024 <= new_port <= 65535:
-                    self.app.app_settings.set("buttplug_server_port", new_port)
-                _tooltip_if_hovered("WebSocket port (default: 12345)")
-                
-                imgui.unindent(10)
-            
-            imgui.separator()
-            if imgui.button("Discover Devices##ButtplugDiscover"):
-                self._discover_buttplug_devices()
-            _tooltip_if_hovered("Search for devices through Intiface Central")
-            
-            imgui.same_line()
-            if imgui.button("Check Server##ButtplugStatus"):
-                self._check_buttplug_server_status()
-            _tooltip_if_hovered("Test connection to Intiface Central server")
-            
-            # Show discovered devices
-            if hasattr(self, '_discovered_buttplug_devices') and self._discovered_buttplug_devices:
-                imgui.spacing()
-                imgui.text(f"Found {len(self._discovered_buttplug_devices)} device(s):")
-                
-                for i, device_info in enumerate(self._discovered_buttplug_devices):
-                    if imgui.button(f"Connect##buttplug_{i}"):
-                        self._connect_specific_buttplug_device(device_info.device_id)
-                    imgui.same_line()
-                    imgui.text(f"{device_info.name} ({device_info.device_type.name})")
-                
-            elif hasattr(self, '_buttplug_discovery_performed') and self._buttplug_discovery_performed:
-                imgui.spacing()
-                self._status_indicator("No devices found", "warning", "Check troubleshooting steps below")
-                imgui.text("Troubleshooting:")
-                imgui.bullet_text("Start Intiface Central application")
-                imgui.bullet_text("Enable Server Mode in Intiface")
-                imgui.bullet_text("Connect and pair your devices")
-                
-        
-        imgui.unindent(10)
-    
-    def _render_device_settings_section(self):
-        """Render device settings section with consistent UX."""
-        imgui.indent(15)
-            
-        # Performance Settings
-        if imgui.collapsing_header("Device Performance##DevicePerformance")[0]:
-            imgui.indent(10)
-            config = self.device_manager.config
-            
-            # Update rate
-            changed, new_rate = imgui.slider_float("Update Rate##DeviceRate", config.max_position_rate_hz, 1.0, 120.0, "%.1f Hz")
-            if changed:
-                config.max_position_rate_hz = new_rate
-            _tooltip_if_hovered("How often device position is updated per second (T-Code devices can handle 60-120Hz)")
-            
-            # Position smoothing
-            changed, new_smoothing = imgui.slider_float("Position Smoothing##DeviceSmooth", config.position_smoothing, 0.0, 1.0, "%.2f")
-            if changed:
-                config.position_smoothing = new_smoothing
-            _tooltip_if_hovered("Smooths position changes to reduce jerkiness (0=no smoothing, 1=maximum smoothing)")
-            
-            # Latency compensation
-            changed, new_latency = imgui.slider_int("Latency Compensation##DeviceLatency", config.latency_compensation_ms, 0, 200)
-            if changed:
-                config.latency_compensation_ms = new_latency
-            _tooltip_if_hovered("Compensates for device response delay in milliseconds")
-            
-            imgui.unindent(10)
-            
-        
-        # Live Control Integration
-        if imgui.collapsing_header("Live Control Integration##DeviceLiveControl")[0]:
-            imgui.indent(10)
-            
-            # Live tracking device control
-            live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
-            changed, new_live_tracking = imgui.checkbox("Live Tracking Control##DeviceLiveTracking", live_tracking_enabled)
-            if changed:
-                self.app.app_settings.set("device_control_live_tracking", new_live_tracking)
-                self.app.app_settings.save_settings()
-                self._update_live_tracking_control(new_live_tracking)
-            _tooltip_if_hovered("Stream live tracker data directly to device in real-time")
-            
-            # Video playback device control  
-            video_playback_enabled = self.app.app_settings.get("device_control_video_playback", False)
-            changed, new_video_playback = imgui.checkbox("Video Playback Control##DeviceVideoPlayback", video_playback_enabled)
-            if changed:
-                self.app.app_settings.set("device_control_video_playback", new_video_playback)
-                self.app.app_settings.save_settings()
-                self._update_video_playback_control(new_video_playback)
-            _tooltip_if_hovered("Sync device with video timeline and funscript playback")
-            
-            imgui.unindent(10)
-            
-        
-        # Advanced Settings (only show if live control enabled)
-        live_tracking_enabled = self.app.app_settings.get("device_control_live_tracking", False)
-        video_playback_enabled = self.app.app_settings.get("device_control_video_playback", False)
-        
-        if live_tracking_enabled or video_playback_enabled:
-            if imgui.collapsing_header("Advanced Control Settings##DeviceAdvanced")[0]:
-                imgui.indent(10)
-                
-                # Control intensity
-                live_intensity = self.app.app_settings.get("device_control_live_intensity", 1.0)
-                changed, new_intensity = imgui.slider_float("Control Intensity##DeviceIntensity", live_intensity, 0.1, 2.0, "%.2fx")
-                if changed:
-                    self.app.app_settings.set("device_control_live_intensity", new_intensity)
-                    self.app.app_settings.save_settings()
-                _tooltip_if_hovered("Multiplier for device movement intensity")
-                
-                imgui.unindent(10)
-        
-        imgui.unindent(15)
-    
-    def _disconnect_current_device(self):
-        """Disconnect the currently connected device."""
-        try:
-            import threading
-            import asyncio
-            
-            def run_disconnect():
-                try:
-                    # Try to use existing event loop first
-                    try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            # Schedule disconnect in the existing loop
-                            future = asyncio.run_coroutine_threadsafe(self.device_manager.stop(), loop)
-                            future.result(timeout=10)  # Wait up to 10 seconds
-                        else:
-                            # Use the existing loop if not running
-                            loop.run_until_complete(self.device_manager.stop())
-                    except RuntimeError:
-                        # No event loop exists, create a new one
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        try:
-                            loop.run_until_complete(self.device_manager.stop())
-                        finally:
-                            loop.close()
-                    
-                    self.app.logger.info("Device disconnected successfully")
-                except Exception as e:
-                    self.app.logger.error(f"Error during disconnect: {e}")
-            
-            thread = threading.Thread(target=run_disconnect, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to disconnect device: {e}")
-    
-    def _scan_osr_devices(self):
-        """Scan for OSR devices specifically."""
-        try:
-            import threading
-            def run_osr_scan():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Get OSR backend and scan
-                    osr_backend = self.device_manager.available_backends.get('osr')
-                    if osr_backend:
-                        devices = loop.run_until_complete(osr_backend.discover_devices())
-                        # Convert to simple format for UI
-                        self._available_osr_ports = []
-                        for device in devices:
-                            self._available_osr_ports.append({
-                                'device': device.device_id,
-                                'description': device.name,
-                                'manufacturer': getattr(device, 'manufacturer', 'Unknown')
-                            })
-                        self.app.logger.info(f"Found {len(devices)} potential OSR devices")
-                        self._osr_scan_performed = True
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_osr_scan, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to scan OSR devices: {e}")
-    
-    def _connect_osr_device(self, port_name):
-        """Connect to specific OSR device."""
-        try:
-            import threading
-            import asyncio
-            
-            def run_osr_connect_and_loop():
-                """Connect to OSR device and keep the async loop running."""
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                async def connect_and_run():
-                    try:
-                        success = await self.device_manager.connect(port_name)
-                        if success:
-                            self.app.logger.info(f"Connected to OSR device on {port_name}")
-                            self.app.logger.info("Async loop running for device control - keeping alive for live tracking")
-                            
-                            # Keep the loop running forever to maintain the position update task
-                            # This will only end when the application shuts down
-                            try:
-                                while True:
-                                    await asyncio.sleep(1)  # Keep loop alive
-                            except asyncio.CancelledError:
-                                self.app.logger.info("Device manager loop cancelled")
-                        else:
-                            self.app.logger.error(f"Failed to connect to OSR device on {port_name}")
-                    except Exception as e:
-                        self.app.logger.error(f"Error in device connection loop: {e}")
-                
-                try:
-                    # Store loop reference for potential cleanup
-                    self.device_manager.loop = loop
-                    loop.run_until_complete(connect_and_run())
-                finally:
-                    loop.close()
-            
-            # Start the persistent connection thread
-            thread = threading.Thread(target=run_osr_connect_and_loop, daemon=True)
-            thread.start()
-            
-        except Exception as e:
-            self.app.logger.error(f"Failed to connect OSR device: {e}")
-    
-    def _render_osr_performance_settings(self):
-        """Render OSR performance tuning controls."""
-        try:
-            imgui.separator()
-            imgui.text("Performance Settings:")
-            
-            # Get current settings or defaults
-            sensitivity = self.app.app_settings.get("osr_sensitivity", 2.0)
-            speed = self.app.app_settings.get("osr_speed", 2.0)
-            
-            # Sensitivity slider
-            imgui.text("Sensitivity (how small movements trigger device):")
-            changed_sens, new_sensitivity = imgui.slider_float("##osr_sensitivity", sensitivity, 0.5, 5.0, "%.1fx")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Higher = more responsive to small position changes\nLower = only responds to large movements")
-            
-            if changed_sens:
-                self.app.app_settings.set("osr_sensitivity", new_sensitivity)
-                self._update_osr_performance(new_sensitivity, speed)
-            
-            # Speed slider  
-            imgui.text("Speed (how fast the device moves):")
-            changed_speed, new_speed = imgui.slider_float("##osr_speed", speed, 0.5, 5.0, "%.1fx")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Higher = faster movements\nLower = slower, smoother movements")
-            
-            if changed_speed:
-                self.app.app_settings.set("osr_speed", new_speed)
-                self._update_osr_performance(sensitivity, new_speed)
-            
-            # Video playback amplification
-            imgui.separator()
-            imgui.text("Video Playback Amplification:")
-            video_amp = self.app.app_settings.get("video_playback_amplification", 1.5)
-            changed_amp, new_amp = imgui.slider_float("##video_amp", video_amp, 1.0, 3.0, "%.1fx")
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Amplifies funscript movement during video playback\nHigher = more dramatic movement\n1.0x = original funscript range")
-            
-            if changed_amp:
-                self.app.app_settings.set("video_playback_amplification", new_amp)
-                self.app.logger.info(f"Video playback amplification set to {new_amp:.1f}x")
-            
-            # Reset button
-            if imgui.button("Reset to Defaults##OSR_Performance"):
-                self.app.app_settings.set("osr_sensitivity", 2.0)
-                self.app.app_settings.set("osr_speed", 2.0)
-                self.app.app_settings.set("video_playback_amplification", 1.5)
-                self._update_osr_performance(2.0, 2.0)
-                
-        except Exception as e:
-            self.app.logger.error(f"Error rendering OSR performance settings: {e}")
-    
-    def _update_osr_performance(self, sensitivity: float, speed: float):
-        """Update OSR device performance settings."""
-        try:
-            # Get the OSR backend
-            osr_backend = self.device_manager.available_backends.get('osr')
-            if osr_backend and hasattr(osr_backend, 'set_performance_settings'):
-                osr_backend.set_performance_settings(sensitivity, speed)
-                self.app.logger.info(f"Updated OSR performance: sensitivity={sensitivity:.1f}x, speed={speed:.1f}x")
-            else:
-                self.app.logger.debug("OSR backend not available for performance update")
-                
-        except Exception as e:
-            self.app.logger.error(f"Failed to update OSR performance: {e}")
-    
-    def _test_osr_movement(self):
-        """Test OSR movement with a simple pattern."""
-        try:
-            import threading
-            def run_test():
-                import asyncio
-                import time
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Check device manager state
-                    if not self.device_manager:
-                        self.app.logger.error("Device manager not initialized")
-                        return
-                    
-                    # Check if any device is connected
-                    if not self.device_manager.is_connected():
-                        self.app.logger.error("No device connected. Please connect an OSR device first.")
-                        return
-                    
-                    backend = self.device_manager.get_connected_backend()
-                    if not backend:
-                        self.app.logger.error("No connected backend available")
-                        return
-                    
-                    # Check if the backend is actually connected
-                    if not backend.is_connected():
-                        self.app.logger.error("Backend reports not connected")
-                        return
-                    
-                    self.app.logger.info("Starting OSR test movement pattern...")
-                    self.app.logger.info(f"Using backend: {type(backend).__name__}")
-                    
-                    # Test pattern: center -> up -> center -> down -> center
-                    test_positions = [
-                        (50, "Center"),
-                        (10, "Up"),  
-                        (50, "Center"),
-                        (90, "Down"),
-                        (50, "Center")
-                    ]
-                    
-                    for position, label in test_positions:
-                        # Use the correct backend method
-                        self.app.logger.info(f"Sending {label} position ({position}%) to device...")
-                        success = loop.run_until_complete(backend.set_position(position, 50))
-                        if success:
-                            self.app.logger.debug(f"OSR test: {label} position ({position}%) - Success")
-                        else:
-                            self.app.logger.error(f"❌ OSR test: {label} position ({position}%) - Failed")
-                        time.sleep(1.0)  # Hold position for 1 second
-                    
-                    self.app.logger.info("OSR test movement completed")
-                        
-                except Exception as e:
-                    self.app.logger.error(f"Error during OSR test: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_test, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to start OSR test movement: {e}")
-    
-    def _preview_axis_position(self, axis_key, tcode_position, message):
-        """Preview a specific axis position in real-time."""
-        try:
-            if not self.device_manager.is_connected():
-                self.app.logger.warning("No device connected for preview")
-                return
-            
-            connected_device = self.device_manager.get_connected_device_info()
-            if not connected_device or "osr" not in connected_device.device_id.lower():
-                self.app.logger.warning("Preview only available for OSR devices")
-                return
-            
-            # Get the OSR backend
-            backend = self.device_manager.get_connected_backend()
-            if not backend:
-                self.app.logger.warning("No connected backend available for preview")
-                return
-            
-            # Check backend connection status
-            if not backend.is_connected():
-                self.app.logger.warning("Backend not connected for preview")
-                return
-            
-            self.app.logger.debug(f"Using backend: {type(backend).__name__} for axis preview")
-            
-            # Map axis key to TCode axis identifier (standard T-code protocol)
-            axis_mapping = {
-                'up_down': 'L0',         # Linear axis 0 (up/down stroke) 
-                'left_right': 'L1',      # Linear axis 1 (left/right)
-                'front_back': 'L2',      # Linear axis 2 (front/back)
-                'twist': 'R0',           # Rotation axis 0 (twist/yaw)
-                'roll': 'R1',            # Rotation axis 1 (roll)
-                'pitch': 'R2',           # Rotation axis 2 (pitch)
-                'vibration': 'V0',       # Vibration axis 0 (primary)
-                'aux_vibration': 'V1'    # Vibration axis 1 (auxiliary)
-            }
-            
-            tcode_axis = axis_mapping.get(axis_key)
-            if not tcode_axis:
-                self.app.logger.warning(f"Unknown axis key: {axis_key}")
-                return
-            
-            # Convert TCode position (0-9999) to percentage (0-100) for backend
-            position_percent = (tcode_position / 9999.0) * 100.0
-            
-            # Send command through backend's standardized axis method
-            import threading
-            def run_preview():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Log what we're about to send
-                    self.app.logger.debug(f"Sending command: {tcode_axis} to {position_percent:.1f}% via {type(backend).__name__}")
-                    
-                    # Check if backend is still connected before sending
-                    if not backend.is_connected():
-                        self.app.logger.error(f"Backend disconnected before sending {tcode_axis} command")
-                        return
-                    
-                    # Use backend's set_axis_position method instead of direct TCode
-                    success = loop.run_until_complete(backend.set_axis_position(tcode_axis, position_percent))
-                    
-                    if success:
-                        self.app.logger.info(f"{message}: {tcode_axis} axis to {position_percent:.1f}%")
-                    else:
-                        self.app.logger.error(f"Failed to set {tcode_axis} axis position - backend returned False")
-                        
-                except Exception as e:
-                    self.app.logger.error(f"Failed to preview axis position: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_preview, daemon=True)
-            thread.start()
-            
-        except Exception as e:
-            self.app.logger.error(f"Failed to preview axis position: {e}")
-    
-    def _demo_axis_range(self, axis_key, min_pos, max_pos, inverted, axis_label):
-        """Demonstrate the full range of an axis with current settings."""
-        try:
-            if not self.device_manager.is_connected():
-                self.app.logger.warning("No device connected for demo")
-                return
-            
-            import threading
-            def run_demo():
-                import asyncio
-                import time
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Get the OSR backend
-                    backend = self.device_manager.get_connected_backend()
-                    if not backend:
-                        return
-                    
-                    # Map axis key to TCode axis identifier (standard T-code protocol)
-                    axis_mapping = {
-                        'up_down': 'L0',         # Linear axis 0 (up/down stroke) 
-                        'left_right': 'L1',      # Linear axis 1 (left/right)
-                        'front_back': 'L2',      # Linear axis 2 (front/back)
-                        'twist': 'R0',           # Rotation axis 0 (twist/yaw)
-                        'roll': 'R1',            # Rotation axis 1 (roll)
-                        'pitch': 'R2',           # Rotation axis 2 (pitch)
-                        'vibration': 'V0',       # Vibration axis 0 (primary)
-                        'aux_vibration': 'V1'    # Vibration axis 1 (auxiliary)
-                    }
-                    
-                    tcode_axis = axis_mapping.get(axis_key)
-                    if not tcode_axis:
-                        self.app.logger.warning(f"Unknown axis: {axis_key}")
-                        return
-                    
-                    self.app.logger.info(f"Demonstrating {axis_label} range...")
-                    
-                    # Demo sequence: min → max → center (respecting inversion)
-                    # Convert TCode positions (0-9999) to percentages (0-100) for backend
-                    if inverted:
-                        sequence = [
-                            ((max_pos / 9999.0) * 100.0, "0% (inverted)"),
-                            ((min_pos / 9999.0) * 100.0, "100% (inverted)"), 
-                            (((min_pos + max_pos) / 2 / 9999.0) * 100.0, "50% (center)")
-                        ]
-                    else:
-                        sequence = [
-                            ((min_pos / 9999.0) * 100.0, "0% (normal)"),
-                            ((max_pos / 9999.0) * 100.0, "100% (normal)"),
-                            (((min_pos + max_pos) / 2 / 9999.0) * 100.0, "50% (center)")
-                        ]
-                    
-                    for position_percent, label in sequence:
-                        # Use backend's standardized axis method instead of direct TCode
-                        success = loop.run_until_complete(backend.set_axis_position(tcode_axis, position_percent))
-                        if success:
-                            self.app.logger.info(f"{axis_label} demo: {label} → {tcode_axis} axis to {position_percent:.1f}%")
-                        else:
-                            self.app.logger.error(f"Failed to set {tcode_axis} axis to {position_percent:.1f}%")
-                        time.sleep(2.0)  # Wait between movements
-                    
-                    self.app.logger.info(f"{axis_label} range demonstration complete")
-                    
-                except Exception as e:
-                    self.app.logger.error(f"Failed to demo axis range: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_demo, daemon=True)
-            thread.start()
-            
-        except Exception as e:
-            self.app.logger.error(f"Failed to start axis demo: {e}")
-    
-    def _simulate_axis_pattern(self, axis_key: str, pattern_type: str, min_pos: int, max_pos: int, inverted: bool, axis_label: str):
-        """Simulate various motion patterns for axis testing."""
-        try:
-            import threading
-            import math
-            import random
-            
-            def run_pattern():
-                import asyncio
-                import time
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    backend = self.device_manager.get_connected_backend()
-                    if not backend:
-                        return
-                    
-                    # Map axis key to TCode axis identifier
-                    axis_mapping = {
-                        'up_down': 'L0', 'left_right': 'L1', 'front_back': 'L2',
-                        'twist': 'R0', 'roll': 'R1', 'pitch': 'R2',
-                        'vibration': 'V0', 'aux_vibration': 'V1'
-                    }
-                    
-                    tcode_axis = axis_mapping.get(axis_key)
-                    if not tcode_axis:
-                        self.app.logger.warning(f"Unknown axis: {axis_key}")
-                        return
-                    
-                    self.app.logger.info(f"Starting {pattern_type} pattern for {axis_label}...")
-                    
-                    # Generate pattern positions
-                    center_pos = (min_pos + max_pos) // 2
-                    amplitude = (max_pos - min_pos) // 2
-                    duration = 10.0  # 10 seconds
-                    steps = 50  # Number of steps
-                    dt = duration / steps
-                    
-                    positions = []
-                    
-                    if pattern_type == "sine_wave":
-                        for i in range(steps):
-                            t = (i / steps) * 4 * math.pi  # 2 full cycles
-                            offset = amplitude * math.sin(t)
-                            pos = center_pos + offset
-                            positions.append((int(pos), f"Sine {i}/{steps}"))
-                    
-                    elif pattern_type == "square_wave":
-                        for i in range(steps):
-                            t = (i / steps) * 4  # 2 full cycles
-                            pos = max_pos if (t % 2) < 1 else min_pos
-                            positions.append((int(pos), f"Square {i}/{steps}"))
-                    
-                    elif pattern_type == "triangle_wave":
-                        for i in range(steps):
-                            t = (i / steps) * 4  # 2 full cycles
-                            cycle_pos = t % 2
-                            if cycle_pos < 1:
-                                # Rising
-                                pos = min_pos + (max_pos - min_pos) * cycle_pos
-                            else:
-                                # Falling
-                                pos = max_pos - (max_pos - min_pos) * (cycle_pos - 1)
-                            positions.append((int(pos), f"Triangle {i}/{steps}"))
-                    
-                    elif pattern_type == "random":
-                        for i in range(20):  # Shorter for random
-                            pos = random.randint(min_pos, max_pos)
-                            positions.append((int(pos), f"Random {i}/20"))
-                    
-                    elif pattern_type == "pulse":
-                        for i in range(10):  # 10 pulses
-                            # Pulse out and back
-                            positions.append((max_pos, f"Pulse {i} - Out"))
-                            positions.append((center_pos, f"Pulse {i} - Back"))
-                    
-                    # Execute pattern
-                    for pos, label in positions:
-                        if inverted:
-                            # Invert the position mapping
-                            display_pos = max_pos + min_pos - pos
-                        else:
-                            display_pos = pos
-                        
-                        # Convert to percentage for backend
-                        position_percent = (display_pos / 9999.0) * 100.0
-                        
-                        success = loop.run_until_complete(backend.set_axis_position(tcode_axis, position_percent))
-                        if success:
-                            self.app.logger.info(f"{axis_label} {pattern_type}: {label} → {tcode_axis} at {position_percent:.1f}%")
-                        else:
-                            self.app.logger.error(f"Failed to set {tcode_axis} to {position_percent:.1f}%")
-                        
-                        time.sleep(dt)
-                    
-                    # Return to center
-                    center_percent = ((center_pos if not inverted else center_pos) / 9999.0) * 100.0
-                    loop.run_until_complete(backend.set_axis_position(tcode_axis, center_percent))
-                    self.app.logger.info(f"{axis_label} {pattern_type} pattern complete - returned to center")
-                    
-                except Exception as e:
-                    self.app.logger.error(f"Error in {pattern_type} pattern: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_pattern, daemon=True)
-            thread.start()
-            
-        except Exception as e:
-            self.app.logger.error(f"Failed to start {pattern_type} pattern: {e}")
-    
-    def _update_live_tracking_control(self, enabled: bool):
-        """Update live tracking control setting in tracker manager."""
-        try:
-            # Get tracker manager from app
-            tracker_manager = getattr(self.app, 'tracker_manager', None)
-            self.app.logger.info(f"Updating live tracking control: enabled={enabled}, tracker_manager={tracker_manager is not None}")
-            
-            if tracker_manager and hasattr(tracker_manager, 'set_live_device_control_enabled'):
-                tracker_manager.set_live_device_control_enabled(enabled)
-                self.app.logger.info(f"Live tracking device control {'enabled' if enabled else 'disabled'}")
-            else:
-                self.app.logger.warning(f"Tracker manager not available for live device control: {tracker_manager}")
-                
-                # Try to find tracker managers by timeline ID
-                for timeline_id in range(1, 3):
-                    tm = getattr(self.app, f'tracker_manager_{timeline_id}', None)
-                    if tm:
-                        self.app.logger.info(f"Found tracker_manager_{timeline_id}, updating...")
-                        tm.set_live_device_control_enabled(enabled)
-                        
-        except Exception as e:
-            self.app.logger.error(f"Failed to update live tracking control: {e}")
-            import traceback
-            self.app.logger.error(f"Traceback: {traceback.format_exc()}")
-    
-    def _update_video_playback_control(self, enabled: bool):
-        """Update video playback control setting."""
-        try:
-            # Setting is automatically picked up by timeline during video playback
-            self.app.logger.info(f"Video playback device control {'enabled' if enabled else 'disabled'}")
-            
-            if enabled:
-                # Verify device manager is available
-                device_manager = getattr(self.app, 'device_manager', None)
-                if device_manager and device_manager.is_connected():
-                    self.app.logger.info("Device control ready for video playback")
-                else:
-                    self.app.logger.warning("No connected devices - video playback control will be inactive")
-                    
-        except Exception as e:
-            self.app.logger.error(f"Failed to update video playback control: {e}")
-    
-    def _initialize_video_playback_bridge(self):
-        """Initialize video playback bridge."""
-        try:
-            if self.device_manager:
-                from device_control.bridges.video_playback_bridge import create_video_playback_bridge
-                self.video_playback_bridge = create_video_playback_bridge(self.device_manager)
-                self.app.logger.info("Video playback bridge initialized")
-            else:
-                self.app.logger.warning("Device manager not available for video playback bridge")
-        except Exception as e:
-            self.app.logger.error(f"Failed to initialize video playback bridge: {e}")
-            self.video_playback_bridge = None
-    
-    
-    def _render_osr_axis_configuration(self):
-        """Render OSR axis configuration UI."""
-        try:
-            imgui.separator()
-            imgui.text("OSR Axis Configuration")
-            
-            # Load current OSR settings
-            current_profile_name = self.app.app_settings.get("device_control_selected_profile", "Balanced")
-            osr_profiles = self.app.app_settings.get("device_control_osr_profiles", {})
-            
-            if current_profile_name not in osr_profiles:
-                imgui.text_colored("No OSR profile found in settings", 1.0, 0.5, 0.0)
-                return
-            
-            profile_data = osr_profiles[current_profile_name]
-            
-            # Profile selection
-            imgui.text("Profile:")
-            imgui.same_line()
-            profile_names = list(osr_profiles.keys())
-            current_index = profile_names.index(current_profile_name) if current_profile_name in profile_names else 0
-            
-            changed, new_index = imgui.combo("##profile_selector", current_index, profile_names)
-            if changed and 0 <= new_index < len(profile_names):
-                new_profile_name = profile_names[new_index]
-                self.app.app_settings.set("device_control_selected_profile", new_profile_name)
-                profile_data = osr_profiles[new_profile_name]
-                self._load_osr_profile_to_device(new_profile_name, profile_data)
-            
-            imgui.text(f"Description: {profile_data.get('description', 'No description')}")
-            
-            # Axis configurations
-            imgui.separator()
-            imgui.text("Axis Settings:")
-            
-            axes_to_show = [
-                # Linear axes
-                ("up_down", "Up/Down Stroke", "L0"),
-                ("left_right", "Left/Right", "L1"),
-                ("front_back", "Front/Back", "L2"),
-                # Rotation axes
-                ("twist", "Twist", "R0"),
-                ("roll", "Roll", "R1"), 
-                ("pitch", "Pitch", "R2"),
-                # Vibration axes
-                ("vibration", "Vibration", "V0"),
-                ("aux_vibration", "Aux Vibration", "V1")
-            ]
-            
-            settings_changed = False
-            
-            for axis_key, axis_label, tcode in axes_to_show:
-                if axis_key not in profile_data:
-                    continue
-                    
-                axis_data = profile_data[axis_key]
-                
-                # Axis header with enable checkbox
-                enabled = axis_data.get("enabled", False)
-                changed, new_enabled = imgui.checkbox(f"{axis_label} ({tcode})", enabled)
-                if changed:
-                    axis_data["enabled"] = new_enabled
-                    settings_changed = True
-                
-                if enabled:
-                    imgui.indent(20)
-                    
-                    # Min/Max position sliders with real-time preview
-                    min_pos = axis_data.get("min_position", 0)
-                    max_pos = axis_data.get("max_position", 9999)
-                    
-                    imgui.text(f"{axis_label} Range:")
-                    imgui.text_colored("Drag sliders to feel the limits in real-time", 0.7, 0.7, 0.7)
-                    
-                    changed, new_min = imgui.slider_int(f"Min Position##{axis_key}", min_pos, 0, 9999, f"%d (0%% limit)")
-                    if changed:
-                        axis_data["min_position"] = new_min
-                        settings_changed = True
-                        # Real-time preview: move to min position
-                        self._preview_axis_position(axis_key, new_min, f"Previewing {axis_label} minimum")
-                    
-                    changed, new_max = imgui.slider_int(f"Max Position##{axis_key}", max_pos, 0, 9999, f"%d (100%% limit)")
-                    if changed:
-                        axis_data["max_position"] = new_max
-                        settings_changed = True
-                        # Real-time preview: move to max position
-                        self._preview_axis_position(axis_key, new_max, f"Previewing {axis_label} maximum")
-                    
-                    # Range validation
-                    if new_min >= new_max:
-                        imgui.text_colored("Warning: Min must be less than Max", 1.0, 0.5, 0.0)
-                    
-                    # Preview buttons for testing limits
-                    imgui.text("Test Range:")
-                    if imgui.button(f"Test Min##{axis_key}"):
-                        self._preview_axis_position(axis_key, new_min, f"Testing {axis_label} minimum (0%)")
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Move to minimum position (funscript 0%)")
-                    
-                    imgui.same_line()
-                    if imgui.button(f"Test Max##{axis_key}"):
-                        self._preview_axis_position(axis_key, new_max, f"Testing {axis_label} maximum (100%)")
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Move to maximum position (funscript 100%)")
-                    
-                    imgui.same_line()
-                    if imgui.button(f"Center##{axis_key}"):
-                        center_pos = (new_min + new_max) // 2
-                        self._preview_axis_position(axis_key, center_pos, f"Centering {axis_label} (50%)")
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Move to center position (funscript 50%)")
-                    
-                    # Speed multiplier
-                    speed_mult = axis_data.get("speed_multiplier", 1.0)
-                    changed, new_speed = imgui.slider_float(f"Speed Multiplier##{axis_key}", speed_mult, 0.1, 3.0, "%.2f")
-                    if changed:
-                        axis_data["speed_multiplier"] = new_speed
-                        settings_changed = True
-                    
-                    # Invert checkbox with preview
-                    invert = axis_data.get("invert", False)
-                    changed, new_invert = imgui.checkbox(f"Invert Direction##{axis_key}", invert)
-                    if changed:
-                        axis_data["invert"] = new_invert
-                        settings_changed = True
-                        # Preview inversion by showing the effect
-                        if new_invert:
-                            # Show inverted max (funscript 0% → device max)
-                            self._preview_axis_position(axis_key, new_max, f"Previewing {axis_label} INVERTED: funscript 0% → device max")
-                        else:
-                            # Show normal min (funscript 0% → device min)
-                            self._preview_axis_position(axis_key, new_min, f"Previewing {axis_label} NORMAL: funscript 0% → device min")
-                    
-                    # Pattern simulation buttons
-                    imgui.separator()
-                    imgui.text(f"{axis_label} Simulation Patterns:")
-                    
-                    # Row 1: Basic patterns
-                    if imgui.button(f"Demo Range##{axis_key}"):
-                        self._demo_axis_range(axis_key, new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Test min → max → center positions")
-                    
-                    imgui.same_line()
-                    if imgui.button(f"Sine Wave##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "sine_wave", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Smooth sine wave motion")
-                    
-                    imgui.same_line()
-                    if imgui.button(f"Square Wave##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "square_wave", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Sharp min/max transitions")
-                    
-                    # Row 2: Complex patterns
-                    if imgui.button(f"Triangle Wave##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "triangle_wave", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Linear ramp up/down motion")
-                    
-                    imgui.same_line()
-                    if imgui.button(f"Random Pattern##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "random", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Random positions for testing")
-                    
-                    imgui.same_line()
-                    if imgui.button(f"Pulse Pattern##{axis_key}"):
-                        self._simulate_axis_pattern(axis_key, "pulse", new_min, new_max, new_invert, axis_label)
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip("Quick pulses from center")
-                    
-                    # Smoothing
-                    smoothing = axis_data.get("smoothing_factor", 0.8)
-                    changed, new_smoothing = imgui.slider_float(f"Smoothing##{axis_key}", smoothing, 0.0, 1.0, "%.2f")
-                    if changed:
-                        axis_data["smoothing_factor"] = new_smoothing
-                        settings_changed = True
-                    
-                    # Pattern generation settings for this axis
-                    imgui.separator()
-                    imgui.text(f"{axis_label} Pattern Generation:")
-                    
-                    # Pattern type dropdown (generalized for all axes)
-                    pattern_types = ["disabled", "wave", "follow", "auto"]
-                    pattern_labels = ["Disabled", "Wave (Smooth)", "Follow Primary", "Auto-Select"]
-                    current_pattern = axis_data.get("pattern_type", "disabled")
-                    current_pattern_index = pattern_types.index(current_pattern) if current_pattern in pattern_types else 0
-                    
-                    changed, new_pattern_index = imgui.combo(f"Pattern Type##{axis_key}", current_pattern_index, pattern_labels)
-                    if changed and 0 <= new_pattern_index < len(pattern_types):
-                        axis_data["pattern_type"] = pattern_types[new_pattern_index]
-                        settings_changed = True
-                    
-                    # Pattern intensity (only if not disabled)
-                    if axis_data.get("pattern_type", "disabled") != "disabled":
-                        intensity = axis_data.get("pattern_intensity", 1.0)
-                        changed, new_intensity = imgui.slider_float(f"Pattern Intensity##{axis_key}", intensity, 0.0, 2.0, "%.2f")
-                        if changed:
-                            axis_data["pattern_intensity"] = new_intensity
-                            settings_changed = True
-                        
-                        # Pattern frequency (only if not disabled)
-                        frequency = axis_data.get("pattern_frequency", 1.0)
-                        changed, new_frequency = imgui.slider_float(f"Pattern Frequency##{axis_key}", frequency, 0.1, 5.0, "%.2f")
-                        if changed:
-                            axis_data["pattern_frequency"] = new_frequency
-                            settings_changed = True
-                    
-                    imgui.unindent(20)
-                
-                imgui.separator()
-            
-            # Global settings
-            imgui.text("Global Settings:")
-            
-            # Update rate
-            update_rate = profile_data.get("update_rate_hz", 20.0)
-            changed, new_rate = imgui.slider_float("Update Rate (Hz)", update_rate, 5.0, 50.0, "%.1f")
-            if changed:
-                profile_data["update_rate_hz"] = new_rate
-                settings_changed = True
-            
-            # Safety limits
-            safety_enabled = profile_data.get("safety_limits_enabled", True)
-            changed, new_safety = imgui.checkbox("Safety Limits Enabled", safety_enabled)
-            if changed:
-                profile_data["safety_limits_enabled"] = new_safety
-                settings_changed = True
-            
-            # Apply button
-            imgui.separator()
-            if imgui.button("Apply Configuration"):
-                self._load_osr_profile_to_device(current_profile_name, profile_data)
-                settings_changed = True
-            
-            imgui.same_line()
-            if imgui.button("Test Axis Movement"):
-                self._test_osr_axes()
-            
-            # Save settings if changed
-            if settings_changed:
-                osr_profiles[current_profile_name] = profile_data
-                self.app.app_settings.set("device_control_osr_profiles", osr_profiles)
-                self.app.app_settings.save_settings()
-                
-        except Exception as e:
-            imgui.text_colored(f"Error in OSR configuration: {e}", 1.0, 0.0, 0.0)
-    
-    def _load_osr_profile_to_device(self, profile_name: str, profile_data: dict):
-        """Load OSR profile to the connected device."""
-        try:
-            # Import axis control here to avoid circular imports
-            from device_control.axis_control import load_profile_from_settings
-            
-            # Convert settings to OSRControlProfile
-            profile = load_profile_from_settings(profile_data)
-            
-            # Get the OSR backend and load the profile
-            backend = self.device_manager.get_connected_backend()
-            if backend and hasattr(backend, 'load_axis_profile'):
-                success = backend.load_axis_profile(profile)
-                if success:
-                    self.app.logger.info(f"Loaded OSR profile '{profile_name}' to device")
-                else:
-                    self.app.logger.error(f"Failed to load OSR profile '{profile_name}' to device")
-                        
-        except Exception as e:
-            self.app.logger.error(f"Error loading OSR profile to device: {e}")
-    
-    def _test_osr_axes(self):
-        """Test OSR axes with a simple movement pattern."""
-        try:
-            import threading
-            def run_test():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(self._test_osr_movement_async())
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_test, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to start OSR test: {e}")
-    
-    async def _test_osr_movement_async(self):
-        """Test OSR movement pattern."""
-        try:
-            backend = self.device_manager.get_connected_backend()
-            if backend and hasattr(backend, 'set_position_with_profile'):
-                # Test pattern: 0 -> 50 -> 100 -> 50 -> 0
-                test_positions = [0.0, 50.0, 100.0, 50.0, 0.0]
-                
-                import asyncio
-                for pos in test_positions:
-                    await backend.set_position_with_profile(pos)
-                    await asyncio.sleep(1.0)  # Hold position for 1 second
-                
-                self.app.logger.info("OSR axis test completed")
-                    
-        except Exception as e:
-            self.app.logger.error(f"OSR test movement failed: {e}")
-    
-    
-    def _open_intiface_download(self):
-        """Open Intiface Central download page."""
-        try:
-            import webbrowser
-            webbrowser.open("https://intiface.com/central/")
-            self.app.logger.info("Opened Intiface Central download page")
-        except Exception as e:
-            self.app.logger.error(f"Failed to open Intiface download page: {e}")
-    
-    def _discover_buttplug_devices(self):
-        """Discover available Buttplug devices using current server settings."""
-        try:
-            import threading
-            def run_buttplug_discovery():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Use the device manager's existing Buttplug backend to ensure consistency
-                    if self.device_manager and 'buttplug' in self.device_manager.available_backends:
-                        backend = self.device_manager.available_backends['buttplug']
-                        server_url = backend.server_address
-                        self.app.logger.info(f"Discovering Buttplug devices at {server_url}...")
-                        devices = loop.run_until_complete(backend.discover_devices())
-                    else:
-                        # Fallback: Create temporary backend for discovery
-                        from device_control.backends.buttplug_backend_direct import DirectButtplugBackend
-                        
-                        server_address = self.app.app_settings.get("buttplug_server_address", "localhost")
-                        server_port = self.app.app_settings.get("buttplug_server_port", 12345)
-                        server_url = f"ws://{server_address}:{server_port}"
-                        
-                        self.app.logger.info(f"Discovering Buttplug devices at {server_url}...")
-                        backend = DirectButtplugBackend(server_url)
-                        devices = loop.run_until_complete(backend.discover_devices())
-                    
-                    # Store discovered devices for UI display
-                    self._discovered_buttplug_devices = devices
-                    self._buttplug_discovery_performed = True
-                    
-                    if devices:
-                        self.app.logger.debug(f"Found {len(devices)} Buttplug device(s):")
-                        for device in devices:
-                            caps = []
-                            if device.capabilities.supports_linear:
-                                caps.append(f"Linear({device.capabilities.linear_channels}ch)")
-                            if device.capabilities.supports_vibration:
-                                caps.append(f"Vibration({device.capabilities.vibration_channels}ch)")
-                            if device.capabilities.supports_rotation:
-                                caps.append(f"Rotation({device.capabilities.rotation_channels}ch)")
-                            
-                            self.app.logger.info(f"  • {device.name} - {', '.join(caps) if caps else 'No capabilities'}")
-                    else:
-                        self.app.logger.info("❌ No Buttplug devices found")
-                        self.app.logger.info("Make sure Intiface Central is running and devices are connected")
-                        
-                except Exception as e:
-                    self._buttplug_discovery_performed = True
-                    if "Connection refused" in str(e) or "Connect call failed" in str(e):
-                        self.app.logger.info(f"❌ Cannot connect to Intiface Central at {server_url}")
-                        self.app.logger.info("Please start Intiface Central and enable server mode")
-                    else:
-                        self.app.logger.error(f"Buttplug discovery error: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_buttplug_discovery, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to start Buttplug discovery: {e}")
-    
-    def _connect_specific_buttplug_device(self, device_id):
-        """Connect to a specific Buttplug device by ID."""
-        try:
-            import threading
-            def run_buttplug_connection():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    success = loop.run_until_complete(self.device_manager.connect(device_id))
-                    if success:
-                        # Find the device name for logging
-                        device_name = "Unknown Device"
-                        if hasattr(self, '_discovered_buttplug_devices'):
-                            for device in self._discovered_buttplug_devices:
-                                if device.device_id == device_id:
-                                    device_name = device.name
-                                    break
-                        
-                        self.app.logger.info(f"Connected to {device_name}")
-                    else:
-                        self.app.logger.error(f"❌ Failed to connect to device {device_id}")
-                        
-                except Exception as e:
-                    self.app.logger.error(f"Buttplug connection failed: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_buttplug_connection, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to connect to Buttplug device: {e}")
-    
-    def _check_buttplug_server_status(self):
-        """Check if Buttplug server is running at configured address/port."""
-        try:
-            import threading
-            def run_status_check():
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                async def check_server():
-                    try:
-                        server_address = self.app.app_settings.get("buttplug_server_address", "localhost")
-                        server_port = self.app.app_settings.get("buttplug_server_port", 12345)
-                        server_url = f"ws://{server_address}:{server_port}"
-                        
-                        # Try to connect briefly to check status
-                        try:
-                            import websockets
-                            import json
-                            
-                            import asyncio
-                            websocket = await asyncio.wait_for(
-                                websockets.connect(server_url), timeout=5
-                            )
-                            
-                            # Send handshake
-                            handshake = {
-                                "RequestServerInfo": {
-                                    "Id": 1,
-                                    "ClientName": "VR-Funscript-AI-Generator-StatusCheck",
-                                    "MessageVersion": 3
-                                }
-                            }
-                            
-                            await websocket.send(json.dumps([handshake]))
-                            response = await websocket.recv()
-                            response_data = json.loads(response)
-                            
-                            await websocket.close()
-                            
-                            if response_data and len(response_data) > 0 and 'ServerInfo' in response_data[0]:
-                                server_info = response_data[0]['ServerInfo']
-                                server_name = server_info.get('ServerName', 'Unknown')
-                                server_version = server_info.get('MessageVersion', 'Unknown')
-                                
-                                self.app.logger.debug(f"Buttplug server running at {server_url}")
-                                self.app.logger.info(f"   Server: {server_name} (Protocol v{server_version})")
-                            else:
-                                self.app.logger.debug(f"Connected to {server_url} but unexpected response")
-                                
-                        except Exception as connection_error:
-                            if "Connection refused" in str(connection_error):
-                                self.app.logger.info(f"❌ Buttplug server not running at {server_url}")
-                                self.app.logger.info("Please start Intiface Central and enable server mode")
-                            else:
-                                self.app.logger.error(f"Server status check failed: {connection_error}")
-                            
-                    except Exception as e:
-                        self.app.logger.error(f"Failed to check server status: {e}")
-                
-                try:
-                    loop.run_until_complete(check_server())
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_status_check, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to start server status check: {e}")
-    
-    def _test_buttplug_movement(self):
-        """Test movement for connected Buttplug device."""
-        try:
-            import threading
-            def run_movement_test():
-                import asyncio
-                import time
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    if not self.device_manager.is_connected():
-                        self.app.logger.info("No device connected for movement test")
-                        return
-                    
-                    self.app.logger.debug("Testing Buttplug device movement...")
-                    
-                    # Test sequence with good timing
-                    positions = [0, 100, 25, 75, 50]
-                    for i, pos in enumerate(positions):
-                        loop.run_until_complete(asyncio.sleep(0.8))  # Wait between positions
-                        self.device_manager.update_position(pos, 50.0)
-                        self.app.logger.info(f"   Step {i+1}/{len(positions)}: Position {pos}%")
-                    
-                    # Return to center
-                    loop.run_until_complete(asyncio.sleep(0.8))
-                    self.device_manager.update_position(50.0, 50.0)
-                    self.app.logger.debug("Movement test complete")
-                    
-                except Exception as e:
-                    self.app.logger.error(f"Movement test failed: {e}")
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=run_movement_test, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.app.logger.error(f"Failed to start movement test: {e}")
-    
-    def _connect_handy(self, connection_key: str):
-        """Connect to Handy device with given connection key."""
-        import threading
-        import asyncio
-
-        def connect_async():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self.device_manager.connect_handy(connection_key))
-            finally:
-                loop.close()
-
-        threading.Thread(target=connect_async, daemon=True).start()
-
-    def _disconnect_handy(self):
-        """Disconnect from Handy device."""
-        import threading
-        import asyncio
-
-        def disconnect_async():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self.device_manager.disconnect_handy())
-            finally:
-                loop.close()
-
-        threading.Thread(target=disconnect_async, daemon=True).start()
-
-    def _apply_handy_hstp_offset(self, offset_ms: int):
-        """Apply sync offset instantly via Handy's /hstp/offset API."""
-        import threading
-        import asyncio
-
-        if not self.device_manager or not self.device_manager.is_connected():
-            return
-
-        def set_offset_async():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self.device_manager.set_handy_hstp_offset(offset_ms))
-            finally:
-                loop.close()
-
-        threading.Thread(target=set_offset_async, daemon=True).start()
-
-    def _apply_handy_sync_offset(self):
-        """Apply sync offset via Handy's /hstp/offset API."""
-        sync_offset = self.app.app_settings.get("device_control_handy_sync_offset_ms", 0)
-        self._apply_handy_hstp_offset(sync_offset)
-
-    def _test_handy_movement(self):
-        """Test Handy device movement."""
-        try:
-            import threading
-            def test_handy_async():
-                import asyncio
-                
-                async def run_test():
-                    try:
-                        self.app.logger.info(f"Device manager has _handy_backend: {hasattr(self.device_manager, '_handy_backend')}")
-                        if hasattr(self.device_manager, '_handy_backend'):
-                            self.app.logger.info(f"_handy_backend value: {self.device_manager._handy_backend}")
-                        
-                        if not hasattr(self.device_manager, '_handy_backend') or not self.device_manager._handy_backend:
-                            self.app.logger.error("No Handy connected")
-                            return
-                        
-                        backend = self.device_manager._handy_backend
-                        self.app.logger.info(f"Backend type: {type(backend)}")
-                        self.app.logger.info(f"Backend connected: {backend.is_connected()}")
-                        self.app.logger.info("Testing Handy movement...")
-                        
-                        # Test sequence: position, duration_ms (short durations for immediate testing)
-                        positions = [(20, 50), (80, 50), (50, 50), (30, 50), (70, 50), (50, 50)]
-                        
-                        for i, (pos, duration) in enumerate(positions):
-                            try:
-                                self.app.logger.info(f"   Calling set_position_enhanced({pos}, duration_ms={duration})")
-                                success = await backend.set_position_enhanced(
-                                    primary=pos,
-                                    duration_ms=duration,
-                                    movement_type="test"
-                                )
-                                self.app.logger.info(f"   set_position_enhanced returned: {success}")
-                                
-                                if success:
-                                    self.app.logger.info(f"   Step {i+1}/{len(positions)}: Position {pos}% in {duration}ms")
-                                else:
-                                    self.app.logger.error(f"   Step {i+1} failed")
-                                
-                                # Wait for movement to complete
-                                await asyncio.sleep(duration / 1000.0 + 0.2)
-                                
-                            except Exception as e:
-                                self.app.logger.error(f"   Step {i+1} error: {e}")
-                                import traceback
-                                self.app.logger.error(f"   Traceback: {traceback.format_exc()}")
-                        
-                        # Return to center
-                        try:
-                            await backend.stop()
-                            self.app.logger.info("Handy movement test complete")
-                        except Exception as e:
-                            self.app.logger.error(f"Failed to stop Handy: {e}")
-                        
-                    except Exception as e:
-                        self.app.logger.error(f"Handy test failed: {e}")
-                
-                # Create new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(run_test())
-                finally:
-                    loop.close()
-            
-            thread = threading.Thread(target=test_handy_async, daemon=True)
-            thread.start()
-            
-        except Exception as e:
-            self.app.logger.error(f"Failed to start Handy test: {e}")
-
-    def _upload_funscript_to_handy(self):
-        """Upload current funscript to Handy for HSSP streaming."""
-        import threading
-        import asyncio
-
-        # Get funscript actions
-        if not hasattr(self.app, 'funscript_processor') or not self.app.funscript_processor:
-            self.app.logger.error("No funscript loaded")
-            return
-
-        primary_actions = self.app.funscript_processor.get_actions('primary')
-        if not primary_actions:
-            self.app.logger.error("No funscript actions available")
-            return
-
-        def upload_async():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(
-                    self.device_manager.prepare_handy_for_video_playback(primary_actions)
-                )
-            finally:
-                loop.close()
-
-        threading.Thread(target=upload_async, daemon=True).start()
-
-    def _render_native_sync_tab(self):
-        """Render streamer tab content."""
-        try:
-            # Initialize streamer manager lazily
-            if self._native_sync_manager is None:
-                from streamer.integration_manager import NativeSyncManager
-                try:
-                    # Try with app_logic parameter (newer streamer versions)
-                    self._native_sync_manager = NativeSyncManager(
-                        self.app.processor,
-                        logger=self.app.logger,
-                        app_logic=self.app  # For HereSphere auto-load functionality
-                    )
-                except TypeError:
-                    # Fall back to old signature (older streamer versions)
-                    self.app.logger.warning("Streamer version doesn't support app_logic parameter - using backward-compatible initialization")
-                    self._native_sync_manager = NativeSyncManager(
-                        self.app.processor,
-                        logger=self.app.logger
-                    )
-
-            # Cache status to avoid expensive lookups every frame (throttle to 500ms)
-            import time
-            current_time = time.time()
-
-            # Update cache if stale (> 500ms)
-            if self._native_sync_status_cache is None or (current_time - self._native_sync_status_time) > 0.5:
-                self._native_sync_status_cache = self._native_sync_manager.get_status()
-                self._native_sync_status_time = current_time
-
-            # Use cached status
-            status = self._native_sync_status_cache
-            is_running = status.get('is_running', False)
-            client_count = status.get('connected_clients', 0)
-
-            # Auto-hide/show video feed based on client connections
-            if is_running:
-                # Initialize setting if not exists
-                if not hasattr(self.app.app_settings, '_streamer_auto_hide_video'):
-                    self.app.app_settings._streamer_auto_hide_video = True
-
-                auto_hide_enabled = getattr(self.app.app_settings, '_streamer_auto_hide_video', True)
-
-                # Track previous client count
-                if not hasattr(self, '_prev_client_count'):
-                    self._prev_client_count = 0
-
-                # Client connected (0 -> >0)
-                if auto_hide_enabled and client_count > 0 and self._prev_client_count == 0:
-                    self.app.app_state_ui.show_video_feed = False
-                    self.app.app_settings.set("show_video_feed", False)
-                    self.app.logger.info("🎥 Auto-hiding video feed (streamer active)")
-
-                # All clients disconnected (>0 -> 0)
-                elif client_count == 0 and self._prev_client_count > 0:
-                    self.app.app_state_ui.show_video_feed = True
-                    self.app.app_settings.set("show_video_feed", True)
-                    self.app.logger.info("🎥 Restoring video feed (no clients)")
-
-                self._prev_client_count = client_count
-
-            # Control Section
-            open_, _ = imgui.collapsing_header(
-                "Server Control##NativeSyncControl",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
-            )
-            if open_:
-                # Version info
-                try:
-                    import streamer
-                    version = getattr(streamer, '__version__', 'legacy')
-                    imgui.text_colored(f"Streamer Module Version: {version}", 0.5, 0.5, 0.5)
-                    imgui.spacing()
-                except Exception:
-                    pass
-
-                # Description
-                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                imgui.text_colored(
-                    "Stream video to browsers/VR headsets with frame-perfect synchronization. "
-                    "Supports zoom/pan controls, speed modes, and interactive device control.",
-                    0.7, 0.7, 0.7
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.spacing()
-
-                # Start/Stop button
-                if is_running:
-                    # Running - show stop button (DESTRUCTIVE - stops server)
-                    with destructive_button_style():
-                        if imgui.button("Stop Streaming Server", width=-1):
-                            self._stop_native_sync()
-                else:
-                    # Not running - show start button (PRIMARY - positive action)
-                    with primary_button_style():
-                        if imgui.button("Start Streaming Server", width=-1):
-                            self._start_native_sync()
-
-            # Connection Info Section (only when running)
-            if is_running:
-                open_, _ = imgui.collapsing_header(
-                    "Connection Info##NativeSyncConnection",
-                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
-                )
-                if open_:
-                    # FunGen Viewer URL
-                    viewer_url = f"http://{self._get_local_ip()}:{status.get('http_port', 8080)}/fungen"
-                    imgui.text("FunGen Viewer URL:")
-                    imgui.same_line()
-                    imgui.push_style_color(imgui.COLOR_TEXT, 0.0, 1.0, 0.5)
-                    imgui.text(viewer_url)
-                    imgui.pop_style_color()
-
-                    # Buttons row
-                    button_width = imgui.get_content_region_available_width() / 2 - 5
-                    # Open in Browser button (PRIMARY - positive action)
-                    with primary_button_style():
-                        if imgui.button("Open in Browser", width=button_width):
-                            self._open_in_browser(viewer_url)
-                    imgui.same_line()
-                    if imgui.button("Copy URL", width=button_width):
-                        self._copy_to_clipboard(viewer_url)
-
-                # Status Section
-                open_, _ = imgui.collapsing_header(
-                    "Status##NativeSyncStatus",
-                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
-                )
-                if open_:
-                    # Server status
-                    sync_active = status.get('sync_server_active', False)
-                    video_active = status.get('video_server_active', False)
-
-                    imgui.text("Streamer:")
-                    imgui.same_line()
-                    if sync_active:
-                        imgui.text_colored("Active", 0.0, 1.0, 0.0)
-                    else:
-                        imgui.text_colored("Inactive", 1.0, 0.0, 0.0)
-
-                    imgui.text("Video Server:")
-                    imgui.same_line()
-                    if video_active:
-                        imgui.text_colored("Active", 0.0, 1.0, 0.0)
-                    else:
-                        imgui.text_colored("Inactive", 1.0, 0.0, 0.0)
-
-                    # Connected clients
-                    client_count = status.get('connected_clients', 0)
-                    imgui.text(f"Connected Clients:")
-                    imgui.same_line()
-                    if client_count > 0:
-                        imgui.text_colored(str(client_count), 0.0, 1.0, 0.5)
-                    else:
-                        imgui.text_colored("0", 0.7, 0.7, 0.7)
-
-                    imgui.spacing()
-
-                    # Browser Playback Progress (when clients connected)
-                    if client_count > 0:
-                        imgui.separator()
-                        imgui.text("Browser Playback Position:")
-
-                        # Get sync server for browser position
-                        if self._native_sync_manager and self._native_sync_manager.sync_server:
-                            sync_server = self._native_sync_manager.sync_server
-                            browser_frame = sync_server.target_frame_index
-                            processor_frame = self.app.processor.current_frame_index
-                            total_frames = self.app.processor.total_frames
-
-                            if browser_frame is not None and total_frames > 0:
-                                # Calculate progress percentages
-                                browser_progress = (browser_frame / total_frames) * 100.0
-                                processor_progress = (processor_frame / total_frames) * 100.0
-
-                                # Browser progress bar
-                                imgui.text("  Browser:")
-                                imgui.same_line(120)
-                                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 0.0, 0.7, 1.0)
-                                imgui.progress_bar(browser_progress / 100.0, (200, 0), f"{browser_frame} / {total_frames}")
-                                imgui.pop_style_color()
-
-                                # Processor progress bar
-                                imgui.text("  Processing:")
-                                imgui.same_line(120)
-                                if processor_frame > browser_frame:
-                                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 0.0, 1.0, 0.5)
-                                else:
-                                    imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, 1.0, 0.5, 0.0)
-                                imgui.progress_bar(processor_progress / 100.0, (200, 0), f"{processor_frame} / {total_frames}")
-                                imgui.pop_style_color()
-
-                                # Show drift if exists
-                                drift = processor_frame - browser_frame
-                                if abs(drift) > 10:
-                                    imgui.spacing()
-                                    if drift > 0:
-                                        imgui.text_colored(f"  Processing is {drift} frames ahead", 0.0, 1.0, 0.5)
-                                    else:
-                                        imgui.text_colored(f"  Processing is {abs(drift)} frames behind!", 1.0, 0.5, 0.0)
-                            else:
-                                imgui.text_colored("  Waiting for browser position updates...", 0.7, 0.7, 0.7)
-                        else:
-                            imgui.text_colored("  No sync data available", 0.7, 0.7, 0.7)
-
-                # Connection Info Section (continued)
-                if open_:
-                    # HereSphere URLs (if enabled)
-                    if status.get('heresphere_enabled', False):
-                        imgui.spacing()
-                        imgui.separator()
-                        imgui.text_colored("HereSphere Integration:", 0.5, 0.8, 1.0)
-                        imgui.spacing()
-
-                        # HereSphere API URL
-                        local_ip = self._get_local_ip()
-                        heresphere_api_port = status.get('heresphere_api_port', 8091)
-                        heresphere_event_port = status.get('heresphere_event_port', 8090)
-
-                        api_url = f"http://{local_ip}:{heresphere_api_port}/heresphere"
-                        imgui.text("API Server (POST):")
-                        imgui.same_line()
-                        imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 1.0, 0.8)
-                        imgui.text(api_url)
-                        imgui.pop_style_color()
-
-                        # Copy button for API URL
-                        if imgui.button("Copy API URL", width=-1):
-                            self._copy_to_clipboard(api_url)
-
-                        imgui.spacing()
-                        imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                        imgui.text_colored(
-                            "Configure HereSphere to use the API URL above as a library source. "
-                            "The Event URL is automatically provided to HereSphere via video metadata.",
-                            0.6, 0.6, 0.6
-                        )
-                        imgui.pop_text_wrap_pos()
-
-                # Video Display Options (when streaming)
-                open_, _ = imgui.collapsing_header(
-                    "Display Options##NativeSyncDisplay",
-                    flags=0,  # Collapsed by default
-                )
-                if open_:
-                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                    imgui.text_colored(
-                        "When streaming to browsers, you can hide the local video feed to save GPU resources.",
-                        0.7, 0.7, 0.7
-                    )
-                    imgui.pop_text_wrap_pos()
-                    imgui.spacing()
-
-                    # Auto-hide video feed checkbox
-                    if not hasattr(self.app.app_settings, '_streamer_auto_hide_video'):
-                        self.app.app_settings._streamer_auto_hide_video = True
-
-                    auto_hide = getattr(self.app.app_settings, '_streamer_auto_hide_video', True)
-                    clicked, new_val = imgui.checkbox("Auto-hide Video Feed while streaming", auto_hide)
-                    if clicked:
-                        self.app.app_settings._streamer_auto_hide_video = new_val
-                        # Apply immediately
-                        if new_val and client_count > 0:
-                            # Hide video
-                            self.app.app_state_ui.show_video_feed = False
-                            self.app.app_settings.set("show_video_feed", False)
-                        elif not new_val:
-                            # Show video
-                            self.app.app_state_ui.show_video_feed = True
-                            self.app.app_settings.set("show_video_feed", True)
-
-                    imgui.same_line()
-                    imgui.text_colored("(?)", 0.7, 0.7, 0.7)
-                    if imgui.is_item_hovered():
-                        imgui.begin_tooltip()
-                        imgui.text("When enabled, the video feed will be hidden\nwhen clients are connected, and restored when\nall clients disconnect.")
-                        imgui.end_tooltip()
-
-                # Rolling Autotune Section (when streaming)
-                imgui.spacing()
-                open_, _ = imgui.collapsing_header(
-                    "Rolling Autotune (Live Tracking)##RollingAutotuneStreamer",
-                    flags=0,  # Collapsed by default
-                )
-                if open_:
-                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                    imgui.text_colored(
-                        "Automatically apply Ultimate Autotune to live tracking data every N seconds. "
-                        "Perfect for streaming with a 5+ second buffer - ensures the cleanest possible "
-                        "funscript signal reaches viewers/devices by the time they play it.",
-                        0.7, 0.7, 0.7
-                    )
-                    imgui.pop_text_wrap_pos()
-                    imgui.spacing()
-
-                    settings = self.app.app_settings
-                    tr = self.app.tracker
-
-                    if not tr:
-                        imgui.text_colored("Tracker not initialized", 1.0, 0.5, 0.0)
-                    else:
-                        # Check if streamer is available and has connected clients
-                        streamer_available = False
-                        clients_connected = False
-                        try:
-                            from application.utils.feature_detection import is_feature_enabled
-                            streamer_available = is_feature_enabled("streamer")
-                            if streamer_available and self._native_sync_manager:
-                                # Check browser websocket clients
-                                if self._native_sync_manager.sync_server:
-                                    clients_connected = len(self._native_sync_manager.sync_server.websocket_clients) > 0
-
-                                # Also check HereSphere connections (active within last 30 seconds)
-                                if not clients_connected and self._native_sync_manager.heresphere_event_bridge:
-                                    import time
-                                    heresphere = self._native_sync_manager.heresphere_event_bridge
-                                    if heresphere.is_running and heresphere.last_event_time > 0:
-                                        time_since_last_event = time.time() - heresphere.last_event_time
-                                        if time_since_last_event < 30.0:  # Active within last 30 seconds
-                                            clients_connected = True
-                        except Exception as e:
-                            self.app.logger.debug(f"Error checking streamer availability: {e}")
-
-                        can_enable = streamer_available and clients_connected
-
-                        # Show requirement message if conditions not met
-                        if not can_enable:
-                            # Get warning icon
-                            icon_mgr = get_icon_texture_manager()
-                            warning_tex, _, _ = icon_mgr.get_icon_texture('warning.png')
-
-                            imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                            if warning_tex:
-                                imgui.image(warning_tex, 20, 20)
-                                imgui.same_line()
-
-                            if not streamer_available:
-                                imgui.text_colored("Requires Streamer module to be available", 1.0, 0.7, 0.0)
-                            elif not clients_connected:
-                                imgui.text_colored("Requires an active streamer session with connected clients", 1.0, 0.7, 0.0)
-                            imgui.pop_text_wrap_pos()
-                            imgui.spacing()
-
-                        # Enable/disable toggle (disabled by default, requires streamer + connected session)
-                        cur_enabled = settings.get("live_tracker_rolling_autotune_enabled", False)
-
-                        # Disable checkbox if requirements not met
-                        if not can_enable:
-                            imgui.push_style_color(imgui.COLOR_TEXT, 0.5, 0.5, 0.5, 1.0)
-                            imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND, 0.2, 0.2, 0.2, 0.5)
-                            imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND_HOVERED, 0.2, 0.2, 0.2, 0.5)
-                            imgui.push_style_color(imgui.COLOR_FRAME_BACKGROUND_ACTIVE, 0.2, 0.2, 0.2, 0.5)
-                            imgui.push_style_color(imgui.COLOR_CHECK_MARK, 0.5, 0.5, 0.5, 0.5)
-
-                        ch, new_enabled = imgui.checkbox("Enable Rolling Autotune##RollingAutotuneEnable", cur_enabled)
-
-                        if not can_enable:
-                            imgui.pop_style_color(5)
-
-                        if imgui.is_item_hovered():
-                            if not can_enable:
-                                tooltip_msg = "Rolling autotune requires:\n• Streamer module available\n• Active streamer session with connected clients"
-                            else:
-                                tooltip_msg = "Apply Ultimate Autotune to the last N seconds of funscript data every N seconds\nRecommended: Keep processing ahead of browser playback by at least the window size"
-                            imgui.set_tooltip(tooltip_msg)
-
-                        if ch and can_enable:
-                            settings.set("live_tracker_rolling_autotune_enabled", new_enabled)
-                            tr.rolling_autotune_enabled = new_enabled
-                            if new_enabled:
-                                self.app.logger.info("Rolling autotune enabled for live tracking", extra={'status_message': True})
-                            else:
-                                self.app.logger.info("Rolling autotune disabled", extra={'status_message': True})
-
-                        # Only show advanced settings if enabled
-                        if cur_enabled:
-                            imgui.spacing()
-                            imgui.separator()
-                            imgui.spacing()
-
-                            imgui.text_colored("Advanced Settings:", 0.5, 0.8, 1.0)
-                            imgui.spacing()
-
-                            # Interval setting
-                            cur_interval = settings.get("live_tracker_rolling_autotune_interval_ms", 5000)
-                            imgui.text("Autotune Interval (ms):")
-                            imgui.push_item_width(150)
-                            ch, new_interval = imgui.input_int("##RollingAutotuneInterval", cur_interval, 1000)
-                            imgui.pop_item_width()
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip("How often to apply autotune (in milliseconds). Default: 5000ms (5 seconds)")
-                            if ch:
-                                v = max(1000, min(30000, new_interval))  # 1-30 seconds
-                                if v != cur_interval:
-                                    settings.set("live_tracker_rolling_autotune_interval_ms", v)
-                                    tr.rolling_autotune_interval_ms = v
-
-                            # Window size setting
-                            cur_window = settings.get("live_tracker_rolling_autotune_window_ms", 5000)
-                            imgui.text("Processing Window (ms):")
-                            imgui.push_item_width(150)
-                            ch, new_window = imgui.input_int("##RollingAutotuneWindow", cur_window, 1000)
-                            imgui.pop_item_width()
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip(
-                                    "Size of data window to process each time (in milliseconds).\n"
-                                    "Should match your buffer size. Default: 5000ms (5 seconds)"
-                                )
-                            if ch:
-                                v = max(1000, min(30000, new_window))  # 1-30 seconds
-                                if v != cur_window:
-                                    settings.set("live_tracker_rolling_autotune_window_ms", v)
-                                    tr.rolling_autotune_window_ms = v
-
-                            imgui.spacing()
-                            imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                            imgui.text_colored(
-                                "💡 Tip: Keep your processing position at least 5-10 seconds ahead of "
-                                "browser playback to ensure cleaned data is ready when needed.",
-                                0.5, 1.0, 0.5
-                            )
-                            imgui.pop_text_wrap_pos()
-
-            # XBVR Configuration Section
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            open_, _ = imgui.collapsing_header(
-                "XBVR Integration##XBVRSettings",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN if not is_running else 0,
-            )
-            if open_:
-                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                imgui.text_colored(
-                    "Browse and load videos from your XBVR library directly in the VR viewer. "
-                    "Displays scene thumbnails, funscript availability, and enables remote playback control.",
-                    0.7, 0.7, 0.7
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.spacing()
-
-                # Get current settings (XBVR always enabled by default)
-                xbvr_host = self.app.app_settings.get('xbvr_host', 'localhost')
-                xbvr_port = self.app.app_settings.get('xbvr_port', 9999)
-
-                if True:
-                    imgui.spacing()
-
-                    # XBVR Host
-                    imgui.text("XBVR Host/IP:")
-                    imgui.push_item_width(200)
-                    changed, new_host = imgui.input_text(
-                        "##xbvr_host",
-                        str(xbvr_host),
-                        256
-                    )
-                    imgui.pop_item_width()
-                    if changed or imgui.is_item_deactivated_after_edit():
-                        self.app.app_settings.set('xbvr_host', new_host)
-                        self.app.app_settings.save_settings()
-
-                    # XBVR Port
-                    imgui.text("XBVR Port:")
-                    imgui.push_item_width(100)
-                    changed, new_port_str = imgui.input_text(
-                        "##xbvr_port",
-                        str(xbvr_port),
-                        256
-                    )
-                    imgui.pop_item_width()
-                    if changed or imgui.is_item_deactivated_after_edit():
-                        try:
-                            new_port = int(new_port_str)
-                            self.app.app_settings.set('xbvr_port', new_port)
-                            self.app.app_settings.save_settings()
-                        except ValueError:
-                            pass  # Ignore invalid port input
-
-                    imgui.spacing()
-                    imgui.text_colored(
-                        f"XBVR URL: http://{xbvr_host}:{xbvr_port}",
-                        0.5, 0.8, 1.0
-                    )
-
-                    imgui.spacing()
-                    # Discover XBVR button (PRIMARY - positive action)
-                    with primary_button_style():
-                        if imgui.button("Discover XBVR Address", width=-1):
-                            self._discover_xbvr_address()
-
-                    imgui.spacing()
-                    # Open XBVR Browser button (PRIMARY - positive action)
-                    with primary_button_style():
-                        if imgui.button("Open XBVR Browser", width=-1):
-                            # Open XBVR browser in default browser
-                            import webbrowser
-                            local_ip = self._get_local_ip()
-                            xbvr_browser_url = f"http://{local_ip}:8080/xbvr"
-                            webbrowser.open(xbvr_browser_url)
-                            self.app.logger.info(f"Opening XBVR browser: {xbvr_browser_url}")
-
-            # Stash Configuration Section
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
-
-            open_, _ = imgui.collapsing_header(
-                "Stash Integration##StashSettings",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN if not is_running else 0,
-            )
-            if open_:
-                imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                imgui.text_colored(
-                    "Browse and load videos from your Stash library directly in the VR viewer. "
-                    "Access scene markers, organized collections, and interactive funscripts.",
-                    0.7, 0.7, 0.7
-                )
-                imgui.pop_text_wrap_pos()
-                imgui.spacing()
-
-                # Get current settings (Stash default port is 9999, same as XBVR)
-                stash_host = self.app.app_settings.get('stash_host', 'localhost')
-                stash_port = self.app.app_settings.get('stash_port', 9999)
-                stash_api_key = self.app.app_settings.get('stash_api_key', '')
-
-                imgui.spacing()
-
-                # Stash Host
-                imgui.text("Stash Host/IP:")
-                imgui.push_item_width(200)
-                changed, new_host = imgui.input_text(
-                    "##stash_host",
-                    str(stash_host),
-                    256
-                )
-                imgui.pop_item_width()
-                if changed or imgui.is_item_deactivated_after_edit():
-                    self.app.app_settings.set('stash_host', new_host)
-                    self.app.app_settings.save_settings()
-
-                # Stash Port
-                imgui.text("Stash Port:")
-                imgui.push_item_width(100)
-                changed, new_port_str = imgui.input_text(
-                    "##stash_port",
-                    str(stash_port),
-                    256
-                )
-                imgui.pop_item_width()
-                if changed or imgui.is_item_deactivated_after_edit():
-                    try:
-                        new_port = int(new_port_str)
-                        self.app.app_settings.set('stash_port', new_port)
-                        self.app.app_settings.save_settings()
-                    except ValueError:
-                        pass  # Ignore invalid port input
-
-                # Stash API Key
-                imgui.text("API Key:")
-                imgui.same_line()
-                imgui.text_colored("(required for authentication)", 0.6, 0.6, 0.6)
-                imgui.push_item_width(300)
-                changed, new_api_key = imgui.input_text(
-                    "##stash_api_key",
-                    str(stash_api_key),
-                    256,
-                    imgui.INPUT_TEXT_PASSWORD
-                )
-                imgui.pop_item_width()
-                if changed or imgui.is_item_deactivated_after_edit():
-                    self.app.app_settings.set('stash_api_key', new_api_key)
-                    self.app.app_settings.save_settings()
-
-                imgui.spacing()
-                imgui.text_colored(
-                    f"Stash URL: http://{stash_host}:{stash_port}",
-                    0.5, 0.8, 1.0
-                )
-                imgui.text_colored(
-                    "Find your API key in Stash: Settings -> Security -> API Key",
-                    0.5, 0.5, 0.5
-                )
-
-                imgui.spacing()
-                # Open Stash Browser button (PRIMARY - positive action)
-                with primary_button_style():
-                    if imgui.button("Open Stash Browser", width=-1):
-                        # Open Stash browser in default browser
-                        import webbrowser
-                        local_ip = self._get_local_ip()
-                        stash_browser_url = f"http://{local_ip}:8080/stash"
-                        webbrowser.open(stash_browser_url)
-                        self.app.logger.info(f"Opening Stash browser: {stash_browser_url}")
-
-            # Info Section (only when not running)
-            if not is_running:
-                open_, _ = imgui.collapsing_header(
-                    "Requirements##NativeSyncRequirements",
-                    flags=imgui.TREE_NODE_DEFAULT_OPEN,
-                )
-                if open_:
-                    imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
-                    imgui.text_colored(
-                        "This will start HTTP and WebSocket servers for native video playback "
-                        "in browsers and VR headsets. Your video will be served at full quality "
-                        "with frame-perfect synchronization.",
-                        0.7, 0.7, 0.7
-                    )
-                    imgui.pop_text_wrap_pos()
-                    imgui.spacing()
-
-                    imgui.bullet_text("Ports 8080 (HTTP) and 8765 (WebSocket) available")
-                    imgui.bullet_text("Browser with HTML5 video support")
-                    imgui.bullet_text("Video can be loaded before or after starting the server")
-
-                # Features Section
-                open_, _ = imgui.collapsing_header(
-                    "Features##NativeSyncFeatures",
-                    flags=0,  # Collapsed by default
-                )
-                if open_:
-                    imgui.bullet_text("Native hardware H.265/AV1 decode")
-                    imgui.bullet_text("Zoom/Pan controls (+/- and WASD keys)")
-                    imgui.bullet_text("Speed modes (Real Time / Slo Mo)")
-                    imgui.bullet_text("Real-time FPS and resolution stats")
-                    imgui.bullet_text("Interactive device control")
-                    imgui.bullet_text("Funscript visualization graph")
-
-        except Exception as e:
-            imgui.text(f"Error in Streamer: {e}")
-            imgui.text_colored("See logs for details.", 1.0, 0.0, 0.0)
-            import traceback
-            self.app.logger.error(f"Streamer tab error: {e}")
-            self.app.logger.error(traceback.format_exc())
-
-    def _start_native_sync(self):
-        """Start streamer servers."""
-        try:
-            # Streamer can start without a video loaded (video can be loaded later)
-            self.app.logger.info("Starting streamer...")
-
-            # Enable HereSphere and XBVR browser by default
-            if self._native_sync_manager:
-                self._native_sync_manager.enable_heresphere = True
-                self._native_sync_manager.enable_xbvr_browser = True
-
-            self._native_sync_manager.start()
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to start streamer: {e}")
-            import traceback
-            self.app.logger.error(traceback.format_exc())
-
-    def _stop_native_sync(self):
-        """Stop streamer servers."""
-        try:
-            self.app.logger.info("Stopping streamer...")
-            self._native_sync_manager.stop()
-
-        except Exception as e:
-            self.app.logger.error(f"Failed to stop streamer: {e}")
-
-    def _open_in_browser(self, url: str):
-        """Open URL in system default browser."""
-        try:
-            import webbrowser
-            webbrowser.open(url)
-            self.app.logger.info(f"Opening in browser: {url}")
-        except Exception as e:
-            self.app.logger.error(f"Failed to open browser: {e}")
-
-    def _copy_to_clipboard(self, text: str):
-        """Copy text to clipboard."""
-        try:
-            import pyperclip
-            pyperclip.copy(text)
-            self.app.logger.info(f"Copied to clipboard: {text}")
-        except Exception:
-            # Fallback - just log
-            self.app.logger.info(f"URL to copy: {text}")
-
-    def _discover_xbvr_address(self):
-        """Attempt to discover XBVR on the local network."""
-        import socket
-        import requests
-        from threading import Thread
-
-        def scan_network():
-            # Get local IP to determine subnet
-            local_ip = self._get_local_ip()
-            if not local_ip or not local_ip.startswith('192.168.'):
-                self.app.logger.info("Could not determine local network subnet", extra={'status_message': True})
-                return
-
-            # Extract subnet (e.g., 192.168.1.x)
-            subnet = '.'.join(local_ip.split('.')[:-1])
-            self.app.logger.info(f"Scanning {subnet}.0/24 for XBVR on port 9999...", extra={'status_message': True})
-
-            found = False
-            for i in range(1, 255):
-                if found:
-                    break
-                test_ip = f"{subnet}.{i}"
-                try:
-                    # Quick connection test on port 9999
-                    response = requests.get(f"http://{test_ip}:9999", timeout=0.5)
-                    if response.status_code == 200 or 'xbvr' in response.text.lower():
-                        self.app.logger.info(f"✅ Found XBVR at {test_ip}:9999", extra={'status_message': True})
-                        self.app.app_settings.set('xbvr_host', test_ip)
-                        self.app.app_settings.set('xbvr_port', 9999)  # Also save the port
-                        self.app.app_settings.save_settings()
-
-                        # Notify integration_manager to update its XBVR client
-                        if hasattr(self.app, 'integration_manager') and self.app.integration_manager:
-                            self.app.integration_manager.update_xbvr_client(test_ip, 9999)
-
-                        found = True
-                except Exception:
-                    pass  # Connection failed, continue
-
-            if not found:
-                self.app.logger.info("No XBVR server found on local network", extra={'status_message': True})
-
-        # Run scan in background thread
-        Thread(target=scan_network, daemon=True).start()
-
-    def _get_local_ip(self) -> str:
-        """Get local network IP address (prefer 192.168.x.x over VPN)."""
-        import socket
-        try:
-            # Get all network interfaces
-            hostname = socket.gethostname()
-            addresses = socket.getaddrinfo(hostname, None, socket.AF_INET)
-
-            # Prefer 192.168.x.x addresses
-            for addr in addresses:
-                ip = addr[4][0]
-                if ip.startswith('192.168.'):
-                    return ip
-
-            # Fallback to any non-loopback address
-            for addr in addresses:
-                ip = addr[4][0]
-                if not ip.startswith('127.'):
-                    return ip
-
-            return "localhost"
-        except Exception:
-            return "localhost"
-
-    def _export_funscript_timeline(self, app, timeline_num):
-        """Export funscript from specified timeline.
-
-        Args:
-            app: Application instance
-            timeline_num: Timeline number to export (1 for primary, 2 for secondary)
-        """
-        app.file_manager.export_funscript_from_timeline(timeline_num)

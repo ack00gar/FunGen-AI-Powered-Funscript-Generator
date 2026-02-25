@@ -109,6 +109,8 @@ class Stage2ContactAnalysisTracker(BaseOfflineTracker):
             tags=["offline", "contact-analysis", "pose-estimation", "stage2", "batch"],
             requires_roi=False,
             supports_dual_axis=True,
+            primary_axis="stroke",
+            secondary_axis="roll",
             stages=[
                 StageDefinition(
                     stage_number=1,
