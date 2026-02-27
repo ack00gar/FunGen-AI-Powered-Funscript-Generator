@@ -463,6 +463,26 @@ class MultiAxisFunscript:
             return self.additional_axes[axis_name]
         return []
 
+    def set_axis_actions(self, axis_name: str, actions: list) -> None:
+        """Replace all actions on a given axis with the provided list.
+
+        Handles primary, secondary, and additional axes.
+        Also invalidates the cached timestamp list for that axis.
+        """
+        if axis_name == 'primary':
+            self.primary_actions.clear()
+            self.primary_actions.extend(actions)
+        elif axis_name == 'secondary':
+            self.secondary_actions.clear()
+            self.secondary_actions.extend(actions)
+        else:
+            self.ensure_axis(axis_name)
+            self.additional_axes[axis_name] = list(actions)
+        # Invalidate cached timestamps
+        cache_key = f"_cached_timestamps_{axis_name}"
+        if hasattr(self, cache_key):
+            setattr(self, cache_key, None)
+
     def add_action_to_axis(self, axis_name: str, timestamp_ms: int, pos: int) -> None:
         """Add an action to any axis (primary, secondary, or additional)."""
         if axis_name == 'primary':

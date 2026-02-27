@@ -372,6 +372,12 @@ class FunGenUniversalInstaller:
         # Check if conda is available
         self.conda_available = (self.miniconda_path / "bin" / "conda").exists() or (self.miniconda_path / "Scripts" / "conda.exe").exists()
         if self.conda_available:
+            # Verify conda is functional, not just present
+            conda_test = self.miniconda_path / ("Scripts/conda.exe" if self.platform == "Windows" else "bin/conda")
+            ret, _, stderr = self.run_command([str(conda_test), "--version"], capture=True, check=False)
+            if ret != 0:
+                self.print_warning(f"Conda binary found but not functional: {stderr.strip()}")
+                self.print_warning("Will attempt to use it anyway, but may fall back to venv")
             self.print_success("Conda environment manager available")
 
             # Check if conda Python is wrong architecture on macOS
@@ -801,15 +807,27 @@ class FunGenUniversalInstaller:
             if self._setup_conda_environment():
                 return True
             else:
-                print("  Conda environment setup failed, trying Python venv as fallback...")
-                self.conda_available = False  # Switch to venv mode
+                self.print_warning("╔" + "="*68 + "╗")
+                self.print_warning("║  WARNING: Conda environment setup FAILED                         ║")
+                self.print_warning("║  Falling back to Python venv (may cause issues)                  ║")
+                self.print_warning("║                                                                  ║")
+                self.print_warning("║  For best results, run install.bat (Windows) or install.sh        ║")
+                self.print_warning("║  instead of install.py directly.                                 ║")
+                self.print_warning("║  Or install Miniconda: https://docs.conda.io/miniconda            ║")
+                self.print_warning("╚" + "="*68 + "╝")
+                self.conda_available = False
                 return self._setup_venv_environment()
         else:
             return self._setup_venv_environment()
     
     def _setup_conda_environment(self) -> bool:
         """Setup conda environment"""
-        conda_exe = self.miniconda_path / ("condabin/conda.bat" if self.platform == "Windows" else "bin/conda")
+        if self.platform == "Windows":
+            conda_exe = self.miniconda_path / "Scripts" / "conda.exe"
+            if not conda_exe.exists():
+                conda_exe = self.miniconda_path / "condabin" / "conda.bat"
+        else:
+            conda_exe = self.miniconda_path / "bin" / "conda"
 
         # Accept conda Terms of Service if not already accepted
         print("  Accepting conda Terms of Service...")
@@ -821,10 +839,14 @@ class FunGenUniversalInstaller:
             ret, stdout, stderr = self.run_command([
                 str(conda_exe), "tos", "accept", "--override-channels", "--channel", channel
             ], capture=True, check=False)
-            # Continue even if this fails - may already be accepted
+            if ret != 0 and stderr.strip():
+                self.print_warning(f"  Conda TOS issue ({channel}): {stderr.strip()[:120]}")
 
         # Check if environment exists
         ret, stdout, _ = self.run_command([str(conda_exe), "env", "list"], capture=True, check=False)
+        if ret != 0:
+            self.print_warning(f"  'conda env list' failed (exit {ret}). Conda may need initialization.")
+            self.print_warning(f"  Try: conda init")
         env_exists = CONFIG["env_name"] in stdout if ret == 0 else False
 
         if not env_exists:
@@ -1137,6 +1159,8 @@ class FunGenUniversalInstaller:
             if gpu_type == "cuda":
                 cuda_version = None
                 torch_version = "2.8.0"  # Constrain to installed version
+                torchvision_version = "0.23.0"
+                torchaudio_version = "2.8.0"
 
                 if req_file == "cuda.requirements.txt":
                     cuda_version = "cu128"
@@ -1146,13 +1170,18 @@ class FunGenUniversalInstaller:
                 if cuda_version:
                     nightly_index_url = f"https://download.pytorch.org/whl/nightly/{cuda_version}"
                     print(f"  Installing torch-tensorrt and tensorrt for {cuda_version} from nightly index...")
-                    print(f"  Constraining torch to version {torch_version} to prevent upgrade...")
+                    print(f"  Constraining PyTorch stack to prevent version drift...")
 
-                    # Install with version constraint to prevent torch from upgrading to 2.9.0
+                    # Install with version constraints for the entire PyTorch stack.
+                    # --extra-index-url lets pip use the nightly index for ALL packages,
+                    # so without constraints pip can silently replace torchvision/torchaudio
+                    # with nightly builds compiled against a different torch ABI.
                     ret, stdout, stderr = self.run_command([
                         str(python_exe), "-m", "pip", "install",
                         "torch-tensorrt", "tensorrt",
-                        f"torch=={torch_version}+{cuda_version}",  # Constrain torch version
+                        f"torch=={torch_version}+{cuda_version}",
+                        f"torchvision=={torchvision_version}+{cuda_version}",
+                        f"torchaudio=={torchaudio_version}+{cuda_version}",
                         "--extra-index-url", nightly_index_url
                     ], check=False)
 
@@ -1162,7 +1191,7 @@ class FunGenUniversalInstaller:
                         self.print_warning("FunGen will fall back to standard PyTorch inference.")
                     else:
                         print(f"    torch-tensorrt and tensorrt for {cuda_version} installed successfully")
-                        print(f"    torch constrained to {torch_version}+{cuda_version}")
+                        print(f"    PyTorch stack constrained to {torch_version}+{cuda_version}")
             
             # Install device_control requirements if available (supporter feature)
             device_control_req_path = self.project_path / "device_control" / "requirements.txt"
@@ -1433,8 +1462,13 @@ export PYTHONNOUSERSITE=1
 # Disable Ultralytics telemetry for privacy
 export YOLO_TELEMETRY=False
 
-echo "Activating FunGen environment..."
-{activate_cmd}
+# Activate environment (skip if already active to avoid double-activation)
+if [ "$CONDA_DEFAULT_ENV" != "{CONFIG["env_name"]}" ]; then
+    echo "Activating FunGen environment..."
+    {activate_cmd}
+else
+    echo "FunGen environment already active."
+fi
 echo "Starting FunGen..."
 python {CONFIG["main_script"]} "$@"
 '''

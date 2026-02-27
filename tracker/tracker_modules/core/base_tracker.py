@@ -39,6 +39,7 @@ class TrackerMetadata:
                  supports_dual_axis: bool = True,
                  primary_axis: str = "stroke",
                  secondary_axis: str = "roll",
+                 additional_axes: Optional[List[str]] = None,
                  stages: Optional[List[StageDefinition]] = None,
                  properties: Optional[Dict[str, Any]] = None):
         """
@@ -56,6 +57,8 @@ class TrackerMetadata:
             supports_dual_axis: Whether tracker supports dual-axis output
             primary_axis: Semantic axis name for timeline 1 output (e.g. "stroke")
             secondary_axis: Semantic axis name for timeline 2 output (e.g. "roll")
+            additional_axes: Extra axis names beyond primary/secondary (e.g. ["pitch", "twist", "sway"]).
+                             Trackers can declare arbitrary names — they don't have to be from FunscriptAxis.
             stages: List of processing stages this tracker uses
             properties: Dictionary of tracker-specific properties/capabilities
         """
@@ -70,6 +73,7 @@ class TrackerMetadata:
         self.supports_dual_axis = supports_dual_axis
         self.primary_axis = primary_axis
         self.secondary_axis = secondary_axis
+        self.additional_axes = additional_axes or []
         self.stages = stages or []
         self.properties = properties or {}
         
@@ -110,24 +114,31 @@ class TrackerMetadata:
 class TrackerResult:
     """Result returned by tracker processing with backward compatibility for tuple access."""
     
-    def __init__(self, 
+    def __init__(self,
                  processed_frame: np.ndarray,
                  action_log: Optional[List[Dict]] = None,
                  debug_info: Optional[Dict] = None,
-                 status_message: Optional[str] = None):
+                 status_message: Optional[str] = None,
+                 secondary_action_log: Optional[List[Dict]] = None,
+                 multi_axis_data: Optional[Dict[str, List[Dict]]] = None):
         """
         Initialize tracker result.
-        
+
         Args:
             processed_frame: Frame with visual overlays applied
             action_log: List of funscript actions generated this frame
             debug_info: Optional debug information for display
             status_message: Optional status message for UI
+            secondary_action_log: Actions for secondary axis (e.g. roll)
+            multi_axis_data: Dict mapping axis names to action lists
+                             (e.g. {"roll": [...], "pitch": [...], "twist": [...]})
         """
         self.processed_frame = processed_frame
         self.action_log = action_log
         self.debug_info = debug_info
         self.status_message = status_message
+        self.secondary_action_log = secondary_action_log
+        self.multi_axis_data = multi_axis_data or {}
     
     def __getitem__(self, index: int):
         """Support tuple-like access for backward compatibility with video processor."""

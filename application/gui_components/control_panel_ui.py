@@ -23,6 +23,7 @@ from .cp_execution_ui import ExecutionMixin
 from .cp_tracker_settings_ui import TrackerSettingsMixin
 from .cp_device_control_ui import DeviceControlMixin
 from .cp_streamer_ui import StreamerMixin
+from .cp_metadata_ui import MetadataEditorMixin
 
 def _tooltip_if_hovered(text):
     if imgui.is_item_hovered():
@@ -44,6 +45,7 @@ class ControlPanelUI(
     TrackerSettingsMixin,
     DeviceControlMixin,
     StreamerMixin,
+    MetadataEditorMixin,
 ):
     def __init__(self, app):
         self.app = app
@@ -278,6 +280,7 @@ class ControlPanelUI(
         ("run", "R", "Run"),
         ("post_processing", "P", "Post-Processing"),
         ("advanced", "A", "Advanced"),
+        ("metadata", "M", "Metadata"),
     ]
     _SIDEBAR_SUPPORTER_SECTIONS = [
         ("device_control", "D", "Device Control", "_feat_device"),
@@ -292,6 +295,7 @@ class ControlPanelUI(
         "device_control": "sidebar-device.png",
         "native_sync": "sidebar-stream.png",
         "supporter_batch": "sidebar-batch.png",
+        "metadata": "sidebar-metadata.png",
     }
 
     def _render_sidebar(self, total_h):
@@ -660,6 +664,8 @@ class ControlPanelUI(
                     "Streamer",
                     "Stream video with synchronized funscript to browsers and VR headsets. "
                     "Built-in web server with HereSphere integration.")
+        elif tab_selected == "metadata":
+            self._render_metadata_tab()
         elif tab_selected == "supporter_batch":
             self._render_supporter_batch_tab()
         imgui.end_child()
@@ -705,6 +711,83 @@ class ControlPanelUI(
         except Exception as e:
             imgui.text_colored("Patreon module error", 0.9, 0.3, 0.3, 1.0)
             imgui.text_wrapped(str(e))
+
+        imgui.spacing()
+        self._render_patreon_exclusive_extras()
+
+    def _render_patreon_exclusive_extras(self):
+        """Render additional Patreon-exclusive feature sections."""
+        # --- Recording Mode ---
+        with section_card("Recording Mode##patreon_rec", open_by_default=False) as _open:
+            if _open:
+                imgui.text_wrapped(
+                    "Draw funscripts by moving your mouse while video plays. "
+                    "Points are auto-simplified with RDP."
+                )
+                imgui.spacing()
+                imgui.text_colored("Activate via timeline toolbar (REC mode)", 0.7, 0.7, 0.7, 1.0)
+
+        # --- Dynamic Injection ---
+        with section_card("Dynamic Injection##patreon_inj", open_by_default=False) as _open:
+            if _open:
+                imgui.text_wrapped(
+                    "Add intermediate points to smooth out segments. "
+                    "Supports linear, cosine, and cubic interpolation."
+                )
+                imgui.spacing()
+                imgui.text_colored("Right-click a segment in Injection mode on the timeline", 0.7, 0.7, 0.7, 1.0)
+
+        # --- Pattern Library ---
+        with section_card("Pattern Library##patreon_pat", open_by_default=False) as _open:
+            if _open:
+                imgui.text_wrapped(
+                    "Save and reuse movement patterns (soft bounces, sine waves, custom motions). "
+                    "Apply with speed and amplitude scaling."
+                )
+                imgui.spacing()
+                pattern_lib = getattr(self.app, 'pattern_library', None)
+                if pattern_lib:
+                    patterns = pattern_lib.list_patterns()
+                    if patterns:
+                        imgui.text(f"Saved patterns: {len(patterns)}")
+                        for p_name in patterns:
+                            imgui.bullet_text(p_name)
+                    else:
+                        imgui.text_colored("No patterns saved yet", 0.5, 0.5, 0.5, 1.0)
+                    imgui.spacing()
+                    imgui.text_colored("Select points on timeline > right-click > Save Selection as Pattern", 0.7, 0.7, 0.7, 1.0)
+                else:
+                    imgui.text_colored("Pattern library not loaded", 0.5, 0.5, 0.5, 1.0)
+
+        # --- Multi-Axis Generation ---
+        with section_card("Multi-Axis Generation##patreon_ma", open_by_default=False) as _open:
+            if _open:
+                imgui.text_wrapped(
+                    "Auto-generate Roll, Pitch, Twist, Sway, and Surge axes from your stroke axis. "
+                    "Heuristic mode derives motion from stroke data. Video-aware mode uses body pose keypoints."
+                )
+                imgui.spacing()
+                imgui.text_colored("Right-click timeline > Generate Axis > choose axis", 0.7, 0.7, 0.7, 1.0)
+
+        # --- Live Device Preview ---
+        with section_card("Live Device Preview##patreon_ldp", open_by_default=False) as _open:
+            if _open:
+                imgui.text_wrapped(
+                    "Feel cursor position on your device while editing, without playing the video. "
+                    "Rate-limited to avoid flooding device commands."
+                )
+                imgui.spacing()
+                imgui.text_colored("Enable in Device Control tab > Live Control Integration", 0.7, 0.7, 0.7, 1.0)
+
+        # --- BPM/Tempo Overlay ---
+        with section_card("BPM / Tempo Overlay##patreon_bpm", open_by_default=False) as _open:
+            if _open:
+                imgui.text_wrapped(
+                    "Beat grid on timeline with tap tempo and snap-to-beat for music sync. "
+                    "Supports 1/1, 1/2, 1/4, 1/8 subdivision."
+                )
+                imgui.spacing()
+                imgui.text_colored("Toggle BPM controls in timeline toolbar", 0.7, 0.7, 0.7, 1.0)
 
     # ------- Tab orchestrators (call into mixins) -------
 

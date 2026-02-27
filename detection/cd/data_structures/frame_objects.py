@@ -82,6 +82,11 @@ class FrameObject:
         self.active_interaction_track_id: Optional[int] = None
         self.motion_mode: Optional[str] = None
 
+        # Multi-axis body orientation data (populated by BodyOrientationExtractor)
+        self.body_roll_0_100: Optional[int] = None
+        self.body_pitch_0_100: Optional[int] = None
+        self.body_twist_0_100: Optional[int] = None
+
     def parse_raw_frame_data(self, raw_frame_data: dict):
         """
         Parse raw YOLO detection data into BoxRecord and PoseRecord objects.

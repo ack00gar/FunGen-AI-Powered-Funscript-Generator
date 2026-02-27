@@ -8,8 +8,13 @@ export PYTHONNOUSERSITE=1
 # Disable Ultralytics telemetry for privacy
 export YOLO_TELEMETRY=False
 
-echo "Activating FunGen environment..."
-source "/Users/k00gar/miniconda3/bin/activate" FunGen
+# Activate environment (skip if already active to avoid double-activation)
+if [ "$CONDA_DEFAULT_ENV" != "FunGen" ]; then
+    echo "Activating FunGen environment..."
+    source "/Users/k00gar/miniconda3/bin/activate" FunGen
+else
+    echo "FunGen environment already active."
+fi
 echo "Starting FunGen..."
 python main.py "$@"
 

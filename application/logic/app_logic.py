@@ -250,6 +250,13 @@ class ApplicationLogic:
         # --- Other Managers ---
         self.project_manager = ProjectManager(self)
         self.shortcut_manager = ShortcutManager(self)
+
+        # Pattern Library (OFS-inspired feature)
+        try:
+            from funscript.pattern_library import PatternLibrary
+            self.pattern_library = PatternLibrary()
+        except Exception:
+            self.pattern_library = None
         self._shortcut_mapping_cache = {}  # Cache parsed shortcut mappings to avoid string parsing every frame
 
         # Initialize chapter type manager for custom chapter types

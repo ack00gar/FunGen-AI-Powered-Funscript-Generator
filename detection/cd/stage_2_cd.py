@@ -26,6 +26,7 @@ from .data_structures import (
     BoxRecord, PoseRecord,
     BaseSegment, Segment
 )
+from .body_orientation import BodyOrientationExtractor
 
 # AppStateContainer no longer used - replaced with direct app object usage
 
@@ -1203,6 +1204,9 @@ def pass_3_kalman_and_lock_state(app, frames: List, video_info: Dict, yolo_input
     is_vr = video_info.get('actual_video_type', '2D') == 'VR'
     pelvis_zone_indices = [11, 12]  # Left and Right Hip
 
+    # Body orientation extractor for multi-axis generation
+    body_orientation_extractor = BodyOrientationExtractor(confidence_threshold=0.3, ema_alpha=0.3)
+
     # --- Global state for locked penis ---
     locked_penis_tracker = {'box_rec': None, 'unseen_frames': 0}
     PENIS_PATIENCE = int(fps * 0.5)  # How many frames to hold onto a lock without seeing it
@@ -1211,6 +1215,22 @@ def pass_3_kalman_and_lock_state(app, frames: List, video_info: Dict, yolo_input
         dominant_pose_this_frame = _get_dominant_pose(frame_obj, is_vr, yolo_input_size)
         if dominant_pose_this_frame:
             frame_obj.dominant_pose_id = dominant_pose_this_frame.id
+
+            # Extract body orientation angles for multi-axis generation
+            if dominant_pose_this_frame.keypoints is not None:
+                orientation = body_orientation_extractor.extract_angles(dominant_pose_this_frame.keypoints)
+                if orientation:
+                    boe = body_orientation_extractor
+                    if 'roll_deg' in orientation:
+                        frame_obj.body_roll_0_100 = boe.angle_to_funscript_pos(orientation['roll_deg'], center=0.0, range_deg=45.0)
+                    if 'pitch_deg' in orientation:
+                        frame_obj.body_pitch_0_100 = boe.angle_to_funscript_pos(orientation['pitch_deg'], center=0.0, range_deg=30.0)
+                    if 'twist_deg' in orientation:
+                        frame_obj.body_twist_0_100 = boe.angle_to_funscript_pos(orientation['twist_deg'], center=0.0, range_deg=30.0)
+                    if 'sway_px' in orientation:
+                        # Normalize sway relative to YOLO input size
+                        sway_normalized = orientation['sway_px'] / max(1, yolo_size) * 100
+                        frame_obj.pos_lr_0_100 = max(0, min(100, int(round(50 + sway_normalized))))
 
         penis_candidates = [b for b in frame_obj.boxes if
                             b.class_name == constants.PENIS_CLASS_NAME and not b.is_excluded]
