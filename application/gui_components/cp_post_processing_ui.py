@@ -3,7 +3,6 @@ import imgui
 from application.utils import primary_button_style, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card
-from funscript.quality_validator import FunscriptQualityValidator, IssueSeverity
 
 
 def _tooltip_if_hovered(text):
@@ -102,122 +101,6 @@ class PostProcessingMixin:
 
             # Render plugin section
             self._render_plugin_section(plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
-
-        # Script Quality Validator section
-        self._render_quality_validator_section(timeline_choice)
-
-    def _render_quality_validator_section(self, timeline_choice):
-        """Render the Script Quality validator card (Phase 1.4)."""
-        with section_card("Script Quality##QualityValidator", tier="secondary",
-                          open_by_default=False) as _open:
-            if not _open:
-                return
-
-            imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
-            imgui.text_wrapped("Check your script for speed limit violations, dead zones, and other issues.")
-            imgui.pop_style_color()
-            imgui.spacing()
-
-            # Run Quality Check button
-            if imgui.button("Run Quality Check##QV_Run"):
-                self._run_quality_check(timeline_choice)
-
-            # Display results if available
-            report = getattr(self, '_quality_report', None)
-            if report:
-                imgui.spacing()
-
-                # Score bar
-                score = report.score
-                if score >= 80:
-                    score_color = (0.2, 0.8, 0.2, 1.0)
-                elif score >= 50:
-                    score_color = (0.9, 0.7, 0.1, 1.0)
-                else:
-                    score_color = (0.9, 0.2, 0.2, 1.0)
-
-                imgui.push_style_color(imgui.COLOR_TEXT, *score_color)
-                imgui.text(f"Quality Score: {score}/100")
-                imgui.pop_style_color()
-
-                # Progress bar
-                imgui.push_style_color(imgui.COLOR_PLOT_HISTOGRAM, *score_color)
-                imgui.progress_bar(score / 100.0, (-1, 0), f"{score}%")
-                imgui.pop_style_color()
-
-                # Stats
-                stats = report.stats
-                if stats:
-                    imgui.text(f"Actions: {stats.get('action_count', 0)}")
-                    imgui.same_line()
-                    imgui.text(f"Avg speed: {stats.get('avg_speed', 0):.0f} u/s")
-                    imgui.same_line()
-                    imgui.text(f"Max: {stats.get('max_speed', 0):.0f} u/s")
-
-                imgui.spacing()
-
-                # Issue list
-                if report.issues:
-                    imgui.text(f"Issues: {report.error_count} errors, {report.warning_count} warnings, {report.info_count} info")
-                    imgui.spacing()
-
-                    # Scrollable issue list
-                    if imgui.begin_child("##QualityIssues", 0, 150, border=True):
-                        for issue in report.issues:
-                            if issue.severity == IssueSeverity.ERROR:
-                                icon, color = "[E]", (0.9, 0.2, 0.2, 1.0)
-                            elif issue.severity == IssueSeverity.WARNING:
-                                icon, color = "[W]", (0.9, 0.7, 0.1, 1.0)
-                            else:
-                                icon, color = "[i]", (0.5, 0.5, 0.5, 1.0)
-
-                            imgui.push_style_color(imgui.COLOR_TEXT, *color)
-                            imgui.text(icon)
-                            imgui.pop_style_color()
-                            imgui.same_line()
-                            imgui.text_wrapped(issue.message)
-                    imgui.end_child()
-                else:
-                    imgui.text_colored("No issues found!", 0.2, 0.8, 0.2, 1.0)
-
-    def _run_quality_check(self, timeline_choice):
-        """Execute the quality validator on the selected timeline."""
-        try:
-            app = self.app
-            fs_proc = app.funscript_processor
-
-            # Get actions for the selected timeline
-            if timeline_choice == 0:
-                axis = "primary"
-            elif timeline_choice == 1:
-                axis = "secondary"
-            else:
-                axis = "primary"
-
-            funscript_obj = None
-            if hasattr(fs_proc, 'get_funscript_obj'):
-                funscript_obj = fs_proc.get_funscript_obj()
-            if not funscript_obj:
-                return
-
-            actions = funscript_obj.get_axis_actions(axis)
-            if not actions:
-                return
-
-            # Get video duration
-            duration_ms = 0
-            if app.processor and app.processor.video_info:
-                fps = app.processor.fps
-                total_frames = app.processor.video_info.get('total_frames', 0)
-                if fps > 0 and total_frames > 0:
-                    duration_ms = (total_frames / fps) * 1000.0
-
-            validator = FunscriptQualityValidator()
-            self._quality_report = validator.validate(actions, duration_ms)
-
-        except Exception as e:
-            if hasattr(self.app, 'logger'):
-                self.app.logger.error(f"Quality check failed: {e}")
 
     def _render_plugin_section(self, plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice):
         """Render a collapsible section for a plugin with its parameters and apply button."""

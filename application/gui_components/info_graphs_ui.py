@@ -7,6 +7,7 @@ from collections import deque
 from application.utils import _format_time
 from application.utils.system_monitor import SystemMonitor
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
+from funscript.quality_validator import FunscriptQualityValidator, IssueSeverity
 
 
 class ComponentPerformanceMonitor:
@@ -147,6 +148,12 @@ class InfoGraphsUI:
         self._write_zero_start_time = None
         self._zero_delay_duration = 3.0  # 3 seconds
 
+        # Quality scoring state (auto-computed in Info tab)
+        self._quality_reports = {}          # {timeline_num: QualityReport}
+        self._quality_last_action_counts = {}  # {timeline_num: int} for change detection
+        self._quality_last_funscript_id = None  # detect funscript object swap
+        self._quality_last_compute_time = {}   # {timeline_num: float} monotonic time
+
     def _apply_video_render(self, new_pitch):
         """Execute video rendering with the new pitch value after delay"""
         processor = self.app.processor
@@ -253,38 +260,33 @@ class InfoGraphsUI:
         )
         if tab_selected == "info":
             imgui.spacing()
-            # Video Information (expanded by default)
-            if imgui.collapsing_header(
-                "Video Information##VideoInfoSection",
-                flags=imgui.TREE_NODE_DEFAULT_OPEN,
-            )[0]:
-                self._render_content_video_info()
+
+            # Video (collapsed by default)
+            if imgui.collapsing_header("Video##VideoParentSection")[0]:
+                if imgui.tree_node("Video Information##VideoInfoNode"):
+                    self._render_content_video_info()
+                    imgui.tree_pop()
+                if imgui.tree_node("Video Settings##VideoSettingsNode"):
+                    self._render_content_video_settings()
+                    imgui.tree_pop()
 
             imgui.separator()
 
-            # Video Settings (collapsed by default)
-            if imgui.collapsing_header(
-                "Video Settings##VideoSettingsSection",
-            )[0]:
-                self._render_content_video_settings()
+            # Funscript (expanded by default)
+            if imgui.collapsing_header("Funscript##FunscriptParentSection",
+                                       flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                # T1 always
+                self._render_funscript_info_section(1)
 
-            imgui.separator()
+                # T2 if visible
+                if self.app.app_state_ui.show_funscript_interactive_timeline2:
+                    self._render_funscript_info_section(2)
 
-            # Funscript Info — per visible timeline
-            self._render_funscript_info_section(1)
-            imgui.separator()
-
-            # T2 if visible
-            if self.app.app_state_ui.show_funscript_interactive_timeline2:
-                self._render_funscript_info_section(2)
-                imgui.separator()
-
-            # T3+ if visible
-            for tl_num in EXTRA_TIMELINE_RANGE:
-                vis_attr = f"show_funscript_interactive_timeline{tl_num}"
-                if getattr(self.app.app_state_ui, vis_attr, False):
-                    self._render_funscript_info_section(tl_num)
-                    imgui.separator()
+                # T3+ if visible
+                for tl_num in EXTRA_TIMELINE_RANGE:
+                    vis_attr = f"show_funscript_interactive_timeline{tl_num}"
+                    if getattr(self.app.app_state_ui, vis_attr, False):
+                        self._render_funscript_info_section(tl_num)
         elif tab_selected == "advanced":
             imgui.spacing()
             # Undo-Redo History section (collapsed by default)
@@ -712,19 +714,196 @@ class InfoGraphsUI:
 
         self.video_settings_perf.end_timing()
 
+    def _maybe_recompute_quality(self, timeline_num):
+        """Recompute quality report with time + delta throttle to avoid per-frame revalidation."""
+        try:
+            fs_proc = self.app.funscript_processor
+            funscript_obj = fs_proc.get_funscript_obj() if fs_proc else None
+
+            # Detect funscript object swap (new project) — clear all caches, recompute immediately
+            obj_id = id(funscript_obj) if funscript_obj else None
+            force = False
+            if obj_id != self._quality_last_funscript_id:
+                self._quality_last_funscript_id = obj_id
+                self._quality_reports.clear()
+                self._quality_last_action_counts.clear()
+                self._quality_last_compute_time.clear()
+                force = True
+
+            if not funscript_obj:
+                return
+
+            target_obj, axis_name = fs_proc._get_target_funscript_object_and_axis(timeline_num)
+            if not target_obj or not axis_name:
+                return
+
+            actions = target_obj.get_axis_actions(axis_name)
+            count = len(actions) if actions else 0
+            last_count = self._quality_last_action_counts.get(timeline_num, -1)
+
+            # Skip if unchanged
+            if count == last_count:
+                return
+
+            if count < 2:
+                self._quality_last_action_counts[timeline_num] = count
+                self._quality_reports.pop(timeline_num, None)
+                return
+
+            if not force:
+                # Time-based throttle: minimum 5 seconds between recomputations
+                now = time.monotonic()
+                last_time = self._quality_last_compute_time.get(timeline_num, 0.0)
+                if now - last_time < 5.0:
+                    # Delta threshold: only bypass throttle if change is significant
+                    delta_threshold = max(50, int(last_count * 0.02)) if last_count > 0 else 0
+                    if abs(count - last_count) < delta_threshold:
+                        return
+
+            self._quality_last_action_counts[timeline_num] = count
+
+            # Get video duration
+            duration_ms = 0
+            if self.app.processor and self.app.processor.video_info:
+                fps = self.app.processor.fps
+                total_frames = self.app.processor.video_info.get('total_frames', 0)
+                if fps > 0 and total_frames > 0:
+                    duration_ms = (total_frames / fps) * 1000.0
+
+            self._quality_reports[timeline_num] = FunscriptQualityValidator().validate(actions, duration_ms)
+            self._quality_last_compute_time[timeline_num] = time.monotonic()
+        except Exception:
+            pass  # Fail silently — quality score is non-critical
+
+    def _render_quality_gauge(self, report):
+        """Render an 8px quality gauge bar. Called unconditionally so gauge is always visible."""
+        if report is None:
+            return
+
+        score = report.score
+        if score >= 80:
+            bar_color = imgui.get_color_u32_rgba(0.2, 0.8, 0.2, 1.0)
+        elif score >= 50:
+            bar_color = imgui.get_color_u32_rgba(0.9, 0.7, 0.1, 1.0)
+        else:
+            bar_color = imgui.get_color_u32_rgba(0.9, 0.2, 0.2, 1.0)
+
+        bg_color = imgui.get_color_u32_rgba(0.15, 0.15, 0.15, 1.0)
+        draw_list = imgui.get_window_draw_list()
+        cursor = imgui.get_cursor_screen_position()
+        avail_w = imgui.get_content_region_available()[0]
+        bar_h = 8
+
+        # Background
+        draw_list.add_rect_filled(
+            cursor[0], cursor[1],
+            cursor[0] + avail_w, cursor[1] + bar_h,
+            bg_color
+        )
+        # Foreground fill
+        fill_w = avail_w * (score / 100.0)
+        if fill_w > 0:
+            draw_list.add_rect_filled(
+                cursor[0], cursor[1],
+                cursor[0] + fill_w, cursor[1] + bar_h,
+                bar_color
+            )
+        # Score text right-aligned
+        score_text = f"{score}%"
+        text_size = imgui.calc_text_size(score_text)
+        text_x = cursor[0] + avail_w - text_size[0] - 4
+        text_y = cursor[1] + (bar_h - text_size[1]) * 0.5
+        draw_list.add_text(text_x, text_y, imgui.get_color_u32_rgba(1, 1, 1, 0.9), score_text)
+
+        # Advance cursor past the gauge
+        imgui.dummy(avail_w, bar_h + 2)
+
     def _render_funscript_info_section(self, timeline_num):
-        """Render a collapsible funscript info section for a timeline, with axis name in header."""
+        """Render funscript info as tree_node with always-visible quality gauge."""
         fs_proc = self.app.funscript_processor
-        # Build header with axis name if available
+
+        # Build axis label
         axis_label = ""
         funscript_obj = fs_proc.get_funscript_obj() if fs_proc else None
         if funscript_obj and hasattr(funscript_obj, '_axis_assignments'):
             ax = funscript_obj._axis_assignments.get(timeline_num)
             if ax:
-                axis_label = f" ({ax})"
-        header = f"Funscript Info - Timeline {timeline_num}{axis_label}##FSInfoT{timeline_num}Section"
-        if imgui.collapsing_header(header)[0]:
+                axis_label = ax
+
+        # Recompute quality (throttled)
+        self._maybe_recompute_quality(timeline_num)
+        report = self._quality_reports.get(timeline_num)
+
+        # Build header text
+        if axis_label:
+            header_label = f"Timeline {timeline_num}: {axis_label}"
+        else:
+            header_label = f"Timeline {timeline_num}"
+
+        if report is not None:
+            score = report.score
+            header = f"{header_label} | {score}/100##FSInfoT{timeline_num}"
+            if score >= 80:
+                score_color = (0.2, 0.8, 0.2, 1.0)
+            elif score >= 50:
+                score_color = (0.9, 0.7, 0.1, 1.0)
+            else:
+                score_color = (0.9, 0.2, 0.2, 1.0)
+            imgui.push_style_color(imgui.COLOR_TEXT, *score_color)
+            expanded = imgui.tree_node(header)
+            imgui.pop_style_color()
+        else:
+            header = f"{header_label}##FSInfoT{timeline_num}"
+            expanded = imgui.tree_node(header)
+
+        # Gauge bar — always visible regardless of expanded/collapsed
+        self._render_quality_gauge(report)
+
+        if expanded:
+            # --- Quality KPI row ---
+            if report is not None:
+                stats = report.stats
+                if stats:
+                    kpi_parts = [
+                        f"Avg speed: {stats.get('avg_speed', 0):.0f} u/s",
+                        f"Max: {stats.get('max_speed', 0):.0f} u/s",
+                    ]
+                    if report.issues:
+                        issue_parts = []
+                        wc = report.warning_count
+                        ec = report.error_count
+                        if ec > 0:
+                            issue_parts.append(f"{ec}E")
+                        if wc > 0:
+                            issue_parts.append(f"{wc}W")
+                        if issue_parts:
+                            kpi_parts.append("Issues: " + " ".join(issue_parts))
+                    imgui.text(" | ".join(kpi_parts))
+                imgui.spacing()
+
+            # --- Original funscript info content ---
             self._render_content_funscript_info(timeline_num)
+
+            # --- Expandable issue details (collapsed by default) ---
+            if report is not None and report.issues:
+                if imgui.tree_node(f"Issues ({len(report.issues)})##QualityIssuesT{timeline_num}"):
+                    if imgui.begin_child(f"##QualityIssueListT{timeline_num}", 0, 100, border=True):
+                        for issue in report.issues:
+                            if issue.severity == IssueSeverity.ERROR:
+                                icon, color = "[E]", (0.9, 0.2, 0.2, 1.0)
+                            elif issue.severity == IssueSeverity.WARNING:
+                                icon, color = "[W]", (0.9, 0.7, 0.1, 1.0)
+                            else:
+                                icon, color = "[i]", (0.5, 0.5, 0.5, 1.0)
+                            imgui.push_style_color(imgui.COLOR_TEXT, *color)
+                            imgui.text(icon)
+                            imgui.pop_style_color()
+                            imgui.same_line()
+                            imgui.text_wrapped(issue.message)
+                    imgui.end_child()
+                    imgui.tree_pop()
+
+            imgui.tree_pop()
 
     def _render_content_funscript_info(self, timeline_num):
         self.funscript_info_perf.start_timing()
