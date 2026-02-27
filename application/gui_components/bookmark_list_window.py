@@ -58,8 +58,10 @@ class BookmarkListWindow:
 
     def _seek(self, time_ms):
         proc = self.app.processor
-        if proc and proc.is_video_open():
-            proc.seek_to_ms(time_ms)
+        if proc and proc.is_video_open() and proc.fps > 0:
+            frame_idx = int((time_ms / 1000.0) * proc.fps)
+            frame_idx = max(0, min(frame_idx, proc.total_frames - 1))
+            self.app.event_handlers.seek_video_with_sync(frame_idx)
 
     # ----- render -----
 
