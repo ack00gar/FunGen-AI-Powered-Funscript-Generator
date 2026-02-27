@@ -1637,11 +1637,11 @@ class InteractiveFunscriptTimeline:
                     if simplified:
                         self._record_timeline_action()
                         actions = self._get_actions()
-                        actions.extend(simplified)
-                        actions.sort(key=lambda a: a['at'])
+                        merged = list(actions) + simplified
+                        merged.sort(key=lambda a: a['at'])
                         fs, axis = self._get_target_funscript_details()
                         if fs and axis:
-                            fs.set_axis_actions(axis, actions)
+                            fs.set_axis_actions(axis, merged)
                             self._finalize_action_and_update_ui()
             else:
                 if imgui.button(f"Record##{self.timeline_num}"):
@@ -1846,11 +1846,11 @@ class InteractiveFunscriptTimeline:
                                     if new_actions:
                                         self._record_timeline_action()
                                         actions = self._get_actions()
-                                        actions.extend(new_actions)
-                                        actions.sort(key=lambda a: a['at'])
+                                        merged = list(actions) + new_actions
+                                        merged.sort(key=lambda a: a['at'])
                                         fs, axis = self._get_target_funscript_details()
                                         if fs and axis:
-                                            fs.set_axis_actions(axis, actions)
+                                            fs.set_axis_actions(axis, merged)
                                             self._finalize_action_and_update_ui()
                                 imgui.close_current_popup()
                     else:
