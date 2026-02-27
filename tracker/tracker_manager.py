@@ -210,6 +210,10 @@ class TrackerManager:
             # Log final point simplification summary
             if self.funscript and hasattr(self.funscript, 'log_final_simplification_summary'):
                 self.funscript.log_final_simplification_summary()
+
+            # Force timeline to resync to current frame position on stop
+            if self.app and hasattr(self.app, 'app_state_ui'):
+                self.app.app_state_ui.force_timeline_pan_to_current_frame = True
         except Exception as e:
             self.logger.error(f"Failed to stop tracking: {e}")
 
@@ -831,7 +835,10 @@ class TrackerManager:
             except RuntimeError:
                 # No event loop available - manually activate bridge
                 self.device_bridge.is_active = True
-                self.logger.debug("No event loop - manually activated device bridge")
+                # Also claim control source so can_send_commands('desktop') passes
+                self.device_bridge.device_manager.set_control_source(
+                    'desktop', 'live_tracker_bridge:manual_activation')
+                self.logger.debug("No event loop - manually activated device bridge and claimed control source")
         elif self.device_bridge:
             # Stop device bridge (handle no event loop gracefully)
             import asyncio
@@ -842,7 +849,10 @@ class TrackerManager:
             except RuntimeError:
                 # No event loop available - manually deactivate bridge
                 self.device_bridge.is_active = False
-                self.logger.debug("No event loop - manually deactivated device bridge")
+                # Release control source
+                self.device_bridge.device_manager.set_control_source(
+                    None, 'live_tracker_bridge:manual_deactivation')
+                self.logger.debug("No event loop - manually deactivated device bridge and released control source")
 
     def _send_to_device_control(self, latest_action: Dict):
         """Send latest tracking position to device control."""

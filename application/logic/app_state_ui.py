@@ -65,6 +65,10 @@ class AppStateUI:
 
         self.show_generated_file_manager = False
 
+        # OFS-Inspired Feature Settings
+        self.speed_limit_threshold: float = self.app_settings.get("speed_limit_threshold", 400.0)
+        self.show_bpm_overlay: bool = self.app_settings.get("show_bpm_overlay", False)
+
         # Tracker UI visibility flags (app state that tracker reads via app_logic)
         # These will be updated by app_logic based on tracker's actual state if needed,
         # or directly if UI controls them.

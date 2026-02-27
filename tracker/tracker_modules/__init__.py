@@ -94,12 +94,20 @@ class TrackerRegistry:
         self.logger.debug(f"Discovery complete. Found {len(self._trackers)} trackers.")
     
     def _scan_directory(self, directory: str, folder_name: str, is_community: bool = False):
-        """Scan a directory for tracker modules."""
+        """Scan a directory for tracker modules.
+
+        For community trackers, also recursively scans subdirectories so users
+        can organize their trackers in folders (e.g. community/my_trackers/).
+        """
         try:
             for filename in os.listdir(directory):
+                full_path = os.path.join(directory, filename)
                 if filename.endswith('.py') and filename not in ['__init__.py']:
-                    file_path = os.path.join(directory, filename)
-                    self._load_tracker_module(file_path, filename, folder_name, is_community)
+                    self._load_tracker_module(full_path, filename, folder_name, is_community)
+                elif is_community and os.path.isdir(full_path) and not filename.startswith(('__', '.')):
+                    # Recursively scan user-created subdirectories within community/
+                    self.logger.debug(f"Scanning community subfolder: {filename}/")
+                    self._scan_directory(full_path, folder_name, is_community)
         except OSError as e:
             error_msg = f"Failed to scan directory {directory}: {e}"
             self._discovery_errors.append(error_msg)

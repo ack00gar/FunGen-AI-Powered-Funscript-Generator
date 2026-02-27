@@ -17,6 +17,11 @@ from application.utils.feature_detection import is_feature_available as _is_feat
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 from config.element_group_colors import TimelineColors
 from funscript.axis_registry import FunscriptAxis, AXIS_TCODE
+from application.utils.heatmap_utils import HeatmapColorMapper
+from application.utils.timeline_modes import TimelineMode, TimelineInteractionState
+from application.utils.bpm_analyzer import BPMOverlayConfig, TapTempo
+from application.classes.bookmark_manager import BookmarkManager
+from application.classes.recording_capture import RecordingCapture
 
 class TimelineTransformer:
     """
@@ -101,7 +106,7 @@ class InteractiveFunscriptTimeline:
         self.preview_actions: Optional[List[Dict]] = None
         self.is_previewing: bool = False
         self.ultimate_autotune_preview_actions: Optional[List[Dict]] = None
-        
+
         # Settings
         self.shift_frames_amount = 1
         self.show_ultimate_autotune_preview = self.app.app_settings.get(
@@ -109,6 +114,38 @@ class InteractiveFunscriptTimeline:
         self._ultimate_preview_dirty = True
         self.nudge_chapter_only = False  # When True, << >> only affect points in selected chapter
         self._container_mode = False  # Set by render() when inside scrollable container
+
+        # --- OFS-Inspired Features ---
+
+        # Heatmap coloring (Phase 1.1)
+        self._show_heatmap_coloring = False
+        self._heatmap_mapper = HeatmapColorMapper(max_speed=400.0)
+
+        # Speed limit visualization (Phase 1.3)
+        self._show_speed_warnings = False
+        self._speed_limit_threshold = 400.0
+
+        # Bookmarks (Phase 1.6)
+        self._bookmark_manager = BookmarkManager()
+        self._bookmark_rename_id: Optional[str] = None
+        self._bookmark_rename_buf: str = ""
+
+        # Timeline Mode State Machine (Phase 2.1)
+        self._mode = TimelineMode.SELECT
+        self._interaction_state = TimelineInteractionState.IDLE
+
+        # Alternating Mode (Phase 2.2)
+        self._alt_next_is_top = True
+        self._alt_top_value = 95
+        self._alt_bottom_value = 5
+
+        # Recording Mode (Phase 3.2)
+        self._recording_capture: Optional[RecordingCapture] = None
+        self._recording_rdp_epsilon = 2.0
+
+        # BPM/Tempo Overlay (Phase 3.3)
+        self._bpm_config: Optional[BPMOverlayConfig] = None
+        self._tap_tempo = TapTempo()
 
     # ==================================================================================
     # CORE DATA HELPERS
@@ -211,23 +248,34 @@ class InteractiveFunscriptTimeline:
         # 6. Render Visual Layers
         self._draw_background_grid(draw_list, tf)
         self._draw_audio_waveform(draw_list, tf)
-        
+
         # Data Layers
         main_actions = self._get_actions()
-        
+
+        # 6-pre. Speed limit overlay (behind curve)
+        if self._show_speed_warnings and main_actions:
+            self._draw_speed_limit_overlay(draw_list, tf, main_actions)
+
+        # 6-pre2. BPM/Tempo grid overlay
+        if self._bpm_config and _is_feature_available("patreon_features"):
+            self._draw_bpm_grid(draw_list, tf)
+
         # 6a. Update & Draw Ultimate Preview (if enabled)
         self._update_ultimate_autotune_preview()
         if self.ultimate_autotune_preview_actions:
-             self._draw_curve(draw_list, tf, self.ultimate_autotune_preview_actions, 
-                              color_override=TimelineColors.ULTIMATE_AUTOTUNE_PREVIEW, 
+             self._draw_curve(draw_list, tf, self.ultimate_autotune_preview_actions,
+                              color_override=TimelineColors.ULTIMATE_AUTOTUNE_PREVIEW,
                               force_lines_only=True, alpha=0.7)
 
         # 6b. Draw Active Plugin Preview (if any)
         if self.is_previewing and self.preview_actions:
              self._draw_curve(draw_list, tf, self.preview_actions, is_preview=True)
 
-        # 6c. Draw Main Script
-        self._draw_curve(draw_list, tf, main_actions, is_preview=False)
+        # 6c. Draw Main Script (heatmap or standard)
+        if self._show_heatmap_coloring and main_actions and len(main_actions) >= 2:
+            self._draw_curve_heatmap(draw_list, tf, main_actions)
+        else:
+            self._draw_curve(draw_list, tf, main_actions, is_preview=False)
 
         # 6d. Plugin Overlay Renderers (New System)
         if self.plugin_preview_renderer:
@@ -302,20 +350,28 @@ class InteractiveFunscriptTimeline:
                 app_state.timeline_pan_offset_ms -= delta_x * tf.zoom
                 app_state.timeline_interaction_active = True
 
-        # --- Action Interaction ---
+        # --- Mode-specific input dispatch ---
+        if self._mode == TimelineMode.ALTERNATING:
+            self._handle_alternating_mode_input(app_state, tf, mouse_pos, is_hovered, io)
+        elif self._mode == TimelineMode.RECORDING:
+            self._handle_recording_mode_input(app_state, tf, mouse_pos, is_hovered, io)
+        elif self._mode == TimelineMode.INJECTION and _is_feature_available("patreon_features"):
+            self._handle_injection_mode_input(app_state, tf, mouse_pos, is_hovered, io)
+
+        # --- Action Interaction (SELECT mode or fallback) ---
         actions = self._get_actions()
-        
+
         # Left Click
-        if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT):
+        if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and self._mode == TimelineMode.SELECT:
             hit_idx = self._hit_test_point(mouse_pos, actions, tf)
-            
+
             if io.key_alt:
                 # Alt + Drag = Range Select
                 self.range_selecting = True
                 self.range_start_time = tf.x_to_time(mouse_pos[0])
                 self.range_end_time = self.range_start_time
                 if not io.key_ctrl: self.multi_selected_action_indices.clear()
-            
+
             elif hit_idx != -1:
                 # Point Clicked
                 self.dragging_action_idx = hit_idx
@@ -411,6 +467,36 @@ class InteractiveFunscriptTimeline:
             imgui.open_popup(f"TimelineContext{self.timeline_num}")
 
         self._render_context_menu(tf)
+        self._render_bookmark_rename_popup()
+
+    def _render_bookmark_rename_popup(self):
+        """Render popup for renaming a bookmark."""
+        if self._bookmark_rename_id is None:
+            return
+
+        if not imgui.is_popup_open("Rename Bookmark##popup"):
+            imgui.open_popup("Rename Bookmark##popup")
+
+        if imgui.begin_popup_modal("Rename Bookmark##popup", flags=imgui.WINDOW_ALWAYS_AUTO_RESIZE)[0]:
+            imgui.text("Enter bookmark name:")
+            changed, self._bookmark_rename_buf = imgui.input_text(
+                "##bm_rename", self._bookmark_rename_buf, 128,
+                imgui.INPUT_TEXT_ENTER_RETURNS_TRUE
+            )
+
+            if changed or imgui.button("OK", 80, 0):
+                self._bookmark_manager.rename(self._bookmark_rename_id, self._bookmark_rename_buf)
+                self._bookmark_rename_id = None
+                self._bookmark_rename_buf = ""
+                imgui.close_current_popup()
+
+            imgui.same_line()
+            if imgui.button("Cancel", 80, 0):
+                self._bookmark_rename_id = None
+                self._bookmark_rename_buf = ""
+                imgui.close_current_popup()
+
+            imgui.end_popup()
 
     def _handle_keyboard_shortcuts(self, app_state, io):
         shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
@@ -485,6 +571,12 @@ class InteractiveFunscriptTimeline:
 
         if nudge_t != 0 and self.multi_selected_action_indices:
             self._nudge_selection_time(nudge_t)
+
+        # 7. Bookmark at playhead (B key)
+        if check_shortcut("add_bookmark", "B"):
+            center_x = (app_state.window_width or 800) / 2
+            playhead_time = getattr(app_state, 'timeline_pan_offset_ms', 0) + (center_x * getattr(app_state, 'timeline_zoom_factor_ms_per_px', 1.0))
+            self._bookmark_manager.add(playhead_time)
 
     def _hit_test_point(self, mouse_pos, actions, tf: TimelineTransformer) -> int:
         """Optimized hit testing using binary search."""
@@ -1043,6 +1135,278 @@ class InteractiveFunscriptTimeline:
                 if is_sel:
                     dl.add_circle(px, py, r+1, imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER))
 
+    # ==================================================================================
+    # OFS-INSPIRED DRAWING METHODS
+    # ==================================================================================
+
+    def _draw_curve_heatmap(self, dl, tf: TimelineTransformer, actions: List[Dict]):
+        """Draw the main curve with per-segment heatmap coloring (Phase 1.1)."""
+        if not actions or len(actions) < 2:
+            return
+
+        # Culling
+        margin_ms = tf.zoom * 100
+        timestamps = self._get_cached_timestamps()
+        if not timestamps or len(timestamps) != len(actions):
+            timestamps = [a['at'] for a in actions]
+        s_idx = bisect_left(timestamps, tf.visible_start_ms - margin_ms)
+        e_idx = bisect_right(timestamps, tf.visible_end_ms + margin_ms)
+        s_idx = max(0, s_idx - 1)
+        e_idx = min(len(actions), e_idx + 1)
+        if e_idx - s_idx < 2:
+            return
+
+        visible_actions = actions[s_idx:e_idx]
+
+        # Vectorized transform
+        ats = np.array([a['at'] for a in visible_actions], dtype=np.float32)
+        poss = np.array([a['pos'] for a in visible_actions], dtype=np.float32)
+        xs = tf.vec_time_to_x(ats)
+        ys = tf.vec_val_to_y(poss)
+
+        # Clamp coordinates
+        safe_min_x = tf.x_offset - 5000
+        safe_max_x = tf.x_offset + tf.width + 5000
+        xs = np.clip(xs, safe_min_x, safe_max_x)
+
+        # Compute per-segment speeds
+        speeds = HeatmapColorMapper.compute_segment_speeds(visible_actions)
+        colors = self._heatmap_mapper.speeds_to_colors_rgba(speeds)
+
+        # Draw per-segment colored lines
+        for i in range(len(speeds)):
+            c = colors[i]
+            col_u32 = imgui.get_color_u32_rgba(float(c[0]), float(c[1]), float(c[2]), float(c[3]))
+            dl.add_line(float(xs[i]), float(ys[i]), float(xs[i + 1]), float(ys[i + 1]), col_u32, 2.0)
+
+        # Draw points (same logic as standard _draw_curve)
+        radius = self.app.app_state_ui.timeline_point_radius
+        pixels_per_point = tf.width / max(1, len(xs))
+        if pixels_per_point > 5:
+            for i in range(len(visible_actions)):
+                real_idx = s_idx + i
+                is_sel = real_idx in self.multi_selected_action_indices
+                is_drag = (real_idx == self.dragging_action_idx)
+
+                if is_drag:
+                    c_tuple = TimelineColors.POINT_DRAGGING
+                    r = radius + 2
+                elif is_sel:
+                    c_tuple = TimelineColors.POINT_SELECTED
+                    r = radius + 1
+                else:
+                    c_tuple = TimelineColors.POINT_DEFAULT
+                    r = radius
+
+                dl.add_circle_filled(float(xs[i]), float(ys[i]), r,
+                                     imgui.get_color_u32_rgba(*c_tuple))
+                if is_sel:
+                    dl.add_circle(float(xs[i]), float(ys[i]), r + 1,
+                                  imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER))
+
+    def _draw_speed_limit_overlay(self, dl, tf: TimelineTransformer, actions: List[Dict]):
+        """Draw red semi-transparent bands for speed limit violations (Phase 1.3)."""
+        if not actions or len(actions) < 2:
+            return
+
+        # Culling
+        margin_ms = tf.zoom * 100
+        timestamps = self._get_cached_timestamps()
+        if not timestamps or len(timestamps) != len(actions):
+            timestamps = [a['at'] for a in actions]
+        s_idx = bisect_left(timestamps, tf.visible_start_ms - margin_ms)
+        e_idx = bisect_right(timestamps, tf.visible_end_ms + margin_ms)
+        s_idx = max(0, s_idx - 1)
+        e_idx = min(len(actions), e_idx + 1)
+        if e_idx - s_idx < 2:
+            return
+
+        visible_actions = actions[s_idx:e_idx]
+        speeds = HeatmapColorMapper.compute_segment_speeds(visible_actions)
+        threshold = self._speed_limit_threshold
+
+        ats = np.array([a['at'] for a in visible_actions], dtype=np.float32)
+        xs = tf.vec_time_to_x(ats)
+        xs = np.clip(xs, tf.x_offset - 100, tf.x_offset + tf.width + 100)
+
+        violation_col = imgui.get_color_u32_rgba(0.9, 0.1, 0.1, 0.15)
+        for i in range(len(speeds)):
+            if speeds[i] > threshold:
+                x1 = float(xs[i])
+                x2 = float(xs[i + 1])
+                dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, violation_col)
+
+    def _draw_bpm_grid(self, dl, tf: TimelineTransformer):
+        """Draw BPM beat grid lines on the timeline (Phase 3.3)."""
+        cfg = self._bpm_config
+        if not cfg or cfg.bpm <= 0:
+            return
+
+        interval_ms = cfg.beat_interval_ms
+        if interval_ms <= 0:
+            return
+
+        # Calculate visible beat positions
+        start_beat = int((tf.visible_start_ms - cfg.offset_ms) / interval_ms)
+        end_beat = int((tf.visible_end_ms - cfg.offset_ms) / interval_ms) + 1
+
+        # Base beat interval (quarter note, ignoring subdivision)
+        base_interval = 60000.0 / cfg.bpm
+
+        beat_col = imgui.get_color_u32_rgba(0.6, 0.3, 0.8, 0.3)
+        downbeat_col = imgui.get_color_u32_rgba(0.7, 0.3, 0.9, 0.6)
+
+        for beat_num in range(start_beat, end_beat + 1):
+            t_ms = cfg.offset_ms + beat_num * interval_ms
+            if t_ms < tf.visible_start_ms or t_ms > tf.visible_end_ms:
+                continue
+            x = tf.time_to_x(t_ms)
+
+            # Check if this is a downbeat (on the main quarter-note grid)
+            is_downbeat = (abs((t_ms - cfg.offset_ms) % base_interval) < 1.0) if cfg.subdivision > 1 else True
+            col = downbeat_col if is_downbeat else beat_col
+            thick = 1.5 if is_downbeat else 0.8
+
+            dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height, col, thick)
+
+    def _draw_bookmarks(self, dl, tf: TimelineTransformer):
+        """Draw bookmark markers on the timeline (Phase 1.6)."""
+        visible = self._bookmark_manager.get_in_range(tf.visible_start_ms, tf.visible_end_ms)
+        if not visible:
+            return
+
+        for bm in visible:
+            x = tf.time_to_x(bm.time_ms)
+            col = imgui.get_color_u32_rgba(*bm.color)
+
+            # Vertical line
+            dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height, col, 1.5)
+
+            # Triangle marker at top
+            tri_size = 6
+            dl.add_triangle_filled(
+                x, tf.y_offset,
+                x - tri_size, tf.y_offset - tri_size,
+                x + tri_size, tf.y_offset - tri_size,
+                col
+            )
+
+            # Label
+            if bm.name:
+                dl.add_text(x + 4, tf.y_offset + 2, col, bm.name[:20])
+
+    # ==================================================================================
+    # MODE-SPECIFIC INPUT HANDLERS
+    # ==================================================================================
+
+    def _handle_alternating_mode_input(self, app_state, tf: TimelineTransformer,
+                                        mouse_pos, is_hovered, io):
+        """Handle input for alternating mode (Phase 2.2).
+
+        Left-click places a point at click X, with Y alternating between
+        top and bottom values. Inspects last action to auto-determine direction.
+        """
+        if not is_hovered:
+            return
+
+        if imgui.is_mouse_clicked(0) and not io.key_ctrl:
+            click_time = tf.x_to_time(mouse_pos[0])
+
+            # Auto-determine next direction from last action
+            actions = self._get_actions()
+            if actions:
+                # Find nearest previous action
+                nearest_idx = bisect_left([a['at'] for a in actions], click_time)
+                if nearest_idx > 0:
+                    prev_pos = actions[nearest_idx - 1]['pos']
+                    mid = (self._alt_top_value + self._alt_bottom_value) / 2
+                    self._alt_next_is_top = prev_pos < mid
+
+            # Place point
+            val = self._alt_top_value if self._alt_next_is_top else self._alt_bottom_value
+            self._add_point(click_time, val)
+            self._alt_next_is_top = not self._alt_next_is_top
+
+    def _handle_recording_mode_input(self, app_state, tf: TimelineTransformer,
+                                      mouse_pos, is_hovered, io):
+        """Handle input for recording mode (Phase 3.2).
+
+        While recording: map mouse Y in canvas to 0-100, capture each frame.
+        """
+        if not self._recording_capture:
+            return
+
+        if self._recording_capture.is_recording:
+            # Map mouse Y to 0-100
+            if is_hovered and tf.height > 0:
+                normalized_y = 1.0 - ((mouse_pos[1] - tf.y_offset) / tf.height)
+                pos = max(0, min(100, normalized_y * 100.0))
+
+                # Get current video time
+                processor = self.app.processor
+                if processor and processor.fps > 0:
+                    current_ms = (processor.current_frame_index / processor.fps) * 1000.0
+                    self._recording_capture.capture_frame(current_ms, pos)
+                    # Show raw samples as live preview on timeline
+                    self.preview_actions = self._recording_capture._samples
+                    self.is_previewing = True
+
+    def _handle_injection_mode_input(self, app_state, tf: TimelineTransformer,
+                                      mouse_pos, is_hovered, io):
+        """Handle input for injection mode (Phase 2.3).
+
+        Click on a segment to inject intermediate points into it.
+        """
+        if not is_hovered:
+            return
+
+        actions = self._get_actions()
+        if not actions or len(actions) < 2:
+            return
+
+        click_time = tf.x_to_time(mouse_pos[0])
+
+        # Highlight segment under cursor (visual feedback)
+        timestamps = [a['at'] for a in actions]
+        idx = bisect_left(timestamps, click_time)
+        if idx <= 0 or idx >= len(actions):
+            return
+
+        if imgui.is_mouse_clicked(0) and not io.key_ctrl:
+            # Inject points into this segment
+            a0 = actions[idx - 1]
+            a1 = actions[idx]
+            dt = a1['at'] - a0['at']
+            if dt < 40:
+                return  # Segment too short
+
+            # Record undo
+            self._record_timeline_action()
+
+            # Generate interpolated points
+            num_injections = max(1, int(dt / 100)) - 1
+            new_actions = list(actions)  # Copy
+            insert_pos = idx
+            for j in range(1, num_injections + 1):
+                t_frac = j / (num_injections + 1)
+                t_ms = a0['at'] + dt * t_frac
+                # Cosine interpolation
+                t2 = (1.0 - math.cos(t_frac * math.pi)) / 2.0
+                pos = a0['pos'] + (a1['pos'] - a0['pos']) * t2
+                new_actions.insert(insert_pos, {
+                    'at': int(round(t_ms)),
+                    'pos': max(0, min(100, int(round(pos)))),
+                })
+                insert_pos += 1
+
+            new_actions.sort(key=lambda a: a['at'])
+
+            # Apply
+            fs, axis = self._get_target_funscript_details()
+            if fs and axis:
+                fs.set_axis_actions(axis, new_actions)
+                self._finalize_action_and_update_ui()
+
     def _draw_ui_overlays(self, dl, tf: TimelineTransformer):
         # 1. Playhead (Center)
         center_x = tf.x_offset + (tf.width / 2)
@@ -1072,6 +1436,16 @@ class InteractiveFunscriptTimeline:
             dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.2))
             dl.add_line(x1, tf.y_offset, x1, tf.y_offset+tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.5))
             dl.add_line(x2, tf.y_offset, x2, tf.y_offset+tf.height, imgui.get_color_u32_rgba(0.0, 0.7, 1.0, 0.5))
+
+        # 4. Bookmarks
+        self._draw_bookmarks(dl, tf)
+
+        # 5. Recording indicator
+        if self._recording_capture and self._recording_capture.is_recording:
+            rec_col = imgui.get_color_u32_rgba(0.9, 0.1, 0.1, 1.0)
+            dl.add_circle_filled(tf.x_offset + 12, tf.y_offset + 12, 5, rec_col)
+            dl.add_text(tf.x_offset + 20, tf.y_offset + 5,
+                        imgui.get_color_u32_rgba(0.9, 0.1, 0.1, 1.0), "REC")
 
     def _draw_state_border(self, dl, canvas_pos, canvas_size, app_state):
         """
@@ -1199,6 +1573,120 @@ class InteractiveFunscriptTimeline:
             self.app.app_settings.set(f"timeline{self.timeline_num}_show_ultimate_preview", self.show_ultimate_autotune_preview)
             self.invalidate_ultimate_preview()
 
+        # --- OFS-Inspired Visualization Toggles ---
+        imgui.same_line()
+        imgui.text("|")
+        imgui.same_line()
+
+        # Heatmap toggle
+        _, self._show_heatmap_coloring = imgui.checkbox(f"Heat##{self.timeline_num}", self._show_heatmap_coloring)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("OFS-style heatmap coloring (speed-based segment colors)")
+        imgui.same_line()
+
+        # Speed warnings toggle
+        _, self._show_speed_warnings = imgui.checkbox(f"Spd##{self.timeline_num}", self._show_speed_warnings)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(f"Highlight speed limit violations (>{self._speed_limit_threshold:.0f} u/s)")
+
+        # --- Mode Selector ---
+        imgui.same_line()
+        imgui.text("|")
+        imgui.same_line()
+
+        mode_labels = ["Select", "Alternating"]
+        # Add patreon-exclusive modes
+        _is_patreon = _is_feature_available("patreon_features")
+        if _is_patreon:
+            mode_labels.extend(["Injection", "Recording"])
+
+        mode_map = [TimelineMode.SELECT, TimelineMode.ALTERNATING]
+        if _is_patreon:
+            mode_map.extend([TimelineMode.INJECTION, TimelineMode.RECORDING])
+
+        current_mode_idx = 0
+        for i, m in enumerate(mode_map):
+            if m == self._mode:
+                current_mode_idx = i
+                break
+
+        imgui.push_item_width(90)
+        changed_mode, new_mode_idx = imgui.combo(f"Mode##{self.timeline_num}", current_mode_idx, mode_labels)
+        imgui.pop_item_width()
+        if changed_mode:
+            self._mode = mode_map[new_mode_idx]
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Timeline editing mode")
+
+        # Mode-specific toolbar additions
+        if self._mode == TimelineMode.ALTERNATING:
+            imgui.same_line()
+            imgui.push_item_width(50)
+            _, self._alt_top_value = imgui.slider_int(f"Top##{self.timeline_num}", self._alt_top_value, 50, 100)
+            imgui.same_line()
+            _, self._alt_bottom_value = imgui.slider_int(f"Bot##{self.timeline_num}", self._alt_bottom_value, 0, 50)
+            imgui.pop_item_width()
+
+        elif self._mode == TimelineMode.RECORDING and _is_patreon:
+            imgui.same_line()
+            if self._recording_capture and self._recording_capture.is_recording:
+                if imgui.button(f"Stop Rec##{self.timeline_num}"):
+                    self.is_previewing = False
+                    self.preview_actions = None
+                    simplified = self._recording_capture.stop_recording(self._recording_rdp_epsilon)
+                    if simplified:
+                        self._record_timeline_action()
+                        actions = self._get_actions()
+                        actions.extend(simplified)
+                        actions.sort(key=lambda a: a['at'])
+                        fs, axis = self._get_target_funscript_details()
+                        if fs and axis:
+                            fs.set_axis_actions(axis, actions)
+                            self._finalize_action_and_update_ui()
+            else:
+                if imgui.button(f"Record##{self.timeline_num}"):
+                    self._recording_capture = RecordingCapture()
+                    self._recording_capture.start_recording()
+                    self.is_previewing = True
+                    self.preview_actions = self._recording_capture._samples
+            imgui.same_line()
+            imgui.push_item_width(60)
+            _, self._recording_rdp_epsilon = imgui.slider_float(
+                f"RDP##{self.timeline_num}", self._recording_rdp_epsilon, 0.5, 10.0, "%.1f")
+            imgui.pop_item_width()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("RDP simplification (higher = fewer points)")
+
+        # BPM controls (Patreon exclusive)
+        if _is_patreon:
+            imgui.same_line()
+            imgui.text("|")
+            imgui.same_line()
+            has_bpm = self._bpm_config is not None
+            _, has_bpm = imgui.checkbox(f"BPM##{self.timeline_num}", has_bpm)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Show BPM beat grid overlay")
+            if has_bpm and self._bpm_config is None:
+                self._bpm_config = BPMOverlayConfig()
+            elif not has_bpm:
+                self._bpm_config = None
+
+            if self._bpm_config:
+                imgui.same_line()
+                imgui.push_item_width(55)
+                _, self._bpm_config.bpm = imgui.drag_float(
+                    f"##bpm_val{self.timeline_num}", self._bpm_config.bpm, 0.5, 30.0, 300.0, "%.0f")
+                imgui.pop_item_width()
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("BPM value (drag to adjust)")
+                imgui.same_line()
+                if imgui.button(f"Tap##{self.timeline_num}"):
+                    bpm = self._tap_tempo.tap()
+                    if bpm:
+                        self._bpm_config.bpm = round(bpm, 1)
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip(f"Tap tempo ({self._tap_tempo.tap_count} taps)")
+
         # Timeline Status Text
         imgui.same_line()
         imgui.text("|")
@@ -1286,6 +1774,97 @@ class InteractiveFunscriptTimeline:
                         imgui.close_current_popup()
                 imgui.end_menu()
 
+            # --- Bookmarks ---
+            imgui.separator()
+            if imgui.menu_item("Add Bookmark Here", "B")[0]:
+                t, _ = getattr(self, 'new_point_candidate', (0, 0))
+                self._bookmark_manager.add(t)
+                imgui.close_current_popup()
+
+            if imgui.begin_menu("Go to Bookmark"):
+                for bm in self._bookmark_manager.bookmarks:
+                    time_str = _format_time(self.app, bm.time_ms / 1000.0)
+                    label = f"{bm.name or 'Bookmark'} ({time_str})"
+                    if imgui.menu_item(label)[0]:
+                        self._seek_video(bm.time_ms)
+                        imgui.close_current_popup()
+                if not self._bookmark_manager.bookmarks:
+                    imgui.menu_item("(no bookmarks)", enabled=False)
+                imgui.end_menu()
+
+            if imgui.begin_menu("Rename Bookmark"):
+                for bm in self._bookmark_manager.bookmarks:
+                    time_str = _format_time(self.app, bm.time_ms / 1000.0)
+                    label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}"
+                    if imgui.menu_item(label)[0]:
+                        self._bookmark_rename_id = bm.id
+                        self._bookmark_rename_buf = bm.name
+                        imgui.close_current_popup()
+                if not self._bookmark_manager.bookmarks:
+                    imgui.menu_item("(no bookmarks)", enabled=False)
+                imgui.end_menu()
+
+            if imgui.begin_menu("Delete Bookmark"):
+                for bm in list(self._bookmark_manager.bookmarks):
+                    time_str = _format_time(self.app, bm.time_ms / 1000.0)
+                    label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}_del"
+                    if imgui.menu_item(label)[0]:
+                        self._bookmark_manager.remove(bm.id)
+                        imgui.close_current_popup()
+                if not self._bookmark_manager.bookmarks:
+                    imgui.menu_item("(no bookmarks)", enabled=False)
+                imgui.end_menu()
+
+            if self._bookmark_manager.bookmarks:
+                if imgui.menu_item("Clear All Bookmarks")[0]:
+                    self._bookmark_manager.clear()
+                    imgui.close_current_popup()
+
+            # --- Pattern Library (Patreon) ---
+            if _is_feature_available("patreon_features"):
+                imgui.separator()
+                if self.multi_selected_action_indices and len(self.multi_selected_action_indices) >= 2:
+                    if imgui.menu_item("Save Selection as Pattern")[0]:
+                        actions = self._get_actions()
+                        sel_actions = [actions[i] for i in sorted(self.multi_selected_action_indices)
+                                       if i < len(actions)]
+                        if len(sel_actions) >= 2:
+                            pattern_lib = getattr(self.app, 'pattern_library', None)
+                            if pattern_lib:
+                                pattern_lib.save_pattern(f"pattern_{int(time.time())}", sel_actions)
+                        imgui.close_current_popup()
+
+                if imgui.begin_menu("Apply Pattern"):
+                    pattern_lib = getattr(self.app, 'pattern_library', None)
+                    if pattern_lib:
+                        for p_name in pattern_lib.list_patterns():
+                            if imgui.menu_item(p_name)[0]:
+                                pattern = pattern_lib.load_pattern(p_name)
+                                if pattern:
+                                    t, _ = getattr(self, 'new_point_candidate', (0, 0))
+                                    new_actions = pattern_lib.apply_pattern(pattern, t)
+                                    if new_actions:
+                                        self._record_timeline_action()
+                                        actions = self._get_actions()
+                                        actions.extend(new_actions)
+                                        actions.sort(key=lambda a: a['at'])
+                                        fs, axis = self._get_target_funscript_details()
+                                        if fs and axis:
+                                            fs.set_axis_actions(axis, actions)
+                                            self._finalize_action_and_update_ui()
+                                imgui.close_current_popup()
+                    else:
+                        imgui.menu_item("(library not loaded)", enabled=False)
+                    imgui.end_menu()
+
+                # Generate Axis submenu
+                if imgui.begin_menu("Generate Axis"):
+                    for axis_name in ['roll', 'pitch', 'twist', 'sway', 'surge']:
+                        if imgui.menu_item(axis_name.capitalize())[0]:
+                            self._trigger_multi_axis_generation(axis_name)
+                            imgui.close_current_popup()
+                    imgui.end_menu()
+
             # Allow plugins to inject menu items via plugin_renderer
             self._render_plugin_selection_menu()
 
@@ -1313,16 +1892,39 @@ class InteractiveFunscriptTimeline:
     # DATA MODIFICATION HELPERS
     # ==================================================================================
 
+    def _record_timeline_action(self):
+        """Convenience wrapper for undo recording."""
+        self.app.funscript_processor._record_timeline_action(self.timeline_num, "Edit")
+
+    def _finalize_action_and_update_ui(self):
+        """Convenience wrapper for undo finalization."""
+        self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Edit")
+        self.invalidate_cache()
+
+    def _trigger_multi_axis_generation(self, target_axis: str):
+        """Trigger multi-axis generation for the given axis via the plugin system."""
+        try:
+            fs, _ = self._get_target_funscript_details()
+            if not fs:
+                return
+            self._record_timeline_action()
+            fs.apply_plugin("Multi-Axis Generator", axis='primary',
+                           target_axis=target_axis, generation_mode='heuristic')
+            self._finalize_action_and_update_ui()
+        except Exception as e:
+            if self.logger:
+                self.logger.warning(f"Multi-axis generation failed: {e}")
+
     def _add_point(self, t, v):
         fs, axis = self._get_target_funscript_details()
         if not fs: return
-        
+
         snap_t = self.app.app_state_ui.snap_to_grid_time_ms
         snap_v = self.app.app_state_ui.snap_to_grid_pos
-        
+
         t = int(round(t / snap_t) * snap_t) if snap_t > 0 else int(t)
         v = int(round(v / snap_v) * snap_v) if snap_v > 0 else int(v)
-        
+
         self.app.funscript_processor._record_timeline_action(self.timeline_num, "Add Point")
         fs.add_action(t, v if axis=='primary' else None, v if axis=='secondary' else None)
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Add Point")
@@ -1566,7 +2168,10 @@ class InteractiveFunscriptTimeline:
 
         # Check if video is playing - use is_playing attribute if available
         is_playing = False
-        if hasattr(processor, 'is_playing'):
+        if getattr(processor, 'live_capture_active', False):
+            # Live capture pauses the processor but still updates current_frame_index
+            is_playing = True
+        elif hasattr(processor, 'is_playing'):
             is_playing = processor.is_playing
         elif hasattr(processor, 'is_processing'):
             # Fallback: check if processing and not paused

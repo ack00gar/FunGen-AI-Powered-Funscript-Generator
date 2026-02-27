@@ -624,16 +624,30 @@ class ToolbarUI:
                       hasattr(processor, 'enable_tracker_processing') and
                       processor.enable_tracker_processing)
 
+        # Check if selected tracker is live-capable
+        selected_mode = app.app_state_ui.selected_tracker_name
+        from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
+        tracker_ui = get_dynamic_tracker_ui()
+        is_live = tracker_ui.is_live_tracker(selected_mode) if selected_mode else False
+
         # Start/Stop Tracking button (green when tracking)
         if is_tracking:
             self._apply_button_color_green()
 
-        tooltip = "Stop Tracking (Active)" if is_tracking else "Start Tracking"
+        if is_tracking:
+            tooltip = "Stop Tracking (Active)"
+        elif is_live:
+            tooltip = "Start Live Tracking"
+        else:
+            tooltip = "Start Full AI Analysis"
+
         if self._toolbar_button(icon_mgr, 'robot.png', btn_size, tooltip):
             if is_tracking:
                 app.event_handlers.handle_reset_live_tracker_click()
-            else:
+            elif is_live:
                 app.event_handlers.handle_start_live_tracker_click()
+            else:
+                app.event_handlers.handle_start_ai_cv_analysis()
 
         if is_tracking:
             self._apply_button_color_default()

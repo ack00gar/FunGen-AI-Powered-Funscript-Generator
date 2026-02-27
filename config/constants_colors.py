@@ -265,6 +265,17 @@ class RGBColors:
     TIMELINE_HEATMAP_BACKGROUND = (20, 20, 25, 255)
     TIMELINE_COLOR_ALPHA = 0.9 # alpha value for the timeline heatmap
 
+    # OFS-standard heatmap gradient (for interactive timeline)
+    OFS_HEATMAP = [
+        (0, 0, 0),           # Black — stationary
+        (30, 100, 222),      # DodgerBlue — slow
+        (0, 230, 230),       # Cyan — moderate
+        (0, 204, 51),        # Green — medium
+        (230, 230, 25),      # Yellow — fast
+        (230, 25, 25),       # Red — device limit
+    ]
+    OFS_HEATMAP_SPEED_NORMALIZATION = 400.0  # units/sec normalization ceiling
+
     # General Slider Colors
     FPS_TARGET_MARKER = YELLOW
     FPS_TRACKER_MARKER = GREEN

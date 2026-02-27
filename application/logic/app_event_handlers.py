@@ -143,19 +143,30 @@ class AppEventHandlers:
                     return
 
         selected_tracker_name = self.app.app_state_ui.selected_tracker_name
-        
+
+        # Use dynamic tracker discovery for validation
+        from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
+        tracker_ui = get_dynamic_tracker_ui()
+
+        # Auto-fallback: if an offline tracker is selected, switch to default live tracker
+        if not selected_tracker_name or not tracker_ui.is_live_tracker(selected_tracker_name):
+            from config.tracker_discovery import TrackerCategory
+            discovery = tracker_ui.discovery
+            live_trackers = discovery.get_trackers_by_category(TrackerCategory.LIVE)
+            if live_trackers:
+                fallback_name = live_trackers[0].internal_name
+                self.logger.info(
+                    f"'{selected_tracker_name}' is not a live tracker - switching to '{fallback_name}'.",
+                    extra={'status_message': True, 'duration': 3.0})
+                selected_tracker_name = fallback_name
+                self.app.app_state_ui.selected_tracker_name = fallback_name
+            else:
+                self.logger.error("No live trackers available.", extra={'status_message': True})
+                return
+
         # Set tracker using dynamic discovery
         if selected_tracker_name:
             self.app.tracker.set_tracking_mode(selected_tracker_name)
-
-        # Use dynamic tracker discovery for logging and validation
-        from application.gui_components.dynamic_tracker_ui import get_dynamic_tracker_ui
-        tracker_ui = get_dynamic_tracker_ui()
-        
-        # Check if selected tracker is valid for live tracking
-        if not selected_tracker_name or not tracker_ui.is_live_tracker(selected_tracker_name):
-            self.logger.error(f"Invalid live tracker selected: {selected_tracker_name}")
-            return
 
         # Handle user ROI tracker special case
         if tracker_ui.is_user_roi_tracker(selected_tracker_name):
