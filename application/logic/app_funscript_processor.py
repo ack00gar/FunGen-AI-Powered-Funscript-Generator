@@ -291,7 +291,7 @@ class AppFunscriptProcessor:
             elif timeline_num == 2:
                 return funscript_obj, 'secondary'
             elif timeline_num >= 3:
-                axis_name = f'axis_{timeline_num}'
+                axis_name = funscript_obj.get_axis_for_timeline(timeline_num)
                 funscript_obj.ensure_axis(axis_name)
                 return funscript_obj, axis_name
         return None, None

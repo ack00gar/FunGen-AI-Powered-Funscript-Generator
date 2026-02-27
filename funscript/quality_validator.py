@@ -97,58 +97,62 @@ class FunscriptQualityValidator:
         if duration_ms <= 0:
             duration_ms = actions[-1]['at']
 
-        # Run individual checks
-        self._check_speed_limits(actions, report)
-        self._check_dead_zones(actions, report)
-        self._check_coverage(actions, duration_ms, report)
-        self._check_min_movement(actions, report)
-        self._check_interval_anomalies(actions, report)
+        # --- Pre-compute shared arrays ONCE (saves 8+ redundant O(n) extractions) ---
+        ats = np.array([a['at'] for a in actions], dtype=np.float64)
+        poss = np.array([a['pos'] for a in actions], dtype=np.float64)
+        dt = np.diff(ats)
+        dp = np.abs(np.diff(poss))
+        dt_safe = np.where(dt > 0, dt, 1.0)
+        speeds = (dp / dt_safe) * 1000.0
 
-        # Compute statistics
-        report.stats = self._compute_stats(actions, duration_ms)
+        # Run individual checks with pre-computed arrays
+        self._check_speed_limits(ats, speeds, report)
+        self._check_dead_zones(ats, dp, report)
+        self._check_coverage(ats, duration_ms, report)
+        self._check_min_movement(dp, report)
+        self._check_interval_anomalies(ats, dt, dp, report)
+
+        # Compute statistics from pre-computed arrays
+        report.stats = self._compute_stats(ats, poss, dt, speeds, duration_ms, len(actions))
 
         # Compute final score
         report.score = self._compute_score(report)
 
         return report
 
-    def _check_speed_limits(self, actions: List[Dict], report: QualityReport):
-        """Check for segments exceeding the speed limit."""
-        ats = np.array([a['at'] for a in actions], dtype=np.float64)
-        poss = np.array([a['pos'] for a in actions], dtype=np.float64)
-
-        dt = np.diff(ats)
-        dp = np.abs(np.diff(poss))
-        dt_safe = np.where(dt > 0, dt, 1.0)
-        speeds = (dp / dt_safe) * 1000.0
-
+    def _check_speed_limits(self, ats, speeds, report: QualityReport):
+        """Check for segments exceeding the speed limit — emits ONE aggregated issue."""
         violations = np.where(speeds > self.speed_limit)[0]
+        n_violations = len(violations)
 
-        for idx in violations:
-            speed = speeds[idx]
-            report.issues.append(QualityIssue(
-                IssueSeverity.WARNING,
-                "speed_limit",
-                f"Speed {speed:.0f} u/s exceeds limit ({self.speed_limit:.0f} u/s)",
-                time_range_ms=(float(ats[idx]), float(ats[idx + 1]))
-            ))
+        if n_violations == 0:
+            return
 
-    def _check_dead_zones(self, actions: List[Dict], report: QualityReport):
+        max_speed = float(np.max(speeds[violations]))
+        avg_speed = float(np.mean(speeds[violations]))
+
+        if n_violations > 50:
+            severity = IssueSeverity.ERROR
+        elif n_violations > 10:
+            severity = IssueSeverity.WARNING
+        else:
+            severity = IssueSeverity.INFO
+
+        report.issues.append(QualityIssue(
+            severity,
+            "speed_limit",
+            f"{n_violations} speed violations (max {max_speed:.0f} u/s, avg {avg_speed:.0f} u/s, limit {self.speed_limit:.0f} u/s)",
+        ))
+
+    def _check_dead_zones(self, ats, dp, report: QualityReport):
         """Check for extended periods with no movement."""
-        ats = np.array([a['at'] for a in actions], dtype=np.float64)
-        poss = np.array([a['pos'] for a in actions], dtype=np.float64)
-
-        dt = np.diff(ats)
-        dp = np.abs(np.diff(poss))
-
-        # Scan for consecutive segments with near-zero movement spanning > threshold
+        n = len(dp)
         i = 0
-        while i < len(dt):
+        while i < n:
             if dp[i] < self.min_movement_threshold:
-                # Start of potential dead zone
                 zone_start = ats[i]
                 j = i
-                while j < len(dt) and dp[j] < self.min_movement_threshold:
+                while j < n and dp[j] < self.min_movement_threshold:
                     j += 1
                 zone_end = ats[min(j, len(ats) - 1)]
                 zone_duration = zone_end - zone_start
@@ -164,13 +168,13 @@ class FunscriptQualityValidator:
             else:
                 i += 1
 
-    def _check_coverage(self, actions: List[Dict], duration_ms: float, report: QualityReport):
+    def _check_coverage(self, ats, duration_ms: float, report: QualityReport):
         """Check what percentage of the video duration is scripted."""
         if duration_ms <= 0:
             return
 
-        script_start = actions[0]['at']
-        script_end = actions[-1]['at']
+        script_start = ats[0]
+        script_end = ats[-1]
         scripted_duration = script_end - script_start
         coverage = (scripted_duration / duration_ms) * 100.0
 
@@ -189,12 +193,8 @@ class FunscriptQualityValidator:
                 f"{coverage:.0f}% of video duration is scripted"
             ))
 
-    def _check_min_movement(self, actions: List[Dict], report: QualityReport):
+    def _check_min_movement(self, dp, report: QualityReport):
         """Check for imperceptible position changes."""
-        poss = np.array([a['pos'] for a in actions], dtype=np.float64)
-        ats = np.array([a['at'] for a in actions], dtype=np.float64)
-
-        dp = np.abs(np.diff(poss))
         small_moves = np.where((dp > 0) & (dp < self.min_movement_threshold))[0]
 
         if len(small_moves) > 0:
@@ -212,11 +212,8 @@ class FunscriptQualityValidator:
                     f"{len(small_moves)} segments have very small movement (<{self.min_movement_threshold} units)"
                 ))
 
-    def _check_interval_anomalies(self, actions: List[Dict], report: QualityReport):
+    def _check_interval_anomalies(self, ats, dt, dp, report: QualityReport):
         """Check for points too close together or too far apart."""
-        ats = np.array([a['at'] for a in actions], dtype=np.float64)
-        dt = np.diff(ats)
-
         # Too close
         too_close = np.where(dt < self.min_interval_ms)[0]
         if len(too_close) > 0:
@@ -227,8 +224,6 @@ class FunscriptQualityValidator:
             ))
 
         # Too far apart (in active sections only — skip if it's a dead zone)
-        poss = np.array([a['pos'] for a in actions], dtype=np.float64)
-        dp = np.abs(np.diff(poss))
         too_far = np.where((dt > self.max_interval_ms) & (dp > self.min_movement_threshold))[0]
         if len(too_far) > 0:
             for idx in too_far[:5]:  # Report up to 5
@@ -239,18 +234,10 @@ class FunscriptQualityValidator:
                     time_range_ms=(float(ats[idx]), float(ats[idx + 1]))
                 ))
 
-    def _compute_stats(self, actions: List[Dict], duration_ms: float) -> Dict:
-        """Compute summary statistics."""
-        ats = np.array([a['at'] for a in actions], dtype=np.float64)
-        poss = np.array([a['pos'] for a in actions], dtype=np.float64)
-
-        dt = np.diff(ats)
-        dp = np.abs(np.diff(poss))
-        dt_safe = np.where(dt > 0, dt, 1.0)
-        speeds = (dp / dt_safe) * 1000.0
-
+    def _compute_stats(self, ats, poss, dt, speeds, duration_ms: float, action_count: int) -> Dict:
+        """Compute summary statistics from pre-computed arrays."""
         return {
-            'action_count': len(actions),
+            'action_count': action_count,
             'duration_ms': duration_ms,
             'avg_speed': float(np.mean(speeds)) if len(speeds) > 0 else 0,
             'max_speed': float(np.max(speeds)) if len(speeds) > 0 else 0,
@@ -264,6 +251,9 @@ class FunscriptQualityValidator:
         score = 100
 
         for issue in report.issues:
+            if score <= 0:
+                break
+
             if issue.severity == IssueSeverity.ERROR:
                 if issue.category == "empty":
                     score -= 100
@@ -273,7 +263,12 @@ class FunscriptQualityValidator:
                     score -= 20
             elif issue.severity == IssueSeverity.WARNING:
                 if issue.category == "speed_limit":
-                    score -= 2  # Per-violation penalty
+                    # Parse violation count from aggregated message for proportional penalty
+                    try:
+                        n = int(issue.message.split()[0])
+                        score -= min(30, n * 0.5)
+                    except (ValueError, IndexError):
+                        score -= 5
                 elif issue.category == "coverage":
                     score -= 10
                 elif issue.category == "min_movement":
@@ -283,6 +278,6 @@ class FunscriptQualityValidator:
                 else:
                     score -= 2
             elif issue.severity == IssueSeverity.INFO:
-                score -= 1  # Minor penalty for info items
+                score -= 1
 
-        return max(0, min(100, score))
+        return max(0, min(100, int(score)))
