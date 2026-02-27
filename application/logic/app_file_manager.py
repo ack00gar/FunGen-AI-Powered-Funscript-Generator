@@ -510,15 +510,38 @@ class AppFileManager:
             metadata["chapters_fps"] = current_fps
             metadata["chapters"] = [chapter.to_funscript_chapter_dict(current_fps) for chapter in chapters]
 
+        # Include project metadata if available
+        project_metadata = {}
+        if hasattr(self.app, 'project_manager') and hasattr(self.app.project_manager, 'get_metadata'):
+            project_metadata = self.app.project_manager.get_metadata() or {}
+
         # Construct the final funscript data object
         funscript_data = {
             "version": "1.0",
-            "author": f"FunGen beta {APP_VERSION}",
+            "author": project_metadata.get("creator", f"FunGen beta {APP_VERSION}"),
             "inverted": False,
             "range": 100,
             "actions": sorted(sanitized_actions, key=lambda x: x["at"]),
             "metadata": metadata
         }
+
+        # Add optional metadata fields if present
+        if project_metadata.get("title"):
+            funscript_data["title"] = project_metadata["title"]
+        if project_metadata.get("description"):
+            funscript_data["description"] = project_metadata["description"]
+        if project_metadata.get("tags"):
+            funscript_data["tags"] = [t.strip() for t in project_metadata["tags"].split(",") if t.strip()]
+        if project_metadata.get("performers"):
+            funscript_data["performers"] = [p.strip() for p in project_metadata["performers"].split(",") if p.strip()]
+        if project_metadata.get("script_url"):
+            funscript_data["script_url"] = project_metadata["script_url"]
+        if project_metadata.get("video_url"):
+            funscript_data["video_url"] = project_metadata["video_url"]
+        if project_metadata.get("license"):
+            funscript_data["license"] = project_metadata["license"]
+        if project_metadata.get("notes"):
+            funscript_data["notes"] = project_metadata["notes"]
 
         try:
             # Use orjson for high-performance writing
@@ -670,6 +693,69 @@ class AppFileManager:
             callback=lambda filepath: self.save_funscript_from_timeline(filepath, timeline_num),
             initial_path=initial_path,
             initial_filename=initial_filename
+        )
+
+    def export_heatmap_png(self, timeline_num: int = 1):
+        """Export heatmap PNG image for the specified timeline.
+
+        Follows the same dialog pattern as export_funscript_from_timeline().
+        """
+        if not self.app.gui_instance or not self.app.gui_instance.file_dialog:
+            self.logger.warning("File dialog not available", extra={"status_message": True})
+            return
+
+        # Get actions
+        fs_proc = self.app.funscript_processor
+        if not fs_proc:
+            self.logger.warning("No funscript data to export heatmap.", extra={"status_message": True})
+            return
+
+        axis = "primary" if timeline_num == 1 else "secondary"
+        funscript_obj = fs_proc.get_funscript_obj() if hasattr(fs_proc, 'get_funscript_obj') else None
+        if not funscript_obj:
+            self.logger.warning("No funscript loaded.", extra={"status_message": True})
+            return
+
+        actions = funscript_obj.get_axis_actions(axis)
+        if not actions:
+            self.logger.warning("No actions on this timeline.", extra={"status_message": True})
+            return
+
+        # Duration
+        duration_ms = actions[-1]['at'] if actions else 0
+        if self.app.processor and self.app.processor.video_info:
+            fps = self.app.processor.fps
+            total_frames = self.app.processor.video_info.get('total_frames', 0)
+            if fps > 0 and total_frames > 0:
+                duration_ms = max(duration_ms, (total_frames / fps) * 1000.0)
+
+        output_folder = self.app.app_settings.get("output_folder_path", "output")
+        initial_filename = "heatmap.png"
+        if self.video_path:
+            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            initial_filename = f"{video_basename}_heatmap.png"
+            output_folder = os.path.join(output_folder, video_basename)
+
+        if not os.path.isdir(output_folder):
+            os.makedirs(output_folder, exist_ok=True)
+
+        def _do_export(filepath):
+            try:
+                from funscript.heatmap_export import HeatmapExporter
+                exporter = HeatmapExporter()
+                exporter.export_png(filepath, actions, duration_ms)
+                self.logger.info(f"Heatmap exported to {os.path.basename(filepath)}",
+                                 extra={"status_message": True})
+            except Exception as e:
+                self.logger.error(f"Heatmap export failed: {e}", extra={"status_message": True})
+
+        self.app.gui_instance.file_dialog.show(
+            is_save=True,
+            title="Export Heatmap PNG",
+            extension_filter="PNG Images (*.png),*.png",
+            callback=_do_export,
+            initial_path=output_folder,
+            initial_filename=initial_filename,
         )
 
     def export_unified_funscript(self):

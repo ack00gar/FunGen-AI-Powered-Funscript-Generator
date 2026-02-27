@@ -14,7 +14,7 @@ except ImportError:
 # META & VERSIONING
 ####################################################################################################
 APP_NAME = "FunGen"
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.6.1"
 APP_WINDOW_TITLE = f"{APP_NAME} v{APP_VERSION} - AI Computer Vision"
 FUNSCRIPT_AUTHOR = "FunGen"
 
@@ -412,6 +412,10 @@ MOTION_INVERSION_THRESHOLD = 1.2
 STAGE1_FRAME_QUEUE_MAXSIZE = 99
 DEFAULT_S1_NUM_PRODUCERS = 1
 DEFAULT_S1_NUM_CONSUMERS = max(os.cpu_count() // 2, 1) if os.cpu_count() else 2
+# MPS (Apple Silicon) shares unified memory — each consumer loads ~2GB of models.
+# Scale by available system memory rather than hard-capping, so beefy Macs aren't penalized.
+MPS_MEMORY_PER_CONSUMER_GB = 2.0  # Conservative estimate per consumer (det + pose models)
+MPS_MEMORY_HEADROOM_GB = 6.0      # Reserve for OS, app, and other processes
 
 
 ####################################################################################################
@@ -639,6 +643,7 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/sidebar-device.png': 'https://em-content.zobj.net/source/apple/391/flashlight_1f526.png',  # 🔦 flashlight (Device Control)
     'ui/icons/sidebar-stream.png': 'https://em-content.zobj.net/source/apple/391/satellite-antenna_1f4e1.png',  # 📡 satellite (Streamer)
     'ui/icons/sidebar-batch.png': 'https://em-content.zobj.net/source/apple/391/crown_1f451.png',  # 👑 crown (Patreon Exclusive)
+    'ui/icons/sidebar-metadata.png': 'https://em-content.zobj.net/source/apple/391/label_1f3f7-fe0f.png',  # 🏷️ label (Metadata)
 }
 
 ####################################################################################################

@@ -65,6 +65,37 @@ class MainMenu:
         axis = self._axis_label_for(t_num)
         return f"T{t_num} ({axis})" if axis else f"Timeline {t_num}"
 
+    def _get_active_bookmark_manager(self):
+        """Get bookmark manager from the active timeline editor."""
+        gui = self.gui
+        if gui and hasattr(gui, 'timeline_editors'):
+            editors = gui.timeline_editors
+            if editors:
+                return getattr(editors[0], '_bookmark_manager', None)
+        return None
+
+    def _add_bookmark_at_playhead(self):
+        """Add bookmark at current playhead position."""
+        bm_mgr = self._get_active_bookmark_manager()
+        if not bm_mgr:
+            return
+        proc = self.app.processor
+        if proc and proc.is_video_open():
+            time_ms = proc.get_position_ms()
+            bm_mgr.add(time_ms)
+
+    def _seek_to_bookmark(self, time_ms):
+        """Seek video to bookmark time."""
+        proc = self.app.processor
+        if proc and proc.is_video_open():
+            proc.seek_to_ms(time_ms)
+
+    def _format_bookmark_time(self, time_ms):
+        """Format bookmark time for display."""
+        secs = time_ms / 1000.0
+        m, s = divmod(secs, 60)
+        return f"{int(m)}:{s:05.2f}"
+
     def _get_shortcut_display(self, action_name: str) -> str:
         """
         Get formatted shortcut string for display in menus.
@@ -480,6 +511,9 @@ class MainMenu:
                     fm.export_funscript_from_timeline(1)
                 if _menu_item_simple(f"Funscript from {self._tl_label(2)}..."):
                     fm.export_funscript_from_timeline(2)
+                imgui.separator()
+                if _menu_item_simple("Heatmap PNG..."):
+                    fm.export_heatmap_png(1)
                 imgui.end_menu()
 
             # Chapters submenu
@@ -600,6 +634,32 @@ class MainMenu:
                         imgui.separator()
                         self._render_per_timeline_undo_items(fs_proc, tl_num)
                 imgui.end_menu()
+
+            # --- Bookmarks ---
+            imgui.separator()
+            if imgui.menu_item("Add Bookmark", "B")[0]:
+                self._add_bookmark_at_playhead()
+
+            if not hasattr(app_state, 'show_bookmark_list_window'):
+                app_state.show_bookmark_list_window = False
+            clicked, val = imgui.menu_item(
+                "Bookmark List", selected=app_state.show_bookmark_list_window
+            )
+            if clicked:
+                app_state.show_bookmark_list_window = val
+
+            if imgui.begin_menu("Go to Bookmark"):
+                bm_mgr = self._get_active_bookmark_manager()
+                if bm_mgr and bm_mgr.bookmarks:
+                    for bm in bm_mgr.bookmarks:
+                        time_str = self._format_bookmark_time(bm.time_ms)
+                        label = f"{bm.name or 'Bookmark'} ({time_str})##{bm.id}"
+                        if imgui.menu_item(label)[0]:
+                            self._seek_to_bookmark(bm.time_ms)
+                else:
+                    imgui.menu_item("(no bookmarks)", enabled=False)
+                imgui.end_menu()
+
             imgui.end_menu()
 
     def _render_per_timeline_undo_items(self, fs_proc, tl_num):
@@ -1192,19 +1252,25 @@ class MainMenu:
             imgui.same_line(spacing=8)
 
     def _render_supporter_badge(self):
-        """Render gold Supporter badge in menu bar when patreon_features is available."""
-        if not self._feat_supporter:
-            return
-
-        # Gold-colored "(Supporter)" text
-        imgui.push_style_color(imgui.COLOR_BUTTON, 0.75, 0.6, 0.15, 1.0)
-        imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.7, 0.25, 1.0)
-        imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.65, 0.5, 0.1, 1.0)
-        imgui.small_button("Supporter")
-        imgui.pop_style_color(3)
-
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Thank you for supporting FunGen!")
+        """Render Patreon badge in menu bar. Gold when active, muted when not."""
+        if self._feat_supporter:
+            # Gold-colored "Patreon" text
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.75, 0.6, 0.15, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.85, 0.7, 0.25, 1.0)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.65, 0.5, 0.1, 1.0)
+            imgui.small_button("Patreon")
+            imgui.pop_style_color(3)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Thank you for being a Patreon supporter!")
+        else:
+            # Gray muted badge when not a Patreon subscriber
+            imgui.push_style_color(imgui.COLOR_BUTTON, 0.3, 0.3, 0.3, 0.6)
+            imgui.push_style_color(imgui.COLOR_BUTTON_HOVERED, 0.4, 0.4, 0.4, 0.7)
+            imgui.push_style_color(imgui.COLOR_BUTTON_ACTIVE, 0.3, 0.3, 0.3, 0.6)
+            imgui.small_button("Patreon")
+            imgui.pop_style_color(3)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Patreon features not activated\nCheck the Support menu for details")
 
     def _render_device_control_indicator(self):
         """Render simple device control status indicator button."""

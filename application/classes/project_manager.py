@@ -25,6 +25,7 @@ class ProjectManager:
         self._project_file_path: Optional[str] = None
         self._project_dirty: bool = False
         self.last_autosave_time: float = time.time()
+        self._metadata: Dict = {}  # Script metadata (creator, title, tags, etc.)
 
     @property
     def project_file_path(self) -> Optional[str]:
@@ -269,6 +270,15 @@ class ProjectManager:
         self.last_autosave_time = time.time()
 
 
+    def get_metadata(self) -> Dict:
+        """Return the project metadata dict (creator, title, tags, etc.)."""
+        return self._metadata
+
+    def set_metadata(self, metadata: Dict):
+        """Update the project metadata dict."""
+        self._metadata = metadata
+        self.project_dirty = True
+
     def _get_project_state_as_dict(self) -> Dict:
         """Gathers all necessary data from app logic sub-modules for saving."""
         # Data from FunscriptProcessor
@@ -328,10 +338,28 @@ class ProjectManager:
 
             # StageProcessor Data (mostly status, as progress is transient)
             "stage2_status_text": stage_proc_data.get("stage2_status_text", "Not run."),
+
+            # Metadata & Bookmarks (OFS-inspired features)
+            "script_metadata": self._metadata,
+            "bookmarks": self._get_bookmarks_data(),
         }
         if self.app.audio_waveform_data is not None:
             project_data["audio_waveform_data"] = self.app.audio_waveform_data
         return project_data
+
+    def _get_bookmarks_data(self):
+        """Collect bookmark data from all timelines."""
+        bookmarks = {}
+        gui = getattr(self.app, 'gui_instance', None)
+        if gui and hasattr(gui, 'control_panel'):
+            cp = gui.control_panel
+            for attr_name in ['timeline_editor1', 'timeline_editor2']:
+                editor = getattr(cp, attr_name, None)
+                if editor and hasattr(editor, '_bookmark_manager'):
+                    bm_data = editor._bookmark_manager.to_dict()
+                    if bm_data:
+                        bookmarks[attr_name] = bm_data
+        return bookmarks
 
     def _apply_project_state_from_dict(self, project_data: Dict):
         """Applies loaded project data to the relevant app logic sub-modules."""
@@ -440,4 +468,21 @@ class ProjectManager:
         if fm.stage2_output_msgpack_path and os.path.exists(fm.stage2_output_msgpack_path):
             fm.load_stage2_overlay_data(fm.stage2_output_msgpack_path)
 
+        # Restore metadata
+        self._metadata = project_data.get("script_metadata", {})
 
+        # Restore bookmarks
+        bookmarks_data = project_data.get("bookmarks", {})
+        if bookmarks_data:
+            self._restore_bookmarks(bookmarks_data)
+
+    def _restore_bookmarks(self, bookmarks_data: Dict):
+        """Restore bookmark data into timeline editors."""
+        from application.classes.bookmark_manager import BookmarkManager
+        gui = getattr(self.app, 'gui_instance', None)
+        if gui and hasattr(gui, 'control_panel'):
+            cp = gui.control_panel
+            for attr_name, bm_list in bookmarks_data.items():
+                editor = getattr(cp, attr_name, None)
+                if editor and hasattr(editor, '_bookmark_manager'):
+                    editor._bookmark_manager = BookmarkManager.from_dict(bm_list)
