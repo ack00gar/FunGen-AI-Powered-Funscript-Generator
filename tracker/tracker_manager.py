@@ -36,6 +36,9 @@ class TrackerManager:
         # Create funscript instance for accumulating tracking data
         self.funscript = MultiAxisFunscript(logger=self.logger)
 
+        # Preserve full TrackerResult for multi-axis extraction
+        self._last_tracker_result = None
+
         # Apply point simplification setting from app settings
         if app_logic_instance and hasattr(app_logic_instance, 'app_settings'):
             simplification_enabled = app_logic_instance.app_settings.get('funscript_point_simplification_enabled', True)
@@ -158,6 +161,13 @@ class TrackerManager:
                 if tracker_info.supports_dual_axis:
                     self.funscript.assign_axis(2, tracker_info.secondary_axis)
 
+                # Auto-assign additional axes (T3+) declared by the tracker
+                if tracker_info.additional_axes:
+                    for i, axis_name in enumerate(tracker_info.additional_axes):
+                        tl_num = 3 + i
+                        self.funscript.assign_axis(tl_num, axis_name)
+                        self.funscript.ensure_axis(axis_name)
+
             # Set up tracker with app and model path
             self._setup_tracker_environment()
             
@@ -238,6 +248,7 @@ class TrackerManager:
             
             # Add actions to funscript
             self._add_actions_to_funscript(action_log)
+            self._add_multi_axis_to_funscript()
 
             # Apply rolling autotune if enabled (for streamer mode)
             if (self.rolling_autotune_enabled and
@@ -299,9 +310,12 @@ class TrackerManager:
             else:
                 # Regular trackers use action_log
                 self._add_actions_to_funscript(action_log)
-            
+
+            # Route secondary and multi-axis data regardless of oscillation mode
+            self._add_multi_axis_to_funscript()
+
             return processed_frame, action_log
-                
+
         except Exception as e:
             self.logger.error(f"Error in process_frame_for_oscillation: {e}")
             return frame, None
@@ -637,10 +651,15 @@ class TrackerManager:
         """Extract processed frame and action log from tracker result."""
         processed_frame = None
         action_log = None
-        
+
         # Handle TrackerResult object
         if hasattr(result, 'processed_frame') and hasattr(result, 'action_log'):
             processed_frame, action_log = result.processed_frame, result.action_log
+            # Preserve full result for multi-axis extraction
+            if hasattr(result, 'multi_axis_data') or hasattr(result, 'secondary_action_log'):
+                self._last_tracker_result = result
+            else:
+                self._last_tracker_result = None
         
         # Handle tuple format
         elif isinstance(result, tuple) and len(result) >= 2:
@@ -705,6 +724,47 @@ class TrackerManager:
                     self.funscript.add_action(timestamp_ms, position)
         except Exception as e:
             self.logger.error(f"Error adding actions to funscript: {e}")
+
+    def _add_multi_axis_to_funscript(self):
+        """Route secondary_action_log and multi_axis_data from the last TrackerResult to the funscript."""
+        result = self._last_tracker_result
+        if result is None or not self.funscript:
+            return
+
+        # Check "Not Relevant" chapter skip — reuse same logic as _add_actions_to_funscript
+        if hasattr(self, 'app') and self.app:
+            try:
+                from config.constants import POSITION_INFO_MAPPING
+                fs_proc = getattr(self.app, 'funscript_processor', None)
+                processor = getattr(self.app, 'processor', None)
+                if fs_proc and processor:
+                    current_frame = processor.current_frame_index
+                    chapter_at_frame = fs_proc.get_chapter_at_frame(current_frame)
+                    if chapter_at_frame:
+                        position_short_name = chapter_at_frame.position_short_name
+                        position_info = POSITION_INFO_MAPPING.get(position_short_name, {})
+                        if position_info.get('category', 'Position') == "Not Relevant":
+                            return
+            except Exception:
+                pass  # Fail open — continue adding actions
+
+        try:
+            # Route secondary_action_log → secondary axis
+            secondary_log = getattr(result, 'secondary_action_log', None)
+            if secondary_log:
+                for action in secondary_log:
+                    if isinstance(action, dict) and 'at' in action and 'pos' in action:
+                        self.funscript.add_action(action['at'], primary_pos=None, secondary_pos=action['pos'])
+
+            # Route multi_axis_data → additional axes
+            multi_axis = getattr(result, 'multi_axis_data', None)
+            if multi_axis:
+                for axis_name, actions in multi_axis.items():
+                    for action in actions:
+                        if isinstance(action, dict) and 'at' in action and 'pos' in action:
+                            self.funscript.add_action_to_axis(axis_name, action['at'], action['pos'])
+        except Exception as e:
+            self.logger.error(f"Error adding multi-axis data to funscript: {e}")
 
     def _apply_rolling_autotune(self, current_time_ms: int):
         """

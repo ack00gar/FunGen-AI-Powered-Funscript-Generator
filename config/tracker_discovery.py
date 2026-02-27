@@ -38,6 +38,7 @@ class TrackerDisplayInfo:
     supports_dual_axis: bool = True
     primary_axis: str = "stroke"
     secondary_axis: str = "roll"
+    additional_axes: List[str] = field(default_factory=list)  # Extra axes beyond primary/secondary
     stages: List = field(default_factory=list)  # List of StageDefinition objects
     properties: Dict[str, Any] = field(default_factory=dict)  # Tracker properties/capabilities
     folder_name: str = ""  # Source folder name for prefixing (live, offline, experimental, community)
@@ -128,6 +129,7 @@ class DynamicTrackerDiscovery:
             supports_dual_axis=metadata.supports_dual_axis,
             primary_axis=getattr(metadata, 'primary_axis', 'stroke'),
             secondary_axis=getattr(metadata, 'secondary_axis', 'roll'),
+            additional_axes=getattr(metadata, 'additional_axes', []),
             stages=stages,
             properties=properties,
             folder_name=folder_name
