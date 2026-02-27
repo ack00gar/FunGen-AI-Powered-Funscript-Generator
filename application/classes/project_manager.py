@@ -351,14 +351,19 @@ class ProjectManager:
         """Collect bookmark data from all timelines."""
         bookmarks = {}
         gui = getattr(self.app, 'gui_instance', None)
-        if gui and hasattr(gui, 'control_panel'):
-            cp = gui.control_panel
+        if gui:
             for attr_name in ['timeline_editor1', 'timeline_editor2']:
-                editor = getattr(cp, attr_name, None)
+                editor = getattr(gui, attr_name, None)
                 if editor and hasattr(editor, '_bookmark_manager'):
                     bm_data = editor._bookmark_manager.to_dict()
                     if bm_data:
                         bookmarks[attr_name] = bm_data
+            extras = getattr(gui, '_extra_timeline_editors', {})
+            for tl_num, editor in sorted(extras.items()):
+                if hasattr(editor, '_bookmark_manager'):
+                    bm_data = editor._bookmark_manager.to_dict()
+                    if bm_data:
+                        bookmarks[f'timeline_editor{tl_num}'] = bm_data
         return bookmarks
 
     def _apply_project_state_from_dict(self, project_data: Dict):
@@ -480,9 +485,16 @@ class ProjectManager:
         """Restore bookmark data into timeline editors."""
         from application.classes.bookmark_manager import BookmarkManager
         gui = getattr(self.app, 'gui_instance', None)
-        if gui and hasattr(gui, 'control_panel'):
-            cp = gui.control_panel
+        if gui:
             for attr_name, bm_list in bookmarks_data.items():
-                editor = getattr(cp, attr_name, None)
+                editor = getattr(gui, attr_name, None)
+                if editor is None and attr_name.startswith('timeline_editor'):
+                    # Check extra timeline editors
+                    try:
+                        tl_num = int(attr_name.replace('timeline_editor', ''))
+                        extras = getattr(gui, '_extra_timeline_editors', {})
+                        editor = extras.get(tl_num)
+                    except ValueError:
+                        pass
                 if editor and hasattr(editor, '_bookmark_manager'):
                     editor._bookmark_manager = BookmarkManager.from_dict(bm_list)

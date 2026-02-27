@@ -88,11 +88,12 @@ class BookmarkListWindow:
         # --- Action buttons ---
         if imgui.button("Add Bookmark at Playhead"):
             proc = self.app.processor
-            if proc and proc.is_video_open():
+            if proc and proc.is_video_open() and proc.fps > 0:
+                current_time_ms = int(round((proc.current_frame_index / proc.fps) * 1000.0))
                 managers = self._get_all_bookmark_managers()
                 if managers:
                     _, mgr = managers[0]  # Add to timeline 1
-                    mgr.add(proc.get_position_ms())
+                    mgr.add(current_time_ms)
 
         imgui.same_line()
         if all_bookmarks:
@@ -127,7 +128,7 @@ class BookmarkListWindow:
                     imgui.table_next_column()
                     if imgui.selectable(
                         f"{self._format_time(bm.time_ms)}##{bm.id}",
-                        False, imgui.SELECTABLE_SPAN_ALL_COLUMNS
+                        False
                     )[0]:
                         self._seek(bm.time_ms)
 

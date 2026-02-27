@@ -1910,6 +1910,25 @@ class InteractiveFunscriptTimeline:
             self._record_timeline_action()
             fs.apply_plugin("Multi-Axis Generator", axis='primary',
                            target_axis=target_axis, generation_mode='heuristic')
+
+            # The plugin stores generated data under the semantic axis name
+            # (e.g. 'roll') in additional_axes.  Route it to the positional
+            # axis that the timeline system actually reads.
+            generated = fs.get_axis_actions(target_axis)
+            if generated:
+                tl_num = fs.get_timeline_for_axis(target_axis) if hasattr(fs, 'get_timeline_for_axis') else None
+                if tl_num is not None:
+                    # Map timeline number to positional axis name
+                    if tl_num == 1:
+                        pos_axis = 'primary'
+                    elif tl_num == 2:
+                        pos_axis = 'secondary'
+                    else:
+                        pos_axis = f'axis_{tl_num}'
+                    # Only copy if semantic and positional names differ
+                    if pos_axis != target_axis:
+                        fs.set_axis_actions(pos_axis, generated)
+
             self._finalize_action_and_update_ui()
         except Exception as e:
             if self.logger:
