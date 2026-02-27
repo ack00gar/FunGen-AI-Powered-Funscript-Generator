@@ -106,6 +106,8 @@ class KeyboardShortcutsDialog:
                 ("jump_to_prev_point_alt", "Jump to Previous Point (Alt)"),
                 ("nudge_selection_pos_up", "Raise Selected Point Value"),
                 ("nudge_selection_pos_down", "Lower Selected Point Value"),
+                ("nudge_selection_time_prev", "Nudge Selection Time Back"),
+                ("nudge_selection_time_next", "Nudge Selection Time Forward"),
             ],
             "Chapters": [
                 ("set_chapter_start", "Set Chapter Start (In-point)"),
@@ -114,6 +116,9 @@ class KeyboardShortcutsDialog:
                 ("delete_selected_chapter_alt", "Delete Chapter (Alt)"),
                 ("delete_points_in_chapter", "Delete Points in Chapter"),
                 ("delete_points_in_chapter_alt", "Delete Points in Chapter (Alt)"),
+            ],
+            "Bookmarks": [
+                ("add_bookmark", "Add Bookmark"),
             ],
             "Tracking Tools": [
                 ("set_oscillation_area", "Set Oscillation Area"),

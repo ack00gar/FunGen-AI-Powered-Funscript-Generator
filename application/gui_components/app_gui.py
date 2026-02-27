@@ -8,6 +8,7 @@ import time
 import threading
 import queue
 import os
+import platform
 from typing import List, Dict
 from collections import deque
 
@@ -160,6 +161,12 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         self.error_popup_message = ""
         self.error_popup_action_label = None
         self.error_popup_action_callback = None
+
+        # Shortcut hint rotation state (status strip)
+        self._hint_rotate_index = 0
+        self._hint_last_rotate = 0.0
+        self._hint_pool_cache = []
+        self._hint_last_context = None
 
     def _handle_threaded_progress(self, task_id: str, progress: float, message: str):
         """Handle progress updates from threaded operations."""
@@ -835,6 +842,109 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
     #     _handle_toggle_waveform_shortcut, _handle_reset_timeline_view_shortcut,
     #     _handle_toggle_oscillation_area_mode, _handle_energy_saver_interaction_detection ---
 
+    # ---- Shortcut hint helpers (status strip) ----
+
+    def _format_shortcut_hint(self, key_str):
+        """Platform-aware formatting: SUPER→Cmd/Ctrl, arrow symbols, etc."""
+        d = key_str
+        is_mac = platform.system() == "Darwin"
+        d = d.replace("SUPER", "Cmd" if is_mac else "Ctrl")
+        d = d.replace("CTRL", "Ctrl")
+        d = d.replace("ALT", "Alt")
+        d = d.replace("SHIFT", "Shift")
+        d = d.replace("RIGHT_ARROW", "Right")
+        d = d.replace("LEFT_ARROW", "Left")
+        d = d.replace("UP_ARROW", "Up")
+        d = d.replace("DOWN_ARROW", "Down")
+        d = d.replace("SPACE", "Space")
+        d = d.replace("BACKSPACE", "Backspace")
+        d = d.replace("DELETE", "Del")
+        d = d.replace("HOME", "Home")
+        d = d.replace("END", "End")
+        d = d.replace("EQUAL", "=")
+        d = d.replace("MINUS", "-")
+        return d
+
+    def _get_contextual_hints(self, shortcuts, timeline_hovered, has_selection):
+        """Return 1-2 fixed hints based on current app state.
+
+        Each hint is (formatted_key, label).
+        """
+        proc = self.app.processor
+        has_video = proc and proc.is_video_open()
+
+        if not has_video:
+            key = shortcuts.get("open_project", "")
+            return [(self._format_shortcut_hint(key), "Open Project")] if key else []
+
+        # Timeline hovered with selection → editing hints
+        if has_selection:
+            hints = []
+            k = shortcuts.get("delete_selected_point", "")
+            if k:
+                hints.append((self._format_shortcut_hint(k), "Delete"))
+            k_up = shortcuts.get("nudge_selection_pos_up", "")
+            k_dn = shortcuts.get("nudge_selection_pos_down", "")
+            if k_up and k_dn:
+                hints.append((self._format_shortcut_hint(k_up) + "/" + self._format_shortcut_hint(k_dn), "Nudge Value"))
+            k = shortcuts.get("copy_selection", "")
+            if k:
+                hints.append((self._format_shortcut_hint(k), "Copy"))
+            return hints
+
+        # Timeline hovered, no selection → canvas interaction hints
+        if timeline_hovered:
+            hints = []
+            mod = "Cmd" if platform.system() == "Darwin" else "Ctrl"
+            hints.append(("Alt+Drag", "Range Select"))
+            hints.append(("Click", "Add Point"))
+            k = shortcuts.get("select_all_points", "")
+            if k:
+                hints.append((self._format_shortcut_hint(k), "Select All"))
+            return hints
+
+        # Default: video loaded, not hovering timeline
+        hints = []
+        k = shortcuts.get("toggle_playback", "")
+        if k:
+            hints.append((self._format_shortcut_hint(k), "Play/Pause"))
+        k_l = shortcuts.get("seek_prev_frame", "")
+        k_r = shortcuts.get("seek_next_frame", "")
+        if k_l and k_r:
+            hints.append((self._format_shortcut_hint(k_l) + "/" + self._format_shortcut_hint(k_r), "Navigate"))
+        return hints
+
+    def _build_rotating_hint_pool(self, shortcuts, fixed_actions):
+        """Build pool of discovery hints from shortcut categories, excluding fixed ones.
+
+        Returns list of (formatted_key, label) tuples.
+        """
+        pool = []
+        fixed_set = set(fixed_actions)
+        proc = self.app.processor
+        has_video = proc and proc.is_video_open()
+
+        # Categories to skip entirely when no video
+        skip_no_video = {"Editing", "Point Navigation", "Playback", "Add Points",
+                         "Chapters", "Tracking Tools", "Bookmarks"}
+
+        for cat_name, cat_shortcuts in self.keyboard_shortcuts_dialog.shortcut_categories.items():
+            if not has_video and cat_name in skip_no_video:
+                continue
+            for action_name, display_name in cat_shortcuts:
+                if action_name in fixed_set:
+                    continue
+                # Skip _alt duplicates
+                if action_name.endswith("_alt"):
+                    continue
+                # Skip number-pad point shortcuts (too many)
+                if action_name.startswith("add_point_"):
+                    continue
+                key_str = shortcuts.get(action_name, "")
+                if not key_str:
+                    continue
+                pool.append((self._format_shortcut_hint(key_str), display_name))
+        return pool
 
     def _render_status_strip(self, strip_h):
         """Render a unified status strip at the very bottom of the window."""
@@ -869,7 +979,7 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             imgui.text(state_text)
             imgui.pop_style_color()
 
-            # Center: operation + progress
+            # Center: progress % during tracking, shortcut hints otherwise
             if stage_proc.full_analysis_active:
                 progress = getattr(stage_proc, 'overall_progress', 0.0)
                 progress_text = f"{int(progress * 100)}%"
@@ -879,6 +989,71 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 imgui.push_style_color(imgui.COLOR_TEXT, *StatusStripColors.ACCENT)
                 imgui.text(progress_text)
                 imgui.pop_style_color()
+            else:
+                # Dynamic shortcut hints
+                shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+
+                # Detect context: video, timeline hover, selection
+                has_video = proc and proc.is_video_open()
+                tl_hovered = False
+                has_sel = False
+                try:
+                    t1 = self.timeline_editor1
+                    t2 = self.timeline_editor2
+                    if t1 and t1.is_hovered:
+                        tl_hovered = True
+                    if t2 and t2.is_hovered:
+                        tl_hovered = True
+                    if t1 and t1.multi_selected_action_indices:
+                        has_sel = True
+                    if not has_sel and t2 and t2.multi_selected_action_indices:
+                        has_sel = True
+                except Exception:
+                    pass
+
+                fixed_hints = self._get_contextual_hints(shortcuts, tl_hovered, has_sel)
+                ctx_key = (has_video, tl_hovered, has_sel)
+
+                # Rebuild rotating pool on context change
+                if ctx_key != self._hint_last_context:
+                    fixed_actions = set()
+                    if not has_video:
+                        fixed_actions.add("open_project")
+                    elif has_sel:
+                        fixed_actions.update(("delete_selected_point", "nudge_selection_pos_up",
+                                              "nudge_selection_pos_down", "copy_selection"))
+                    elif tl_hovered:
+                        fixed_actions.add("select_all_points")
+                    else:
+                        fixed_actions.update(("toggle_playback", "seek_prev_frame", "seek_next_frame"))
+                    self._hint_pool_cache = self._build_rotating_hint_pool(shortcuts, fixed_actions)
+                    self._hint_last_context = ctx_key
+                    self._hint_rotate_index = 0
+
+                # Rotate discovery tip every 10s
+                now = time.time()
+                if self._hint_pool_cache and now - self._hint_last_rotate >= 10.0:
+                    self._hint_rotate_index = (self._hint_rotate_index + 1) % len(self._hint_pool_cache)
+                    self._hint_last_rotate = now
+
+                # Build display string: "Key Action · Key Action · Key Action"
+                parts = []
+                for key_disp, label in fixed_hints:
+                    parts.append(f"{key_disp} {label}")
+                if self._hint_pool_cache:
+                    rot = self._hint_pool_cache[self._hint_rotate_index % len(self._hint_pool_cache)]
+                    parts.append(f"{rot[0]} {rot[1]}")
+
+                if parts:
+                    hint_text = "  \u00b7  ".join(parts)
+                    center_x = self.window_width * 0.5
+                    text_w = imgui.calc_text_size(hint_text)[0]
+                    imgui.same_line(position=center_x - text_w * 0.5)
+                    imgui.push_style_color(imgui.COLOR_TEXT, 0.50, 0.50, 0.55, 0.75)
+                    imgui.text(hint_text)
+                    imgui.pop_style_color()
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Press F1 to see all keyboard shortcuts")
 
             # Right: FPS
             io = imgui.get_io()

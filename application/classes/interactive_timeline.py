@@ -88,6 +88,8 @@ class InteractiveFunscriptTimeline:
         self.range_selecting: bool = False
         self.range_start_time: float = 0
         self.range_end_time: float = 0
+
+        self.is_hovered: bool = False  # Set each frame; read by status strip hints
         
         self.context_menu_target_idx: int = -1
         self.selection_anchor_idx: int = -1 # For Shift+Click range selection logic if needed
@@ -315,6 +317,7 @@ class InteractiveFunscriptTimeline:
         in_canvas = (tf.x_offset <= mouse_pos[0] <= tf.x_offset + tf.width and
                      tf.y_offset <= mouse_pos[1] <= tf.y_offset + tf.height)
         is_hovered = in_canvas and imgui.is_window_hovered()
+        self.is_hovered = is_hovered
         is_focused = imgui.is_window_focused(imgui.FOCUS_ROOT_AND_CHILD_WINDOWS)
 
         # Update active timeline ONLY on explicit user interaction (click)

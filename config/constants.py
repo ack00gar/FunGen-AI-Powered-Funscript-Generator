@@ -153,6 +153,11 @@ DEFAULT_SHORTCUTS = {
     # Point Value Adjustment (nudge selected points)
     "nudge_selection_pos_up": "SHIFT+UP_ARROW",      # Shift+Up to raise selected point value
     "nudge_selection_pos_down": "SHIFT+DOWN_ARROW",  # Shift+Down to lower selected point value
+    "nudge_selection_time_prev": "SHIFT+LEFT_ARROW",  # Shift+Left to nudge selection backward in time
+    "nudge_selection_time_next": "SHIFT+RIGHT_ARROW", # Shift+Right to nudge selection forward in time
+
+    # Bookmarks
+    "add_bookmark": "B",                              # Add bookmark at playhead position
 
     # Timeline View Controls
     "zoom_in_timeline": f"{MOD_KEY}+EQUAL",   # CTRL+= (same key as + on most keyboards)
