@@ -161,122 +161,124 @@ class PostProcessingMixin:
         needs_cursor = (context_obj and context_obj.plugin_instance and
                         getattr(context_obj.plugin_instance, 'requires_cursor', False))
 
-        # Section card for this plugin (collapsed by default)
-        with section_card(f"{display_name}##Plugin_{plugin_name}", tier="secondary",
-                          open_by_default=False) as _plugin_open:
-            if not _plugin_open:
-                return
-            # Show cursor info label for cursor-dependent plugins
-            if needs_cursor:
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
-                imgui.text("Position your video playhead first")
-                imgui.pop_style_color()
-                imgui.spacing()
-            if description:
-                imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
-                imgui.text_wrapped(description)
-                imgui.pop_style_color()
-                imgui.spacing()
-
-            # Get plugin context and parameters
-            context = plugin_manager.plugin_contexts.get(plugin_name)
-            if not context:
-                imgui.text_disabled("Plugin context not available")
-                return
-
-            plugin_instance = context.plugin_instance
-            if not plugin_instance or not hasattr(plugin_instance, 'parameters_schema'):
-                imgui.text_disabled("No parameters available")
-            else:
-                # Render parameters
-                schema = plugin_instance.parameters_schema
-                params = context.parameters
-
-                for param_name, param_info in schema.items():
-                    param_type = param_info.get('type')
-                    param_label = param_info.get('label', param_name)
-                    param_desc = param_info.get('description', '')
-
-                    # Get constraints from schema
-                    constraints = param_info.get('constraints', {})
-                    param_min = constraints.get('min', 0)
-                    param_max = constraints.get('max', 100)
-                    default_value = param_info.get('default')
-
-                    current_value = params.get(param_name, default_value)
-
-                    # Skip internal parameters that shouldn't be shown in UI
-                    if param_name in ['start_time_ms', 'end_time_ms', 'selected_indices']:
-                        continue
-
-                    # Render different UI elements based on parameter type
-                    # Compare against Python type objects, not strings
-                    if param_type == float or param_type == 'float':
-                        if current_value is None:
-                            current_value = default_value if default_value is not None else 0.0
-                        imgui.push_item_width(200)
-                        _, new_value = imgui.slider_float(
-                            f"{param_label}##PP_{plugin_name}_{param_name}",
-                            float(current_value),
-                            float(param_min),
-                            float(param_max),
-                            "%.2f"
-                        )
-                        imgui.pop_item_width()
-                        params[param_name] = new_value
-                    elif param_type == int or param_type == 'int':
-                        if current_value is None:
-                            current_value = default_value if default_value is not None else 0
-                        imgui.push_item_width(200)
-                        _, new_value = imgui.slider_int(
-                            f"{param_label}##PP_{plugin_name}_{param_name}",
-                            int(current_value),
-                            int(param_min),
-                            int(param_max)
-                        )
-                        imgui.pop_item_width()
-                        params[param_name] = new_value
-                    elif param_type == bool or param_type == 'bool':
-                        if current_value is None:
-                            current_value = default_value if default_value is not None else False
-                        _, new_value = imgui.checkbox(
-                            f"{param_label}##PP_{plugin_name}_{param_name}",
-                            bool(current_value)
-                        )
-                        params[param_name] = new_value
-                    elif param_type == str or param_type == 'str' or param_type == 'choice':
-                        choices = constraints.get('choices', [])
-                        if choices:
-                            try:
-                                current_idx = choices.index(current_value) if current_value in choices else 0
-                            except (ValueError, TypeError):
-                                current_idx = 0
-                            imgui.push_item_width(200)
-                            _, new_idx = imgui.combo(
-                                f"{param_label}##PP_{plugin_name}_{param_name}",
-                                current_idx,
-                                choices
-                            )
-                            imgui.pop_item_width()
-                            params[param_name] = choices[new_idx]
-
-                    if param_desc and imgui.is_item_hovered():
-                        imgui.set_tooltip(param_desc)
-
+        # Collapsing header for this plugin (not section_card — we're already inside a category card)
+        _plugin_open, _ = imgui.collapsing_header(f"{display_name}##Plugin_{plugin_name}", flags=0)
+        if not _plugin_open:
+            return
+        imgui.indent(6)
+        # Show cursor info label for cursor-dependent plugins
+        if needs_cursor:
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
+            imgui.text("Position your video playhead first")
+            imgui.pop_style_color()
+            imgui.spacing()
+        if description:
+            imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
+            imgui.text_wrapped(description)
+            imgui.pop_style_color()
             imgui.spacing()
 
-            # Reset to default button
-            if imgui.button(f"Reset to Default##PP_{plugin_name}_Reset"):
-                default_params = plugin_manager._get_default_parameters(plugin_instance)
-                context.parameters = default_params.copy()
+        # Get plugin context and parameters
+        context = plugin_manager.plugin_contexts.get(plugin_name)
+        if not context:
+            imgui.text_disabled("Plugin context not available")
+            imgui.unindent(6)
+            return
 
-            # Apply button (PRIMARY styling)
-            imgui.same_line()
-            with primary_button_style():
-                if imgui.button(f"Apply##PP_{plugin_name}_Apply"):
-                    self._apply_plugin(plugin_name, context.parameters, timeline_choice, scope_choice, fs_proc)
+        plugin_instance = context.plugin_instance
+        if not plugin_instance or not hasattr(plugin_instance, 'parameters_schema'):
+            imgui.text_disabled("No parameters available")
+        else:
+            # Render parameters
+            schema = plugin_instance.parameters_schema
+            params = context.parameters
 
-            imgui.spacing()
+            for param_name, param_info in schema.items():
+                param_type = param_info.get('type')
+                param_label = param_info.get('label', param_name)
+                param_desc = param_info.get('description', '')
+
+                # Get constraints from schema
+                constraints = param_info.get('constraints', {})
+                param_min = constraints.get('min', 0)
+                param_max = constraints.get('max', 100)
+                default_value = param_info.get('default')
+
+                current_value = params.get(param_name, default_value)
+
+                # Skip internal parameters that shouldn't be shown in UI
+                if param_name in ['start_time_ms', 'end_time_ms', 'selected_indices']:
+                    continue
+
+                # Render different UI elements based on parameter type
+                # Compare against Python type objects, not strings
+                if param_type == float or param_type == 'float':
+                    if current_value is None:
+                        current_value = default_value if default_value is not None else 0.0
+                    imgui.push_item_width(200)
+                    _, new_value = imgui.slider_float(
+                        f"{param_label}##PP_{plugin_name}_{param_name}",
+                        float(current_value),
+                        float(param_min),
+                        float(param_max),
+                        "%.2f"
+                    )
+                    imgui.pop_item_width()
+                    params[param_name] = new_value
+                elif param_type == int or param_type == 'int':
+                    if current_value is None:
+                        current_value = default_value if default_value is not None else 0
+                    imgui.push_item_width(200)
+                    _, new_value = imgui.slider_int(
+                        f"{param_label}##PP_{plugin_name}_{param_name}",
+                        int(current_value),
+                        int(param_min),
+                        int(param_max)
+                    )
+                    imgui.pop_item_width()
+                    params[param_name] = new_value
+                elif param_type == bool or param_type == 'bool':
+                    if current_value is None:
+                        current_value = default_value if default_value is not None else False
+                    _, new_value = imgui.checkbox(
+                        f"{param_label}##PP_{plugin_name}_{param_name}",
+                        bool(current_value)
+                    )
+                    params[param_name] = new_value
+                elif param_type == str or param_type == 'str' or param_type == 'choice':
+                    choices = constraints.get('choices', [])
+                    if choices:
+                        try:
+                            current_idx = choices.index(current_value) if current_value in choices else 0
+                        except (ValueError, TypeError):
+                            current_idx = 0
+                        imgui.push_item_width(200)
+                        _, new_idx = imgui.combo(
+                            f"{param_label}##PP_{plugin_name}_{param_name}",
+                            current_idx,
+                            choices
+                        )
+                        imgui.pop_item_width()
+                        params[param_name] = choices[new_idx]
+
+                if param_desc and imgui.is_item_hovered():
+                    imgui.set_tooltip(param_desc)
+
+        imgui.spacing()
+
+        # Reset to default button
+        if imgui.button(f"Reset to Default##PP_{plugin_name}_Reset"):
+            default_params = plugin_manager._get_default_parameters(plugin_instance)
+            context.parameters = default_params.copy()
+
+        # Apply button (PRIMARY styling)
+        imgui.same_line()
+        with primary_button_style():
+            if imgui.button(f"Apply##PP_{plugin_name}_Apply"):
+                self._apply_plugin(plugin_name, context.parameters, timeline_choice, scope_choice, fs_proc)
+
+        imgui.unindent(6)
+        imgui.spacing()
 
     def _apply_plugin(self, plugin_name, parameters, timeline_choice, scope_choice, fs_proc):
         """Apply a plugin with the given parameters."""
