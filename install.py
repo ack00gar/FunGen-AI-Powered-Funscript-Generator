@@ -1419,6 +1419,12 @@ set PYTHONNOUSERSITE=1
 REM Disable Ultralytics telemetry for privacy
 set YOLO_TELEMETRY=False
 
+REM Isolate Ultralytics config to project directory (prevents cross-project corruption)
+set "YOLO_CONFIG_DIR={self.project_path}\\config\\ultralytics"
+
+REM Prevent Ultralytics from hanging on network checks at startup
+set YOLO_OFFLINE=True
+
 echo Activating FunGen environment...
 {activate_cmd}
 echo Starting FunGen...
@@ -1461,6 +1467,12 @@ export PYTHONNOUSERSITE=1
 
 # Disable Ultralytics telemetry for privacy
 export YOLO_TELEMETRY=False
+
+# Isolate Ultralytics config to project directory (prevents cross-project corruption)
+export YOLO_CONFIG_DIR="$(dirname "$0")/config/ultralytics"
+
+# Prevent Ultralytics from hanging on network checks at startup
+export YOLO_OFFLINE=True
 
 # Activate environment (skip if already active to avoid double-activation)
 if [ "$CONDA_DEFAULT_ENV" != "{CONFIG["env_name"]}" ]; then
@@ -1547,37 +1559,62 @@ read -p "Press Enter to close..."
         try:
             from pathlib import Path
             import os
+            import json
 
             print("  Disabling Ultralytics telemetry for privacy...")
 
-            # Method 1: Create settings file
+            # Ultralytics 8.x uses settings.json (not .yaml)
+            settings_content = {
+                "sync": False,
+                "api_key": "",
+                "openai_api_key": "",
+                "clearml": False,
+                "comet": False,
+                "dvc": False,
+                "hub": False,
+                "mlflow": False,
+                "neptune": False,
+                "raytune": False,
+                "tensorboard": False,
+                "wandb": False,
+            }
+
+            dirs_written = []
+
+            # Write to project-local config dir (used at runtime via YOLO_CONFIG_DIR)
+            project_settings_dir = self.project_path / 'config' / 'ultralytics'
+            project_settings_dir.mkdir(parents=True, exist_ok=True)
+            project_settings_path = project_settings_dir / 'settings.json'
+            if not project_settings_path.exists():
+                project_settings_path.write_text(json.dumps(settings_content, indent=2))
+                dirs_written.append(str(project_settings_path))
+
+            # Also write to global config dir as a fallback (in case launched without env var)
             if self.platform == "Windows":
-                settings_dir = Path(os.environ.get('APPDATA', Path.home())) / 'Ultralytics'
+                global_dir = Path(os.environ.get('APPDATA', Path.home())) / 'Ultralytics'
+            elif self.platform == "Darwin":
+                global_dir = Path.home() / 'Library' / 'Application Support' / 'Ultralytics'
             else:
-                settings_dir = Path.home() / '.config' / 'Ultralytics'
+                global_dir = Path.home() / '.config' / 'Ultralytics'
 
-            settings_dir.mkdir(parents=True, exist_ok=True)
-            settings_path = settings_dir / 'settings.yaml'
+            global_dir.mkdir(parents=True, exist_ok=True)
+            global_settings_path = global_dir / 'settings.json'
+            if not global_settings_path.exists():
+                global_settings_path.write_text(json.dumps(settings_content, indent=2))
+                dirs_written.append(str(global_settings_path))
 
-            settings_content = """# Ultralytics Settings
-# Automatically configured by FunGen installer for privacy
+            if dirs_written:
+                self.print_success(f"Ultralytics telemetry disabled: {', '.join(dirs_written)}")
+            else:
+                self.print_success("Ultralytics settings.json already exists (not overwritten)")
 
-sync: false          # Disable auto-sync
-analytics: false     # Disable analytics/telemetry
-crashes: false       # Disable crash reporting
-"""
-
-            settings_path.write_text(settings_content)
-            self.print_success(f"Ultralytics telemetry disabled: {settings_path}")
-
-            # Method 2: Set environment variable hint for launchers
-            print("  Note: Launch scripts will also set YOLO_TELEMETRY=False")
+            print("  Note: Launch scripts set YOLO_CONFIG_DIR, YOLO_OFFLINE, YOLO_TELEMETRY")
 
             return True
 
         except Exception as e:
             self.print_warning(f"Could not disable Ultralytics telemetry: {e}")
-            self.print_warning("You can manually disable it later in ~/.config/Ultralytics/settings.yaml")
+            self.print_warning("Non-critical — launch scripts still set YOLO_OFFLINE and YOLO_TELEMETRY env vars")
             return True  # Non-critical, continue installation
 
     def print_completion_message(self):
