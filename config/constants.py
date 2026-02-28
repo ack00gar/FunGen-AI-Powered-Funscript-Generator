@@ -651,6 +651,7 @@ UI_CONTROL_ICON_URLS = {
     'ui/icons/sidebar-stream.png': 'https://em-content.zobj.net/source/apple/391/satellite-antenna_1f4e1.png',  # 📡 satellite (Streamer)
     'ui/icons/sidebar-batch.png': 'https://em-content.zobj.net/source/apple/391/crown_1f451.png',  # 👑 crown (Patreon Exclusive)
     'ui/icons/sidebar-metadata.png': 'https://em-content.zobj.net/source/apple/391/label_1f3f7-fe0f.png',  # 🏷️ label (Metadata)
+    'ui/icons/sidebar-configure.png': 'https://em-content.zobj.net/source/apple/391/wrench_1f527.png',  # 🔧 wrench (Configure)
 }
 
 ####################################################################################################

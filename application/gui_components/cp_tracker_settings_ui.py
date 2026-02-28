@@ -12,6 +12,56 @@ def _tooltip_if_hovered(text):
 class TrackerSettingsMixin:
     """Mixin providing tracker settings rendering methods."""
 
+    # ---- Dynamic dispatch (new) ----
+
+    def _get_current_tracker_instance(self):
+        """Return the active tracker module instance, or None."""
+        tr = getattr(self.app, 'tracker', None)
+        if tr and hasattr(tr, '_current_tracker'):
+            return tr._current_tracker
+        return None
+
+    def _render_tracker_dynamic_settings(self):
+        """Dispatch to tracker-provided settings UI."""
+        tracker_instance = self._get_current_tracker_instance()
+        if not tracker_instance:
+            imgui.text_disabled("Tracker not initialized.")
+            return False
+
+        try:
+            # Path A: Direct custom render
+            if tracker_instance.render_settings_ui():
+                return True
+        except Exception as exc:
+            imgui.text_colored("Settings UI error: %s" % exc, 1.0, 0.3, 0.3, 1.0)
+            return False
+
+        # Path B: Schema auto-render
+        schema = tracker_instance.get_settings_schema()
+        if schema and schema.get('properties'):
+            from application.utils.schema_settings_renderer import render_schema_settings
+            return render_schema_settings(schema, self.app.app_settings, tracker_instance)
+
+        return False
+
+    def _render_tracker_debug_panel(self):
+        """Render debug panel only if the tracker actually provides content."""
+        tracker_instance = self._get_current_tracker_instance()
+        if not tracker_instance:
+            return
+        # Only show the header if the tracker overrides render_debug_ui
+        # (base class returns False, so skip trackers that don't override it)
+        method = getattr(tracker_instance, 'render_debug_ui', None)
+        if method is None:
+            return
+        from tracker.tracker_modules.core.base_tracker import BaseTracker
+        if method.__func__ is BaseTracker.render_debug_ui:
+            return
+        if imgui.collapsing_header("Tracker Debug##TrackerDebugPanel")[0]:
+            tracker_instance.render_debug_ui()
+
+    # ---- Legacy per-tracker renders (kept as fallback) ----
+
     def _render_live_tracker_settings(self):
         app = self.app
         tr = app.tracker
@@ -101,7 +151,7 @@ class TrackerSettingsMixin:
                     settings.set("live_tracker_dis_finest_scale", new_scale)
                     tr.update_dis_flow_config(finest_scale=new_scale)
 
-            if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu"):
+            if imgui.collapsing_header("Output Signal Generation##ROISignalTrackerMenu")[0]:
                 cur_sens = settings.get("live_tracker_sensitivity")
                 ch, ns = imgui.slider_float("Output Sensitivity##ROISensTrackerMenu", cur_sens, 0.0, 100.0, "%.1f")
                 if imgui.is_item_hovered():

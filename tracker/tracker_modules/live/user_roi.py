@@ -135,7 +135,7 @@ class UserRoiTracker(BaseTracker):
                 )
                 # Keep flow history window at 3 for responsiveness (matches original tracker)
                 self.flow_history_window_smooth = 3  # Don't override with settings
-                self.sensitivity = settings.get('sensitivity', 10.0)
+                self.sensitivity = settings.get('live_tracker_sensitivity', 10.0)
                 self.adaptive_flow_scale = settings.get('adaptive_flow_scale', False)
                 self.y_offset = settings.get('y_offset', 0)
                 self.x_offset = settings.get('x_offset', 0)
@@ -405,6 +405,110 @@ class UserRoiTracker(BaseTracker):
             self.logger.error(f"Settings validation error: {e}")
             return False
     
+    # ---- Settings UI (rendered by control panel via dynamic dispatch) ----
+
+    def render_settings_ui(self) -> bool:
+        """Render User ROI tracker settings using imgui."""
+        import imgui
+
+        if not self.app:
+            return False
+
+        settings = self.app.app_settings
+
+        def _tip(text):
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(text)
+
+        # Sub-tracking
+        cur_sub = settings.get("enable_user_roi_sub_tracking", True)
+        ch, nv = imgui.checkbox("Enable Sub-Tracking##UserROISubTrack", cur_sub)
+        if ch:
+            settings.set("enable_user_roi_sub_tracking", nv)
+            self.enable_user_roi_sub_tracking = nv
+        _tip("Track a smaller box inside the ROI for finer motion detection")
+
+        # Tracking box size
+        if self.enable_user_roi_sub_tracking:
+            cur_w = settings.get("user_roi_tracking_box_width", 5)
+            cur_h = settings.get("user_roi_tracking_box_height", 5)
+            imgui.text("Tracking Box Size")
+            imgui.push_item_width(100)
+            ch_w, nw = imgui.input_int("W##UserROIBoxW", cur_w)
+            imgui.same_line()
+            ch_h, nh = imgui.input_int("H##UserROIBoxH", cur_h)
+            imgui.pop_item_width()
+            _tip("Pixel dimensions of the sub-tracking box within the ROI")
+            if ch_w:
+                nw = max(3, min(200, nw))
+                if nw != cur_w:
+                    settings.set("user_roi_tracking_box_width", nw)
+                    self.user_roi_tracking_box_size = (nw, self.user_roi_tracking_box_size[1])
+            if ch_h:
+                nh = max(3, min(200, nh))
+                if nh != cur_h:
+                    settings.set("user_roi_tracking_box_height", nh)
+                    self.user_roi_tracking_box_size = (self.user_roi_tracking_box_size[0], nh)
+
+        # Sensitivity
+        cur_sens = settings.get("live_tracker_sensitivity", self.sensitivity)
+        ch, ns = imgui.slider_float("Sensitivity##UserROISens", cur_sens, 0.0, 100.0, "%.1f")
+        _tip("How responsive the output is to motion")
+        if ch and ns != cur_sens:
+            settings.set("live_tracker_sensitivity", ns)
+            self.sensitivity = ns
+
+        # Adaptive flow scale
+        cur_adaptive = settings.get("adaptive_flow_scale", False)
+        ch, nv = imgui.checkbox("Adaptive Flow Scaling##UserROIAdaptive", cur_adaptive)
+        _tip("Automatically scale flow range based on observed motion")
+        if ch:
+            settings.set("adaptive_flow_scale", nv)
+            self.adaptive_flow_scale = nv
+
+        # X / Y offset
+        imgui.text("Position Offsets")
+        imgui.push_item_width(100)
+        cur_y = settings.get("y_offset", 0)
+        ch, ny = imgui.input_int("Y Offset##UserROIYOff", cur_y)
+        if ch and ny != cur_y:
+            settings.set("y_offset", ny)
+            self.y_offset = ny
+        imgui.same_line()
+        cur_x = settings.get("x_offset", 0)
+        ch, nx = imgui.input_int("X Offset##UserROIXOff", cur_x)
+        if ch and nx != cur_x:
+            settings.set("x_offset", nx)
+            self.x_offset = nx
+        imgui.pop_item_width()
+        _tip("Manual position offset added to the output signal")
+
+        # Show ROI
+        cur_show = settings.get("show_roi", True)
+        ch, nv = imgui.checkbox("Show ROI Overlay##UserROIShow", cur_show)
+        if ch:
+            settings.set("show_roi", nv)
+            self.show_roi = nv
+
+        # Sparse flow
+        cur_sparse = settings.get("use_sparse_flow", False)
+        ch, nv = imgui.checkbox("Use Sparse Optical Flow##UserROISparse", cur_sparse)
+        _tip("Use sparse (feature-based) instead of dense optical flow")
+        if ch:
+            settings.set("use_sparse_flow", nv)
+            self.use_sparse_flow = nv
+
+        # Output delay
+        imgui.text("Output Delay (frames)")
+        cur_delay = settings.get("output_delay_frames", 0)
+        ch, nd = imgui.slider_int("##UserROIDelay", cur_delay, 0, 20)
+        _tip("Delay output by N frames to compensate for processing latency")
+        if ch and nd != cur_delay:
+            settings.set("output_delay_frames", nd)
+            self.output_delay_frames = nd
+
+        return True
+
     def get_status_info(self) -> Dict[str, Any]:
         """Get current status information."""
         base_status = super().get_status_info()
