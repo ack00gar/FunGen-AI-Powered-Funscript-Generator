@@ -3,6 +3,9 @@
 /logs/*
 config.json
 
+# Ultralytics project-local config (contains machine-specific UUID, auto-created at runtime)
+config/ultralytics/
+
 # Auto-downloaded splash screen emojis (downloaded from config/constants.py URLs)
 assets/splash/*.png
 
