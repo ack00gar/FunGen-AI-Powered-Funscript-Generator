@@ -321,13 +321,40 @@ class BaseTracker(ABC):
         """
         return False
     
+    def render_settings_ui(self) -> bool:
+        """
+        Override to render custom imgui settings for this tracker.
+        Called every frame when the tracker's settings panel is visible.
+        Full imgui API available — sliders, buttons, checkboxes, trees, etc.
+
+        Return True if you rendered content, False to fall through to
+        schema-based auto-render (get_settings_schema).
+        """
+        return False
+
+    @property
+    def uses_class_detection(self) -> bool:
+        """Whether this tracker uses YOLO class detection (enables class filtering UI)."""
+        return False
+
+    def render_debug_ui(self) -> bool:
+        """
+        Override to render debug info panel.
+        Return True if you rendered content.
+        """
+        return False
+
+    def on_setting_changed(self, key: str, value) -> None:
+        """Called when a schema-auto-rendered setting changes."""
+        pass
+
     def get_settings_schema(self) -> Dict[str, Any]:
         """
         Get JSON schema describing tracker-specific settings.
-        
+
         Override this method to define custom settings that will be
         automatically generated in the UI. Use JSON Schema format.
-        
+
         Returns:
             Dict: JSON schema for tracker settings
         """

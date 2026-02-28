@@ -308,8 +308,77 @@ class CommunityExampleTracker(BaseTracker):
         base_status.update(custom_status)
         return base_status
     
+    # ---- Settings UI ----
+    #
+    # Two approaches are available:
+    #
+    # **Path A — Direct imgui render** (full control):
+    #   Override ``render_settings_ui()`` and draw widgets yourself.
+    #   Return True if you rendered content.
+    #
+    # **Path B — Schema auto-render** (zero imgui knowledge):
+    #   Override ``get_settings_schema()`` to return a JSON-Schema dict.
+    #   The control panel will auto-generate sliders, checkboxes, combos, etc.
+    #
+    # If *both* are implemented, Path A takes priority (schema is ignored
+    # unless render_settings_ui returns False).
+
+    def render_settings_ui(self) -> bool:
+        """Path A example — render custom imgui widgets.
+
+        Uncomment and customise. Delete this method to use Path B instead.
+        """
+        # import imgui
+        #
+        # if not self.app:
+        #     return False
+        #
+        # settings = self.app.app_settings
+        #
+        # cur = settings.get("community_example_motion_threshold", 10.0)
+        # ch, nv = imgui.slider_float("Motion Threshold##CommunityEx", cur, 0.0, 100.0, "%.1f")
+        # if ch and nv != cur:
+        #     settings.set("community_example_motion_threshold", nv)
+        #     self.motion_threshold = nv
+        #
+        # cur_s = settings.get("community_example_sensitivity", 1.0)
+        # ch, ns = imgui.slider_float("Sensitivity##CommunityEx", cur_s, 0.1, 5.0, "%.2f")
+        # if ch and ns != cur_s:
+        #     settings.set("community_example_sensitivity", ns)
+        #     self.sensitivity = ns
+        #
+        # return True  # We rendered content
+
+        # Return False so the schema auto-renderer kicks in (Path B).
+        return False
+
+    def render_debug_ui(self) -> bool:
+        """Optional debug panel shown under a collapsing header."""
+        import imgui
+
+        imgui.text("Frame count: %d" % self.frame_count)
+        imgui.text("Motion history length: %d" % len(self.motion_history))
+        if self.motion_history:
+            imgui.text("Last motion: %.2f" % self.motion_history[-1])
+        return True
+
+    def on_setting_changed(self, key: str, value) -> None:
+        """Called when a schema-auto-rendered setting changes (Path B)."""
+        if key == "community_example_motion_threshold":
+            self.motion_threshold = value
+        elif key == "community_example_sensitivity":
+            self.sensitivity = value
+        elif key == "community_example_smoothing":
+            self.smoothing_factor = value
+        elif key == "community_example_min_interval":
+            self.min_action_interval_ms = value
+
     def get_settings_schema(self) -> Dict[str, Any]:
-        """Get JSON schema for tracker settings UI."""
+        """Path B — JSON schema for auto-generated settings UI.
+
+        Each property becomes a widget: number→slider_float, integer→slider_int,
+        boolean→checkbox, string+enum→combo, string→input_text.
+        """
         return {
             "type": "object",
             "properties": {
@@ -322,7 +391,7 @@ class CommunityExampleTracker(BaseTracker):
                     "default": 10.0
                 },
                 "community_example_sensitivity": {
-                    "type": "number", 
+                    "type": "number",
                     "title": "Sensitivity",
                     "description": "Overall sensitivity multiplier",
                     "minimum": 0.1,

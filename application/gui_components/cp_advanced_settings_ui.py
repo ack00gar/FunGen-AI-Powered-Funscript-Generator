@@ -253,8 +253,9 @@ class AdvancedSettingsMixin:
                         if _open:
                             self._render_tracker_dynamic_settings()
 
-            # Class filtering
-            if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
+            # Class filtering — only for trackers that use YOLO class detection
+            tracker_inst = self._get_current_tracker_instance()
+            if adv and tracker_inst and getattr(tracker_inst, 'uses_class_detection', False):
                 if matches_section("class_filter"):
                     _open_default = bool(search_query and matches_section("class_filter"))
                     with section_card("Class Filtering##AdvancedClassFilter",

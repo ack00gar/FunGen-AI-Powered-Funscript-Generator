@@ -278,6 +278,7 @@ class ControlPanelUI(
     _SIDEBAR_WIDTH = 40
     _SIDEBAR_CORE_SECTIONS = [
         ("run", "R", "Run"),
+        ("configure", "C", "Configure"),
         ("post_processing", "P", "Post-Processing"),
         ("advanced", "A", "Advanced"),
         ("metadata", "M", "Metadata"),
@@ -290,6 +291,7 @@ class ControlPanelUI(
     # Map section keys to icon asset filenames for sidebar PNG icons
     _SIDEBAR_ICON_MAP = {
         "run": "sidebar-run.png",
+        "configure": "sidebar-configure.png",
         "post_processing": "sidebar-postproc.png",
         "advanced": "sidebar-advanced.png",
         "device_control": "sidebar-device.png",
@@ -644,6 +646,8 @@ class ControlPanelUI(
         imgui.begin_child("TabContentRegion", width=0, height=content_h, border=False)
         if tab_selected == "run":
             self._render_run_control_tab()
+        elif tab_selected == "configure":
+            self._render_configuration_tab()
         elif tab_selected == "post_processing":
             self._render_post_processing_tab()
         elif tab_selected == "advanced":
@@ -988,32 +992,22 @@ class ControlPanelUI(
         imgui.text("Configure settings for the selected mode.")
         imgui.spacing()
 
-        # AI Models & Inference moved to Tools > AI Models dialog
+        adv = app_state.show_advanced_options
 
-        adv = app.app_state_ui.show_advanced_options
-        if self._is_live_tracker(tmode) and adv:
-            self._render_live_tracker_settings()
+        # Dynamic tracker settings (replaces hardcoded per-tracker dispatch)
+        if self._is_live_tracker(tmode):
+            if imgui.collapsing_header("Live Tracker Settings##ConfigLiveTracker",
+                                       flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_tracker_dynamic_settings()
 
-        # TEMPORARILY DISABLE SECTIONS WITH HARDCODED TRACKERMODE REFERENCES
-        # TODO: Replace with dynamic discovery logic
-
-        # Class filtering for advanced users
-        if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
+        # Class filtering — only for trackers that use YOLO class detection
+        tracker_inst = self._get_current_tracker_instance()
+        if adv and tracker_inst and getattr(tracker_inst, 'uses_class_detection', False):
             if imgui.collapsing_header("Class Filtering##ConfigClassFilterHeader")[0]:
                 self._render_class_filtering_content()
 
-        # Oscillation detector settings for oscillation trackers
-        from config.tracker_discovery import get_tracker_discovery
-        discovery = get_tracker_discovery()
-        tracker_info = discovery.get_tracker_info(tmode)
-        if tracker_info and 'oscillation' in tracker_info.display_name.lower():
-            if imgui.collapsing_header("Oscillation Detector Settings##ConfigOscillationDetector", flags=0)[0]:
-                self._render_oscillation_detector_settings()
-
-        # Stage 3 specific settings (temporarily disabled - needs proper stage detection)
-        # if tmode == "stage3_optical_flow":
-        #     if imgui.collapsing_header("Stage 3 Oscillation Detector Mode##ConfigStage3OD", flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
-        #         self._render_stage3_oscillation_detector_mode_settings()
+        # Debug panel (only if tracker actually renders content)
+        self._render_tracker_debug_panel()
 
         # Check if configuration is available for this tracker
         has_config = self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)
