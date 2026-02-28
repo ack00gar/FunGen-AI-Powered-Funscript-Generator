@@ -40,7 +40,11 @@ class AutotunePlugin(FunscriptTransformationPlugin):
     @property
     def version(self) -> str:
         return "1.0.0"
-    
+
+    @property
+    def category(self) -> str:
+        return "Autotune"
+
     @property
     def parameters_schema(self) -> Dict[str, Any]:
         return {

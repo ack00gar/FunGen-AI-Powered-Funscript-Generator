@@ -1589,33 +1589,44 @@ class InteractiveFunscriptTimeline:
     def _render_toolbar(self, view_mode):
         if view_mode != 'expert': return
         
-        # Standard Buttons - Clear selected points
+        # Delete / Clear button - adaptive label based on selection
         num_selected = len(self.multi_selected_action_indices) if self.multi_selected_action_indices else 0
-        clear_label = f"Clear ({num_selected})##{self.timeline_num}" if num_selected > 0 else f"Clear##{self.timeline_num}"
-
-        if imgui.button(clear_label):
-            self._delete_selected()
-
-        if imgui.is_item_hovered():
-            tooltip = f"Delete {num_selected} selected points" if num_selected > 0 else "Delete selected points (none selected)"
-            imgui.set_tooltip(tooltip)
-
-        imgui.same_line()
-
-        # Clear All button
-        if imgui.button(f"Clear All##{self.timeline_num}"):
-            self._clear_all_points()
-        if imgui.is_item_hovered(): imgui.set_tooltip("Delete ALL points on this timeline (Ctrl+Z to undo)")
-        
-        imgui.same_line()
-        
-        # Plugin System Buttons
-        self.plugin_renderer.render_plugin_buttons(self.timeline_num, view_mode)
+        if num_selected > 0:
+            del_label = f"Delete ({num_selected})##{self.timeline_num}"
+            if imgui.button(del_label):
+                self._delete_selected()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"Delete {num_selected} selected points (Ctrl+Z to undo)")
+        else:
+            del_label = f"Clear Timeline##{self.timeline_num}"
+            if imgui.button(del_label):
+                self._clear_all_points()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Delete ALL points on this timeline (Ctrl+Z to undo)")
         
         imgui.same_line()
         imgui.text("|")
         imgui.same_line()
-        
+
+        # Autotune one-click button
+        if imgui.button(f"Autotune##{self.timeline_num}"):
+            context = self.plugin_renderer.plugin_manager.plugin_contexts.get("Ultimate Autotune")
+            if context:
+                context.apply_requested = True
+                if self.multi_selected_action_indices:
+                    context.apply_to_selection = True
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Apply Ultimate Autotune (selection or full timeline)")
+
+        imgui.same_line()
+
+        # Plugin System Buttons
+        self.plugin_renderer.render_plugin_buttons(self.timeline_num, view_mode)
+
+        imgui.same_line()
+        imgui.text("|")
+        imgui.same_line()
+
         # Nudge All Buttons
         if imgui.button(f"<<##{self.timeline_num}"):
             if self.nudge_chapter_only:
@@ -1960,18 +1971,68 @@ class InteractiveFunscriptTimeline:
         imgui.separator()
         if imgui.begin_menu("Run Plugin"):
              fs, axis = self._get_target_funscript_details()
-             self.app.funscript_processor # Pass context if needed
-             # Render simplified plugin list from manager
-             available = self.plugin_renderer.plugin_manager.get_available_plugins()
+             pm = self.plugin_renderer.plugin_manager
+             available = pm.get_available_plugins()
+
+             # Group plugins by category
+             _CAT_ORDER = ["Autotune", "Quickfix Tools", "Transform", "Smoothing",
+                           "Timing & Generation", "General"]
+             categorized = {c: [] for c in _CAT_ORDER}
              for p_name in available:
-                 if imgui.menu_item(p_name)[0]:
-                     # Trigger plugin context with selection
-                     self.plugin_renderer.plugin_manager.set_plugin_state(p_name, PluginUIState.OPEN)
-                     # Enable apply_to_selection since this was triggered from selection menu
-                     context = self.plugin_renderer.plugin_manager.plugin_contexts.get(p_name)
-                     if context:
-                         context.apply_to_selection = True
-                         self.logger.info(f"Auto-enabled 'apply to selection' for {p_name} (triggered from context menu)")
+                 ctx = pm.plugin_contexts.get(p_name)
+                 cat = "General"
+                 if ctx and ctx.plugin_instance:
+                     cat = getattr(ctx.plugin_instance, 'category', 'General')
+                 if cat not in categorized:
+                     categorized[cat] = []
+                 categorized[cat].append(p_name)
+
+             def _activate(name):
+                 pm.set_plugin_state(name, PluginUIState.OPEN)
+                 ctx2 = pm.plugin_contexts.get(name)
+                 if ctx2:
+                     ctx2.apply_to_selection = True
+                     self.logger.info(f"Auto-enabled 'apply to selection' for {name} (triggered from context menu)")
+
+             for cat in _CAT_ORDER:
+                 names = categorized.get(cat, [])
+                 if not names:
+                     continue
+                 if imgui.begin_menu(cat):
+                     if cat == "Quickfix Tools":
+                         # Separate selection vs cursor tools
+                         sel_names = []
+                         cur_names = []
+                         for n in sorted(names):
+                             ctx = pm.plugin_contexts.get(n)
+                             if ctx and ctx.plugin_instance and getattr(ctx.plugin_instance, 'requires_cursor', False):
+                                 cur_names.append(n)
+                             else:
+                                 sel_names.append(n)
+                         for n in sel_names:
+                             if imgui.menu_item(n)[0]:
+                                 _activate(n)
+                         if cur_names:
+                             imgui.separator()
+                             imgui.text_disabled("Position playhead first")
+                             for n in cur_names:
+                                 if imgui.menu_item(n)[0]:
+                                     _activate(n)
+                     else:
+                         for n in sorted(names):
+                             if imgui.menu_item(n)[0]:
+                                 _activate(n)
+                     imgui.end_menu()
+
+             # Render any extra categories not in the predefined order
+             for cat, names in categorized.items():
+                 if cat not in _CAT_ORDER and names:
+                     if imgui.begin_menu(cat):
+                         for n in sorted(names):
+                             if imgui.menu_item(n)[0]:
+                                 _activate(n)
+                         imgui.end_menu()
+
              imgui.end_menu()
 
     # ==================================================================================
@@ -2224,6 +2285,12 @@ class InteractiveFunscriptTimeline:
             if context.apply_to_selection and self.multi_selected_action_indices:
                 selected_indices = list(self.multi_selected_action_indices)
                 params['selected_indices'] = selected_indices
+
+            # Auto-inject current_time_ms for cursor-dependent plugins
+            if getattr(plugin_instance, 'requires_cursor', False):
+                fps = self.app.processor.video_info.get('fps', 30) if self.app.processor and self.app.processor.video_info else 30
+                frame_idx = getattr(self.app, 'current_frame_index', 0)
+                params['current_time_ms'] = int((frame_idx / fps) * 1000)
 
             # Record undo action
             self.app.funscript_processor._record_timeline_action(

@@ -26,15 +26,19 @@ class ThresholdClampPlugin(FunscriptTransformationPlugin):
     @property
     def name(self) -> str:
         return "Threshold Clamp"
-    
+
     @property
     def description(self) -> str:
         return "Clamps positions to 0/100 based on thresholds"
-    
+
     @property
     def version(self) -> str:
         return "1.0.0"
-    
+
+    @property
+    def category(self) -> str:
+        return "Transform"
+
     @property
     def parameters_schema(self) -> Dict[str, Any]:
         return {
@@ -271,11 +275,15 @@ class ValueClampPlugin(FunscriptTransformationPlugin):
     @property
     def description(self) -> str:
         return "Clamps all positions to a specific value"
-    
+
     @property
     def version(self) -> str:
         return "1.0.0"
-    
+
+    @property
+    def category(self) -> str:
+        return "Transform"
+
     @property
     def parameters_schema(self) -> Dict[str, Any]:
         return {

@@ -147,7 +147,7 @@ class AdvancedSettingsMixin:
                         self._profile_name_input = ""
                         self._profile_list_cache = None  # Refresh cache
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Saves current processing settings as a reusable preset\n(tracking, post-processing, performance — not UI layout)")
+                imgui.set_tooltip("Saves current processing settings as a reusable preset\n(tracking, post-processing, performance - not UI layout)")
 
     # ------- Advanced tab -------
 
@@ -243,15 +243,15 @@ class AdvancedSettingsMixin:
                         if _open:
                             self._render_settings_logging_autosave()
 
-            # Tracking Parameters section
+            # Live Tracker Settings (dynamic dispatch)
             adv = app_state.show_advanced_options
             if self._is_live_tracker(tmode) and adv:
-                if matches_section("live_tracker"):
-                    _open_default = bool(search_query and matches_section("live_tracker"))
+                if matches_section("live_tracker") or matches_section("oscillation"):
+                    _open_default = bool(search_query and (matches_section("live_tracker") or matches_section("oscillation")))
                     with section_card("Live Tracker Settings##AdvancedLiveTracker",
                                       tier="secondary", open_by_default=_open_default) as _open:
                         if _open:
-                            self._render_live_tracker_settings()
+                            self._render_tracker_dynamic_settings()
 
             # Class filtering
             if (self._is_live_tracker(tmode) or self._is_offline_tracker(tmode)) and adv:
@@ -261,18 +261,6 @@ class AdvancedSettingsMixin:
                                       tier="secondary", open_by_default=_open_default) as _open:
                         if _open:
                             self._render_class_filtering_content()
-
-            # Oscillation detector settings
-            from config.tracker_discovery import get_tracker_discovery
-            discovery = get_tracker_discovery()
-            tracker_info = discovery.get_tracker_info(tmode)
-            if tracker_info and 'oscillation' in tracker_info.display_name.lower():
-                if matches_section("oscillation"):
-                    _open_default = bool(search_query and matches_section("oscillation"))
-                    with section_card("Oscillation Detector Settings##AdvancedOscillation",
-                                      tier="secondary", open_by_default=_open_default) as _open:
-                        if _open:
-                            self._render_oscillation_detector_settings()
 
         imgui.spacing()
 
@@ -812,7 +800,7 @@ class AdvancedSettingsMixin:
 
                 # Show TCode
                 tcode = tcode_for_axis(current_axis)
-                imgui.text(tcode or "—"); imgui.next_column()
+                imgui.text(tcode or "-"); imgui.next_column()
 
             imgui.columns(1)
             imgui.separator()

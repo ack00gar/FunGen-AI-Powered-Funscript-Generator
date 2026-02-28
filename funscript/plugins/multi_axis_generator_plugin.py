@@ -35,6 +35,10 @@ class MultiAxisGeneratorPlugin(FunscriptTransformationPlugin):
         return "1.0.0"
 
     @property
+    def category(self) -> str:
+        return "Timing & Generation"
+
+    @property
     def requires_scipy(self) -> bool:
         return True
 

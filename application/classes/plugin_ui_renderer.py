@@ -6,8 +6,11 @@ schemas, eliminating the need for hardcoded UI elements.
 """
 
 import logging
+from collections import OrderedDict
 from typing import Dict, List, Any, Optional, Tuple, Callable
 from .plugin_ui_manager import PluginUIManager, PluginUIState
+
+_CATEGORY_ORDER = ["Autotune", "Quickfix Tools", "Transform", "Smoothing", "Timing & Generation", "General"]
 
 try:
     import imgui
@@ -34,7 +37,7 @@ class PluginUIRenderer:
     def render_plugin_buttons(self, timeline_num: int, view_mode: str = 'expert') -> bool:
         """
         Render a single "Plugins" dropdown button that opens a popup menu
-        with all available plugins listed as selectable items.
+        with plugins organized into categorized sub-menus.
 
         Returns:
             True if any plugin was clicked, False otherwise
@@ -44,7 +47,6 @@ class PluginUIRenderer:
 
         any_button_clicked = False
         available_plugins = self.plugin_manager.get_available_plugins()
-        sorted_plugins = sorted(available_plugins)
 
         popup_id = f"##PluginMenu_T{timeline_num}"
 
@@ -53,36 +55,95 @@ class PluginUIRenderer:
             imgui.open_popup(popup_id)
 
         if imgui.begin_popup(popup_id):
-            for plugin_name in sorted_plugins:
-                ui_data = self.plugin_manager.get_plugin_ui_data(plugin_name)
-                if not ui_data or not ui_data['available']:
+            # Build category -> [plugin_name] mapping
+            categorized = OrderedDict()
+            for cat in _CATEGORY_ORDER:
+                categorized[cat] = []
+
+            for plugin_name in available_plugins:
+                ctx = self.plugin_manager.plugin_contexts.get(plugin_name)
+                if not ctx or not ctx.plugin_instance:
+                    continue
+                cat = getattr(ctx.plugin_instance, 'category', 'General')
+                if cat not in categorized:
+                    categorized[cat] = []
+                categorized[cat].append(plugin_name)
+
+            # Sort within each category
+            for cat, names in categorized.items():
+                if cat == "Autotune":
+                    ua = [n for n in names if 'ultimate' in n.lower() and 'autotune' in n.lower()]
+                    rest = sorted([n for n in names if n not in ua])
+                    categorized[cat] = ua + rest
+                else:
+                    categorized[cat] = sorted(names)
+
+            # Render each non-empty category as a sub-menu
+            for cat, plugin_names in categorized.items():
+                if not plugin_names:
                     continue
 
-                if imgui.selectable(ui_data['display_name'])[0]:
-                    self.logger.info(f"Plugin selected: {plugin_name} on Timeline {timeline_num}")
+                if imgui.begin_menu(f"{cat}##{timeline_num}"):
+                    if cat == "Quickfix Tools":
+                        # Separate selection vs cursor tools
+                        sel_tools = []
+                        cur_tools = []
+                        for pn in plugin_names:
+                            ctx = self.plugin_manager.plugin_contexts.get(pn)
+                            if ctx and ctx.plugin_instance and getattr(ctx.plugin_instance, 'requires_cursor', False):
+                                cur_tools.append(pn)
+                            else:
+                                sel_tools.append(pn)
 
-                    if self._should_apply_directly(plugin_name, ui_data):
-                        context = self.plugin_manager.plugin_contexts.get(plugin_name)
-                        if context:
-                            context.apply_requested = True
-                            if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
-                                if self.timeline_reference.multi_selected_action_indices:
-                                    context.apply_to_selection = True
+                        for pn in sel_tools:
+                            any_button_clicked |= self._render_plugin_menu_item(pn, timeline_num)
+
+                        if cur_tools:
+                            imgui.separator()
+                            imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.8, 0.3, 1.0)
+                            imgui.text("Position playhead first")
+                            imgui.pop_style_color()
+                            for pn in cur_tools:
+                                any_button_clicked |= self._render_plugin_menu_item(pn, timeline_num)
                     else:
-                        self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
-                        if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
-                            if self.timeline_reference.multi_selected_action_indices:
-                                context = self.plugin_manager.plugin_contexts.get(plugin_name)
-                                if context:
-                                    context.apply_to_selection = True
-                    any_button_clicked = True
+                        for pn in plugin_names:
+                            any_button_clicked |= self._render_plugin_menu_item(pn, timeline_num)
 
-                if imgui.is_item_hovered() and ui_data.get('description'):
-                    imgui.set_tooltip(ui_data['description'])
+                    imgui.end_menu()
 
             imgui.end_popup()
 
         return any_button_clicked
+
+    def _render_plugin_menu_item(self, plugin_name: str, timeline_num: int) -> bool:
+        """Render a single plugin as a selectable menu item. Returns True if clicked."""
+        ui_data = self.plugin_manager.get_plugin_ui_data(plugin_name)
+        if not ui_data or not ui_data['available']:
+            return False
+
+        if imgui.selectable(ui_data['display_name'])[0]:
+            self.logger.info(f"Plugin selected: {plugin_name} on Timeline {timeline_num}")
+
+            if self._should_apply_directly(plugin_name, ui_data):
+                context = self.plugin_manager.plugin_contexts.get(plugin_name)
+                if context:
+                    context.apply_requested = True
+                    if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
+                        if self.timeline_reference.multi_selected_action_indices:
+                            context.apply_to_selection = True
+            else:
+                self.plugin_manager.set_plugin_state(plugin_name, PluginUIState.OPEN)
+                if self.timeline_reference and hasattr(self.timeline_reference, 'multi_selected_action_indices'):
+                    if self.timeline_reference.multi_selected_action_indices:
+                        context = self.plugin_manager.plugin_contexts.get(plugin_name)
+                        if context:
+                            context.apply_to_selection = True
+            return True
+
+        if imgui.is_item_hovered() and ui_data.get('description'):
+            imgui.set_tooltip(ui_data['description'])
+
+        return False
     
     def render_plugin_windows(self, timeline_num: int, window_id_suffix: str) -> bool:
         """
