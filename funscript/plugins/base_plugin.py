@@ -82,10 +82,20 @@ class FunscriptTransformationPlugin(ABC):
         return True
     
     @property
+    def category(self) -> str:
+        """Return the category this plugin belongs to for UI grouping."""
+        return "General"
+
+    @property
+    def requires_cursor(self) -> bool:
+        """Return True if this plugin needs the video playhead position (current_time_ms)."""
+        return False
+
+    @property
     def ui_preference(self) -> str:
         """
         Return the preferred UI behavior for this plugin.
-        
+
         Returns:
             'direct' - Apply immediately with default parameters (no popup)
             'popup' - Show parameter configuration window (default)
@@ -266,11 +276,13 @@ class PluginRegistry:
                 'requires_scipy': plugin.requires_scipy,
                 'requires_rdp': plugin.requires_rdp,
                 'modifies_inplace': plugin.modifies_inplace,
-                'ui_preference': plugin.ui_preference
+                'ui_preference': plugin.ui_preference,
+                'category': plugin.category,
+                'requires_cursor': plugin.requires_cursor
             }
             for plugin in self._plugins.values()
-            if plugin.name not in hidden_plugin_names 
-            and 'template' not in plugin.name.lower() 
+            if plugin.name not in hidden_plugin_names
+            and 'template' not in plugin.name.lower()
             and 'example' not in plugin.name.lower()
         ]
     

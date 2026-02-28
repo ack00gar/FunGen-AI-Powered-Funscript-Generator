@@ -38,6 +38,10 @@ class DynamicAmplifyPlugin(FunscriptTransformationPlugin):
         return "1.0.0"
 
     @property
+    def category(self) -> str:
+        return "Transform"
+
+    @property
     def parameters_schema(self) -> Dict[str, Any]:
         return {
             'window_ms': {

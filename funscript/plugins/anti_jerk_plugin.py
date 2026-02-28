@@ -34,7 +34,11 @@ class AntiJerkPlugin(FunscriptTransformationPlugin):
     @property
     def version(self) -> str:
         return "2.0.0"
-    
+
+    @property
+    def category(self) -> str:
+        return "Smoothing"
+
     @property
     def parameters_schema(self) -> Dict[str, Any]:
         return {
