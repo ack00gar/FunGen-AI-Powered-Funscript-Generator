@@ -123,6 +123,7 @@ class KeyboardShortcutsDialog:
             ],
             "Tracking Tools": [
                 ("set_oscillation_area", "Set Oscillation Area"),
+                ("set_user_roi", "Set User ROI"),
             ],
             "Add Points": [
                 ("add_point_0", "Add Point at 0%"),
