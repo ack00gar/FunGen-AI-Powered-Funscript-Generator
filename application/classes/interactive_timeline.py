@@ -258,6 +258,9 @@ class InteractiveFunscriptTimeline:
         if self._show_speed_warnings and main_actions:
             self._draw_speed_limit_overlay(draw_list, tf, main_actions)
 
+        # 6-ch. Chapter highlight overlay
+        self._draw_chapter_highlight_overlay(draw_list, tf)
+
         # 6-pre2. BPM/Tempo grid overlay
         if self._bpm_config and _is_feature_available("patreon_features"):
             self._draw_bpm_grid(draw_list, tf)
@@ -831,6 +834,53 @@ class InteractiveFunscriptTimeline:
         self.app.funscript_processor._finalize_action_and_update_ui(self.timeline_num, "Nudge Chapter Points")
         self.invalidate_cache()
 
+    def select_points_in_chapter(self):
+        """Select all funscript points within the context-selected chapter boundaries."""
+        selected_chapters = []
+        if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_navigation_ui'):
+            nav_ui = self.app.gui_instance.video_navigation_ui
+            if nav_ui and hasattr(nav_ui, 'context_selected_chapters'):
+                selected_chapters = nav_ui.context_selected_chapters
+
+        if not selected_chapters:
+            if self.logger:
+                self.logger.info("No chapter selected", extra={'status_message': True})
+            return
+
+        actions = self._get_actions()
+        if not actions:
+            return
+
+        processor = self.app.processor
+        if not processor or not processor.video_info:
+            return
+
+        fps = processor.fps
+        if fps <= 0:
+            return
+
+        new_selection = set()
+        for chapter in selected_chapters:
+            start_ms = int(round((chapter.start_frame_id / fps) * 1000.0))
+            end_ms = int(round((chapter.end_frame_id / fps) * 1000.0))
+
+            action_timestamps = self._get_cached_timestamps()
+            if not action_timestamps or len(action_timestamps) != len(actions):
+                action_timestamps = [a['at'] for a in actions]
+            start_idx = bisect_left(action_timestamps, start_ms)
+            end_idx = bisect_right(action_timestamps, end_ms)
+
+            for i in range(start_idx, end_idx):
+                new_selection.add(i)
+
+        self.multi_selected_action_indices = new_selection
+
+        if self.logger:
+            self.logger.info(
+                f"Selected {len(new_selection)} points in {len(selected_chapters)} chapter(s)",
+                extra={'status_message': True}
+            )
+
     # --- Clipboard & Timeline Ops ---
     def _handle_copy_selection(self):
         actions = self._get_actions()
@@ -1238,6 +1288,39 @@ class InteractiveFunscriptTimeline:
                 x1 = float(xs[i])
                 x2 = float(xs[i + 1])
                 dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, violation_col)
+
+    def _draw_chapter_highlight_overlay(self, dl, tf: TimelineTransformer):
+        """Draw gold highlight band for context-selected chapters."""
+        nav_ui = None
+        if self.app.gui_instance and hasattr(self.app.gui_instance, 'video_navigation_ui'):
+            nav_ui = self.app.gui_instance.video_navigation_ui
+        if not nav_ui or not nav_ui.context_selected_chapters:
+            return
+
+        processor = self.app.processor
+        if not processor or not processor.video_info:
+            return
+        fps = processor.fps
+        if fps <= 0:
+            return
+
+        fill_col = imgui.get_color_u32_rgba(*TimelineColors.CHAPTER_HIGHLIGHT_FILL)
+        edge_col = imgui.get_color_u32_rgba(*TimelineColors.CHAPTER_HIGHLIGHT_EDGE)
+
+        for chapter in nav_ui.context_selected_chapters:
+            start_ms = (chapter.start_frame_id / fps) * 1000.0
+            end_ms = (chapter.end_frame_id / fps) * 1000.0
+
+            # Cull offscreen chapters
+            if end_ms < tf.visible_start_ms or start_ms > tf.visible_end_ms:
+                continue
+
+            x1 = max(tf.x_offset, tf.time_to_x(start_ms))
+            x2 = min(tf.x_offset + tf.width, tf.time_to_x(end_ms))
+
+            dl.add_rect_filled(x1, tf.y_offset, x2, tf.y_offset + tf.height, fill_col)
+            dl.add_line(x1, tf.y_offset, x1, tf.y_offset + tf.height, edge_col, 1.5)
+            dl.add_line(x2, tf.y_offset, x2, tf.y_offset + tf.height, edge_col, 1.5)
 
     def _draw_bpm_grid(self, dl, tf: TimelineTransformer):
         """Draw BPM beat grid lines on the timeline (Phase 3.3)."""
