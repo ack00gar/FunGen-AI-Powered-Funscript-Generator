@@ -215,6 +215,7 @@ DEFAULT_SHORTCUTS = {
 
     # Tracking Tools
     "set_oscillation_area": "X",     # Toggle oscillation area drawing mode
+    "set_user_roi": "U",             # Toggle User ROI drawing mode
 }
 
 

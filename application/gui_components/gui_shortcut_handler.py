@@ -141,6 +141,8 @@ class ShortcutHandlerMixin:
         # Tracking Tools
         elif check_and_run_shortcut("set_oscillation_area", self._handle_toggle_oscillation_area_mode):
             pass
+        elif check_and_run_shortcut("set_user_roi", self._handle_toggle_user_roi_mode):
+            pass
 
         # Chapters
         elif check_and_run_shortcut("set_chapter_start", self._handle_set_chapter_start_shortcut):
@@ -649,6 +651,24 @@ class ShortcutHandlerMixin:
             self.app.exit_set_oscillation_area_mode()
         else:
             self.app.enter_set_oscillation_area_mode()
+
+    def _handle_toggle_user_roi_mode(self):
+        """Handle keyboard shortcut for toggling User ROI drawing mode (U)"""
+        tracker = self.app.tracker
+        if not tracker:
+            return
+
+        from config.tracker_discovery import get_tracker_discovery
+        discovery = get_tracker_discovery()
+        tracker_info = discovery.get_tracker_info(self.app.app_state_ui.selected_tracker_name)
+        if not tracker_info or not tracker_info.requires_intervention:
+            self.app.logger.info("User ROI shortcut requires a User ROI tracker.", extra={'status_message': True})
+            return
+
+        if self.app.is_setting_user_roi_mode:
+            self.app.exit_set_user_roi_mode()
+        else:
+            self.app.enter_set_user_roi_mode()
 
     def _handle_energy_saver_interaction_detection(self):
         io = imgui.get_io()
