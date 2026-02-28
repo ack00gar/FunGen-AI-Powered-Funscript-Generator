@@ -112,6 +112,7 @@ class KeyboardShortcutsDialog:
             "Chapters": [
                 ("set_chapter_start", "Set Chapter Start (In-point)"),
                 ("set_chapter_end", "Set Chapter End (Out-point)"),
+                ("select_points_in_chapter", "Select Points in Chapter"),
                 ("delete_selected_chapter", "Delete Chapter"),
                 ("delete_selected_chapter_alt", "Delete Chapter (Alt)"),
                 ("delete_points_in_chapter", "Delete Points in Chapter"),
