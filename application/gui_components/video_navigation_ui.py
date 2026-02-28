@@ -721,10 +721,26 @@ class VideoNavigationUI:
         if self.is_dragging_chapter_range and not is_mouse_over_bar:
             self.is_dragging_chapter_range = False
 
-        # Chapter Deletion - Keyboard shortcuts (DELETE/BACKSPACE for selected chapters)
+        # Chapter keyboard shortcuts (when chapters are context-selected)
         if len(self.context_selected_chapters) > 0:
             shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
             io = imgui.get_io()
+
+            # Check Select Points in Chapter (E key) - must come before delete checks
+            sel_pts_sc_str = shortcuts.get("select_points_in_chapter", "E")
+            sel_pts_key_tuple = self.app._map_shortcut_to_glfw_key(sel_pts_sc_str)
+            if sel_pts_key_tuple and (
+                imgui.is_key_pressed(sel_pts_key_tuple[0]) and
+                sel_pts_key_tuple[1]['ctrl'] == io.key_ctrl and
+                sel_pts_key_tuple[1]['alt'] == io.key_alt and
+                sel_pts_key_tuple[1]['shift'] == io.key_shift and
+                sel_pts_key_tuple[1]['super'] == io.key_super
+            ):
+                # Dispatch to the active timeline editor
+                active_tl = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
+                editor = self.gui_instance.timeline_editor1 if active_tl == 1 else self.gui_instance.timeline_editor2
+                if editor:
+                    editor.select_points_in_chapter()
 
             # Check Delete Points in Chapter FIRST (SHIFT+DELETE or SHIFT+BACKSPACE) - must come before regular delete
             del_points_sc_str = shortcuts.get("delete_points_in_chapter", "SHIFT+DELETE")
@@ -805,6 +821,7 @@ class VideoNavigationUI:
             imgui.text_disabled("Chapter Operations")
             imgui.separator()
 
+            # --- Navigation ---
             # Seek to Beginning
             if imgui.menu_item("Seek to Beginning", enabled=can_select_one)[0]:
                 if can_select_one:
@@ -823,13 +840,41 @@ class VideoNavigationUI:
 
             imgui.separator()
 
-            # === CHANGE TYPE & EDIT ===
+            # --- Selection & Points ---
+            shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
+            import platform as _platform
+
+            can_any = num_selected > 0
+
+            # Select Points in Chapter(s)
+            select_pts_shortcut = shortcuts.get("select_points_in_chapter", "E")
+            select_pts_label = f"Select Points in Chapter{'s' if num_selected > 1 else ''}"
+            if imgui.menu_item(select_pts_label, shortcut=select_pts_shortcut, enabled=can_any)[0]:
+                if can_any and self.context_selected_chapters:
+                    active_tl = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
+                    editor = self.gui_instance.timeline_editor1 if active_tl == 1 else self.gui_instance.timeline_editor2
+                    if editor:
+                        editor.select_points_in_chapter()
+
+            # Delete Points in Chapter(s)
+            if _platform.system() == "Darwin":
+                delete_points_shortcut = shortcuts.get("delete_points_in_chapter_alt", "Shift+Backspace")
+            else:
+                delete_points_shortcut = shortcuts.get("delete_points_in_chapter", "Shift+Delete")
+            delete_points_label = f"Delete Points in Chapter{'s' if num_selected > 1 else ''}"
+            if imgui.menu_item(delete_points_label, shortcut=delete_points_shortcut, enabled=can_any)[0]:
+                if can_any and self.context_selected_chapters:
+                    fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
+
+            imgui.separator()
+
+            # --- Editing ---
+            can_edit = num_selected == 1
             if imgui.begin_menu("Change Type", enabled=can_select_one):
                 if can_select_one and self.context_selected_chapters:
                     self._render_quick_type_change_menu()
                 imgui.end_menu()
 
-            can_edit = num_selected == 1
             if imgui.menu_item("Edit Details...", enabled=can_edit)[0]:
                 if can_edit and self.context_selected_chapters:
                     chapter_obj_to_edit = self.context_selected_chapters[0]
@@ -853,60 +898,7 @@ class VideoNavigationUI:
 
                     self.show_edit_chapter_dialog = True
 
-            imgui.separator()
-
-            # === DELETE OPERATIONS ===
-            can_delete = num_selected > 0
-            shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
-            # Show the platform-appropriate shortcut (Backspace on Mac, Delete on others)
-            import platform
-            if platform.system() == "Darwin":
-                delete_shortcut = shortcuts.get("delete_selected_chapter_alt", "Backspace")
-            else:
-                delete_shortcut = shortcuts.get("delete_selected_chapter", "Delete")
-            delete_label = f"Delete Chapter{'s' if num_selected != 1 else ''} ({num_selected})" if num_selected > 1 else "Delete Chapter"
-            if imgui.menu_item(delete_label, shortcut=delete_shortcut, enabled=can_delete)[0]:
-                if can_delete and self.context_selected_chapters:
-                    ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
-                    fs_proc.delete_video_chapters_by_ids(ch_ids)
-                    self.context_selected_chapters.clear()
-
-            can_delete_points = num_selected > 0
-            # Show the platform-appropriate shortcut (Shift+Backspace on Mac, Shift+Delete on others)
-            import platform
-            if platform.system() == "Darwin":
-                delete_points_shortcut = shortcuts.get("delete_points_in_chapter_alt", "Shift+Backspace")
-            else:
-                delete_points_shortcut = shortcuts.get("delete_points_in_chapter", "Shift+Delete")
-            delete_points_label = f"Delete Points in Chapter{'s' if num_selected != 1 else ''} ({num_selected})" if num_selected > 1 else "Delete Points in Chapter"
-            if imgui.menu_item(delete_points_label, shortcut=delete_points_shortcut, enabled=can_delete_points)[0]:
-                if can_delete_points and self.context_selected_chapters:
-                    fs_proc.clear_script_points_in_selected_chapters(self.context_selected_chapters)
-
-            imgui.separator()
-
-            # === OTHER OPERATIONS ===
-            if imgui.menu_item("Start Tracker in Chapter", enabled=can_select_one)[0]:
-                if can_select_one and len(self.context_selected_chapters) == 1:
-                    selected_chapter = self.context_selected_chapters[0]
-                    if hasattr(fs_proc, 'set_scripting_range_from_chapter'):
-                        fs_proc.set_scripting_range_from_chapter(selected_chapter)
-                        self._start_live_tracking(
-                            success_info=f"Tracker started for chapter: {selected_chapter.position_short_name}"
-                        )
-
-            imgui.separator()
-
-            # === MERGE & SPLIT ===
-            can_standard_merge = num_selected == 2
-            if imgui.menu_item("Merge Chapters (2)", enabled=can_standard_merge)[0]:
-                if can_standard_merge and len(self.context_selected_chapters) == 2:
-                    chaps_to_merge = sorted(self.context_selected_chapters, key=lambda c: c.start_frame_id)
-                    if hasattr(fs_proc, 'merge_selected_chapters'):
-                        fs_proc.merge_selected_chapters(chaps_to_merge[0], chaps_to_merge[1])
-                        self.context_selected_chapters.clear()
-
-            # Split Chapter
+            # Split Chapter at Cursor
             can_split = False
             split_frame = self.context_menu_opened_at_frame
             split_pos_key = None
@@ -945,6 +937,41 @@ class VideoNavigationUI:
                     imgui.close_current_popup()
                     imgui.end_popup()
                     return
+
+            imgui.separator()
+
+            # --- Tracking & Merge ---
+            if imgui.menu_item("Start Tracker in Chapter", enabled=can_select_one)[0]:
+                if can_select_one and len(self.context_selected_chapters) == 1:
+                    selected_chapter = self.context_selected_chapters[0]
+                    if hasattr(fs_proc, 'set_scripting_range_from_chapter'):
+                        fs_proc.set_scripting_range_from_chapter(selected_chapter)
+                        self._start_live_tracking(
+                            success_info=f"Tracker started for chapter: {selected_chapter.position_short_name}"
+                        )
+
+            can_standard_merge = num_selected == 2
+            if imgui.menu_item("Merge Chapters (2)", enabled=can_standard_merge)[0]:
+                if can_standard_merge and len(self.context_selected_chapters) == 2:
+                    chaps_to_merge = sorted(self.context_selected_chapters, key=lambda c: c.start_frame_id)
+                    if hasattr(fs_proc, 'merge_selected_chapters'):
+                        fs_proc.merge_selected_chapters(chaps_to_merge[0], chaps_to_merge[1])
+                        self.context_selected_chapters.clear()
+
+            imgui.separator()
+
+            # --- Delete Chapter (destructive, last) ---
+            can_delete = num_selected > 0
+            if _platform.system() == "Darwin":
+                delete_shortcut = shortcuts.get("delete_selected_chapter_alt", "Backspace")
+            else:
+                delete_shortcut = shortcuts.get("delete_selected_chapter", "Delete")
+            delete_label = f"Delete Chapter{'s' if num_selected > 1 else ''} ({num_selected})" if num_selected > 1 else "Delete Chapter"
+            if imgui.menu_item(delete_label, shortcut=delete_shortcut, enabled=can_delete)[0]:
+                if can_delete and self.context_selected_chapters:
+                    ch_ids = [ch.unique_id for ch in self.context_selected_chapters]
+                    fs_proc.delete_video_chapters_by_ids(ch_ids)
+                    self.context_selected_chapters.clear()
 
             imgui.separator()
 
