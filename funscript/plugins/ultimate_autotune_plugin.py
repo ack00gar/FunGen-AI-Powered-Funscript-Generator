@@ -45,7 +45,11 @@ class UltimateAutotunePlugin(FunscriptTransformationPlugin):
     @property
     def version(self) -> str:
         return "1.0.0"
-    
+
+    @property
+    def category(self) -> str:
+        return "Autotune"
+
     @property
     def author(self) -> str:
         return "FunGen Team"

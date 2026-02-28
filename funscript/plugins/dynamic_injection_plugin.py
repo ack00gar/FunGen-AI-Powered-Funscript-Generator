@@ -34,6 +34,10 @@ class DynamicInjectionPlugin(FunscriptTransformationPlugin):
         return "1.0.0"
 
     @property
+    def category(self) -> str:
+        return "Timing & Generation"
+
+    @property
     def parameters_schema(self) -> Dict[str, Any]:
         return {
             'target_interval_ms': {

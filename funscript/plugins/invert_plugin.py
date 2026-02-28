@@ -28,12 +28,16 @@ class InvertPlugin(FunscriptTransformationPlugin):
     
     @property
     def description(self) -> str:
-        return "Inverts position values (0↔100, preserving timing)"
+        return "Inverts position values (0<->100, preserving timing)"
     
     @property
     def version(self) -> str:
         return "1.0.0"
-    
+
+    @property
+    def category(self) -> str:
+        return "Transform"
+
     @property
     def ui_preference(self) -> str:
         """Invert is a simple one-click operation."""

@@ -1,8 +1,12 @@
 """Post-Processing tab UI mixin for ControlPanelUI."""
 import imgui
+from collections import OrderedDict
 from application.utils import primary_button_style, destructive_button_style
 from application.utils.imgui_helpers import DisabledScope as _DisabledScope
 from application.utils.section_card import section_card
+
+# Category display order — General is a catch-all at the end
+_CATEGORY_ORDER = ["Autotune", "Quickfix Tools", "Transform", "Smoothing", "Timing & Generation", "General"]
 
 
 def _tooltip_if_hovered(text):
@@ -73,45 +77,101 @@ class PostProcessingMixin:
         imgui.separator()
         imgui.spacing()
 
-        # Get all plugins
+        # Get all plugins and group by category
         all_plugins = plugin_manager.get_available_plugins()
         if not all_plugins:
             imgui.text_disabled("No plugins available")
             return
 
-        # Prioritize Ultimate Autotune plugin first
-        ultimate_autotune = None
-        other_plugins = []
+        # Build category -> [plugin_name] mapping
+        categorized = OrderedDict()
+        for cat in _CATEGORY_ORDER:
+            categorized[cat] = []
+
         for plugin_name in all_plugins:
-            if 'ultimate' in plugin_name.lower() and 'autotune' in plugin_name.lower():
-                ultimate_autotune = plugin_name
+            ctx = plugin_manager.plugin_contexts.get(plugin_name)
+            if not ctx or not ctx.plugin_instance:
+                continue
+            cat = getattr(ctx.plugin_instance, 'category', 'General')
+            if cat not in categorized:
+                categorized[cat] = []
+            categorized[cat].append(plugin_name)
+
+        # Sort within each category (Ultimate Autotune stays first in Autotune)
+        for cat, names in categorized.items():
+            if cat == "Autotune":
+                # Put Ultimate Autotune first
+                ua = [n for n in names if 'ultimate' in n.lower() and 'autotune' in n.lower()]
+                rest = sorted([n for n in names if n not in ua])
+                categorized[cat] = ua + rest
             else:
-                other_plugins.append(plugin_name)
+                categorized[cat] = sorted(names)
 
-        # Sort other plugins alphabetically
-        other_plugins.sort()
-
-        # Render plugins in order: Ultimate Autotune first, then others
-        plugins_to_render = ([ultimate_autotune] if ultimate_autotune else []) + other_plugins
-
-        for plugin_name in plugins_to_render:
-            ui_data = plugin_manager.get_plugin_ui_data(plugin_name)
-            if not ui_data or not ui_data['available']:
+        # Render each non-empty category
+        for cat, plugin_names in categorized.items():
+            if not plugin_names:
                 continue
 
-            # Render plugin section
-            self._render_plugin_section(plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
+            open_default = (cat == "Autotune")
+            with section_card(f"{cat}##PluginCat_{cat}", tier="primary",
+                              open_by_default=open_default) as cat_open:
+                if not cat_open:
+                    continue
+
+                if cat == "Quickfix Tools":
+                    # Separate selection vs cursor tools
+                    sel_tools = []
+                    cur_tools = []
+                    for pn in plugin_names:
+                        ctx = plugin_manager.plugin_contexts.get(pn)
+                        if ctx and ctx.plugin_instance and getattr(ctx.plugin_instance, 'requires_cursor', False):
+                            cur_tools.append(pn)
+                        else:
+                            sel_tools.append(pn)
+
+                    for pn in sel_tools:
+                        ui_data = plugin_manager.get_plugin_ui_data(pn)
+                        if ui_data and ui_data['available']:
+                            self._render_plugin_section(pn, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
+
+                    if cur_tools:
+                        imgui.spacing()
+                        imgui.separator()
+                        imgui.push_style_color(imgui.COLOR_TEXT, 1.0, 0.8, 0.3, 1.0)
+                        imgui.text("Cursor-based (position playhead first)")
+                        imgui.pop_style_color()
+                        imgui.spacing()
+                        for pn in cur_tools:
+                            ui_data = plugin_manager.get_plugin_ui_data(pn)
+                            if ui_data and ui_data['available']:
+                                self._render_plugin_section(pn, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
+                else:
+                    for pn in plugin_names:
+                        ui_data = plugin_manager.get_plugin_ui_data(pn)
+                        if ui_data and ui_data['available']:
+                            self._render_plugin_section(pn, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice)
 
     def _render_plugin_section(self, plugin_name, ui_data, plugin_manager, fs_proc, timeline_choice, scope_choice):
         """Render a collapsible section for a plugin with its parameters and apply button."""
         display_name = ui_data.get('display_name', plugin_name)
         description = ui_data.get('description', '')
 
+        # Check if plugin requires cursor
+        context_obj = plugin_manager.plugin_contexts.get(plugin_name)
+        needs_cursor = (context_obj and context_obj.plugin_instance and
+                        getattr(context_obj.plugin_instance, 'requires_cursor', False))
+
         # Section card for this plugin (collapsed by default)
         with section_card(f"{display_name}##Plugin_{plugin_name}", tier="secondary",
                           open_by_default=False) as _plugin_open:
             if not _plugin_open:
                 return
+            # Show cursor info label for cursor-dependent plugins
+            if needs_cursor:
+                imgui.push_style_color(imgui.COLOR_TEXT, 0.4, 0.8, 1.0, 1.0)
+                imgui.text("Position your video playhead first")
+                imgui.pop_style_color()
+                imgui.spacing()
             if description:
                 imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1.0)
                 imgui.text_wrapped(description)
@@ -255,6 +315,18 @@ class PostProcessingMixin:
             plugin_params['axis'] = axis
             if selected_indices:
                 plugin_params['selected_indices'] = selected_indices
+
+            # Auto-inject current_time_ms for cursor-dependent plugins
+            plugin_manager = None
+            if self.timeline_editor1 and hasattr(self.timeline_editor1, 'plugin_manager'):
+                plugin_manager = self.timeline_editor1.plugin_manager
+            if plugin_manager:
+                ctx = plugin_manager.plugin_contexts.get(plugin_name)
+                if ctx and ctx.plugin_instance and getattr(ctx.plugin_instance, 'requires_cursor', False):
+                    app = self.app
+                    fps = getattr(app, 'fps', None) or 30.0
+                    frame_idx = getattr(app, 'current_frame_index', 0)
+                    plugin_params['current_time_ms'] = int((frame_idx / fps) * 1000)
 
             funscript_obj.apply_plugin(plugin_name, **plugin_params)
             self.app.logger.info(f"Applied {plugin_name} to {axis}", extra={"status_message": True})

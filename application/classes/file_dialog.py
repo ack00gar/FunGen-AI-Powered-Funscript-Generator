@@ -360,7 +360,7 @@ class ImGuiFileDialog:
                         self._file_sizes_cache[full_path] = size_bytes
 
                 if size_bytes is None:
-                    size_str = "—"
+                    size_str = "-"
                 elif size_bytes < 1024:
                     size_str = f"{size_bytes} B"
                 elif size_bytes < 1024 * 1024:
