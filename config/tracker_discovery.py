@@ -266,21 +266,20 @@ class DynamicTrackerDiscovery:
         # Filter out example trackers
         all_trackers = [t for t in all_trackers if "example" not in t.internal_name.lower() and "example" not in t.display_name.lower()]
         
-        # Sort all trackers: Experimental trackers at the end, others alphabetically
+        # Sort by folder priority: Live first, Offline second, then the rest
+        _FOLDER_PRIORITY = {"live": 0, "offline": 1, "legacy": 2, "experimental": 3, "community": 4}
+
         def get_sort_key(tracker_info):
+            folder = (tracker_info.folder_name or "").lower()
+            priority = _FOLDER_PRIORITY.get(folder, 99)
             folder_prefix = tracker_info.folder_name.title() + " - " if tracker_info.folder_name else ""
             display_name = tracker_info.display_name
             if not display_name.startswith(folder_prefix):
                 prefixed_display_name = folder_prefix + display_name
             else:
                 prefixed_display_name = display_name
-            
-            # Move experimental trackers to the end by adding a prefix that sorts last
-            if tracker_info.folder_name and tracker_info.folder_name.lower() == "experimental":
-                return "zzz_" + prefixed_display_name  # "zzz_" ensures it sorts last
-            else:
-                return prefixed_display_name
-        
+            return (priority, prefixed_display_name)
+
         all_trackers.sort(key=get_sort_key)
         
         # Build the final lists with proper prefixing
@@ -300,6 +299,30 @@ class DynamicTrackerDiscovery:
         
         return display_names, internal_names
     
+    def get_gui_display_list_filtered(self, hidden_folders: Set[str]) -> Tuple[List[str], List[str]]:
+        """
+        Get display lists filtered by hidden folder names.
+
+        Args:
+            hidden_folders: Set of folder names to exclude (e.g. {"legacy", "experimental"}).
+
+        Returns:
+            Tuple[List[str], List[str]]: (display_names, internal_names)
+        """
+        display_names, internal_names = self.get_gui_display_list()
+        if not hidden_folders:
+            return display_names, internal_names
+
+        filtered_display = []
+        filtered_internal = []
+        for display, internal in zip(display_names, internal_names):
+            info = self._display_info_cache.get(internal)
+            if info and info.folder_name.lower() in hidden_folders:
+                continue
+            filtered_display.append(display)
+            filtered_internal.append(internal)
+        return filtered_display, filtered_internal
+
     def get_batch_compatible_trackers(self) -> List[TrackerDisplayInfo]:
         """Get trackers that support batch processing (Live + Offline, no Live Intervention)."""
         return [info for info in self._display_info_cache.values() 

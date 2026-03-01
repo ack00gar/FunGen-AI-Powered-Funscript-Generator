@@ -16,7 +16,7 @@ from config import constants, element_group_colors
 from application.classes import GaugeWindow, ImGuiFileDialog, InteractiveFunscriptTimeline, LRDialWindow, MainMenu, Simulator3DWindow
 from application.gui_components import ControlPanelUI, VideoDisplayUI, VideoNavigationUI, ChapterListWindow, InfoGraphsUI, GeneratedFileManagerWindow, AutotunerWindow, KeyboardShortcutsDialog, ToolbarUI, ChapterTypeManagerUI
 from application.gui_components.bookmark_list_window import BookmarkListWindow
-from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority
+from application.utils import _format_time, ProcessingThreadManager, TaskType, TaskPriority, get_icon_texture_manager
 from application.utils.feature_detection import is_feature_available as _is_feature_available
 from application.utils.timeline_constants import EXTRA_TIMELINE_RANGE
 from application.gui_components.gui_preview_manager import PreviewManagerMixin
@@ -494,44 +494,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
 
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
-    def _render_energy_saver_indicator(self):
-        colors = self.colors
-        """Renders a constant indicator when energy saver mode is active."""
-        if self.app.energy_saver.energy_saver_active:
-            indicator_text = "Energy Saver Active"
-            main_viewport = imgui.get_main_viewport()
-            style = imgui.get_style()
-            text_size = imgui.calc_text_size(indicator_text)
-
-            # Account for icon size (16x16) + spacing
-            icon_width = 20  # 16px icon + 4px spacing
-            win_size = (text_size[0] + icon_width + style.window_padding[0] * 2,
-                       max(text_size[1], 16) + style.window_padding[1] * 2)
-            position = (main_viewport.pos[0] + 10, main_viewport.pos[1] + main_viewport.size[1] - win_size[1] - 10)
-
-            imgui.set_next_window_position(position[0], position[1])
-            imgui.set_next_window_bg_alpha(0.65)
-
-            window_flags = (imgui.WINDOW_NO_DECORATION |
-                            imgui.WINDOW_NO_MOVE |
-                            imgui.WINDOW_ALWAYS_AUTO_RESIZE |
-                            imgui.WINDOW_NO_INPUTS |
-                            imgui.WINDOW_NO_FOCUS_ON_APPEARING |
-                            imgui.WINDOW_NO_NAV)
-
-            imgui.begin("EnergySaverIndicator", closable=False, flags=window_flags)
-
-            # Show leaf icon + text
-            icon_mgr = getattr(self, 'icon_manager', None)
-            if icon_mgr:
-                leaf_tex, _, _ = icon_mgr.get_icon_texture('energy-leaf.png')
-                if leaf_tex:
-                    imgui.image(leaf_tex, 16, 16)
-                    imgui.same_line()
-
-            imgui.text_colored(indicator_text, *colors.ENERGY_SAVER_INDICATOR)
-            imgui.end()
-
     # --- This function now submits a task to the worker thread ---
     def render_funscript_timeline_preview(self, total_duration_s: float, graph_height: int):
         app_state = self.app.app_state_ui
@@ -967,19 +929,31 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
             stage_proc = self.app.stage_processor
             text_color = StatusStripColors.TEXT
 
-            # Left: workflow state
+            # Left: energy saver state or workflow state
             proc = self.app.processor
-            if not proc or not proc.is_video_open():
-                state_text = "No video loaded"
-            elif stage_proc.full_analysis_active:
-                state_text = "Tracking..."
+            if self.app.energy_saver.energy_saver_active:
+                icon_mgr = get_icon_texture_manager()
+                leaf_tex, _, _ = icon_mgr.get_icon_texture('energy-leaf.png')
+                if leaf_tex:
+                    imgui.image(leaf_tex, 16, 16)
+                    imgui.same_line()
+                imgui.push_style_color(imgui.COLOR_TEXT, *StatusStripColors.ENERGY_SAVER)
+                imgui.text("Energy Saver")
+                imgui.pop_style_color()
             else:
-                state_text = "Ready"
-            imgui.push_style_color(imgui.COLOR_TEXT, *text_color)
-            imgui.text(state_text)
-            imgui.pop_style_color()
+                if not proc or not proc.is_video_open():
+                    state_text = "No video loaded"
+                elif stage_proc.full_analysis_active:
+                    state_text = "Tracking..."
+                else:
+                    state_text = "Ready"
+                imgui.push_style_color(imgui.COLOR_TEXT, *text_color)
+                imgui.text(state_text)
+                imgui.pop_style_color()
 
-            # Center: progress % during tracking, shortcut hints otherwise
+            # Center: progress % during tracking, status message, or shortcut hints
+            _has_status_msg = app_state.status_message and time.time() < app_state.status_message_time
+
             if stage_proc.full_analysis_active:
                 progress = getattr(stage_proc, 'overall_progress', 0.0)
                 progress_text = f"{int(progress * 100)}%"
@@ -989,7 +963,18 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
                 imgui.push_style_color(imgui.COLOR_TEXT, *StatusStripColors.ACCENT)
                 imgui.text(progress_text)
                 imgui.pop_style_color()
+            elif _has_status_msg:
+                msg = app_state.status_message
+                center_x = self.window_width * 0.5
+                text_w = imgui.calc_text_size(msg)[0]
+                imgui.same_line(position=center_x - text_w * 0.5)
+                imgui.push_style_color(imgui.COLOR_TEXT, *StatusStripColors.ACCENT)
+                imgui.text(msg)
+                imgui.pop_style_color()
             else:
+                # Clear expired messages
+                if app_state.status_message and time.time() >= app_state.status_message_time:
+                    app_state.status_message = ""
                 # Dynamic shortcut hints
                 shortcuts = self.app.app_settings.get("funscript_editor_shortcuts", {})
 
@@ -1307,7 +1292,6 @@ class GUI(DialogRendererMixin, ShortcutHandlerMixin, PreviewManagerMixin):
         if getattr(app_state, 'show_bookmark_list_window', False):
             self._time_render("BookmarkListWindow", self.bookmark_list_window_ui.render)
         self._time_render("Popups", self._render_all_popups)
-        self._time_render("EnergySaverIndicator", self._render_energy_saver_indicator)
 
         # TODO: Move this to a separate class/error management module  
         self._time_render("ErrorPopup", self._render_error_popup)
