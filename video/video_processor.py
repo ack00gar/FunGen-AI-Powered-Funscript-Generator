@@ -1974,7 +1974,11 @@ class VideoProcessor:
         self.seek_thread.start()
 
     def _seek_video_worker(self, target_frame: int):
-        """Worker thread for async seek operations. Runs blocking operations without freezing UI."""
+        """Worker thread for async seek operations. Runs blocking operations without freezing UI.
+
+        Drains coalesced seek requests: after each seek completes, checks if a newer
+        target arrived via seek_request_frame_index and loops to serve it.
+        """
         try:
             was_processing = self.is_processing
             was_paused = self.is_processing and self.pause_event.is_set()
@@ -1988,21 +1992,31 @@ class VideoProcessor:
                 # Give it a moment to stop gracefully
                 time.sleep(0.05)
 
-            self.logger.info(f"Seeking to frame {target_frame}")
+            # Coalesce loop: drain any pending seek requests that arrived during decode
+            while True:
+                self.logger.info(f"Seeking to frame {target_frame}")
 
-            # Show instant thumbnail preview only (no buffer loading for scrubbing)
-            # Rolling backward buffer is only for arrow key navigation
-            original_batch_size = self.batch_fetch_size
-            self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
-            new_frame = self._get_specific_frame(target_frame, immediate_display=False)
-            self.batch_fetch_size = original_batch_size
+                # Show instant thumbnail preview only (no buffer loading for scrubbing)
+                # Rolling backward buffer is only for arrow key navigation
+                original_batch_size = self.batch_fetch_size
+                self.batch_fetch_size = 1  # Triggers fast thumbnail extractor path
+                new_frame = self._get_specific_frame(target_frame, immediate_display=False)
+                self.batch_fetch_size = original_batch_size
 
-            with self.frame_lock:
-                self.current_frame = new_frame
+                with self.frame_lock:
+                    self.current_frame = new_frame
 
-            if new_frame is None:
-                self.logger.warning(f"Seek to frame {target_frame} failed to retrieve frame.")
-                self.current_frame_index = target_frame
+                if new_frame is None:
+                    self.logger.warning(f"Seek to frame {target_frame} failed to retrieve frame.")
+                    self.current_frame_index = target_frame
+
+                # Check if a newer seek target arrived while we were decoding
+                pending = self.seek_request_frame_index
+                if pending is not None and pending != target_frame:
+                    target_frame = pending
+                    self.seek_request_frame_index = None
+                    continue  # Loop to serve the newer target
+                break  # No pending request, we're done
 
             if was_processing and not was_paused:
                 self.start_processing(start_frame=self.current_frame_index, end_frame=stored_end_limit)
