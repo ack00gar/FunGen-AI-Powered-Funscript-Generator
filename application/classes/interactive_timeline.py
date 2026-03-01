@@ -1785,7 +1785,7 @@ class InteractiveFunscriptTimeline:
             cfg = self._bpm_config
             imgui.same_line()
             # BPM value with +/- buttons
-            imgui.push_item_width(65)
+            imgui.push_item_width(120)
             _, cfg.bpm = imgui.input_float(
                 f"##bpm_val{self.timeline_num}", cfg.bpm, 1.0, 5.0, "%.3f")
             imgui.pop_item_width()
@@ -1794,7 +1794,7 @@ class InteractiveFunscriptTimeline:
                 imgui.set_tooltip("BPM value")
             # Offset
             imgui.same_line()
-            imgui.push_item_width(55)
+            imgui.push_item_width(100)
             offset_s = cfg.offset_ms / 1000.0
             _, offset_s = imgui.input_float(
                 f"##bpm_off{self.timeline_num}", offset_s, 0.001, 0.01, "%.3f")
