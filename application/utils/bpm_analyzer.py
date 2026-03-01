@@ -8,20 +8,34 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 
+SUBDIVISION_LABELS = [
+    "whole measures", "2nd measures", "4th measures", "8th measures",
+    "12th measures", "16th measures", "24th measures", "32nd measures",
+]
+SUBDIVISION_VALUES = [1, 2, 4, 8, 12, 16, 24, 32]
+
+
 @dataclass
 class BPMOverlayConfig:
     """Configuration for BPM/beat grid overlay."""
     bpm: float = 120.0
     offset_ms: float = 0.0
-    subdivision: int = 1  # 1=quarter, 2=eighth, 4=sixteenth, 8=thirty-second
+    subdivision: int = 1  # index into SUBDIVISION_VALUES
     snap_to_beat: bool = False
+
+    @property
+    def subdivision_value(self) -> int:
+        """Actual subdivision multiplier from the dropdown index."""
+        if 0 <= self.subdivision < len(SUBDIVISION_VALUES):
+            return SUBDIVISION_VALUES[self.subdivision]
+        return 1
 
     @property
     def beat_interval_ms(self) -> float:
         """Time between beats at current BPM and subdivision."""
         if self.bpm <= 0:
             return 1000.0
-        return 60000.0 / (self.bpm * self.subdivision)
+        return 60000.0 / (self.bpm * self.subdivision_value)
 
 
 class TapTempo:
