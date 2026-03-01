@@ -214,21 +214,6 @@ class DialogRendererMixin:
 
         imgui.end()
 
-    def _render_status_message(self, app_state):
-        if app_state.status_message and time.time() < app_state.status_message_time:
-            imgui.set_next_window_position(self.window_width - 310, self.window_height - 40)
-            imgui.begin("StatusMessage", flags=(
-                imgui.WINDOW_NO_DECORATION |
-                imgui.WINDOW_NO_MOVE |
-                imgui.WINDOW_ALWAYS_AUTO_RESIZE |
-                imgui.WINDOW_NO_INPUTS |
-                imgui.WINDOW_NO_FOCUS_ON_APPEARING |
-                imgui.WINDOW_NO_NAV))
-            imgui.text(app_state.status_message)
-            imgui.end()
-        elif app_state.status_message:
-            app_state.status_message = ""
-
     def _render_error_popup(self):
         """Render error popup with early return to avoid expensive operations when not needed."""
         # Early return if no error popup is active - avoids expensive ImGui operations
@@ -298,9 +283,6 @@ class DialogRendererMixin:
         # File dialog only if open
         if self.file_dialog.open:
             self.file_dialog.draw()
-
-        # Status message (has internal visibility check)
-        self._render_status_message(app_state)
 
         # Updater dialogs (have early returns to avoid expensive ImGui calls when not visible)
         self.app.updater.render_update_dialog()

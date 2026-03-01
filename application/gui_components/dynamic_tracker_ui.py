@@ -24,7 +24,11 @@ class DynamicTrackerUI:
     def get_gui_display_list(self) -> Tuple[List[str], List[str]]:
         """Get display names and internal names for GUI combo boxes."""
         return self.discovery.get_gui_display_list()
-    
+
+    def get_gui_display_list_filtered(self, hidden_folders: Set[str]) -> Tuple[List[str], List[str]]:
+        """Get display names and internal names, excluding hidden folder categories."""
+        return self.discovery.get_gui_display_list_filtered(hidden_folders)
+
     def get_simple_mode_trackers(self) -> Tuple[List[str], List[str]]:
         """Get live and offline trackers for simple mode GUI."""
         all_trackers = self.discovery.get_all_trackers()

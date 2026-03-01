@@ -119,6 +119,9 @@ class ControlPanelUI(
         # Progressive disclosure toggle for Advanced tab (default True in expert mode)
         self._show_all_advanced_settings = True
 
+        # Tracker filter row toggle (ephemeral, resets each session)
+        self._tracker_filter_open = False
+
     # ------- Helpers -------
 
     def _try_reinitialize_tracker_ui(self):
@@ -195,12 +198,15 @@ class ControlPanelUI(
             self.app.logger.warning(f"Dynamic tracker UI not available, cannot check if '{tracker_name}' is mixed stage3 tracker")
         return False
 
-    def _get_tracker_lists_for_ui(self, simple_mode=False):
+    def _get_tracker_lists_for_ui(self, simple_mode=False, hidden_folders=None):
         """Get tracker lists for UI combo boxes using dynamic discovery."""
         try:
             if simple_mode:
                 # Simple mode: only live trackers
                 display_names, internal_names = self.tracker_ui.get_simple_mode_trackers()
+            elif hidden_folders:
+                # Full mode with category filtering
+                display_names, internal_names = self.tracker_ui.get_gui_display_list_filtered(hidden_folders)
             else:
                 # Full mode: all trackers
                 display_names, internal_names = self.tracker_ui.get_gui_display_list()
@@ -794,18 +800,20 @@ class ControlPanelUI(
         stage_proc = app.stage_processor
         fs_proc = app.funscript_processor
         events = app.event_handlers
-        # TrackerMode removed - using dynamic discovery system
-
-        # Ensure this is always defined before any conditional UI blocks use it
-        processor = app.processor
-        disable_combo = (
-            stage_proc.full_analysis_active
-            or app.is_setting_user_roi_mode
-            or (processor and processor.is_processing and not processor.pause_event.is_set())
-        )
+        # Build set of hidden tracker folders from settings
+        _settings = app.app_settings
+        _hidden_folders = set()
+        if not _settings.get("tracker_show_legacy", False):
+            _hidden_folders.add("legacy")
+        if not _settings.get("tracker_show_experimental", True):
+            _hidden_folders.add("experimental")
+        if not _settings.get("tracker_show_community", True):
+            _hidden_folders.add("community")
 
         # Use dynamic tracker discovery for full mode
-        modes_display_full, modes_enum, discovered_trackers_full = self._get_tracker_lists_for_ui(simple_mode=False)
+        modes_display_full, modes_enum, discovered_trackers_full = self._get_tracker_lists_for_ui(
+            simple_mode=False, hidden_folders=_hidden_folders
+        )
 
         # Early access tracker gating — annotate gated trackers
         _early_access_set = set()
@@ -824,8 +832,8 @@ class ControlPanelUI(
             else:
                 modes_display_gated.append(display)
 
-        with section_card("Choose Analysis Method##SimpleAnalysisMethod", tier="primary",
-                          accent_color=self.ControlPanelColors.ACTIVE_PROGRESS) as open_:
+        with section_card("Analysis Method##RunControlAnalysisMethod",
+                          tier="secondary") as open_:
             if open_:
                 modes_display = modes_display_gated
 
@@ -835,6 +843,12 @@ class ControlPanelUI(
                     or app.is_setting_user_roi_mode
                     or (processor and processor.is_processing and not processor.pause_event.is_set())
                 )
+                # --- Tracker combo + settings icon button on same line ---
+                style = imgui.get_style()
+                icon_size = imgui.get_frame_height() - style.frame_padding[1] * 2
+                btn_w = icon_size + style.frame_padding[0] * 2
+                combo_width = imgui.get_content_region_available_width() - btn_w - style.item_spacing.x
+
                 with _DisabledScope(disable_combo):
                     try:
                         cur_idx = modes_enum.index(app_state.selected_tracker_name)
@@ -842,8 +856,37 @@ class ControlPanelUI(
                         cur_idx = 0
                         app_state.selected_tracker_name = modes_enum[cur_idx]
 
+                    imgui.set_next_item_width(combo_width)
                     clicked, new_idx = imgui.combo("##TrackerModeCombo", cur_idx, modes_display)
                     self._help_tooltip(self._generate_combined_tooltip(discovered_trackers_full))
+
+                imgui.same_line()
+                icon_mgr = get_icon_texture_manager()
+                settings_tex, _, _ = icon_mgr.get_icon_texture('settings.png')
+                if settings_tex and imgui.image_button(settings_tex, icon_size, icon_size):
+                    self._tracker_filter_open = not self._tracker_filter_open
+                elif not settings_tex and imgui.button("...##TrkFilter"):
+                    self._tracker_filter_open = not self._tracker_filter_open
+                _tooltip_if_hovered("Filter tracker categories")
+
+                # --- Collapsible filter row ---
+                _chk_legacy = _settings.get("tracker_show_legacy", False)
+                _chk_exp = _settings.get("tracker_show_experimental", True)
+                _chk_comm = _settings.get("tracker_show_community", True)
+                if self._tracker_filter_open:
+                    imgui.text_disabled("Show:")
+                    imgui.same_line()
+                    ch_l, nv_l = imgui.checkbox("Legacy##TrkFilterLeg", _chk_legacy)
+                    if ch_l:
+                        _settings.set("tracker_show_legacy", nv_l)
+                    imgui.same_line()
+                    ch_e, nv_e = imgui.checkbox("Exp.##TrkFilterExp", _chk_exp)
+                    if ch_e:
+                        _settings.set("tracker_show_experimental", nv_e)
+                    imgui.same_line()
+                    ch_c, nv_c = imgui.checkbox("Comm.##TrkFilterComm", _chk_comm)
+                    if ch_c:
+                        _settings.set("tracker_show_community", nv_c)
 
                 if clicked and new_idx != cur_idx:
                     new_mode = modes_enum[new_idx]
@@ -867,8 +910,9 @@ class ControlPanelUI(
                         if tr:
                             tr.set_tracking_mode(new_mode)
 
-                # Axis mode combo (merged from Tracking card)
+                # Axis mode combo
                 imgui.spacing()
+                imgui.separator()
                 imgui.text("Tracking Axes:")
                 self._render_tracking_axes_mode(stage_proc)
 

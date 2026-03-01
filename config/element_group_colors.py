@@ -274,6 +274,7 @@ class StatusStripColors:
     BG = CurrentTheme.STATUS_STRIP_BG
     TEXT = CurrentTheme.STATUS_STRIP_TEXT
     ACCENT = CurrentTheme.STATUS_STRIP_ACCENT
+    ENERGY_SAVER = CurrentTheme.ENERGY_SAVER_INDICATOR
 
 
 class ButtonColors:
