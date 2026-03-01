@@ -110,6 +110,7 @@ class AppSettings:
             "global_font_scale": 1.0,
             "auto_system_scaling_enabled": True,  # Automatically detect and apply system scaling
             "timeline_pan_speed_multiplier": 20,
+            "timeline_pan_drag_modifier": "SHIFT",  # Modifier key for left-drag pan (trackpad alternative to middle-mouse)
             "show_funscript_interactive_timeline": True,
             "show_funscript_interactive_timeline2": False,
             "show_funscript_timeline": True,
