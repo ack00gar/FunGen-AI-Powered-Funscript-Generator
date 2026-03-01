@@ -367,7 +367,7 @@ class StreamerMixin:
 
                         if imgui.is_item_hovered():
                             if not can_enable:
-                                tooltip_msg = "Rolling autotune requires:\n• Streamer module available\n• Active streamer session with connected clients"
+                                tooltip_msg = "Rolling autotune requires:\n- Streamer module available\n- Active streamer session with connected clients"
                             else:
                                 tooltip_msg = "Apply Ultimate Autotune to the last N seconds of funscript data every N seconds\nRecommended: Keep processing ahead of browser playback by at least the window size"
                             imgui.set_tooltip(tooltip_msg)
@@ -423,7 +423,7 @@ class StreamerMixin:
                             imgui.spacing()
                             imgui.push_text_wrap_pos(imgui.get_content_region_available_width())
                             imgui.text_colored(
-                                "💡 Tip: Keep your processing position at least 5-10 seconds ahead of "
+                                "Tip: Keep your processing position at least 5-10 seconds ahead of "
                                 "browser playback to ensure cleaned data is ready when needed.",
                                 0.5, 1.0, 0.5
                             )
@@ -714,7 +714,7 @@ class StreamerMixin:
                     # Quick connection test on port 9999
                     response = requests.get(f"http://{test_ip}:9999", timeout=0.5)
                     if response.status_code == 200 or 'xbvr' in response.text.lower():
-                        self.app.logger.info(f"✅ Found XBVR at {test_ip}:9999", extra={'status_message': True})
+                        self.app.logger.info(f"Found XBVR at {test_ip}:9999", extra={'status_message': True})
                         self.app.app_settings.set('xbvr_host', test_ip)
                         self.app.app_settings.set('xbvr_port', 9999)  # Also save the port
                         self.app.app_settings.save_settings()

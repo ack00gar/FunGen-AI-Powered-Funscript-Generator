@@ -588,7 +588,7 @@ class ToolbarUI:
 
         # Previous Point
         if has_video:
-            if self._toolbar_button(icon_mgr, 'jump-start.png', btn_size, "Previous Point (↓)"):
+            if self._toolbar_button(icon_mgr, 'jump-start.png', btn_size, "Previous Point (Down)"):
                 app.event_handlers.handle_jump_to_point("prev")
         else:
             imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)
@@ -599,7 +599,7 @@ class ToolbarUI:
 
         # Next Point
         if has_video:
-            if self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Next Point (↑)"):
+            if self._toolbar_button(icon_mgr, 'jump-end.png', btn_size, "Next Point (Up)"):
                 app.event_handlers.handle_jump_to_point("next")
         else:
             imgui.push_style_var(imgui.STYLE_ALPHA, 0.3)

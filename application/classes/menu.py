@@ -126,10 +126,10 @@ class MainMenu:
         display_str = display_str.replace("SHIFT", "Shift")
 
         # Format arrow keys
-        display_str = display_str.replace("RIGHT_ARROW", "→")
-        display_str = display_str.replace("LEFT_ARROW", "←")
-        display_str = display_str.replace("UP_ARROW", "↑")
-        display_str = display_str.replace("DOWN_ARROW", "↓")
+        display_str = display_str.replace("RIGHT_ARROW", "Right")
+        display_str = display_str.replace("LEFT_ARROW", "Left")
+        display_str = display_str.replace("UP_ARROW", "Up")
+        display_str = display_str.replace("DOWN_ARROW", "Down")
 
         # Format other keys
         display_str = display_str.replace("SPACE", "Space")

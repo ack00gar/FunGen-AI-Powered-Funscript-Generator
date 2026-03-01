@@ -90,7 +90,8 @@ class InteractiveFunscriptTimeline:
         self.range_end_time: float = 0
 
         self.is_hovered: bool = False  # Set each frame; read by status strip hints
-        
+        self._hovered_point_idx: int = -1  # For hover tooltip stats
+
         self.context_menu_target_idx: int = -1
         self.selection_anchor_idx: int = -1 # For Shift+Click range selection logic if needed
 
@@ -366,6 +367,29 @@ class InteractiveFunscriptTimeline:
 
         # --- Action Interaction (SELECT mode or fallback) ---
         actions = self._get_actions()
+
+        # --- Hover Tooltip ---
+        if is_hovered and not self.is_dragging_active and not self.is_marqueeing and actions:
+            hover_idx = self._hit_test_point(mouse_pos, actions, tf)
+            self._hovered_point_idx = hover_idx
+            if hover_idx != -1:
+                act = actions[hover_idx]
+                if hover_idx > 0:
+                    prev = actions[hover_idx - 1]
+                    dt = act['at'] - prev['at']
+                    pos_delta = act['pos'] - prev['pos']
+                    abs_delta = abs(pos_delta)
+                    speed = abs_delta / (dt / 1000.0) if dt > 0 else 0.0
+                    arrow = "UP" if pos_delta > 0 else ("DN" if pos_delta < 0 else "--")
+                    imgui.set_tooltip(
+                        f"{prev['pos']} -> {act['pos']} = {abs_delta} {arrow}\n"
+                        f"Interval: {dt:.0f} ms\n"
+                        f"Speed: {speed:.0f} units/s"
+                    )
+                else:
+                    imgui.set_tooltip(f"{act['pos']} @{act['at']:.0f}ms (first point)")
+        else:
+            self._hovered_point_idx = -1
 
         # Left Click
         if is_hovered and imgui.is_mouse_clicked(glfw.MOUSE_BUTTON_LEFT) and self._mode == TimelineMode.SELECT:
@@ -1167,14 +1191,15 @@ class InteractiveFunscriptTimeline:
                 # Check interaction state
                 is_sel = real_idx in self.multi_selected_action_indices
                 is_drag = (real_idx == self.dragging_action_idx)
-                is_interactive = is_sel or is_drag
-                
+                is_hover = (real_idx == self._hovered_point_idx)
+                is_interactive = is_sel or is_drag or is_hover
+
                 # Skip drawing non-selected points if zoomed out too far
                 if not is_interactive and pixels_per_point < 5:
                     continue
 
                 px, py = xs[i], ys[i]
-                
+
                 # Colors
                 if is_drag:
                     c_tuple = TimelineColors.POINT_DRAGGING
@@ -1182,12 +1207,15 @@ class InteractiveFunscriptTimeline:
                 elif is_sel:
                     c_tuple = TimelineColors.POINT_SELECTED
                     r = radius + 1
+                elif is_hover:
+                    c_tuple = TimelineColors.POINT_HOVER
+                    r = radius + 1
                 else:
                     c_tuple = TimelineColors.POINT_DEFAULT if not is_preview else TimelineColors.PREVIEW_POINTS
                     r = radius
 
                 dl.add_circle_filled(px, py, r, imgui.get_color_u32_rgba(c_tuple[0], c_tuple[1], c_tuple[2], c_tuple[3] * alpha))
-                
+
                 if is_sel:
                     dl.add_circle(px, py, r+1, imgui.get_color_u32_rgba(*TimelineColors.SELECTED_POINT_BORDER))
 
@@ -1243,12 +1271,16 @@ class InteractiveFunscriptTimeline:
                 real_idx = s_idx + i
                 is_sel = real_idx in self.multi_selected_action_indices
                 is_drag = (real_idx == self.dragging_action_idx)
+                is_hover = (real_idx == self._hovered_point_idx)
 
                 if is_drag:
                     c_tuple = TimelineColors.POINT_DRAGGING
                     r = radius + 2
                 elif is_sel:
                     c_tuple = TimelineColors.POINT_SELECTED
+                    r = radius + 1
+                elif is_hover:
+                    c_tuple = TimelineColors.POINT_HOVER
                     r = radius + 1
                 else:
                     c_tuple = TimelineColors.POINT_DEFAULT

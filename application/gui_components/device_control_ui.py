@@ -386,7 +386,7 @@ class DeviceControlUI:
             if changed:
                 axis_range.max_speed = new_speed
             
-            changed, new_accel = imgui.slider_float("Acceleration", axis_range.acceleration, 50.0, 1000.0, "%.1f%%/s²")
+            changed, new_accel = imgui.slider_float("Acceleration", axis_range.acceleration, 50.0, 1000.0, "%.1f%%/s^2")
             if changed:
                 axis_range.acceleration = new_accel
             
@@ -648,10 +648,10 @@ class DeviceControlUI:
         # Status indicator
         if current_enabled:
             imgui.same_line()
-            imgui.text_colored("● ENABLED", 0.0, 1.0, 0.0)
+            imgui.text_colored("* ENABLED", 0.0, 1.0, 0.0)
         else:
             imgui.same_line()
-            imgui.text_colored("● DISABLED", 0.7, 0.7, 0.7)
+            imgui.text_colored("* DISABLED", 0.7, 0.7, 0.7)
         
         # Help text
         if current_enabled:

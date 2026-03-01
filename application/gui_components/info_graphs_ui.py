@@ -3,6 +3,7 @@ import os
 import threading
 import numpy as np
 import time
+from bisect import bisect_left
 from collections import deque
 from application.utils import _format_time
 from application.utils.system_monitor import SystemMonitor
@@ -287,6 +288,14 @@ class InfoGraphsUI:
                     vis_attr = f"show_funscript_interactive_timeline{tl_num}"
                     if getattr(self.app.app_state_ui, vis_attr, False):
                         self._render_funscript_info_section(tl_num)
+
+            imgui.separator()
+
+            # Segment Statistics (expanded by default)
+            if imgui.collapsing_header("Segment Statistics##SegStatSection",
+                                       flags=imgui.TREE_NODE_DEFAULT_OPEN)[0]:
+                self._render_segment_statistics()
+
         elif tab_selected == "advanced":
             imgui.spacing()
             # Undo-Redo History section (collapsed by default)
@@ -461,7 +470,7 @@ class InfoGraphsUI:
                 imgui.next_column()
                 vr_fov = self.app.processor.vr_fov if hasattr(self.app.processor, 'vr_fov') else 0
                 if vr_fov > 0:
-                    imgui.text(f"{vr_fov}°")
+                    imgui.text(f"{vr_fov}deg")
                 else:
                     imgui.text("N/A")
                 imgui.next_column()
@@ -905,6 +914,64 @@ class InfoGraphsUI:
 
             imgui.tree_pop()
 
+    def _render_segment_statistics(self):
+        """Render OFS-style segment statistics for the current playhead position."""
+        processor = self.app.processor
+        fs_proc = self.app.funscript_processor
+        if not processor or not fs_proc or not processor.video_info:
+            imgui.text_colored("No video loaded", 0.5, 0.5, 0.5, 1.0)
+            return
+
+        fps = processor.fps
+        if fps <= 0:
+            imgui.text_colored("No video loaded", 0.5, 0.5, 0.5, 1.0)
+            return
+
+        current_time_ms = (processor.current_frame_index / fps) * 1000.0
+        active_tl = getattr(self.app.app_state_ui, 'active_timeline_num', 1)
+
+        fs_obj, axis_name = fs_proc._get_target_funscript_object_and_axis(active_tl)
+        if not fs_obj or not axis_name:
+            imgui.text_colored("No funscript data", 0.5, 0.5, 0.5, 1.0)
+            return
+
+        actions = fs_obj.get_axis_actions(axis_name)
+        if not actions or len(actions) < 2:
+            imgui.text_colored("Not enough actions", 0.5, 0.5, 0.5, 1.0)
+            return
+
+        # Find bounding actions using bisect
+        timestamps = [a['at'] for a in actions]
+        idx = bisect_left(timestamps, current_time_ms)
+
+        # Clamp to valid segment range
+        if idx <= 0:
+            idx = 1
+        if idx >= len(actions):
+            idx = len(actions) - 1
+
+        behind = actions[idx - 1]
+        front = actions[idx]
+
+        seg_duration_ms = front['at'] - behind['at']
+        interval_ms = current_time_ms - behind['at']
+        pos_delta = front['pos'] - behind['pos']
+        abs_delta = abs(pos_delta)
+
+        if seg_duration_ms > 0:
+            speed = abs_delta / (seg_duration_ms / 1000.0)
+        else:
+            speed = 0.0
+
+        arrow = "UP" if pos_delta > 0 else ("DN" if pos_delta < 0 else "--")
+
+        imgui.text(f"Timeline {active_tl}")
+        imgui.separator()
+        imgui.text(f"Interval:  {interval_ms:.0f} ms")
+        imgui.text(f"Duration:  {seg_duration_ms:.0f} ms")
+        imgui.text(f"Speed:     {speed:.0f} units/s")
+        imgui.text(f"Direction: {behind['pos']} -> {front['pos']} = {abs_delta} {arrow}")
+
     def _render_content_funscript_info(self, timeline_num):
         self.funscript_info_perf.start_timing()
         fs_proc = self.app.funscript_processor
@@ -1345,7 +1412,7 @@ class InfoGraphsUI:
         cpu_temp = stats.get("cpu_temp", None)
         if cpu_temp is not None:
             imgui.same_line()
-            imgui.text_colored(f" | {cpu_temp:.0f}°C", 0.7, 0.7, 0.7, 1.0)
+            imgui.text_colored(f" | {cpu_temp:.0f}C", 0.7, 0.7, 0.7, 1.0)
 
         imgui.spacing()
 
@@ -1426,7 +1493,7 @@ class InfoGraphsUI:
             # Append temp if available
             gpu_temp = stats.get("gpu_temp", None)
             if gpu_temp is not None:
-                header += f" | {gpu_temp:.0f}°C"
+                header += f" | {gpu_temp:.0f}C"
 
             imgui.text_colored(header, *gpu_color)
 

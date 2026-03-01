@@ -102,7 +102,7 @@ class ShortcutManager:
         mod_key_name = "CMD" if platform.system() == "Darwin" else "CTRL"
 
         self.app.logger.info(
-            f"🎹 Recording shortcut for '{action_name.replace('_', ' ').title()}' - "
+            f"Recording shortcut for '{action_name.replace('_', ' ').title()}' - "
             f"Press desired key combination (e.g., {mod_key_name}+K) or ESC to cancel",
             extra={'status_message': True}
         )
