@@ -186,7 +186,12 @@ class ShortcutHandlerMixin:
         current_time = time.time()
 
         # Update seek interval based on video FPS for natural navigation speed
-        if self.app.processor and self.app.processor.fps > 0:
+        # Use FPS override if enabled, otherwise fall back to video FPS
+        app_state = self.app.app_state_ui
+        if app_state.fps_override_enabled and app_state.fps_override_value > 0:
+            target_nav_fps = max(15, min(240, app_state.fps_override_value))
+            self.arrow_key_state['seek_interval'] = 1.0 / target_nav_fps
+        elif self.app.processor and self.app.processor.fps > 0:
             # Use video FPS but cap at reasonable limits for responsiveness
             video_fps = self.app.processor.fps
             # Allow faster navigation for high FPS videos, slower for low FPS

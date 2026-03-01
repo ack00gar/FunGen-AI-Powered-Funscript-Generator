@@ -783,15 +783,8 @@ class ControlPanelUI(
                 imgui.spacing()
                 imgui.text_colored("Enable in Device Control tab > Live Control Integration", 0.7, 0.7, 0.7, 1.0)
 
-        # --- BPM/Tempo Overlay ---
-        with section_card("BPM / Tempo Overlay##patreon_bpm", open_by_default=False) as _open:
-            if _open:
-                imgui.text_wrapped(
-                    "Beat grid on timeline with tap tempo and snap-to-beat for music sync. "
-                    "Supports 1/1, 1/2, 1/4, 1/8 subdivision."
-                )
-                imgui.spacing()
-                imgui.text_colored("Toggle BPM controls in timeline toolbar", 0.7, 0.7, 0.7, 1.0)
+        # BPM/Tempo Overlay removed from patreon extras — now a core feature
+        # (controls in timeline toolbar)
 
     # ------- Tab orchestrators (call into mixins) -------
 
