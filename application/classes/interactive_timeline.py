@@ -19,7 +19,7 @@ from config.element_group_colors import TimelineColors
 from funscript.axis_registry import FunscriptAxis, AXIS_TCODE
 from application.utils.heatmap_utils import HeatmapColorMapper
 from application.utils.timeline_modes import TimelineMode, TimelineInteractionState
-from application.utils.bpm_analyzer import BPMOverlayConfig, TapTempo
+from application.utils.bpm_analyzer import BPMOverlayConfig, TapTempo, SUBDIVISION_LABELS, SUBDIVISION_VALUES
 from application.classes.bookmark_manager import BookmarkManager
 from application.classes.recording_capture import RecordingCapture
 
@@ -262,7 +262,7 @@ class InteractiveFunscriptTimeline:
         self._draw_chapter_highlight_overlay(draw_list, tf)
 
         # 6-pre2. BPM/Tempo grid overlay
-        if self._bpm_config and _is_feature_available("patreon_features"):
+        if self._bpm_config:
             self._draw_bpm_grid(draw_list, tf)
 
         # 6a. Update & Draw Ultimate Preview (if enabled)
@@ -571,7 +571,11 @@ class InteractiveFunscriptTimeline:
 
         # 6. Nudge Time (Shift+Arrows)
         nudge_t = 0
-        snap_t = app_state.snap_to_grid_time_ms if app_state.snap_to_grid_time_ms > 0 else 20
+        cfg = self._bpm_config
+        if cfg and cfg.snap_to_beat and cfg.bpm > 0:
+            snap_t = cfg.beat_interval_ms
+        else:
+            snap_t = app_state.snap_to_grid_time_ms if app_state.snap_to_grid_time_ms > 0 else 20
         if check_shortcut("nudge_selection_time_prev", "SHIFT+LEFT_ARROW"): nudge_t = -snap_t
         if check_shortcut("nudge_selection_time_next", "SHIFT+RIGHT_ARROW"): nudge_t = snap_t
 
@@ -632,9 +636,8 @@ class InteractiveFunscriptTimeline:
         v_raw = tf.y_to_val(mouse_pos[1])
         
         # Snapping
-        snap_t = self.app.app_state_ui.snap_to_grid_time_ms
+        t_raw = self._snap_time(t_raw)
         snap_v = self.app.app_state_ui.snap_to_grid_pos
-        if snap_t > 0: t_raw = round(t_raw / snap_t) * snap_t
         if snap_v > 0: v_raw = round(v_raw / snap_v) * snap_v
         
         # Constraints: Cannot drag past neighbors
@@ -1323,7 +1326,7 @@ class InteractiveFunscriptTimeline:
             dl.add_line(x2, tf.y_offset, x2, tf.y_offset + tf.height, edge_col, 1.5)
 
     def _draw_bpm_grid(self, dl, tf: TimelineTransformer):
-        """Draw BPM beat grid lines on the timeline (Phase 3.3)."""
+        """Draw BPM beat grid lines on the timeline with visual hierarchy."""
         cfg = self._bpm_config
         if not cfg or cfg.bpm <= 0:
             return
@@ -1336,11 +1339,15 @@ class InteractiveFunscriptTimeline:
         start_beat = int((tf.visible_start_ms - cfg.offset_ms) / interval_ms)
         end_beat = int((tf.visible_end_ms - cfg.offset_ms) / interval_ms) + 1
 
-        # Base beat interval (quarter note, ignoring subdivision)
+        # Base beat interval (whole note / downbeat)
         base_interval = 60000.0 / cfg.bpm
+        # Quarter beat interval
+        quarter_interval = base_interval / 4.0 if base_interval > 0 else 0
 
-        beat_col = imgui.get_color_u32_rgba(0.6, 0.3, 0.8, 0.3)
-        downbeat_col = imgui.get_color_u32_rgba(0.7, 0.3, 0.9, 0.6)
+        # 3-tier colors: downbeat (bright), quarter (medium), subdivision (faint)
+        downbeat_col = imgui.get_color_u32_rgba(0.7, 0.3, 0.9, 0.7)
+        quarter_col = imgui.get_color_u32_rgba(0.65, 0.3, 0.85, 0.45)
+        sub_col = imgui.get_color_u32_rgba(0.6, 0.3, 0.8, 0.2)
 
         for beat_num in range(start_beat, end_beat + 1):
             t_ms = cfg.offset_ms + beat_num * interval_ms
@@ -1348,10 +1355,17 @@ class InteractiveFunscriptTimeline:
                 continue
             x = tf.time_to_x(t_ms)
 
-            # Check if this is a downbeat (on the main quarter-note grid)
-            is_downbeat = (abs((t_ms - cfg.offset_ms) % base_interval) < 1.0) if cfg.subdivision > 1 else True
-            col = downbeat_col if is_downbeat else beat_col
-            thick = 1.5 if is_downbeat else 0.8
+            # Classify line tier
+            rel = t_ms - cfg.offset_ms
+            if base_interval > 0 and abs(rel % base_interval) < 1.0:
+                # Downbeat (measure start)
+                col, thick = downbeat_col, 2.0
+            elif quarter_interval > 0 and abs(rel % quarter_interval) < 1.0:
+                # Quarter beat
+                col, thick = quarter_col, 1.2
+            else:
+                # Subdivision
+                col, thick = sub_col, 0.7
 
             dl.add_line(x, tf.y_offset, x, tf.y_offset + tf.height, col, thick)
 
@@ -1754,35 +1768,82 @@ class InteractiveFunscriptTimeline:
             if imgui.is_item_hovered():
                 imgui.set_tooltip("RDP simplification (higher = fewer points)")
 
-        # BPM controls (Patreon exclusive)
-        if _is_patreon:
-            imgui.same_line()
-            imgui.text("|")
-            imgui.same_line()
-            has_bpm = self._bpm_config is not None
-            _, has_bpm = imgui.checkbox(f"BPM##{self.timeline_num}", has_bpm)
-            if imgui.is_item_hovered():
-                imgui.set_tooltip("Show BPM beat grid overlay")
-            if has_bpm and self._bpm_config is None:
-                self._bpm_config = BPMOverlayConfig()
-            elif not has_bpm:
-                self._bpm_config = None
+        # BPM controls (core feature)
+        imgui.same_line()
+        imgui.text("|")
+        imgui.same_line()
+        has_bpm = self._bpm_config is not None
+        _, has_bpm = imgui.checkbox(f"BPM##{self.timeline_num}", has_bpm)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Show BPM beat grid overlay")
+        if has_bpm and self._bpm_config is None:
+            self._bpm_config = BPMOverlayConfig()
+        elif not has_bpm:
+            self._bpm_config = None
 
-            if self._bpm_config:
-                imgui.same_line()
-                imgui.push_item_width(55)
-                _, self._bpm_config.bpm = imgui.drag_float(
-                    f"##bpm_val{self.timeline_num}", self._bpm_config.bpm, 0.5, 30.0, 300.0, "%.0f")
-                imgui.pop_item_width()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip("BPM value (drag to adjust)")
-                imgui.same_line()
-                if imgui.button(f"Tap##{self.timeline_num}"):
-                    bpm = self._tap_tempo.tap()
-                    if bpm:
-                        self._bpm_config.bpm = round(bpm, 1)
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(f"Tap tempo ({self._tap_tempo.tap_count} taps)")
+        if self._bpm_config:
+            cfg = self._bpm_config
+            imgui.same_line()
+            # BPM value with +/- buttons
+            imgui.push_item_width(65)
+            _, cfg.bpm = imgui.input_float(
+                f"##bpm_val{self.timeline_num}", cfg.bpm, 1.0, 5.0, "%.3f")
+            imgui.pop_item_width()
+            cfg.bpm = max(1.0, min(999.0, cfg.bpm))
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("BPM value")
+            # Offset
+            imgui.same_line()
+            imgui.push_item_width(55)
+            offset_s = cfg.offset_ms / 1000.0
+            _, offset_s = imgui.input_float(
+                f"##bpm_off{self.timeline_num}", offset_s, 0.001, 0.01, "%.3f")
+            cfg.offset_ms = offset_s * 1000.0
+            imgui.pop_item_width()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Beat offset (seconds)")
+            # Subdivision dropdown
+            imgui.same_line()
+            imgui.push_item_width(105)
+            _, cfg.subdivision = imgui.combo(
+                f"##bpm_sub{self.timeline_num}", cfg.subdivision, SUBDIVISION_LABELS)
+            imgui.pop_item_width()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Beat subdivision")
+            # Snap to beat
+            imgui.same_line()
+            _, cfg.snap_to_beat = imgui.checkbox(f"Snap##{self.timeline_num}", cfg.snap_to_beat)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Snap points to beat grid")
+            # Tap tempo
+            imgui.same_line()
+            if imgui.button(f"Tap##{self.timeline_num}"):
+                bpm = self._tap_tempo.tap()
+                if bpm:
+                    cfg.bpm = round(bpm, 3)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(f"Tap tempo ({self._tap_tempo.tap_count} taps)")
+
+        # FPS Override controls (core feature)
+        app_state = self.app.app_state_ui
+        imgui.same_line()
+        imgui.text("|")
+        imgui.same_line()
+        _, app_state.fps_override_enabled = imgui.checkbox(
+            f"FPS##{self.timeline_num}", app_state.fps_override_enabled)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Snap to custom frame grid")
+        if app_state.fps_override_enabled:
+            imgui.same_line()
+            imgui.push_item_width(60)
+            _, app_state.fps_override_value = imgui.input_float(
+                f"##fps_val{self.timeline_num}", app_state.fps_override_value, 0, 0, "%.3f")
+            app_state.fps_override_value = max(1.0, min(240.0, app_state.fps_override_value))
+            imgui.pop_item_width()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Override FPS for snap grid (e.g. 59.940)")
+            # Dynamically update snap grid (keep float precision for fractional FPS)
+            app_state.snap_to_grid_time_ms = 1000.0 / app_state.fps_override_value
 
         # Timeline Status Text
         imgui.same_line()
@@ -2081,14 +2142,21 @@ class InteractiveFunscriptTimeline:
             if self.logger:
                 self.logger.warning(f"Multi-axis generation failed: {e}")
 
+    def _snap_time(self, t_ms):
+        """Snap time to beat grid (if BPM snap enabled) or normal grid."""
+        cfg = self._bpm_config
+        if cfg and cfg.snap_to_beat and cfg.bpm > 0:
+            interval = cfg.beat_interval_ms
+            return cfg.offset_ms + round((t_ms - cfg.offset_ms) / interval) * interval
+        snap_t = self.app.app_state_ui.snap_to_grid_time_ms
+        return round(t_ms / snap_t) * snap_t if snap_t > 0 else t_ms
+
     def _add_point(self, t, v):
         fs, axis = self._get_target_funscript_details()
         if not fs: return
 
-        snap_t = self.app.app_state_ui.snap_to_grid_time_ms
+        t = int(self._snap_time(t))
         snap_v = self.app.app_state_ui.snap_to_grid_pos
-
-        t = int(round(t / snap_t) * snap_t) if snap_t > 0 else int(t)
         v = int(round(v / snap_v) * snap_v) if snap_v > 0 else int(v)
 
         self.app.funscript_processor._record_timeline_action(self.timeline_num, "Add Point")
