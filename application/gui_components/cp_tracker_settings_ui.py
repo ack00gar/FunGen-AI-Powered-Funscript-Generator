@@ -224,6 +224,7 @@ class TrackerSettingsMixin:
             or (processor and processor.is_processing and not processor.pause_event.is_set())
         )
         with _DisabledScope(disable_axis_controls):
+            imgui.set_next_item_width(-1)
             axis_mode_changed, new_axis_mode_idx = imgui.combo("##TrackingAxisModeComboGlobal", current_axis_mode_idx, axis_modes)
             if axis_mode_changed:
                 old_mode = self.app.tracking_axis_mode
@@ -244,6 +245,7 @@ class TrackerSettingsMixin:
                 output_targets = ["Timeline 1 (Primary)", "Timeline 2 (Secondary)"]
                 current_output_target_idx = 1 if self.app.single_axis_output_target == "secondary" else 0
 
+                imgui.set_next_item_width(-1)
                 output_target_changed, new_output_target_idx = imgui.combo("##SingleAxisOutputComboGlobal", current_output_target_idx, output_targets)
                 if output_target_changed:
                     old_target = self.app.single_axis_output_target

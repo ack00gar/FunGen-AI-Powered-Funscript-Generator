@@ -13,6 +13,9 @@ assets/splash/*.png
 assets/ui/icons/*.png
 
 # Test and audit files that shouldn't be in the repo
+tests/
+test_all_cli_modes.py
+pytest.ini
 test_timeline_fixes.py
 test_complete_ua_fix.py
 audit_launch_logging.py
